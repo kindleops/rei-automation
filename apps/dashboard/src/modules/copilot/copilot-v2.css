@@ -1,0 +1,605 @@
+/* ═══════════════════════════════════════════════════════════════════
+   NEXUS AI COPILOT v2.1-ELITE — Living Multi-Agent Architecture
+   ═══════════════════════════════════════════════════════════════════ */
+
+   .nx-copilot-v2-panel {
+    position: fixed !important;
+    top: 64px !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    z-index: 9999 !important;
+    display: flex;
+    flex-direction: column;
+    width: 420px;
+    background: rgba(10, 12, 18, 0.90) !important;
+    backdrop-filter: blur(40px) saturate(180%) brightness(0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 24px;
+    color: #e8edf5;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+    box-shadow: 
+      0 32px 80px rgba(0, 0, 0, 0.8),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    animation: nx-copilot-entry 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  @keyframes nx-copilot-entry {
+    from { transform: translateX(100%) scale(0.95); opacity: 0; }
+    to { transform: translateX(0) scale(1); opacity: 1; }
+  }
+  
+  /* ── Agent Identity Header ─────────────────────────────────────── */
+  
+  .nx-copilot-identity-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    z-index: 2;
+  }
+  
+  .nx-copilot-identity-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  
+  .nx-identity-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  
+  .nx-identity-title-row strong {
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.01em;
+  }
+  
+  .nx-identity-badge {
+    font-size: 8px;
+    font-weight: 900;
+    color: rgba(104, 217, 196, 0.6);
+    background: rgba(104, 217, 196, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(104, 217, 196, 0.2);
+  }
+  
+  .nx-identity-role {
+    font-size: 11px;
+    color: rgba(200, 210, 230, 0.5);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .nx-identity-thinking-text {
+    font-size: 11px;
+    color: #68d9c4;
+    font-style: italic;
+    animation: nx-text-pulse 2s ease-in-out infinite;
+  }
+  
+  @keyframes nx-text-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  
+  /* ── Header Actions & Switcher ─────────────────────────────────── */
+  
+  .nx-copilot-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px;
+    background: rgba(8, 10, 16, 0.6);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  
+  .nx-copilot-switcher {
+    position: relative;
+    flex: 1;
+  }
+  
+  .nx-copilot-switcher__trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e8edf5;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .nx-copilot-switcher__trigger:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  
+  .nx-copilot-switcher__menu {
+    position: absolute;
+    top: 110%;
+    left: 0;
+    width: 240px;
+    background: rgba(20, 24, 34, 0.95);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  
+  .nx-copilot-switcher__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s;
+  }
+  
+  .nx-copilot-switcher__item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  
+  .nx-copilot-switcher__item.is-active {
+    background: rgba(104, 217, 196, 0.1);
+  }
+  
+  /* ── Chat Area ─────────────────────────────────────────────────── */
+  
+  .nx-copilot-v2-chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  }
+  
+  .nx-copilot-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 32px 20px;
+    gap: 16px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .nx-copilot-welcome-icon {
+    font-size: 48px;
+    margin-bottom: 8px;
+    filter: drop-shadow(0 0 20px rgba(255,255,255,0.1));
+  }
+  
+  .nx-copilot-msg {
+    display: flex;
+    gap: 12px;
+    animation: nx-msg-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .nx-copilot-msg.is-system {
+    justify-content: center;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+  }
+  
+  .nx-copilot-msg.is-operator {
+    flex-direction: row-reverse;
+  }
+  
+  .nx-copilot-msg__content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 85%;
+  }
+  
+  .nx-copilot-msg.is-operator .nx-copilot-msg__content {
+    align-items: flex-end;
+  }
+  
+  .nx-copilot-msg__body {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 12px 16px;
+    border-radius: 4px 16px 16px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(230, 240, 255, 0.9);
+  }
+  
+  .nx-copilot-msg.is-operator .nx-copilot-msg__body {
+    background: rgba(100, 160, 220, 0.1);
+    border-color: rgba(100, 160, 220, 0.2);
+    border-radius: 16px 4px 16px 16px;
+  }
+  
+  .nx-copilot-msg.is-thinking .nx-copilot-msg__body {
+    border-color: rgba(104, 217, 196, 0.3);
+    box-shadow: 0 0 20px rgba(104, 217, 196, 0.05);
+  }
+  
+  /* ── Reasoning & Thinking Panels ───────────────────────────────── */
+  
+  .nx-copilot-reasoning-panel {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  
+  .nx-reasoning-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  
+  .nx-reasoning-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+  
+  .nx-reasoning-content {
+    padding: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .nx-reasoning-section strong {
+    display: block;
+    color: #fff;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+  
+  .nx-reasoning-section ul {
+    margin: 0;
+    padding-left: 16px;
+  }
+  
+  .nx-reasoning-section li.is-safe {
+    color: #30d158;
+    list-style: none;
+    margin-left: -16px;
+    display: flex;
+    gap: 6px;
+  }
+  
+  .nx-reasoning-section li.is-mutation {
+    color: #ff9f0a;
+    list-style: none;
+    margin-left: -16px;
+    display: flex;
+    gap: 6px;
+  }
+  
+  /* ── Action Preview ────────────────────────────────────────────── */
+  
+  .nx-copilot-action-preview {
+    margin-top: 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(20, 24, 34, 0.8);
+    overflow: hidden;
+  }
+  
+  .nx-copilot-action-preview.is-dangerous {
+    border-color: rgba(255, 69, 58, 0.3);
+  }
+  
+  .nx-action-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  
+  .nx-action-preview-header .nx-action-badge.is-danger {
+    background: rgba(255, 69, 58, 0.2);
+    color: #ff453a;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+  }
+  
+  .nx-action-preview-desc {
+    padding: 10px 12px;
+    margin: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  
+  .nx-action-preview-payload {
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+    color: #a0aec0;
+    overflow-x: auto;
+  }
+  
+  .nx-action-preview-controls {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  
+  .nx-action-btn {
+    flex: 1;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  
+  .nx-action-btn.is-cancel {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+  
+  .nx-action-btn.is-execute {
+    background: rgba(48, 209, 88, 0.15);
+    border-color: rgba(48, 209, 88, 0.3);
+    color: #30d158;
+  }
+  
+  /* ── Action Chips ──────────────────────────────────────────────── */
+  
+  .nx-copilot-action-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  
+  .nx-chips-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+  }
+  
+  .nx-chips-scroll {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  
+  .nx-copilot-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .nx-copilot-chip:hover {
+    background: rgba(104, 217, 196, 0.1);
+    border-color: rgba(104, 217, 196, 0.3);
+    color: #68d9c4;
+  }
+  
+  /* ── Input Area ────────────────────────────────────────────────── */
+  
+  .nx-copilot-v2-input-area {
+    padding: 16px 20px;
+    background: rgba(8, 10, 16, 0.8);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  .nx-copilot-v2-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 8px 16px;
+    transition: all 0.2s;
+  }
+  
+  .nx-copilot-v2-input-row:focus-within {
+    border-color: rgba(104, 217, 196, 0.4);
+    box-shadow: 0 0 0 2px rgba(104, 217, 196, 0.1);
+  }
+  
+  .nx-copilot-v2-input-row textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    resize: none;
+    padding: 4px 0;
+  }
+  
+  .nx-copilot-send-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: rgba(104, 217, 196, 0.15);
+    color: #68d9c4;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .nx-copilot-send-btn:hover {
+    background: rgba(104, 217, 196, 0.3);
+    transform: scale(1.05);
+  }
+
+  /* ── Live Intelligence Layer ───────────────────────────────────── */
+  
+  .nx-copilot-msg__header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  .nx-copilot-sentiment-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+  }
+
+  .nx-copilot-sentiment-badge svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  .nx-copilot-confidence {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .nx-conf-bar-bg {
+    width: 40px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .nx-conf-bar-fill {
+    height: 100%;
+    transition: width 0.5s ease-out;
+  }
+
+  .nx-conf-bar-fill.is-high { background: #30d158; }
+  .nx-conf-bar-fill.is-medium { background: #ffd60a; }
+  .nx-conf-bar-fill.is-low { background: #ff453a; }
+
+  .nx-conf-score {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+  }
+
+  .nx-copilot-handoff-event {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px;
+    margin: 8px 0;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    justify-content: center;
+  }
+
+  .nx-handoff-agents {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nx-handoff-avatar {
+    font-size: 16px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .nx-handoff-arrow {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .nx-handoff-details {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nx-handoff-details strong {
+    font-size: 11px;
+    color: #fff;
+  }
+
+  .nx-handoff-details p {
+    margin: 0;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .is-streaming::after {
+    content: '▋';
+    display: inline-block;
+    vertical-align: bottom;
+    animation: blink 1s step-start infinite;
+    color: #68d9c4;
+    margin-left: 2px;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }

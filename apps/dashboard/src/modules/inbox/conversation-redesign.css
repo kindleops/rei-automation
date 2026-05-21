@@ -1,0 +1,1073 @@
+/* ============================================================
+   NEXUS CONVERSATION THREAD WORKSPACE — v3
+   conversation-redesign.css
+   ============================================================ */
+
+/* ── Brighter Blue Conversation System ─────────────────────── */
+:root {
+  --nx-conversation-outbound-bg: linear-gradient(
+    135deg,
+    rgba(17, 102, 218, 0.46),
+    rgba(7, 41, 111, 0.88)
+  );
+  --nx-conversation-outbound-border: rgba(47, 157, 255, 0.72);
+  --nx-conversation-outbound-glow: rgba(0, 96, 255, 0.18);
+  --nx-conversation-outbound-text: rgba(235, 247, 255, 0.97);
+  --nx-conversation-outbound-muted: rgba(154, 205, 255, 0.72);
+  --nx-composer-focus-border: rgba(45, 155, 255, 0.78);
+  --nx-composer-focus-glow: rgba(0, 132, 255, 0.22);
+}
+
+/* ── Container ─────────────────────────────────────────────── */
+.nx-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--nx-bg-base);
+  position: relative;
+}
+
+.nx-chat-container.is-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--nx-text-muted);
+}
+
+/* ── Compact Contact Header v2 ─────────────────────────────── */
+.nx-chat-header-v2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--nx-border-subtle);
+  background: rgba(0, 0, 0, 0.18);
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.nx-chat-header-v2__left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nx-chat-header-v2__identity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.nx-chat-header-v2__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--nx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.nx-chat-header-v2__phone {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--nx-text-muted);
+  white-space: nowrap;
+}
+
+.nx-chat-header-v2__phone svg {
+  width: 10px;
+  height: 10px;
+  opacity: 0.5;
+}
+
+.nx-chat-header-v2__address {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nx-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-chat-header-v2__address svg {
+  width: 10px;
+  height: 10px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.nx-chat-header-v2__chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-top: 1px;
+}
+
+.nx-chat-header-v2__chips::-webkit-scrollbar {
+  display: none;
+}
+
+.nx-chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border-subtle);
+  color: var(--nx-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.nx-chat-chip svg {
+  width: 9px;
+  height: 9px;
+}
+
+.nx-chat-chip--market {
+  color: var(--nx-text-secondary);
+}
+
+.nx-chat-chip--stage {
+  color: #0a84ff;
+  background: rgba(10, 132, 255, 0.1);
+  border-color: rgba(10, 132, 255, 0.2);
+}
+
+.nx-chat-chip--danger {
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.1);
+  border-color: rgba(255, 69, 58, 0.2);
+}
+
+.nx-chat-header-v2__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.nx-chat-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-muted);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nx-chat-action-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nx-chat-action-icon:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-chat-action-icon.is-active {
+  color: var(--nx-accent-primary);
+  background: var(--nx-accent-transparent);
+}
+
+/* compact disclosure menu */
+.nx-chat-actions-disclosure summary {
+  list-style: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--nx-text-muted);
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+}
+
+.nx-chat-actions-disclosure summary:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-chat-actions-disclosure summary svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nx-chat-actions-disclosure__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 80;
+  background: var(--nx-bg-elevated, rgba(20, 28, 52, 0.98));
+  border: 1px solid var(--nx-border-subtle);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.nx-chat-actions-disclosure {
+  position: relative;
+}
+
+/* ── Compact Action Strip ──────────────────────────────────── */
+.nx-chat-action-strip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--nx-border-subtle);
+  background: rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nx-chat-action-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.nx-action-strip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--nx-border-subtle);
+  border-radius: 5px;
+  background: var(--nx-bg-elevated);
+  color: var(--nx-text-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.nx-action-strip-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
+.nx-action-strip-btn:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+.nx-action-strip-btn--auto {
+  color: #0a84ff;
+  border-color: rgba(10, 132, 255, 0.3);
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.nx-action-strip-btn--hot {
+  color: #ff9f0a;
+  border-color: rgba(255, 159, 10, 0.3);
+  background: rgba(255, 159, 10, 0.08);
+}
+
+.nx-action-strip-btn--pause {
+  color: var(--nx-text-secondary);
+}
+
+.nx-action-strip-btn--resume {
+  color: #30d158;
+  border-color: rgba(48, 209, 88, 0.3);
+  background: rgba(48, 209, 88, 0.08);
+}
+
+.nx-action-strip-btn--dnc {
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.2);
+  background: rgba(255, 69, 58, 0.06);
+}
+
+.nx-action-strip-btn--dnc:hover {
+  background: rgba(255, 69, 58, 0.15);
+}
+
+/* 25% compact: icon-only horizontal scroll instead of hidden */
+.is-layout-compact .nx-chat-action-strip {
+  display: flex;
+  padding: 3px 8px;
+  gap: 2px;
+}
+
+.is-layout-compact .nx-action-strip-btn span {
+  display: none;
+}
+
+.is-layout-compact .nx-action-strip-btn {
+  padding: 4px 7px;
+  min-width: 26px;
+  justify-content: center;
+  border-radius: 5px;
+}
+
+/* ── Message Timeline ──────────────────────────────────────── */
+.nx-message-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scroll-behavior: smooth;
+}
+
+.nx-message-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.nx-message-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+/* ── Message Bubbles ───────────────────────────────────────── */
+.nx-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  margin-bottom: 6px;
+}
+
+.nx-bubble-wrap.is-outbound {
+  align-items: flex-end;
+}
+
+.nx-bubble-wrap.is-inbound {
+  align-items: flex-start;
+}
+
+.nx-chat-bubble {
+  max-width: min(520px, 72%);
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-break: break-word;
+  position: relative;
+}
+
+.is-outbound .nx-chat-bubble {
+  background: var(--nx-conversation-outbound-bg, linear-gradient(135deg, rgba(17, 102, 218, 0.46), rgba(7, 41, 111, 0.88)));
+  color: var(--nx-conversation-outbound-text, rgba(235, 247, 255, 0.97));
+  border-radius: 14px 14px 4px 14px;
+  border: 1px solid var(--nx-conversation-outbound-border, rgba(47, 157, 255, 0.72));
+  box-shadow:
+    0 0 0 1px rgba(64, 169, 255, 0.08) inset,
+    0 18px 48px var(--nx-conversation-outbound-glow, rgba(0, 96, 255, 0.18));
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.is-outbound .nx-chat-bubble:hover {
+  border-color: rgba(64, 172, 255, 0.85);
+  box-shadow:
+    0 0 0 1px rgba(80, 185, 255, 0.12) inset,
+    0 20px 56px rgba(0, 110, 255, 0.26);
+}
+
+.is-inbound .nx-chat-bubble {
+  background: var(--nx-bg-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--nx-text-primary);
+  border-radius: 14px 14px 14px 4px;
+  border: 1px solid var(--nx-border-subtle);
+}
+
+.is-failed .nx-chat-bubble {
+  border-color: rgba(255, 69, 58, 0.35);
+}
+
+.is-failed.is-outbound .nx-chat-bubble {
+  opacity: 0.82;
+}
+
+/* ── Bubble footer / timestamp ─────────────────────────────── */
+.nx-bubble-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 0;
+}
+
+.nx-bubble-time {
+  font-size: 10.5px;
+  color: var(--nx-text-muted);
+  opacity: 0.7;
+}
+
+.nx-delivery-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nx-delivery-pill {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid;
+  letter-spacing: 0.02em;
+}
+
+/* ── Translation badge ─────────────────────────────────────── */
+.nx-translate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(80, 185, 210, 0.55);
+  margin-top: 3px;
+  padding: 2px 5px 2px 3px;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  cursor: default;
+  transition: color 0.2s, background 0.2s;
+  user-select: none;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.nx-translate-badge svg {
+  width: 11px;
+  height: 11px;
+  opacity: 0.75;
+}
+
+/* State: available to translate (clickable) */
+.nx-translate-badge.is-available {
+  color: rgba(90, 190, 220, 0.55);
+  cursor: pointer;
+}
+
+.nx-translate-badge.is-available:hover {
+  color: rgba(100, 210, 245, 0.92);
+  background: rgba(80, 180, 220, 0.08);
+}
+
+.nx-translate-badge.is-available svg {
+  opacity: 0.6;
+}
+
+/* State: currently translating */
+.nx-translate-badge.is-translating {
+  color: rgba(100, 200, 230, 0.75);
+  cursor: default;
+}
+
+/* State: translated (confirmed) */
+.nx-translate-badge.is-translated {
+  color: rgba(48, 209, 88, 0.75);
+}
+
+.nx-translate-badge.is-translated svg {
+  opacity: 0.85;
+}
+
+.nx-translate-badge.is-translated:hover {
+  color: rgba(48, 209, 88, 0.95);
+}
+
+/* Spinner for translating state */
+.nx-translate-badge__spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(100, 200, 230, 0.25);
+  border-top-color: rgba(100, 200, 230, 0.85);
+  border-radius: 50%;
+  animation: nx-badge-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes nx-badge-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Bubble shimmer while translation in progress */
+@keyframes nx-translate-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.nx-bubble-wrap.is-translating .nx-chat-bubble {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(80, 190, 220, 0.10) 40%,
+    rgba(100, 210, 245, 0.18) 50%,
+    rgba(80, 190, 220, 0.10) 60%,
+    transparent 100%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: nx-translate-shimmer 1.6s ease-in-out infinite !important;
+}
+
+/* ── Hover affordances ─────────────────────────────────────── */
+.nx-bubble-hover-actions {
+  display: flex;
+  gap: 4px;
+  position: absolute;
+  bottom: -4px;
+  right: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.is-inbound .nx-bubble-hover-actions {
+  left: 0;
+  right: auto;
+}
+
+.nx-bubble-wrap:hover .nx-bubble-hover-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nx-bubble-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--nx-border-subtle);
+  background: var(--nx-bg-glass);
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.nx-bubble-action svg {
+  width: 11px;
+  height: 11px;
+}
+
+.nx-bubble-action:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+}
+
+/* ── Approval actions ──────────────────────────────────────── */
+.nx-approval-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.nx-approve-btn,
+.nx-edit-btn,
+.nx-cancel-btn,
+.nx-retry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid;
+  cursor: pointer;
+}
+
+.nx-approve-btn {
+  background: rgba(48, 209, 88, 0.12);
+  border-color: rgba(48, 209, 88, 0.3);
+  color: #30d158;
+}
+
+.nx-edit-btn {
+  background: rgba(10, 132, 255, 0.1);
+  border-color: rgba(10, 132, 255, 0.25);
+  color: #0a84ff;
+}
+
+.nx-cancel-btn,
+.nx-retry-btn {
+  background: rgba(255, 69, 58, 0.08);
+  border-color: rgba(255, 69, 58, 0.2);
+  color: #ff453a;
+}
+
+.nx-approve-btn svg,
+.nx-edit-btn svg,
+.nx-cancel-btn svg,
+.nx-retry-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* ── Turn Intelligence ─────────────────────────────────────── */
+.nx-turn-intel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.nx-turn-intent {
+  font-size: 10px;
+  color: #bf5af2;
+  background: rgba(191, 90, 242, 0.1);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(191, 90, 242, 0.2);
+}
+
+.nx-turn-conf {
+  font-size: 10px;
+  color: var(--nx-text-muted);
+}
+
+/* ── AI Suggestions Bar ────────────────────────────────────── */
+.nx-ai-suggestions-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--nx-border-subtle);
+  background: rgba(0, 0, 0, 0.12);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.nx-ai-suggestions-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.nx-ai-lang-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(255, 159, 10, 0.15);
+  border: 1px solid rgba(255, 159, 10, 0.3);
+  color: #ff9f0a;
+  flex-shrink: 0;
+}
+
+.nx-ai-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(47, 157, 255, 0.22);
+  background: rgba(10, 90, 200, 0.08);
+  color: var(--nx-conversation-outbound-muted, rgba(154, 205, 255, 0.72));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.nx-ai-suggestion-chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.nx-ai-suggestion-chip:hover {
+  background: rgba(17, 102, 218, 0.18);
+  color: rgba(200, 232, 255, 0.96);
+  border-color: rgba(64, 172, 255, 0.55);
+  box-shadow: 0 0 10px rgba(0, 120, 255, 0.15);
+}
+
+.nx-ai-suggestion-chip.is-soft:hover {
+  background: rgba(48, 209, 88, 0.1);
+  border-color: rgba(48, 209, 88, 0.3);
+  color: #30d158;
+  box-shadow: none;
+}
+
+.nx-ai-suggestion-chip.is-direct:hover {
+  background: rgba(17, 102, 218, 0.18);
+  border-color: rgba(47, 157, 255, 0.55);
+  color: rgba(200, 232, 255, 0.96);
+}
+
+.nx-ai-suggestion-chip.is-internal {
+  color: #bf5af2;
+  border-color: rgba(191, 90, 242, 0.2);
+  background: rgba(191, 90, 242, 0.07);
+}
+
+.nx-ai-suggestion-chip.is-internal:hover {
+  background: rgba(191, 90, 242, 0.15);
+}
+
+.nx-ai-suggestion-chip.is-danger {
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.2);
+  background: rgba(255, 69, 58, 0.06);
+}
+
+.nx-ai-suggestion-chip.is-danger:hover {
+  background: rgba(255, 69, 58, 0.15);
+}
+
+.nx-ai-suggestion-chip.is-more {
+  color: var(--nx-text-muted);
+  font-size: 11px;
+}
+
+/* ── Uncontacted / Empty states ────────────────────────────── */
+.nx-uncontacted-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.nx-uncontacted-state__card {
+  text-align: center;
+  color: var(--nx-text-secondary);
+}
+
+.nx-uncontacted-state__card svg {
+  width: 36px;
+  height: 36px;
+  opacity: 0.15;
+  margin-bottom: 14px;
+}
+
+.nx-uncontacted-state__card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--nx-text-primary);
+  margin: 0 0 8px;
+}
+
+.nx-uncontacted-state__card p {
+  font-size: 13px;
+  color: var(--nx-text-secondary);
+  margin: 0 0 20px;
+}
+
+.nx-uncontacted-state__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* ── Responsive width modes ─────────────────────────────────── */
+
+/* === 25% COMPACT: mobile-like dense layout === */
+.is-layout-compact .nx-chat-header-v2 {
+  padding: 5px 10px;
+  align-items: center;
+}
+
+.is-layout-compact .nx-chat-header-v2__name {
+  font-size: 12.5px;
+  max-width: 120px;
+}
+
+.is-layout-compact .nx-chat-header-v2__address {
+  display: none;
+}
+
+.is-layout-compact .nx-chat-header-v2__phone {
+  display: none;
+}
+
+.is-layout-compact .nx-chat-header-v2__chips {
+  /* Only show stage + status, hide market chip */
+  margin-top: 0;
+}
+
+.is-layout-compact .nx-chat-chip--market {
+  display: none;
+}
+
+.is-layout-compact .nx-message-list {
+  padding: 8px 10px !important;
+  gap: 2px;
+}
+
+.is-layout-compact .nx-bubble-wrap {
+  margin-bottom: 4px;
+  max-width: 100%;
+}
+
+.is-layout-compact .nx-chat-bubble {
+  max-width: 88%;
+  font-size: 12.5px;
+  padding: 7px 10px !important;
+}
+
+/* === 50% MEDIUM: balanced workspace === */
+.is-layout-medium .nx-chat-header-v2 {
+  padding: 7px 14px;
+}
+
+.is-layout-medium .nx-chat-header-v2__address {
+  display: flex;
+}
+
+.is-layout-medium .nx-chat-header-v2__phone {
+  display: flex;
+}
+
+.is-layout-medium .nx-message-list {
+  padding: 12px 14px !important;
+}
+
+.is-layout-medium .nx-bubble-wrap {
+  margin-bottom: 5px;
+}
+
+/* === 75% EXPANDED: message-first === */
+.is-layout-expanded .nx-chat-header-v2 {
+  padding: 8px 18px;
+}
+
+.is-layout-expanded .nx-message-list {
+  padding: 12px 20px !important;
+}
+
+/* === 100% FULL: command conversation view === */
+.is-layout-full .nx-chat-header-v2 {
+  padding: 10px 22px;
+}
+
+.is-layout-full .nx-chat-header-v2__name {
+  font-size: 14px;
+  max-width: 240px;
+}
+
+.is-layout-full .nx-message-list {
+  padding: 14px 24px !important;
+}
+
+.is-layout-full .nx-bubble-wrap {
+  margin-bottom: 8px;
+}
+
+.is-layout-full .nx-chat-bubble {
+  max-width: min(560px, 65%);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   HEADER ATMOSPHERE SYSTEM — Phase 0K
+   Adaptive cinematic lighting behind the thread header.
+   Ultra-slow aurora / fog drift. Status-aware color intelligence.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Base atmosphere layer */
+.nx-chat-atmosphere {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 260px;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: linear-gradient(to bottom, black 15%, rgba(0,0,0,0.6) 45%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 15%, rgba(0,0,0,0.6) 45%, transparent 100%);
+  will-change: transform, opacity;
+  transition: opacity 2.5s ease;
+  border-radius: 0;
+}
+
+/* Ensure header + action strip float above atmosphere */
+.nx-chat-header-v2 {
+  position: relative;
+  z-index: 1;
+}
+
+.nx-chat-action-strip {
+  position: relative;
+  z-index: 1;
+}
+
+/* Atmosphere keyframes — ultra-slow, fog-like drift */
+@keyframes nx-atmo-drift {
+  0%   { transform: translateX(0) translateY(0) scale(1); }
+  33%  { transform: translateX(14px) translateY(-10px) scale(1.04); }
+  66%  { transform: translateX(-10px) translateY(7px) scale(1.02); }
+  100% { transform: translateX(0) translateY(0) scale(1); }
+}
+
+@keyframes nx-atmo-pulse {
+  0%, 100% { opacity: 0.78; }
+  50%       { opacity: 1; }
+}
+
+@keyframes nx-atmo-breathe {
+  0%, 100% { opacity: 0.65; }
+  50%       { opacity: 0.95; }
+}
+
+/* ── NEW REPLY: electric blue + soft violet ───────────────────── */
+.is-atmo-reply .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 90% 72% at 15% -8%, rgba(47,157,255,0.45) 0%, transparent 68%),
+    radial-gradient(ellipse 68% 60% at 88% 8%, rgba(110,70,255,0.35) 0%, transparent 68%),
+    radial-gradient(ellipse 55% 44% at 50% 35%, rgba(17,102,218,0.22) 0%, transparent 60%);
+  animation: nx-atmo-drift 18s ease-in-out infinite, nx-atmo-pulse 14s ease-in-out infinite;
+}
+
+/* ── HOT LEAD: amber + ember orange ──────────────────────────── */
+.is-atmo-hot .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 88% 70% at 12% -8%, rgba(255,149,10,0.42) 0%, transparent 68%),
+    radial-gradient(ellipse 65% 55% at 90% 10%, rgba(255,69,58,0.30) 0%, transparent 68%),
+    radial-gradient(ellipse 52% 42% at 50% 30%, rgba(220,120,10,0.18) 0%, transparent 60%);
+  animation: nx-atmo-drift 20s ease-in-out infinite, nx-atmo-pulse 16s ease-in-out infinite;
+}
+
+/* ── NEGOTIATION: deep gold + midnight blue ───────────────────── */
+.is-atmo-negotiation .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 78% 58% at 18% -8%, rgba(220,175,40,0.22) 0%, transparent 68%),
+    radial-gradient(ellipse 60% 50% at 88% 8%, rgba(30,60,160,0.30) 0%, transparent 68%),
+    radial-gradient(ellipse 50% 38% at 50% 32%, rgba(160,120,20,0.12) 0%, transparent 60%);
+  animation: nx-atmo-drift 28s ease-in-out infinite, nx-atmo-pulse 23s ease-in-out infinite;
+}
+
+/* ── PREMIUM / CLOSING: faint gold shimmer ───────────────────── */
+.is-atmo-premium .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 78% 58% at 18% -8%, rgba(210,170,50,0.22) 0%, transparent 68%),
+    radial-gradient(ellipse 58% 48% at 88% 8%, rgba(255,210,90,0.16) 0%, transparent 68%),
+    radial-gradient(ellipse 48% 36% at 50% 30%, rgba(180,140,30,0.10) 0%, transparent 60%);
+  animation: nx-atmo-drift 26s ease-in-out infinite, nx-atmo-breathe 21s ease-in-out infinite;
+}
+
+/* ── FOLLOW-UP: muted cool cyan ──────────────────────────────── */
+.is-atmo-followup .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 80% 60% at 22% -5%, rgba(80,190,210,0.16) 0%, transparent 68%),
+    radial-gradient(ellipse 58% 48% at 82% 10%, rgba(47,157,255,0.12) 0%, transparent 68%),
+    radial-gradient(ellipse 46% 36% at 50% 32%, rgba(50,150,170,0.08) 0%, transparent 60%);
+  animation: nx-atmo-drift 30s ease-in-out infinite, nx-atmo-pulse 26s ease-in-out infinite;
+}
+
+/* ── DNC / HOSTILE / SUPPRESSED: dark crimson ───────────────── */
+.is-atmo-dnc .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 80% 60% at 18% -5%, rgba(180,20,20,0.24) 0%, transparent 68%),
+    radial-gradient(ellipse 58% 48% at 88% 8%, rgba(120,10,30,0.20) 0%, transparent 68%),
+    radial-gradient(ellipse 46% 36% at 50% 30%, rgba(100,0,0,0.14) 0%, transparent 60%);
+  animation: nx-atmo-drift 20s ease-in-out infinite, nx-atmo-breathe 16s ease-in-out infinite;
+}
+
+/* ── COMMERCIAL: steel blue ──────────────────────────────────── */
+.is-atmo-commercial .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 78% 58% at 18% -5%, rgba(80,120,200,0.20) 0%, transparent 68%),
+    radial-gradient(ellipse 58% 48% at 88% 8%, rgba(40,80,160,0.16) 0%, transparent 68%),
+    radial-gradient(ellipse 46% 36% at 50% 30%, rgba(60,100,180,0.10) 0%, transparent 60%);
+  animation: nx-atmo-drift 27s ease-in-out infinite, nx-atmo-pulse 22s ease-in-out infinite;
+}
+
+/* ── DEFAULT: neutral deep blue ambient ──────────────────────── */
+.is-atmo-default .nx-chat-atmosphere {
+  background:
+    radial-gradient(ellipse 85% 65% at 20% -8%, rgba(30,80,200,0.32) 0%, transparent 68%),
+    radial-gradient(ellipse 65% 52% at 82% 10%, rgba(50,80,180,0.22) 0%, transparent 68%),
+    radial-gradient(ellipse 48% 38% at 50% 30%, rgba(20,60,160,0.14) 0%, transparent 60%);
+  animation: nx-atmo-drift 22s ease-in-out infinite, nx-atmo-pulse 18s ease-in-out infinite;
+}
+
+/* ── Debug button ───────────────────────────────────────────── */
+.nx-debug-btn-mini {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.nx-debug-btn-mini:hover {
+  opacity: 1;
+  background: var(--nx-bg-hover);
+}
+
+/* ── Loading / empty ────────────────────────────────────────── */
+.nx-inbox__workspace-empty,
+.nx-inbox__messages-empty,
+.nx-inbox__messages-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--nx-text-muted);
+  font-size: 13px;
+  padding: 32px;
+  text-align: center;
+}
+
+.nx-inbox__messages-loading-icon {
+  width: 20px;
+  height: 20px;
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Keyword highlight ─────────────────────────────────────── */
+.nx-keyword-highlight {
+  background: rgba(255, 214, 10, 0.25);
+  color: #ffd60a;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ── Legacy suppression — hide old context cards now removed ── */
+.nx-operator-rail {
+  display: none !important;
+}
+.nx-thread-context-strip {
+  display: none !important;
+}
+/* Old chat-header: superseded by nx-chat-header-v2 */
+.nx-chat-header {
+  display: none !important;
+}

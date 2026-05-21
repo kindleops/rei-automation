@@ -1,0 +1,206 @@
+import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { Icon } from '../../../shared/icons'
+import { formatRelativeTime } from '../../../shared/formatters'
+import { fetchInboxActivity, undoInboxActivity, type InboxActivityEvent, type ActivityEventType } from '../../../lib/data/inboxActivityData'
+
+const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+
+type ActivityCategory = 'All' | 'Queue' | 'SMS' | 'AI' | 'Map' | 'Offers' | 'Buyers' | 'Errors'
+
+const CATEGORIES: ActivityCategory[] = ['All', 'Queue', 'SMS', 'AI', 'Map', 'Offers', 'Buyers', 'Errors']
+
+const categoryOf = (type: ActivityEventType): ActivityCategory => {
+  if (type === 'message_sent' || type === 'message_received' || type === 'message_failed') return 'SMS'
+  if (type === 'ai_copilot_interaction') return 'AI'
+  if (type === 'stage_change' || type === 'archive_thread' || type === 'unarchive_thread') return 'Queue'
+  return 'Queue'
+}
+
+type Severity = 'info' | 'success' | 'warning' | 'critical' | 'neutral'
+
+const severityOf = (type: ActivityEventType): Severity => {
+  if (type === 'message_failed') return 'critical'
+  if (type === 'message_sent') return 'success'
+  if (type === 'ai_copilot_interaction') return 'info'
+  return 'neutral'
+}
+
+const iconOf = (type: ActivityEventType): string => {
+  switch (type) {
+    case 'stage_change': return 'trending-up'
+    case 'archive_thread': return 'archive'
+    case 'unarchive_thread': return 'archive'
+    case 'star_thread': return 'star'
+    case 'unstar_thread': return 'star'
+    case 'pin_thread': return 'pin'
+    case 'unpin_thread': return 'pin'
+    case 'message_sent': return 'send'
+    case 'message_received': return 'message'
+    case 'message_failed': return 'alert'
+    case 'note_added': return 'activity'
+    case 'ai_copilot_interaction': return 'shield'
+    default: return 'activity'
+  }
+}
+
+const sourceLabelOf = (type: ActivityEventType): string => {
+  const cat = categoryOf(type)
+  if (cat === 'SMS') return 'SMS'
+  if (cat === 'AI') return 'AI ENGINE'
+  return 'QUEUE'
+}
+
+export const InboxActivityPanel = ({
+  threadKey,
+  onClose,
+  onViewThread,
+}: {
+  threadKey?: string
+  onClose: () => void
+  onViewThread?: (threadKey: string) => void
+}) => {
+  const DEV = Boolean(import.meta.env.DEV)
+  const [activities, setActivities] = useState<InboxActivityEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activeCategory, setActiveCategory] = useState<ActivityCategory>('All')
+
+  useEffect(() => {
+    if (DEV) console.log('[NexusPopover]', { name: 'ActivityLog', action: 'open', open: true })
+    return () => {
+      if (DEV) console.log('[NexusPopover]', { name: 'ActivityLog', action: 'close', open: false })
+    }
+  }, [DEV])
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchInboxActivity(threadKey).then((data) => {
+      if (!cancelled) {
+        setActivities(data)
+        setLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [threadKey])
+
+  const handleUndo = useCallback(async (id: string) => {
+    const result = await undoInboxActivity(id)
+    if (result.ok) {
+      setLoading(true)
+      const data = await fetchInboxActivity(threadKey)
+      setActivities(data)
+      setLoading(false)
+    }
+  }, [threadKey])
+
+  const filtered = activities.filter((item) => {
+    if (activeCategory === 'All') return true
+    if (activeCategory === 'Errors') return severityOf(item.event_type) === 'critical'
+    return categoryOf(item.event_type) === activeCategory
+  })
+
+  const panel = (
+    <aside className="nx-activity-panel nx-liquid-panel" aria-label="Live activity log">
+
+      {/* ── Header ────────────────────────────────────────────────── */}
+      <header className="lac-header">
+        <div className="lac-header__identity">
+          <span className="lac-header__eyebrow">COMMAND SPACE</span>
+          <strong className="lac-header__title">Live Activity</strong>
+          <p className="lac-header__subtitle">
+            System heartbeat across queue, inbox, AI, map, offers, buyers, and automation.
+          </p>
+        </div>
+        <button type="button" className="lac-close" onClick={onClose} aria-label="Close activity log">
+          <Icon name="close" />
+        </button>
+      </header>
+
+      {/* ── Category filters ───────────────────────────────────────── */}
+      <div className="lac-filters" role="tablist" aria-label="Activity categories">
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === cat}
+            className={cls('lac-chip', activeCategory === cat && 'is-active')}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setActiveCategory(cat) }}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Activity list ──────────────────────────────────────────── */}
+      <div className="lac-list">
+        {loading && (
+          <p className="lac-empty">Loading activity...</p>
+        )}
+
+        {!loading && filtered.length === 0 && (
+          <div className="lac-empty-state">
+            <span className="lac-empty-state__icon">◎</span>
+            <p className="lac-empty-state__text">
+              No live activity yet. Queue actions, replies, AI decisions, map events, and automation logs will appear here.
+            </p>
+          </div>
+        )}
+
+        {!loading && filtered.map((item) => {
+          const severity = severityOf(item.event_type)
+          const icon = iconOf(item.event_type)
+          const source = sourceLabelOf(item.event_type)
+          return (
+            <article key={item.id} className={cls('lac-row', `is-${severity}`)}>
+              <div className={cls('lac-row__icon', `is-${severity}`)}>
+                <Icon name={icon as any} />
+              </div>
+              <div className="lac-row__main">
+                <div className="lac-row__top">
+                  <span className="lac-row__source">{source}</span>
+                  <strong className="lac-row__title">{item.title}</strong>
+                  <time className="lac-row__time">{formatRelativeTime(item.created_at)}</time>
+                </div>
+                {item.description && (
+                  <p className="lac-row__detail">{item.description}</p>
+                )}
+                <div className="lac-row__footer">
+                  <span className="lac-row__actor">{item.actor}</span>
+                  <div className="lac-row__actions">
+                    {item.undo_payload && (
+                      <button
+                        type="button"
+                        className="lac-action-btn"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleUndo(item.id) }}
+                      >
+                        Undo
+                      </button>
+                    )}
+                    {onViewThread && (
+                      <button
+                        type="button"
+                        className="lac-action-btn"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewThread(item.thread_key) }}
+                      >
+                        View →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+
+      {/* ── Footer ────────────────────────────────────────────────── */}
+      <footer className="lac-footer">
+        <span>Press <kbd>⌘K</kbd> to act on activity</span>
+      </footer>
+
+    </aside>
+  )
+
+  return typeof document !== 'undefined' ? createPortal(panel, document.body) : null
+}

@@ -1,0 +1,15 @@
+{
+  "name": "rei-automation",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:api": "npm --workspace apps/api run build",
+    "build:dashboard": "npm --workspace apps/dashboard run build",
+    "build": "npm run build:api && npm run build:dashboard",
+    "boundary:audit": "node scripts/proof/monorepo-boundary-audit.mjs",
+    "build:safe": "npm run boundary:audit && npm run build"
+  }
+}

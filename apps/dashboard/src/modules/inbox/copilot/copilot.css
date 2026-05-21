@@ -1,0 +1,1659 @@
+/* ═══════════════════════════════════════════════════════════════════
+   NEXUS AI COPILOT — Premium Dark Graphite Command Interface
+   No rainbow palette. Dark graphite, glass, subtle borders, soft glow.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Panel Shell ───────────────────────────────────────────────── */
+
+.nx-copilot-panel {
+  position: fixed !important;
+  top: 64px !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  z-index: 9999 !important;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  background: rgba(10, 12, 18, 0.85) !important;
+  backdrop-filter: blur(40px) saturate(180%) brightness(0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 20px;
+  color: #e8edf5;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  box-shadow: 
+    0 24px 80px rgba(0, 0, 0, 0.8),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: nx-copilot-entry 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-copilot-entry {
+  from { transform: translateX(100%) scale(0.95); opacity: 0; }
+  to { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+.nx-copilot-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.2), transparent 40%, transparent 60%, rgba(255,255,255,0.1));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+
+.nx-copilot-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 200px;
+  background: radial-gradient(ellipse at 30% -20%, rgba(120, 140, 180, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── ELITE AI COMMAND ORB ──────────────────────────────────────── */
+
+.nx-ai-orb-container {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  perspective: 1000px;
+}
+
+.nx-ai-orb {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #68d9c4 20%, #101627 100%);
+  box-shadow: 
+    0 0 20px rgba(104, 217, 196, 0.4),
+    inset 0 0 10px rgba(255, 255, 255, 0.5);
+  z-index: 5;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.nx-ai-orb-container:hover .nx-ai-orb {
+  transform: scale(1.1) rotate(15deg);
+  box-shadow: 0 0 30px rgba(104, 217, 196, 0.6);
+}
+
+.nx-ai-orb-halo {
+  position: absolute;
+  inset: -8px;
+  border: 1px solid rgba(104, 217, 196, 0.3);
+  border-radius: 50%;
+  animation: nx-orb-halo-spin 4s linear infinite;
+  pointer-events: none;
+}
+
+.nx-ai-orb-halo::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  background: #68d9c4;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #68d9c4;
+}
+
+.nx-ai-orb-shimmer {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.4) 50%, transparent 60%);
+  background-size: 200% 200%;
+  animation: nx-orb-shimmer 2s linear infinite;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.nx-ai-orb.is-thinking {
+  animation: nx-orb-pulse 1s ease-in-out infinite;
+}
+
+.nx-ai-orb.is-ready {
+  box-shadow: 0 0 40px rgba(255, 214, 10, 0.6);
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #ffd60a 20%, #101627 100%);
+}
+
+@keyframes nx-orb-halo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nx-orb-shimmer {
+  0% { background-position: -200% -200%; }
+  100% { background-position: 200% 200%; }
+}
+
+@keyframes nx-orb-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); opacity: 0.8; }
+}
+
+
+/* ── Header ────────────────────────────────────────────────────── */
+
+.nx-copilot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 10, 16, 0.6);
+  backdrop-filter: blur(12px);
+  position: relative;
+  z-index: 2;
+}
+
+.nx-copilot-header__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nx-copilot-header__avatar-wrapper {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+.nx-copilot-header__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  border: 1px solid;
+  position: relative;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.nx-copilot-header__avatar-orbit {
+  position: absolute;
+  inset: 0;
+  border: 1px solid;
+  border-radius: 50%;
+  animation: nx-orbit-pulse 3s ease-in-out infinite;
+  opacity: 0.5;
+}
+
+@keyframes nx-orbit-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.2); opacity: 0.1; }
+}
+
+.nx-copilot-header__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nx-copilot-header__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.nx-copilot-header__title-row strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.nx-copilot-header__version {
+  font-size: 8px;
+  font-weight: 900;
+  color: rgba(104, 217, 196, 0.4);
+  background: rgba(104, 217, 196, 0.05);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.nx-copilot-header__command-label {
+  font-size: 9px;
+  font-weight: 900;
+  color: #68d9c4;
+  background: rgba(104, 217, 196, 0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.nx-copilot-header__status {
+  font-size: 10px;
+  color: rgba(200, 210, 230, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+
+.nx-copilot-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.nx-copilot-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nx-copilot-header__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(180, 200, 230, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.nx-copilot-header__badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+.nx-copilot-close-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: rgba(200, 210, 230, 0.5);
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.nx-copilot-close-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Agent Switcher ────────────────────────────────────────────── */
+
+.nx-copilot-switcher {
+  padding: 8px 14px;
+  position: relative;
+  z-index: 10;
+}
+
+.nx-copilot-switcher__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: #e8edf5;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.nx-copilot-switcher__trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.nx-copilot-switcher__trigger svg {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  opacity: 0.5;
+}
+
+.nx-copilot-switcher__emoji {
+  font-size: 15px;
+}
+
+.nx-copilot-switcher__menu {
+  position: absolute;
+  top: 100%;
+  left: 14px;
+  right: 14px;
+  background: rgba(16, 19, 28, 0.96);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  max-height: 360px;
+  overflow-y: auto;
+  animation: nx-copilot-menu-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-copilot-menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.nx-copilot-switcher__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #e8edf5;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-switcher__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nx-copilot-switcher__item.is-active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nx-copilot-switcher__item-emoji {
+  font-size: 18px;
+  width: 28px;
+  text-align: center;
+}
+
+.nx-copilot-switcher__item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nx-copilot-switcher__item-info strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.nx-copilot-switcher__item-info small {
+  font-size: 10px;
+  color: rgba(200, 210, 230, 0.5);
+}
+
+.nx-copilot-switcher__item svg {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: rgba(120, 200, 160, 0.8);
+}
+
+/* ── Context Capsule ───────────────────────────────────────────── */
+
+.nx-copilot-context {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.nx-copilot-context--empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(200, 210, 230, 0.4);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.nx-copilot-context--empty svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.4;
+}
+
+.nx-copilot-context__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.nx-copilot-context__label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(200, 210, 230, 0.45);
+  min-width: 52px;
+}
+
+.nx-copilot-context__row strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.nx-copilot-context__value {
+  font-size: 11px;
+  color: rgba(200, 210, 230, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-copilot-context__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.nx-copilot-ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(200, 210, 230, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nx-copilot-context__missing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: rgba(255, 180, 100, 0.8);
+}
+
+.nx-copilot-context__missing svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* ── Chat Stream ───────────────────────────────────────────────── */
+
+.nx-copilot-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+/* ── Message Cards ─────────────────────────────────────────────── */
+
+.nx-copilot-msg {
+  display: flex;
+  gap: 8px;
+  animation: nx-msg-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx-copilot-msg__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.nx-copilot-msg__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.nx-copilot-msg__name {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(200, 210, 230, 0.5);
+  margin-bottom: 3px;
+  display: block;
+}
+
+.nx-copilot-msg__body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(220, 230, 245, 0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nx-copilot-msg.is-agent .nx-copilot-msg__body {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 2px 12px 12px 12px;
+  padding: 10px 12px;
+}
+
+.nx-copilot-msg.is-operator {
+  flex-direction: row-reverse;
+}
+
+.nx-copilot-msg.is-operator .nx-copilot-msg__content {
+  text-align: right;
+}
+
+.nx-copilot-msg.is-operator .nx-copilot-msg__body {
+  background: rgba(100, 130, 180, 0.12);
+  border: 1px solid rgba(100, 130, 180, 0.15);
+  border-radius: 12px 2px 12px 12px;
+  padding: 10px 12px;
+  display: inline-block;
+  text-align: left;
+}
+
+.nx-copilot-msg.is-system .nx-copilot-msg__body {
+  font-size: 11px;
+  color: rgba(200, 210, 230, 0.5);
+  font-style: italic;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.nx-copilot-msg__time {
+  font-size: 9px;
+  color: rgba(200, 210, 230, 0.3);
+  margin-top: 4px;
+  display: block;
+}
+
+/* ── Draft Card ────────────────────────────────────────────────── */
+
+.nx-copilot-draft-card {
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 180, 140, 0.15);
+  background: rgba(120, 180, 140, 0.04);
+  overflow: hidden;
+}
+
+.nx-copilot-draft-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(120, 180, 140, 0.06);
+  border-bottom: 1px solid rgba(120, 180, 140, 0.1);
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(160, 220, 180, 0.9);
+}
+
+.nx-copilot-draft-card__badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(120, 180, 140, 0.1);
+}
+
+.nx-copilot-draft-card__body {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(220, 235, 245, 0.9);
+  margin: 0;
+}
+
+.nx-copilot-draft-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px 8px;
+}
+
+.nx-copilot-draft-card__meta span {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(200, 210, 230, 0.5);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nx-copilot-draft-card__internal {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 140, 100, 0.05);
+  border-top: 1px solid rgba(255, 140, 100, 0.1);
+  font-size: 10px;
+  color: rgba(255, 180, 140, 0.8);
+}
+
+.nx-copilot-draft-card__internal svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.nx-copilot-draft-card__actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 10px;
+}
+
+/* ── Action Buttons & Chips ────────────────────────────────────── */
+
+.nx-copilot-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(200, 210, 230, 0.8);
+  font-size: 10px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.nx-copilot-action-btn.is-primary {
+  background: rgba(100, 160, 220, 0.12);
+  border-color: rgba(100, 160, 220, 0.2);
+  color: rgba(140, 190, 240, 0.9);
+}
+
+.nx-copilot-action-btn.is-primary:hover {
+  background: rgba(100, 160, 220, 0.2);
+}
+
+.nx-copilot-action-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.nx-copilot-action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  animation: nx-chips-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+
+@keyframes nx-chips-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx-copilot-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(200, 210, 230, 0.7);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: capitalize;
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* ── Typing Indicator ──────────────────────────────────────────── */
+
+.nx-copilot-typing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 2px 12px 12px 12px;
+  animation: nx-msg-in 0.3s ease, nx-shimmer-bg 2s linear infinite;
+  background-size: 200% 100%;
+}
+
+@keyframes nx-shimmer-bg {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.nx-copilot-typing {
+  background-image: linear-gradient(
+    90deg, 
+    rgba(255, 255, 255, 0.02) 0%, 
+    rgba(255, 255, 255, 0.05) 50%, 
+    rgba(255, 255, 255, 0.02) 100%
+  );
+}
+
+.nx-copilot-typing__dots {
+  display: flex;
+  gap: 3px;
+}
+
+
+.nx-copilot-typing__dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(200, 210, 230, 0.3);
+  animation: nx-typing-pulse 1.4s ease-in-out infinite;
+}
+
+.nx-copilot-typing__dots i:nth-child(2) { animation-delay: 0.2s; }
+.nx-copilot-typing__dots i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes nx-typing-pulse {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 0.8; background: rgba(160, 200, 230, 0.6); }
+}
+
+.nx-copilot-typing__label {
+  font-size: 10px;
+  color: rgba(200, 210, 230, 0.4);
+  font-style: italic;
+}
+
+/* ── Suggestions ───────────────────────────────────────────────── */
+
+.nx-copilot-suggestions {
+  padding: 8px 14px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.nx-copilot-suggestions__label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(200, 210, 230, 0.3);
+  margin-bottom: 6px;
+  display: block;
+}
+
+.nx-copilot-suggestions__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nx-copilot-suggestion {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(200, 210, 230, 0.65);
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-suggestion:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  transform: translateX(3px);
+}
+
+/* ── Command Input ─────────────────────────────────────────────── */
+
+.nx-copilot-input-area {
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(8, 10, 16, 0.5);
+  position: relative;
+}
+
+.nx-copilot-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  transition: all 0.2s ease;
+}
+
+.nx-copilot-input-row:focus-within {
+  border-color: rgba(120, 150, 200, 0.25);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 3px rgba(120, 150, 200, 0.06);
+}
+
+.nx-copilot-input-row textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e8edf5;
+  font-size: 12.5px;
+  line-height: 1.4;
+  resize: none;
+  min-height: 20px;
+  max-height: 100px;
+  font-family: inherit;
+}
+
+.nx-copilot-input-row textarea::placeholder {
+  color: rgba(200, 210, 230, 0.3);
+}
+
+.nx-copilot-send-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: rgba(100, 140, 200, 0.15);
+  border: 1px solid rgba(100, 140, 200, 0.2);
+  color: rgba(140, 180, 230, 0.8);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.nx-copilot-send-btn:hover:not(:disabled) {
+  background: rgba(100, 140, 200, 0.25);
+  color: #fff;
+}
+
+.nx-copilot-send-btn:disabled {
+  opacity: 0.3;
+}
+
+.nx-copilot-send-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Slash Command Menu ────────────────────────────────────────── */
+
+.nx-copilot-slash-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 14px;
+  right: 14px;
+  background: rgba(16, 19, 28, 0.96);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: nx-copilot-menu-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  margin-bottom: 4px;
+}
+
+.nx-copilot-slash-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #e8edf5;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.nx-copilot-slash-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nx-copilot-slash-item kbd {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(140, 180, 230, 0.8);
+  background: rgba(100, 140, 200, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 70px;
+}
+
+.nx-copilot-slash-item span {
+  font-size: 11px;
+  color: rgba(200, 210, 230, 0.6);
+}
+
+/* ── Quick Actions Bar ─────────────────────────────────────────── */
+
+.nx-copilot-quick-actions {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  background: rgba(6, 8, 14, 0.4);
+}
+
+.nx-copilot-quick-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(200, 210, 230, 0.55);
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: all 0.15s ease;
+}
+
+.nx-copilot-quick-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.nx-copilot-quick-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Voice & Audio ─────────────────────────────────────────────── */
+
+.nx-copilot-voice-controls {
+  padding: 0 14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-copilot-mic-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #95a7c9;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.nx-copilot-mic-btn:hover:not(:disabled) {
+  background: rgba(104, 217, 196, 0.1);
+  border-color: #68d9c4;
+  color: #68d9c4;
+  transform: scale(1.05);
+}
+
+.nx-copilot-mic-btn.is-active {
+  background: #68d9c4;
+  color: #0a0c12;
+  box-shadow: 0 0 15px rgba(104, 217, 196, 0.4);
+  border-color: #68d9c4;
+}
+
+.nx-copilot-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 14px;
+}
+
+.nx-copilot-voice-bar {
+  width: 2px;
+  background: #68d9c4;
+  border-radius: 1px;
+  animation: nx-voice-wave 1s ease-in-out infinite;
+}
+
+@keyframes nx-voice-wave {
+  0%, 100% { height: 4px; opacity: 0.3; }
+  50% { height: 14px; opacity: 1; }
+}
+
+.nx-copilot-voice-selector-wrap {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 2px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-copilot-voice-selector-wrap select {
+  background: transparent;
+  border: 0;
+  color: #ecf4ff;
+  font-size: 10px;
+  font-weight: 700;
+  flex: 1;
+  outline: none;
+  cursor: pointer;
+  height: 24px;
+}
+
+.nx-copilot-voice-selector-wrap label {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #95a7c9;
+  font-weight: 900;
+  opacity: 0.6;
+}
+
+@keyframes nx-copilot-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ── Orb Trigger Integration ────────────────────────────────────── */
+
+.nx-intel-orb-trigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  margin: 10px 0;
+}
+
+.nx-intel-orb-trigger:hover {
+  background: rgba(104, 217, 196, 0.05);
+  border-color: rgba(104, 217, 196, 0.2);
+}
+
+.nx-intel-orb-label {
+  font-size: 10px;
+  font-weight: 900;
+  color: #68d9c4;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nx-composer-orb-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(104, 217, 196, 0.08);
+  border: 1px solid rgba(104, 217, 196, 0.15);
+  color: #68d9c4;
+  font-size: 11px;
+  font-weight: 800;
+  transition: all 0.2s ease;
+}
+
+.nx-composer-orb-trigger:hover {
+  background: rgba(104, 217, 196, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(104, 217, 196, 0.2);
+}
+
+.nx-ai-orb-container.is-sm {
+  width: 24px;
+  height: 24px;
+}
+.nx-ai-orb-container.is-sm .nx-ai-orb {
+  width: 16px;
+  height: 16px;
+}
+.nx-ai-orb-container.is-sm .nx-ai-orb-halo {
+  inset: -4px;
+}
+
+/* ── Original CopilotOrb Styling ───────────────────────────────── */
+
+.nx-copilot-orb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  margin-top: -12px;
+  margin-bottom: -12px;
+}
+
+/* Keep global shell orb variants out of normal document flow.
+   Without this, the base .nx-copilot-orb rule can collapse stage height
+   and create a visible bottom dead strip in the app shell. */
+.nx-copilot-orb.nx-copilot-orb--floating {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  z-index: 840;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.nx-copilot-orb.nx-copilot-orb--corner {
+  position: fixed;
+  top: 88px;
+  right: 22px;
+  z-index: 840;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.nx-copilot-orb:hover {
+  transform: scale(1.05);
+}
+
+.nx-copilot-orb:active {
+  transform: scale(0.95);
+}
+
+.nx-copilot-orb__canvas {
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 0 10px rgba(var(--nx-orb-rgb), 0.3));
+}
+
+.nx-copilot-orb__live-glow {
+  position: absolute;
+  inset: 15%;
+  background: rgba(var(--nx-orb-rgb), 0.1);
+  filter: blur(20px);
+  border-radius: 50%;
+  animation: nx-orb-pulse var(--nx-orb-vspeed, 200ms) ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.nx-copilot-orb__label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(var(--nx-orb-rgb), 0.6);
+  pointer-events: none;
+  margin-top: -4px;
+  white-space: nowrap;
+}
+
+.nx-copilot-orb.is-sm {
+  transform: scale(0.6);
+}
+
+.nx-copilot-orb.is-sm:hover {
+  transform: scale(0.65);
+}
+
+@keyframes nx-orb-pulse {
+  from { opacity: 0.2; transform: scale(0.9); }
+  to { opacity: 0.6; transform: scale(1.1); }
+}
+
+/* ── Global Floating AI Anchor ──────────────────────────────────── */
+
+.nx-global-ai-anchor {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9998; /* Just below the portal panel */
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1), transparent 70%);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: nx-anchor-entry 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.nx-global-ai-anchor:hover {
+  transform: scale(1.1);
+  background: radial-gradient(circle at 30% 30%, rgba(104, 217, 196, 0.15), transparent 80%);
+}
+
+.nx-global-ai-anchor.is-hidden {
+  opacity: 0;
+  transform: scale(0.5) translateY(20px);
+  pointer-events: none;
+}
+
+@keyframes nx-anchor-entry {
+  from { opacity: 0; transform: scale(0.5) translateY(40px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.nx-global-ai-anchor__label {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 900;
+  color: #68d9c4;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.nx-global-ai-anchor:hover .nx-global-ai-anchor__label {
+  opacity: 1;
+  bottom: -4px;
+}
+
+/* ── Voice Mode Styling ───────────────────────────────────────── */
+
+.nx-voice-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 10px;
+  font-weight: 800;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.nx-voice-mode-toggle.is-active {
+  background: rgba(104, 217, 196, 0.15);
+  border-color: rgba(104, 217, 196, 0.3);
+  color: #68d9c4;
+  box-shadow: 0 0 15px rgba(104, 217, 196, 0.2);
+}
+
+.nx-copilot-voice-waves {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  margin-left: 10px;
+}
+
+.nx-voice-wave-bar {
+  width: 2px;
+  height: 4px;
+  background: #68d9c4;
+  border-radius: 1px;
+  transition: height 0.1s ease;
+}
+
+.nx-voice-wave-bar.is-active {
+  animation: nx-voice-surge 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes nx-voice-surge {
+  from { height: 4px; opacity: 0.4; }
+  to { height: 16px; opacity: 1; }
+}
+
+/* Specific agent accents for waves */
+.nx-voice-wave-bar {
+  background: var(--agent-accent, #68d9c4);
+}
+
+/* ── Voice Grid Styling ───────────────────────────────────────── */
+
+.nx-copilot-voice-grid {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.nx-copilot-voice-grid__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.nx-copilot-voice-grid__header span {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.nx-copilot-voice-grid__header small {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.nx-copilot-voice-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.nx-copilot-voice-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: left;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.nx-copilot-voice-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.nx-copilot-voice-item i {
+  color: #68d9c4;
+  opacity: 0.6;
+}
+
+.nx-copilot-voice-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.nx-copilot-voice-info strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.nx-copilot-voice-info small {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Scrollbar for voice list */
+.nx-copilot-voice-list::-webkit-scrollbar {
+  width: 4px;
+}
+.nx-copilot-voice-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+/* ── Provider State Badges ───────────────────────────────────── */
+
+.nx-provider-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-left: 8px;
+  border: 1px solid transparent;
+}
+
+.nx-provider-badge.is-connected {
+  background: rgba(48, 209, 88, 0.1);
+  color: #30d158;
+  border-color: rgba(48, 209, 88, 0.2);
+  box-shadow: 0 0 10px rgba(48, 209, 88, 0.1);
+}
+
+.nx-provider-badge.is-mock_mode {
+  background: rgba(104, 217, 196, 0.1);
+  color: #68d9c4;
+  border-color: rgba(104, 217, 196, 0.2);
+}
+
+.nx-provider-badge.is-offline {
+  background: rgba(255, 69, 58, 0.1);
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.2);
+}
+
+.nx-copilot-typing.nx-liquid-panel {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+  margin: 10px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ── Advanced Thinking & Steps ────────────────────────────────── */
+
+.nx-copilot-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.nx-copilot-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  transition: all 0.3s ease;
+}
+
+.nx-copilot-step.is-active {
+  color: #68d9c4;
+  text-shadow: 0 0 10px rgba(104, 217, 196, 0.3);
+}
+
+.nx-copilot-step.is-done {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.nx-step-icon {
+  width: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+
+.nx-copilot-step.is-active .nx-step-icon {
+  animation: nx-step-pulse 1.5s infinite;
+}
+
+@keyframes nx-step-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Underwriting Result Card ─────────────────────────────────── */
+
+.nx-copilot-underwrite-card {
+  margin-top: 12px;
+  background: rgba(10, 15, 25, 0.6);
+  border: 1px solid rgba(104, 217, 196, 0.15);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: nx-msg-in 0.5s ease;
+}
+
+.nx-underwrite-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(104, 217, 196, 0.05);
+  border-bottom: 1px solid rgba(104, 217, 196, 0.1);
+}
+
+.nx-underwrite-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #68d9c4;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.nx-underwrite-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nx-underwrite-badge.is-strong-buy { background: #30d158; color: #000; }
+.nx-underwrite-badge.is-buy { background: rgba(48, 209, 88, 0.2); color: #30d158; }
+.nx-underwrite-badge.is-maybe { background: rgba(255, 214, 10, 0.2); color: #ffd60a; }
+.nx-underwrite-badge.is-pass { background: rgba(255, 69, 58, 0.2); color: #ff453a; }
+
+.nx-underwrite-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.nx-underwrite-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  background: rgba(10, 15, 25, 0.4);
+}
+
+.nx-underwrite-stat label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 4px;
+}
+
+.nx-underwrite-stat strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.nx-underwrite-comps {
+  padding: 12px 14px;
+}
+
+.nx-comps-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.nx-comp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 4px;
+  font-size: 11px;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+}
+
+.nx-comp-row:hover {
+  background: rgba(104, 217, 196, 0.1);
+  color: #fff;
+  transform: translateX(4px);
+}

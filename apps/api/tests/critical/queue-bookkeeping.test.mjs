@@ -1,0 +1,173 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { finalizeSuccessfulQueueSend } from "@/lib/domain/queue/process-send-queue.js";
+import { createPodioItem } from "../helpers/test-helpers.js";
+
+test("finalizeSuccessfulQueueSend records a clean success path", async () => {
+  const calls = [];
+  const brain_item = createPodioItem(701);
+
+  const result = await finalizeSuccessfulQueueSend(
+    {
+      queue_item_id: 123,
+      phone_item: createPodioItem(401),
+      phone_item_id: 401,
+      brain_id: 701,
+      brain_item,
+      conversation_item_id: 701,
+      master_owner_id: 201,
+      prospect_id: 301,
+      property_id: 601,
+      market_id: 801,
+      outbound_number_item_id: 501,
+      template_id: 901,
+      message_body: "Test message",
+      message_variant: 2,
+      latency_ms: 483,
+      send_result: {
+        message_id: "provider-1",
+        to: "+15550000001",
+        from: "+15550000002",
+      },
+      current_total_messages_sent: 4,
+      client_reference_id: "queue-123",
+      now: "2026-04-01T12:00:00.000Z",
+    },
+    {
+      updateItem: async (item_id, payload) => {
+        calls.push({ type: "updateItem", item_id, payload });
+      },
+      logOutboundMessageEvent: async (payload) => {
+        calls.push({ type: "logOutboundMessageEvent", payload });
+      },
+      updateBrainAfterSend: async (payload) => {
+        calls.push({ type: "updateBrainAfterSend", payload });
+      },
+      updateMasterOwnerAfterSend: async (payload) => {
+        calls.push({ type: "updateMasterOwnerAfterSend", payload });
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, false);
+  assert.equal(result.sent, true);
+  assert.equal(result.provider_message_id, "provider-1");
+  assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map((entry) => entry.type),
+    [
+      "updateItem",
+      "logOutboundMessageEvent",
+      "updateBrainAfterSend",
+      "updateMasterOwnerAfterSend",
+    ]
+  );
+  assert.equal(calls[1].payload.brain_item, brain_item);
+  assert.equal(calls[1].payload.conversation_item_id, 701);
+  assert.equal(calls[1].payload.master_owner_id, 201);
+  assert.equal(calls[1].payload.prospect_id, 301);
+  assert.equal(calls[1].payload.property_id, 601);
+  assert.equal(calls[1].payload.market_id, 801);
+  assert.equal(calls[1].payload.phone_item_id, 401);
+  assert.equal(calls[1].payload.outbound_number_item_id, 501);
+  assert.equal(calls[1].payload.client_reference_id, "queue-123");
+  assert.equal(calls[1].payload.template_id, 901);
+  assert.equal(calls[1].payload.message_variant, 2);
+  assert.equal(calls[1].payload.latency_ms, 483);
+  assert.equal(calls[1].payload.provider_message_id, "provider-1");
+  assert.equal(calls[1].payload.sent_at, "2026-04-01 07:00:00");
+
+  assert.equal(calls[2].payload.master_owner_id, 201);
+  assert.equal(calls[2].payload.prospect_id, 301);
+  assert.equal(calls[2].payload.property_id, 601);
+  assert.equal(calls[2].payload.sms_agent_id, null);
+});
+
+test("finalizeSuccessfulQueueSend reports partial failure if bookkeeping breaks after provider send", async () => {
+  const calls = [];
+  const brain_item = createPodioItem(701);
+
+  const result = await finalizeSuccessfulQueueSend(
+    {
+      queue_item_id: 123,
+      phone_item_id: 401,
+      brain_id: 701,
+      brain_item,
+      conversation_item_id: 701,
+      master_owner_id: 201,
+      prospect_id: 301,
+      property_id: 601,
+      market_id: 801,
+      outbound_number_item_id: 501,
+      template_id: 901,
+      message_body: "Test message",
+      message_variant: 1,
+      latency_ms: 215,
+      send_result: {
+        message_id: "provider-2",
+        to: "+15550000001",
+        from: "+15550000002",
+      },
+      current_total_messages_sent: 4,
+      client_reference_id: "queue-123",
+      now: "2026-04-01T12:00:00.000Z",
+    },
+    {
+      updateItem: async () => {
+        throw new Error("queue update unavailable");
+      },
+      logOutboundMessageEvent: async () => {
+        calls.push("logOutboundMessageEvent");
+      },
+      updateBrainAfterSend: async () => {
+        calls.push("updateBrainAfterSend");
+      },
+      updateMasterOwnerAfterSend: async () => {
+        calls.push("updateMasterOwnerAfterSend");
+      },
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.partial, true);
+  assert.equal(result.sent, true);
+  assert.deepEqual(calls, [
+    "logOutboundMessageEvent",
+    "updateBrainAfterSend",
+    "updateMasterOwnerAfterSend",
+  ]);
+  assert.match(result.bookkeeping_errors[0], /^queue_sent_update_failed:/);
+});
+
+test("finalizeSuccessfulQueueSend refuses to mark a queue row sent when provider SID is missing", async () => {
+  await assert.rejects(
+    () =>
+      finalizeSuccessfulQueueSend(
+        {
+          queue_item_id: 123,
+          phone_item_id: 401,
+          brain_id: 701,
+          send_result: {
+            status: "queued",
+          },
+        },
+        {
+          updateItem: async () => {
+            throw new Error("should_not_run");
+          },
+          logOutboundMessageEvent: async () => {
+            throw new Error("should_not_run");
+          },
+          updateBrainAfterSend: async () => {
+            throw new Error("should_not_run");
+          },
+          updateMasterOwnerAfterSend: async () => {
+            throw new Error("should_not_run");
+          },
+        }
+      ),
+    /SEND FAILED - NO SID/
+  );
+});

@@ -1,0 +1,84 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tool and cache directories
+.aider/
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
+.antigravity/
+.cache/
+.claude.json
+.claude/
+.cline/
+.codex/
+.config/
+.copilot/
+.cursor/
+.docker/
+.gemini/
+.lesshst
+.npm/
+.ollama/
+.opencode/
+.overture/
+.pixel-agents/
+.supabase/
+.viminfo
+.warp/
+.wdm/
+.zsh_history
+.zsh_sessions/
+.zshrc
+.gitconfig
+
+# OS and shell
+*.local-backup
+.Trash/
+
+# Project exclusions
+agent-lab/
+nextaos/
+podio-ops/
+podio_fields/
+podio_options.json
+rei-automation
+reivesti-platform-design/
+scripts-podio/
+scripts.local-backup
+Google\ Drive
+
+# macOS user directories
+Desktop/
+Documents/
+Downloads/
+Library/
+Movies/
+Music/
+Pictures/
+Projects/
+Public/
+Applications/
+.vercel

@@ -1,0 +1,488 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   NEXUS GLOBAL THEME ENGINE
+   All [data-nexus-theme] attributes live here.
+   Components read --nx-* vars; these cascade to every surface.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Default (no attribute set falls back to dark) ─────────────────────── */
+:root {
+  --nx-bg:              #07101a;
+  --nx-bg-soft:         #0c1828;
+  --nx-panel-bg:        rgba(8, 14, 24, 0.96);
+  --nx-card-bg:         rgba(8, 14, 24, 0.92);
+  --nx-card-border:     rgba(132, 191, 255, 0.18);
+  --nx-border:          rgba(98, 215, 255, 0.10);
+  --nx-border-strong:   rgba(98, 215, 255, 0.18);
+  --nx-accent:          #63d7ff;
+  --nx-accent-soft:     rgba(99, 215, 255, 0.14);
+  --nx-accent-glow:     rgba(99, 215, 255, 0.22);
+  --nx-text:            #eaf7ff;
+  --nx-text-muted:      rgba(186, 213, 240, 0.65);
+  --nx-danger:          #ef4444;
+  --nx-success:         #22c55e;
+  --nx-warning:         #f59e0b;
+  --nx-info:            #38bdf8;
+  --nx-shadow:          rgba(4, 12, 28, 0.58);
+  --nx-grid:            rgba(99, 215, 255, 0.04);
+  --nx-command-bg:      rgba(6, 12, 24, 0.97);
+  --nx-bubble-inbound:  rgba(99, 215, 255, 0.10);
+  --nx-bubble-outbound: rgba(63, 172, 255, 0.85);
+  --nx-badge-bg:        rgba(99, 215, 255, 0.10);
+  --nx-badge-border:    rgba(99, 215, 255, 0.22);
+}
+
+/* ── dark ───────────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="dark"] {
+  --nx-bg:              #07101a;
+  --nx-bg-soft:         #0c1828;
+  --nx-panel-bg:        rgba(8, 14, 24, 0.96);
+  --nx-card-bg:         rgba(8, 14, 24, 0.92);
+  --nx-card-border:     rgba(132, 191, 255, 0.18);
+  --nx-border:          rgba(98, 215, 255, 0.10);
+  --nx-border-strong:   rgba(98, 215, 255, 0.18);
+  --nx-accent:          #63d7ff;
+  --nx-accent-soft:     rgba(99, 215, 255, 0.14);
+  --nx-accent-glow:     rgba(99, 215, 255, 0.22);
+  --nx-text:            #eaf7ff;
+  --nx-text-muted:      rgba(186, 213, 240, 0.65);
+  --nx-danger:          #ef4444;
+  --nx-success:         #22c55e;
+  --nx-warning:         #f59e0b;
+  --nx-info:            #38bdf8;
+  --nx-shadow:          rgba(4, 12, 28, 0.58);
+  --nx-grid:            rgba(99, 215, 255, 0.04);
+  --nx-command-bg:      rgba(6, 12, 24, 0.97);
+  --nx-bubble-inbound:  rgba(99, 215, 255, 0.10);
+  --nx-bubble-outbound: rgba(63, 172, 255, 0.85);
+  --nx-badge-bg:        rgba(99, 215, 255, 0.10);
+  --nx-badge-border:    rgba(99, 215, 255, 0.22);
+}
+
+/* ── satellite ──────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="satellite"] {
+  --nx-bg:              #0a0d11;
+  --nx-bg-soft:         #0e1316;
+  --nx-panel-bg:        rgba(14, 16, 18, 0.92);
+  --nx-card-bg:         rgba(14, 16, 18, 0.88);
+  --nx-card-border:     rgba(218, 230, 244, 0.12);
+  --nx-border:          rgba(214, 229, 248, 0.10);
+  --nx-border-strong:   rgba(214, 229, 248, 0.20);
+  --nx-accent:          #c8dcf2;
+  --nx-accent-soft:     rgba(229, 237, 248, 0.12);
+  --nx-accent-glow:     rgba(229, 237, 248, 0.18);
+  --nx-text:            #f4f7fb;
+  --nx-text-muted:      rgba(196, 212, 232, 0.65);
+  --nx-danger:          #ef4444;
+  --nx-success:         #22c55e;
+  --nx-warning:         #f59e0b;
+  --nx-info:            #38bdf8;
+  --nx-shadow:          rgba(0, 0, 0, 0.52);
+  --nx-grid:            rgba(229, 237, 248, 0.03);
+  --nx-command-bg:      rgba(12, 16, 20, 0.96);
+  --nx-bubble-inbound:  rgba(229, 237, 248, 0.10);
+  --nx-bubble-outbound: rgba(140, 160, 200, 0.85);
+  --nx-badge-bg:        rgba(229, 237, 248, 0.10);
+  --nx-badge-border:    rgba(229, 237, 248, 0.22);
+}
+
+/* ── terrain ────────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="terrain"] {
+  --nx-bg:              #0d1009;
+  --nx-bg-soft:         #131709;
+  --nx-panel-bg:        rgba(14, 17, 14, 0.95);
+  --nx-card-bg:         rgba(14, 17, 14, 0.91);
+  --nx-card-border:     rgba(190, 223, 121, 0.18);
+  --nx-border:          rgba(183, 216, 108, 0.12);
+  --nx-border-strong:   rgba(183, 216, 108, 0.24);
+  --nx-accent:          #b7d86c;
+  --nx-accent-soft:     rgba(183, 216, 108, 0.16);
+  --nx-accent-glow:     rgba(183, 216, 108, 0.22);
+  --nx-text:            #f6fee7;
+  --nx-text-muted:      rgba(204, 228, 145, 0.65);
+  --nx-danger:          #f97316;
+  --nx-success:         #22c55e;
+  --nx-warning:         #eab308;
+  --nx-info:            #86efac;
+  --nx-shadow:          rgba(10, 12, 9, 0.56);
+  --nx-grid:            rgba(195, 223, 124, 0.05);
+  --nx-command-bg:      rgba(13, 16, 10, 0.96);
+  --nx-bubble-inbound:  rgba(183, 216, 108, 0.12);
+  --nx-bubble-outbound: rgba(104, 142, 42, 0.90);
+  --nx-badge-bg:        rgba(183, 216, 108, 0.10);
+  --nx-badge-border:    rgba(183, 216, 108, 0.24);
+}
+
+/* ── red_ops ────────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="red_ops"] {
+  --nx-bg:              #0e0608;
+  --nx-bg-soft:         #160a0d;
+  --nx-panel-bg:        rgba(15, 8, 10, 0.97);
+  --nx-card-bg:         rgba(15, 8, 10, 0.93);
+  --nx-card-border:     rgba(255, 118, 118, 0.20);
+  --nx-border:          rgba(255, 107, 99, 0.14);
+  --nx-border-strong:   rgba(255, 107, 99, 0.26);
+  --nx-accent:          #ff6b63;
+  --nx-accent-soft:     rgba(255, 107, 99, 0.16);
+  --nx-accent-glow:     rgba(191, 29, 29, 0.32);
+  --nx-text:            #fff2ee;
+  --nx-text-muted:      rgba(255, 210, 205, 0.65);
+  /* semantic colors stay readable — danger is not the same hue as accent */
+  --nx-danger:          #ff4d4d;
+  --nx-success:         #4ade80;
+  --nx-warning:         #fbbf24;
+  --nx-info:            #60a5fa;
+  --nx-shadow:          rgba(24, 3, 5, 0.62);
+  --nx-grid:            rgba(255, 107, 99, 0.04);
+  --nx-command-bg:      rgba(14, 7, 9, 0.97);
+  --nx-bubble-inbound:  rgba(255, 107, 99, 0.12);
+  --nx-bubble-outbound: rgba(200, 50, 42, 0.90);
+  --nx-badge-bg:        rgba(255, 107, 99, 0.10);
+  --nx-badge-border:    rgba(255, 107, 99, 0.26);
+}
+
+/* ── matrix ─────────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="matrix"] {
+  --nx-bg:              #020805;
+  --nx-bg-soft:         #040e09;
+  --nx-panel-bg:        rgba(2, 8, 5, 0.97);
+  --nx-card-bg:         rgba(2, 8, 5, 0.93);
+  --nx-card-border:     rgba(0, 196, 106, 0.18);
+  --nx-border:          rgba(0, 255, 136, 0.12);
+  --nx-border-strong:   rgba(0, 255, 136, 0.24);
+  --nx-accent:          #00ff88;
+  --nx-accent-soft:     rgba(0, 255, 136, 0.14);
+  --nx-accent-glow:     rgba(0, 255, 136, 0.20);
+  --nx-text:            #d8ffe8;
+  --nx-text-muted:      rgba(114, 255, 178, 0.65);
+  --nx-danger:          #ff3b3b;
+  --nx-success:         #00ff88;
+  --nx-warning:         #c8ff4d;
+  --nx-info:            #56ffc1;
+  --nx-shadow:          rgba(0, 0, 0, 0.64);
+  --nx-grid:            rgba(0, 255, 136, 0.06);
+  --nx-command-bg:      rgba(1, 8, 5, 0.97);
+  --nx-bubble-inbound:  rgba(0, 255, 136, 0.10);
+  --nx-bubble-outbound: rgba(0, 180, 88, 0.90);
+  --nx-badge-bg:        rgba(0, 255, 136, 0.10);
+  --nx-badge-border:    rgba(0, 255, 136, 0.26);
+}
+
+/* ── blueprint ──────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="blueprint"] {
+  --nx-bg:              #061420;
+  --nx-bg-soft:         #091e2e;
+  --nx-panel-bg:        rgba(6, 20, 30, 0.97);
+  --nx-card-bg:         rgba(6, 20, 30, 0.93);
+  --nx-card-border:     rgba(122, 214, 255, 0.18);
+  --nx-border:          rgba(105, 215, 255, 0.12);
+  --nx-border-strong:   rgba(105, 215, 255, 0.26);
+  --nx-accent:          #69d7ff;
+  --nx-accent-soft:     rgba(105, 215, 255, 0.18);
+  --nx-accent-glow:     rgba(29, 120, 170, 0.26);
+  --nx-text:            #dff8ff;
+  --nx-text-muted:      rgba(154, 234, 255, 0.65);
+  --nx-danger:          #f87171;
+  --nx-success:         #58ffd4;
+  --nx-warning:         #fde68a;
+  --nx-info:            #86f0ff;
+  --nx-shadow:          rgba(2, 10, 18, 0.60);
+  --nx-grid:            rgba(105, 215, 255, 0.06);
+  --nx-command-bg:      rgba(5, 16, 26, 0.97);
+  --nx-bubble-inbound:  rgba(105, 215, 255, 0.10);
+  --nx-bubble-outbound: rgba(30, 120, 200, 0.90);
+  --nx-badge-bg:        rgba(105, 215, 255, 0.10);
+  --nx-badge-border:    rgba(105, 215, 255, 0.26);
+}
+
+/* ── executive ──────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="executive"] {
+  --nx-bg:              #0a0a06;
+  --nx-bg-soft:         #121009;
+  --nx-panel-bg:        rgba(10, 10, 8, 0.97);
+  --nx-card-bg:         rgba(12, 10, 8, 0.93);
+  --nx-card-border:     rgba(216, 180, 80, 0.14);
+  --nx-border:          rgba(216, 180, 80, 0.10);
+  --nx-border-strong:   rgba(216, 180, 80, 0.22);
+  --nx-accent:          #d8b450;
+  --nx-accent-soft:     rgba(216, 180, 80, 0.16);
+  --nx-accent-glow:     rgba(216, 180, 80, 0.22);
+  --nx-text:            #f0e8d8;
+  --nx-text-muted:      rgba(240, 220, 180, 0.65);
+  --nx-danger:          #ef4444;
+  --nx-success:         #4ade80;
+  --nx-warning:         #fbbf24;
+  --nx-info:            #78c8ff;
+  --nx-shadow:          rgba(3, 3, 1, 0.60);
+  --nx-grid:            rgba(216, 180, 80, 0.04);
+  --nx-command-bg:      rgba(8, 8, 5, 0.97);
+  --nx-bubble-inbound:  rgba(216, 180, 80, 0.10);
+  --nx-bubble-outbound: rgba(160, 120, 30, 0.90);
+  --nx-badge-bg:        rgba(216, 180, 80, 0.10);
+  --nx-badge-border:    rgba(216, 180, 80, 0.24);
+}
+
+/* ── night_vision ───────────────────────────────────────────────────────── */
+:root[data-nexus-theme="night_vision"] {
+  --nx-bg:              #06130f;
+  --nx-bg-soft:         #0a1c17;
+  --nx-panel-bg:        rgba(6, 19, 15, 0.97);
+  --nx-card-bg:         rgba(6, 18, 14, 0.93);
+  --nx-card-border:     rgba(114, 255, 178, 0.18);
+  --nx-border:          rgba(114, 255, 178, 0.12);
+  --nx-border-strong:   rgba(114, 255, 178, 0.24);
+  --nx-accent:          #72ffb2;
+  --nx-accent-soft:     rgba(114, 255, 178, 0.16);
+  --nx-accent-glow:     rgba(41, 163, 110, 0.24);
+  --nx-text:            #e8fff2;
+  --nx-text-muted:      rgba(160, 255, 205, 0.65);
+  --nx-danger:          #f87171;
+  --nx-success:         #72ffb2;
+  --nx-warning:         #d3ff7a;
+  --nx-info:            #7cf7ff;
+  --nx-shadow:          rgba(1, 10, 8, 0.58);
+  --nx-grid:            rgba(114, 255, 178, 0.05);
+  --nx-command-bg:      rgba(5, 16, 12, 0.97);
+  --nx-bubble-inbound:  rgba(114, 255, 178, 0.10);
+  --nx-bubble-outbound: rgba(36, 150, 90, 0.90);
+  --nx-badge-bg:        rgba(114, 255, 178, 0.10);
+  --nx-badge-border:    rgba(114, 255, 178, 0.24);
+}
+
+/* ── monochrome ─────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="monochrome"] {
+  --nx-bg:              #060708;
+  --nx-bg-soft:         #0c0d0f;
+  --nx-panel-bg:        rgba(8, 10, 12, 0.97);
+  --nx-card-bg:         rgba(8, 10, 12, 0.93);
+  --nx-card-border:     rgba(148, 163, 184, 0.18);
+  --nx-border:          rgba(148, 163, 184, 0.10);
+  --nx-border-strong:   rgba(148, 163, 184, 0.22);
+  --nx-accent:          #d3dde8;
+  --nx-accent-soft:     rgba(211, 221, 232, 0.12);
+  --nx-accent-glow:     rgba(148, 163, 184, 0.16);
+  --nx-text:            #f8fafc;
+  --nx-text-muted:      rgba(171, 184, 199, 0.65);
+  --nx-danger:          #f87171;
+  --nx-success:         #34d399;
+  --nx-warning:         #fbbf24;
+  --nx-info:            #4fc3ff;
+  --nx-shadow:          rgba(0, 0, 0, 0.58);
+  --nx-grid:            rgba(255, 255, 255, 0.025);
+  --nx-command-bg:      rgba(6, 8, 10, 0.97);
+  --nx-bubble-inbound:  rgba(211, 221, 232, 0.10);
+  --nx-bubble-outbound: rgba(100, 116, 136, 0.88);
+  --nx-badge-bg:        rgba(211, 221, 232, 0.10);
+  --nx-badge-border:    rgba(211, 221, 232, 0.22);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THEME PERSONALITY EFFECTS
+   Special effects for overlay themes — applied via CSS class hooks
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Matrix: grid overlay for cards/panels */
+:root[data-nexus-theme="matrix"] .matrix-grid-overlay {
+  background-image:
+    linear-gradient(rgba(0, 255, 136, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 136, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Matrix: scanline effect on cards */
+:root[data-nexus-theme="matrix"] .matrix-card-scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 136, 0.015) 2px,
+    rgba(0, 255, 136, 0.015) 4px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Matrix: command overlay glow */
+:root[data-nexus-theme="matrix"] .matrix-command-glow {
+  box-shadow:
+    0 0 40px rgba(0, 255, 136, 0.12),
+    0 0 80px rgba(0, 255, 136, 0.06);
+}
+
+/* Matrix: message bubble glow */
+:root[data-nexus-theme="matrix"] .matrix-bubble-glow {
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.18);
+}
+
+/* Blueprint: grid lines on schematic surfaces */
+:root[data-nexus-theme="blueprint"] .blueprint-grid {
+  background-image:
+    linear-gradient(rgba(105, 215, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(105, 215, 255, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GLOBAL SURFACE THEMING
+   Apply --nx-* vars to structural app shells so every surface responds
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* App shell root */
+.nx-os {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Command/global overlays */
+.gcc-overlay {
+  background:
+    radial-gradient(circle at top, var(--nx-accent-glow), transparent 30%),
+    linear-gradient(180deg, rgba(0,0,0,0.82), rgba(0,0,0,0.94));
+}
+
+.gcc-shell {
+  border-color: var(--nx-border-strong);
+  background: var(--nx-command-bg);
+  box-shadow:
+    0 34px 80px var(--nx-shadow),
+    0 0 0 1px rgba(255,255,255,0.02) inset,
+    0 12px 40px var(--nx-accent-glow);
+}
+
+/* Room label bar */
+.nx-room-label {
+  background: var(--nx-panel-bg);
+  border-bottom: 1px solid var(--nx-border);
+  backdrop-filter: blur(12px);
+}
+
+/* Buttons — accent-aware */
+.nx-btn-primary {
+  background: var(--nx-accent);
+  color: var(--nx-bg);
+}
+.nx-btn-primary:hover {
+  box-shadow: 0 0 0 2px var(--nx-accent-glow);
+}
+
+/* Filter pills / chips */
+.nx-filter-pill,
+.nx-chip {
+  background: var(--nx-badge-bg);
+  border: 1px solid var(--nx-badge-border);
+  color: var(--nx-text);
+}
+.nx-filter-pill.is-active,
+.nx-chip.is-active {
+  background: var(--nx-accent-soft);
+  border-color: var(--nx-accent);
+  color: var(--nx-accent);
+}
+
+/* Status chips — semantic colors preserved */
+.nx-status-chip {
+  background: var(--nx-badge-bg);
+  border: 1px solid var(--nx-badge-border);
+}
+.nx-status-chip.is-danger  { background: rgba(255,68,68,0.12); border-color: var(--nx-danger);  color: var(--nx-danger);  }
+.nx-status-chip.is-success { background: rgba(34,197,94,0.10); border-color: var(--nx-success); color: var(--nx-success); }
+.nx-status-chip.is-warning { background: rgba(245,158,11,0.12); border-color: var(--nx-warning); color: var(--nx-warning); }
+
+/* Seller Intelligence card shell */
+.nx-seller-intel-card {
+  background: var(--nx-card-bg);
+  border: 1px solid var(--nx-card-border);
+  box-shadow: 0 8px 24px var(--nx-shadow);
+}
+
+/* Pipeline cards */
+.nx-pipeline-card,
+.pipeline-card {
+  background: var(--nx-card-bg);
+  border: 1px solid var(--nx-card-border);
+}
+
+/* Queue row accent */
+.nx-operational-row:hover {
+  background: var(--nx-accent-soft);
+}
+
+/* Accent palette overrides */
+:root[data-nexus-accent="cyan"] {
+  --nx-accent: #38d0f0;
+  --nx-accent-glow: rgba(56, 208, 240, 0.25);
+  --nx-accent-soft: rgba(56, 208, 240, 0.14);
+}
+:root[data-nexus-accent="emerald"] {
+  --nx-accent: #2cb87a;
+  --nx-accent-glow: rgba(44, 184, 122, 0.25);
+  --nx-accent-soft: rgba(44, 184, 122, 0.14);
+}
+:root[data-nexus-accent="amber"] {
+  --nx-accent: #d89530;
+  --nx-accent-glow: rgba(216, 149, 48, 0.25);
+  --nx-accent-soft: rgba(216, 149, 48, 0.14);
+}
+:root[data-nexus-accent="violet"] {
+  --nx-accent: #9966ff;
+  --nx-accent-glow: rgba(153, 102, 255, 0.25);
+  --nx-accent-soft: rgba(153, 102, 255, 0.14);
+}
+:root[data-nexus-accent="rose"] {
+  --nx-accent: #e85080;
+  --nx-accent-glow: rgba(232, 80, 128, 0.25);
+  --nx-accent-soft: rgba(232, 80, 128, 0.14);
+}
+:root[data-nexus-accent="ice"] {
+  --nx-accent: #a0d8f0;
+  --nx-accent-glow: rgba(160, 216, 240, 0.22);
+  --nx-accent-soft: rgba(160, 216, 240, 0.12);
+}
+
+/* Map chrome responds to Nexus theme + accent */
+.nx-map-right-body,
+.nx-map-right-body--workspace,
+.nx-icm,
+.nx-icm__panel,
+.nx-icm__dock,
+.nx-icm__toolbar,
+.nx-map-shell {
+  background: var(--nx-panel-bg);
+  border-color: var(--nx-border);
+  color: var(--nx-text);
+}
+
+.nx-icm__chip.is-active,
+.nx-map-chip.is-active,
+.nx-icm__toggle.is-active,
+.nx-icm__dock-chip.is-active {
+  background: var(--nx-accent-soft);
+  border-color: var(--nx-accent);
+  color: var(--nx-text);
+  box-shadow: 0 0 0 1px var(--nx-accent-glow) inset;
+}
+
+.nx-icm .maplibregl-ctrl-group,
+.nx-icm .maplibregl-ctrl button,
+.nx-map-right-body .maplibregl-ctrl-group,
+.nx-map-right-body .maplibregl-ctrl button {
+  background: color-mix(in srgb, var(--nx-panel-bg) 92%, black 8%);
+  border-color: var(--nx-border);
+  color: var(--nx-text);
+}
+
+.nx-icm .maplibregl-ctrl button:hover,
+.nx-map-right-body .maplibregl-ctrl button:hover {
+  background: var(--nx-accent-soft);
+}
+
+.nx-map-live-badge,
+.nx-icm__live-pill,
+.nx-icm__status-pill {
+  border-color: var(--nx-accent);
+  background: var(--nx-accent-soft);
+  color: var(--nx-text);
+}

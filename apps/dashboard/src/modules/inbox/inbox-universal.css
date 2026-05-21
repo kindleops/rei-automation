@@ -1,0 +1,136 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   NEXUS UNIVERSAL INBOX — Source Mode & Uncontacted Styles
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.nx-sidebar__source-toggle-row {
+  display: flex;
+  padding: 8px 12px;
+  gap: 4px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-0);
+}
+
+.nx-source-mode-btn {
+  flex: 1;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.nx-source-mode-btn:hover {
+  color: var(--text-0);
+  background: var(--surface-2);
+}
+
+.nx-source-mode-btn.is-active {
+  background: var(--surface-2);
+  color: var(--tone-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+/* Uncontacted State in Chat Thread */
+.nx-uncontacted-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  background: var(--bg-0);
+}
+
+.nx-uncontacted-state__card {
+  max-width: 400px;
+  width: 100%;
+  padding: 32px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.nx-uncontacted-state__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 20px;
+  background: var(--bg-1);
+  border-radius: 50%;
+  color: var(--text-3);
+}
+
+.nx-uncontacted-state__icon svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.3;
+}
+
+.nx-uncontacted-state__card h3 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.nx-uncontacted-state__card p {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.nx-uncontacted-state__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.nx-btn--primary {
+  background: var(--tone-primary);
+  color: #000;
+}
+
+.nx-btn--primary:hover {
+  filter: brightness(1.1);
+}
+
+.nx-btn--secondary {
+  background: var(--surface-2);
+  color: var(--text-1);
+  border: 1px solid var(--border-1);
+}
+
+.nx-btn--secondary:hover {
+  background: var(--surface-hover);
+  color: var(--text-0);
+}
+
+.nx-btn svg {
+  width: 16px;
+  height: 16px;
+}

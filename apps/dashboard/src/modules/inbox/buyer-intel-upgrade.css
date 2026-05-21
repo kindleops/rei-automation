@@ -1,0 +1,491 @@
+.nx-buyer-intel-workspace {
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  color: #edf4ff;
+}
+
+.nx-buyer-intel-hero,
+.nx-buyer-intel-section,
+.nx-buyer-intel-detail,
+.nx-buyer-entity-card {
+  border: 1px solid rgba(169, 190, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(15, 22, 39, 0.92), rgba(8, 12, 24, 0.9)),
+    radial-gradient(circle at top right, rgba(111, 191, 255, 0.18), transparent 42%);
+  box-shadow: 0 18px 60px rgba(1, 5, 16, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.nx-buyer-intel-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+  border-radius: 24px;
+}
+
+.nx-buyer-intel-hero h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(1.1rem, 1.4vw, 1.8rem);
+  line-height: 1.1;
+}
+
+.nx-buyer-intel-hero p,
+.nx-buyer-intel-section__header span,
+.nx-buyer-entity-card__eyebrow,
+.nx-buyer-entity-card small,
+.nx-buyer-intel-detail__hero span,
+.nx-buyer-intel-detail__hero p {
+  color: rgba(219, 229, 255, 0.68);
+}
+
+.nx-buyer-intel-hero__eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7ee7ff;
+}
+
+.nx-buyer-intel-hero__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  gap: 10px;
+  min-width: min(100%, 340px);
+}
+
+.nx-buyer-intel-hero__stats div,
+.nx-buyer-intel-detail__metrics div,
+.nx-buyer-intel-detail__footprint div,
+.nx-buyer-intel-detail__explanation div,
+.nx-buyer-entity-card__metric-grid div {
+  display: grid;
+  gap: 4px;
+}
+
+.nx-buyer-intel-hero__stats div,
+.nx-buyer-intel-detail__metrics div,
+.nx-buyer-intel-detail__footprint div,
+.nx-buyer-intel-detail__explanation div {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(169, 190, 255, 0.08);
+}
+
+.nx-buyer-intel-hero__stats span,
+.nx-buyer-entity-card__metric-grid span,
+.nx-buyer-intel-detail__metrics span,
+.nx-buyer-intel-detail__footprint span,
+.nx-buyer-intel-detail__explanation span,
+.nx-buyer-intel-trail-card__meta span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(219, 229, 255, 0.58);
+}
+
+.nx-buyer-intel-hero__stats strong,
+.nx-buyer-entity-card__metric-grid strong,
+.nx-buyer-intel-detail__metrics strong,
+.nx-buyer-intel-detail__footprint strong,
+.nx-buyer-intel-detail__explanation strong {
+  font-size: 0.96rem;
+}
+
+.nx-buyer-intel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nx-buyer-intel-toolbar__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nx-buyer-intel-filter,
+.nx-buyer-entity-card__footer button,
+.nx-buyer-intel-detail__actions button {
+  border: 1px solid rgba(169, 190, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #eef5ff;
+  border-radius: 999px;
+  padding: 9px 13px;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: 160ms ease;
+}
+
+.nx-buyer-intel-filter.is-active,
+.nx-buyer-entity-card__footer button:hover,
+.nx-buyer-intel-detail__actions button:hover {
+  background: rgba(94, 184, 255, 0.16);
+  border-color: rgba(126, 224, 255, 0.38);
+}
+
+.nx-buyer-intel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.nx-buyer-intel-grid__stack {
+  display: grid;
+  gap: 16px;
+}
+
+.nx-buyer-intel-section,
+.nx-buyer-intel-detail {
+  border-radius: 24px;
+  padding: 18px;
+}
+
+.nx-buyer-intel-section__header,
+.nx-buyer-intel-detail__section-head,
+.nx-buyer-entity-card__score-head,
+.nx-buyer-intel-trail-card__top,
+.nx-buyer-entity-card__header,
+.nx-buyer-intel-detail__hero,
+.nx-buyer-entity-card__identity,
+.nx-buyer-intel-detail__identity,
+.nx-buyer-entity-card__footer,
+.nx-buyer-intel-detail__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nx-buyer-intel-card-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.is-pane-25 .nx-buyer-intel-grid,
+.is-pane-50 .nx-buyer-intel-grid {
+  grid-template-columns: 1fr;
+}
+
+.is-pane-25 .nx-buyer-intel-detail {
+  order: -1;
+}
+
+.nx-buyer-entity-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 22px;
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.nx-buyer-entity-card:hover,
+.nx-buyer-entity-card.is-selected {
+  transform: translateY(-2px);
+  border-color: rgba(126, 224, 255, 0.36);
+  box-shadow: 0 20px 50px rgba(1, 5, 16, 0.52);
+}
+
+.nx-buyer-entity-card.is-gold,
+.nx-buyer-intel-detail__hero.is-gold {
+  background:
+    linear-gradient(145deg, rgba(28, 22, 9, 0.95), rgba(11, 12, 19, 0.92)),
+    radial-gradient(circle at top right, rgba(255, 210, 107, 0.22), transparent 38%);
+}
+
+.nx-buyer-entity-card.is-cyan,
+.nx-buyer-intel-detail__hero.is-cyan {
+  background:
+    linear-gradient(145deg, rgba(10, 24, 33, 0.95), rgba(8, 12, 24, 0.92)),
+    radial-gradient(circle at top right, rgba(95, 218, 255, 0.22), transparent 38%);
+}
+
+.nx-buyer-entity-card.is-purple,
+.nx-buyer-intel-detail__hero.is-purple {
+  background:
+    linear-gradient(145deg, rgba(24, 16, 38, 0.95), rgba(8, 12, 24, 0.92)),
+    radial-gradient(circle at top right, rgba(188, 137, 255, 0.24), transparent 40%);
+}
+
+.nx-buyer-entity-card__identity,
+.nx-buyer-intel-detail__identity {
+  align-items: center;
+}
+
+.nx-buyer-entity-card__avatar,
+.nx-buyer-intel-detail__avatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(126, 224, 255, 0.16));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.nx-buyer-intel-detail__avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 1.05rem;
+}
+
+.nx-buyer-entity-card__header-badges,
+.nx-buyer-intel-detail__badge-stack,
+.nx-buyer-entity-card__badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nx-buyer-entity-card__badge,
+.nx-buyer-entity-card__pill,
+.nx-buyer-intel-detail__badge-stack span {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(169, 190, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nx-buyer-entity-card__badge.is-gold {
+  color: #ffd46f;
+}
+
+.nx-buyer-entity-card__badge.is-cyan {
+  color: #7ee7ff;
+}
+
+.nx-buyer-entity-card__badge.is-purple {
+  color: #d4b5ff;
+}
+
+.nx-buyer-entity-card__badge.is-dark {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.nx-buyer-entity-card__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nx-buyer-entity-card__score {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(169, 190, 255, 0.09);
+}
+
+.nx-buyer-entity-card__score-bar {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nx-buyer-entity-card__score-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ae0ff, #b18cff, #ffd46f);
+}
+
+.nx-buyer-entity-card__footer,
+.nx-buyer-intel-detail__actions {
+  flex-wrap: wrap;
+}
+
+.nx-buyer-entity-card__trail-preview,
+.nx-buyer-intel-detail__trail {
+  display: grid;
+  gap: 10px;
+}
+
+.nx-buyer-entity-card__trail-row,
+.nx-buyer-intel-trail-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(169, 190, 255, 0.08);
+}
+
+.nx-buyer-entity-card__trail-row {
+  display: grid;
+  gap: 4px;
+}
+
+.nx-buyer-intel-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.nx-buyer-intel-detail__hero {
+  padding: 18px;
+  border-radius: 20px;
+  align-items: flex-start;
+}
+
+.nx-buyer-intel-detail__section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(169, 190, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.nx-buyer-intel-detail__metrics,
+.nx-buyer-intel-detail__footprint,
+.nx-buyer-intel-detail__explanation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nx-buyer-intel-trail-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+
+.nx-icm-hover--buyer .nx-icm-hover__stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nx-icm-buyer-card--premium {
+  width: min(440px, calc(100vw - 24px));
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(169, 190, 255, 0.14);
+  background:
+    linear-gradient(145deg, rgba(13, 20, 36, 0.96), rgba(8, 12, 24, 0.94)),
+    radial-gradient(circle at top right, rgba(126, 224, 255, 0.14), transparent 42%);
+  box-shadow: 0 20px 60px rgba(1, 5, 16, 0.5);
+}
+
+.nx-icm-buyer-card__head--premium {
+  align-items: flex-start;
+}
+
+.nx-icm-buyer-card__hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nx-icm-buyer-card__avatar {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 212, 111, 0.18), rgba(126, 224, 255, 0.16));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-weight: 700;
+}
+
+.nx-icm-buyer-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nx-icm-buyer-card__badges span,
+.nx-icm-buyer-card__metric span,
+.nx-icm-buyer-card__section-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(219, 229, 255, 0.58);
+}
+
+.nx-icm-buyer-card__badges span {
+  border: 1px solid rgba(169, 190, 255, 0.16);
+  border-radius: 999px;
+  padding: 4px 9px;
+}
+
+.nx-icm-buyer-card__grid--premium {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.nx-icm-buyer-card__metric,
+.nx-icm-buyer-card__trail-item,
+.nx-icm-buyer-card__summary {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(169, 190, 255, 0.08);
+}
+
+.nx-icm-buyer-card__trail {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.nx-icm-buyer-card__trail-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nx-icm-buyer-card__trail-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+  color: rgba(219, 229, 255, 0.78);
+  font-size: 0.84rem;
+}
+
+.nx-icm-buyer-card__actions--premium {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.nx-icm-buyer-card__actions--premium a,
+.nx-icm-buyer-card__actions--premium button {
+  border: 1px solid rgba(169, 190, 255, 0.14);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #eef5ff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 1280px) {
+  .nx-buyer-intel-hero,
+  .nx-buyer-intel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nx-buyer-intel-hero {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 900px) {
+  .nx-buyer-entity-card__metric-grid,
+  .nx-buyer-intel-detail__metrics,
+  .nx-buyer-intel-detail__footprint,
+  .nx-buyer-intel-detail__explanation,
+  .nx-icm-buyer-card__grid--premium {
+    grid-template-columns: 1fr;
+  }
+}

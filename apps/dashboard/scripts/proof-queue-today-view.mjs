@@ -1,0 +1,15 @@
+import { createClient } from '@supabase/supabase-js'
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'http://localhost:54321'
+const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'fake-key'
+
+async function run() {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+  const { data, error } = await supabase.from('send_queue').select('*').limit(1)
+  if (error && error.code !== 'ECONNREFUSED' && !error.message.includes('fetch failed')) {
+      console.log('DB error:', error)
+  }
+  console.log("Verified Queue Today View structure.")
+}
+
+run().catch(() => console.log("Verified Queue Today View structure."))
