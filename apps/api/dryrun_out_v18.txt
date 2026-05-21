@@ -1,0 +1,47 @@
+(node:6235) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/ryankindle/rei-automation/apps/api/src/lib/domain/outbound/supabase-candidate-feeder.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/ryankindle/rei-automation/apps/api/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+◇ injected env (0) from .env.local // tip: ⌘ enable debugging { debug: true }
+Running feeder with: {
+  limit: 25,
+  scan_limit: 100,
+  touch_number: 1,
+  schedule_spread: true,
+  within_contact_window_now: true,
+  dry_run: true
+}
+{"timestamp":"2026-05-21T19:19:57.534Z","level":"INFO","event":"outbound.supabase_feeder_completed","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","source":"v_outbound_discovery_fresh","dry_run":true,"scanned_count":100,"eligible_count":51,"queued_count":0,"skipped_count":100}}
+
+--- FEEDER DIAGNOSTICS ---
+scanned_count: 100
+eligible_count: 51
+queued_count: 0
+hydration_failure_count: 19
+
+--- SAMPLE SKIPS (Top 5) ---
+----------------------------------------
+Reason: outside_contact_window
+Contact Window: undefined
+Window Allowed: undefined
+Window Reason: undefined
+----------------------------------------
+Reason: duplicate_queue_item
+Contact Window: undefined
+Window Allowed: undefined
+Window Reason: undefined
+----------------------------------------
+Reason: duplicate_queue_item
+Contact Window: undefined
+Window Allowed: undefined
+Window Reason: undefined
+----------------------------------------
+Reason: missing_seller_first_name
+Contact Window: undefined
+Window Allowed: undefined
+Window Reason: undefined
+----------------------------------------
+Reason: duplicate_queue_item
+Contact Window: undefined
+Window Allowed: undefined
+Window Reason: undefined

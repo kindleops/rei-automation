@@ -1,0 +1,282 @@
+{
+  "batch_name": "launch_batch_001",
+  "timestamp": "2026-05-21T21:05:01.692Z",
+  "queued_count": 50,
+  "candidates": [
+    {
+      "queue_row_id": "b5a21cf8-4171-462f-852e-ec6ecfc5e04c",
+      "queue_key": "feed:a143b495058a354834f31b9ae07f40747a36c167",
+      "master_owner_id": "mo_61a6a7bc399e65f842ae6a82",
+      "phone": "+17027880024",
+      "sender": "+13235589881",
+      "market": "Las Vegas, NV",
+      "template_id": "204705",
+      "message": "Hey Jose, this is Crystal. I have been investing in Las Vegas. Do you still own 4601 Shoen Ave?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "bdccd8ea-bf39-4a09-a788-f132820de87b",
+      "queue_key": "feed:e73e41ac73165cf89050d75bc05cf2d0f2e0e4d9",
+      "master_owner_id": "mo_dcfa8fac58edfb45bfaf3870",
+      "phone": "+15122940157",
+      "sender": "+14693131600",
+      "market": "Austin, TX",
+      "template_id": "207985",
+      "message": "Hello Johnnie, this is Nathan. I invest in Elgin. Are you still the owner of 719 Madison St?",
+      "routing": "approved_regional_fallback:Dallas, TX"
+    },
+    {
+      "queue_row_id": "a257ec5f-e1e7-420a-983d-d0a4eb25f512",
+      "queue_key": "feed:e4e8567bdcdddf56332ba12d2d0fcfd2e638dd30",
+      "master_owner_id": "mo_1f5e7aae4fe85862f18f3f2a",
+      "phone": "+17035813481",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "200049",
+      "message": "Hi Megan, this is Michael. Just checking, do you own 6903 W Laurel Ln?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "d18f6dea-eb03-4090-9c49-c62a0bb1b01d",
+      "queue_key": "feed:45727ee0c8f0122507adfa75d343f45b39da4e45",
+      "master_owner_id": "mo_c8baaeaebaa36e00104e0e21",
+      "phone": "+17864037756",
+      "sender": "+16128060495",
+      "market": "Indianapolis, IN",
+      "template_id": "200017",
+      "message": "Hi Marilene, this is Michael. Are you still the owner of 8412 E 36th Pl?",
+      "routing": "approved_regional_fallback:Minneapolis, MN"
+    },
+    {
+      "queue_row_id": "d7f6cbc3-c79d-43f7-8895-bf18f4be71e5",
+      "queue_key": "feed:a40490b0a1229aae89b6817403f1a1d36537d168",
+      "master_owner_id": "mo_6d8b3facc4a651a50bed0f50",
+      "phone": "+17209518929",
+      "sender": "+13235589881",
+      "market": "Las Vegas, NV",
+      "template_id": "213857",
+      "message": "Hey Miguel, Helen here. I am looking to acquire more units in Las Vegas. Is 4543 Penmar Cir yours?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "61186f9e-675c-4b43-b22d-bdfdf4c519e4",
+      "queue_key": "feed:afe0e7daa138ff27579f2728782363f6c2bbb9da",
+      "master_owner_id": "mo_7bdb80dc39f9cd8509c2fbda",
+      "phone": "+14802323998",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "204513",
+      "message": "Hey Yasmyn, this is Jake. I am a local real estate investor in Mesa. Do you still own 1537 N Spruce Cir?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "fa1e4410-afc2-4cb1-8328-a8cab824af89",
+      "queue_key": "feed:cdf9a778bafd54feed50102d479d1fa1d19a73d4",
+      "master_owner_id": "mo_3e69eb493ebd8ba1f71fe3c1",
+      "phone": "+19085789757",
+      "sender": "+14704920588",
+      "market": "Atlanta, GA",
+      "template_id": "207713",
+      "message": "Hello Daniel, this is Michael. I am a local buyer in Atlanta. Is 1004 Westmoor Dr Nw yours?",
+      "routing": "exact_market_match"
+    },
+    {
+      "queue_row_id": "e2fa1dee-ae73-4380-8aab-78f2414a7e47",
+      "queue_key": "feed:e2708d3ee50d66a56487f9301a3422860ee38491",
+      "master_owner_id": "mo_b6e79a34199762be292ac7f1",
+      "phone": "+16026514438",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "213217",
+      "message": "Hey Angelina, this is Helen. I am looking to acquire more units in Phoenix. Is 5829 W Berkeley Rd yours?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "66bf4d72-f82a-4e86-b4d9-d0520f23369f",
+      "queue_key": "feed:7545d56c222fb78a28e369060b7471a10661011b",
+      "master_owner_id": "mo_3bad0d851eef9ebf827d82cb",
+      "phone": "+14045395715",
+      "sender": "+14704920588",
+      "market": "Atlanta, GA",
+      "template_id": "208481",
+      "message": "Hello Mario, this is Michael. I have been investing in Atlanta. Is 1687 Terry Mill Rd Se yours?",
+      "routing": "exact_market_match"
+    },
+    {
+      "queue_row_id": "9ad168f8-183f-491a-860c-be67c9d5dbed",
+      "queue_key": "feed:6f298eb602136484c39a00fa152e9b6505488688",
+      "master_owner_id": "mo_56e998b38cc967b8b17ba632",
+      "phone": "+16233874617",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "214305",
+      "message": "Hello Maribel, this is Jake. I am looking for another triplex in Phoenix. Do you still own 4501 N 71st Ave?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "8c345dd8-92cf-49c3-98e7-a425bc50db85",
+      "queue_key": "feed:37a42a9d6c70852ef7cedb3a518f213dee8984d7",
+      "master_owner_id": "mo_a727def6be5dc5f638dc2cb0",
+      "phone": "+19016432703",
+      "sender": "+14704920588",
+      "market": "Memphis, TN",
+      "template_id": "214225",
+      "message": "Hello Carlos, this is Jake. I am looking for another duplex in Memphis. Do you still own 3114 Morningside St?",
+      "routing": "approved_regional_fallback:Atlanta, GA"
+    },
+    {
+      "queue_row_id": "bffe1da7-2729-4468-aa96-05b2bbbdd9dc",
+      "queue_key": "feed:7d63a7bf9c1a9a5d9f7129ab5377e502b271c0a5",
+      "master_owner_id": "mo_68ff78c949a7ca7512425ea6",
+      "phone": "+17738177666",
+      "sender": "+16128060495",
+      "market": "Indianapolis, IN",
+      "template_id": "204273",
+      "message": "Hey Celso, this is Greg. I invest in Indianapolis. Just checking, do you own 1047 N Tibbs Ave?",
+      "routing": "approved_regional_fallback:Minneapolis, MN"
+    },
+    {
+      "queue_row_id": "6eb15c97-680b-4f4f-8d49-54ab5196eb32",
+      "queue_key": "feed:6f8f9d6ba17ab1ba905c543ade27d82138970c71",
+      "master_owner_id": "mo_7d2e3c209a5038bcb98386fd",
+      "phone": "+14808862069",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "207985",
+      "message": "Hello Gerardo, this is Jake. I invest in Phoenix. Are you still the owner of 4141 N 33rd Dr?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "f8f93330-d166-4e5d-baa3-5b011a8f8f1a",
+      "queue_key": "feed:b6e844e1590a37153cd1983b78cb8d7a66ccab73",
+      "master_owner_id": "mo_de3942a69a6bee73e5bd011a",
+      "phone": "+19189517955",
+      "sender": "+14693131600",
+      "market": "Tulsa, OK",
+      "template_id": "201474",
+      "message": "Hola Faustino, Carmen aqui. Soy comprador local en Tulsa. 11306 E 16th St es tu propiedad?",
+      "routing": "approved_regional_fallback:Dallas, TX"
+    },
+    {
+      "queue_row_id": "1966e7ab-7caf-4545-8500-d068a9cd26d6",
+      "queue_key": "feed:b674ebef32db61438c9cc9265af3b7dffc06946e",
+      "master_owner_id": "mo_d44704068eccae72176666c7",
+      "phone": "+19134062830",
+      "sender": "+14693131600",
+      "market": "Kansas City, MO",
+      "template_id": "214305",
+      "message": "Hello Jose, this is Greg. I am looking for another triplex in Kansas City. Do you still own 1501 N 23rd St?",
+      "routing": "approved_regional_fallback:Dallas, TX"
+    },
+    {
+      "queue_row_id": "1699bbdd-f56b-4485-9e5f-c19bb632c176",
+      "queue_key": "feed:7d7b2328c3363c7e711379de31a82b643968a145",
+      "master_owner_id": "mo_5411ab2ba1383c599b3c478c",
+      "phone": "+16027480054",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "213857",
+      "message": "Hey Airon, Jake here. I am looking to acquire more units in Glendale. Is 6427 W Lawrence Rd yours?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "7756bb2f-d100-465b-90c7-5283b9040b6b",
+      "queue_key": "feed:cf73483139d8e9cc223f71bddab0be93f1cd6c7d",
+      "master_owner_id": "mo_a562daf04fab393b7a3c6204",
+      "phone": "+16467276868",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "201303",
+      "message": "Ni hao Sheng, Wei zai zheli. Wo xiang queren yi xia, 4225 W Cholla St shi nin de ma?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "78e29b55-765f-45c5-aae6-fa54f6f3e5b1",
+      "queue_key": "feed:e23126aa6c2163dbb37a0b9004fb88c63295aba9",
+      "master_owner_id": "mo_bbeedc742ddec792e4c298e4",
+      "phone": "+15402736008",
+      "sender": "+14704920588",
+      "market": "Atlanta, GA",
+      "template_id": "200049",
+      "message": "Hi Brittany, this is Andre. Just checking, do you own 902 Margaret Pl Nw?",
+      "routing": "exact_market_match"
+    },
+    {
+      "queue_row_id": "21a51202-7710-49c3-b613-603b1baca983",
+      "queue_key": "feed:aaaefcdf908ec40653ea88c0c36761fec458dd96",
+      "master_owner_id": "mo_bcd35a0d5a72f4c4280630aa",
+      "phone": "+19189543396",
+      "sender": "+14693131600",
+      "market": "Tulsa, OK",
+      "template_id": "204705",
+      "message": "Hey Marisol, this is Nathan. I have been investing in Tulsa. Do you still own 1352 N 77th Ave E?",
+      "routing": "approved_regional_fallback:Dallas, TX"
+    },
+    {
+      "queue_row_id": "cb486b20-0442-4cdb-866b-b12a4f55004a",
+      "queue_key": "feed:4846793da7b14eb50df7c36a6aaa19e2fdb55c43",
+      "master_owner_id": "mo_b433b78c58ec76be9687cb85",
+      "phone": "+17027937977",
+      "sender": "+13235589881",
+      "market": "Las Vegas, NV",
+      "template_id": "207681",
+      "message": "Hello Faith, this is Crystal. I am a local buyer in Las Vegas. Do you still own 5512 Liverpool Rd?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    },
+    {
+      "queue_row_id": "a6e07c85-657f-4982-bcc2-81c216ac31a7",
+      "queue_key": "feed:68b4360be651ee6ce243ca3fda419ac233c96dd2",
+      "master_owner_id": "mo_15876f628b87b9a5a1aa7e26",
+      "phone": "+18123272716",
+      "sender": "+16128060495",
+      "market": "Indianapolis, IN",
+      "template_id": "214273",
+      "message": "Hello Kathlyn, this is Greg. I am looking for another duplex in Indianapolis. Just checking, do you own 640 E 34th St?",
+      "routing": "approved_regional_fallback:Minneapolis, MN"
+    },
+    {
+      "queue_row_id": "277a6c0f-cebf-40f3-b98d-9cbade965609",
+      "queue_key": "feed:ddbfa66525deb4e0a007c203694fabfea6f25cc4",
+      "master_owner_id": "mo_976a7ac21a92ed1b3a7a2c28",
+      "phone": "+17043597728",
+      "sender": "+19804589889",
+      "market": "Charlotte, NC",
+      "template_id": "213857",
+      "message": "Hey Santiago, Scott here. I am looking to acquire more units in Charlotte. Is 6130 Hickory Grove Rd yours?",
+      "routing": "exact_market_match"
+    },
+    {
+      "queue_row_id": "3209d544-3785-4838-9fae-25d8d0e66813",
+      "queue_key": "feed:7a6ac5202c298e82a32abd4b95e8080f552ed4c4",
+      "master_owner_id": "mo_2115d733d0abcac1d95177df",
+      "phone": "+18325078144",
+      "sender": "+12818458577",
+      "market": "Houston, TX",
+      "template_id": "214241",
+      "message": "Hello Benita, this is Mason. I am looking for another duplex in Houston. Are you still the owner of 5818 Southwell St?",
+      "routing": "exact_market_match"
+    },
+    {
+      "queue_row_id": "77e0c60f-1efb-482a-b13d-916844b0dd23",
+      "queue_key": "feed:e9243fe51dffd19f0e09614e7ee1e56cc46eb7f9",
+      "master_owner_id": "mo_61ddbd6822bdef53d51c38d5",
+      "phone": "+14016635301",
+      "sender": "+17866052999",
+      "market": "Providence, RI",
+      "template_id": "200482",
+      "message": "Hola Julio, soy Carmen. Invierto en Pawtucket. Todavia eres el dueno de 16 Derby St?",
+      "routing": "approved_regional_fallback:Miami, FL"
+    },
+    {
+      "queue_row_id": "332e64fb-febf-4f5e-a865-19065aa91817",
+      "queue_key": "feed:bc3927cc70b9cb427c7e74f7e76f6f047b035508",
+      "master_owner_id": "mo_943e585ab214927466504392",
+      "phone": "+16234326543",
+      "sender": "+13235589881",
+      "market": "Phoenix, AZ",
+      "template_id": "200482",
+      "message": "Hola Karen, soy Alejandro. Invierto en Phoenix. Todavia eres el dueno de 3602 W Coronado Rd?",
+      "routing": "approved_regional_fallback:Los Angeles, CA"
+    }
+  ]
+}

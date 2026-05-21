@@ -1,0 +1,148 @@
+(node:87612) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/ryankindle/rei-automation/apps/api/src/lib/domain/outbound/supabase-candidate-feeder.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/ryankindle/rei-automation/apps/api/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+◇ injected env (0) from .env.local // tip: ⌁ auth for agents [www.vestauth.com]
+Running feeder with: {
+  limit: 25,
+  scan_limit: 500,
+  touch_number: 1,
+  schedule_spread: true,
+  dry_run: true
+}
+{"timestamp":"2026-05-21T18:45:50.938Z","level":"INFO","event":"outbound.supabase_feeder_completed","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","source":"v_outbound_discovery_fresh","dry_run":true,"scanned_count":500,"eligible_count":236,"queued_count":0,"skipped_count":500}}
+
+--- FEEDER DIAGNOSTICS ---
+scanned_count: 500
+eligible_count: 236
+queued_count: 0
+fresh_candidate_count: 500
+exhausted_candidate_count: 0
+hydration_failure_count: 0
+duplicate_queue_block_count: 123
+batch_duplicate_block_count: 199
+template_block_count: 3
+routing_block_count: 0
+contact_window_block_count: 141
+
+--- SAMPLE CANDIDATES ---
+----------------------------------------
+Result: SKIPPED: outbound_gate_batch_duplicate_phone
+Prospect Name: Glenn Lynch
+Phone: +19139996511
+Address: 1623 Walker Ave, Kansas City, Ks 66104
+Market: Kansas City, MO
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: undefined
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Laurens Holdings LLC
+Phone: +14047840058
+Address: 2431 Clarissa Dr Nw, Atlanta, Ga 30318
+Market: Atlanta, GA
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: outbound_gate_batch_duplicate_phone
+Prospect Name: Chad-barn LLC
+Phone: +14049933404
+Address: 3998 Glenwood Rd, Decatur, Ga 30032
+Market: Atlanta, GA
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: undefined
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Chief Cornerstone Properties LLC
+Phone: +17703774515
+Address: 7043 Pine Mountain Rd, Lithonia, Ga 30058
+Market: Atlanta, GA
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: outbound_gate_batch_duplicate_phone
+Prospect Name: Az Sunrise Properties LLC
+Phone: +16236283873
+Address: 4545 N 67th Ave Unit 1233, Phoenix, Az 85033
+Market: Phoenix, AZ
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: undefined
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Millsap Mary M Estate Of
+Phone: +18579284455
+Address: 5542 W Northview Ave, Glendale, Az 85301
+Market: Phoenix, AZ
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: outside_contact_window
+Prospect Name: Joyce G Newsome
+Phone: +18323406374
+Address: 1439 Tarberry Rd, Houston, Tx 77088
+Market: Houston, TX
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: outbound_gate_batch_duplicate_phone
+Prospect Name: Inner City Investments INC
+Phone: +16787687019
+Address: 1594 Ezra Church Dr Nw, Atlanta, Ga 30314
+Market: Atlanta, GA
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: undefined
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Irene Ben Group LLC
+Phone: +12529041137
+Address: 2809 Peebles Dr, Rocky Mount, Nc 27801
+Market: Charlotte, NC
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: outside_contact_window
+Prospect Name: Jose Madrid & Antonio Monarres
+Phone: +19135795950
+Address: 3012 Hutchings St, Kansas City, Ks 66104
+Market: Kansas City, MO
+Selected TextGrid Number: None
+Routing Reason: N/A
+Template: None
+Rendered Message Preview: None
+Suppression/DNC Status: DNC: undefined, Suppressed: false
+Prior Touch Status: Fresh (Never Contacted)

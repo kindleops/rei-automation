@@ -1,0 +1,89 @@
+(node:3643) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/ryankindle/rei-automation/apps/api/src/lib/domain/outbound/supabase-candidate-feeder.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/ryankindle/rei-automation/apps/api/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+◇ injected env (0) from .env.local // tip: ⌘ suppress logs { quiet: true }
+Running feeder with: {
+  limit: 25,
+  scan_limit: 200,
+  touch_number: 1,
+  schedule_spread: true,
+  within_contact_window_now: true,
+  dry_run: true
+}
+{"timestamp":"2026-05-21T19:13:44.570Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_8c974029a4ac23e62e16c74c","property_id":"238453657","phone_id":"ph_3fe29b36a5e7559f379a1f7b","template_id":"211393","rendered_preview":"Hey there, this is Michael. 🙂 Is 3998 Glenwood Rd yours?"}}
+{"timestamp":"2026-05-21T19:13:46.690Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_bc46f66227b0808b434b327c","property_id":"239176880","phone_id":"ph_822c55cc6a411c0d6175cc62","template_id":"204513","rendered_preview":"Hey there, this is Michael. I am a local real estate investor in Atlanta. Do you"}}
+{"timestamp":"2026-05-21T19:13:47.597Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_617667c2229716b7347122e1","property_id":"2118223005","phone_id":"ph_89f85721ef498fa52f216ec4","template_id":"200994","rendered_preview":"Hola there, soy Alejandro. He estado invirtiendo en Providence. 531 Dexter St es"}}
+{"timestamp":"2026-05-21T19:13:53.644Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_605dc0801333f30a7fb6368e","property_id":"239106998","phone_id":"ph_7c0e3aba05a8aa8af6f18b2f","template_id":"213217","rendered_preview":"Hey there, this is Michael. I am looking to acquire more units in Atlanta. Is 18"}}
+{"timestamp":"2026-05-21T19:13:55.193Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_98213d5b52e03efd2eb8cea9","property_id":"238406799","phone_id":"ph_5fa9e1435a9fe9e9fb2681da","template_id":"213825","rendered_preview":"Hey there, this is Michael. I am looking to acquire more units in Stone Mountain"}}
+{"timestamp":"2026-05-21T19:13:55.884Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_30f3041c314532771446000c","property_id":"239185531","phone_id":"ph_9e205d47f0677fbb97b25069","template_id":"207729","rendered_preview":"Hello there, this is Michael. I am a local buyer in Atlanta. Just checking, do y"}}
+{"timestamp":"2026-05-21T19:13:57.546Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_1f5e7aae4fe85862f18f3f2a","property_id":"24927505","phone_id":"ph_d4c97d9e8bf7e9742e6cd5e6","template_id":"200049","rendered_preview":"Hi there, this is Michael. Just checking, do you own 6903 W Laurel Ln?"}}
+{"timestamp":"2026-05-21T19:13:58.934Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_b65bc2abcc2dfd3f05a0253d","property_id":"24589344","phone_id":"ph_84d3f5f89e36a8cd8068ad02","template_id":"207713","rendered_preview":"Hello there, this is Helen. I am a local buyer in Phoenix. Is 4308 W Encanto Blv"}}
+{"timestamp":"2026-05-21T19:13:59.606Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_c8baaeaebaa36e00104e0e21","property_id":"251052511","phone_id":"ph_015b74e7eb468d7277e2166d","template_id":"200017","rendered_preview":"Hi there, this is Michael. Are you still the owner of 8412 E 36th Pl?"}}
+{"timestamp":"2026-05-21T19:14:00.315Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_79d8577281505f638051d575","property_id":"250974454","phone_id":"ph_e30723dd464f80bc03972361","template_id":"200786","rendered_preview":"Hola there, soy Carmen. Soy inversionista local de bienes raices en Indianapolis"}}
+{"timestamp":"2026-05-21T19:14:01.351Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_333d0f777d207d9db34cb633","property_id":"296634622","phone_id":"ph_0bee2eb6c4991fe76e194183","template_id":"204529","rendered_preview":"Hey there, this is Michael. I am a local real estate investor in Durham. Are you"}}
+{"timestamp":"2026-05-21T19:14:02.213Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_6d8b3facc4a651a50bed0f50","property_id":"282881401","phone_id":"ph_e7c860f882f22fc78c3b1e06","template_id":"213857","rendered_preview":"Hey there, Helen here. I am looking to acquire more units in Las Vegas. Is 4543 "}}
+{"timestamp":"2026-05-21T19:14:04.004Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_a5da9a1bd936f37c5e9ceaa9","property_id":"296651363","phone_id":"ph_077a9835219ed77c5b6a7893","template_id":"213873","rendered_preview":"Hey there, my name is Michael. I am looking to acquire more units in Durham. Jus"}}
+{"timestamp":"2026-05-21T19:14:04.684Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_ed6d361cc91f86fa48429008","property_id":"298306751","phone_id":"ph_77a32aefa8e6014dbf215024","template_id":"204257","rendered_preview":"Hey there, this is Helen. I invest in Charlotte. Is 2722 Mayflower Rd yours?"}}
+{"timestamp":"2026-05-21T19:14:07.234Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_e4afa8b5282f1dd5dc3638d6","property_id":"2145824740","phone_id":"ph_08b4d6c7bb1be61d97ebb728","template_id":"200049","rendered_preview":"Hi there, this is Helen. Just checking, do you own 2701 E Nebraska Ave?"}}
+{"timestamp":"2026-05-21T19:14:08.834Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_3e69eb493ebd8ba1f71fe3c1","property_id":"239153500","phone_id":"ph_b04189c7263c57d11dea34d7","template_id":"207713","rendered_preview":"Hello there, this is Michael. I am a local buyer in Atlanta. Is 1004 Westmoor Dr"}}
+{"timestamp":"2026-05-21T19:14:10.255Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_3bad0d851eef9ebf827d82cb","property_id":"238408738","phone_id":"ph_65aae46de24deafb7bd89873","template_id":"208481","rendered_preview":"Hello there, this is Michael. I have been investing in Atlanta. Is 1687 Terry Mi"}}
+{"timestamp":"2026-05-21T19:14:21.014Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_405752b0931954c0d5b3bf43","property_id":"282856456","phone_id":"ph_bbb139d5c206384669a557e2","template_id":"204705","rendered_preview":"Hey there, this is Michael. I have been investing in Las Vegas. Do you still own"}}
+{"timestamp":"2026-05-21T19:14:31.239Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_bbeedc742ddec792e4c298e4","property_id":"239283731","phone_id":"ph_a2edb37c1c9f1a2caa821355","template_id":"200049","rendered_preview":"Hi there, this is Andre. Just checking, do you own 902 Margaret Pl Nw?"}}
+{"timestamp":"2026-05-21T19:14:40.084Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_b98dda7e18ef883866e54152","property_id":"239159919","phone_id":"ph_b81b94c2713d9dbf5110a45d","template_id":"204721","rendered_preview":"Hey there, this is Michael. I have been investing in Atlanta. Are you still the "}}
+{"timestamp":"2026-05-21T19:14:41.047Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_3a9bdca4bd4c7e0288f54fd8","property_id":"24562924","phone_id":"ph_80c6ef151a9011a491d5dfd4","template_id":"201458","rendered_preview":"Hola there, Alejandro aqui. Soy comprador local en Phoenix. Sigues siendo el due"}}
+{"timestamp":"2026-05-21T19:14:42.945Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_955b3edf03b3a498c958a4f3","property_id":"239176759","phone_id":"ph_3c8c9a0f637b13788da94937","template_id":"204705","rendered_preview":"Hey there, this is Michael. I have been investing in Atlanta. Do you still own 8"}}
+{"timestamp":"2026-05-21T19:14:46.389Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_7438286db9103a4a3e550331","property_id":"239189739","phone_id":"ph_1ca79c2d29a3ab00ee65da1c","template_id":"214273","rendered_preview":"Hello there, this is Michael. I am looking for another duplex in Atlanta. Just c"}}
+{"timestamp":"2026-05-21T19:14:47.316Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_ab047e4b20eb639448b958c1","property_id":"298268082","phone_id":"ph_cfb3c78747d5c4d454dab87d","template_id":"204529","rendered_preview":"Hey there, this is Michael. I am a local real estate investor in Charlotte. Are "}}
+{"timestamp":"2026-05-21T19:14:48.955Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_78b7a094db5416595df375ba","property_id":"251116714","phone_id":"ph_c2291d29a5b1dd51750b52b1","template_id":"204561","rendered_preview":"Hey there, this is Michael. I am a local real estate investor in Indianapolis. J"}}
+{"timestamp":"2026-05-21T19:14:52.085Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_d2da1d1cdc98b34f6610f78b","property_id":"298204414","phone_id":"ph_bf21280a15fb3c5f25a157a4","template_id":"211409","rendered_preview":"Hey there, this is Michael. 🙂 Are you still the owner of 5620 Southampton Rd?"}}
+{"timestamp":"2026-05-21T19:14:53.499Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_8918c28e81c9ad8a1597a733","property_id":"2118152792","phone_id":"ph_5ed0f151f95d5f6506a2de1f","template_id":"211393","rendered_preview":"Hey there, this is Michael. 🙂 Is 101 Bucklin St yours?"}}
+{"timestamp":"2026-05-21T19:14:54.895Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_f6f5ad5f2ec90079e51f3c84","property_id":"239108241","phone_id":"ph_163ba8995de6fc6c2803c4f1","template_id":"211409","rendered_preview":"Hey there, this is Michael. 🙂 Are you still the owner of 2048 Thomasville Ct Se"}}
+{"timestamp":"2026-05-21T19:14:57.634Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_d05c255f9c4b0c777e6796f3","property_id":"239161418","phone_id":"ph_2870ef1cdb455bf133e86609","template_id":"208497","rendered_preview":"Hello there, this is Helen. I have been investing in Atlanta. Just checking, do "}}
+{"timestamp":"2026-05-21T19:15:03.548Z","level":"WARN","event":"feeder.blank_greeting_rendered","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","master_owner_id":"mo_83efa780d3c4df75cf725dd6","property_id":"251119370","phone_id":"ph_9bf6eada8364f45fa3ec8608","template_id":"201010","rendered_preview":"Hola there, soy Alejandro. He estado invirtiendo en Indianapolis. Solo confirman"}}
+{"timestamp":"2026-05-21T19:15:07.746Z","level":"INFO","event":"outbound.supabase_feeder_completed","env":"production","meta":{"module":"domain.outbound.supabase_candidate_feeder","source":"v_outbound_discovery_fresh","dry_run":true,"scanned_count":200,"eligible_count":92,"queued_count":0,"skipped_count":200}}
+
+--- FEEDER RESULT ---
+OK: true
+Error: null
+Source Error: null
+scanned_count: 200
+eligible_count: 92
+queued_count: 0
+
+--- FEEDER DIAGNOSTICS ---
+fresh_candidate_count: 200
+exhausted_candidate_count: 0
+hydration_failure_count: 30
+
+--- SAMPLE CANDIDATES (Top 5) ---
+----------------------------------------
+Result: SKIPPED: outside_contact_window
+Prospect Name: Glenn Lynch
+Phone: +19139996511
+Address: 1623 Walker Ave, Kansas City, Ks 66104
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Laurens Holdings LLC
+Phone: +14047840058
+Address: 2431 Clarissa Dr Nw, Atlanta, Ga 30318
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Chief Cornerstone Properties LLC
+Phone: +17703774515
+Address: 7043 Pine Mountain Rd, Lithonia, Ga 30058
+Prior Touch Status: Fresh (Never Contacted)
+----------------------------------------
+Result: SKIPPED: blank_greeting_rendered
+Prospect Name: undefined
+Phone: undefined
+Address: undefined
+Prior Touch Status: Previously Contacted
+----------------------------------------
+Result: SKIPPED: duplicate_queue_item
+Prospect Name: Millsap Mary M Estate Of
+Phone: +18579284455
+Address: 5542 W Northview Ave, Glendale, Az 85301
+Prior Touch Status: Fresh (Never Contacted)
