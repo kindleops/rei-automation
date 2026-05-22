@@ -1,5 +1,6 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { getSystemFlags } from '@/lib/system-control.js'
+import { createInboxSendNowQueueRow } from '@/lib/domain/inbox/send-now-service.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -209,7 +210,14 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
 
 export async function runInboxAction({ action, payload = {}, supabase = defaultSupabase, getFlags = getSystemFlags } = {}) {
   const dryRun = asBoolean(payload.dry_run, true)
+
+  // Resolve thread_key with fallbacks:
+  // 1. payload.thread_key (top-level, set by buildQueueRoutingColumns when thread.threadKey is truthy)
+  // 2. payload.metadata.thread_key (buried in metadata object)
+  // 3. payload.to_phone_number (for inbox sends thread_key == seller E.164 phone)
   const threadKey = clean(payload.thread_key)
+    || clean(payload.metadata?.thread_key)
+    || clean(payload.to_phone_number)
 
   if (!isCanonicalThreadKey(threadKey)) {
     return blockedResponse(action, 'invalid_canonical_thread_key', { dry_run: dryRun, thread_key: threadKey || null })
@@ -279,14 +287,34 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
     })
   }
 
-  return {
-    ok: false,
-    action,
-    blocked: true,
-    reason: 'BACKEND_ENDPOINT_NOT_READY',
+  // ── send-now: create queue row and return result ─────────────────────────
+  if (action === 'send-now') {
+    const sendResult = await createInboxSendNowQueueRow(
+      { ...payload, thread_key: threadKey },
+      { supabase }
+    )
+
+    if (!sendResult.ok) {
+      return blockedResponse(action, sendResult.error || 'send_queue_insert_failed', {
+        dry_run: false,
+        thread_key: threadKey,
+        diagnostics: { send_error: sendResult.error },
+      })
+    }
+
+    return okResponse(action, {
+      dry_run: false,
+      thread_key: threadKey,
+      queue_id: sendResult.queue_id || null,
+      queue_key: sendResult.queue_key || null,
+      queue_created: sendResult.queue_created,
+    })
+  }
+
+  return blockedResponse(action, 'action_not_implemented', {
     dry_run: false,
     thread_key: threadKey,
-  }
+  })
 }
 
 const THREAD_STATE_ALLOWED_FIELDS = new Set([
