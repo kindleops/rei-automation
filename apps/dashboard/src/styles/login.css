@@ -1,0 +1,441 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LeadCommand Ops — Login Page
+   Cinematic, mobile-first, dark glass acquisition cockpit
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Root ──────────────────────────────────────────────────────────────── */
+
+.lc-root {
+  min-height: 100dvh;
+  background: #0c0c0c;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Background layers ─────────────────────────────────────────────────── */
+
+/* Deep radial gradient — green bloom left, sky hint right */
+.lc-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 70% at 15% 55%, rgba(62, 207, 142, 0.055) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 45% at 85% 15%, rgba(56, 189, 248, 0.030) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 55% 90%, rgba(62, 207, 142, 0.020) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+/* Subtle dot grid — fades out toward edges */
+.lc-grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size: 36px 36px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 20%, transparent 100%);
+  mask-image: radial-gradient(ellipse 75% 75% at 50% 50%, black 20%, transparent 100%);
+  pointer-events: none;
+  opacity: 0.25;
+}
+
+/* Ambient glow orbs — soft light sources */
+.lc-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(100px);
+}
+
+.lc-orb--1 {
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  left: -200px;
+  background: rgba(62, 207, 142, 0.07);
+  animation: lc-orb-drift 14s ease-in-out infinite alternate;
+}
+
+.lc-orb--2 {
+  width: 500px;
+  height: 500px;
+  bottom: -150px;
+  right: -150px;
+  background: rgba(56, 189, 248, 0.05);
+  animation: lc-orb-drift 18s ease-in-out infinite alternate-reverse;
+}
+
+/* ── Main layout ───────────────────────────────────────────────────────── */
+
+.lc-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: max(24px, env(safe-area-inset-top, 24px))
+           max(16px, env(safe-area-inset-right, 16px))
+           max(24px, env(safe-area-inset-bottom, 24px))
+           max(16px, env(safe-area-inset-left, 16px));
+  box-sizing: border-box;
+}
+
+/* ── Card ──────────────────────────────────────────────────────────────── */
+
+.lc-card {
+  width: 100%;
+  max-width: 420px;
+  background: rgba(14, 14, 14, 0.90);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 14px;
+  padding: 36px 32px 28px;
+  box-shadow:
+    0 0 0 1px rgba(62, 207, 142, 0.07) inset,
+    0 1px 0 rgba(255, 255, 255, 0.055) inset,
+    0 40px 100px rgba(0, 0, 0, 0.75),
+    0 8px 24px rgba(0, 0, 0, 0.55);
+  box-sizing: border-box;
+  animation: lc-card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Brand lockup ──────────────────────────────────────────────────────── */
+
+.lc-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.lc-mark {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tone-primary, #3ecf8e);
+  filter: drop-shadow(0 0 10px rgba(62, 207, 142, 0.35));
+  flex-shrink: 0;
+}
+
+.lc-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lc-brand-heading {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-0, #f4f4f5);
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.lc-brand-heading .lc-accent {
+  color: var(--tone-primary, #3ecf8e);
+}
+
+.lc-brand-tagline {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--text-3, #71717a);
+  text-transform: uppercase;
+  line-height: 1.5;
+}
+
+/* ── Access badge ──────────────────────────────────────────────────────── */
+
+.lc-badge-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.lc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  background: rgba(62, 207, 142, 0.06);
+  border: 1px solid rgba(62, 207, 142, 0.20);
+  border-radius: 100px;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--tone-primary, #3ecf8e);
+  text-transform: uppercase;
+}
+
+.lc-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: lc-blink 2.8s ease-in-out infinite;
+}
+
+/* ── Divider ───────────────────────────────────────────────────────────── */
+
+.lc-sep {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.07) 25%,
+    rgba(255, 255, 255, 0.07) 75%,
+    transparent 100%
+  );
+  margin: 20px 0;
+}
+
+/* ── Form ──────────────────────────────────────────────────────────────── */
+
+.lc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lc-label {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2, #a1a1aa);
+}
+
+.lc-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  padding: 12px 14px;
+  font-size: 16px; /* 16px prevents iOS zoom on focus */
+  color: var(--text-0, #f4f4f5);
+  outline: none;
+  width: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.lc-input::placeholder {
+  color: var(--text-3, #71717a);
+  opacity: 1;
+}
+
+.lc-input:focus {
+  border-color: rgba(62, 207, 142, 0.45);
+  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.09), 0 0 14px rgba(62, 207, 142, 0.06);
+}
+
+.lc-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Error ─────────────────────────────────────────────────────────────── */
+
+.lc-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  background: rgba(248, 113, 113, 0.07);
+  border: 1px solid rgba(248, 113, 113, 0.20);
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--tone-danger, #f87171);
+  line-height: 1.45;
+}
+
+.lc-error-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Submit button ─────────────────────────────────────────────────────── */
+
+.lc-btn {
+  margin-top: 6px;
+  padding: 13px 16px;
+  min-height: 48px;
+  background: var(--tone-primary, #3ecf8e);
+  color: #050e09;
+  border: none;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  letter-spacing: 0.015em;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+  box-shadow: 0 0 0 1px rgba(62, 207, 142, 0.28), 0 4px 18px rgba(62, 207, 142, 0.16);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.lc-btn:hover:not(:disabled) {
+  opacity: 0.91;
+  box-shadow: 0 0 0 1px rgba(62, 207, 142, 0.45), 0 6px 26px rgba(62, 207, 142, 0.22);
+}
+
+.lc-btn:active:not(:disabled) {
+  transform: scale(0.975);
+  opacity: 0.82;
+  box-shadow: 0 0 0 1px rgba(62, 207, 142, 0.22), 0 2px 8px rgba(62, 207, 142, 0.10);
+}
+
+.lc-btn:disabled {
+  opacity: 0.50;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ── Loading spinner ───────────────────────────────────────────────────── */
+
+.lc-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(5, 14, 9, 0.25);
+  border-top-color: #050e09;
+  border-radius: 50%;
+  animation: nx-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Card footer ───────────────────────────────────────────────────────── */
+
+.lc-footer {
+  margin-top: 20px;
+  margin-bottom: 0;
+  font-size: 12px;
+  color: var(--text-3, #71717a);
+  text-align: center;
+  line-height: 1.55;
+}
+
+/* ── Trust panel (desktop only) ────────────────────────────────────────── */
+
+.lc-trust {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 18px;
+  max-width: 420px;
+}
+
+.lc-trust-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(113, 113, 122, 0.65);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.lc-trust-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--tone-primary, #3ecf8e);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+
+/* Mobile — compact card, hide trust panel */
+@media (max-width: 480px) {
+  .lc-card {
+    padding: 28px 20px 24px;
+    border-radius: 12px;
+  }
+
+  .lc-brand-heading {
+    font-size: 22px;
+  }
+
+  .lc-trust {
+    display: none;
+  }
+}
+
+/* Tall mobile (iPhone SE etc.) — tighter vertical spacing */
+@media (max-height: 680px) {
+  .lc-brand {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .lc-card {
+    padding: 24px 20px 20px;
+  }
+
+  .lc-sep {
+    margin: 14px 0;
+  }
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+
+@keyframes lc-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lc-orb-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(24px, 18px) scale(1.08);
+  }
+}
+
+@keyframes lc-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
