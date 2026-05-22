@@ -6,7 +6,6 @@ import type { SmsTemplate } from './templateData'
 import { resolveOutboundTextgridNumber } from './textgridRouting'
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 import * as backendClient from '../api/backendClient'
-import { getBackendBaseUrl, getBackendSecret } from '../api/backendClient'
 import {
   asBoolean,
   asIso,
@@ -1727,13 +1726,6 @@ export const fetchLiveInbox = async ({
   map = true,
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
-  const backendBase = getBackendBaseUrl()
-  const isBrowser = typeof window !== 'undefined'
-
-  if (!backendBase && !import.meta.env.DEV && !isBrowser) {
-    throw new Error('BACKEND_NOT_CONFIGURED: VITE_BACKEND_API_URL is not set')
-  }
-  const backendSecret = getBackendSecret()
   const params = new URLSearchParams()
   const entries: Record<string, unknown> = { filter, direction, q, keywordGroup, cursor, limit, map: map ? '1' : '0' }
   Object.entries(entries).forEach(([key, value]) => {
@@ -1741,18 +1733,9 @@ export const fetchLiveInbox = async ({
     if (param) params.set(key, param)
   })
 
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  if (backendSecret) {
-    headers['x-ops-dashboard-secret'] = backendSecret
-  }
-
-  const res = await fetch(`${backendBase}/api/cockpit/inbox/live?${params.toString()}`, {
-    method: 'GET',
-    headers,
-    signal,
-  })
-  if (!res.ok) throw new Error(`Live inbox API failed (${res.status})`)
-  const payload = await res.json() as AnyRecord
+  const result = await backendClient.fetchLiveInbox(params.toString(), signal)
+  if (!result.ok) throw new Error(`Live inbox API failed (${result.status})`)
+  const payload = result.data as AnyRecord
   const normalizedPayload = asBoolean(payload['ok'], false)
     ? ((payload['diagnostics'] as AnyRecord) ?? payload)
     : payload
@@ -3879,6 +3862,10 @@ export const sendInboxMessageNow = async (
   } else {
     console.log('[sendInboxMessageNow] routing to backend | toPhone:', toPhone, '| fromPhone:', fromPhone)
   }
+
+  // Log safe secret debug before delegating — confirms secret path is backendClient only.
+  const { debug: secretDebug } = backendClient.getBackendApiSecretDebugSafe()
+  console.log('[sendInboxMessageNow] using backendClient.sendInboxMessageNow', { secretDebug })
 
   // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
   // Backend is responsible for creating message_events row — no optimistic insert from dashboard.

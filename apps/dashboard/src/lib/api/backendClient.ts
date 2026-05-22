@@ -48,23 +48,32 @@ export const getBackendBaseUrl = (): string => {
   return ''
 }
 
-export const getBackendSecret = (): string => {
-  const secret = import.meta.env.VITE_BACKEND_API_SECRET as string | undefined
-
-  if (!secret) {
-    console.error('Missing VITE_BACKEND_API_SECRET')
-    throw new Error('Missing VITE_BACKEND_API_SECRET')
-  }
-
-  // Safe debug log (temporary)
-  console.debug('[BackendSecret Audit]', {
-    secretLength: secret.length,
-    first6: secret.slice(0, 6),
-    last4: secret.slice(-4),
-  })
-
-  return secret
+export interface BackendApiSecretDebug {
+  secretLength: number
+  first6: string
+  last4: string
 }
+
+export interface BackendApiSecretResult {
+  secret: string
+  debug: BackendApiSecretDebug
+}
+
+export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
+  const secret = import.meta.env.VITE_BACKEND_API_SECRET as string | undefined
+  if (!secret) throw new Error('Missing VITE_BACKEND_API_SECRET')
+  return {
+    secret,
+    debug: {
+      secretLength: secret.length,
+      first6: secret.slice(0, 6),
+      last4: secret.slice(-4),
+    },
+  }
+}
+
+// Compat alias — callers that only need the raw secret string.
+export const getBackendSecret = (): string => getBackendApiSecretDebugSafe().secret
 
 export interface BackendClientError {
   ok: false
@@ -110,14 +119,11 @@ async function callBackend<T = unknown>(
     }
   }
 
-  const secret = getBackendSecret()
+  const { secret } = getBackendApiSecretDebugSafe()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
-  }
-
-  if (secret) {
-    headers['x-ops-dashboard-secret'] = secret
+    'x-ops-dashboard-secret': secret,
   }
 
   // Attach Supabase session JWT for future API-side JWT validation.
@@ -337,10 +343,27 @@ export function queueInboxReply(payload: Record<string, unknown>): Promise<Backe
 // Queues a message with status=ready for immediate processor pickup.
 // Backend is responsible for message_events row — no optimistic insert from dashboard.
 export function sendInboxMessageNow(payload: Record<string, unknown>): Promise<BackendResult<SendNowResult>> {
+  const { debug } = getBackendApiSecretDebugSafe()
+  console.log('[backendClient.sendInboxMessageNow] dispatching', { secretDebug: debug })
   return callBackend<SendNowResult>('/api/cockpit/inbox/send-now', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+// GET /api/cockpit/inbox/live — used by inboxData.getLiveInbox so all secret
+// management stays inside callBackend and never leaks into data layer files.
+export function fetchLiveInbox(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/live?${queryString}`, { signal })
+}
+
+// GET /api/internal/dashboard/nexus — live dashboard model.
+// Routes through callBackend so the secret header is never set outside this file.
+export function fetchNexusDashboard(signal?: AbortSignal): Promise<BackendResult<unknown>> {
+  return callBackend('/api/internal/dashboard/nexus', { signal })
 }
 
 // POST /api/cockpit/inbox/schedule-reply

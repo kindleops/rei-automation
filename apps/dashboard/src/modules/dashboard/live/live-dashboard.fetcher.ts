@@ -2,25 +2,21 @@
  * live-dashboard.fetcher.ts
  *
  * Fetches the live dashboard model from the real-estate-automation API.
- * Validates the response shape before returning.
+ * All authentication headers are handled by backendClient.fetchNexusDashboard
+ * — credentials are never read or set in this file directly.
  *
  * Environment variables consumed (VITE_ prefix exposes them to the browser):
  *   VITE_BACKEND_API_URL  — Base URL of the real-estate-automation deployment
  *                           e.g. "https://your-rea-app.vercel.app"
  *
- * Throws if the network request fails, the server returns non-ok, or the
- * response body is not a valid LiveDashboardModel envelope.
+ * Throws NexusApiFetchError if the request times out, the server returns
+ * non-ok, or the response body is not a valid LiveDashboardModel envelope.
  */
 
 import type { LiveDashboardModel } from './live-dashboard.adapter'
+import { fetchNexusDashboard } from '../../../lib/api/backendClient'
 
 const FETCH_TIMEOUT_MS = 14_000
-// Legacy read endpoint retained temporarily for live dashboard model parity.
-const NEXUS_API_ENDPOINT = '/api/internal/dashboard/nexus'
-
-function getApiBase(): string {
-  return (import.meta.env.VITE_BACKEND_API_URL ?? '').replace(/\/$/, '')
-}
 
 function isValidDashboardModel(value: unknown): value is LiveDashboardModel {
   if (!value || typeof value !== 'object') return false
@@ -48,74 +44,43 @@ export class NexusApiFetchError extends Error {
 }
 
 export async function fetchLiveDashboard(): Promise<LiveDashboardModel> {
-  const api_base = getApiBase()
-  const isBrowser = typeof window !== 'undefined'
-  
-  if (!api_base && !import.meta.env.DEV && !isBrowser) {
-    throw new NexusApiFetchError(
-      'VITE_BACKEND_API_URL is not configured — set it to use live data'
-    )
-  }
-
-  const url = `${api_base}${NEXUS_API_ENDPOINT}`
-  const secret = (import.meta.env.VITE_BACKEND_API_SECRET ?? '')
   const controller = new AbortController()
   const timeout_id = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-  if (secret) {
-    headers['x-ops-dashboard-secret'] = secret
-  }
-
-  let response: Response
+  let result: Awaited<ReturnType<typeof fetchNexusDashboard>>
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-      headers,
-      cache: 'no-store',
-    })
+    result = await fetchNexusDashboard(controller.signal)
   } catch (err) {
     clearTimeout(timeout_id)
     const is_abort = err instanceof Error && err.name === 'AbortError'
     throw new NexusApiFetchError(
       is_abort
         ? `NEXUS API request timed out after ${FETCH_TIMEOUT_MS / 1000}s`
-        : `NEXUS API network error: ${err instanceof Error ? err.message : String(err)}`
+        : `NEXUS API error: ${err instanceof Error ? err.message : String(err)}`
     )
   }
   clearTimeout(timeout_id)
 
-  if (!response.ok) {
-    let api_message = ''
-    try {
-      const body = await response.json()
-      api_message = body?.message ?? body?.error ?? ''
-    } catch { /* ignore parse errors */ }
+  if (!result.ok) {
+    const status = result.status ?? null
+    const msg = result.message ?? result.error ?? 'NEXUS API returned non-ok'
     throw new NexusApiFetchError(
-      `NEXUS API returned ${response.status}${api_message ? `: ${api_message}` : ''}`,
-      response.status
+      `NEXUS API returned ${status ?? 'error'}: ${msg}`,
+      status
     )
   }
 
-  let envelope: unknown
-  try {
-    envelope = await response.json()
-  } catch {
-    throw new NexusApiFetchError('NEXUS API response is not valid JSON')
+  const envelope = result.data as { ok?: boolean; data?: unknown; message?: string } | null
+
+  if (envelope && typeof envelope === 'object' && 'ok' in envelope && !envelope.ok) {
+    throw new NexusApiFetchError(envelope.message ?? 'NEXUS API returned ok: false')
   }
 
-  const body = envelope as { ok?: boolean; data?: unknown; message?: string }
+  const dashboardData = envelope && typeof envelope === 'object' && 'data' in envelope
+    ? envelope.data
+    : envelope
 
-  if (!body.ok) {
-    throw new NexusApiFetchError(
-      body.message ?? 'NEXUS API returned ok: false'
-    )
-  }
-
-  if (!isValidDashboardModel(body.data)) {
+  if (!isValidDashboardModel(dashboardData)) {
     throw new NexusApiFetchError(
       'NEXUS API response is missing required dashboard fields',
       null,
@@ -123,5 +88,5 @@ export async function fetchLiveDashboard(): Promise<LiveDashboardModel> {
     )
   }
 
-  return body.data as LiveDashboardModel
+  return dashboardData as LiveDashboardModel
 }
