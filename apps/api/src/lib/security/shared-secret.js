@@ -47,14 +47,6 @@ function getCookieToken(request, cookie_names = []) {
 }
 
 function getHeaderToken(request, header_names = []) {
-  const authorization = clean(request?.headers?.get("authorization"));
-  if (authorization.toLowerCase().startsWith("bearer ")) {
-    return {
-      token: clean(authorization.slice(7)),
-      via: "authorization",
-    };
-  }
-
   for (const header_name of header_names) {
     const value = clean(request?.headers?.get(header_name));
     if (value) {
@@ -63,6 +55,14 @@ function getHeaderToken(request, header_names = []) {
         via: `header:${header_name}`,
       };
     }
+  }
+
+  const authorization = clean(request?.headers?.get("authorization"));
+  if (authorization.toLowerCase().startsWith("bearer ")) {
+    return {
+      token: clean(authorization.slice(7)),
+      via: "authorization",
+    };
   }
 
   return null;
