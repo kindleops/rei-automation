@@ -1729,7 +1729,9 @@ export const fetchLiveInbox = async ({
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
   const backendBase = getBackendBaseUrl()
-  if (!backendBase) {
+  const isBrowser = typeof window !== 'undefined'
+
+  if (!backendBase && !import.meta.env.DEV && !isBrowser) {
     throw new Error('BACKEND_NOT_CONFIGURED: VITE_BACKEND_API_URL is not set')
   }
   const backendSecret = getBackendSecret()
