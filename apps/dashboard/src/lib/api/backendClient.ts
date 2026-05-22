@@ -12,28 +12,6 @@
 import type { AnyRecord } from '../data/shared'
 
 export const getBackendBaseUrl = (): string => {
-  // 1. Explicit environment variables (Vite-exposed)
-  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || 
-            (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
-  
-  if (url) return url.replace(/\/$/, '')
-
-  // 2. Dynamic resolution for web environments
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname
-    
-    // Vercel autodiscovery
-    if (hostname.includes('vercel.app')) {
-      if (hostname.includes('dashboard')) {
-        return `https://${hostname.replace('-dashboard', '')}`
-      }
-      return window.location.origin
-    }
-
-    // Local/Internal development (default to relative path for Vite proxy)
-    if (import.meta.env.DEV || hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
-      // Return empty string to trigger relative path fetch (proxied by Vite)
-      return ''
   // Primary: VITE_BACKEND_API_URL
   let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
 
@@ -42,17 +20,28 @@ export const getBackendBaseUrl = (): string => {
     url = (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
   }
 
+  if (url) return url.replace(/\/$/, '')
+
   // In production, never fall back to localhost — fail clearly if the env var is missing.
-  if (!url && import.meta.env.PROD) {
+  if (import.meta.env.PROD) {
     console.error('[BACKEND_API_URL_MISSING] VITE_BACKEND_API_URL must be set in production. Set it to https://real-estate-automation-three.vercel.app in your Vercel project env vars.')
     return ''
   }
 
   // Dev-only localhost fallback
-  if (!url && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
     const hostname = window.location.hostname
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       url = 'http://localhost:3000'
+      return url
+    }
+    
+    // Vercel autodiscovery
+    if (hostname.includes('vercel.app')) {
+      if (hostname.includes('dashboard')) {
+        return `https://${hostname.replace('-dashboard', '')}`
+      }
+      return window.location.origin
     }
   }
 
