@@ -1,5 +1,6 @@
 import { useEffect, type FormEvent } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
+import { buildStreetViewUrl } from '../inbox-normalization'
 import '../seller-intelligence-card.css'
 
 type SellerRecord = Record<string, unknown>
@@ -255,9 +256,24 @@ export const getTopPropertyTags = (record: SellerRecord): string[] => {
 export const getNormalizedPropertyImages = (record: SellerRecord) => {
   const payload = record.raw_payload_json as Record<string, any> | undefined
 
-  let streetViewImage = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image']))
+  let streetViewImage: string | null = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image'])) || null
   if (!streetViewImage && payload?.streetview_image) {
     streetViewImage = normalize(payload.streetview_image)
+  }
+
+  // Fallback to Google Street View API if no image is found in record
+  if (!streetViewImage) {
+    const address = normalize(firstDefined(record, [
+      'property_address_full',
+      'propertyAddressFull',
+      'property_address',
+      'propertyAddress',
+      'address',
+      'situs_address',
+    ]))
+    if (address && address !== 'Property Unknown') {
+      streetViewImage = buildStreetViewUrl(address) || null
+    }
   }
 
   const mapImage = normalize(firstDefined(record, ['mapImage', 'map_image'])) || null

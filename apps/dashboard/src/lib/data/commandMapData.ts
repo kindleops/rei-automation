@@ -449,6 +449,9 @@ export type CommandMapSellerPin = {
   pulse_style: string | null
   execution_ring_color: string | null
   render_priority: number | null
+  streetview_image?: string | null
+  map_image?: string | null
+  satellite_image?: string | null
 }
 
 const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
@@ -490,6 +493,9 @@ const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
   'podio_tags',
   'property_flags_text',
   'property_flags_json',
+  'streetview_image',
+  'map_image',
+  'satellite_image',
   'owner_type',
   'seller_state',
   'seller_status',

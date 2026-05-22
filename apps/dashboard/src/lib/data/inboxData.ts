@@ -3766,56 +3766,65 @@ export const sendInboxMessageNow = async (
   const isValidE164 = (phone: string): boolean => /^\+\d{10,15}$/.test(phone)
 
   const sellerPhone = toE164(thread.sellerPhone || toPhone || thread.phoneNumber)
-  const sellerVariants = buildPhoneVariants(sellerPhone)
-  const sellerInboundFilter = sellerVariants.map(v => `from_phone_number.eq.${safeFilterValue(v)}`).join(',')
-  const sellerOutboundFilter = sellerVariants.map(v => `to_phone_number.eq.${safeFilterValue(v)}`).join(',')
-
   const sbClient = getSupabaseClient()
-  let fromPhone: string | null = null
-  let resolutionSource = 'none'
-  let inboundRow: AnyRecord | null = null
-  let outboundRow: AnyRecord | null = null
 
-  // 2. Query latest inbound message_events (our number was to_phone_number)
-  const { data: inboundRows } = await sbClient
+  let fromPhone: string | null = null
+  let textgridNumberId: string | null = null
+  let resolutionSource = 'none'
+
+  // FORCED RESOLUTION: Primary attempt from message_events
+  const { data: inboundRow, error: inboundErr } = await sbClient
     .from('message_events')
-    .select('from_phone_number, to_phone_number')
+    .select('to_phone_number,textgrid_number_id')
     .eq('direction', 'inbound')
-    .or(sellerInboundFilter)
+    .eq('from_phone_number', sellerPhone)
     .not('to_phone_number', 'is', null)
     .order('created_at', { ascending: false })
     .limit(1)
+    .maybeSingle()
 
-  inboundRow = (safeArray(inboundRows as AnyRecord[])[0] as AnyRecord) || null
+  const forcedFromPhone = toE164(inboundRow?.to_phone_number)
 
-  if (inboundRow) {
-    // 3. Set fromPhone = normalizeE164(inboundRow.to_phone_number)
-    fromPhone = toE164(inboundRow.to_phone_number)
-    resolutionSource = 'latest_inbound.to_phone_number'
-  } else {
-    // 4. Only if there is no inbound row, check latest outbound
+  if (forcedFromPhone && isValidE164(forcedFromPhone) && forcedFromPhone !== sellerPhone) {
+    fromPhone = forcedFromPhone
+    textgridNumberId = (inboundRow?.textgrid_number_id as string) || null
+    resolutionSource = 'forced_latest_inbound.to_phone_number'
+  }
+
+  console.log('[sendInboxMessageNow] FORCED inbound sender resolution', {
+    sellerPhone,
+    inboundErr,
+    inboundTo: inboundRow?.to_phone_number,
+    forcedFromPhone,
+    fromPhone,
+    textgridNumberId,
+    resolutionSource
+  })
+
+  // Fallback to latest outbound only if forced inbound failed
+  if (!fromPhone) {
+    const sellerVariants = buildPhoneVariants(sellerPhone)
+    const sellerOutboundFilter = sellerVariants.map(v => `to_phone_number.eq.${safeFilterValue(v)}`).join(',')
     const { data: outboundRows } = await sbClient
       .from('message_events')
-      .select('from_phone_number, to_phone_number')
+      .select('from_phone_number, to_phone_number, textgrid_number_id')
       .eq('direction', 'outbound')
       .or(sellerOutboundFilter)
       .not('from_phone_number', 'is', null)
       .order('created_at', { ascending: false })
       .limit(1)
 
-    outboundRow = (safeArray(outboundRows as AnyRecord[])[0] as AnyRecord) || null
+    const outboundRow = (safeArray(outboundRows as AnyRecord[])[0] as AnyRecord) || null
     if (outboundRow) {
       fromPhone = toE164(outboundRow.from_phone_number)
+      textgridNumberId = (outboundRow.textgrid_number_id as string) || null
       resolutionSource = 'latest_outbound.from_phone_number'
     }
   }
 
-  // 5. Validate fromPhone
+  // Validate fromPhone against textgrid_numbers if we found one
   let isValid = false
-  let textgridNumberId: string | null = null
-
   if (fromPhone && isValidE164(fromPhone) && fromPhone !== sellerPhone) {
-    // must exist in textgrid_numbers.phone_number
     const { data: tgRows } = await sbClient
       .from('textgrid_numbers')
       .select('id, phone_number')
@@ -3826,68 +3835,25 @@ export const sendInboxMessageNow = async (
     const tgRow = safeArray(tgRows as AnyRecord[])[0]
     if (tgRow) {
       isValid = true
-      textgridNumberId = asString(tgRow.id, '') || null
+      textgridNumberId = asString(tgRow.id, '') || textgridNumberId
     }
   }
 
-  // 6. If not valid, block before backend
+  // Block if still not valid
   if (!isValid) {
-    // FORCED RESOLUTION: Final attempt for existing inbox replies
-    const { data: forcedInboundRow, error: inboundErr } = await sbClient
-      .from('message_events')
-      .select('to_phone_number,textgrid_number_id')
-      .eq('direction', 'inbound')
-      .eq('from_phone_number', sellerPhone)
-      .not('to_phone_number', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    const forcedFromPhone = toE164(forcedInboundRow?.to_phone_number)
-
-    if (forcedFromPhone && isValidE164(forcedFromPhone) && forcedFromPhone !== sellerPhone) {
-      fromPhone = forcedFromPhone
-      textgridNumberId = (forcedInboundRow?.textgrid_number_id as string) || textgridNumberId
-      resolutionSource = 'forced_latest_inbound.to_phone_number'
-      isValid = true // We found it, so it's valid now
-    }
-
-    console.log('[sendInboxMessageNow] FORCED inbound sender resolution', {
-      sellerPhone,
-      inboundErr,
-      inboundTo: forcedInboundRow?.to_phone_number,
-      forcedFromPhone,
-      fromPhone,
-      textgridNumberId,
-      resolutionSource
-    })
-
-    if (!isValid) {
-      return {
-        ok: false,
-        queueId: null,
-        messageEventId: null,
-        providerMessageSid: null,
-        deliveryStatus: null,
-        errorMessage: 'Missing original TextGrid sender number — cannot reply until this thread is linked to the number the seller texted.',
-        insertPayloadKeys: [],
-        suppressionBlocked: false,
-        sendRouteUsed: 'none',
-        queueProcessorEligible: false,
-      }
+    return {
+      ok: false,
+      queueId: null,
+      messageEventId: null,
+      providerMessageSid: null,
+      deliveryStatus: null,
+      errorMessage: 'Missing original TextGrid sender number — cannot reply until this thread is linked to the number the seller texted.',
+      insertPayloadKeys: [],
+      suppressionBlocked: false,
+      sendRouteUsed: 'none',
+      queueProcessorEligible: false,
     }
   }
-
-  // 8. Add debug
-  console.log('[sendInboxMessageNow] sender resolution', {
-    sellerPhone,
-    inboundFrom: inboundRow?.from_phone_number,
-    inboundTo: inboundRow?.to_phone_number,
-    outboundFrom: outboundRow?.from_phone_number,
-    resolvedFromPhone: fromPhone,
-    resolutionSource,
-    fromEqualsTo: fromPhone === sellerPhone,
-  })
 
   const now = new Date().toISOString()
   const queueKey = `inbox:send_now:${thread.threadKey ?? thread.id}:${Date.now()}`
@@ -3907,21 +3873,19 @@ export const sendInboxMessageNow = async (
     max_retries: 3,
     message_body: personalization.messageText,
     message_text: personalization.messageText,
-    to_phone_number: sellerPhone, // 7. Payload must send sellerPhone
+    to_phone_number: sellerPhone,
     character_count: personalization.messageText.length,
     touch_number: 1,
     current_stage: 'manual_reply',
     message_type: 'manual_reply',
     use_case_template: templateAttachment.useCaseTemplate,
-    // contact_window intentionally omitted — null means no window restriction
-    // timezone not required but nice to have
     metadata: {
       source: 'inbox',
       action: 'send_now',
       thread_key: thread.threadKey,
       selected_thread_id: thread.id,
       created_from: 'leadcommand_inbox',
-      our_number: fromPhone, // 7. update metadata our_number too
+      our_number: fromPhone,
       seller_phone: sellerPhone,
       note: 'queued_ready_for_processor',
       ...buildQueueRoutingMetadata(thread),
@@ -3932,9 +3896,6 @@ export const sendInboxMessageNow = async (
       ...templateAttachment.metadata,
       resolution: {
         sellerPhone,
-        inboundFrom: inboundRow?.from_phone_number,
-        inboundTo: inboundRow?.to_phone_number,
-        outboundFrom: outboundRow?.from_phone_number,
         resolvedFromPhone: fromPhone,
         resolutionSource,
         fromEqualsTo: fromPhone === sellerPhone,
@@ -3943,8 +3904,8 @@ export const sendInboxMessageNow = async (
     created_at: now,
   }
 
-  // ALWAYS include from_phone_number (even if null) — backend processor requires this field
-  insertPayload.from_phone_number = fromPhone // 7. Payload must send original inbound to_phone_number (fromPhone)
+  // ALWAYS include from_phone_number
+  insertPayload.from_phone_number = fromPhone
   if (templateAttachment.language) insertPayload.language = templateAttachment.language
   if (isValidUUID(asString(templateAttachment.templateId, ''))) {
     insertPayload.template_id = templateAttachment.templateId
