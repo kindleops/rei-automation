@@ -1,10 +1,9 @@
-import { loadTemplate } from "@/lib/domain/templates/load-template.js";
 import { supabase } from "@/lib/supabase/client.js";
-import { info, warn } from "@/lib/logging/logger.js";
+import { warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
-import { 
-  resolveSafetyTier, 
-  SELLER_FLOW_SAFETY_TIERS 
+import {
+  resolveSafetyTier,
+  SELLER_FLOW_SAFETY_TIERS
 } from "./seller-flow-safety-policy.js";
 
 const STAGE_CODES = {
@@ -277,71 +276,52 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   }
 
   if (should_queue_reply && selected_use_case) {
-    // Check if template exists
+    // Query sms_templates directly — no RPC dependency.
+    // Priority: exact use_case + language match, then English fallback.
     try {
-      const isTest = process.env.NODE_ENV === "test";
-  // 1. Resolve Template via DB function
-  const { data: template_id, error: resolveErr } = await supabase
-    .rpc('get_auto_reply_template_id', {
-      in_intent: intent,
-      in_language: selected_language
-    });
+      const { data: candidates, error: tmplErr } = await supabase
+        .from("sms_templates")
+        .select("id,template_id,template_body,use_case,language,is_active,safe_for_auto_reply,stage_code,stage_label")
+        .eq("is_active", true)
+        .eq("use_case", selected_use_case)
+        .in("language", [selected_language, "English"])
+        .order("language", { ascending: false }) // prefer exact language match
+        .limit(20);
 
-  if (resolveErr || !template_id) {
-    return {
-      should_queue_reply: false,
-      suppression_reason: "no_template_for_intent_and_language"
-    };
-  }
+      if (tmplErr) throw tmplErr;
 
-  // 2. Load the template
-  const template = await loadTemplate({
-    template_id: template_id,
-    context: input.conversation_context
-  });
+      const eligible = (candidates || []).filter(
+        (t) => t.safe_for_auto_reply !== false // null is treated as eligible until column is backfilled
+      );
 
-  if (!template) {
-    return {
-      should_queue_reply: false,
-      suppression_reason: "template_load_failed"
-    };
-  }
+      // Prefer exact language; English is acceptable fallback
+      const bestTemplate =
+        eligible.find((t) => t.language === selected_language) ||
+        (selected_language !== "English" ? eligible.find((t) => t.language === "English") : null);
 
-  const vars = {
-    first_name: input.thread.ownerName?.split(' ')[0] || "there",
-    seller_first_name: input.thread.ownerName?.split(' ')[0] || "there",
-    property_address: input.thread.propertyAddress || "the property",
-    agent_name: "Operator"
-  };
-
-  const render = personalizeTemplate(template.template_body, vars);
-
-  if (!render.ok) {
-    return {
-        should_queue_reply: false,
-        suppression_reason: "template_render_failed"
-    };
-  }
-
-  const final_reply = render.text;
-
-  // 3. Safety Gate - Lint for generic/blank greetings
-  if (hasBlankSellerGreeting(final_reply)) {
-    return {
-      should_queue_reply: false,
-      suppression_reason: "unsafe_blank_greeting"
-    };
-  }
-
-  return {
-    should_queue_reply: true,
-    inbound_intent: intent,
-    fallback_reply: final_reply
-  };
+      if (!bestTemplate || !bestTemplate.template_body?.trim()) {
+        should_queue_reply = false;
+        suppression_reason = "no_template_for_intent_and_language";
+        reply_mode = "manual_review";
+      } else {
+        fallback_reply = bestTemplate.template_body.trim();
+        reply_mode = "auto_queue";
+        // Log which template was selected for auditability
+        if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
+          // eslint-disable-next-line no-console
+          console.log("[auto_reply_plan] template_selected", {
+            template_id: bestTemplate.template_id || bestTemplate.id,
+            use_case: selected_use_case,
+            language: bestTemplate.language,
+            intent,
+          });
+        }
+      }
     } catch (e) {
       warn("auto_reply_plan.template_check_failed", { error: e.message });
-      fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-      reply_mode = "auto_queue_fallback";
+      should_queue_reply = false;
+      suppression_reason = "template_lookup_error";
+      reply_mode = "manual_review";
     }
   }
   
