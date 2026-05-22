@@ -1473,10 +1473,9 @@ export default function InboxPage() {
     return () => clearTimeout(timer)
   }, [selected?.id, sellerLanguageCode, threadHasInboundMessages, handleTranslateThread])
 
-  const lastAutoTranslatedDraftRef = useRef<string>('')
-  const handleTranslateDraft = useCallback(async () => {
-    const text = draftText.trim()
-    if (!text) return
+  const handleTranslateDraft = useCallback(async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
 
     setDraftTranslationLoading(true)
 
@@ -1486,7 +1485,7 @@ export default function InboxPage() {
         : 'es'
 
       const result = await translateText({
-        text,
+        text: trimmed,
         sourceLanguage: 'en',
         targetLanguage,
         mode: 'draft',
@@ -1495,9 +1494,8 @@ export default function InboxPage() {
       if (result.detectedLanguage && !result.detectedLanguage.startsWith('en')) {
         setDetectedThreadLanguage((current) => current ?? result.detectedLanguage)
       }
-      // Auto-insert: replace draft directly — no popup/preview step
+      // Push translated text back to Composer via draftText prop.
       setDraftText(result.translatedText)
-      lastAutoTranslatedDraftRef.current = result.translatedText
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to translate draft'
       emitNotification({
@@ -1508,19 +1506,7 @@ export default function InboxPage() {
     } finally {
       setDraftTranslationLoading(false)
     }
-  }, [draftText, sellerLanguageCode])
-
-  // Auto-translate draft when seller language is KNOWN non-English (2s debounce after typing stops).
-  // Requires sellerLanguageCode — null = unknown, skip auto to avoid false detection loops.
-  const draftTranslateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (draftTranslateTimerRef.current) clearTimeout(draftTranslateTimerRef.current)
-    const trimmed = draftText.trim()
-    if (!trimmed || !sellerLanguageCode || isEnglishLanguage(sellerLanguageCode) || draftTranslationLoading) return
-    if (trimmed === lastAutoTranslatedDraftRef.current) return
-    draftTranslateTimerRef.current = setTimeout(() => { handleTranslateDraft() }, 2000)
-    return () => { if (draftTranslateTimerRef.current) clearTimeout(draftTranslateTimerRef.current) }
-  }, [draftText, sellerLanguageCode, draftTranslationLoading, handleTranslateDraft])
+  }, [sellerLanguageCode])
 
 
   useEffect(() => {
@@ -2433,7 +2419,7 @@ export default function InboxPage() {
   }, [])
 
   const insertAiSuggestion = useCallback((suggestionText: string) => {
-    setDraftText((prev) => (prev.trim() ? `${prev.trim()}\n\n${suggestionText}` : suggestionText))
+    setDraftText(suggestionText)
   }, [])
 
   const updateAutonomyControl = useCallback(async (
@@ -2746,18 +2732,15 @@ export default function InboxPage() {
 
       <Composer
         draftText={draftText}
-        setDraftText={setDraftText}
         onSend={handleSend}
         isSending={isSending}
-        onOpenSchedule={() => {
-          setScheduledTemplatePayload({ text: draftText, template: null })
+        onOpenSchedule={(currentDraft) => {
+          setScheduledTemplatePayload({ text: currentDraft, template: null })
           setSchedulePanelOpen(true)
         }}
         onAI={() => setActiveOverlay('ai')}
         thread={selected}
         threadContext={threadContext}
-        onInsertTemplate={(text) => setDraftText(prev => prev ? `${prev}\n\n${text}` : text)}
-        onReplaceTemplate={(text) => setDraftText(text)}
         onSendTemplate={handleSendTemplate}
         onQueueTemplate={handleQueueTemplate}
         onScheduleTemplate={handleScheduleTemplate}
@@ -2769,6 +2752,7 @@ export default function InboxPage() {
         isSellerLanguageEnglish={isEnglishLanguage(sellerLanguageCode)}
         isTranslatingDraft={draftTranslationLoading}
         onTranslateDraft={handleTranslateDraft}
+        autoTranslateDraft={!!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)}
       />
     </section>
   )

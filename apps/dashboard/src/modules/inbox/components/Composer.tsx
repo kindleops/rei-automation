@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { Icon } from '../../../shared/icons'
 import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
 import type { InboxThread } from '../inbox.adapter'
@@ -36,15 +36,15 @@ const QUICK_ACTIONS: Array<{ id: string; label: string; icon: IconName; ready: b
 ]
 
 interface ComposerProps {
+  // Parent pushes values into Composer via this prop (translation results, template inserts, clear-after-send).
+  // Typing updates localDraft only — parent never re-renders on each keystroke.
   draftText: string
-  setDraftText: (t: string) => void
   onSend: (text: string) => void
-  onOpenSchedule: () => void
+  // Receives current draft so parent can set schedule payload without tracking it.
+  onOpenSchedule: (currentDraft: string) => void
   onAI: () => void
   thread: InboxThread | null
   threadContext: ThreadContext | null
-  onInsertTemplate: (text: string) => void
-  onReplaceTemplate: (text: string) => void
   onSendTemplate: (payload: TemplateActionPayload) => void
   onQueueTemplate: (payload: TemplateActionPayload) => void
   onScheduleTemplate: (payload: TemplateActionPayload) => void
@@ -57,7 +57,9 @@ interface ComposerProps {
   sellerLanguageLabel?: string
   isSellerLanguageEnglish?: boolean
   isTranslatingDraft?: boolean
-  onTranslateDraft?: () => void
+  onTranslateDraft?: (text: string) => void
+  // When true, auto-translate fires after 2s of typing inactivity.
+  autoTranslateDraft?: boolean
 }
 
 type SpeechRecognitionResultLike = {
@@ -93,14 +95,11 @@ const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
 
 export const Composer = ({
   draftText,
-  setDraftText,
   onSend,
   onOpenSchedule,
   onAI: _onAI,
   thread,
   threadContext,
-  onInsertTemplate,
-  onReplaceTemplate,
   onSendTemplate,
   onQueueTemplate,
   onScheduleTemplate,
@@ -113,7 +112,9 @@ export const Composer = ({
   isSellerLanguageEnglish = true,
   isTranslatingDraft = false,
   onTranslateDraft,
+  autoTranslateDraft = false,
 }: ComposerProps) => {
+  const [localDraft, setLocalDraft] = useState(draftText)
   const [micState, setMicState] = useState<MicState>('idle')
   const [voiceUnsupported, setVoiceUnsupported] = useState(false)
   const [quickActionsOpen, setQuickActionsOpen] = useState(false)
@@ -125,11 +126,20 @@ export const Composer = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animationFrameRef = useRef<number | undefined>(undefined)
+  // Tracks the last value we pushed to onTranslateDraft to prevent re-triggering.
+  const lastAutoTranslatedDraftRef = useRef<string>('')
 
   const isListening = micState === 'recording'
   const isProcessing = micState === 'processing'
-  const hasDraft = draftText.trim().length > 0
+  const hasDraft = localDraft.trim().length > 0
   const composerDisabled = disabled || isSending
+
+  // Sync: parent pushes new text (translation result, template insert, post-send clear) → update localDraft.
+  // Mark the pushed text as already-translated so auto-translate doesn't fire on it.
+  useEffect(() => {
+    setLocalDraft(draftText)
+    lastAutoTranslatedDraftRef.current = draftText
+  }, [draftText])
 
   useEffect(() => {
     setQuickActionsOpen(false)
@@ -140,13 +150,22 @@ export const Composer = ({
     if (!textarea) return
     textarea.style.height = 'auto'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`
-  }, [draftText])
+  }, [localDraft])
 
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea || composerDisabled) return
     textarea.focus({ preventScroll: true })
   }, [thread?.id, composerDisabled])
+
+  // Auto-translate: fires 2s after typing stops when seller language is known non-English.
+  useEffect(() => {
+    const trimmed = localDraft.trim()
+    if (!autoTranslateDraft || !trimmed || isTranslatingDraft) return
+    if (trimmed === lastAutoTranslatedDraftRef.current) return
+    const timer = setTimeout(() => { onTranslateDraft?.(localDraft) }, 2000)
+    return () => clearTimeout(timer)
+  }, [localDraft, autoTranslateDraft, isTranslatingDraft, onTranslateDraft])
 
   const stopVoiceAnalysis = () => {
     if (animationFrameRef.current) {
@@ -195,7 +214,7 @@ export const Composer = ({
     const Recognition = getSpeechRecognition()
     if (!Recognition) { setVoiceUnsupported(true); return }
     const recognition = new Recognition()
-    baseDraftRef.current = draftText.trim()
+    baseDraftRef.current = localDraft.trim()
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'en-US'
@@ -210,7 +229,7 @@ export const Composer = ({
         .replace(/([.!?])\s*(\w)/g, '$1 $2')
         .replace(/\s+/g, ' ')
         .trim()
-      setDraftText([baseDraftRef.current, cleaned].filter(Boolean).join(' ').trim())
+      setLocalDraft([baseDraftRef.current, cleaned].filter(Boolean).join(' ').trim())
     }
     recognition.onerror = () => {
       recognitionRef.current = null
@@ -232,11 +251,19 @@ export const Composer = ({
     startVoiceAnalysis()
   }
 
-  const submitDraft = () => {
+  const submitDraft = useCallback(() => {
     if (composerDisabled || !hasDraft) return
-    onSend(draftText)
-    setDraftText('')
-  }
+    onSend(localDraft)
+    setLocalDraft('')
+  }, [composerDisabled, hasDraft, localDraft, onSend])
+
+  const handleInsertTemplate = useCallback((text: string) => {
+    setLocalDraft(prev => prev.trim() ? `${prev.trim()}\n\n${text}` : text)
+  }, [])
+
+  const handleReplaceTemplate = useCallback((text: string) => {
+    setLocalDraft(text)
+  }, [])
 
   const micTitle = voiceUnsupported
     ? 'Voice dictation not supported'
@@ -263,7 +290,7 @@ export const Composer = ({
                   key={t.id}
                   type="button"
                   className="nx-qap-template-btn"
-                  onClick={() => { setDraftText(t.text); setQuickActionsOpen(false) }}
+                  onClick={() => { setLocalDraft(t.text); setQuickActionsOpen(false) }}
                   title={t.text}
                 >
                   <Icon name="file-text" />
@@ -322,7 +349,7 @@ export const Composer = ({
               key={s.id}
               type="button"
               className={cls('nx-composer-ai-chip', s.tone && `is-${s.tone}`)}
-              onClick={() => setDraftText(s.text)}
+              onClick={() => setLocalDraft(s.text)}
               disabled={composerDisabled}
               title={s.label}
             >
@@ -355,14 +382,14 @@ export const Composer = ({
         <textarea
           ref={textareaRef}
           placeholder={disabled ? (disabledReason ?? 'Messaging disabled for this thread') : 'Type a message…'}
-          value={draftText}
-          onChange={e => setDraftText(e.target.value)}
+          value={localDraft}
+          onChange={e => setLocalDraft(e.target.value)}
           rows={1}
           disabled={composerDisabled}
           onKeyDown={e => {
             if (composerDisabled) return
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitDraft(); return }
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && draftText.trim()) { e.preventDefault(); submitDraft() }
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && localDraft.trim()) { e.preventDefault(); submitDraft() }
           }}
           onInput={(e) => {
             const el = e.target as HTMLTextAreaElement
@@ -385,7 +412,7 @@ export const Composer = ({
               : 'Translate draft'
           )}
           disabled={composerDisabled || !hasDraft || isTranslatingDraft}
-          onClick={() => onTranslateDraft?.()}
+          onClick={() => onTranslateDraft?.(localDraft)}
           aria-label="Translate draft"
         >
           <Icon name="globe" />
@@ -397,7 +424,7 @@ export const Composer = ({
           className="nx-composer-icon-btn nx-calendar-btn"
           title="Schedule message"
           disabled={composerDisabled}
-          onClick={onOpenSchedule}
+          onClick={() => onOpenSchedule(localDraft)}
           aria-label="Schedule message"
         >
           <Icon name="calendar" />
@@ -456,8 +483,8 @@ export const Composer = ({
         onClose={() => setTemplatePopoverOpen(false)}
         thread={thread}
         threadContext={threadContext}
-        onInsert={onInsertTemplate}
-        onReplace={onReplaceTemplate}
+        onInsert={handleInsertTemplate}
+        onReplace={handleReplaceTemplate}
         onSendNow={onSendTemplate}
         onQueue={onQueueTemplate}
         onSchedule={onScheduleTemplate}
