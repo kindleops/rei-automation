@@ -49,8 +49,21 @@ export const getBackendBaseUrl = (): string => {
 }
 
 export const getBackendSecret = (): string => {
-  return (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined) || 
-         (import.meta.env.VITE_NEXUS_API_SECRET as string | undefined) || ''
+  const secret = import.meta.env.VITE_BACKEND_API_SECRET as string | undefined
+
+  if (!secret) {
+    console.error('Missing VITE_BACKEND_API_SECRET')
+    throw new Error('Missing VITE_BACKEND_API_SECRET')
+  }
+
+  // Safe debug log (temporary)
+  console.debug('[BackendSecret Audit]', {
+    secretLength: secret.length,
+    first6: secret.slice(0, 6),
+    last4: secret.slice(-4),
+  })
+
+  return secret
 }
 
 export interface BackendClientError {
