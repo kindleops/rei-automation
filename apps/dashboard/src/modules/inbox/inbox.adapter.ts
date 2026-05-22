@@ -581,7 +581,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
   })
 
   // Realtime config
-  const realtimeEnabled = String(import.meta.env.VITE_INBOX_REALTIME_ENABLED ?? 'false').toLowerCase() === 'true'
+  const realtimeEnabled = String(import.meta.env.VITE_INBOX_REALTIME_ENABLED ?? 'true').toLowerCase() !== 'false'
   const minRefreshMs = 5000
   const lastRefreshAtRef = useRef<string | null>(null)
   const loadingRef = useRef(false)
@@ -702,6 +702,14 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null
+
+    // Polling heartbeat — catches missed realtime events and keeps the list fresh
+    // when realtime is disabled. 30 s is fast enough to feel live; the _automatic
+    // flag enforces the 5 s minimum-gap guard so rapid polls don't stack.
+    const POLL_INTERVAL_MS = realtimeEnabled ? 60_000 : 30_000
+    const pollInterval = window.setInterval(() => {
+      if (!cancelled) void refresh({ _automatic: true })
+    }, POLL_INTERVAL_MS)
 
     const markRecentlyUpdated = (threadId: string) => {
       setRecentlyUpdatedThreadIds((prev) => new Set([...prev, threadId]))
@@ -824,6 +832,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       abortRef.current?.abort()
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (refreshTimeout) clearTimeout(refreshTimeout)
+      window.clearInterval(pollInterval)
       if (channel) void getSupabaseClient().removeChannel(channel)
     }
   }, [refresh, realtimeEnabled])
