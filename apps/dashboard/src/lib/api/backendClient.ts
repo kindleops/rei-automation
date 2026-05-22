@@ -9,9 +9,40 @@
  * REAL_ESTATE_AUTOMATION_BASE_URL for server-side use.
  */
 
-const getBackendBaseUrl = (): string => {
-  const url = import.meta.env.VITE_BACKEND_API_URL as string | undefined
+import type { AnyRecord } from '../data/shared'
+
+export const getBackendBaseUrl = (): string => {
+  // Primary: VITE_BACKEND_API_URL
+  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
+  
+  // Fallback 1: Legacy VITE_NEXUS_API_URL
+  if (!url) {
+    url = (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
+  }
+
+  // Fallback 2: Dynamic discovery for Vercel environments
+  if (!url && typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    if (hostname.includes('vercel.app')) {
+      // If we're on a dashboard preview/prod branch, try to point to the main API
+      if (hostname.includes('dashboard')) {
+        url = `https://${hostname.replace('-dashboard', '')}`
+      } else {
+        // Assume same origin if not explicitly segmented
+        url = window.location.origin
+      }
+    } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      // Sensible default for local dev
+      url = 'http://localhost:3000'
+    }
+  }
+
   return url ? url.replace(/\/$/, '') : ''
+}
+
+export const getBackendSecret = (): string => {
+  return (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined) || 
+         (import.meta.env.VITE_NEXUS_API_SECRET as string | undefined) || ''
 }
 
 export interface BackendClientError {
@@ -22,13 +53,13 @@ export interface BackendClientError {
   upstream?: unknown
 }
 
-export interface BackendClientSuccess<T = unknown> {
+export interface BackendResultSuccess<T = unknown> {
   ok: true
   status: number
   data: T
 }
 
-export type BackendResult<T = unknown> = BackendClientSuccess<T> | BackendClientError
+export type BackendResult<T = unknown> = BackendResultSuccess<T> | BackendClientError
 
 function notReady<T = unknown>(message: string): BackendResult<T> {
   return {
@@ -45,6 +76,7 @@ async function callBackend<T = unknown>(
 ): Promise<BackendResult<T>> {
   const base = getBackendBaseUrl()
   if (!base) {
+    console.error('[BACKEND_API_URL_MISSING] VITE_BACKEND_API_URL is not set. Manual sends and other backend actions will fail.')
     return {
       ok: false,
       status: 503,
@@ -53,11 +85,21 @@ async function callBackend<T = unknown>(
     }
   }
 
+  const secret = getBackendSecret()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  }
+
+  if (secret) {
+    headers['x-ops-dashboard-secret'] = secret
+  }
+
   const url = `${base}${path}`
   let response: Response
   try {
     response = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      headers,
       ...options,
     })
   } catch (err) {
@@ -339,6 +381,54 @@ export function retryRoutingForQueueItem(queueId: string): Promise<BackendResult
   return callBackend<QueueActionResult>('/api/cockpit/queue/retry-routing', {
     method: 'POST',
     body: JSON.stringify({ queue_id: queueId }),
+  })
+}
+
+// POST /api/cockpit/queue/run-safe-batch
+export function runSafeBatch(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/run-safe-batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// POST /api/cockpit/queue/run
+export function runQueueNow(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/run', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// POST /api/cockpit/queue/reprocess-paused
+export function reprocessPaused(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/reprocess-paused', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// POST /api/cockpit/queue/retry-failed
+export function retryFailed(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/retry-failed', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// POST /api/cockpit/queue/reconcile
+export function reconcileDelivery(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/reconcile', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// POST /api/cockpit/queue/cancel-stale-followups
+export function cancelStaleFollowups(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/cancel-stale-followups', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 

@@ -1595,6 +1595,8 @@ export default function InboxPage() {
     return snapshot
   }, [])
 
+import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
+
   const runQueueCommand = useCallback(async (
     actionKey: string,
     endpoint: string,
@@ -1604,11 +1606,29 @@ export default function InboxPage() {
       successDetail?: (payload: any) => string
     },
   ) => {
+    const backendBase = getBackendBaseUrl()
+    const backendSecret = getBackendSecret()
+    
+    if (!backendBase && endpoint.startsWith('/api/cockpit')) {
+       emitNotification({
+         title: 'Backend Not Configured',
+         detail: 'VITE_BACKEND_API_URL is missing. Administrative actions are disabled.',
+         severity: 'critical'
+       })
+       return
+    }
+
+    const url = endpoint.startsWith('http') ? endpoint : `${backendBase}${endpoint}`
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (backendSecret) {
+      headers['x-ops-dashboard-secret'] = backendSecret
+    }
+
     setQueueCommandActionLoading(actionKey)
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(options?.body ?? {}),
       })
       const payload = await response.json().catch(() => ({}))

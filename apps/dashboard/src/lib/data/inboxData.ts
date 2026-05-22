@@ -1716,6 +1716,8 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
   }
 }
 
+import { getBackendBaseUrl, getBackendSecret } from '../api/backendClient'
+
 export const fetchLiveInbox = async ({
   filter = 'all',
   direction = 'all',
@@ -1726,19 +1728,26 @@ export const fetchLiveInbox = async ({
   map = true,
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
-  const backendBase = (import.meta.env.VITE_BACKEND_API_URL ?? '').replace(/\/$/, '')
+  const backendBase = getBackendBaseUrl()
   if (!backendBase) {
     throw new Error('BACKEND_NOT_CONFIGURED: VITE_BACKEND_API_URL is not set')
   }
+  const backendSecret = getBackendSecret()
   const params = new URLSearchParams()
   const entries: Record<string, unknown> = { filter, direction, q, keywordGroup, cursor, limit, map: map ? '1' : '0' }
   Object.entries(entries).forEach(([key, value]) => {
     const param = toQueryParam(value)
     if (param) params.set(key, param)
   })
+
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (backendSecret) {
+    headers['x-ops-dashboard-secret'] = backendSecret
+  }
+
   const res = await fetch(`${backendBase}/api/cockpit/inbox/live?${params.toString()}`, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers,
     signal,
   })
   if (!res.ok) throw new Error(`Live inbox API failed (${res.status})`)

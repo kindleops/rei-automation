@@ -36,7 +36,13 @@ const getStatusColor = (status: ServiceStatus) => {
   }
 }
 
+import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
+
 export function SystemHealthOpsPanel() {
+  const backendUrl = getBackendBaseUrl() || 'NOT CONFIGURED'
+  const isDev = import.meta.env.DEV
+  const hasSecret = Boolean(getBackendSecret())
+
   return (
     <div style={{
       background: 'var(--nexus-bg-surface, #1e1e1e)',
@@ -47,10 +53,25 @@ export function SystemHealthOpsPanel() {
       color: 'var(--nexus-text, #e5e5e5)',
       fontFamily: 'monospace'
     }}>
-      <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        Live Ops Panel
-      </h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h3 style={{ margin: 0, fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Live Ops Panel
+        </h3>
+        {isDev && (
+          <div style={{ 
+            fontSize: '10px', 
+            background: '#3b82f620', 
+            color: '#3b82f6', 
+            padding: '2px 8px', 
+            borderRadius: '4px',
+            border: '1px solid #3b82f640'
+          }}>
+            DEV MODE
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: isDev ? '16px' : 0 }}>
         {MOCK_SERVICES.map(service => (
           <div key={service.name} style={{
             display: 'flex',
@@ -80,6 +101,35 @@ export function SystemHealthOpsPanel() {
           </div>
         ))}
       </div>
+
+      {isDev && (
+        <div style={{ 
+          marginTop: '16px', 
+          paddingTop: '16px', 
+          borderTop: '1px solid var(--nexus-border, #333)',
+          fontSize: '11px'
+        }}>
+          <div style={{ color: 'var(--nexus-text-muted, #999)', marginBottom: '8px', textTransform: 'uppercase', fontSize: '10px' }}>
+            Connectivity Debug
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Backend API:</span>
+              <span style={{ color: backendUrl === 'NOT CONFIGURED' ? 'var(--nexus-red, #ef4444)' : 'var(--nexus-green, #10b981)' }}>
+                {backendUrl}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Auth Secret:</span>
+              <span>{hasSecret ? 'SET (SECURE)' : 'MISSING'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Proxy Status:</span>
+              <span>{backendUrl.includes('localhost') ? 'LOCAL' : 'REMOTE'}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

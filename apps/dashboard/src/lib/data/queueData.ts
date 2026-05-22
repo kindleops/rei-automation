@@ -343,6 +343,8 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
   const sentTodayCount = items.filter((i) => i.sentAt && new Date(i.sentAt).toDateString() === now).length
   const deliveredTodayCount = items.filter((i) => (i as any).deliveredAt && new Date((i as any).deliveredAt).toDateString() === now).length
 
+import { getBackendBaseUrl } from '../api/backendClient'
+
   const apiPressureLevel: 'low' | 'medium' | 'high' =
     failedCount + retryCount > items.length * 0.1
       ? 'high'
@@ -350,7 +352,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
         ? 'medium'
         : 'low'
 
-  const hasProxyUrl = Boolean(import.meta.env.VITE_BACKEND_API_URL)
+  const hasProxyUrl = Boolean(getBackendBaseUrl())
   const engineMode: QueueModel['engineMode'] = hasProxyUrl 
     ? 'proxy' 
     : 'dry-run only'

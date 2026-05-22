@@ -56,17 +56,23 @@ export async function fetchLiveDashboard(): Promise<LiveDashboardModel> {
   }
 
   const url = `${api_base}${NEXUS_API_ENDPOINT}`
+  const secret = (import.meta.env.VITE_BACKEND_API_SECRET ?? '')
   const controller = new AbortController()
   const timeout_id = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (secret) {
+    headers['x-ops-dashboard-secret'] = secret
+  }
 
   let response: Response
   try {
     response = await fetch(url, {
       method: 'GET',
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       cache: 'no-store',
     })
   } catch (err) {

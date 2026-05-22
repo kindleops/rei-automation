@@ -2936,6 +2936,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       selection_reason: options.selection_reason,
       routing_allowed: options.routing_allowed,
       routing_block_reason: options.routing_block_reason,
+      batch_name: options.batch_name || null,
       agent_name: agent_first_name || null,
       agent_first_name: agent_first_name || null,
       agent_name_raw: agent_name_raw || null,
