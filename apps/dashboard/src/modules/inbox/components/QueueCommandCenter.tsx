@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
-import { SystemHealthOpsPanel } from './SystemHealthOpsPanel'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -239,9 +238,6 @@ export function QueueCommandCenter({
           </div>
         ))}
       </div>
-
-      {/* ── SECTION 3.5: Ops Panel ──────────────────────────────────── */}
-      <SystemHealthOpsPanel />
 
       {/* ── SECTION 4: Needs Attention ──────────────────────────────── */}
       <div className="qcc-attention">

@@ -445,7 +445,7 @@ export const InboxSidebar = ({
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={onSelect} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
       }) : <div className="nx-sidebar-rebuilt__empty">No conversations match this filter.</div>}
-      {canLoadMore && <div className="nx-sidebar-rebuilt__load-more"><button type="button" className="nx-load-more-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLoadMore(); }}>LOAD MORE</button></div>}
+      {canLoadMore && <div className="nx-sidebar-rebuilt__load-more"><button type="button" className="nx-load-more-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLoadMore(); }}>Loading more...</button></div>}
     </div>
   )
 

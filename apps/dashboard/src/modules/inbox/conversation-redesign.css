@@ -314,11 +314,12 @@
   background: rgba(255, 69, 58, 0.15);
 }
 
-/* 25% compact: icon-only horizontal scroll instead of hidden */
+/* 25% compact: icon-only, centered */
 .is-layout-compact .nx-chat-action-strip {
   display: flex;
-  padding: 3px 8px;
-  gap: 2px;
+  padding: 4px 8px;
+  gap: 4px;
+  justify-content: center;
 }
 
 .is-layout-compact .nx-action-strip-btn span {
@@ -326,10 +327,10 @@
 }
 
 .is-layout-compact .nx-action-strip-btn {
-  padding: 4px 7px;
-  min-width: 26px;
+  padding: 5px 9px;
+  min-width: 28px;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 6px;
 }
 
 /* ── Message Timeline ──────────────────────────────────────── */
@@ -1070,4 +1071,48 @@
 /* Old chat-header: superseded by nx-chat-header-v2 */
 .nx-chat-header {
   display: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   25% COMPACT COMPOSER — stacked layout
+   Textarea on top row, all buttons on centered bottom row.
+══════════════════════════════════════════════════════════════ */
+
+/* Outer composer: stronger right border to define pane edge */
+.is-layout-compact .nx-sticky-composer {
+  border-right-color: rgba(47, 157, 255, 0.55) !important;
+}
+
+/* Stacked flex layout — textarea first, buttons row second */
+.is-layout-compact .nx-composer-input-area {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 2px 4px;
+  padding: 4px 6px !important;
+}
+
+/* Textarea: full-width top row */
+.is-layout-compact .nx-composer-input-area textarea {
+  order: -1;
+  flex: 1 1 100%;
+  min-height: 42px;
+  padding: 6px 4px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 2px;
+}
+
+/* All direct button children: bottom row */
+.is-layout-compact .nx-composer-input-area > button {
+  order: 1;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 30px;
+}
+
+/* Send button slightly wider in the bottom row */
+.is-layout-compact .nx-send-button {
+  width: 40px !important;
+  height: 30px !important;
 }

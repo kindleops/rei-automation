@@ -124,6 +124,7 @@ import { buildConversationDecision } from './inbox-decisioning'
 import { getViewLayoutMode, type ViewWidthPercent } from './view-layout'
 import './inbox-premium.css'
 import './inbox-rebuild.css'
+import './inbox-rebuild-v2.css'
 import './inbox-polish.css'
 import './buyer-intel-upgrade.css'
 import './copilot/copilot.css'
@@ -1426,6 +1427,8 @@ export default function InboxPage() {
           mode: 'thread',
         })
         translationByBody.set(body, result.translatedText)
+        // Only store detected language if genuinely non-English — prevents English threads
+        // from hiding the translate UI after detection sets sellerLanguageCode to 'en'
         if (result.detectedLanguage && !result.detectedLanguage.startsWith('en')) {
           setDetectedThreadLanguage(result.detectedLanguage.toLowerCase())
         }
@@ -1459,7 +1462,8 @@ export default function InboxPage() {
   }, [selectedMessages, sellerLanguageCode, threadHasInboundMessages])
 
   // Auto-translate inbound messages when a KNOWN non-English thread is selected.
-  // Guard requires sellerLanguageCode — null = unknown, skip to avoid false 'en' detection hiding translate UI.
+  // Guard requires sellerLanguageCode to be set — null = unknown language, don't auto-translate
+  // (prevents false English detection from hiding the translate UI for English threads).
   const autoTranslatedThreadRef = useRef<string | null>(null)
   useEffect(() => {
     if (!selected?.id || !sellerLanguageCode || isEnglishLanguage(sellerLanguageCode) || !threadHasInboundMessages) return
@@ -1506,6 +1510,8 @@ export default function InboxPage() {
     }
   }, [draftText, sellerLanguageCode])
 
+  // Auto-translate draft when seller language is KNOWN non-English (2s debounce after typing stops).
+  // Requires sellerLanguageCode — null = unknown, skip auto to avoid false detection loops.
   const draftTranslateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (draftTranslateTimerRef.current) clearTimeout(draftTranslateTimerRef.current)
@@ -1515,6 +1521,7 @@ export default function InboxPage() {
     draftTranslateTimerRef.current = setTimeout(() => { handleTranslateDraft() }, 2000)
     return () => { if (draftTranslateTimerRef.current) clearTimeout(draftTranslateTimerRef.current) }
   }, [draftText, sellerLanguageCode, draftTranslationLoading, handleTranslateDraft])
+
 
   useEffect(() => {
     try {
@@ -1595,8 +1602,6 @@ export default function InboxPage() {
     return snapshot
   }, [])
 
-import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
-
   const runQueueCommand = useCallback(async (
     actionKey: string,
     endpoint: string,
@@ -1606,29 +1611,11 @@ import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient
       successDetail?: (payload: any) => string
     },
   ) => {
-    const backendBase = getBackendBaseUrl()
-    const backendSecret = getBackendSecret()
-    
-    if (!backendBase && endpoint.startsWith('/api/cockpit')) {
-       emitNotification({
-         title: 'Backend Not Configured',
-         detail: 'VITE_BACKEND_API_URL is missing. Administrative actions are disabled.',
-         severity: 'critical'
-       })
-       return
-    }
-
-    const url = endpoint.startsWith('http') ? endpoint : `${backendBase}${endpoint}`
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (backendSecret) {
-      headers['x-ops-dashboard-secret'] = backendSecret
-    }
-
     setQueueCommandActionLoading(actionKey)
     try {
-      const response = await fetch(url, {
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(options?.body ?? {}),
       })
       const payload = await response.json().catch(() => ({}))
