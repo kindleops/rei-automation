@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import { buildStreetViewUrl } from '../inbox-normalization'
 import '../seller-intelligence-card.css'
@@ -253,15 +253,22 @@ export const getTopPropertyTags = (record: SellerRecord): string[] => {
   })
 }
 
-export const getBestPropertyImage = (record: SellerRecord): string | null => {
-  const direct = normalize(firstDefined(record, ['streetview_image']))
-  if (direct) return direct
-  const address = normalize(firstDefined(record, ['property_address_full', 'propertyAddressFull', 'property_address', 'propertyAddress', 'address', 'situs_address']))
-  if (address) {
-    const generated = buildStreetViewUrl(address)
-    if (generated) return generated
+export const getNormalizedPropertyImages = (record: SellerRecord) => {
+  const payload = record.raw_payload_json as Record<string, any> | undefined
+
+  let streetViewImage = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image']))
+  if (!streetViewImage && payload?.streetview_image) {
+    streetViewImage = normalize(payload.streetview_image)
   }
-  return normalize(firstDefined(record, ['satellite_image', 'map_image'])) || null
+
+  const mapImage = normalize(firstDefined(record, ['mapImage', 'map_image'])) || null
+  const satelliteImage = normalize(firstDefined(record, ['satelliteImage', 'satellite_image'])) || null
+
+  return {
+    streetViewImage: streetViewImage || null,
+    mapImage,
+    satelliteImage,
+  }
 }
 
 export const buildSellerPhysicalStats = (record: SellerRecord): string[] => {
@@ -403,7 +410,25 @@ export function SellerIntelligenceCard({
   ])) || 'Property Unknown'
   const ownerType = deriveOwnerType(record)
   const propertyType = titleize(normalize(firstDefined(record, ['property_type', 'propertyType', 'property_class', 'propertyClass'])) || '—')
-  const imageUrl = getBestPropertyImage(record)
+  
+  const { streetViewImage, mapImage, satelliteImage } = getNormalizedPropertyImages(record)
+  const imageSequence = [streetViewImage, satelliteImage, mapImage]
+    .filter(Boolean)
+    .map(url => url!.replace(/^http:\/\//i, 'https://'))
+  
+  const [imageIndex, setImageIndex] = useState(0)
+  const currentImageUrl = imageSequence[imageIndex] || null
+
+  useEffect(() => {
+    if (import.meta.env.DEV && imageSequence.length === 0) {
+      console.warn("[map-image-missing]", address, record)
+    }
+  }, [address, record, imageSequence.length])
+
+  const handleImageError = () => {
+    setImageIndex(prev => prev + 1)
+  }
+
   const pills = deriveSellerStatusPills(record, messages)
   const physicalSummary = buildCompactPhysicalSummary(record)
   const financialMetrics: MetricItem[] = [
@@ -435,11 +460,17 @@ export function SellerIntelligenceCard({
 
   return (
     <article className={cls('nx-seller-card', `is-${variant}`, `seller-card--${densityMode}`)}>
-      <div className="nx-seller-card__image">
-        {imageUrl ? (
-          <img src={imageUrl} alt={address} loading="lazy" />
+      <div className="nx-seller-card__image" style={{ minHeight: '140px' }}>
+        {currentImageUrl ? (
+          <img 
+            src={currentImageUrl} 
+            alt={address} 
+            loading="lazy" 
+            onError={handleImageError}
+            style={{ objectFit: 'cover', width: '100%', height: '100%', borderRadius: '8px' }}
+          />
         ) : (
-          <div className="nx-seller-card__image-placeholder">Street View Preview</div>
+          <div className="nx-seller-card__image-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '140px', backgroundColor: '#111', borderRadius: '8px', color: '#666', width: '100%', height: '100%' }}>Street View Preview</div>
         )}
         <div className="nx-seller-card__image-overlay" />
         <div className="nx-seller-card__image-label">Street View</div>

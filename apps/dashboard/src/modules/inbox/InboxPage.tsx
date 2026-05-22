@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
 import { createPortal } from 'react-dom'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread } from './inbox.adapter'

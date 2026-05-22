@@ -6,9 +6,11 @@ import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/c
 import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
 import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
 import { checkOutreachSuppression } from "@/lib/domain/outreach/outreach-service.js";
+import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
+const IDENTITY_QUARANTINE_TABLE = "outbound_identity_quarantine";
 const DEFAULT_CANDIDATE_SOURCE = "v_outbound_discovery_fresh";
 const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_outbound_discovery_open_now",
@@ -47,6 +49,9 @@ const REASON_CODES = Object.freeze({
   SCHEDULE_OVERFLOW_BLOCKED: "SCHEDULE_OVERFLOW_BLOCKED",
   NAME_HYDRATION_FAILURE: "NAME_HYDRATION_FAILURE",
   TEMPLATE_RENDER_LINT_FAILURE: "TEMPLATE_RENDER_LINT_FAILURE",
+  IDENTITY_MISMATCH: "IDENTITY_MISMATCH",
+  IDENTITY_NOT_VERIFIED: "IDENTITY_NOT_VERIFIED",
+  MARKET_IDENTITY_QUARANTINE: "MARKET_IDENTITY_QUARANTINE",
 });
 
 const logger = child({ module: "domain.outbound.supabase_candidate_feeder" });
@@ -196,21 +201,26 @@ function extractFirstName(value, { allow_single_token = true } = {}) {
 }
 
 export function resolveSellerIdentity(candidate = {}) {
+  const alignment = candidate.identity_alignment || { status: "unknown" };
+  const is_untrusted = ["mismatch", "weak", "unknown", "household_associated"].includes(alignment.status);
+  const skip_prospect_names = ["household_associated"].includes(alignment.status);
+
   const sources = [
-    { source: "seller_first_name", value: candidate.seller_first_name, allow_single_token: true },
-    { source: "prospect_first_name", value: candidate.prospect_first_name, allow_single_token: true },
-    { source: "prospect_display_name", value: candidate.prospect_display_name, allow_single_token: false },
+    { source: "seller_first_name", value: candidate.seller_first_name, allow_single_token: true, skip_if_untrusted: is_untrusted },
+    { source: "prospect_first_name", value: candidate.prospect_first_name, allow_single_token: true, skip_if_untrusted: is_untrusted || skip_prospect_names },
+    { source: "prospect_display_name", value: candidate.prospect_display_name, allow_single_token: false, skip_if_untrusted: is_untrusted || skip_prospect_names },
     { source: "owner_first_name", value: candidate.owner_first_name, allow_single_token: true },
     { source: "owner_display_name", value: candidate.owner_display_name, allow_single_token: false },
     { source: "master_owner_first_name", value: candidate.master_owner_first_name, allow_single_token: true },
     { source: "master_owner_display_name", value: candidate.master_owner_display_name, allow_single_token: false },
-    { source: "seller_full_name", value: candidate.seller_full_name, allow_single_token: false },
-    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
-    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false },
+    { source: "seller_full_name", value: candidate.seller_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted },
+    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, skip_if_untrusted: is_untrusted || skip_prospect_names, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
+    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted || skip_prospect_names },
   ];
 
-  for (const { source, value, allow_single_token, guard } of sources) {
+  for (const { source, value, allow_single_token, guard, skip_if_untrusted } of sources) {
     if (!value) continue;
+    if (skip_if_untrusted) continue;
     if (guard && !guard()) continue;
     const first_name = extractFirstName(value, { allow_single_token });
     if (first_name) {
@@ -491,7 +501,38 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     freshness_score: asNumber(row.freshness_score, null),
     last_sms_at: row.last_sms_at || null,
     canonical_property_group: getCanonicalPropertyGroup(row.property_type),
+    // Identity alignment fields
+    likely_owner: asBoolean(pick(row.likely_owner), null),
+    likely_renting: asBoolean(pick(row.likely_renting), null),
+    matching_flags: clean(pick(row.matching_flags)),
+    person_flags_text: clean(pick(row.person_flags_text)),
+    owner_type_guess: clean(pick(row.owner_type_guess)),
+    phone_owner: clean(pick(row.phone_owner)),
+    prospect_cnam: clean(pick(row.prospect_cnam, row.cnam)),
+    prospect_full_name: clean(pick(row.prospect_full_name, row.prospect_display_name, row.full_name)),
+    linked_property_ids_text: clean(pick(row.linked_property_ids_text, row.property_ids_text)),
   };
+
+  // ── Identity Alignment Check ───────────────────────────────────────────
+  const identity_alignment = calculateOwnerProspectAlignment({
+    masterOwnerName: candidate.owner_display_name,
+    ownerDisplayName: candidate.owner_display_name,
+    ownerName: candidate.owner_display_name,
+    prospectFullName: candidate.prospect_full_name,
+    phoneFullName: candidate.phone_full_name,
+    phoneOwner: candidate.phone_owner,
+    cnam: candidate.prospect_cnam,
+    likelyOwner: candidate.likely_owner,
+    likelyRenting: candidate.likely_renting,
+    matchingFlags: candidate.matching_flags,
+    personFlagsText: candidate.person_flags_text,
+    bestPhoneScore: candidate.best_phone_score,
+    contactScoreFinal: candidate.contact_score_final,
+    linkedPropertyIdsText: candidate.linked_property_ids_text,
+    joinedPropertySource: candidate.joined_property_source
+  });
+  candidate.identity_alignment = identity_alignment;
+  // ─────────────────────────────────────────────────────────────────────────
 
   const seller_identity = resolveSellerIdentity(candidate);
   return {
@@ -2086,6 +2127,56 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
     return { ok: false, reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, reason: "pending_prior_touch" };
   }
 
+  // ── Identity Alignment Gate ─────────────────────────────────────────────
+  const identity_policy = isIdentityEligibleForLiveOutbound(candidate.identity_alignment, options);
+  
+  if (!identity_policy.eligible) {
+    if (identity_policy.reason === "identity_mismatch") {
+      logger.info("outbound_identity_guard_blocked", {
+        property_address: candidate.property_address_full,
+        master_owner_id: candidate.master_owner_id,
+        master_owner_name: candidate.owner_display_name,
+        prospect_id: candidate.primary_prospect_id,
+        prospect_full_name: candidate.prospect_full_name,
+        phone_id: candidate.phone_id,
+        phone: candidate.canonical_e164,
+        identity_alignment_status: candidate.identity_alignment.status,
+        identity_alignment_score: candidate.identity_alignment.score,
+        identity_alignment_reasons: candidate.identity_alignment.reasons
+      });
+
+      if (!options.dry_run) {
+        await quarantineIdentityMismatch(candidate, candidate.identity_alignment, deps);
+      }
+
+      return {
+        ok: false,
+        reason_code: REASON_CODES.IDENTITY_MISMATCH,
+        reason: "owner_prospect_identity_mismatch",
+        identity_alignment: candidate.identity_alignment
+      };
+    }
+
+    return {
+      ok: false,
+      reason_code: REASON_CODES.IDENTITY_NOT_VERIFIED,
+      reason: identity_policy.reason,
+      identity_alignment: candidate.identity_alignment
+    };
+  }
+
+  // ── Market Quarantine Gate ─────────────────────────────────────────────
+  const blockedMarkets = asArray(options.identity_blocked_markets || process.env.IDENTITY_BLOCKED_MARKETS);
+  if (blockedMarkets.length > 0 && blockedMarkets.includes(candidate.market)) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.MARKET_IDENTITY_QUARANTINE,
+      reason: "market_identity_quarantine",
+      market: candidate.market
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ── Long-term outreach state suppression ────────────────────────────────
   try {
     const outreach_suppression = await checkOutreachSuppression(
@@ -3100,6 +3191,22 @@ export function buildFeederDiagnostics(summary = {}) {
     no_template_count: Number(summary.no_template_count || 0),
     template_render_failed_count: Number(summary.template_render_failed_count || 0),
     hydration_failure_count: Number(summary.hydration_failure_count || 0),
+    identity_mismatch_count: Number(summary.identity_mismatch_count || 0),
+    identity_verified_count: Number(summary.identity_verified_count || 0),
+    identity_probable_count: Number(summary.identity_probable_count || 0),
+    identity_household_associated_count: Number(summary.identity_household_associated_count || 0),
+    identity_weak_count: Number(summary.identity_weak_count || 0),
+    identity_unknown_count: Number(summary.identity_unknown_count || 0),
+    identity_hard_block_count: Number(summary.identity_hard_block_count || 0),
+    identity_hold_count: Number(summary.identity_hold_count || 0),
+    identity_live_eligible_count: Number(summary.identity_live_eligible_count || 0),
+    identity_live_ineligible_count: Number(summary.identity_live_ineligible_count || 0),
+    identity_weak_held_count: Number(summary.identity_weak_held_count || 0),
+    identity_unknown_held_count: Number(summary.identity_unknown_held_count || 0),
+    identity_household_held_count: Number(summary.identity_household_held_count || 0),
+    identity_probable_allowed_count: Number(summary.identity_probable_allowed_count || 0),
+    identity_verified_allowed_count: Number(summary.identity_verified_allowed_count || 0),
+    identity_household_associated_allowed_count: Number(summary.identity_household_associated_allowed_count || 0),
     fresh_candidate_count: Number(summary.fresh_candidate_count || 0),
     exhausted_candidate_count: Number(summary.exhausted_candidate_count || 0),
     schedule_spread_enabled: Boolean(summary.schedule_spread_enabled),
@@ -3143,6 +3250,15 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const scan_limit = Math.max(limit, Math.min(asPositiveInteger(input.scan_limit ?? input.candidate_fetch_limit, 500), 5000));
   const candidate_offset = Math.max(0, Math.trunc(Number(input.candidate_offset ?? input.scan_offset ?? input.offset) || 0));
 
+  // ── Fetch Identity Policy Flags ───────────────────────────────────────
+  const allow_weak_identity_outbound = asBoolean(
+    input.allow_weak_identity_outbound ?? (await getSystemFlag("allow_weak_identity_outbound")),
+    asBoolean(process.env.ALLOW_WEAK_IDENTITY_OUTBOUND, false)
+  );
+
+  const identity_blocked_markets = input.identity_blocked_markets ?? (await getSystemFlag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
+  // ─────────────────────────────────────────────────────────────────────────
+
   const options = {
     dry_run: asBoolean(input.dry_run, false),
     limit,
@@ -3165,6 +3281,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     schedule_interval_seconds_min: asPositiveInteger(input.schedule_interval_seconds_min, 45),
     schedule_interval_seconds_max: asPositiveInteger(input.schedule_interval_seconds_max, 180),
     timezone_filter: clean(input.timezone_filter) || null,
+    allow_weak_identity_outbound,
+    identity_blocked_markets,
     now,
   };
 
@@ -3246,6 +3364,22 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     no_template_count: 0,
     template_render_failed_count: 0,
     hydration_failure_count: 0,
+    identity_mismatch_count: 0,
+    identity_verified_count: 0,
+    identity_probable_count: 0,
+    identity_household_associated_count: 0,
+    identity_weak_count: 0,
+    identity_unknown_count: 0,
+    identity_hard_block_count: 0,
+    identity_hold_count: 0,
+    identity_live_eligible_count: 0,
+    identity_live_ineligible_count: 0,
+    identity_weak_held_count: 0,
+    identity_unknown_held_count: 0,
+    identity_household_held_count: 0,
+    identity_probable_allowed_count: 0,
+    identity_verified_allowed_count: 0,
+    identity_household_associated_allowed_count: 0,
     fresh_candidate_count: 0,
     exhausted_candidate_count: 0,
     schedule_spread_enabled: use_spread,
@@ -3303,6 +3437,36 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       : {};
 
     const eligibility = await evaluateCandidateEligibility(candidate, options, deps);
+
+    // ── Identity Alignment Telemetry ──────────────────────────────────────────
+    const id_status = candidate.identity_alignment?.status;
+    const is_hard_blocked = Boolean(candidate.identity_alignment?.hardBlock);
+
+    if (id_status === "verified") summary.identity_verified_count += 1;
+    else if (id_status === "probable") summary.identity_probable_count += 1;
+    else if (id_status === "household_associated") summary.identity_household_associated_count += 1;
+    else if (id_status === "weak") summary.identity_weak_count += 1;
+    else if (id_status === "unknown") summary.identity_unknown_count += 1;
+    else if (id_status === "mismatch") summary.identity_mismatch_count += 1;
+
+    if (is_hard_blocked) {
+      summary.identity_hard_block_count += 1;
+    }
+
+    const identity_policy = isIdentityEligibleForLiveOutbound(candidate.identity_alignment, options);
+    if (identity_policy.eligible) {
+      summary.identity_live_eligible_count += 1;
+      if (id_status === "verified") summary.identity_verified_allowed_count += 1;
+      if (id_status === "probable") summary.identity_probable_allowed_count += 1;
+      if (id_status === "household_associated") summary.identity_household_associated_allowed_count += 1;
+    } else {
+      summary.identity_live_ineligible_count += 1;
+      if (id_status === "weak") summary.identity_weak_held_count += 1;
+      if (id_status === "unknown") summary.identity_unknown_held_count += 1;
+      if (id_status === "household_associated") summary.identity_household_held_count += 1;
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     if (!eligibility.ok) {
       summary.skipped_count += 1;
       const counter = mapReasonToDiagnosticCounter(eligibility.reason_code);

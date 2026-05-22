@@ -34,6 +34,25 @@ export const getBackendBaseUrl = (): string => {
     if (import.meta.env.DEV || hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
       // Return empty string to trigger relative path fetch (proxied by Vite)
       return ''
+  // Primary: VITE_BACKEND_API_URL
+  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
+
+  // Fallback 1: Legacy VITE_NEXUS_API_URL
+  if (!url) {
+    url = (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
+  }
+
+  // In production, never fall back to localhost — fail clearly if the env var is missing.
+  if (!url && import.meta.env.PROD) {
+    console.error('[BACKEND_API_URL_MISSING] VITE_BACKEND_API_URL must be set in production. Set it to https://real-estate-automation-three.vercel.app in your Vercel project env vars.')
+    return ''
+  }
+
+  // Dev-only localhost fallback
+  if (!url && typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      url = 'http://localhost:3000'
     }
   }
 
@@ -97,6 +116,17 @@ async function callBackend<T = unknown>(
 
   if (secret) {
     headers['x-ops-dashboard-secret'] = secret
+  }
+
+  // Attach Supabase session JWT for future API-side JWT validation.
+  try {
+    const { getAuthClient } = await import('../auth/supabaseAuth')
+    const { data } = await getAuthClient().auth.getSession()
+    if (data.session?.access_token) {
+      headers['Authorization'] = `Bearer ${data.session.access_token}`
+    }
+  } catch {
+    // Auth client not available — ops secret alone is used.
   }
 
   const url = `${base}${path}`
