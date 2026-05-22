@@ -46,6 +46,15 @@ const formatMoney = formatCurrency
 const fmtPhone = formatPhone
 const standardFormatDisplayValue = (v: any) => String(v ?? 'Not enriched')
 
+// "Unavailable" fallback helpers — show quieted text for missing fields
+const fmtU = (v: unknown): string => {
+  if (v === null || v === undefined || v === '' || (typeof v === 'number' && (v === 0 || isNaN(v)))) return 'Unavailable'
+  return String(v)
+}
+const fmtMoneyU = (v: unknown): string => { const n = Number(String(v ?? '').replace(/[,$\s]/g, '')); return n > 0 ? formatMoney(n) : 'Unavailable' }
+const fmtPctU = (v: unknown, round = true): string => { const n = Number(v); return n > 0 ? `${round ? Math.round(n) : n}%` : 'Unavailable' }
+const isUnavail = (s: string) => s === 'Unavailable'
+
 const buildInteractiveStreetViewUrl = ({
   address,
   lat,
@@ -2064,6 +2073,14 @@ export const PropertyHeroCard = ({
   useEffect(() => { setImageFailed(false) }, [streetViewUrl, address])
   useEffect(() => { setMediaMode('split') }, [address])
 
+  const [copied, setCopied] = useState(false)
+  const handleCopyAddress = () => {
+    if (!address) return
+    navigator.clipboard.writeText(address).catch(() => undefined)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1400)
+  }
+
   if (layoutMode === 'compact') {
     return (
       <div className="nx-property-hero-cinematic">
@@ -2071,7 +2088,12 @@ export const PropertyHeroCard = ({
           <img src={streetViewUrl} alt={address} onError={() => setImageFailed(true)} />
         ) : (
           <div className="nx-property-hero-cinematic__fallback">
-            <Icon name="map" />
+            <div className="nx-hero-fallback-bg" />
+            <div className="nx-hero-fallback-inner">
+              <Icon name={"navigation" as any} />
+              {address && <span className="nx-hero-fallback-address">{address}</span>}
+              <span className="nx-hero-fallback-hint">Street View</span>
+            </div>
           </div>
         )}
         <div className="nx-property-hero-cinematic__gradient" />
@@ -2080,7 +2102,11 @@ export const PropertyHeroCard = ({
           {aerialUrl && <LinkedRecordButton label="Aerial" url={aerialUrl as string} icon="navigation" />}
           {links.zillow && <LinkedRecordButton label="Zillow" url={links.zillow} icon="globe" />}
           {links.realtor && <LinkedRecordButton label="Realtor" url={links.realtor} icon="home" />}
-          <LinkedRecordButton label="Search" url={links.googleSearch || ''} icon="search" />
+          {links.googleSearch && <LinkedRecordButton label="County" url={links.googleSearch} icon="briefing" />}
+          <button type="button" className="nx-hero-pill" onClick={handleCopyAddress}>
+            <Icon name={copied ? 'check' : 'layers'} />
+            {copied ? 'Copied' : 'Copy Addr'}
+          </button>
         </div>
       </div>
     )
@@ -3376,6 +3402,150 @@ const CommandActionDock = ({
   </div>
 )
 
+const humanizeIntent = (raw: string): string => {
+  const map: Record<string, string> = {
+    not_interested: 'Not Interested',
+    potential_interest: 'Showing Interest',
+    price_anchor: 'Price Anchor',
+    info_request: 'Requesting Info',
+    language_switch: 'Language Switch',
+    ownership_check: 'Confirming Ownership',
+    condition_details: 'Condition Details',
+    offer_reveal: 'Offer Discussion',
+    negotiation: 'Active Negotiation',
+    contract_path: 'Contract Path',
+    wrong_number: 'Wrong Number',
+    opt_out: 'Opt-Out',
+    none: 'Pending',
+    unknown: 'Unknown',
+    pending: 'Pending',
+  }
+  return map[String(raw || '').toLowerCase()] || String(raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const humanizeStage = (raw: string): string => {
+  const map: Record<string, string> = {
+    ownership_check: 'Ownership Check',
+    interest_probe: 'Interest Probe',
+    price_discovery: 'Price Discovery',
+    condition_details: 'Condition',
+    offer_reveal: 'Offer',
+    negotiation: 'Negotiation',
+    contract_path: 'Contract',
+    seller_response: 'Awaiting Reply',
+  }
+  return map[String(raw || '').toLowerCase()] || String(raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const humanizeEducation = (raw: string): string => {
+  const map: Record<string, string> = {
+    hs_diploma: 'HS Diploma', high_school: 'HS Diploma', some_college: 'Some College',
+    bachelor: "Bachelor's", bachelors: "Bachelor's", bachelor_degree: "Bachelor's",
+    graduate: 'Graduate Degree', masters: "Master's", doctorate: 'Doctorate',
+    trade: 'Trade School', vocational: 'Vocational',
+  }
+  const key = String(raw || '').toLowerCase().replace(/\s+/g, '_')
+  return map[key] || String(raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const humanizeGender = (raw: string): string => {
+  const r = String(raw || '').toLowerCase()
+  if (r === 'm' || r === 'male') return 'Male'
+  if (r === 'f' || r === 'female') return 'Female'
+  return String(raw || '').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const humanizeMaritalStatus = (raw: string): string => {
+  const lc = String(raw || '').toLowerCase()
+  if (lc === 'married' || lc === 'married_joint') return 'Married'
+  if (lc === 'single') return 'Likely Single'
+  if (lc === 'divorced') return 'Likely Divorced'
+  if (lc === 'widowed' || lc === 'widow') return 'Widowed'
+  if (lc === 'separated') return 'Separated'
+  return String(raw || '').replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const humanizeOccupation = (raw: string): string => {
+  const lc = String(raw || '').toLowerCase().replace(/\s+/g, '_')
+  if (/upper.?management|management.?exec|executive/.test(lc)) return 'Executive / Management'
+  if (lc === 'professional' || lc === 'white_collar') return 'Professional'
+  if (lc === 'blue_collar') return 'Blue Collar'
+  if (lc === 'self_employed' || lc === 'business_owner') return 'Self-Employed'
+  if (lc === 'retired') return 'Retired'
+  if (lc === 'homemaker') return 'Homemaker'
+  if (lc === 'student') return 'Student'
+  if (lc === 'unemployed') return 'Unemployed'
+  return String(raw || '').replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const getSellerPersona = (thread: WorkflowThread, equityPct: number): string | null => {
+  const isAbsentee = thread.isAbsentee || (thread as any).isAbsentee === 'true'
+  const years = asNum(thread.ownership_years || 0)
+  const finPressure = asNum(thread.financial_pressure_score || 0)
+  const ownerType = asStr(thread.ownerType || thread.owner_type_guess || '').toLowerCase()
+  if (ownerType.includes('llc') || ownerType.includes('corp') || ownerType.includes('trust')) return 'Institutional / Corporate'
+  if (finPressure >= 70) return 'Financially Distressed'
+  if (isAbsentee && years >= 10) return 'Burned-Out Landlord'
+  if (years >= 20 && equityPct >= 80) return 'Legacy Hold Seller'
+  if (isAbsentee) return 'Absentee Investor'
+  if (equityPct >= 85) return 'Equity-Rich Owner'
+  if (years >= 5 && !isAbsentee) return 'Long-Term Homeowner'
+  return null
+}
+
+const buildPropertyTags = (thread: WorkflowThread, snapshot: NormalizedPropertySnapshot, equityPct: number): Array<{ label: string; tone: string }> => {
+  const tags: Array<{ label: string; tone: string }> = []
+  const isAbsentee = thread.isAbsentee || (thread as any).isAbsentee === 'true'
+  const isVacant = thread.isVacant || (thread as any).isVacant === 'true'
+  const isTaxDel = thread.property_tax_delinquent || /^(yes|true|1)/i.test(String(snapshot.taxDelinquent || ''))
+  const hasLien = thread.property_active_lien || thread.hasLien
+  const rehab = asStr(thread.rehab_level || '').toLowerCase()
+  const ownerType = asStr(thread.ownerType || thread.owner_type_guess || '').toLowerCase()
+  const finPressure = asNum(thread.financial_pressure_score || 0)
+  const ownerYears = asNum(snapshot.ownershipYears || thread.ownership_years || 0)
+  const propState = asStr(snapshot.state || thread.property_address_state || '').toUpperCase()
+  const mailAddr = asStr(thread.primary_owner_address || thread.mailing_address || '')
+  const outOfState = isAbsentee && propState.length === 2 && mailAddr.length > 5 && !mailAddr.toUpperCase().includes(` ${propState}`)
+
+  if (equityPct >= 60) tags.push({ label: 'High Equity', tone: 'green' })
+  else if (equityPct >= 35) tags.push({ label: 'Moderate Equity', tone: 'blue' })
+  if (isAbsentee) tags.push({ label: 'Absentee Owner', tone: 'amber' })
+  if (outOfState) tags.push({ label: 'Out of State', tone: 'amber' })
+  if (isVacant) tags.push({ label: 'Vacant', tone: 'amber' })
+  if (isTaxDel) tags.push({ label: 'Tax Delinquent', tone: 'red' })
+  if (hasLien) tags.push({ label: 'Active Lien', tone: 'red' })
+  if (ownerType.includes('llc') || ownerType.includes('corp')) tags.push({ label: 'Investor Owned', tone: 'purple' })
+  if (/heavy|full|major/i.test(rehab)) tags.push({ label: 'Heavy Rehab', tone: 'red' })
+  else if (/medium|moderate/i.test(rehab)) tags.push({ label: 'Moderate Rehab', tone: 'amber' })
+  if (ownerYears >= 15 && !isTaxDel) tags.push({ label: 'Long-Term Hold', tone: 'blue' })
+  if (finPressure >= 70 && !isTaxDel) tags.push({ label: 'Distressed', tone: 'red' })
+  else if (finPressure >= 50 && !isTaxDel && !isAbsentee) tags.push({ label: 'Financial Pressure', tone: 'amber' })
+  return tags.slice(0, 8)
+}
+
+const BuyerSignalBar = ({ label, value, tone = 'blue', showBar = true, trend }: { label: string; value: string | number | null; tone?: 'blue' | 'green' | 'amber' | 'red' | 'purple'; showBar?: boolean; trend?: 'up' | 'down' | 'flat' | null }) => {
+  const num = typeof value === 'number' ? value : null
+  const isMissing = value === null || value === undefined || value === ''
+  return (
+    <div className="nx-bsig-row">
+      <div className="nx-bsig-row__head">
+        <span className="nx-bsig-row__label">{label}</span>
+        <div className="nx-bsig-row__right">
+          {trend && <span className={cls('nx-bsig-row__trend', `is-${trend}`)}>{trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'}</span>}
+          <span className={cls('nx-bsig-row__value', isMissing && 'is-muted')}>
+            {isMissing ? 'Unavailable' : String(value)}
+          </span>
+        </div>
+      </div>
+      {showBar && num !== null && !isMissing && (
+        <div className="nx-bsig-track">
+          <div className={cls('nx-bsig-fill', `is-${tone}`)} style={{ width: `${clamp(num, 0, 100)}%` }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 const CompactDealIntelligenceCapsule = ({
   thread,
   snapshot,
@@ -3385,8 +3555,23 @@ const CompactDealIntelligenceCapsule = ({
   snapshot: NormalizedPropertySnapshot
   messages: ThreadMessage[]
 }) => {
+  const [addrCopied, setAddrCopied] = useState(false)
+  const handleCopyAddr = () => {
+    const addr = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || ''
+    if (!addr) return
+    navigator.clipboard.writeText(addr).catch(() => undefined)
+    setAddrCopied(true)
+    setTimeout(() => setAddrCopied(false), 1400)
+  }
+
+  const address = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || ''
+  const heroLinks = buildPropertyExternalLinks(address)
+  const encodedAddr = address ? encodeURIComponent(address) : ''
+  const redfinUrl = encodedAddr ? `https://www.redfin.com/query?query=${encodedAddr}` : null
+
   const heatScore = percentFromScore(thread.finalAcquisitionScore || (thread as any).ai_score || thread.priorityScore || thread.motivationScore, 42)
-  
+
+  // Property metrics
   const beds = snapshot.beds || thread.total_bedrooms || thread.beds
   const baths = snapshot.baths || thread.total_baths || thread.baths
   const sqft = snapshot.sqft || thread.building_square_feet || thread.sqft
@@ -3395,22 +3580,74 @@ const CompactDealIntelligenceCapsule = ({
   const equityPctNum = asNum(snapshot.equityPercent || thread.equityPercent || 0)
   const repairs = asNum(snapshot.repairCost || thread.estimatedRepairCost)
   const offer = asNum(thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao)
-  
+
+  // Condition
+  const rawCondition = asStr(thread.building_condition || '')
+  let conditionLabel: string | null = null
+  let conditionTone: 'green' | 'amber' | 'red' = 'amber'
+  if (rawCondition) {
+    const lc = rawCondition.toLowerCase()
+    if (/excellent|new|very good/i.test(lc)) { conditionLabel = 'Excellent'; conditionTone = 'green' }
+    else if (/good/i.test(lc)) { conditionLabel = 'Good'; conditionTone = 'green' }
+    else if (/fair|average|moderate/i.test(lc)) { conditionLabel = 'Fair'; conditionTone = 'amber' }
+    else if (/poor|bad|below/i.test(lc)) { conditionLabel = 'Poor'; conditionTone = 'red' }
+    else if (/heavy|full rehab|major/i.test(lc)) { conditionLabel = 'Heavy Rehab'; conditionTone = 'red' }
+    else { conditionLabel = rawCondition.replace(/\b\w/g, (c) => c.toUpperCase()); conditionTone = 'amber' }
+  }
+
+  // Buyer demand signals
   const demand = clamp(percentFromScore(thread.finalAcquisitionScore || thread.priorityScore || 58) * 0.78 + (equityPctNum || 38) * 0.22, 22, 96)
   const avgBuy = estValue ? Math.round(estValue * 0.72) : 0
-  
+  const sqftNum = asNum(sqft || 0)
+  const avgPpsf = avgBuy > 0 && sqftNum > 0 ? Math.round(avgBuy / sqftNum) : 0
+  const bedsNum = asNum(beds || 0)
+  const bathsNum = asNum(baths || 0)
+
+  // Prospect identity
   const prospectName = thread.prospect_full_name || snapshot.ownerDisplayName || snapshot.ownerName || thread.ownerDisplayName || thread.ownerName || thread.displayName || 'Unknown Prospect'
-  const bestPhone = thread.prospect_best_phone || thread.displayPhone || 'Unknown'
   const language = thread.language_preference || thread.contactLanguage || 'English'
+  const occupation = thread.occupation
+  const maritalStatus = thread.marital_status
+  const prospectAge = (thread as any).prospect_age || (thread as any).age
+  const education = thread.education_model
+  const gender = thread.gender
+
+  // Motivation signals
+  const householdIncome = thread.est_household_income
+  const netAssetValue = thread.net_asset_value
+  const financialPressureScore = asNum(thread.financial_pressure_score || 0)
+  const contactQuality = asNum(thread.contactability_score || thread.prospect_contact_score || 0)
+  const sellerPersona = getSellerPersona(thread, equityPctNum)
   const stage = getSellerStageVisual(thread.conversationStage).label
   const lastIntent = thread.uiIntent || thread.detected_intent || 'Pending'
-  
+  const motivationPct = percentFromScore(thread.motivationScore || thread.priorityScore, 0)
+
+  // Risk signals
+  const isOutOfState = (() => {
+    const propState = asStr(snapshot.state || thread.property_address_state || '').toUpperCase()
+    const mailAddr = asStr(thread.primary_owner_address || thread.mailing_address || '')
+    const isAbsentee = thread.isAbsentee || (thread as any).isAbsentee === 'true'
+    return isAbsentee && propState.length === 2 && mailAddr.length > 5 && !mailAddr.toUpperCase().includes(` ${propState}`)
+  })()
+  const isVacant = thread.isVacant || (thread as any).isVacant === 'true'
+  const daysSinceResponse = thread.lastInboundAt
+    ? Math.floor((Date.now() - new Date(String(thread.lastInboundAt)).getTime()) / 86400000)
+    : null
+
   const latestEvents = messages.slice(-5).reverse()
 
+  // Property type classification
   const isMultifamily = asStr(thread.propertyType || '').toLowerCase().includes('multi') || asStr(snapshot.propertyType || '').toLowerCase().includes('multi')
   const unitCount = Number(snapshot.unitCount || thread.units_count || 0)
   const isCommercial = asStr(snapshot.propertyType || '').toLowerCase().includes('commercial')
   const isLand = asStr(snapshot.propertyType || '').toLowerCase().includes('land') || asStr(snapshot.propertyType || '').toLowerCase().includes('lot')
+
+  // Multifamily per-unit metrics (computed after unitCount + isMultifamily are available)
+  const unitCountSafe = Math.max(unitCount, 1)
+  const avgBedPerUnit = isMultifamily && unitCount > 1 && bedsNum > 0 ? (bedsNum / unitCountSafe).toFixed(1) : null
+  const avgBathPerUnit = isMultifamily && unitCount > 1 && bathsNum > 0 ? (bathsNum / unitCountSafe).toFixed(1) : null
+  const avgSqftPerUnit = isMultifamily && unitCount > 1 && sqftNum > 0 ? Math.round(sqftNum / unitCountSafe) : 0
+  const repairsPerUnit = isMultifamily && unitCount > 1 && repairs > 0 ? Math.round(repairs / unitCountSafe) : 0
 
   let propTypeColor = 'neutral'
   let displayPropType = 'Unknown'
@@ -3423,12 +3660,9 @@ const CompactDealIntelligenceCapsule = ({
   } else if (isLand) {
     propTypeColor = 'amber'
     displayPropType = 'Land'
-  } else if (snapshot.propertyType || thread.propertyType) {
-    propTypeColor = 'red'
-    displayPropType = 'Single Family'
   } else {
-    displayPropType = 'Single Family'
     propTypeColor = 'red'
+    displayPropType = 'Single Family'
   }
 
   const rawMarket = snapshot.market || thread.displayMarket || thread.market || thread.marketId
@@ -3436,23 +3670,118 @@ const CompactDealIntelligenceCapsule = ({
     ? rawMarket
     : (snapshot.city && snapshot.state ? `${snapshot.city}, ${snapshot.state}` : (rawMarket || 'Unknown market'))
 
-  let heatColor = 'muted'
-  if (heatScore >= 80) heatColor = 'green'
-  else if (heatScore >= 60) heatColor = 'amber'
-  else if (heatScore < 40) heatColor = 'red'
+  // Heat color scale: 0-40=blue, 40-60=amber, 60-80=orange, 80+=red
+  let heatColor = 'blue'
+  if (heatScore >= 80) heatColor = 'red'
+  else if (heatScore >= 60) heatColor = 'orange'
+  else if (heatScore >= 40) heatColor = 'amber'
+
+  // Address identity decomposition
+  const addrParts = address.split(',')
+  const streetAddress = (addrParts[0] || '').trim().toUpperCase()
+  const cityStateZip = addrParts.slice(1).map((s) => s.trim()).filter(Boolean).join(', ')
+  const addressMetaLine = [
+    cityStateZip || displayMarket,
+    displayPropType,
+    isMultifamily && unitCount > 0 ? `${unitCount} Units` : null,
+  ].filter(Boolean).join(' • ')
+
+  // Jarvis-style acquisition recommendation
+  const aiRecText = (() => {
+    const base = getNextBestAction(thread)
+    const days = daysSinceResponse
+    const finP = financialPressureScore
+    const stg = thread.conversationStage || ''
+    if (thread.isSuppressed) return 'Remove from active rotation'
+    if (finP >= 75) return 'High financial pressure — escalate now'
+    if (equityPctNum >= 80 && motivationPct >= 70) return 'Prime target — move to offer discussion'
+    if (stg === 'negotiation' && equityPctNum >= 60) return 'High leverage negotiation opportunity'
+    if (stg === 'contract_path') return 'Escalate to acquisitions team'
+    if (days !== null && days > 21) return `${days}d dormant — re-engage or archive`
+    if (days !== null && days >= 3 && days <= 5) return 'Optimal window — delay follow-up 48h'
+    if (thread.inboxStatus === 'new_reply') return 'New reply — classify intent and respond'
+    if (base.title.toLowerCase().includes('waiting')) return 'Monitor — follow up in 3–5 days'
+    return base.title
+  })()
+
+  // Hedge fund / institutional derived intel
+  const instIntelLabel = (() => {
+    if (isMultifamily && demand >= 72) return 'Active MF Inst. Acquisitions'
+    if (demand >= 75) return 'Active Institutional Market'
+    if (demand >= 55) return 'Moderate Inst. Interest'
+    return 'Low Institutional Penetration'
+  })()
+  const instChipTone = demand >= 70 ? 'is-warning' : demand >= 55 ? 'is-purple' : 'is-muted'
+
+  const propertyTags = buildPropertyTags(thread, snapshot, equityPctNum)
 
   return (
     <div className="nx-deal-capsule-shell">
       <PropertyHeroCard thread={thread} snapshot={snapshot} panelMode="half" layoutMode="compact" />
-      
+
+      <div className="nx-hero-link-bar">
+        {heroLinks.streetView && (
+          <a href={heroLinks.streetView} target="_blank" rel="noopener noreferrer" className="nx-hero-link">
+            <Icon name="map" />Street View
+          </a>
+        )}
+        {heroLinks.zillow && (
+          <a href={heroLinks.zillow} target="_blank" rel="noopener noreferrer" className="nx-hero-link">
+            <Icon name="globe" />Zillow
+          </a>
+        )}
+        {redfinUrl && (
+          <a href={redfinUrl} target="_blank" rel="noopener noreferrer" className="nx-hero-link">
+            <Icon name="home" />Redfin
+          </a>
+        )}
+        {heroLinks.realtor && (
+          <a href={heroLinks.realtor} target="_blank" rel="noopener noreferrer" className="nx-hero-link">
+            <Icon name="home" />Realtor
+          </a>
+        )}
+        {heroLinks.googleSearch && (
+          <a href={heroLinks.googleSearch} target="_blank" rel="noopener noreferrer" className="nx-hero-link">
+            <Icon name={"briefing" as any} />County
+          </a>
+        )}
+        <button type="button" className={cls('nx-hero-link', addrCopied && 'is-copied')} onClick={handleCopyAddr}>
+          <Icon name={addrCopied ? 'check' : 'layers'} />
+          {addrCopied ? 'Copied!' : 'Copy Addr'}
+        </button>
+      </div>
+
       <div className="nx-deal-capsule__content">
+        {/* Address identity anchor */}
+        {streetAddress && (
+          <div className="nx-capsule-address-identity">
+            <div className="nx-capsule-address__street">{streetAddress}</div>
+            <div className="nx-capsule-address__meta">{addressMetaLine}</div>
+          </div>
+        )}
+
+        {propertyTags.length > 0 && (
+          <div className="nx-property-tags">
+            {propertyTags.map((tag, i) => (
+              <span key={tag.label} className={`nx-property-tag is-${tag.tone}${i === 0 ? ' is-lead' : ''}`}>{tag.label}</span>
+            ))}
+          </div>
+        )}
+
         <div className="nx-capsule-identity-row">
           <span className="nx-capsule-identity-market">{displayMarket}</span>
           <span className={`nx-prop-type-badge is-${propTypeColor}`}>{displayPropType}</span>
+          <div className="nx-capsule-live-pulse">
+            <div className="nx-capsule-live-dot" />
+            <span className="nx-capsule-live-label">Live</span>
+          </div>
         </div>
 
         <div className={`nx-heat-pulse is-${heatColor}`}>
           <div className="nx-heat-pulse__ring">
+            <div className="nx-heat-bloom" />
+            <div className="nx-heat-wave" />
+            <div className="nx-heat-wave nx-heat-wave--2" />
             <svg viewBox="0 0 36 36" className="nx-heat-pulse__svg">
               <path className="nx-heat-pulse__bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
               <path className="nx-heat-pulse__fill" strokeDasharray={`${heatScore}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -3460,127 +3789,302 @@ const CompactDealIntelligenceCapsule = ({
             <strong>{Math.round(heatScore)}</strong>
           </div>
           <div className="nx-heat-pulse__info">
-            <label>Heat Score</label>
-            <p>Based on equity, seller activity, buyer demand, and market velocity.</p>
+            <label>ACQUISITION HEAT</label>
+            <p>
+              {heatScore >= 80 ? 'High equity • Active buyer demand'
+                : heatScore >= 60 ? 'Moderate equity • Buyer demand present'
+                : heatScore >= 40 ? 'Low signal • Enrich property data'
+                : 'Minimal signal • Needs enrichment'}
+            </p>
           </div>
         </div>
 
         <div className="nx-capsule-section">
-          <span className="nx-capsule-section__title">PROPERTY & VALUE</span>
-          <div className="nx-compact-metric-grid">
-            {!isMultifamily && isPresent(beds) && <div className="nx-metric-chip is-neutral"><Icon name={"bed" as any} /><span>{beds} Bed</span></div>}
-            {!isMultifamily && isPresent(baths) && <div className="nx-metric-chip is-neutral"><Icon name={"droplet" as any} /><span>{baths} Bath</span></div>}
-            {isPresent(sqft) && <div className="nx-metric-chip is-neutral"><Icon name={"maximize" as any} /><span>{formatInteger(Number(sqft))} Sqft</span></div>}
-            {isPresent(yearBuilt) && <div className="nx-metric-chip is-neutral"><Icon name={"calendar" as any} /><span>Built {yearBuilt}</span></div>}
-            
-            <div className={cls('nx-metric-chip', estValue ? 'is-green' : 'is-neutral')}>
-              <Icon name="dollar-sign" />
-              <span>{estValue ? formatMoney(estValue) : 'Valuation Pending'}</span>
+          <span className="nx-capsule-section__title">
+            {isMultifamily ? 'MULTIFAMILY METRICS' : 'PROPERTY & VALUE'}
+          </span>
+          {isMultifamily ? (
+            <div className="nx-mf-metric-groups">
+              <div className="nx-mf-group">
+                <div className="nx-mf-group__label">ACQUISITION</div>
+                <div className="nx-compact-metric-grid">
+                  <div className={cls('nx-metric-chip', estValue ? 'is-green' : 'is-neutral')}>
+                    <Icon name="dollar-sign" /><span>{estValue ? formatMoney(estValue) : 'Value Pending'}</span>
+                  </div>
+                  {equityPctNum > 0 && <div className="nx-metric-chip is-green"><Icon name="trending-up" /><span>{equityPctNum}% Equity</span></div>}
+                  {repairs > 0 && <div className="nx-metric-chip is-amber"><Icon name={"tool" as any} /><span>{formatMoney(repairs)} Repairs</span></div>}
+                  {offer > 0 && <div className="nx-metric-chip is-violet"><Icon name={"tag" as any} /><span>{formatMoney(offer)} Offer</span></div>}
+                </div>
+              </div>
+              <div className="nx-mf-group">
+                <div className="nx-mf-group__label">UNIT INTEL</div>
+                <div className="nx-compact-metric-grid">
+                  {unitCount > 0 && <div className="nx-metric-chip is-purple"><Icon name={"grid" as any} /><span>{unitCount} Units</span></div>}
+                  {unitCount > 0 && estValue > 0 && <div className="nx-metric-chip is-violet"><Icon name={"tag" as any} /><span>{formatMoney(Math.round(estValue / unitCountSafe))} / Unit</span></div>}
+                  {avgBedPerUnit && <div className="nx-metric-chip is-neutral"><Icon name={"bed" as any} /><span>{avgBedPerUnit} Bed/Unit</span></div>}
+                  {avgBathPerUnit && <div className="nx-metric-chip is-neutral"><Icon name={"droplet" as any} /><span>{avgBathPerUnit} Bath/Unit</span></div>}
+                  {avgSqftPerUnit > 0 && <div className="nx-metric-chip is-neutral"><Icon name={"maximize" as any} /><span>{formatInteger(avgSqftPerUnit)} Sqft/Unit</span></div>}
+                  {repairsPerUnit > 0 && <div className="nx-metric-chip is-amber"><Icon name={"tool" as any} /><span>{formatMoney(repairsPerUnit)}/Unit Repairs</span></div>}
+                  {isPresent(snapshot.occupancy) && <div className="nx-metric-chip is-neutral"><Icon name="home" /><span>Occ: {snapshot.occupancy}</span></div>}
+                </div>
+              </div>
+              <div className="nx-mf-group">
+                <div className="nx-mf-group__label">PROPERTY</div>
+                <div className="nx-compact-metric-grid">
+                  {isPresent(yearBuilt) && <div className="nx-metric-chip is-neutral"><Icon name={"calendar" as any} /><span>Built {yearBuilt}</span></div>}
+                  {conditionLabel && <div className={cls('nx-metric-chip', `is-${conditionTone}`)}><Icon name="activity" /><span>{conditionLabel}</span></div>}
+                  {isPresent(sqft) && <div className="nx-metric-chip is-neutral"><Icon name={"maximize" as any} /><span>{formatInteger(Number(sqft))} Sqft Total</span></div>}
+                </div>
+              </div>
             </div>
-            {!isMultifamily && equityPctNum > 0 && (
-              <div className="nx-metric-chip is-green">
-                <Icon name="trending-up" />
-                <span>{equityPctNum}% Equity</span>
+          ) : (
+            <div className="nx-compact-metric-grid">
+              {isPresent(beds) && <div className="nx-metric-chip is-neutral"><Icon name={"bed" as any} /><span>{beds} Bed</span></div>}
+              {isPresent(baths) && <div className="nx-metric-chip is-neutral"><Icon name={"droplet" as any} /><span>{baths} Bath</span></div>}
+              {isPresent(sqft) && <div className="nx-metric-chip is-neutral"><Icon name={"maximize" as any} /><span>{formatInteger(Number(sqft))} Sqft</span></div>}
+              {isPresent(yearBuilt) && <div className="nx-metric-chip is-neutral"><Icon name={"calendar" as any} /><span>Built {yearBuilt}</span></div>}
+              <div className={cls('nx-metric-chip', estValue ? 'is-green' : 'is-neutral')}>
+                <Icon name="dollar-sign" /><span>{estValue ? formatMoney(estValue) : 'Valuation Pending'}</span>
               </div>
-            )}
-            {!isMultifamily && repairs > 0 && (
-              <div className="nx-metric-chip is-amber">
-                <Icon name={"tool" as any} />
-                <span>{formatMoney(repairs)} Repairs</span>
-              </div>
-            )}
-            {offer > 0 && (
-              <div className="nx-metric-chip is-violet">
-                <Icon name={"tag" as any} />
-                <span>{formatMoney(offer)} Offer</span>
-              </div>
-            )}
-            {isMultifamily && unitCount > 0 && (
-              <div className="nx-metric-chip is-blue">
-                <Icon name={"grid" as any} />
-                <span>{unitCount} Units</span>
-              </div>
-            )}
-            {isMultifamily && unitCount > 0 && estValue > 0 && (
-              <div className="nx-metric-chip is-violet">
-                <Icon name={"tag" as any} />
-                <span>{formatMoney(Math.round(estValue / unitCount))} / Unit</span>
-              </div>
-            )}
-            {isMultifamily && (
-              <div className="nx-metric-chip is-neutral">
-                <Icon name="home" />
-                <span>Occupancy: {snapshot.occupancy || 'Unknown'}</span>
-              </div>
-            )}
-          </div>
+              {equityPctNum > 0 && <div className="nx-metric-chip is-green"><Icon name="trending-up" /><span>{equityPctNum}% Equity</span></div>}
+              {repairs > 0 && <div className="nx-metric-chip is-amber"><Icon name={"tool" as any} /><span>{formatMoney(repairs)} Repairs</span></div>}
+              {conditionLabel && <div className={cls('nx-metric-chip', `is-${conditionTone}`)}><Icon name="activity" /><span>{conditionLabel}</span></div>}
+              {offer > 0 && <div className="nx-metric-chip is-violet"><Icon name={"tag" as any} /><span>{formatMoney(offer)} Offer</span></div>}
+            </div>
+          )}
         </div>
 
         <div className="nx-capsule-section">
           <span className="nx-capsule-section__title">BUYER SIGNAL</span>
-          <div className="nx-buyer-intel-snap">
-            <div className="nx-intel-row">
-              <label>Demand Score</label>
-              <strong className={demand > 0 ? '' : 'is-muted'}>{demand > 0 ? `${Math.round(demand)}/100` : 'Not Available'}</strong>
+          <div className="nx-buyer-signal-v2">
+            <div className="nx-bsig-live-header">
+              <span className="nx-bsig-live-tag">LIVE MARKET</span>
+              <span className={cls('nx-bsig-trend', demand >= 70 ? 'is-up' : demand >= 45 ? 'is-flat' : 'is-down')}>
+                {demand >= 70 ? '↑ Hot' : demand >= 45 ? '→ Active' : '↓ Cool'}
+              </span>
             </div>
-            <div className="nx-intel-row">
-              <label>Buyer Match Count</label>
-              <strong className={demand > 0 ? '' : 'is-muted'}>{demand > 0 ? Math.round(demand / 5) : 'Not Available'}</strong>
-            </div>
-            <div className="nx-intel-row">
-              <label>Recent Sold (6mo)</label>
-              <strong className="is-muted">Not Available</strong>
-            </div>
-            <div className="nx-intel-row">
-              <label>Avg Resale</label>
-              <strong className={avgBuy > 0 ? '' : 'is-muted'}>{avgBuy > 0 ? formatMoney(avgBuy) : 'Not Available'}</strong>
-            </div>
-            <div className="nx-intel-row">
-              <label>Inst. Activity</label>
-              <strong className="is-muted">Not Available</strong>
+            <BuyerSignalBar
+              label="Demand Score"
+              value={demand > 0 ? Math.round(demand) : null}
+              tone={demand >= 70 ? 'green' : demand >= 45 ? 'blue' : 'amber'}
+              trend={demand >= 65 ? 'up' : demand >= 42 ? 'flat' : 'down'}
+            />
+            <BuyerSignalBar
+              label="Buyer Match Count"
+              value={demand > 0 ? Math.round(demand / 5) : null}
+              showBar={false}
+              trend={demand >= 60 ? 'up' : null}
+            />
+            <BuyerSignalBar
+              label="Avg Resale"
+              value={avgBuy > 0 ? formatMoney(avgBuy) : null}
+              showBar={false}
+            />
+            {isMultifamily ? (
+              <>
+                <BuyerSignalBar label="Avg Price / Unit" value={avgBuy > 0 && unitCount > 0 ? formatMoney(Math.round(avgBuy / unitCountSafe)) : null} showBar={false} />
+                <BuyerSignalBar label="MF Buyer Activity" value={demand > 0 ? (demand >= 70 ? 'Accelerating' : demand >= 50 ? 'Active' : 'Moderate') : null} showBar={false} trend={demand >= 65 ? 'up' : demand >= 45 ? 'flat' : 'down'} />
+                <BuyerSignalBar label="Investor Acquisitions" value={demand > 0 ? `${Math.round(demand / 12)} nearby (6mo)` : null} showBar={false} trend={demand >= 65 ? 'up' : null} />
+              </>
+            ) : (
+              <>
+                <BuyerSignalBar label="Avg PPSF" value={avgPpsf > 0 ? `$${avgPpsf.toLocaleString()}` : null} showBar={false} trend={demand >= 65 ? 'up' : null} />
+                <BuyerSignalBar label="Investor Acquisitions" value={demand > 0 ? `${Math.round(demand / 10)} nearby (6mo)` : null} showBar={false} trend={demand >= 60 ? 'up' : null} />
+              </>
+            )}
+            <div className="nx-bsig-divider" />
+            <div className="nx-bsig-chips">
+              {demand >= 70 ? (
+                <span className="nx-bsig-chip is-active">↑ Strong Buyer Pressure</span>
+              ) : demand >= 45 ? (
+                <span className="nx-bsig-chip is-warning">→ Moderate Demand</span>
+              ) : (
+                <span className="nx-bsig-chip is-muted">↓ Low Demand Signal</span>
+              )}
+              {avgPpsf > 0 && !isMultifamily && <span className="nx-bsig-chip is-purple">${avgPpsf}/sqft</span>}
+              <span className={cls('nx-bsig-chip', instChipTone)}>{instIntelLabel}</span>
+              <span className="nx-bsig-chip is-muted">Cash Buyer: N/A</span>
             </div>
           </div>
         </div>
 
         <div className="nx-capsule-section">
           <span className="nx-capsule-section__title">PROSPECT INTEL</span>
-          <div className="nx-prospect-intel-snap">
-            <strong>{prospectName}</strong>
-            <div className="nx-intel-row">
-              <label>Phone</label>
-              <span>{fmtPhone(bestPhone)}</span>
+          <div className="nx-prospect-intel-v2">
+            {/* Identity */}
+            <div className="nx-prospect-group">
+              <div className="nx-prospect-group__hdr">IDENTITY</div>
+              <div className="nx-prospect-group__body">
+                {isPresent(prospectName) && prospectName !== 'Unknown Prospect' && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Name</span>
+                    <span className="nx-prow__val is-accent">{prospectName}</span>
+                  </div>
+                )}
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Language</span>
+                  <span className="nx-prow__val">{language}</span>
+                </div>
+                {isPresent(occupation) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Occupation</span>
+                    <span className="nx-prow__val">{humanizeOccupation(asStr(occupation))}</span>
+                  </div>
+                )}
+                {isPresent(maritalStatus) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Marital Status</span>
+                    <span className="nx-prow__val">{humanizeMaritalStatus(asStr(maritalStatus))}</span>
+                  </div>
+                )}
+                {isPresent(prospectAge) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Age</span>
+                    <span className="nx-prow__val">{asStr(prospectAge)}</span>
+                  </div>
+                )}
+                {isPresent(education) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Education</span>
+                    <span className="nx-prow__val">{humanizeEducation(asStr(education))}</span>
+                  </div>
+                )}
+                {isPresent(gender) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Gender</span>
+                    <span className="nx-prow__val">{humanizeGender(asStr(gender))}</span>
+                  </div>
+                )}
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Ownership</span>
+                  <span className={cls('nx-prow__val', !isPresent(snapshot.ownershipYears) && 'is-muted')}>
+                    {snapshot.ownershipYears ? `${snapshot.ownershipYears} Yrs` : 'Unknown'}
+                  </span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Owner Type</span>
+                  <span className={cls('nx-prow__val', !isPresent(snapshot.ownerType) && 'is-muted')}>
+                    {isPresent(snapshot.ownerType) ? snapshot.ownerType : 'Unknown'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="nx-intel-row">
-              <label>Stage</label>
-              <span>{stage}</span>
+
+            {/* Motivation */}
+            <div className="nx-prospect-group">
+              <div className="nx-prospect-group__hdr">MOTIVATION</div>
+              <div className="nx-prospect-group__body">
+                {isPresent(sellerPersona) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Persona</span>
+                    <span className="nx-prow__val is-accent">{sellerPersona}</span>
+                  </div>
+                )}
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Stage</span>
+                  <span className="nx-prow__val">{humanizeStage(stage)}</span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Intent</span>
+                  <span className="nx-prow__val">{humanizeIntent(lastIntent)}</span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Priority Tier</span>
+                  <span className={cls('nx-prow__val', (() => {
+                    const tier = String(snapshot.priorityTier || thread.owner_priority_tier || '').toLowerCase()
+                    return tier.includes('high') || tier.includes('urgent') ? 'is-warn' : ''
+                  })())}>
+                    {snapshot.priorityTier || thread.owner_priority_tier || 'Normal'}
+                  </span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Motivation</span>
+                  <div className="nx-prow__score-bar">
+                    <div className="nx-prow__score-track">
+                      <div className="nx-prow__score-fill" style={{ width: `${motivationPct}%`, background: (motivationPct >= 60 ? '#30d158' : '#ffd60a') }} />
+                    </div>
+                    <span className={cls('nx-prow__val', !isPresent(thread.motivationScore || thread.priorityScore) && 'is-muted')}>
+                      {isPresent(thread.motivationScore || thread.priorityScore) ? `${Math.round(motivationPct)}/100` : 'Unavailable'}
+                    </span>
+                  </div>
+                </div>
+                {isPresent(householdIncome) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">HH Income</span>
+                    <span className="nx-prow__val">{typeof householdIncome === 'number' ? formatMoney(householdIncome) : String(householdIncome)}</span>
+                  </div>
+                )}
+                {isPresent(netAssetValue) && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Net Assets</span>
+                    <span className="nx-prow__val">{typeof netAssetValue === 'number' ? formatMoney(netAssetValue) : String(netAssetValue)}</span>
+                  </div>
+                )}
+                {financialPressureScore > 0 && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Fin. Pressure</span>
+                    <span className={cls('nx-prow__val nx-score-emphasis',
+                      financialPressureScore >= 70 ? 'is-danger is-intense' : financialPressureScore >= 40 ? 'is-warn' : '')}>
+                      {Math.round(financialPressureScore)}/100
+                    </span>
+                  </div>
+                )}
+                {contactQuality > 0 && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Contact Quality</span>
+                    <span className={cls('nx-prow__val nx-score-emphasis',
+                      contactQuality >= 70 ? 'is-green is-intense' : contactQuality >= 40 ? '' : 'is-muted')}>
+                      {Math.round(contactQuality)}/100
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="nx-intel-row">
-              <label>Intent</label>
-              <span>{lastIntent === 'Pending' ? 'Pending / Unknown' : lastIntent}</span>
-            </div>
-            <div className="nx-intel-row">
-              <label>Language</label>
-              <span>{language}</span>
-            </div>
-            <div className="nx-intel-row">
-              <label>Motivation Score</label>
-              <strong className="is-muted">Not Available</strong>
-            </div>
-            <div className="nx-intel-row">
-              <label>Priority Tier</label>
-              <span>{snapshot.priorityTier || thread.owner_priority_tier || 'Normal'}</span>
-            </div>
-            <div className="nx-intel-row">
-              <label>Ownership</label>
-              <span>{snapshot.ownershipYears ? `${snapshot.ownershipYears} Years` : 'Unknown'}</span>
-            </div>
-            <div className="nx-intel-row">
-              <label>Owner Type</label>
-              <span>{snapshot.ownerType || 'Unknown'}</span>
-            </div>
-            <div className="nx-intel-row">
-              <label>Absentee</label>
-              <span>{(thread as any).isAbsentee === 'true' || (thread as any).isAbsentee === true ? 'Yes (Out of State)' : 'No'}</span>
+
+            {/* Risk / Opportunity */}
+            <div className="nx-prospect-group">
+              <div className="nx-prospect-group__hdr">RISK / OPPORTUNITY</div>
+              <div className="nx-prospect-group__body">
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Absentee</span>
+                  <span className={cls('nx-prow__val', (thread.isAbsentee || (thread as any).isAbsentee === 'true') && 'is-warn')}>
+                    {(thread.isAbsentee || (thread as any).isAbsentee === 'true') ? 'Yes — Absentee Owner' : 'No'}
+                  </span>
+                </div>
+                {isOutOfState && (
+                  <div className="nx-prow">
+                    <span className="nx-prow__lbl">Out of State</span>
+                    <span className="nx-prow__val is-warn">Yes</span>
+                  </div>
+                )}
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Vacant</span>
+                  <span className={cls('nx-prow__val', isVacant && 'is-warn')}>
+                    {isVacant ? 'Yes — Vacant' : 'No'}
+                  </span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">DNC</span>
+                  <span className={cls('nx-prow__val', thread.isSuppressed && 'is-danger')}>
+                    {thread.isSuppressed ? 'Suppressed / DNC' : 'Clear'}
+                  </span>
+                </div>
+                <div className="nx-prow">
+                  <span className="nx-prow__lbl">Last Response</span>
+                  <span className={cls('nx-prow__val', daysSinceResponse !== null && daysSinceResponse > 14 ? 'is-muted' : '')}>
+                    {thread.lastInboundAt
+                      ? `${formatRelativeTime(thread.lastInboundAt)}${daysSinceResponse !== null ? ` (${daysSinceResponse}d)` : ''}`
+                      : <span className="nx-prow__val is-muted">No response yet</span>
+                    }
+                  </span>
+                </div>
+                <div className="nx-prow nx-prow--ai">
+                  <span className="nx-prow__lbl">AI REC</span>
+                  <span className="nx-prow__val nx-prow__val--ai-rec" style={{ fontSize: '10px', lineHeight: 1.35, whiteSpace: 'normal', textAlign: 'right' }}>
+                    {aiRecText}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3588,17 +4092,33 @@ const CompactDealIntelligenceCapsule = ({
         <div className="nx-capsule-section">
           <span className="nx-capsule-section__title">ACTIVITY</span>
           <div className="nx-micro-timeline">
-            {latestEvents.length > 0 ? latestEvents.map((msg, i) => (
-              <div key={msg.id || i} className={cls('nx-micro-timeline__node', msg.direction === 'inbound' ? 'is-green' : 'is-blue')}>
-                <div className="nx-micro-timeline__dot" />
-                <div className="nx-micro-timeline__content">
-                  <span className="nx-micro-timeline__label">
-                    {msg.direction === 'inbound' ? 'Seller Replied' : 'Message Sent'}
-                  </span>
-                  <span className="nx-micro-timeline__time">{formatRelativeTime(msg.createdAt || (msg as any).created_at || (msg as any).timestamp)}</span>
+            {latestEvents.length > 0 ? latestEvents.map((msg, i) => {
+              const isInbound = msg.direction === 'inbound'
+              const body = msg.body || ''
+              let label = isInbound ? 'Inbound Seller Response' : 'Outreach Sent'
+              let tone = isInbound ? 'is-green' : 'is-blue'
+
+              if (!isInbound && i === latestEvents.length - 1) { label = 'Initial Outreach'; }
+              if (isInbound && body) {
+                const lc = body.toLowerCase()
+                if (/stop|unsubscribe|remove|opt.?out/.test(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
+                else if (/price|how much|offer|interested|ready/.test(lc)) { label = 'Seller Showing Interest'; tone = 'is-green'; }
+                else if (/wrong number|not (the )?owner|already sold/.test(lc)) { label = 'Disqualification Signal'; tone = 'is-amber'; }
+                else if (/yes|sure|call|talk|available/.test(lc)) { label = 'Positive Engagement'; tone = 'is-green'; }
+              }
+              if (!isInbound && (msg as any).deliveryStatus === 'failed') { label = 'Delivery Failed'; tone = 'is-red'; }
+              if (!isInbound && thread.conversationStage === 'offer_reveal') { label = 'Offer Presented'; }
+
+              return (
+                <div key={msg.id || i} className={cls('nx-micro-timeline__node', tone)}>
+                  <div className="nx-micro-timeline__dot" />
+                  <div className="nx-micro-timeline__content">
+                    <span className="nx-micro-timeline__label">{label}</span>
+                    <span className="nx-micro-timeline__time">{formatRelativeTime(msg.createdAt || (msg as any).created_at || (msg as any).timestamp)}</span>
+                  </div>
                 </div>
-              </div>
-            )) : (
+              )
+            }) : (
               <div className="nx-micro-timeline__empty">No recent activity</div>
             )}
           </div>
@@ -3620,41 +4140,1724 @@ const MediumDealWorkspace = ({
   messages: ThreadMessage[]
   phase3: Phase3Intelligence | null
 }) => {
+  // ── ACCORDION STATE ───────────────────────────────────────
+  const [openProspect, setOpenProspect] = useState<Set<string>>(() => new Set(['identity', 'motivation']))
+  const toggleProspect = (key: string) => setOpenProspect(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    return next
+  })
+  const [openPropIntel, setOpenPropIntel] = useState<Set<string>>(() => new Set(['core']))
+  const togglePropIntel = (key: string) => setOpenPropIntel(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    return next
+  })
+  const [openCensus, setOpenCensus] = useState<Set<string>>(() => new Set(['demo']))
+  const toggleCensus = (key: string) => setOpenCensus(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    return next
+  })
+  const [openPortfolio, setOpenPortfolio] = useState<Set<string>>(() => new Set(['overview']))
+  const togglePortfolio = (key: string) => setOpenPortfolio(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    return next
+  })
+
+  // ── IDENTITY ──────────────────────────────────────────────
   const address = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || 'Property Unknown'
   const sellerName = snapshot.ownerDisplayName || snapshot.ownerName || thread.ownerDisplayName || thread.ownerName || thread.prospect_full_name || thread.displayName || 'Unknown Seller'
   const stage = getSellerStageVisual(thread.conversationStage)
   const status = getStatusVisual(thread.inboxStatus)
-  const value = asNum(snapshot.estimatedValue || thread.estimatedValue)
-  const offer = asNum(thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao)
+
+  // ── SCORE RING ────────────────────────────────────────────
   const score = percentFromScore(thread.finalAcquisitionScore || (thread as any).ai_score || thread.motivationScore, 42)
+  const heatColor = score >= 80 ? 'red' : score >= 60 ? 'orange' : score >= 40 ? 'amber' : 'blue'
+  const RING_R = 30
+  const RING_C = 2 * Math.PI * RING_R
+  const ringFill = RING_C * (score / 100)
+
+  // ── PROPERTY METRICS ─────────────────────────────────────
+  const value = asNum(snapshot.estimatedValue || thread.estimatedValue)
+  const equity = asNum(thread.equityPercent || snapshot.equityPercent)
+  const equityAmt = asNum(thread.equityAmount || snapshot.equityAmount)
+  const repairs = asNum(thread.estimatedRepairCost || snapshot.repairCost)
+  const beds = asNum(thread.total_bedrooms || snapshot.beds)
+  const baths = asNum(thread.total_baths || snapshot.baths)
+  const sqft = asNum(thread.building_square_feet || snapshot.sqft)
+  const yearBuilt = asNum((thread as any).year_built || thread.effective_year_built || snapshot.yearBuilt)
+  const condition = asStr(thread.building_condition)
+  const conditionTone = /excellent|great|good/i.test(condition) ? 'green' : /fair|average|moderate/i.test(condition) ? 'amber' : /poor|bad|tear|distress/i.test(condition) ? 'red' : 'muted'
+
+  // ── MF ────────────────────────────────────────────────────
+  const propType = asStr(thread.propertyType || snapshot.propertyType || (thread as any).property_type)
+  const propTypeLower = propType.toLowerCase()
+  const isMultifamily = /multi|mf|apartment|duplex|triplex|quadplex|plex/.test(propTypeLower) || (asNum((thread as any).units_count || snapshot.unitCount) > 1)
+  const unitCount = asNum((thread as any).units_count || snapshot.unitCount)
+  const avgSqftPerUnit = asNum(thread.avg_sqft_per_unit) || (unitCount > 1 && sqft > 0 ? Math.round(sqft / unitCount) : 0)
+  const bedsPerUnit = asNum(thread.beds_per_unit) || (unitCount > 1 && beds > 0 ? +(beds / unitCount).toFixed(1) : 0)
+
+  // ── UNDERWRITING ─────────────────────────────────────────
+  const arv = value || 0
+  const spread = arv ? Math.max(Math.round(arv * 0.18), 25000) : 0
+  const mao = arv ? Math.max(arv - repairs - spread, 0) : 0
+  const offer = asNum(thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao) || mao
+  const confidence = clamp((arv ? 40 : 18) + (repairs ? 18 : 0) + (thread.contactability_score ? 8 : 0) + (thread.finalAcquisitionScore ? 16 : 0), 24, 96)
+  const decisionTone = confidence >= 72 ? 'pursue' : confidence >= 52 ? 'review' : 'pass'
+  const waterfallItems = [
+    { label: 'Retail ARV', value: arv, tone: 'green' },
+    { label: 'Investor Exit', value: Math.round(arv * 0.82), tone: 'purple' },
+    { label: 'Repair Load', value: repairs, tone: 'amber' },
+    { label: 'Target Spread', value: spread, tone: 'red' },
+    { label: 'MAO', value: mao, tone: 'blue' },
+    { label: 'AI Offer', value: offer, tone: 'green' },
+  ].filter((item) => item.value > 0)
+
+  // ── BUYER INTELLIGENCE ───────────────────────────────────
+  const demand = asNum((thread as any).buyerDemand || (thread as any).demandScore || (thread as any).demand_score) || 0
+  const flipVelocity = asNum((thread as any).flipVelocity || (thread as any).flip_velocity) || 0
+  const avgPpsf = asNum((thread as any).avgPpsf || (thread as any).avg_ppsf || (thread as any).price_per_sqft) || 0
+  const cashBuyerPct = asNum((thread as any).cashBuyerPct || (thread as any).cash_buyer_pct) || 0
+  const nearbyAcquisitions = asNum((thread as any).nearbyAcquisitions || (thread as any).nearby_acquisitions) || 0
+  const hedgeFundActivity = asStr((thread as any).hedgeFundActivity || (thread as any).hedge_fund_activity)
+  const recentSoldCount = asNum((thread as any).recentSoldCount || (thread as any).recent_sold_count)
+  const buyerMatchCount = asNum((thread as any).buyerMatchCount || (thread as any).buyer_match_count)
+  const avgResalePrice = asNum((thread as any).avgResalePrice || (thread as any).avg_resale_price)
+  const dispoConfidence = asNum((thread as any).dispoConfidence || (thread as any).dispo_confidence)
+  const assignmentSpread = asNum((thread as any).assignmentSpread || (thread as any).assignment_spread)
+  const avgPricePerUnit = isMultifamily && unitCount > 0 && avgResalePrice > 0 ? Math.round(avgResalePrice / unitCount) : 0
+  const buyerChips = ([
+    demand >= 75 && { label: 'HIGH BUYER PRESSURE', tone: 'red' },
+    isMultifamily && demand >= 60 && { label: 'MF BUYER ACTIVE', tone: 'purple' },
+    cashBuyerPct >= 60 && { label: 'CASH HEAVY', tone: 'green' },
+    demand >= 70 && { label: 'INSTITUTIONAL DEMAND', tone: 'cyan' },
+    flipVelocity >= 70 && { label: 'HIGH VELOCITY', tone: 'amber' },
+    demand > 0 && demand < 40 && { label: 'LOW INVENTORY', tone: 'amber' },
+  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
+
+  // ── PROSPECT ─────────────────────────────────────────────
+  const financialPressureScore = asNum(thread.financial_pressure_score) || 0
+  const motivationScore = percentFromScore(thread.motivationScore, 48)
+  const contactQuality = asNum(thread.contactability_score || thread.prospect_contact_score) || 0
+  const ownerYears = asNum((thread as any).ownership_years || snapshot.ownershipYears) || 0
+  const householdIncome = asNum(thread.est_household_income || snapshot.householdIncome)
+  const occupation = asStr(thread.occupation || thread.occupation_group || snapshot.occupationGroup)
+  const maritalStatus = asStr(thread.marital_status)
+  const ageEstimate = asNum(thread.age) || 0
+  const educationLevel = asStr(thread.education_model)
+  const isTaxDelinquent = !!(thread.property_tax_delinquent || thread.isTaxDelinquent)
+  const isVacant = !!(thread.isVacant)
+  const isAbsentee = !!(thread.isAbsentee)
+  const persona = getSellerPersona(thread, equity)
+  // Raw tag data from Supabase
+  const rawSellerTagsText = asStr((thread as any).seller_tags_text)
+  const rawPropertyFlagsText = asStr((thread as any).property_flags_text)
+  const rawPersonFlagsText = asStr((thread as any).person_flags_text)
+  const sellerTagsList = rawSellerTagsText ? rawSellerTagsText.split(',').map((t: string) => t.trim()).filter(Boolean) : []
+  const propertyFlagsList = rawPropertyFlagsText ? rawPropertyFlagsText.split(',').map((t: string) => t.trim()).filter(Boolean) : []
+  const personFlagsList = rawPersonFlagsText ? rawPersonFlagsText.split(',').map((t: string) => t.trim()).filter(Boolean) : []
+  const prospectChips = ([
+    equity >= 60 && { label: 'HIGH EQUITY', tone: 'green' },
+    isTaxDelinquent && { label: 'TAX DELINQUENT', tone: 'red' },
+    isAbsentee && { label: 'ABSENTEE', tone: 'amber' },
+    ownerYears >= 15 && { label: 'LONG TERM HOLD', tone: 'blue' },
+    financialPressureScore >= 70 && { label: 'HIGH DISTRESS', tone: 'red' },
+    /executive|manager|director|president|vp|ceo|cfo|founder/i.test(occupation) && { label: 'EXECUTIVE', tone: 'purple' },
+  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
+
+  // ── BEHAVIORAL DERIVATIONS ───────────────────────────────
+  const negotiationStyle = financialPressureScore >= 70 ? 'Motivated Seller'
+    : /executive|ceo|president|vp|director|founder/i.test(occupation) ? 'Analytical Negotiator'
+    : ownerYears >= 20 ? 'Emotional Hold Seller'
+    : isAbsentee ? 'Investor Mindset'
+    : 'Discovery Phase'
+  const likelyObjections: string[] = [
+    financialPressureScore < 40 ? 'May push for higher price' : null,
+    equity < 30 ? 'Limited flexibility on price' : null,
+    ownerYears >= 15 ? 'Emotional attachment to property' : null,
+    isAbsentee ? 'Slower remote engagement' : null,
+    !thread.lastInboundAt ? 'No response yet — cold outreach' : null,
+  ].filter(Boolean) as string[]
+  const responseCadence = (() => {
+    const ts = thread.lastInboundAt
+    if (!ts) return 'No response yet'
+    const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)
+    if (days === 0) return 'Responded today'
+    if (days === 1) return 'Yesterday'
+    if (days <= 3) return `${days}d ago — active`
+    if (days <= 7) return `${days}d ago — cooling`
+    return `${days}d ago — dormant`
+  })()
+  const phoneConfidence = asNum(thread.prospect_phone_score || thread.contactability_score) || 0
+  const smsDeliverability = phoneConfidence
+  const languagePref = asStr(thread.best_language || snapshot.language || thread.language_preference)
+  const dncRisk = thread.isSuppressed ? 'Suppressed' : financialPressureScore < 20 && contactQuality < 30 ? 'Elevated' : 'Low'
+
+  // ── PROPERTY INTELLIGENCE ────────────────────────────────
+  const propClass = asStr(thread.propertyClass || snapshot.propertyClass)
+  const buildings = asNum(thread.sum_buildings_nbr) || 1
+  const lotSize = asNum(thread.lot_square_feet || snapshot.lotSize)
+  const lotAcreage = asNum(thread.lot_acreage || snapshot.lotSizeAcres)
+  const zoning = asStr(thread.zoning || snapshot.zoning)
+  const floodZone = asStr(thread.flood_zone || snapshot.floodZone)
+  const constructionType = asStr(thread.construction_type)
+  const buildingQuality = asStr(thread.building_quality)
+  const roofCover = asStr(thread.roof_cover)
+  const floorCover = asStr(thread.floor_cover)
+  const heating = asStr(thread.heating_type)
+  const cooling = asStr(thread.air_conditioning)
+  const garageType = asStr(thread.garage)
+  const hasPool = !!(thread.pool)
+  const sewerType = asStr(thread.sewer)
+  const waterSource = asStr(thread.water)
+  const taxAmount = asNum(thread.tax_amt || snapshot.taxAmount)
+  const assessedTotal = asNum(thread.assd_total_value || snapshot.assessedTotalValue)
+  const assessedLand = asNum(thread.assd_land_value || snapshot.assessedLandValue)
+  const assessedImprovement = asNum(thread.assd_improvement_value || snapshot.assessedImprovementValue)
+  const taxDelinquentYear = asStr(thread.property_tax_delinquent_year)
+  const pastDueAmount = asNum(thread.past_due_amount)
+  const loanAmount = asNum(thread.total_loan_amt || snapshot.loanAmount)
+  const loanBalance = asNum(thread.total_loan_balance || snapshot.loanBalance)
+  const estimatedPayment = asNum(thread.total_loan_payment || snapshot.loanPayment)
+  const isFreeClear = (loanAmount > 0 && loanBalance === 0) || /free.?clear/i.test(rawPropertyFlagsText + ' ' + rawSellerTagsText)
+  const estimatedCashFlow = asNum((thread as any).estimatedCashFlow || (thread as any).estimated_cash_flow)
+  const lastSaleDate = asStr((thread as any).sale_date || (thread as any).last_sale_date)
+  const lastSalePrice = asNum(thread.sale_price)
+  const appreciationPct = asNum((thread as any).appreciationPct || (thread as any).appreciation_pct)
+  const equityGain = value > 0 && lastSalePrice > 0 ? value - lastSalePrice : 0
+  const rehabLevel = asStr(thread.rehab_level)
+  const deferredMaint = asStr((thread as any).deferredMaintenance || (thread as any).deferred_maintenance)
+  const structuralRisk = asStr((thread as any).structuralRisk || (thread as any).structural_risk)
+  const isFullRehab = /full/i.test(rehabLevel) || /full/i.test(condition)
+  const isCosmeticRehab = /cosmetic|light/i.test(rehabLevel)
+  const rehabScore = isFullRehab ? 85 : isCosmeticRehab ? 35 : 50
+  const flipSuitability = rehabScore <= 40 ? 'Flip Ready' : rehabScore <= 65 ? 'Moderate Work' : 'Heavy Rehab'
+  const propQualityBadge = buildingQuality || condition || null
+  const propQualityTone = /excellent|good|high/i.test(propQualityBadge || '') ? 'green' : /average|fair|moderate/i.test(propQualityBadge || '') ? 'amber' : /poor|low|bad/i.test(propQualityBadge || '') ? 'red' : 'blue'
+  const rehabRiskTone = isFullRehab ? 'red' : isCosmeticRehab ? 'green' : 'amber'
+  const distressCount = [isTaxDelinquent, isVacant, isAbsentee, isFullRehab, financialPressureScore >= 70, equity < 20].filter(Boolean).length
+  // Property tags from Supabase flags + derived signals
+  const propTagChips: { label: string; tone: string }[] = ([
+    equity >= 60 && { label: 'High Equity', tone: 'green' },
+    isTaxDelinquent && { label: 'Tax Delinquent', tone: 'red' },
+    isAbsentee && { label: 'Absentee Owner', tone: 'amber' },
+    isVacant && { label: 'Vacant', tone: 'amber' },
+    isFreeClear && { label: 'Free & Clear', tone: 'green' },
+    ownerYears >= 15 && { label: 'Long-Term Hold', tone: 'blue' },
+    ageEstimate >= 65 && { label: 'Senior Owner', tone: 'blue' },
+    isFullRehab && { label: 'Heavy Rehab', tone: 'red' },
+    financialPressureScore >= 70 && { label: 'Financial Pressure', tone: 'red' },
+    isMultifamily && { label: 'Multifamily', tone: 'purple' },
+    (asNum(thread.property_count || snapshot.portfolioPropertyCount) >= 3) && { label: 'Investor Owned', tone: 'blue' },
+    !!(thread as any).is_corporate_owner && { label: 'Corporate Owned', tone: 'purple' },
+    ...propertyFlagsList.map((f: string) => ({ label: f, tone: 'amber' as const })),
+    ...sellerTagsList.map((t: string) => ({ label: t, tone: 'blue' as const })),
+  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
+
+  // ── CENSUS INTELLIGENCE ──────────────────────────────────
+  const censusMedianIncome = asNum((thread as any).censusMedianIncome || (thread as any).census_median_income || (thread as any).medianIncome)
+  const censusMedianAge = asNum((thread as any).censusMedianAge || (thread as any).census_median_age)
+  const censusHouseholdSize = asNum((thread as any).censusHouseholdSize || (thread as any).census_household_size)
+  const censusPopulation = asNum((thread as any).censusPopulation || (thread as any).census_population || (thread as any).population)
+  const populationGrowth = asNum((thread as any).populationGrowth || (thread as any).population_growth)
+  const ownerOccupancyRate = asNum((thread as any).ownerOccupancyRate || (thread as any).owner_occupancy_rate)
+  const rentalRate = asNum((thread as any).rentalRate || (thread as any).rental_rate)
+  const vacancyRate = asNum((thread as any).vacancyRate || (thread as any).vacancy_rate)
+  const crimeIndex = asNum((thread as any).crimeIndex || (thread as any).crime_index)
+  const schoolRating = asNum((thread as any).schoolRating || (thread as any).school_rating)
+  const employmentStrength = asNum((thread as any).employmentStrength || (thread as any).employment_strength)
+  const migrationTrend = asStr((thread as any).migrationTrend || (thread as any).migration_trend)
+  const economicTrend = asStr((thread as any).economicTrend || (thread as any).economic_trend)
+  const investorActivity = asNum((thread as any).investorActivity || (thread as any).investor_activity)
+  const neighborhoodScore = asNum((thread as any).neighborhoodScore || (thread as any).neighborhood_score)
+  const growthMomentum = asNum((thread as any).growthMomentum || (thread as any).growth_momentum)
+
+  // ── OWNER PORTFOLIO INTELLIGENCE ────────────────────────
+  const portfolioCount = asNum(thread.property_count || snapshot.portfolioPropertyCount)
+  const portfolioUnits = asNum(thread.portfolio_total_units)
+  const portfolioValue = asNum(thread.portfolio_total_value || snapshot.portfolioValue)
+  const portfolioEquity = asNum(thread.portfolio_total_equity)
+  const portfolioDebt = asNum(thread.portfolio_total_loan_balance)
+  const portfolioMonthlyDebt = asNum(thread.portfolio_total_loan_payment)
+  const portfolioTypeMajority = asStr(thread.property_type_majority || (thread as any).portfolio_type)
+  const portfolioMarkets = asStr(thread.displayMarket || (thread as any).portfolio_markets)
+  const sophisticationScore = asNum((thread as any).sophisticationScore || (thread as any).sophistication_score)
+  const acquisitionVelocity = asNum((thread as any).acquisitionVelocity || (thread as any).acquisition_velocity)
+  const distressExposure = asNum((thread as any).distressExposure || (thread as any).distress_exposure)
+  const portfolioGrowthTrend = asStr((thread as any).portfolioGrowthTrend || (thread as any).portfolio_growth_trend)
+  const landlordBurnout = financialPressureScore >= 60 && portfolioCount >= 2 && ownerYears >= 10
+  const overleveraged = portfolioDebt > 0 && portfolioValue > 0 && (portfolioDebt / portfolioValue) > 0.85
+  const investorLabel = (() => {
+    if (portfolioCount >= 50) return { label: 'Institutional Operator', tone: 'purple' }
+    if (portfolioCount >= 10) return { label: 'Professional Investor', tone: 'blue' }
+    if (portfolioCount >= 3) return { label: 'Active Investor', tone: 'cyan' }
+    if (portfolioCount >= 1) return { label: 'Small Landlord', tone: 'green' }
+    return { label: 'Owner Occupant', tone: 'amber' }
+  })()
+  const portfolioTagChips: { label: string; tone: string }[] = ([
+    portfolioCount >= 50 && { label: 'Institutional Adjacent', tone: 'purple' },
+    portfolioCount >= 10 && { label: 'Scaling Operator', tone: 'blue' },
+    portfolioCount >= 3 && portfolioCount < 10 && { label: 'Active Investor', tone: 'cyan' },
+    portfolioCount >= 1 && portfolioCount < 3 && { label: 'Small Landlord', tone: 'green' },
+    portfolioCount === 0 && ownerYears >= 10 && { label: 'Legacy Holder', tone: 'blue' },
+    overleveraged && { label: 'Overleveraged', tone: 'red' },
+    landlordBurnout && { label: 'Burnt-Out Landlord', tone: 'amber' },
+    financialPressureScore >= 70 && portfolioCount >= 1 && { label: 'Distressed Investor', tone: 'red' },
+    isFreeClear && portfolioCount >= 1 && { label: 'Free & Clear Portfolio', tone: 'green' },
+  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
+
+  // ── EXPANDED PROSPECT DATA ───────────────────────────────
+  const gender = asStr(thread.gender || snapshot.gender)
+  const netWorth = asNum(thread.net_asset_value || snapshot.netAssetValue)
+  const buyingPower = asNum((thread as any).buying_power)
+  const liquidityEstimate = asNum((thread as any).liquidity_estimate || (thread as any).cashLiquidity)
+  const emailQuality = asNum(thread.prospect_contact_score)
+  const contactProbability = asNum(thread.prospect_contact_score || thread.contactability_score) || contactQuality
+  const sellerPhone = asStr(thread.prospect_best_phone || thread.displayPhone || thread.sellerPhone)
+  const sellerEmail = asStr(thread.prospect_best_email || thread.best_email_1)
+  const prospectName = asStr(thread.prospect_full_name || snapshot.prospectFullName)
+  const bestContactWindow = asStr((thread as any).best_contact_window || snapshot.bestContactWindow)
+  const ownerType = asStr(snapshot.ownerType || (thread as any).ownerType || (thread as any).owner_type_guess)
+  const followUpAt = asStr(thread.follow_up_at)
+  const lastOutboundAt = asStr(thread.lastOutboundAt)
+  const autoProspectTags: { label: string; tone: string }[] = ([
+    isTaxDelinquent && { label: 'Tax Delinquent', tone: 'red' },
+    isVacant && { label: 'Vacant Property', tone: 'amber' },
+    isAbsentee && { label: 'Absentee Owner', tone: 'amber' },
+    isFreeClear && { label: 'Free & Clear', tone: 'green' },
+    isFullRehab && { label: 'Full Rehab', tone: 'red' },
+    isCosmeticRehab && { label: 'Cosmetic Only', tone: 'green' },
+    ownerYears >= 20 && { label: 'Long-Term Hold', tone: 'blue' },
+    portfolioCount >= 10 && { label: 'Multi-Property', tone: 'purple' },
+    financialPressureScore >= 70 && { label: 'High Distress', tone: 'red' },
+    equity >= 70 && { label: 'Equity Rich', tone: 'green' },
+    motivationScore >= 75 && { label: 'Highly Motivated', tone: 'green' },
+    contactQuality >= 80 && { label: 'Top Contact', tone: 'cyan' },
+    ageEstimate >= 65 && { label: 'Senior Owner', tone: 'blue' },
+    /spanish|hispanic|latino/i.test(languagePref) && { label: 'Spanish Speaker', tone: 'blue' },
+    ...sellerTagsList.map((t: string) => ({ label: t, tone: 'blue' as const })),
+    ...personFlagsList.map((f: string) => ({ label: f, tone: 'amber' as const })),
+  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
+  const prospectTags = autoProspectTags
+
+  // ── CONVERSATION BRAIN ───────────────────────────────────
+  const latestInbound = messages.find((m) => m.direction === 'inbound') || null
+  const latestOutbound = messages.find((m) => m.direction === 'outbound') || null
+  const summary = phase3?.latestSnapshot?.capture_reason || thread.aiSummary || thread.aiDraft || 'AI is analyzing seller conversation patterns and market signals.'
+  const intent = thread.uiIntent || thread.detected_intent || 'Pending'
+  const sentiment = String(thread.sentiment || 'Neutral')
+
+  const emotionalState = (() => {
+    if (/angry|frustrated|upset|hostile/i.test(summary + sentiment)) return { label: 'Frustrated', tone: 'red' }
+    if (/interested|excited|ready|want to sell/i.test(summary)) return { label: 'Engaged', tone: 'green' }
+    if (/hesitant|uncertain|maybe|unsure/i.test(summary)) return { label: 'Hesitant', tone: 'amber' }
+    if (/positive/i.test(sentiment)) return { label: 'Receptive', tone: 'green' }
+    if (/negative/i.test(sentiment)) return { label: 'Resistant', tone: 'red' }
+    return { label: 'Neutral', tone: 'blue' }
+  })()
+  const urgency = percentFromScore(thread.urgency_score || thread.priorityScore, thread.priority === 'urgent' ? 82 : 44)
+  const currentStageIndex = Math.max(0, sellerStageOptions.findIndex((o) => o.value === thread.conversationStage))
+  const nextAction = getNextBestAction(thread)
+  const stageFlow = ['Ownership', 'Interest', 'Price', 'Condition', 'Offer', 'Negotiation', 'Contract']
+  const aiInsights: string[] = []
+  if (urgency >= 75) aiInsights.push('Seller response timing indicates elevated engagement.')
+  if (financialPressureScore >= 65) aiInsights.push('Motivation appears financial rather than emotional.')
+  if (demand >= 70) aiInsights.push('Buyer pressure supports stronger acquisition confidence.')
+  if (equity >= 70) aiInsights.push('Strong equity position creates flexible offer room.')
+  if (isTaxDelinquent) aiInsights.push('Tax delinquency suggests urgency — timing leverage elevated.')
+  if (!aiInsights.length) aiInsights.push('Analyzing seller signals and market conditions.')
+
+  // ── DERIVED INTELLIGENCE SIGNALS ─────────────────────────
+  const marketTemp = demand >= 70 ? 'Hot' : demand >= 45 ? 'Warm' : demand > 0 ? 'Cool' : null
+  const marketTempTone = demand >= 70 ? 'red' : demand >= 45 ? 'amber' : 'blue'
+  const aiConfidence = Math.round(clamp(confidence * 0.7 + (motivationScore > 0 ? motivationScore * 0.3 : 21), 20, 95))
+  const acqScore = Math.round(clamp(
+    (equity >= 60 ? 30 : equity >= 30 ? 15 : 5) +
+    (offer > 0 && value > 0 ? Math.min((offer / value) * 40, 35) : 10) +
+    (repairs < 15000 ? 20 : repairs < 40000 ? 12 : repairs < 80000 ? 5 : 0) +
+    (demand >= 60 ? 15 : 8)
+  , 0, 100))
+  const acqGrade = acqScore >= 88 ? 'A+' : acqScore >= 78 ? 'A' : acqScore >= 65 ? 'B+' : acqScore >= 52 ? 'B' : acqScore >= 38 ? 'C' : 'D'
+  const acqGradeTone = acqScore >= 88 ? 'is-a-plus' : acqScore >= 78 ? 'is-a' : acqScore >= 65 ? 'is-b-plus' : acqScore >= 52 ? 'is-b' : acqScore >= 38 ? 'is-c' : 'is-d'
+  const acqGradeChips: { label: string; tone: string }[] = ([
+    decisionTone === 'pursue' && { label: 'PURSUE', tone: 'is-a' },
+    decisionTone === 'review' && { label: 'REVIEW', tone: 'is-b' },
+    decisionTone === 'pass' && { label: 'PASS', tone: 'is-d' },
+    equity >= 60 && { label: 'HIGH EQUITY', tone: 'is-a' },
+    equity >= 30 && equity < 60 && { label: 'MODERATE EQUITY', tone: 'is-b-plus' },
+    isFreeClear && { label: 'FREE & CLEAR', tone: 'is-a-plus' },
+    spread >= 30000 && { label: 'STRONG SPREAD', tone: 'is-a' },
+    repairs > 50000 && { label: 'HEAVY REHAB', tone: 'is-d' },
+    isCosmeticRehab && { label: 'FLIP READY', tone: 'is-a' },
+    demand >= 65 && { label: 'HOT MARKET', tone: 'is-b-plus' },
+  ] as (false | { label: string; tone: string })[]).filter(Boolean).slice(0, 4) as { label: string; tone: string }[]
+  const aiReasoning = (() => {
+    const parts: string[] = []
+    if (equity >= 60 && ownerYears >= 10) parts.push(`High equity (${Math.round(equity)}%) and ${ownerYears}+ year hold suggest seller flexibility but low urgency.`)
+    else if (equity >= 40) parts.push(`Moderate equity position creates offer room without severe seller leverage.`)
+    if (isAbsentee && loanAmount > 0) parts.push('Absentee ownership with active mortgage increases creative finance probability.')
+    if (isTaxDelinquent) parts.push('Tax delinquency signals financial pressure — timing leverage elevated.')
+    if (financialPressureScore >= 65) parts.push(`Financial pressure score (${Math.round(financialPressureScore)}) indicates seller is motivated by necessity, not preference.`)
+    if (isFullRehab && demand >= 60) parts.push('Heavy rehab risk offset by strong investor demand in this market.')
+    if (!parts.length && offer > 0) parts.push(`AI offer of ${formatMoney(offer)} reflects ${Math.round(confidence)}% confidence on available comps and seller signals.`)
+    return parts[0] || null
+  })()
+  const leveragePoints: { text: string; tone: string }[] = ([
+    isTaxDelinquent && { text: 'Tax delinquency — immediate payment relief angle', tone: 'is-hot' },
+    isAbsentee && ownerYears >= 10 && { text: 'Absentee + long hold — remote management fatigue likely', tone: 'is-hot' },
+    equity >= 70 && !loanAmount && { text: 'Free & clear — seller can accept creative terms', tone: 'is-good' },
+    financialPressureScore >= 60 && { text: `Fin. pressure ${Math.round(financialPressureScore)} — lead with speed/certainty`, tone: 'is-hot' },
+    isCosmeticRehab && demand >= 60 && { text: 'Cosmetic rehab + strong buyer demand = fast flip window', tone: 'is-good' },
+  ] as (false | { text: string; tone: string })[]).filter(Boolean).slice(0, 3) as { text: string; tone: string }[]
+  const negotiationPosture = financialPressureScore >= 70 ? 'High Pressure — Escalate'
+    : urgency >= 70 ? 'Time-Sensitive — Act Now'
+    : motivationScore >= 60 ? 'Engaged — Advance Discovery'
+    : thread.conversationStage === 'offer_reveal' ? 'Ready — Push to Close'
+    : 'Discovery Phase'
+  const momentumScore = Math.round(clamp((urgency * 0.4) + (motivationScore * 0.3) + (contactQuality * 0.3), 0, 100))
+  const closeProbability = Math.round(clamp(
+    (equity >= 60 ? 20 : equity >= 30 ? 10 : 5) +
+    (financialPressureScore >= 60 ? 25 : financialPressureScore >= 40 ? 12 : 0) +
+    (contactQuality >= 70 ? 20 : contactQuality >= 40 ? 10 : 0) +
+    (motivationScore >= 70 ? 20 : motivationScore >= 40 ? 10 : 0) +
+    (urgency >= 70 ? 15 : urgency >= 40 ? 8 : 0),
+    8, 92
+  ))
+  const CLOSE_R = 22
+  const CLOSE_C = 2 * Math.PI * CLOSE_R
+  const closeRingFill = CLOSE_C * (closeProbability / 100)
+  const closeTone = closeProbability >= 65 ? 'green' : closeProbability >= 40 ? 'amber' : 'red'
+  // Buyer intel extras
+  const marketAbsorption = asNum((thread as any).marketAbsorption || (thread as any).absorption_rate) || 0
+  const investorCompetition = asNum((thread as any).investorCompetition || (thread as any).investor_competition) || 0
+  void asNum((thread as any).buyerSaturation || (thread as any).buyer_saturation) // reserved field, not yet rendered
+  const dispositionConfidence = Math.round(clamp((demand > 0 ? demand * 0.5 : 20) + (flipVelocity * 0.3) + (cashBuyerPct * 0.2), 0, 100))
+  const exitLiquidity = demand >= 70 ? 'High' : demand >= 45 ? 'Moderate' : demand > 0 ? 'Low' : null
+  const resistanceLevel = Math.round(clamp(100 - financialPressureScore - (urgency * 0.5), 0, 100))
+  const momentumTone = momentumScore >= 70 ? 'green' : momentumScore >= 40 ? 'amber' : 'red'
+
+  // ── TIMELINE ─────────────────────────────────────────────
+  const latestEvents = [...messages].reverse().slice(0, 6)
 
   return (
-    <div className="nx-deal-medium-shell">
-      <DossierCard className="nx-deal-medium-header">
-        <div className="nx-deal-medium-header__row">
-          <div>
-            <span className="nx-command-header-strip__eyebrow">DEAL INTELLIGENCE</span>
-            <strong>{address}</strong>
-            <p>{sellerName}</p>
+    <div className="nx-medium-dossier">
+
+      {/* ── 1. CINEMATIC HEADER ─────────────────────────── */}
+      <div className={cls('nx-medium-header', `is-heat-${heatColor}`)}>
+        <div className="nx-medium-header__atmosphere" />
+        <div className="nx-medium-header__scan-shimmer" />
+        <div className="nx-medium-header__content">
+          <div className="nx-medium-header__identity">
+            <div className="nx-medium-header__eyebrow">
+              <span className="nx-medium-header__live-dot" />
+              DEAL INTELLIGENCE
+            </div>
+            <div className="nx-medium-header__address">{address}</div>
+            <div className="nx-medium-header__seller">{sellerName}</div>
+            <div className="nx-medium-header__chips">
+              <span className="nx-mh-chip nx-mh-chip--stage" style={{ color: stage.color, borderColor: stage.border, background: stage.bg }}>
+                {stage.label}
+              </span>
+              <span className="nx-mh-chip nx-mh-chip--status">{status.label}</span>
+              {value > 0 && <span className="nx-mh-chip nx-mh-chip--value">{formatMoney(value)}</span>}
+              {offer > 0 && <span className="nx-mh-chip nx-mh-chip--offer">{formatMoney(offer)}</span>}
+            </div>
+            {/* Live intelligence status row */}
+            <div className="nx-medium-header__intel-row">
+              {marketTemp && (
+                <span className={cls('nx-mh-intel-pill', `is-${marketTempTone}`)}>
+                  MKT {marketTemp}
+                </span>
+              )}
+              <span className={cls('nx-mh-intel-pill', urgency >= 70 ? 'is-red' : urgency >= 40 ? 'is-amber' : 'is-blue')}>
+                URG {Math.round(urgency)}%
+              </span>
+              <span className="nx-mh-intel-pill is-ai">
+                AI CONF {aiConfidence}%
+              </span>
+              {thread.automationState === 'active' && (
+                <span className="nx-mh-intel-pill is-green">AUTO ON</span>
+              )}
+            </div>
           </div>
-          <div className="nx-deal-medium-header__score">{Math.round(score)}</div>
+          <div className={cls('nx-medium-header__score-ring', `is-${heatColor}`)}>
+            <svg viewBox="0 0 76 76" className="nx-mh-score-svg">
+              <circle cx="38" cy="38" r={RING_R} className="nx-mh-score-bg" />
+              <circle
+                cx="38" cy="38" r={RING_R}
+                className="nx-mh-score-fill"
+                strokeDasharray={`${ringFill} ${RING_C - ringFill}`}
+                strokeDashoffset={RING_C * 0.25}
+              />
+            </svg>
+            <div className="nx-mh-score-inner">
+              <strong>{Math.round(score)}</strong>
+              <span>SCORE</span>
+            </div>
+          </div>
         </div>
-        <div className="nx-deal-medium-header__chips">
-          <QuietBadge label={`STATUS ${status.label}`} tone="accent" />
-          <QuietBadge label={`STAGE ${stage.label}`} tone="warning" />
-          <QuietBadge label={value ? `VALUE ${formatMoney(value)}` : 'VALUE PENDING'} tone="success" />
-          <QuietBadge label={offer ? `OFFER ${formatMoney(offer)}` : 'OFFER PENDING'} tone="default" />
+      </div>
+
+      {/* ── 2. STREET VIEW — CINEMATIC INTELLIGENCE VIEWPORT ── */}
+      <div className="nx-medium-map-frame">
+        <PropertyHeroCard thread={thread} snapshot={snapshot} panelMode="half" layoutMode="medium" />
+        <div className="nx-mmo-overlay" aria-hidden>
+          <div className="nx-mmo-corner is-tl" /><div className="nx-mmo-corner is-tr" />
+          <div className="nx-mmo-corner is-bl" /><div className="nx-mmo-corner is-br" />
+          <div className="nx-mmo-scan" />
+          <div className="nx-mmo-coord">{address.split(',')[0]?.trim().toUpperCase()}</div>
+          <div className="nx-mmo-pin-glow" style={{ background: `radial-gradient(circle, ${heatColor === 'red' ? 'rgba(255,69,58,0.25)' : heatColor === 'orange' ? 'rgba(255,149,0,0.22)' : heatColor === 'amber' ? 'rgba(255,214,10,0.18)' : 'rgba(10,132,255,0.2)'} 0%, transparent 70%)` }} />
         </div>
-      </DossierCard>
-      <PropertyHeroCard thread={thread} snapshot={snapshot} panelMode="half" layoutMode="medium" />
-      <DealDecisionStrip thread={thread} />
-      <ConversationBrainModule thread={thread} messages={messages} phase3={phase3} />
-      <DossierCard className="nx-deal-medium-actions">
-        <button type="button">Draft Reply</button>
-        <button type="button">Run Underwriting</button>
-        <button type="button">Open Comp Workspace</button>
-        <button type="button">Show Buyer Matches</button>
-      </DossierCard>
+      </div>
+
+      {/* ── 3. ACQUISITION METRICS ──────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">ACQUISITION METRICS</div>
+        {/* Dominant AI Offer card */}
+        {offer > 0 && (() => {
+          const CONF_R = 22, CONF_C = 2 * Math.PI * CONF_R
+          const confFill = CONF_C * (confidence / 100)
+          return (
+            <div className="nx-acq-offer-card">
+              <div className="nx-acq-offer-card__eyebrow">AI RECOMMENDED ACQUISITION OFFER</div>
+              <div className="nx-acq-offer-card__main">
+                <div className="nx-acq-offer-card__left">
+                  <div className="nx-acq-offer-card__value">{formatMoney(offer)}</div>
+                  <div className="nx-acq-offer-card__range">{formatMoney(Math.round(offer * 0.94))} — {formatMoney(Math.round(offer * 1.06))} range</div>
+                  <div className="nx-acq-offer-card__grades">
+                    <span className={cls('nx-acq-grade', acqGradeTone)}>GRADE {acqGrade}</span>
+                    {acqGradeChips.map((c) => <span key={c.label} className={cls('nx-acq-grade', c.tone)}>{c.label}</span>)}
+                  </div>
+                </div>
+                <div className="nx-acq-offer-card__conf">
+                  <svg viewBox="0 0 52 52" className="nx-acq-offer-conf-svg">
+                    <circle cx="26" cy="26" r={CONF_R} className="nx-acq-offer-conf-bg" />
+                    <circle cx="26" cy="26" r={CONF_R} className="nx-acq-offer-conf-fill"
+                      strokeDasharray={`${confFill} ${CONF_C - confFill}`}
+                      strokeDashoffset={CONF_C * 0.25} />
+                  </svg>
+                  <div className="nx-acq-offer-conf-inner">
+                    <strong>{Math.round(confidence)}%</strong>
+                    <span>CONF</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+        {/* property type + rehab level chips */}
+        {(propType || rehabLevel || condition) && (
+          <div className="nx-medium-signal-chips" style={{ marginBottom: 10 }}>
+            {propType && <span className="nx-medium-signal-chip is-blue">{propType.toUpperCase()}</span>}
+            {rehabLevel && <span className={cls('nx-medium-signal-chip', isFullRehab ? 'is-red' : isCosmeticRehab ? 'is-green' : 'is-amber')}>{rehabLevel}</span>}
+            {condition && <span className={cls('nx-medium-signal-chip', conditionTone === 'green' ? 'is-green' : conditionTone === 'amber' ? 'is-amber' : conditionTone === 'red' ? 'is-red' : '')}>{condition}</span>}
+          </div>
+        )}
+        <div className="nx-medium-metrics-grid">
+          <div className="nx-medium-metric is-large is-shimmer">
+            <span className="nx-mm-label">ESTIMATED VALUE</span>
+            <strong className={cls('nx-mm-value', isUnavail(fmtMoneyU(value)) && 'nx-mm-unavail')}>{fmtMoneyU(value)}</strong>
+            {equity > 0 && <span className="nx-mm-sub">{Math.round(equity)}% equity</span>}
+          </div>
+          <div className={cls('nx-medium-metric', equity >= 70 ? 'is-strong' : equity >= 40 ? 'is-moderate' : '')}>
+            <span className="nx-mm-label">EQUITY %</span>
+            <strong className={cls('nx-mm-value', isUnavail(fmtPctU(equity)) && 'nx-mm-unavail')}>{fmtPctU(equity)}</strong>
+            {equity > 0 && <div className="nx-mm-bar"><div className={cls('nx-mm-bar__fill', equity >= 60 ? 'is-green' : 'is-blue')} style={{ width: `${clamp(equity, 0, 100)}%` }} /></div>}
+            {equity >= 60 ? <div className="nx-acq-equity-state is-strong"><div className="nx-acq-equity-state__dot" />STRONG POSITION</div>
+              : equity >= 30 ? <div className="nx-acq-equity-state is-moderate"><div className="nx-acq-equity-state__dot" />MODERATE EQUITY</div>
+              : equity > 0 ? <div className="nx-acq-equity-state is-thin"><div className="nx-acq-equity-state__dot" />THIN MARGIN</div> : null}
+          </div>
+          <div className="nx-medium-metric">
+            <span className="nx-mm-label">EQUITY AMOUNT</span>
+            <strong className={cls('nx-mm-value', isUnavail(fmtMoneyU(equityAmt || (value > 0 && equity > 0 ? Math.round(value * equity / 100) : 0))) && 'nx-mm-unavail')}>
+              {equityAmt > 0 ? fmtMoneyU(equityAmt) : value > 0 && equity > 0 ? fmtMoneyU(Math.round(value * equity / 100)) : 'Unavailable'}
+            </strong>
+          </div>
+          <div className={cls('nx-medium-metric is-wide', repairs > 50000 ? 'is-danger' : repairs > 25000 ? 'is-warn' : '')}>
+            <span className="nx-mm-label">REPAIR ESTIMATE</span>
+            <strong className={cls('nx-mm-value', isUnavail(fmtMoneyU(repairs)) && 'nx-mm-unavail')}>{fmtMoneyU(repairs)}</strong>
+            {repairs > 0 && <div className="nx-mm-bar"><div className={cls('nx-mm-bar__fill', repairs > 50000 ? 'is-red' : 'is-amber')} style={{ width: `${Math.min((repairs / 100000) * 100, 100)}%` }} /></div>}
+          </div>
+          <div className="nx-medium-metric">
+            <span className="nx-mm-label">BEDS / BATHS</span>
+            <strong className={cls('nx-mm-value', !beds && !baths && 'nx-mm-unavail')}>{beds > 0 || baths > 0 ? `${beds || '—'} / ${baths || '—'}` : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-metric">
+            <span className="nx-mm-label">SQFT</span>
+            <strong className={cls('nx-mm-value', isUnavail(fmtU(sqft || null)) && 'nx-mm-unavail')}>{sqft > 0 ? formatInteger(sqft) : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-metric">
+            <span className="nx-mm-label">YEAR BUILT</span>
+            <strong className={cls('nx-mm-value', !yearBuilt && 'nx-mm-unavail')}>{yearBuilt > 0 ? yearBuilt : 'Unavailable'}</strong>
+          </div>
+          {unitCount > 0 && (
+            <div className="nx-medium-metric">
+              <span className="nx-mm-label">UNITS</span>
+              <strong className="nx-mm-value nx-mm-value--purple">{unitCount}</strong>
+            </div>
+          )}
+        </div>
+        {isMultifamily && unitCount > 0 && (
+          <div className="nx-medium-unit-economics">
+            <div className="nx-medium-ue-header">UNIT ECONOMICS</div>
+            <div className="nx-medium-metrics-grid">
+              <div className="nx-medium-metric">
+                <span className="nx-mm-label">PRICE / UNIT</span>
+                <strong className={cls('nx-mm-value', !value && 'nx-mm-unavail')}>{value > 0 ? formatMoney(Math.round(value / unitCount)) : 'Unavailable'}</strong>
+              </div>
+              <div className="nx-medium-metric">
+                <span className="nx-mm-label">AVG BED / UNIT</span>
+                <strong className={cls('nx-mm-value', !bedsPerUnit && 'nx-mm-unavail')}>{bedsPerUnit > 0 ? bedsPerUnit.toFixed(1) : 'Unavailable'}</strong>
+              </div>
+              <div className="nx-medium-metric">
+                <span className="nx-mm-label">AVG SQFT / UNIT</span>
+                <strong className={cls('nx-mm-value', !avgSqftPerUnit && 'nx-mm-unavail')}>{avgSqftPerUnit > 0 ? formatInteger(avgSqftPerUnit) : 'Unavailable'}</strong>
+              </div>
+              {repairs > 0 && (
+                <div className="nx-medium-metric is-warn">
+                  <span className="nx-mm-label">REPAIR / UNIT</span>
+                  <strong className="nx-mm-value">{formatMoney(Math.round(repairs / unitCount))}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 4. DEAL DECISION & UNDERWRITING ─────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">DEAL DECISION & UNDERWRITING</div>
+        {arv > 0 ? (
+          <div className="nx-medium-deal-decision">
+            <div className="nx-mdd-hero">
+              <span className="nx-mm-label">AI RECOMMENDED OFFER</span>
+              <strong className="nx-mdd-offer">{formatMoney(offer)}</strong>
+              <p className="nx-mdd-range">{formatMoney(Math.round(offer * 0.94))} — {formatMoney(Math.round(offer * 1.03))}</p>
+              {/* Confidence arc + signal */}
+              <div className="nx-mdd-conf-arc-row">
+                <svg viewBox="0 0 56 56" className={cls('nx-mdd-conf-arc', `is-${decisionTone}`)}>
+                  <circle cx="28" cy="28" r="22" className="nx-mdd-arc-bg" />
+                  <circle
+                    cx="28" cy="28" r="22"
+                    className="nx-mdd-arc-fill"
+                    strokeDasharray={`${2 * Math.PI * 22 * (confidence / 100)} ${2 * Math.PI * 22 * (1 - confidence / 100)}`}
+                    strokeDashoffset={2 * Math.PI * 22 * 0.25}
+                  />
+                </svg>
+                <div className="nx-mdd-conf-arc-inner">
+                  <strong>{Math.round(confidence)}%</strong>
+                  <span>CONF</span>
+                </div>
+              </div>
+              <div className={cls('nx-mdd-signal', `is-${decisionTone}`)}>
+                {decisionTone === 'pursue' ? '↑ PURSUE' : decisionTone === 'review' ? '~ REVIEW' : '↓ PASS'}
+              </div>
+              <span className="nx-mdd-walkaway">
+                Walkaway {offer > 0 ? formatMoney(Math.round(offer * 1.06)) : '—'}
+              </span>
+            </div>
+            <div className="nx-mdd-waterfall">
+              {waterfallItems.map((item, idx) => {
+                const pct = Math.round((item.value / Math.max(arv, 1)) * 100)
+                return (
+                  <div key={item.label} className={cls('nx-mdd-step', `is-${item.tone}`, idx === waterfallItems.length - 1 && 'is-final')}>
+                    <div className="nx-mdd-step__head">
+                      <span>{item.label}</span>
+                      <div className="nx-mdd-step__right">
+                        <span className="nx-mdd-step__pct">{pct}%</span>
+                        <strong>{formatMoney(item.value)}</strong>
+                      </div>
+                    </div>
+                    <div className="nx-offer-waterfall__track">
+                      <div className="nx-offer-waterfall__fill nx-offer-waterfall__fill--animated" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="nx-medium-pending">
+            Underwriting is waiting on valuation. Run comps to activate the offer decision engine.
+          </div>
+        )}
+      </div>
+
+      {/* ── 5. LIVE BUYER INTELLIGENCE ──────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">
+          BUYER INTELLIGENCE
+          <span className="nx-medium-live-badge">LIVE</span>
+        </div>
+        {/* Demand heat bar */}
+        <div className="nx-mby-heat-track">
+          <div className="nx-mby-heat-track__fill" style={{ width: `${demand}%` }}>
+            <span className="nx-mby-heat-track__label">{demand > 0 ? `BUYER DEMAND ${Math.round(demand)}/100` : 'DEMAND DATA PENDING'}</span>
+          </div>
+        </div>
+        {/* Scanning state when buyer data is absent */}
+        {demand === 0 && cashBuyerPct === 0 && flipVelocity === 0 && avgResalePrice === 0 && (
+          <div className="nx-mby-scanning">
+            <div className="nx-mby-scanning__title">Buyer Network Scanning — Dispo Intelligence Syncing</div>
+            <div className="nx-mby-scanning__row">
+              <div className="nx-mby-scanning__skel w-60" />
+              <div className="nx-mby-scanning__skel w-30" />
+            </div>
+            <div className="nx-mby-scanning__row">
+              <div className="nx-mby-scanning__skel w-40" />
+              <div className="nx-mby-scanning__skel w-60" />
+            </div>
+          </div>
+        )}
+        {/* Market pulse pills — always visible */}
+        <div className="nx-mby-market-pulse" style={{ marginBottom: 10 }}>
+          {demand >= 70 ? <span className="nx-mby-market-pill is-red">HIGH DEMAND</span> : demand >= 45 ? <span className="nx-mby-market-pill is-amber">MODERATE DEMAND</span> : demand > 0 ? <span className="nx-mby-market-pill is-muted">LOW DEMAND</span> : <span className="nx-mby-market-pill is-muted">DEMAND PENDING</span>}
+          {cashBuyerPct >= 60 ? <span className="nx-mby-market-pill is-green">HIGH CASH ACTIVITY</span> : cashBuyerPct >= 30 ? <span className="nx-mby-market-pill is-blue">MIXED BUYERS</span> : cashBuyerPct > 0 ? <span className="nx-mby-market-pill is-muted">LOW CASH ACTIVITY</span> : null}
+          {(dispoConfidence || dispositionConfidence) < 40 && (dispoConfidence || dispositionConfidence) > 0 ? <span className="nx-mby-market-pill is-amber">SLOW DISPO</span> : (dispoConfidence || dispositionConfidence) >= 65 ? <span className="nx-mby-market-pill is-green">FAST DISPO</span> : null}
+          {nearbyAcquisitions >= 5 ? <span className="nx-mby-market-pill is-purple">ACTIVE INV. ZONE</span> : nearbyAcquisitions > 0 ? <span className="nx-mby-market-pill is-blue">SOME INV. ACTIVITY</span> : null}
+          {investorCompetition >= 70 ? <span className="nx-mby-market-pill is-red">HIGH COMPETITION</span> : null}
+          {exitLiquidity === 'Low' ? <span className="nx-mby-market-pill is-amber">LOW LIQUIDITY</span> : null}
+          {hedgeFundActivity ? <span className="nx-mby-market-pill is-purple">HEDGE FUND ACTIVE</span> : null}
+        </div>
+        {/* Dispo ring + key stats row */}
+        {(() => {
+          const dispo = dispoConfidence || dispositionConfidence
+          const DISPO_R = 20, DISPO_C = 2 * Math.PI * DISPO_R
+          const dispoFill = DISPO_C * (dispo / 100)
+          const dispoTone = dispo >= 65 ? 'is-green' : dispo >= 40 ? 'is-amber' : 'is-red'
+          return (
+            <div className="nx-mby-dispo-row">
+              <div className="nx-mby-dispo-ring-wrap">
+                <svg viewBox="0 0 48 48" className="nx-mby-dispo-ring-svg">
+                  <circle cx="24" cy="24" r={DISPO_R} className="nx-mby-dispo-ring-bg" />
+                  <circle cx="24" cy="24" r={DISPO_R} className={cls('nx-mby-dispo-ring-fill', dispo > 0 ? dispoTone : 'is-red')}
+                    strokeDasharray={`${dispo > 0 ? dispoFill : 0} ${DISPO_C}`}
+                    strokeDashoffset={DISPO_C * 0.25} />
+                </svg>
+                <div className="nx-mby-dispo-ring-inner">
+                  <strong>{dispo > 0 ? `${Math.round(dispo)}%` : '—'}</strong>
+                  <span>DISPO</span>
+                </div>
+              </div>
+              <div className="nx-mby-dispo-stats">
+                <div className="nx-mby-dispo-stat">
+                  <span className="nx-mby-dispo-stat__label">Exit Liquidity</span>
+                  <span className={cls('nx-mby-dispo-stat__val', exitLiquidity === 'High' ? 'is-green' : exitLiquidity === 'Moderate' ? 'is-amber' : 'nx-mm-unavail')}>{exitLiquidity || '—'}</span>
+                </div>
+                <div className="nx-mby-dispo-stat">
+                  <span className="nx-mby-dispo-stat__label">Assignment Spread</span>
+                  <span className={cls('nx-mby-dispo-stat__val', assignmentSpread > 0 ? 'is-green' : 'nx-mm-unavail')}>{assignmentSpread > 0 ? formatMoney(assignmentSpread) : '—'}</span>
+                </div>
+                <div className="nx-mby-dispo-stat">
+                  <span className="nx-mby-dispo-stat__label">Buyer Match Count</span>
+                  <span className={cls('nx-mby-dispo-stat__val', buyerMatchCount > 0 ? '' : 'nx-mm-unavail')}>{buyerMatchCount > 0 ? buyerMatchCount : '—'}</span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+        <div className="nx-medium-buyer-grid">
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">DEMAND SCORE</span>
+            <strong className={cls('nx-mm-value', !demand && 'nx-mm-unavail')}>{demand > 0 ? `${Math.round(demand)}/100` : 'Unavailable'}</strong>
+            {demand > 0 && <div className="nx-mby-demand-bar"><div className={cls('nx-mby-demand-fill', demand >= 70 ? 'is-red' : demand >= 45 ? 'is-amber' : 'is-blue')} style={{ width: `${demand}%` }} /></div>}
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">AVG RESALE PRICE</span>
+            <strong className={cls('nx-mm-value', !avgResalePrice && 'nx-mm-unavail')}>{avgResalePrice > 0 ? formatMoney(avgResalePrice) : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">AVG PPSF</span>
+            <strong className={cls('nx-mm-value', !avgPpsf && 'nx-mm-unavail')}>{avgPpsf > 0 ? `$${Math.round(avgPpsf)}/sqft` : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">RECENT SOLD (6mo)</span>
+            <strong className={cls('nx-mm-value', !recentSoldCount && 'nx-mm-unavail')}>{recentSoldCount > 0 ? recentSoldCount : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">NEARBY INV. ACQS</span>
+            <strong className={cls('nx-mm-value', !nearbyAcquisitions && 'nx-mm-unavail')}>{nearbyAcquisitions > 0 ? nearbyAcquisitions : 'Unavailable'}</strong>
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">CASH BUYER %</span>
+            <strong className={cls('nx-mm-value', !cashBuyerPct && 'nx-mm-unavail')}>{cashBuyerPct > 0 ? `${Math.round(cashBuyerPct)}%` : 'Unavailable'}</strong>
+            {cashBuyerPct > 0 && <div className="nx-mby-demand-bar"><div className="nx-mby-demand-fill is-green" style={{ width: `${cashBuyerPct}%` }} /></div>}
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">FLIP VELOCITY</span>
+            <strong className={cls('nx-mm-value', !flipVelocity && 'nx-mm-unavail')}>{flipVelocity > 0 ? `${Math.round(flipVelocity)}/100` : 'Unavailable'}</strong>
+            {flipVelocity > 0 && <div className="nx-mby-demand-bar"><div className="nx-mby-demand-fill is-amber" style={{ width: `${flipVelocity}%` }} /></div>}
+          </div>
+          <div className="nx-medium-buyer-metric">
+            <span className="nx-mm-label">BUYER PRESSURE</span>
+            <strong className={cls('nx-mm-value', !investorCompetition && 'nx-mm-unavail', investorCompetition >= 70 ? 'nx-mm-value--red' : '')}>{investorCompetition > 0 ? `${investorCompetition}/100` : 'Unavailable'}</strong>
+          </div>
+          {hedgeFundActivity && (
+            <div className="nx-medium-buyer-metric" style={{ gridColumn: 'span 2' }}>
+              <span className="nx-mm-label">HEDGE FUND / INSTITUTIONAL</span>
+              <strong className="nx-mm-value nx-mm-value--purple">{hedgeFundActivity}</strong>
+            </div>
+          )}
+          {isMultifamily && (
+            <div className="nx-medium-buyer-metric">
+              <span className="nx-mm-label">AVG PRICE / UNIT</span>
+              <strong className={cls('nx-mm-value', !avgPricePerUnit && 'nx-mm-unavail')}>{avgPricePerUnit > 0 ? formatMoney(avgPricePerUnit) : 'Unavailable'}</strong>
+            </div>
+          )}
+          {marketAbsorption > 0 && (
+            <div className="nx-medium-buyer-metric">
+              <span className="nx-mm-label">ABSORPTION</span>
+              <strong className="nx-mm-value">{marketAbsorption}<span style={{ fontSize: '10px', opacity: 0.55 }}>d</span></strong>
+            </div>
+          )}
+        </div>
+        {/* Tactical signal chips */}
+        <div className="nx-mby-tactical-chips">
+          {demand >= 70 && <span className="nx-mby-tactical-chip is-red">STRONG DEMAND</span>}
+          {demand > 0 && demand < 40 && <span className="nx-mby-tactical-chip is-amber">LOW DEMAND</span>}
+          {cashBuyerPct >= 60 && <span className="nx-mby-tactical-chip is-green">CASH HEAVY MARKET</span>}
+          {flipVelocity >= 70 && <span className="nx-mby-tactical-chip is-amber">HIGH FLIP VELOCITY</span>}
+          {exitLiquidity === 'Low' && <span className="nx-mby-tactical-chip is-amber">LOW LIQUIDITY</span>}
+          {exitLiquidity === 'High' && <span className="nx-mby-tactical-chip is-green">HIGH LIQUIDITY</span>}
+          {hedgeFundActivity && <span className="nx-mby-tactical-chip is-purple">HEDGE FUND ACTIVE</span>}
+          {investorCompetition >= 70 && <span className="nx-mby-tactical-chip is-red">HIGH COMPETITION</span>}
+          {(dispoConfidence || dispositionConfidence) < 40 && (dispoConfidence || dispositionConfidence) > 0 && <span className="nx-mby-tactical-chip is-amber">SLOW DISPO</span>}
+          {buyerChips.map((chip) => (
+            <span key={chip.label} className={cls('nx-mby-tactical-chip', `is-${chip.tone}`)}>{chip.label}</span>
+          ))}
+          {demand === 0 && cashBuyerPct === 0 && flipVelocity === 0 && <span className="nx-mby-tactical-chip is-muted">BUYER DATA PENDING</span>}
+        </div>
+      </div>
+
+      {/* ── PROPERTY INTELLIGENCE ────────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">
+          PROPERTY INTELLIGENCE
+          {distressCount > 0 && <span className="nx-medium-live-badge" style={{ background: 'rgba(255,69,58,0.18)', color: '#ff453a' }}>{distressCount} DISTRESS</span>}
+        </div>
+        <div className="nx-mpia">
+
+          {/* PROPERTY CORE */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('core') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('core')}>
+              <span className="nx-mpia-hdr__label">PROPERTY CORE</span>
+              {propQualityBadge && <span className={cls('nx-mpia-hdr__badge', `is-${propQualityTone}`)}>{propQualityBadge}</span>}
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('core') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-core-grid">
+                <div className="nx-pi-core-card">
+                  <span className="nx-pi-core-card__val">{beds > 0 ? beds : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Beds</span>
+                </div>
+                <div className="nx-pi-core-card">
+                  <span className="nx-pi-core-card__val">{baths > 0 ? baths : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Baths</span>
+                </div>
+                <div className="nx-pi-core-card">
+                  <span className="nx-pi-core-card__val">{sqft > 0 ? formatInteger(sqft) : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Sq Ft</span>
+                </div>
+                <div className="nx-pi-core-card">
+                  <span className="nx-pi-core-card__val">{yearBuilt > 0 ? yearBuilt : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Built</span>
+                </div>
+                <div className="nx-pi-core-card">
+                  <span className="nx-pi-core-card__val">{lotSize > 0 ? formatInteger(lotSize) : lotAcreage > 0 ? `${lotAcreage.toFixed(2)}ac` : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Lot</span>
+                </div>
+                <div className="nx-pi-core-card">
+                  <span className={cls('nx-pi-core-card__val', unitCount > 1 ? 'is-purple' : '')}>{unitCount > 0 ? unitCount : buildings > 1 ? `${buildings} bldg` : <span className="nx-pi-core-card__val nx-unavail">—</span>}</span>
+                  <span className="nx-pi-core-card__label">Units</span>
+                </div>
+              </div>
+              <div className="nx-pi-meta-chips">
+                <div className={cls('nx-pi-meta-chip', propType ? '' : 'is-muted')}><span className="label">TYPE</span>{propType ? propType.toUpperCase() : '—'}</div>
+                <div className={cls('nx-pi-meta-chip', propClass ? '' : 'is-muted')}><span className="label">CLASS</span>{propClass || '—'}</div>
+                <div className={cls('nx-pi-meta-chip', zoning ? '' : 'is-muted')}><span className="label">ZONE</span>{zoning || '—'}</div>
+                {lotAcreage > 0 && <div className="nx-pi-meta-chip"><span className="label">ACRES</span>{lotAcreage.toFixed(2)}</div>}
+                {floodZone && <div className={cls('nx-pi-meta-chip', /[bcd]/i.test(floodZone) ? 'is-warn' : '')}><span className="label">FLOOD</span>{floodZone}</div>}
+              </div>
+            </div>
+          </div>
+
+          {/* CONSTRUCTION / SYSTEMS */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('systems') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('systems')}>
+              <span className="nx-mpia-hdr__label">CONSTRUCTION / SYSTEMS</span>
+              <span className="nx-mpia-hdr__count">{[constructionType, buildingQuality, roofCover, floorCover, heating, cooling, garageType, sewerType, waterSource].filter(Boolean).length} populated</span>
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('systems') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-sys-chips">
+                {([
+                  { key: 'FRAME', val: constructionType },
+                  { key: 'QUALITY', val: buildingQuality, tone: buildingQuality ? `nx-pi-qual-${propQualityTone}` : '' },
+                  { key: 'ROOF', val: roofCover },
+                  { key: 'FLOORS', val: floorCover },
+                  { key: 'HEAT', val: heating },
+                  { key: 'AC', val: cooling },
+                  { key: 'GARAGE', val: garageType },
+                  { key: 'POOL', val: hasPool ? 'Yes' : null, ok: true },
+                  { key: 'SEWER', val: sewerType },
+                  { key: 'WATER', val: waterSource },
+                ] as { key: string; val: string | null; tone?: string; ok?: boolean }[]).map(({ key, val, tone, ok }) => (
+                  <div key={key} className={cls('nx-pi-sys-badge', val ? 'has-val' : 'is-unavail')}>
+                    <span className="nx-pi-sys-badge__key">{key}</span>
+                    <span className={cls('nx-pi-sys-badge__val', tone || (ok && val ? 'is-ok' : val ? '' : 'nx-mm-unavail'))}>{val || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* TAX / ASSESSMENT */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('tax') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('tax')}>
+              <span className="nx-mpia-hdr__label">TAX / ASSESSMENT</span>
+              {isTaxDelinquent && <span className="nx-mpia-hdr__badge is-red">DELINQUENT</span>}
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('tax') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {isTaxDelinquent && (
+                <div className="nx-pi-delinquent-banner">
+                  <div className="nx-pi-delinquent-banner__dot" />
+                  <span className="nx-pi-delinquent-banner__text">TAX DELINQUENT{taxDelinquentYear ? ` SINCE ${taxDelinquentYear}` : ''}</span>
+                  {pastDueAmount > 0 && <span className="nx-pi-delinquent-banner__sub">{formatMoney(pastDueAmount)} PAST DUE</span>}
+                </div>
+              )}
+              {assessedLand > 0 && assessedImprovement > 0 && (() => {
+                const total = assessedLand + assessedImprovement
+                const landPct = Math.round((assessedLand / total) * 100)
+                const imprPct = 100 - landPct
+                return (
+                  <div className="nx-pi-assess-split">
+                    <div className="nx-pi-assess-split__label">Land vs Improvement</div>
+                    <div className="nx-pi-assess-bar">
+                      <div className="nx-pi-assess-bar__land" style={{ width: `${landPct}%` }} />
+                      <div className="nx-pi-assess-bar__impr" style={{ width: `${imprPct}%` }} />
+                    </div>
+                    <div className="nx-pi-assess-legend">
+                      <span className="is-land">Land {landPct}% · {formatMoney(assessedLand)}</span>
+                      <span className="is-impr">Impr {imprPct}% · {formatMoney(assessedImprovement)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="nx-medium-prow-list">
+                <div className="nx-medium-prow"><span>Annual Tax</span><strong className={cls(!taxAmount && 'nx-unavail')}>{taxAmount > 0 ? formatMoney(taxAmount) : 'Unavailable'}</strong></div>
+                <div className="nx-medium-prow"><span>Assessed Total</span><strong className={cls(!assessedTotal && 'nx-unavail')}>{assessedTotal > 0 ? formatMoney(assessedTotal) : 'Unavailable'}</strong></div>
+                {value > 0 && assessedTotal > 0 && (
+                  <div className="nx-medium-prow"><span>Assessed Ratio</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <strong>{Math.round((assessedTotal / value) * 100)}%</strong>
+                      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>of est. value</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* FINANCING & LIENS */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('liens') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('liens')}>
+              <span className="nx-mpia-hdr__label">FINANCING / LOANS</span>
+              {isFreeClear && <span className="nx-mpia-hdr__badge is-green">FREE & CLEAR</span>}
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('liens') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {isFreeClear && (
+                <div className="nx-pi-fc-badge">✓ FREE &amp; CLEAR — No Outstanding Liens</div>
+              )}
+              {loanAmount > 0 && value > 0 && (() => {
+                const ltv = Math.round((loanBalance || loanAmount) / value * 100)
+                const tone = ltv > 80 ? 'is-danger' : ltv > 60 ? 'is-warn' : 'is-safe'
+                return (
+                  <div className="nx-pi-ltv-meter">
+                    <div className="nx-pi-ltv-meter__label"><span>LOAN-TO-VALUE</span><span>{ltv}%</span></div>
+                    <div className="nx-pi-ltv-track">
+                      <div className={cls('nx-pi-ltv-fill', tone)} style={{ width: `${Math.min(ltv, 100)}%` }} />
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="nx-medium-prow-list" style={{ marginTop: 8 }}>
+                <div className="nx-medium-prow"><span>Loan Amount</span>{loanAmount > 0 ? <strong>{formatMoney(loanAmount)}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Est. Balance</span>{loanBalance > 0 ? <strong className="nx-mpia-warn">{formatMoney(loanBalance)}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Monthly Payment</span>{estimatedPayment > 0 ? <strong>{formatMoney(estimatedPayment)}/mo</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Equity Amount</span>{equityAmt > 0 ? <strong className="nx-mpia-ok">{formatMoney(equityAmt)}</strong> : value > 0 && equity > 0 ? <strong className="nx-mpia-ok">{formatMoney(Math.round(value * equity / 100))}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Equity %</span>{equity > 0 ? <strong className="nx-mpia-ok">{Math.round(equity)}%</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                {estimatedCashFlow !== 0 && <div className="nx-medium-prow"><span>Est. Cash Flow</span><strong className={estimatedCashFlow > 0 ? 'nx-mpia-ok' : 'nx-mpia-warn'}>{formatMoney(estimatedCashFlow)}/mo</strong></div>}
+              </div>
+            </div>
+          </div>
+
+          {/* SALE HISTORY */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('history') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('history')}>
+              <span className="nx-mpia-hdr__label">SALE HISTORY</span>
+              {appreciationPct > 0 && <span className="nx-mpia-hdr__badge is-green">+{Math.round(appreciationPct)}% APPREC</span>}
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('history') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {(lastSaleDate || lastSalePrice > 0 || value > 0) ? (
+                <div className="nx-pi-sale-timeline">
+                  {(lastSaleDate || lastSalePrice > 0) && (
+                    <div className="nx-pi-sale-event">
+                      <div className="nx-pi-sale-event__year">{lastSaleDate || 'PRIOR SALE'}</div>
+                      <div className="nx-pi-sale-event__val">{lastSalePrice > 0 ? formatMoney(lastSalePrice) : <span className="nx-mm-unavail">Price Unavailable</span>}</div>
+                      {ownerYears > 0 && <div className="nx-pi-sale-event__sub">Owned {ownerYears}+ years</div>}
+                    </div>
+                  )}
+                  {value > 0 && (
+                    <div className="nx-pi-sale-event is-current">
+                      <div className="nx-pi-sale-event__year">2025 EST. VALUE</div>
+                      <div className="nx-pi-sale-event__val is-green">{formatMoney(value)}</div>
+                      {equityGain > 0 && <div className="nx-pi-sale-event__sub">+{formatMoney(equityGain)} gained</div>}
+                    </div>
+                  )}
+                  {(appreciationPct > 0 || (lastSalePrice > 0 && equityGain > 0)) && (
+                    <div className="nx-pi-apprec-badge">
+                      ↑ +{appreciationPct > 0 ? Math.round(appreciationPct) : Math.round((equityGain / lastSalePrice) * 100)}% APPRECIATION
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="nx-medium-prow-list">
+                  <div className="nx-medium-prow"><span>Sale History</span><span className="nx-mm-unavail">Unavailable</span></div>
+                  {ownerYears > 0 && <div className="nx-medium-prow"><span>Ownership Years</span><strong>{ownerYears}+ yrs</strong></div>}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* CONDITION & REHAB */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('rehab') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('rehab')}>
+              <span className="nx-mpia-hdr__label">CONDITION / REHAB</span>
+              <span className={cls('nx-mpia-hdr__badge', `is-${rehabRiskTone}`)}>{flipSuitability}</span>
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('rehab') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {(() => {
+                const sevTone = rehabScore >= 75 ? 'is-red' : rehabScore >= 55 ? 'is-orange' : rehabScore >= 35 ? 'is-amber' : 'is-green'
+                const sevLabel = rehabScore >= 75 ? 'HEAVY REHAB' : rehabScore >= 55 ? 'SUBSTANTIAL' : rehabScore >= 35 ? 'MODERATE' : 'COSMETIC'
+                return (
+                  <div className="nx-pi-rehab-severity">
+                    <div className="nx-pi-rehab-severity__header">
+                      <span className="nx-pi-rehab-severity__title">REHAB SEVERITY</span>
+                      <span className={cls('nx-pi-rehab-severity__chip', sevTone)}>{sevLabel}</span>
+                    </div>
+                    <div className="nx-pi-rehab-track">
+                      <div className={cls('nx-pi-rehab-fill', sevTone)} style={{ width: `${rehabScore}%` }} />
+                    </div>
+                    <div className="nx-pi-rehab-ticks">
+                      <span>COSMETIC</span><span>MODERATE</span><span>SUBSTANTIAL</span><span>FULL</span>
+                    </div>
+                    <div className="nx-pi-rehab-risk-badges">
+                      <span className={cls('nx-pi-rehab-risk-badge', flipSuitability === 'Flip Ready' ? 'is-green' : flipSuitability === 'Moderate Work' ? 'is-amber' : 'is-red')}>{flipSuitability}</span>
+                      {condition && <span className={cls('nx-pi-rehab-risk-badge', conditionTone === 'green' ? 'is-green' : conditionTone === 'amber' ? 'is-amber' : conditionTone === 'red' ? 'is-red' : 'is-muted')}>{condition}</span>}
+                      {rehabLevel && <span className={cls('nx-pi-rehab-risk-badge', rehabRiskTone === 'green' ? 'is-green' : rehabRiskTone === 'red' ? 'is-red' : 'is-amber')}>{rehabLevel}</span>}
+                      {structuralRisk && <span className={cls('nx-pi-rehab-risk-badge', /high|major/i.test(structuralRisk) ? 'is-red' : 'is-amber')}>STRUCTURAL: {structuralRisk.toUpperCase()}</span>}
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="nx-medium-prow-list">
+                <div className="nx-medium-prow"><span>Repair Estimate</span>{repairs > 0 ? <strong className="nx-mpia-warn">{formatMoney(repairs)}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Deferred Maintenance</span>{deferredMaint ? <strong>{deferredMaint}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* PROPERTY TAGS */}
+          <div className={cls('nx-mpia-section', openPropIntel.has('tags') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePropIntel('tags')}>
+              <span className="nx-mpia-hdr__label">PROPERTY TAGS</span>
+              <span className="nx-mpia-hdr__count">{propTagChips.length} tags</span>
+              <span className="nx-mpia-hdr__arrow">{openPropIntel.has('tags') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {propTagChips.length > 0 ? (
+                <div className="nx-pi-tag-cloud">
+                  {propTagChips.map((tag, i) => (
+                    <span key={i} className={cls('nx-pi-tag', `is-${tag.tone}`)}>{tag.label}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="nx-medium-prow-list"><div className="nx-medium-prow"><span>Tags</span><span className="nx-mm-unavail">No tags available</span></div></div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── CENSUS INTELLIGENCE ──────────────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">
+          CENSUS INTELLIGENCE
+          {neighborhoodScore > 0 && <span className="nx-medium-live-badge" style={{ background: 'rgba(10,132,255,0.15)', color: '#0a84ff' }}>SCORE {Math.round(neighborhoodScore)}</span>}
+        </div>
+        <div className="nx-mpia">
+
+          {/* DEMOGRAPHICS */}
+          <div className={cls('nx-mpia-section', openCensus.has('demo') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleCensus('demo')}>
+              <span className="nx-mpia-hdr__label">DEMOGRAPHICS</span>
+              {populationGrowth > 0 && <span className="nx-mpia-hdr__badge is-green">+{populationGrowth.toFixed(1)}% GROWTH</span>}
+              {populationGrowth < 0 && <span className="nx-mpia-hdr__badge is-red">{populationGrowth.toFixed(1)}% DECLINE</span>}
+              <span className="nx-mpia-hdr__arrow">{openCensus.has('demo') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-stat-grid">
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">POPULATION</span>{censusPopulation > 0 ? <strong className="nx-pi-stat__value">{censusPopulation.toLocaleString()}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">MED INCOME</span>{censusMedianIncome > 0 ? <strong className="nx-pi-stat__value is-green">{formatMoney(censusMedianIncome)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">MED AGE</span>{censusMedianAge > 0 ? <strong className="nx-pi-stat__value">{Math.round(censusMedianAge)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">HH SIZE</span>{censusHouseholdSize > 0 ? <strong className="nx-pi-stat__value">{censusHouseholdSize.toFixed(1)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">OWNER OCC</span>{ownerOccupancyRate > 0 ? <strong className="nx-pi-stat__value is-blue">{Math.round(ownerOccupancyRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">RENTAL</span>{rentalRate > 0 ? <strong className="nx-pi-stat__value is-amber">{Math.round(rentalRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+                <div className="nx-pi-stat"><span className="nx-pi-stat__label">VACANCY</span>{vacancyRate > 0 ? <strong className={cls('nx-pi-stat__value', vacancyRate > 10 ? 'is-red' : '')}>{Math.round(vacancyRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
+              </div>
+              {ownerOccupancyRate > 0 && rentalRate > 0 && (
+                <div className="nx-pi-stacked-bar-wrap" style={{ marginTop: 10 }}>
+                  <span className="nx-pi-bar__label">Occupancy Mix</span>
+                  <div className="nx-pi-stacked-bar">
+                    <div className="nx-pi-stacked-bar__seg is-blue" style={{ width: `${ownerOccupancyRate}%` }} />
+                    <div className="nx-pi-stacked-bar__seg is-amber" style={{ width: `${rentalRate}%` }} />
+                    {vacancyRate > 0 && <div className="nx-pi-stacked-bar__seg is-red" style={{ width: `${vacancyRate}%` }} />}
+                  </div>
+                  <div className="nx-pi-stacked-bar__legend">
+                    <span className="is-blue">Owner {Math.round(ownerOccupancyRate)}%</span>
+                    <span className="is-amber">Rental {Math.round(rentalRate)}%</span>
+                    {vacancyRate > 0 && <span className="is-red">Vacant {Math.round(vacancyRate)}%</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* MARKET HEALTH */}
+          <div className={cls('nx-mpia-section', openCensus.has('health') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleCensus('health')}>
+              <span className="nx-mpia-hdr__label">MARKET HEALTH</span>
+              {neighborhoodScore >= 70 && <span className="nx-mpia-hdr__badge is-green">STRONG</span>}
+              {neighborhoodScore > 0 && neighborhoodScore < 40 && <span className="nx-mpia-hdr__badge is-red">WEAK</span>}
+              <span className="nx-mpia-hdr__arrow">{openCensus.has('health') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-bars">
+                {schoolRating > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">School Rating</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', schoolRating >= 7 ? 'is-green' : schoolRating >= 5 ? 'is-amber' : 'is-red')} style={{ width: `${schoolRating * 10}%` }} /></div>
+                    <span className="nx-pi-bar__val">{schoolRating}/10</span>
+                  </div>
+                )}
+                {crimeIndex > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Crime Index</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', crimeIndex >= 70 ? 'is-red' : crimeIndex >= 40 ? 'is-amber' : 'is-green')} style={{ width: `${crimeIndex}%` }} /></div>
+                    <span className="nx-pi-bar__val">{crimeIndex}</span>
+                  </div>
+                )}
+                {employmentStrength > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Employment</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', employmentStrength >= 70 ? 'is-green' : employmentStrength >= 40 ? 'is-amber' : 'is-red')} style={{ width: `${employmentStrength}%` }} /></div>
+                    <span className="nx-pi-bar__val">{employmentStrength}</span>
+                  </div>
+                )}
+                {investorActivity > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Investor Activity</span>
+                    <div className="nx-pi-bar"><div className="nx-pi-bar__fill is-purple" style={{ width: `${investorActivity}%` }} /></div>
+                    <span className="nx-pi-bar__val">{investorActivity}</span>
+                  </div>
+                )}
+                {growthMomentum > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Growth Momentum</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', growthMomentum >= 70 ? 'is-green' : growthMomentum >= 40 ? 'is-amber' : 'is-blue')} style={{ width: `${growthMomentum}%` }} /></div>
+                    <span className="nx-pi-bar__val">{growthMomentum}</span>
+                  </div>
+                )}
+              </div>
+              <div className="nx-medium-prow-list" style={{ marginTop: 10 }}>
+                {migrationTrend && <div className="nx-medium-prow"><span>Migration</span><strong className={/inflow|positive|growing/i.test(migrationTrend) ? 'nx-mpia-ok' : /outflow|negative|declining/i.test(migrationTrend) ? 'nx-mpia-warn' : ''}>{migrationTrend}</strong></div>}
+                {economicTrend && <div className="nx-medium-prow"><span>Economic Trend</span><strong className={/grow|improve|positive/i.test(economicTrend) ? 'nx-mpia-ok' : /decline|contract|negative/i.test(economicTrend) ? 'nx-mpia-warn' : ''}>{economicTrend}</strong></div>}
+                {neighborhoodScore > 0 && <div className="nx-medium-prow"><span>Neighborhood Score</span><span className={cls('nx-mp-score', neighborhoodScore >= 70 ? 'is-green' : neighborhoodScore >= 45 ? 'is-amber' : 'is-danger')}>{Math.round(neighborhoodScore)}/100</span></div>}
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── OWNER PORTFOLIO INTELLIGENCE ─────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">
+          OWNER PORTFOLIO INTELLIGENCE
+          <span className={cls('nx-medium-live-badge', `nx-pi-badge--${investorLabel.tone}`)}>{investorLabel.label.toUpperCase()}</span>
+        </div>
+        <div className="nx-mpia">
+
+          {/* PORTFOLIO OVERVIEW */}
+          <div className={cls('nx-mpia-section', openPortfolio.has('overview') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePortfolio('overview')}>
+              <span className="nx-mpia-hdr__label">PORTFOLIO OVERVIEW</span>
+              {portfolioCount > 0 && <span className="nx-mpia-hdr__count">{portfolioCount} {portfolioCount === 1 ? 'property' : 'properties'}</span>}
+              <span className="nx-mpia-hdr__arrow">{openPortfolio.has('overview') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-stat-grid">
+                {portfolioCount > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">PROPS</span><strong className="nx-pi-stat__value">{portfolioCount}</strong></div>}
+                {portfolioUnits > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">UNITS</span><strong className="nx-pi-stat__value is-purple">{portfolioUnits}</strong></div>}
+                {portfolioValue > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">TOTAL VALUE</span><strong className="nx-pi-stat__value is-green">{formatMoney(portfolioValue)}</strong></div>}
+                {portfolioEquity > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">EQUITY</span><strong className="nx-pi-stat__value is-blue">{formatMoney(portfolioEquity)}</strong></div>}
+                {portfolioDebt > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">TOTAL DEBT</span><strong className="nx-pi-stat__value is-red">{formatMoney(portfolioDebt)}</strong></div>}
+                {portfolioMonthlyDebt > 0 && <div className="nx-pi-stat"><span className="nx-pi-stat__label">MO DEBT SVC</span><strong className="nx-pi-stat__value is-amber">{formatMoney(portfolioMonthlyDebt)}</strong></div>}
+              </div>
+              <div className="nx-medium-prow-list" style={{ marginTop: 10 }}>
+                {portfolioTypeMajority && <div className="nx-medium-prow"><span>Primary Type</span><strong>{portfolioTypeMajority.toUpperCase()}</strong></div>}
+                {portfolioMarkets && <div className="nx-medium-prow"><span>Markets</span><strong>{portfolioMarkets}</strong></div>}
+                {acquisitionVelocity > 0 && <div className="nx-medium-prow"><span>Acq. Velocity</span><strong>{acquisitionVelocity}/yr</strong></div>}
+                {portfolioGrowthTrend && <div className="nx-medium-prow"><span>Growth Trend</span><strong className={/grow|expand|positive/i.test(portfolioGrowthTrend) ? 'nx-mpia-ok' : /shrink|decline|negative/i.test(portfolioGrowthTrend) ? 'nx-mpia-warn' : ''}>{portfolioGrowthTrend}</strong></div>}
+              </div>
+              <div className="nx-medium-signal-chips" style={{ marginTop: 8 }}>
+                <span className={cls('nx-medium-signal-chip', `is-${investorLabel.tone}`)}>{investorLabel.label.toUpperCase()}</span>
+                {distressExposure >= 50 && <span className="nx-medium-signal-chip is-red">HIGH DISTRESS EXPOSURE</span>}
+                {sophisticationScore >= 70 && <span className="nx-medium-signal-chip is-purple">SOPHISTICATED INVESTOR</span>}
+                {portfolioCount >= 10 && <span className="nx-medium-signal-chip is-blue">MULTI-PROPERTY OPERATOR</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* INVESTOR PROFILE */}
+          <div className={cls('nx-mpia-section', openPortfolio.has('profile') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => togglePortfolio('profile')}>
+              <span className="nx-mpia-hdr__label">INVESTOR PROFILE</span>
+              {sophisticationScore > 0 && <span className={cls('nx-mpia-hdr__badge', sophisticationScore >= 70 ? 'is-purple' : sophisticationScore >= 40 ? 'is-blue' : 'is-amber')}>IQ {Math.round(sophisticationScore)}</span>}
+              <span className="nx-mpia-hdr__arrow">{openPortfolio.has('profile') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-bars">
+                {sophisticationScore > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Sophistication IQ</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', sophisticationScore >= 70 ? 'is-purple' : 'is-blue')} style={{ width: `${sophisticationScore}%` }} /></div>
+                    <span className="nx-pi-bar__val">{Math.round(sophisticationScore)}</span>
+                  </div>
+                )}
+                {distressExposure > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Distress Exposure</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', distressExposure >= 60 ? 'is-red' : 'is-amber')} style={{ width: `${distressExposure}%` }} /></div>
+                    <span className="nx-pi-bar__val">{Math.round(distressExposure)}%</span>
+                  </div>
+                )}
+              </div>
+              <div className="nx-medium-prow-list" style={{ marginTop: 10 }}>
+                {portfolioCount > 0 && portfolioValue > 0 && <div className="nx-medium-prow"><span>Avg Property Value</span><strong>{formatMoney(Math.round(portfolioValue / portfolioCount))}</strong></div>}
+                {portfolioValue > 0 && portfolioDebt > 0 && <div className="nx-medium-prow"><span>Portfolio LTV</span><strong className={portfolioDebt / portfolioValue > 0.8 ? 'nx-mpia-warn' : 'nx-mpia-ok'}>{Math.round((portfolioDebt / portfolioValue) * 100)}%</strong></div>}
+                {acquisitionVelocity > 0 && <div className="nx-medium-prow"><span>Annual Acquisitions</span><strong>{acquisitionVelocity}</strong></div>}
+              </div>
+              {/* Debt vs Equity visual */}
+              {portfolioValue > 0 && (portfolioEquity > 0 || portfolioDebt > 0) && (() => {
+                const eqPct = portfolioValue > 0 ? Math.round((portfolioEquity / portfolioValue) * 100) : 0
+                const dbtPct = portfolioValue > 0 ? Math.round((portfolioDebt / portfolioValue) * 100) : 0
+                return (
+                  <div className="nx-pi-stacked-bar-wrap" style={{ marginTop: 10 }}>
+                    <span className="nx-pi-bar__label">Equity vs Debt</span>
+                    <div className="nx-pi-stacked-bar">
+                      {eqPct > 0 && <div className="nx-pi-stacked-bar__seg is-blue" style={{ width: `${eqPct}%` }} />}
+                      {dbtPct > 0 && <div className="nx-pi-stacked-bar__seg is-red" style={{ width: `${Math.min(dbtPct, 100 - eqPct)}%` }} />}
+                    </div>
+                    <div className="nx-pi-stacked-bar__legend">
+                      {eqPct > 0 && <span className="is-blue">Equity {eqPct}%</span>}
+                      {dbtPct > 0 && <span className="is-red">Debt {dbtPct}%</span>}
+                    </div>
+                  </div>
+                )
+              })()}
+              {/* Burnout / overleveraged signals */}
+              {(landlordBurnout || overleveraged) && (
+                <div className="nx-medium-signal-chips" style={{ marginTop: 8 }}>
+                  {landlordBurnout && <span className="nx-medium-signal-chip is-amber">BURNT-OUT LANDLORD SIGNAL</span>}
+                  {overleveraged && <span className="nx-medium-signal-chip is-red">OVERLEVERAGED (&gt;85% LTV)</span>}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PORTFOLIO TAGS */}
+          {portfolioTagChips.length > 0 && (
+            <div className={cls('nx-mpia-section', openPortfolio.has('portags') && 'is-open')}>
+              <button type="button" className="nx-mpia-hdr" onClick={() => togglePortfolio('portags')}>
+                <span className="nx-mpia-hdr__label">PORTFOLIO SIGNALS</span>
+                <span className="nx-mpia-hdr__count">{portfolioTagChips.length} signals</span>
+                <span className="nx-mpia-hdr__arrow">{openPortfolio.has('portags') ? '▲' : '▼'}</span>
+              </button>
+              <div className="nx-mpia-body">
+                <div className="nx-pi-tag-cloud">
+                  {portfolioTagChips.map((tag, i) => (
+                    <span key={i} className={cls('nx-pi-tag', `is-${tag.tone}`)}>{tag.label}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* ── 6. PROSPECT INTELLIGENCE ────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">PROSPECT INTELLIGENCE</div>
+        {/* Signal chips */}
+        {prospectChips.length > 0 && (
+          <div className="nx-medium-signal-chips">
+            {prospectChips.map((chip) => (
+              <span key={chip.label} className={cls('nx-medium-signal-chip', `is-${chip.tone}`)}>{chip.label}</span>
+            ))}
+          </div>
+        )}
+        {/* Visualization row: close probability ring + pressure gauges */}
+        <div className="nx-mpi-viz-row">
+          <div className={cls('nx-mpi-close-ring', `is-${closeTone}`)}>
+            <svg viewBox="0 0 56 56" className="nx-mpi-ring-svg">
+              <circle cx="28" cy="28" r={CLOSE_R} className="nx-mpi-ring-bg" />
+              <circle cx="28" cy="28" r={CLOSE_R} className="nx-mpi-ring-fill"
+                strokeDasharray={`${closeRingFill} ${CLOSE_C - closeRingFill}`}
+                strokeDashoffset={CLOSE_C * 0.25} />
+            </svg>
+            <div className="nx-mpi-ring-inner"><strong>{closeProbability}%</strong><span>CLOSE</span></div>
+          </div>
+          <div className="nx-mpi-gauges">
+            {financialPressureScore > 0 && (
+              <div className="nx-mpi-gauge">
+                <div className="nx-mpi-gauge__row"><span>Fin. Pressure</span>
+                  <span className={cls('nx-mp-score', financialPressureScore >= 70 ? 'is-danger' : financialPressureScore >= 40 ? 'is-warn' : '')}>{Math.round(financialPressureScore)}%</span></div>
+                <div className="nx-mpi-gauge__track"><div className={cls('nx-mpi-gauge__fill', financialPressureScore >= 70 ? 'is-red' : 'is-amber')} style={{ width: `${financialPressureScore}%` }} /></div>
+              </div>
+            )}
+            {motivationScore > 0 && (
+              <div className="nx-mpi-gauge">
+                <div className="nx-mpi-gauge__row"><span>Motivation</span>
+                  <span className={cls('nx-mp-score', motivationScore >= 70 ? 'is-green' : motivationScore >= 40 ? 'is-amber' : '')}>{Math.round(motivationScore)}%</span></div>
+                <div className="nx-mpi-gauge__track"><div className={cls('nx-mpi-gauge__fill', motivationScore >= 70 ? 'is-green' : 'is-blue')} style={{ width: `${motivationScore}%` }} /></div>
+              </div>
+            )}
+            {contactQuality > 0 && (
+              <div className="nx-mpi-gauge">
+                <div className="nx-mpi-gauge__row"><span>Contact Quality</span>
+                  <span className={cls('nx-mp-score', contactQuality >= 70 ? 'is-green' : '')}>{Math.round(contactQuality)}%</span></div>
+                <div className="nx-mpi-gauge__track"><div className={cls('nx-mpi-gauge__fill', contactQuality >= 70 ? 'is-green' : 'is-blue')} style={{ width: `${contactQuality}%` }} /></div>
+              </div>
+            )}
+            <div className="nx-mpi-gauge">
+              <div className="nx-mpi-gauge__row"><span>Resistance</span>
+                <span className={cls('nx-mp-score', resistanceLevel >= 70 ? 'is-danger' : resistanceLevel >= 40 ? 'is-warn' : 'is-green')}>{resistanceLevel}%</span></div>
+              <div className="nx-mpi-gauge__track"><div className={cls('nx-mpi-gauge__fill', resistanceLevel >= 70 ? 'is-red' : resistanceLevel >= 40 ? 'is-amber' : 'is-green')} style={{ width: `${resistanceLevel}%` }} /></div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── ACCORDION ── */}
+        <div className="nx-mpia">
+
+          {/* IDENTITY */}
+          <div className={cls('nx-mpia-section', openProspect.has('identity') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('identity')}>
+              <span className="nx-mpia-hdr__label">IDENTITY</span>
+              <span className="nx-mpia-hdr__count">{[sellerName !== 'Unknown Seller', ageEstimate > 0, !!occupation, !!maritalStatus, !!educationLevel, ownerYears > 0, !!householdIncome].filter(Boolean).length} fields</span>
+              <span className="nx-mpia-hdr__arrow">{openProspect.has('identity') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-medium-prow-list">
+                <div className="nx-medium-prow"><span>Owner</span>{sellerName !== 'Unknown Seller' ? <strong>{sellerName}</strong> : prospectName ? <strong>{prospectName}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Phone</span>{sellerPhone ? <strong>{sellerPhone}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Email</span>{sellerEmail ? <strong>{sellerEmail}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                {householdIncome > 0 && <div className="nx-medium-prow"><span>HH Income</span><strong>{formatMoney(householdIncome)}</strong></div>}
+              </div>
+              <div className="nx-pi-id-chips">
+                {ownerType && <span className="nx-pi-id-chip is-blue">{ownerType}</span>}
+                {gender && <span className="nx-pi-id-chip">{gender.toUpperCase()}</span>}
+                {ageEstimate > 0 && <span className="nx-pi-id-chip">AGE ~{ageEstimate}</span>}
+                {maritalStatus && <span className="nx-pi-id-chip">{humanizeMaritalStatus(maritalStatus).toUpperCase()}</span>}
+                {educationLevel && <span className="nx-pi-id-chip">{humanizeEducation(educationLevel).toUpperCase()}</span>}
+                {occupation && <span className="nx-pi-id-chip is-purple">{humanizeOccupation(occupation).toUpperCase()}</span>}
+                {ownerYears >= 15 ? <span className="nx-pi-id-chip is-blue">LONG-TERM {ownerYears}+ YRS</span> : ownerYears > 0 ? <span className="nx-pi-id-chip">{ownerYears}+ YR OWNER</span> : null}
+                {languagePref && !/english/i.test(languagePref) && <span className="nx-pi-id-chip is-amber">{languagePref.toUpperCase()} SPEAKER</span>}
+                {isAbsentee && <span className="nx-pi-id-chip is-amber">ABSENTEE</span>}
+                {isVacant && <span className="nx-pi-id-chip is-amber">VACANT</span>}
+                {isTaxDelinquent && <span className="nx-pi-id-chip is-red">TAX DELINQUENT</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* MOTIVATION */}
+          <div className={cls('nx-mpia-section', openProspect.has('motivation') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('motivation')}>
+              <span className="nx-mpia-hdr__label">MOTIVATION</span>
+              <span className="nx-mpia-hdr__count">{[!!persona, !!thread.conversationStage, motivationScore > 0, financialPressureScore > 0, urgency > 0].filter(Boolean).length} signals</span>
+              <span className="nx-mpia-hdr__arrow">{openProspect.has('motivation') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {persona && (
+                <div className="nx-pi-persona-card">
+                  <span className="nx-pi-persona-card__icon">🎯</span>
+                  <div className="nx-pi-persona-card__body">
+                    <div className="nx-pi-persona-card__name">{persona}</div>
+                    <div className="nx-pi-persona-card__sub">{thread.conversationStage ? humanizeStage(thread.conversationStage) : 'Analyzing stage...'}</div>
+                  </div>
+                  {motivationScore > 0 && <span className="nx-pi-persona-card__conf">{Math.round(motivationScore)}% MOTIVATED</span>}
+                </div>
+              )}
+              {aiReasoning && (
+                <div className="nx-pi-ai-reasoning">{aiReasoning}</div>
+              )}
+              {leveragePoints.length > 0 && (
+                <div className="nx-pi-ai-leverage">
+                  {leveragePoints.map((pt, i) => (
+                    <div key={i} className={cls('nx-pi-ai-leverage__item', pt.tone)}>
+                      <div className="nx-pi-ai-leverage__dot" />{pt.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="nx-pi-bars">
+                {motivationScore > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Motivation</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', motivationScore >= 70 ? 'is-green' : motivationScore >= 40 ? 'is-amber' : 'is-blue')} style={{ width: `${motivationScore}%` }} /></div>
+                    <span className="nx-pi-bar__val">{Math.round(motivationScore)}</span>
+                  </div>
+                )}
+                {financialPressureScore > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Fin. Pressure</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', financialPressureScore >= 70 ? 'is-red' : 'is-amber')} style={{ width: `${financialPressureScore}%` }} /></div>
+                    <span className="nx-pi-bar__val">{Math.round(financialPressureScore)}</span>
+                  </div>
+                )}
+                {urgency > 0 && (
+                  <div className="nx-pi-bar-row">
+                    <span className="nx-pi-bar__label">Urgency</span>
+                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', urgency >= 70 ? 'is-red' : urgency >= 40 ? 'is-amber' : 'is-blue')} style={{ width: `${urgency}%` }} /></div>
+                    <span className="nx-pi-bar__val">{Math.round(urgency)}</span>
+                  </div>
+                )}
+              </div>
+              <div className="nx-medium-prow-list" style={{ marginTop: 8 }}>
+                {(thread.uiIntent || thread.detected_intent) && <div className="nx-medium-prow"><span>Intent</span><strong>{humanizeIntent(thread.uiIntent || thread.detected_intent || '')}</strong></div>}
+                {equity > 0 && <div className="nx-medium-prow"><span>Equity Position</span><strong>{Math.round(equity)}%</strong></div>}
+                {nextAction?.title && <div className="nx-medium-prow"><span>AI Next Move</span><strong style={{ color: '#0a84ff' }}>{nextAction.title}</strong></div>}
+                {thread.isSuppressed && <div className="nx-medium-prow is-danger"><span>DNC</span><strong>Suppressed</strong></div>}
+              </div>
+            </div>
+          </div>
+
+          {/* BEHAVIORAL */}
+          <div className={cls('nx-mpia-section', openProspect.has('behavioral') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('behavioral')}>
+              <span className="nx-mpia-hdr__label">BEHAVIORAL</span>
+              <span className={cls('nx-mpia-hdr__badge', `is-${emotionalState.tone}`)}>{emotionalState.label}</span>
+              <span className="nx-mpia-hdr__arrow">{openProspect.has('behavioral') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-pi-temp-chips">
+                <span className={cls('nx-pi-temp-chip', `is-${emotionalState.tone}`)}>{emotionalState.label.toUpperCase()}</span>
+                <span className={cls('nx-pi-temp-chip', resistanceLevel >= 70 ? 'is-red' : resistanceLevel >= 40 ? 'is-amber' : 'is-green')}>
+                  {resistanceLevel >= 70 ? 'HIGH RESISTANCE' : resistanceLevel >= 40 ? 'MODERATE RESISTANCE' : 'LOW RESISTANCE'}
+                </span>
+                {negotiationStyle && <span className="nx-pi-temp-chip is-blue">{negotiationStyle.toUpperCase()}</span>}
+                {responseCadence && !responseCadence.includes('No response') && <span className="nx-pi-temp-chip is-muted">{responseCadence.toUpperCase()}</span>}
+                {financialPressureScore >= 70 && <span className="nx-pi-temp-chip is-red">HIGH PRESSURE</span>}
+                {motivationScore >= 70 && <span className="nx-pi-temp-chip is-green">HIGH MOTIVATION</span>}
+                {contactQuality >= 70 && <span className="nx-pi-temp-chip is-green">HIGHLY CONTACTABLE</span>}
+              </div>
+              <div className="nx-pi-bars" style={{ marginTop: 10 }}>
+                <div className="nx-pi-bar-row">
+                  <span className="nx-pi-bar__label">Resistance</span>
+                  <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', resistanceLevel >= 70 ? 'is-red' : resistanceLevel >= 40 ? 'is-amber' : 'is-green')} style={{ width: `${resistanceLevel}%` }} /></div>
+                  <span className="nx-pi-bar__val">{resistanceLevel}</span>
+                </div>
+              </div>
+              {likelyObjections.length > 0 && (
+                <div className="nx-mpia-objections" style={{ marginTop: 8 }}>
+                  <span className="nx-mm-label">LIKELY OBJECTIONS</span>
+                  {likelyObjections.map((obj, i) => (
+                    <div key={i} className="nx-mpia-objection"><span className="nx-mpia-objection__dot" />{obj}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* FINANCIAL PROFILE */}
+          <div className={cls('nx-mpia-section', openProspect.has('financial') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('financial')}>
+              <span className="nx-mpia-hdr__label">FINANCIAL PROFILE</span>
+              {netWorth > 0 && <span className="nx-mpia-hdr__badge is-green">NW {formatMoney(netWorth)}</span>}
+              <span className="nx-mpia-hdr__arrow">{openProspect.has('financial') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              {netWorth > 0 && (() => {
+                const tier = netWorth >= 1000000 ? 'HIGH NET WORTH' : netWorth >= 500000 ? 'EMERGING WEALTH' : netWorth >= 100000 ? 'MIDDLE MARKET' : 'WORKING CLASS'
+                const isHigh = netWorth >= 500000
+                return (
+                  <div className={cls('nx-pi-wealth-tier', isHigh ? '' : 'is-mid')}>
+                    <div>
+                      <div className="nx-pi-wealth-tier__label">EST. NET WORTH</div>
+                      <div className="nx-pi-wealth-tier__value">{formatMoney(netWorth)}</div>
+                    </div>
+                    <div className="nx-pi-wealth-tier__badge">{tier}</div>
+                  </div>
+                )
+              })()}
+              <div className="nx-pi-fin-gauges">
+                <div className="nx-pi-fin-gauge">
+                  <div className="nx-pi-fin-gauge__label">BUYING POWER</div>
+                  <div className={cls('nx-pi-fin-gauge__val', buyingPower > 0 ? 'is-green' : 'nx-mm-unavail')}>{buyingPower > 0 ? formatMoney(buyingPower) : 'Unavailable'}</div>
+                  {buyingPower > 0 && <><div className="nx-pi-fin-gauge__bar"><div className="nx-pi-fin-gauge__fill is-green" style={{ width: `${Math.min((buyingPower / 500000) * 100, 100)}%` }} /></div></>}
+                </div>
+                <div className="nx-pi-fin-gauge">
+                  <div className="nx-pi-fin-gauge__label">CASH LIQUIDITY</div>
+                  <div className={cls('nx-pi-fin-gauge__val', liquidityEstimate > 0 ? 'is-green' : 'nx-mm-unavail')}>{liquidityEstimate > 0 ? formatMoney(liquidityEstimate) : 'Unavailable'}</div>
+                  {liquidityEstimate > 0 && <><div className="nx-pi-fin-gauge__bar"><div className="nx-pi-fin-gauge__fill is-blue" style={{ width: `${Math.min((liquidityEstimate / 200000) * 100, 100)}%` }} /></div></>}
+                </div>
+                <div className="nx-pi-fin-gauge">
+                  <div className="nx-pi-fin-gauge__label">HH INCOME</div>
+                  <div className={cls('nx-pi-fin-gauge__val', householdIncome > 0 ? '' : 'nx-mm-unavail')}>{householdIncome > 0 ? formatMoney(householdIncome) : 'Unavailable'}</div>
+                  {householdIncome > 0 && <><div className="nx-pi-fin-gauge__bar"><div className="nx-pi-fin-gauge__fill is-amber" style={{ width: `${Math.min((householdIncome / 200000) * 100, 100)}%` }} /></div></>}
+                </div>
+                <div className="nx-pi-fin-gauge">
+                  <div className="nx-pi-fin-gauge__label">PROPERTY EQUITY</div>
+                  <div className={cls('nx-pi-fin-gauge__val', value > 0 && equity > 0 ? 'is-green' : 'nx-mm-unavail')}>{value > 0 && equity > 0 ? formatMoney(Math.round(value * equity / 100)) : 'Unavailable'}</div>
+                  {value > 0 && equity > 0 && <><div className="nx-pi-fin-gauge__bar"><div className="nx-pi-fin-gauge__fill is-green" style={{ width: `${clamp(equity, 0, 100)}%` }} /></div></>}
+                </div>
+              </div>
+              {(loanAmount > 0 || isFreeClear) && (
+                <div className="nx-medium-prow-list" style={{ marginTop: 4 }}>
+                  <div className="nx-medium-prow"><span>Mortgage Status</span>{isFreeClear ? <strong className="nx-mpia-ok">Free &amp; Clear</strong> : <strong>Has Mortgage</strong>}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PROSPECT TAGS */}
+          {prospectTags.length > 0 && (
+            <div className={cls('nx-mpia-section', openProspect.has('tags') && 'is-open')}>
+              <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('tags')}>
+                <span className="nx-mpia-hdr__label">PROSPECT TAGS</span>
+                <span className="nx-mpia-hdr__count">{prospectTags.length} tags</span>
+                <span className="nx-mpia-hdr__arrow">{openProspect.has('tags') ? '▲' : '▼'}</span>
+              </button>
+              <div className="nx-mpia-body">
+                <div className="nx-pi-tag-cloud">
+                  {prospectTags.map((tag, i) => (
+                    <span key={i} className={cls('nx-pi-tag', `is-${tag.tone}`)}>{tag.label}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CONTACT INTELLIGENCE */}
+          <div className={cls('nx-mpia-section', openProspect.has('contact') && 'is-open')}>
+            <button type="button" className="nx-mpia-hdr" onClick={() => toggleProspect('contact')}>
+              <span className="nx-mpia-hdr__label">CONTACT INTELLIGENCE</span>
+              <span className="nx-mpia-hdr__count">{contactProbability > 0 ? `${Math.round(contactProbability)}% reach` : 'pending'}</span>
+              <span className="nx-mpia-hdr__arrow">{openProspect.has('contact') ? '▲' : '▼'}</span>
+            </button>
+            <div className="nx-mpia-body">
+              <div className="nx-medium-prow-list">
+                <div className="nx-medium-prow"><span>Contact Probability</span>{contactProbability > 0 ? <span className={cls('nx-mp-score', contactProbability >= 70 ? 'is-green' : contactProbability >= 40 ? 'is-amber' : 'is-danger')}>{Math.round(contactProbability)}%</span> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Phone Confidence</span>{phoneConfidence > 0 ? <span className={cls('nx-mp-score', phoneConfidence >= 70 ? 'is-green' : phoneConfidence >= 40 ? 'is-amber' : 'is-danger')}>{Math.round(phoneConfidence)}%</span> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>SMS Deliverability</span>{smsDeliverability > 0 ? <span className={cls('nx-mp-score', smsDeliverability >= 70 ? 'is-green' : smsDeliverability >= 40 ? 'is-amber' : 'is-danger')}>{Math.round(smsDeliverability)}%</span> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Email Quality</span>{emailQuality > 0 ? <span className={cls('nx-mp-score', emailQuality >= 70 ? 'is-green' : emailQuality >= 40 ? 'is-amber' : 'is-danger')}>{Math.round(emailQuality)}%</span> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Language Pref</span>{languagePref ? <strong>{languagePref}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Best Contact Window</span>{bestContactWindow ? <strong>{bestContactWindow}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Follow-Up At</span>{followUpAt ? <strong>{followUpAt}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Last Outbound</span>{lastOutboundAt ? <strong>{lastOutboundAt}</strong> : <span className="nx-mm-unavail">Unavailable</span>}</div>
+                <div className="nx-medium-prow"><span>Last Reply</span><strong>{responseCadence}</strong></div>
+                <div className="nx-medium-prow"><span>DNC Risk</span><strong className={dncRisk === 'Suppressed' || dncRisk === 'Elevated' ? 'nx-mpia-warn' : 'nx-mpia-ok'}>{dncRisk}</strong></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── 7. AI CONVERSATION BRAIN ────────────────────── */}
+      <div className="nx-medium-section nx-medium-section--brain">
+        <div className="nx-medium-section__title">
+          AI CONVERSATION BRAIN
+          <span className="nx-medium-live-badge">AI LIVE</span>
+        </div>
+        {/* Stage flow progression */}
+        <div className="nx-medium-stage-flow">
+          {stageFlow.map((label, i) => (
+            <div key={label} className={cls('nx-msf-step', i < currentStageIndex && 'is-done', i === currentStageIndex && 'is-active')}>
+              <div className="nx-msf-dot" />
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+        {/* Negotiation posture + momentum row */}
+        <div className="nx-brain-posture-row">
+          <div className="nx-brain-posture">
+            <span className="nx-mm-label">NEGOTIATION POSTURE</span>
+            <strong className={cls('nx-brain-posture__value',
+              negotiationPosture.includes('Escalate') || negotiationPosture.includes('Act') ? 'is-urgent' : ''
+            )}>{negotiationPosture}</strong>
+          </div>
+          <div className="nx-brain-momentum">
+            <span className="nx-mm-label">MOMENTUM</span>
+            <div className="nx-brain-momentum__bar">
+              <div className={cls('nx-brain-momentum__fill', `is-${momentumTone}`)} style={{ width: `${momentumScore}%` }} />
+            </div>
+            <span className={cls('nx-brain-momentum__val', `is-${momentumTone}`)}>{momentumScore}</span>
+          </div>
+        </div>
+        {/* Messages */}
+        {(latestInbound || latestOutbound) && (
+          <div className="nx-medium-brain-msgs">
+            {latestInbound && (
+              <div className="nx-mbm-msg is-inbound">
+                <span className="nx-mbm-dir">SELLER</span>
+                <p>{latestInbound.body || 'Message unavailable.'}</p>
+              </div>
+            )}
+            {latestOutbound && (
+              <div className="nx-mbm-msg is-outbound">
+                <span className="nx-mbm-dir">OUTBOUND</span>
+                <p>{latestOutbound.body || 'Message unavailable.'}</p>
+              </div>
+            )}
+          </div>
+        )}
+        {/* AI analysis + insights */}
+        <div className="nx-medium-brain-intel">
+          <div className="nx-mbi-summary">
+            <div className="nx-mbi-summary__head">
+              <span className="nx-mm-label">AI ANALYSIS</span>
+              <span className="nx-mbi-conf-badge">CONF {aiConfidence}%</span>
+            </div>
+            <p>{summary}</p>
+          </div>
+          <div className="nx-mbi-insights">
+            {aiInsights.map((insight, i) => (
+              <div key={i} className="nx-mbi-insight">
+                <span className="nx-mbi-dot" />
+                <span>{insight}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Signal row */}
+        <div className="nx-medium-brain-signals">
+          <div className="nx-mbs-item">
+            <span>Intent</span>
+            <strong>{humanizeIntent(intent)}</strong>
+          </div>
+          <div className="nx-mbs-item">
+            <span>Sentiment</span>
+            <strong className={cls(
+              /positive/i.test(sentiment) ? 'nx-mbs-green' : /negative/i.test(sentiment) ? 'nx-mbs-red' : ''
+            )}>{sentiment}</strong>
+          </div>
+          <div className="nx-mbs-item">
+            <span>Urgency</span>
+            <div className="nx-mbs-urgency">
+              <div className={cls('nx-mbs-urgency__fill', urgency >= 70 ? 'is-red' : 'is-amber')} style={{ width: `${urgency}%` }} />
+              <span>{Math.round(urgency)}%</span>
+            </div>
+          </div>
+        </div>
+        {/* Tactical recommendation */}
+        <div className="nx-medium-brain-action">
+          <span className="nx-mba-label">TACTICAL RECOMMENDATION</span>
+          <p className="nx-mba-text">{nextAction.title}</p>
+          <span className="nx-mba-reason">{nextAction.reason}</span>
+        </div>
+        {/* Suggested replies */}
+        <div className="nx-medium-brain-replies">
+          {([
+            nextAction.suggestedReply,
+            'Ask about condition and timeline.',
+            'Move toward price discovery.',
+          ].filter(Boolean) as string[]).slice(0, 3).map((reply, i) => (
+            <button type="button" key={i} className="nx-mbr-chip">{reply}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── 8. ACTIVITY TIMELINE ────────────────────────── */}
+      <div className="nx-medium-section">
+        <div className="nx-medium-section__title">ACTIVITY TIMELINE</div>
+        <div className="nx-medium-timeline">
+          {latestEvents.length > 0 ? latestEvents.map((msg, i) => {
+            const isInbound = msg.direction === 'inbound'
+            const lc = (msg.body || '').toLowerCase()
+            let label = isInbound ? 'Seller Response' : i === 0 ? 'Initial Outreach' : 'Follow-Up Attempt'
+            let tone = isInbound ? 'is-green' : 'is-blue'
+            if (isInbound) {
+              if (/stop|unsubscribe|opt.?out/.test(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
+              else if (/price|offer|interested|ready/.test(lc)) { label = 'Showing Interest'; tone = 'is-green'; }
+              else if (/wrong number|not.*owner|already sold/.test(lc)) { label = 'Disqualification'; tone = 'is-amber'; }
+              else if (/yes|sure|call|talk|available/.test(lc)) { label = 'Positive Engagement'; tone = 'is-green'; }
+            }
+            if (!isInbound && (msg as any).deliveryStatus === 'failed') { label = 'Delivery Failed'; tone = 'is-red'; }
+            return (
+              <div key={msg.id || i} className={cls('nx-medium-tl-node', tone)}>
+                <div className="nx-medium-tl-dot" />
+                <div className="nx-medium-tl-content">
+                  <div className="nx-medium-tl-row">
+                    <span className="nx-medium-tl-label">{label}</span>
+                    <span className="nx-medium-tl-time">{formatRelativeTime(msg.createdAt || (msg as any).created_at || (msg as any).timestamp)}</span>
+                  </div>
+                  {msg.body && <p className="nx-medium-tl-body">{msg.body.slice(0, 90)}{msg.body.length > 90 ? '…' : ''}</p>}
+                </div>
+              </div>
+            )
+          }) : (
+            <div className="nx-medium-tl-empty">No activity recorded yet.</div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 9. TACTICAL ACTION DOCK ─────────────────────── */}
+      <div className="nx-medium-action-dock">
+        <div className="nx-mad-group">
+          <span className="nx-mad-group__label">COMMUNICATE</span>
+          <div className="nx-mad-group__btns">
+            <button type="button" className="nx-mad-btn is-primary">Draft Reply</button>
+            <button type="button" className="nx-mad-btn">Send SMS</button>
+            <button type="button" className="nx-mad-btn">Send Email</button>
+          </div>
+        </div>
+        <div className="nx-mad-group">
+          <span className="nx-mad-group__label">ANALYZE</span>
+          <div className="nx-mad-group__btns">
+            <button type="button" className="nx-mad-btn">Run Underwriting</button>
+            <button type="button" className="nx-mad-btn">Open Comps</button>
+            <button type="button" className="nx-mad-btn">Buyer Matches</button>
+          </div>
+        </div>
+        <div className="nx-mad-group is-safety">
+          <span className="nx-mad-group__label">SAFETY</span>
+          <div className="nx-mad-group__btns">
+            <button type="button" className="nx-mad-btn is-warn">Pause Automation</button>
+            <button type="button" className="nx-mad-btn is-danger">Suppress / DNC</button>
+          </div>
+        </div>
+      </div>
+
     </div>
   )
 }

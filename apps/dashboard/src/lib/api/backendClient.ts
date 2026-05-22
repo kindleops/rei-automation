@@ -12,32 +12,32 @@
 import type { AnyRecord } from '../data/shared'
 
 export const getBackendBaseUrl = (): string => {
-  // Primary: VITE_BACKEND_API_URL
-  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
+  // 1. Explicit environment variables (Vite-exposed)
+  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || 
+            (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
   
-  // Fallback 1: Legacy VITE_NEXUS_API_URL
-  if (!url) {
-    url = (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
-  }
+  if (url) return url.replace(/\/$/, '')
 
-  // Fallback 2: Dynamic discovery for Vercel environments
-  if (!url && typeof window !== 'undefined') {
+  // 2. Dynamic resolution for web environments
+  if (typeof window !== 'undefined') {
     const hostname = window.location.hostname
+    
+    // Vercel autodiscovery
     if (hostname.includes('vercel.app')) {
-      // If we're on a dashboard preview/prod branch, try to point to the main API
       if (hostname.includes('dashboard')) {
-        url = `https://${hostname.replace('-dashboard', '')}`
-      } else {
-        // Assume same origin if not explicitly segmented
-        url = window.location.origin
+        return `https://${hostname.replace('-dashboard', '')}`
       }
-    } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      // Sensible default for local dev
-      url = 'http://localhost:3000'
+      return window.location.origin
+    }
+
+    // Local/Internal development (default to relative path for Vite proxy)
+    if (import.meta.env.DEV || hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
+      // Return empty string to trigger relative path fetch (proxied by Vite)
+      return ''
     }
   }
 
-  return url ? url.replace(/\/$/, '') : ''
+  return ''
 }
 
 export const getBackendSecret = (): string => {
@@ -75,7 +75,11 @@ async function callBackend<T = unknown>(
   options: RequestInit = {}
 ): Promise<BackendResult<T>> {
   const base = getBackendBaseUrl()
-  if (!base) {
+  const isBrowser = typeof window !== 'undefined'
+  
+  // If NO base URL is set AND we are not in a browser (or dev proxy not likely), block.
+  // In dev browser mode, empty base is OK because it uses the Vite proxy.
+  if (!base && !import.meta.env.DEV && !isBrowser) {
     console.error('[BACKEND_API_URL_MISSING] VITE_BACKEND_API_URL is not set. Manual sends and other backend actions will fail.')
     return {
       ok: false,

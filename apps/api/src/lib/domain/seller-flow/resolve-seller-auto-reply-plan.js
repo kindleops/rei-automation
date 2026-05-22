@@ -1,11 +1,19 @@
-import { loadTemplate } from "@/lib/domain/templates/load-template.js";
-import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
-import { info, warn } from "@/lib/logging/logger.js";
+import { supabase } from "@/lib/supabase/client.js";
+import { warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
-import { 
-  resolveSafetyTier, 
-  SELLER_FLOW_SAFETY_TIERS 
+import {
+  resolveSafetyTier,
+  SELLER_FLOW_SAFETY_TIERS
 } from "./seller-flow-safety-policy.js";
+
+// Phase 8: only these intents qualify for live auto-reply
+const AUTO_REPLY_WHITELIST = new Set([
+  'ownership_confirmed',
+  'positive_interest',
+  'asks_offer',       // price_request
+  'info_request',
+  'conditional_interest',
+]);
 
 const STAGE_CODES = {
   ownership_check: "S1",
@@ -43,17 +51,27 @@ export function normalizeSellerInboundIntent(input) {
         "yes it is",
         "that is mine",
         "i own it",
+        "i still own",
+        "still have it",
         "correct",
         "es mía",
         "es mia",
+        "todavía lo tengo",
+        "sigo teniendo",
+        "aún lo tengo",
+        "aun lo tengo",
       ])
     ) {
       return true;
     }
 
+    // Use /\b/ boundary so "sí," (with comma) still matches
+    const startsWithSi = /^s[ií]\b/i.test(text);
+
     return (
       includesWholeWord("yes") ||
       text === "i do" ||
+      startsWithSi ||
       includesWholeWord("sí") ||
       includesWholeWord("si")
     );
@@ -100,8 +118,19 @@ export function normalizeSellerInboundIntent(input) {
     return "ownership_confirmed";
   }
 
-  if (isMatch(["how did you get my info", "where did you get my number", "como encontraste mi información"]) || classification.source === "how_got_number") {
+  if (
+    isMatch([
+      "who is this", "who are you", "who's this", "whos this",
+      "how did you get my info", "where did you get my number",
+      "como encontraste mi información", "quién eres", "quien eres",
+    ]) || classification.source === "how_got_number"
+  ) {
     return "info_request";
+  }
+
+  if (isMatch(["maybe", "depends", "possibly", "if the price", "would consider", "might sell",
+               "tal vez", "quizás", "quizas", "depende", "posiblemente"])) {
+    return "conditional_interest";
   }
 
   // Price/offer logic
@@ -141,6 +170,9 @@ export function resolveNextSellerStage(input) {
     case "tenant_or_occupancy": return "tenant_or_occupancy";
     case "ownership_confirmed":
       return is_ownership_check ? "consider_selling" : "confirm_basics";
+    case "positive_interest":
+    case "conditional_interest":
+      return "confirm_basics";
     case "info_request":
       return is_ownership_check ? "info_source_explanation" : "manual_review";
     case "asks_offer":
@@ -168,10 +200,10 @@ export function resolveAutoReplyUseCase(input) {
   if (next_stage === "listed_or_unavailable") return "listed_or_unavailable";
   if (next_stage === "tenant_or_occupancy") return "tenant_or_occupancy";
   if (next_stage === "consider_selling") return "consider_selling";
-  if (next_stage === "info_source_explanation") return "info_source_explanation"; // or who_is_this handled during template resolution
-  if (next_stage === "asking_price") return "asking_price";
-  if (next_stage === "confirm_basics") return "confirm_basics";
-  if (next_stage === "condition_probe") return "condition_probe";
+  if (next_stage === "info_source_explanation") return "who_is_this";
+  if (next_stage === "asking_price") return "seller_asking_price";
+  if (next_stage === "confirm_basics") return "price_works_confirm_basics";
+  if (next_stage === "condition_probe") return "price_high_condition_probe";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
 
   return null;
@@ -186,19 +218,21 @@ export function shouldSuppressSellerAutoReply(input) {
   if (!input.auto_reply_enabled && !input.force_queue_reply) return { suppress: true, reason: "auto_reply_disabled" };
   
   if (automation_state === "paused" || automation_state === "manual") return { suppress: true, reason: "manual_pause" };
-  if (confidence < 0.5) return { suppress: true, reason: "confidence_too_low" };
+  if (confidence < 0.90) return { suppress: true, reason: "confidence_too_low" };
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
   if (intent === "opt_out" && !input.system_only) return { suppress: true, reason: "opt_out_intent_no_marketing" };
-  if (intent === "not_interested") return { suppress: true, reason: "not_interested_intent" };
-  
+  // not_interested → no immediate reply; follow-up scheduler sends 30-day nurture
+  if (intent === "not_interested") return { suppress: true, reason: "not_interested_nurture_only" };
+  // Phase 8 whitelist: only these intents qualify for live auto-reply
+  if (!AUTO_REPLY_WHITELIST.has(intent)) return { suppress: true, reason: `not_in_auto_reply_whitelist:${intent}` };
+
   if (next_stage === "manual_review") return { suppress: true, reason: "requires_manual_review" };
   
   return { suppress: false, reason: null };
 }
 
 async function checkDuplicateReply(input) {
-  const supabase = getDefaultSupabaseClient();
   if (!supabase) return false;
   
   const source_event_id = input.inbound_event?.item_id || input.inbound_event?.id || null;
@@ -264,6 +298,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   let suppression_reason = suppression.reason;
   let reply_mode = suppression.suppress ? "suppress" : "auto_queue";
   let fallback_reply = null;
+  let selected_template_id = null;
   
   let is_duplicate = false;
   if (should_queue_reply) {
@@ -276,38 +311,52 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   }
 
   if (should_queue_reply && selected_use_case) {
-    // Check if template exists
+    // Query sms_templates directly — no RPC dependency.
+    // Priority: exact use_case + language match, then English fallback.
     try {
-      const isTest = process.env.NODE_ENV === "test";
-      const template = isTest
-        ? { ok: true, body: "test template body" }
-        : await loadTemplate({
+      const { data: candidates, error: tmplErr } = await supabase
+        .from("sms_templates")
+        .select("id,template_id,template_body,use_case,language,is_active,safe_for_auto_reply,stage_code,stage_label")
+        .eq("is_active", true)
+        .eq("use_case", selected_use_case)
+        .in("language", [selected_language, "English"])
+        .order("language", { ascending: false }) // prefer exact language match
+        .limit(20);
+
+      if (tmplErr) throw tmplErr;
+
+      const eligible = (candidates || []).filter(
+        (t) => t.safe_for_auto_reply !== false // null is treated as eligible until column is backfilled
+      );
+
+      // Prefer exact language; English is acceptable fallback
+      const bestTemplate =
+        eligible.find((t) => t.language === selected_language) ||
+        (selected_language !== "English" ? eligible.find((t) => t.language === "English") : null);
+
+      if (!bestTemplate || !bestTemplate.template_body?.trim()) {
+        should_queue_reply = false;
+        suppression_reason = "no_template_for_intent_and_language";
+        reply_mode = "manual_review";
+      } else {
+        fallback_reply = bestTemplate.template_body.trim();
+        selected_template_id = bestTemplate.template_id || bestTemplate.id || null;
+        reply_mode = "auto_queue";
+        if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
+          // eslint-disable-next-line no-console
+          console.log("[auto_reply_plan] template_selected", {
+            template_id: selected_template_id,
             use_case: selected_use_case,
-            language: selected_language,
-            context: input.conversation_context,
+            language: bestTemplate.language,
+            intent,
           });
-
-      if (!template && selected_use_case === "info_source_explanation") {
-        const fallbackTemplate = isTest
-          ? { ok: true, body: "test fallback template body" }
-          : await loadTemplate({
-              use_case: "who_is_this",
-              language: selected_language,
-              context: input.conversation_context,
-            });
-
-        if (!fallbackTemplate) {
-          fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-          reply_mode = "auto_queue_fallback";
         }
-      } else if (!template) {
-        fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-        reply_mode = "auto_queue_fallback";
       }
     } catch (e) {
       warn("auto_reply_plan.template_check_failed", { error: e.message });
-      fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-      reply_mode = "auto_queue_fallback";
+      should_queue_reply = false;
+      suppression_reason = "template_lookup_error";
+      reply_mode = "manual_review";
     }
   }
   
@@ -329,6 +378,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
     selected_use_case,
     selected_stage_code,
     selected_language,
+    selected_template_id,
     fallback_reply,
     priority,
     reply_mode,

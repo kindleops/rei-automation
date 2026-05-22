@@ -602,6 +602,18 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       allowedHosts: true,
+      proxy: {
+        '/api/cockpit': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/internal': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        }
+      }
     },
     resolve: {
       alias: {

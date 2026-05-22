@@ -36,7 +36,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
     not_interested: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
       template: SELLER_FLOW_STAGES.NOT_INTERESTED,
-      safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
+      safety: SELLER_FLOW_SAFETY_TIERS.REVIEW,
     },
     unclear: {
       next_stage: SELLER_FLOW_STAGES.OWNERSHIP_CHECK,
@@ -60,7 +60,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
     not_interested: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
       template: SELLER_FLOW_STAGES.NOT_INTERESTED,
-      safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
+      safety: SELLER_FLOW_SAFETY_TIERS.REVIEW,
     },
     opt_out: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
@@ -107,7 +107,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
     not_interested: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
       template: SELLER_FLOW_STAGES.NOT_INTERESTED,
-      safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
+      safety: SELLER_FLOW_SAFETY_TIERS.REVIEW,
     },
     asks_offer: {
       next_stage: SELLER_FLOW_STAGES.OFFER_REVEAL_CASH,

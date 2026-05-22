@@ -6,6 +6,7 @@ import type { SmsTemplate } from './templateData'
 import { resolveOutboundTextgridNumber } from './textgridRouting'
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 import * as backendClient from '../api/backendClient'
+import { getBackendBaseUrl, getBackendSecret } from '../api/backendClient'
 import {
   asBoolean,
   asIso,
@@ -1716,8 +1717,6 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
   }
 }
 
-import { getBackendBaseUrl, getBackendSecret } from '../api/backendClient'
-
 export const fetchLiveInbox = async ({
   filter = 'all',
   direction = 'all',
@@ -1729,7 +1728,9 @@ export const fetchLiveInbox = async ({
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
   const backendBase = getBackendBaseUrl()
-  if (!backendBase) {
+  const isBrowser = typeof window !== 'undefined'
+
+  if (!backendBase && !import.meta.env.DEV && !isBrowser) {
     throw new Error('BACKEND_NOT_CONFIGURED: VITE_BACKEND_API_URL is not set')
   }
   const backendSecret = getBackendSecret()

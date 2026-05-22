@@ -3157,6 +3157,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     template_use_case: clean(input.template_use_case) || "ownership_check",
     touch_number: asPositiveInteger(input.touch_number, 1),
     campaign_session_id: clean(input.campaign_session_id) || `session-${now.slice(0, 10)}`,
+    batch_name: clean(input.batch_name) || null,
     debug_templates: asBoolean(input.debug_templates, false),
     schedule_spread: asBoolean(input.schedule_spread, false),
     schedule_start_local: clean(input.schedule_start_local) || "09:00",

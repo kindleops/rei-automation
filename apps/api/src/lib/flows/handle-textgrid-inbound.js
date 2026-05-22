@@ -20,6 +20,7 @@ import { isOfferStageTrigger, runOfferStageAI, buildOfferStageMetadata, shouldSk
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { maybeQueueSellerStageReply } from "@/lib/domain/seller-flow/maybe-queue-seller-stage-reply.js";
 import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
+import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import {
   normalizeSellerFlowUseCase,
   SELLER_FLOW_STAGES,
@@ -68,6 +69,7 @@ const defaultDeps = {
   syncPipelineState,
   maybeQueueSellerStageReply,
   resolveSellerAutoReplyPlan,
+  scheduleFollowUp,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
   cancelPendingQueueItemsForOwner,
@@ -451,7 +453,7 @@ function buildSecondPassSupabasePayload({
       seller_stage: route?.stage || null,
       conversation_stage: route?.stage || context?.summary?.conversation_stage || null,
       needs_human_review:
-        classification_confidence !== null ? classification_confidence < 0.5 : true,
+        classification_confidence !== null ? classification_confidence < 0.90 : true,
       next_action: route?.use_case || auto_reply_plan?.selected_use_case || null,
     },
   };
@@ -1408,6 +1410,90 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         now: new Date().toISOString()
       });
 
+      // ── SEGMENT: follow-up scheduling ───────────────────────────────────────
+      // Wire follow-up after safety+classification decision. Gated by system_followup_enabled.
+      // Never schedules for: opt_out, wrong_person, hostile_or_legal, timing_complaint.
+      // not_interested → 30-day nurture. Active whitelisted intents → no nurture (active workflow).
+      let seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" };
+      try {
+        if (system_followup_enabled) {
+          seller_followup_result = await runtimeDeps.scheduleFollowUp(
+            auto_reply_plan.inbound_intent,
+            inbound_from,  // thread_key = seller E.164 phone
+            {
+              is_suppressed: Boolean(
+                auto_reply_plan.safety?.opt_out ||
+                auto_reply_plan.safety?.wrong_number ||
+                auto_reply_plan.safety?.hostile_or_legal
+              ),
+              source: "inbound_sms_handler",
+              inbound_message_event_id,
+              master_owner_id,
+              property_id,
+              classification_confidence: classification?.confidence ?? null,
+            }
+          );
+        }
+      } catch (err) {
+        safeWarn("textgrid.inbound_followup_schedule_failed", {
+          message_id: extracted.message_id,
+          inbound_from,
+          intent: auto_reply_plan.inbound_intent,
+          error: err?.message || "unknown",
+        });
+      }
+
+      // ── SEGMENT: auto-reply live cap ─────────────────────────────────────
+      // Cap live auto-replies at AUTO_REPLY_LIVE_CAP (default 5) for Phase 8 validation.
+      let cap_reached = false;
+      const auto_reply_live_cap = asPositiveInt(process.env.AUTO_REPLY_LIVE_CAP, 5);
+      if (auto_reply_live_cap > 0 && inbound_autopilot_enabled) {
+        try {
+          const supabase = runtimeDeps.getSupabaseClient?.();
+          if (supabase) {
+            const todayStart = new Date();
+            todayStart.setUTCHours(0, 0, 0, 0);
+            const { count } = await supabase
+              .from("send_queue")
+              .select("id", { count: "exact", head: true })
+              .eq("metadata->>action_type", "autopilot_inbound_reply")
+              .gte("created_at", todayStart.toISOString());
+            cap_reached = (count || 0) >= auto_reply_live_cap;
+            if (cap_reached) {
+              safeWarn("textgrid.inbound_auto_reply_cap_reached", {
+                message_id: extracted.message_id,
+                inbound_from,
+                cap: auto_reply_live_cap,
+                count: count || 0,
+              });
+            }
+          }
+        } catch (capErr) {
+          safeWarn("textgrid.inbound_auto_reply_cap_check_failed", {
+            message_id: extracted.message_id,
+            error: capErr?.message || "unknown",
+          });
+        }
+      }
+
+      // ── SEGMENT: auto-reply decision log ────────────────────────────────────
+      // Structured log for every auto-reply decision — sent, blocked, and followup.
+      safeInfo("auto_reply_decision", {
+        inbound_id: extracted.message_id,
+        inbound_from,
+        intent: auto_reply_plan.inbound_intent,
+        language: auto_reply_plan.selected_language || classification?.language || null,
+        confidence: classification?.confidence ?? null,
+        selected_template_id: auto_reply_plan.selected_template_id || null,
+        should_queue_reply: auto_reply_plan.should_queue_reply,
+        blocked_reason: auto_reply_plan.suppression_reason || null,
+        cap_reached,
+        followup_scheduled: Boolean(seller_followup_result?.followup_created),
+        followup_scheduled_for: seller_followup_result?.scheduled_for || null,
+        followup_reason: seller_followup_result?.reason || null,
+        system_followup_enabled,
+      });
+
       let explicit_use_case = auto_reply_plan.selected_use_case;
       let explicit_template_lookup_use_case = auto_reply_plan.selected_use_case;
       let extra_template_render_overrides = {};
@@ -1486,8 +1572,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         });
 
 
-        // Feature flag: if auto_reply_dry_run, only preview (no live queue)
-        const should_queue_live = !auto_reply_dry_run_final && inbound_autopilot_enabled;
+        // Feature flag: if auto_reply_dry_run or cap_reached, only preview (no live queue)
+        const should_queue_live = !auto_reply_dry_run_final && inbound_autopilot_enabled && !cap_reached;
 
         if (!is_preview && seller_stage_preview?.ok && should_queue_live) {
           seller_stage_reply = await runtimeDeps.maybeQueueSellerStageReply({
@@ -2015,6 +2101,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       underwriting,
       underwriting_transfer,
       seller_stage_reply,
+      seller_followup_result,
       underwriting_follow_up,
       contract,
       pipeline,

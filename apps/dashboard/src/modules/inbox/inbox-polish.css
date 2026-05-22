@@ -6041,13 +6041,14 @@
   position: absolute;
   inset: 0;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  height: 100%;
 }
 
 .nx-command-surface__map-stage .nx-icm,
 .nx-command-surface__map-stage .nx-icm__canvas {
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 0;
+  height: 100%;
 }
 
 .nx-command-surface__map-stage .nx-icm {

@@ -49,7 +49,9 @@ export class NexusApiFetchError extends Error {
 
 export async function fetchLiveDashboard(): Promise<LiveDashboardModel> {
   const api_base = getApiBase()
-  if (!api_base) {
+  const isBrowser = typeof window !== 'undefined'
+  
+  if (!api_base && !import.meta.env.DEV && !isBrowser) {
     throw new NexusApiFetchError(
       'VITE_BACKEND_API_URL is not configured — set it to use live data'
     )
