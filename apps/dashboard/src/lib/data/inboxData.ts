@@ -3764,17 +3764,39 @@ export const sendInboxMessageNow = async (
     threadKey: thread.threadKey,
   }, false)
 
-  const fromPhone = routingResult.ok
-    ? routingResult.from_phone_number
-    : [
-        normalizePhone(options?.fromPhoneNumber ?? ''),
-        normalizePhone(thread.ourNumber ?? ''),
-        normalizePhone(import.meta.env.VITE_TEXTGRID_FROM_NUMBER ?? ''),
-        normalizePhone(import.meta.env.VITE_TEXTGRID_NUMBER ?? ''),
-      ].find((phone) => phone && phone.length > 0) || null
+  // Normalize any phone value to E.164 (+1XXXXXXXXXX for US). Returns '' if invalid.
+  const toE164 = (v: unknown): string => {
+    const raw = String(v ?? '').trim()
+    if (!raw) return ''
+    const digits = raw.replace(/\D/g, '')
+    if (!digits) return ''
+    if (digits.length === 10) return `+1${digits}`
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+    return raw.startsWith('+') ? raw : digits ? `+${digits}` : ''
+  }
+  const isValidE164 = (phone: string): boolean => /^\+\d{10,15}$/.test(phone)
+
+  const threadOurNumber = toE164(thread.ourNumber)
+  const envFromNumber = toE164(import.meta.env.VITE_TEXTGRID_FROM_NUMBER)
+  const envNumber = toE164(import.meta.env.VITE_TEXTGRID_NUMBER)
+
+  const fromPhone =
+    (routingResult.ok && routingResult.from_phone_number && isValidE164(toE164(routingResult.from_phone_number)) ? toE164(routingResult.from_phone_number) : null) ||
+    (isValidE164(threadOurNumber) ? threadOurNumber : null) ||
+    (options?.fromPhoneNumber ? (isValidE164(toE164(options.fromPhoneNumber)) ? toE164(options.fromPhoneNumber) : null) : null) ||
+    (isValidE164(envFromNumber) ? envFromNumber : null) ||
+    (isValidE164(envNumber) ? envNumber : null) ||
+    null
+
+  console.log('[sendInboxMessageNow] from phone resolution', {
+    threadOurNumber: thread.ourNumber,
+    envFromNumberPresent: !!import.meta.env.VITE_TEXTGRID_FROM_NUMBER,
+    resolvedFromPhone: fromPhone,
+    toPhone,
+  })
 
   if (!fromPhone) {
-    if (DEV) console.warn('[sendInboxMessageNow] no from_phone_number available — send will likely fail', { threadOurNumber: thread.ourNumber, envVars: { VITE_TEXTGRID_FROM_NUMBER: !!import.meta.env.VITE_TEXTGRID_FROM_NUMBER, VITE_TEXTGRID_NUMBER: !!import.meta.env.VITE_TEXTGRID_NUMBER } })
+    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Missing sender number — assign a TextGrid number to this thread/market.', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
   }
 
   // If from number known, try to resolve textgrid_numbers table for the number id
