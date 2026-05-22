@@ -3832,17 +3832,49 @@ export const sendInboxMessageNow = async (
 
   // 6. If not valid, block before backend
   if (!isValid) {
-    return {
-      ok: false,
-      queueId: null,
-      messageEventId: null,
-      providerMessageSid: null,
-      deliveryStatus: null,
-      errorMessage: 'Missing original TextGrid sender number — cannot reply until this thread is linked to the number the seller texted.',
-      insertPayloadKeys: [],
-      suppressionBlocked: false,
-      sendRouteUsed: 'none',
-      queueProcessorEligible: false,
+    // FORCED RESOLUTION: Final attempt for existing inbox replies
+    const { data: forcedInboundRow, error: inboundErr } = await sbClient
+      .from('message_events')
+      .select('to_phone_number,textgrid_number_id')
+      .eq('direction', 'inbound')
+      .eq('from_phone_number', sellerPhone)
+      .not('to_phone_number', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const forcedFromPhone = toE164(forcedInboundRow?.to_phone_number)
+
+    if (forcedFromPhone && isValidE164(forcedFromPhone) && forcedFromPhone !== sellerPhone) {
+      fromPhone = forcedFromPhone
+      textgridNumberId = (forcedInboundRow?.textgrid_number_id as string) || textgridNumberId
+      resolutionSource = 'forced_latest_inbound.to_phone_number'
+      isValid = true // We found it, so it's valid now
+    }
+
+    console.log('[sendInboxMessageNow] FORCED inbound sender resolution', {
+      sellerPhone,
+      inboundErr,
+      inboundTo: forcedInboundRow?.to_phone_number,
+      forcedFromPhone,
+      fromPhone,
+      textgridNumberId,
+      resolutionSource
+    })
+
+    if (!isValid) {
+      return {
+        ok: false,
+        queueId: null,
+        messageEventId: null,
+        providerMessageSid: null,
+        deliveryStatus: null,
+        errorMessage: 'Missing original TextGrid sender number — cannot reply until this thread is linked to the number the seller texted.',
+        insertPayloadKeys: [],
+        suppressionBlocked: false,
+        sendRouteUsed: 'none',
+        queueProcessorEligible: false,
+      }
     }
   }
 
