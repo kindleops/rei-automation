@@ -126,17 +126,23 @@ async function callBackend<T = unknown>(
       ...options,
     })
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    const isCors = errMsg === 'Failed to fetch' || errMsg.includes('NetworkError') || errMsg.includes('CORS')
     return {
       ok: false,
       status: 502,
       error: 'BACKEND_NETWORK_ERROR',
-      message: `Failed to connect to real-estate-automation at ${url}: ${err instanceof Error ? err.message : String(err)}`,
+      message: isCors
+        ? `CORS or network error calling ${url} — check that the API allows origin ${typeof window !== 'undefined' ? window.location.origin : 'unknown'} and that VITE_BACKEND_API_URL is correct. Raw: ${errMsg}`
+        : `Network error calling ${url}: ${errMsg}`,
     }
   }
 
   let body: unknown
+  let bodyText = ''
   try {
-    body = await response.json()
+    bodyText = await response.text()
+    body = JSON.parse(bodyText)
   } catch {
     body = null
   }
@@ -151,7 +157,7 @@ async function callBackend<T = unknown>(
       ok: false,
       status: response.status,
       error: String(canonical ?? response.statusText ?? 'BACKEND_ERROR'),
-      message: String(canonical ?? `Upstream ${response.status} from ${url}`),
+      message: `[${response.status}] ${String(canonical ?? response.statusText ?? 'BACKEND_ERROR')} — ${url}${bodyText ? ` (body: ${bodyText.slice(0, 200)})` : ''}`,
       upstream: body,
     }
   }
