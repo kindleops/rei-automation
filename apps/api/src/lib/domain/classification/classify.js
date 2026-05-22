@@ -696,6 +696,21 @@ const OBJECTION_MAP = [
     ],
   },
   {
+    key: "property_correction",
+    phrases: [
+      "not a duplex", "not a multi", "is a house", "not a house",
+      "wrong address", "incorrect address", "don't own", "do not own",
+      "no longer own", "i no longer own", "i sold it", "already sold",
+      "sold that property", "sold that house", "sold years ago",
+      "not mine", "not my property", "this is not a", "this isn't a",
+      "property type is wrong", "incorrect property",
+      // Spanish
+      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
+      "no es mía", "no es mia", "no es mi propiedad",
+      "la mía es", "la mia es",
+    ]
+  },
+  {
     key: "who_is_this",
     phrases: [
       // English
@@ -3289,20 +3304,30 @@ function resolveIntents(
     includesAny(text, [
       "wrong number", "wrong #", "wrong person", "incorrect number",
       "not the owner", "not the property owner", "not the homeowner",
-      "don't own", "dont own", "no longer own", "i sold it", "sold it",
-      "sold years ago", "not mine", "not my property", "never owned",
-      "never lived", "wrong address", "this is not", "not this person",
-      "it sold", "its sold", "already sold", "never did", "never have",
-      "dont speak spanish", "don't speak spanish", "dont live on", "don't live on",
-      "not my house", "not my property",
+      "not this person", "wrong person", "who is",
       // Spanish / Portuguese
-      "número equivocado", "equivocado", "no soy el dueño", "no es mía", "no es mia",
-      "no soy el propietario", "no tengo esa casa", "no es mi casa", "no vivo",
-      "llanoesmia", "noesmia", "la mia es", "la mía es", "mal informado",
-      "trabalho de casa", "homework",
+      "número equivocado", "equivocado", "no soy el dueño",
+      "no soy el propietario", "no soy la propietaria",
     ])
   ) {
     intents.push("wrong_number");
+  }
+
+  // 2.5 PROPERTY CORRECTION
+  if (
+    normalized_objection === "property_correction" ||
+    includesAny(text, [
+      "not a duplex", "not a multi", "is a house", "not a house",
+      "wrong address", "incorrect address", "don't own", "dont own",
+      "no longer own", "i sold it", "sold it", "it sold", "its sold",
+      "already sold", "sold years ago", "not mine", "not my property",
+      "never owned", "this is not a", "this isn't a", "property type is wrong",
+      // Spanish
+      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
+      "no es mía", "no es mia", "no es mi casa",
+    ])
+  ) {
+    intents.push("property_correction");
   }
 
   // 3. HOSTILE OR LEGAL
@@ -3310,6 +3335,7 @@ function resolveIntents(
     "sue", "attorney", "lawyer", "legal", "court", "harassment", "fcc", "report",
     "fuck", "shit", "bitch", "asshole", "f***", "lawsuit", "police", "sheriff",
     "damn business", "drop dead", "vete a", "chingaos", "mames",
+    "stop harassing", "don't ever text", "dont ever text", "never contact",
   ])) {
     intents.push("hostile_or_legal");
   }

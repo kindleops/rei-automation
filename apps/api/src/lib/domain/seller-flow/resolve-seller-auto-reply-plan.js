@@ -1,5 +1,5 @@
 import { loadTemplate } from "@/lib/domain/templates/load-template.js";
-import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { supabase } from "@/lib/supabase/client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
 import { 
@@ -141,6 +141,8 @@ export function resolveNextSellerStage(input) {
     case "tenant_or_occupancy": return "tenant_or_occupancy";
     case "ownership_confirmed":
       return is_ownership_check ? "consider_selling" : "confirm_basics";
+    case "positive_interest":
+      return "confirm_basics";
     case "info_request":
       return is_ownership_check ? "info_source_explanation" : "manual_review";
     case "asks_offer":
@@ -170,7 +172,7 @@ export function resolveAutoReplyUseCase(input) {
   if (next_stage === "consider_selling") return "consider_selling";
   if (next_stage === "info_source_explanation") return "info_source_explanation"; // or who_is_this handled during template resolution
   if (next_stage === "asking_price") return "asking_price";
-  if (next_stage === "confirm_basics") return "confirm_basics";
+  if (next_stage === "confirm_basics") return "price_works_confirm_basics";
   if (next_stage === "condition_probe") return "condition_probe";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
 
@@ -190,7 +192,7 @@ export function shouldSuppressSellerAutoReply(input) {
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
   if (intent === "opt_out" && !input.system_only) return { suppress: true, reason: "opt_out_intent_no_marketing" };
-  if (intent === "not_interested") return { suppress: true, reason: "not_interested_intent" };
+  // Removed hard suppression for "not_interested" so they can be handled by the nurture plan.
   
   if (next_stage === "manual_review") return { suppress: true, reason: "requires_manual_review" };
   
@@ -198,7 +200,6 @@ export function shouldSuppressSellerAutoReply(input) {
 }
 
 async function checkDuplicateReply(input) {
-  const supabase = getDefaultSupabaseClient();
   if (!supabase) return false;
   
   const source_event_id = input.inbound_event?.item_id || input.inbound_event?.id || null;
@@ -279,31 +280,64 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
     // Check if template exists
     try {
       const isTest = process.env.NODE_ENV === "test";
-      const template = isTest
-        ? { ok: true, body: "test template body" }
-        : await loadTemplate({
-            use_case: selected_use_case,
-            language: selected_language,
-            context: input.conversation_context,
-          });
+  // 1. Resolve Template via DB function
+  const { data: template_id, error: resolveErr } = await supabase
+    .rpc('get_auto_reply_template_id', {
+      in_intent: intent,
+      in_language: selected_language
+    });
 
-      if (!template && selected_use_case === "info_source_explanation") {
-        const fallbackTemplate = isTest
-          ? { ok: true, body: "test fallback template body" }
-          : await loadTemplate({
-              use_case: "who_is_this",
-              language: selected_language,
-              context: input.conversation_context,
-            });
+  if (resolveErr || !template_id) {
+    return {
+      should_queue_reply: false,
+      suppression_reason: "no_template_for_intent_and_language"
+    };
+  }
 
-        if (!fallbackTemplate) {
-          fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-          reply_mode = "auto_queue_fallback";
-        }
-      } else if (!template) {
-        fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
-        reply_mode = "auto_queue_fallback";
-      }
+  // 2. Load the template
+  const template = await loadTemplate({
+    template_id: template_id,
+    context: input.conversation_context
+  });
+
+  if (!template) {
+    return {
+      should_queue_reply: false,
+      suppression_reason: "template_load_failed"
+    };
+  }
+
+  const vars = {
+    first_name: input.thread.ownerName?.split(' ')[0] || "there",
+    seller_first_name: input.thread.ownerName?.split(' ')[0] || "there",
+    property_address: input.thread.propertyAddress || "the property",
+    agent_name: "Operator"
+  };
+
+  const render = personalizeTemplate(template.template_body, vars);
+
+  if (!render.ok) {
+    return {
+        should_queue_reply: false,
+        suppression_reason: "template_render_failed"
+    };
+  }
+
+  const final_reply = render.text;
+
+  // 3. Safety Gate - Lint for generic/blank greetings
+  if (hasBlankSellerGreeting(final_reply)) {
+    return {
+      should_queue_reply: false,
+      suppression_reason: "unsafe_blank_greeting"
+    };
+  }
+
+  return {
+    should_queue_reply: true,
+    inbound_intent: intent,
+    fallback_reply: final_reply
+  };
     } catch (e) {
       warn("auto_reply_plan.template_check_failed", { error: e.message });
       fallback_reply = "Got it — are you open to selling it if the numbers made sense?";
