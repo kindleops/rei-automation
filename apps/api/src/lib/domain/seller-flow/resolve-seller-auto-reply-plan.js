@@ -42,17 +42,27 @@ export function normalizeSellerInboundIntent(input) {
         "yes it is",
         "that is mine",
         "i own it",
+        "i still own",
+        "still have it",
         "correct",
         "es mía",
         "es mia",
+        "todavía lo tengo",
+        "sigo teniendo",
+        "aún lo tengo",
+        "aun lo tengo",
       ])
     ) {
       return true;
     }
 
+    // Use /\b/ boundary so "sí," (with comma) still matches
+    const startsWithSi = /^s[ií]\b/i.test(text);
+
     return (
       includesWholeWord("yes") ||
       text === "i do" ||
+      startsWithSi ||
       includesWholeWord("sí") ||
       includesWholeWord("si")
     );
@@ -99,8 +109,19 @@ export function normalizeSellerInboundIntent(input) {
     return "ownership_confirmed";
   }
 
-  if (isMatch(["how did you get my info", "where did you get my number", "como encontraste mi información"]) || classification.source === "how_got_number") {
+  if (
+    isMatch([
+      "who is this", "who are you", "who's this", "whos this",
+      "how did you get my info", "where did you get my number",
+      "como encontraste mi información", "quién eres", "quien eres",
+    ]) || classification.source === "how_got_number"
+  ) {
     return "info_request";
+  }
+
+  if (isMatch(["maybe", "depends", "possibly", "if the price", "would consider", "might sell",
+               "tal vez", "quizás", "quizas", "depende", "posiblemente"])) {
+    return "conditional_interest";
   }
 
   // Price/offer logic
@@ -141,6 +162,7 @@ export function resolveNextSellerStage(input) {
     case "ownership_confirmed":
       return is_ownership_check ? "consider_selling" : "confirm_basics";
     case "positive_interest":
+    case "conditional_interest":
       return "confirm_basics";
     case "info_request":
       return is_ownership_check ? "info_source_explanation" : "manual_review";
@@ -169,10 +191,10 @@ export function resolveAutoReplyUseCase(input) {
   if (next_stage === "listed_or_unavailable") return "listed_or_unavailable";
   if (next_stage === "tenant_or_occupancy") return "tenant_or_occupancy";
   if (next_stage === "consider_selling") return "consider_selling";
-  if (next_stage === "info_source_explanation") return "info_source_explanation"; // or who_is_this handled during template resolution
-  if (next_stage === "asking_price") return "asking_price";
+  if (next_stage === "info_source_explanation") return "who_is_this";
+  if (next_stage === "asking_price") return "seller_asking_price";
   if (next_stage === "confirm_basics") return "price_works_confirm_basics";
-  if (next_stage === "condition_probe") return "condition_probe";
+  if (next_stage === "condition_probe") return "price_high_condition_probe";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
 
   return null;
@@ -191,7 +213,8 @@ export function shouldSuppressSellerAutoReply(input) {
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
   if (intent === "opt_out" && !input.system_only) return { suppress: true, reason: "opt_out_intent_no_marketing" };
-  // Removed hard suppression for "not_interested" so they can be handled by the nurture plan.
+  // not_interested → no immediate reply; follow-up scheduler sends 30-day nurture
+  if (intent === "not_interested") return { suppress: true, reason: "not_interested_nurture_only" };
   
   if (next_stage === "manual_review") return { suppress: true, reason: "requires_manual_review" };
   
