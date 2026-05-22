@@ -1,6 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
-import { buildStreetViewUrl } from '../inbox-normalization'
 import '../seller-intelligence-card.css'
 
 type SellerRecord = Record<string, unknown>
