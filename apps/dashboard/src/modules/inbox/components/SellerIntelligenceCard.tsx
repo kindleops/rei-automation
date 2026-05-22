@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useEffect, type FormEvent } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import '../seller-intelligence-card.css'
 
@@ -415,18 +415,13 @@ export function SellerIntelligenceCard({
     .filter(Boolean)
     .map(url => url!.replace(/^http:\/\//i, 'https://'))
   
-  const [imageIndex, setImageIndex] = useState(0)
-  const currentImageUrl = imageSequence[imageIndex] || null
+  const currentImageUrl = imageSequence[0] || null
 
   useEffect(() => {
     if (import.meta.env.DEV && imageSequence.length === 0) {
       console.warn("[map-image-missing]", address, record)
     }
   }, [address, record, imageSequence.length])
-
-  const handleImageError = () => {
-    setImageIndex(prev => prev + 1)
-  }
 
   const pills = deriveSellerStatusPills(record, messages)
   const physicalSummary = buildCompactPhysicalSummary(record)
@@ -456,21 +451,49 @@ export function SellerIntelligenceCard({
     { label: 'SMS', enabled: variant === 'selected' && Boolean(onOpenConversation), onClick: onOpenConversation },
     { label: 'Follow-Up', enabled: false, onClick: undefined },
   ]
+  const imgHtml = currentImageUrl ? `<img 
+    src="${currentImageUrl}" 
+    alt="${address.replace(/"/g, '&quot;')}" 
+    loading="lazy" 
+    style="object-fit: cover; width: 100%; height: 100%; border-radius: 8px" 
+    onerror="
+      var seq = [${imageSequence.map(s => `'${s}'`).join(',')}];
+      var idx = parseInt(this.getAttribute('data-err') || '0') + 1;
+      this.setAttribute('data-err', idx);
+      if (idx < seq.length) {
+        this.src = seq[idx];
+      } else {
+        this.parentElement.style.display = 'none';
+        var placeholder = this.parentElement.nextElementSibling;
+        if (placeholder && placeholder.className.indexOf('nx-seller-card__image-placeholder') > -1) {
+          placeholder.style.display = 'flex';
+        }
+      }
+    " 
+  />` : ''
 
   return (
     <article className={cls('nx-seller-card', `is-${variant}`, `seller-card--${densityMode}`)}>
       <div className="nx-seller-card__image" style={{ minHeight: '140px' }}>
-        {currentImageUrl ? (
-          <img 
-            src={currentImageUrl} 
-            alt={address} 
-            loading="lazy" 
-            onError={handleImageError}
-            style={{ objectFit: 'cover', width: '100%', height: '100%', borderRadius: '8px' }}
-          />
-        ) : (
-          <div className="nx-seller-card__image-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '140px', backgroundColor: '#111', borderRadius: '8px', color: '#666', width: '100%', height: '100%' }}>Street View Preview</div>
+        {currentImageUrl && (
+          <div dangerouslySetInnerHTML={{ __html: imgHtml }} style={{ width: '100%', height: '100%', display: 'flex' }} />
         )}
+        <div 
+          className="nx-seller-card__image-placeholder" 
+          style={{ 
+            display: currentImageUrl ? 'none' : 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            minHeight: '140px', 
+            backgroundColor: '#111', 
+            borderRadius: '8px', 
+            color: '#666', 
+            width: '100%', 
+            height: '100%' 
+          }}
+        >
+          Street View Preview
+        </div>
         <div className="nx-seller-card__image-overlay" />
         <div className="nx-seller-card__image-label">Street View</div>
         {variant === 'selected' && onClose ? (
