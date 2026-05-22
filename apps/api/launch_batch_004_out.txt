@@ -1,0 +1,6 @@
+(node:33588) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/ryankindle/rei-automation/apps/api/src/lib/domain/queue/run-send-queue.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/ryankindle/rei-automation/apps/api/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+◇ injected env (0) from .env.local // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+[launch_batch_004] Preparing EXACTLY 500 live candidates for scale test...
