@@ -6,6 +6,15 @@ import {
   SELLER_FLOW_SAFETY_TIERS
 } from "./seller-flow-safety-policy.js";
 
+// Phase 8: only these intents qualify for live auto-reply
+const AUTO_REPLY_WHITELIST = new Set([
+  'ownership_confirmed',
+  'positive_interest',
+  'asks_offer',       // price_request
+  'info_request',
+  'conditional_interest',
+]);
+
 const STAGE_CODES = {
   ownership_check: "S1",
   info_source_explanation: "S1B",
@@ -209,13 +218,15 @@ export function shouldSuppressSellerAutoReply(input) {
   if (!input.auto_reply_enabled && !input.force_queue_reply) return { suppress: true, reason: "auto_reply_disabled" };
   
   if (automation_state === "paused" || automation_state === "manual") return { suppress: true, reason: "manual_pause" };
-  if (confidence < 0.5) return { suppress: true, reason: "confidence_too_low" };
+  if (confidence < 0.90) return { suppress: true, reason: "confidence_too_low" };
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
   if (intent === "opt_out" && !input.system_only) return { suppress: true, reason: "opt_out_intent_no_marketing" };
   // not_interested → no immediate reply; follow-up scheduler sends 30-day nurture
   if (intent === "not_interested") return { suppress: true, reason: "not_interested_nurture_only" };
-  
+  // Phase 8 whitelist: only these intents qualify for live auto-reply
+  if (!AUTO_REPLY_WHITELIST.has(intent)) return { suppress: true, reason: `not_in_auto_reply_whitelist:${intent}` };
+
   if (next_stage === "manual_review") return { suppress: true, reason: "requires_manual_review" };
   
   return { suppress: false, reason: null };
@@ -287,6 +298,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   let suppression_reason = suppression.reason;
   let reply_mode = suppression.suppress ? "suppress" : "auto_queue";
   let fallback_reply = null;
+  let selected_template_id = null;
   
   let is_duplicate = false;
   if (should_queue_reply) {
@@ -328,12 +340,12 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
         reply_mode = "manual_review";
       } else {
         fallback_reply = bestTemplate.template_body.trim();
+        selected_template_id = bestTemplate.template_id || bestTemplate.id || null;
         reply_mode = "auto_queue";
-        // Log which template was selected for auditability
         if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
           // eslint-disable-next-line no-console
           console.log("[auto_reply_plan] template_selected", {
-            template_id: bestTemplate.template_id || bestTemplate.id,
+            template_id: selected_template_id,
             use_case: selected_use_case,
             language: bestTemplate.language,
             intent,
@@ -366,6 +378,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
     selected_use_case,
     selected_stage_code,
     selected_language,
+    selected_template_id,
     fallback_reply,
     priority,
     reply_mode,
