@@ -3776,27 +3776,101 @@ export const sendInboxMessageNow = async (
   }
   const isValidE164 = (phone: string): boolean => /^\+\d{10,15}$/.test(phone)
 
-  const threadOurNumber = toE164(thread.ourNumber)
-  const envFromNumber = toE164(import.meta.env.VITE_TEXTGRID_FROM_NUMBER)
-  const envNumber = toE164(import.meta.env.VITE_TEXTGRID_NUMBER)
-
-  const fromPhone =
-    (routingResult.ok && routingResult.from_phone_number && isValidE164(toE164(routingResult.from_phone_number)) ? toE164(routingResult.from_phone_number) : null) ||
-    (isValidE164(threadOurNumber) ? threadOurNumber : null) ||
-    (options?.fromPhoneNumber ? (isValidE164(toE164(options.fromPhoneNumber)) ? toE164(options.fromPhoneNumber) : null) : null) ||
-    (isValidE164(envFromNumber) ? envFromNumber : null) ||
-    (isValidE164(envNumber) ? envNumber : null) ||
+  // ── Step 1: thread-direct fields ─────────────────────────────────────────────
+  // Check all known field names for the TextGrid sender on this thread.
+  const threadAsAny = thread as unknown as AnyRecord
+  const threadOurNumberRaw =
+    thread.ourNumber ??
+    (threadAsAny.toNumber as string | undefined) ??
+    (threadAsAny.textgridNumber as string | undefined) ??
+    (threadAsAny.originalOutboundFromNumber as string | undefined) ??
     null
+  const threadOurNumber = toE164(threadOurNumberRaw)
+
+  let fromPhone: string | null = isValidE164(threadOurNumber) ? threadOurNumber : null
+  let resolutionSource: string | null = fromPhone ? 'thread.ourNumber' : null
+
+  // ── Steps 2-4: DB lookups to recover original sender ─────────────────────────
+  // Only run these if thread fields didn't give us the number.
+  let latestInboundToNumber: string | null = null
+  let latestOutboundFromNumber: string | null = null
+  let queueFromNumber: string | null = null
+
+  if (!fromPhone) {
+    const sbClient = getSupabaseClient()
+    const phoneVariants = buildPhoneVariants(toPhone)
+    // inbound: seller is from_phone_number — our number is to_phone_number
+    const inboundFilter = phoneVariants.map(v => `from_phone_number.eq.${safeFilterValue(v)}`).join(',')
+    // outbound / queue: seller is to_phone_number — our number is from_phone_number
+    const outboundFilter = phoneVariants.map(v => `to_phone_number.eq.${safeFilterValue(v)}`).join(',')
+
+    const [inboundProbe, outboundProbe, queueProbe] = await Promise.all([
+      // Step 2: latest inbound message — our number is to_phone_number
+      sbClient
+        .from('message_events')
+        .select('to_phone_number')
+        .eq('direction', 'inbound')
+        .or(inboundFilter)
+        .order('event_timestamp', { ascending: false })
+        .limit(1),
+      // Step 3: latest outbound message — our number is from_phone_number
+      sbClient
+        .from('message_events')
+        .select('from_phone_number')
+        .eq('direction', 'outbound')
+        .or(outboundFilter)
+        .order('event_timestamp', { ascending: false })
+        .limit(1),
+      // Step 4: most recent sent/queued row in send_queue
+      sbClient
+        .from('send_queue')
+        .select('from_phone_number,metadata')
+        .or(outboundFilter)
+        .in('queue_status', ['sent', 'delivered', 'queued'])
+        .order('created_at', { ascending: false })
+        .limit(1),
+    ])
+
+    const inboundRow = safeArray(inboundProbe.data as AnyRecord[])[0] ?? null
+    const outboundRow = safeArray(outboundProbe.data as AnyRecord[])[0] ?? null
+    const queueRow = safeArray(queueProbe.data as AnyRecord[])[0] ?? null
+
+    latestInboundToNumber = toE164(inboundRow?.to_phone_number) || null
+    latestOutboundFromNumber = toE164(outboundRow?.from_phone_number) || null
+
+    const queueRowFrom = toE164(queueRow?.from_phone_number)
+    const queueMetaFrom = queueRow?.metadata && typeof queueRow.metadata === 'object'
+      ? toE164((queueRow.metadata as AnyRecord).from_phone_number)
+      : ''
+    queueFromNumber =
+      (queueRowFrom && isValidE164(queueRowFrom) ? queueRowFrom : null) ||
+      (queueMetaFrom && isValidE164(queueMetaFrom) ? queueMetaFrom : null) ||
+      null
+
+    if (latestInboundToNumber && isValidE164(latestInboundToNumber)) {
+      fromPhone = latestInboundToNumber
+      resolutionSource = 'message_events.inbound.to_phone_number'
+    } else if (latestOutboundFromNumber && isValidE164(latestOutboundFromNumber)) {
+      fromPhone = latestOutboundFromNumber
+      resolutionSource = 'message_events.outbound.from_phone_number'
+    } else if (queueFromNumber) {
+      fromPhone = queueFromNumber
+      resolutionSource = 'send_queue.from_phone_number'
+    }
+  }
 
   console.log('[sendInboxMessageNow] from phone resolution', {
+    canonicalThreadKey: thread.threadKey ?? thread.id,
     threadOurNumber: thread.ourNumber,
-    envFromNumberPresent: !!import.meta.env.VITE_TEXTGRID_FROM_NUMBER,
+    latestInboundToNumber,
+    latestOutboundFromNumber,
+    queueFromNumber,
     resolvedFromPhone: fromPhone,
-    toPhone,
+    resolutionSource,
   })
 
   if (!fromPhone) {
-    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Missing sender number — assign a TextGrid number to this thread/market.', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Missing original sender number — cannot reply until this thread is linked to its original TextGrid number.', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
   }
 
   // If from number known, try to resolve textgrid_numbers table for the number id
