@@ -330,10 +330,10 @@ export const ChatThread = ({
         )}
       </header>
 
-      {/* ── THREAD STATE BAR (status / stage / temperature / autopilot pills + quick actions) ── */}
+      {/* ── THREAD STATE BAR: status / stage / temperature / autopilot ── */}
       <ThreadStateBar
         thread={thread}
-        onAction={(id, action, payload) => onThreadAction?.(id, action, payload as any)}
+        onRefetch={(threadKey) => onThreadAction?.(thread.id, 'refetch', { threadKey })}
         disabled={isSuppressed}
       />
 

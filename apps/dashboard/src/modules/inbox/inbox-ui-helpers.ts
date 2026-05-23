@@ -499,28 +499,35 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
   return null
 }
 
-const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxViewSelectValue): boolean => {
+export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxViewSelectValue): boolean => {
   const decision = buildConversationDecision(thread)
   const isArchived = Boolean(thread.isArchived || thread.inboxStatus === 'closed')
 
-  if (view === 'archived') return isArchived
-  if (view === 'starred') return Boolean(thread.isStarred)
-  if (view === 'pinned') return Boolean(thread.isPinned)
-  if (view === 'unassigned') {
+  let matches = true
+  if (view === 'archived') matches = isArchived
+  else if (view === 'starred') matches = Boolean(thread.isStarred)
+  else if (view === 'pinned') matches = Boolean(thread.isPinned)
+  else if (view === 'unassigned') {
     const assigned = getField(thread, 'assignedAgent') || getField(thread, 'sms_agent_id') || getField(thread, 'ownerId')
-    return !assigned
+    matches = !assigned
   }
-  if (view === 'all_inbound' || view === 'inbound_all') return decision.has_inbound_history
-  if (view === 'hot_leads' || view === 'positive_hot') return isHotLeadDecision(decision)
-  if (view === 'spanish_language') return decision.language === 'spanish'
-  if (view === 'inbound') return decision.last_message_direction === 'inbound' && !isArchived
-  if (view === 'outbound') return decision.last_message_direction === 'outbound' && !isArchived
-  if (view === 'active') return decision.active && decision.suppression_status === 'clear' && !isArchived
-  if (view === 'sent') return toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'sent' && !isArchived
-  if (view === 'failed') return toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'failed' && !isArchived
+  else if (view === 'all_inbound' || view === 'inbound_all') matches = decision.has_inbound_history
+  else if (view === 'hot_leads' || view === 'positive_hot') matches = isHotLeadDecision(decision)
+  else if (view === 'spanish_language') matches = decision.language === 'spanish'
+  else if (view === 'inbound') matches = decision.last_message_direction === 'inbound' && !isArchived
+  else if (view === 'outbound') matches = decision.last_message_direction === 'outbound' && !isArchived
+  else if (view === 'active') matches = decision.active && decision.suppression_status === 'clear' && !isArchived
+  else if (view === 'sent') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'sent' && !isArchived
+  else if (view === 'failed') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'failed' && !isArchived
+  else {
+    const bucket = bucketFromView(view)
+    matches = bucket ? matchesInboxBucket(thread, bucket, decision) : true
+  }
 
-  const bucket = bucketFromView(view)
-  return bucket ? matchesInboxBucket(thread, bucket, decision) : true
+  if (!matches) {
+    console.debug('[InboxLifecycle] thread filtered out', { threadId: thread.id, view })
+  }
+  return matches
 }
 
 const matchesAdvancedFilters = (thread: InboxWorkflowThread, filters: InboxAdvancedFilters): boolean => {

@@ -1,3 +1,7 @@
+import crypto from "node:crypto";
+import { info, warn } from "@/lib/logging/logger.js";
+import { getSystemFlag } from "@/lib/system-control.js";
+
 export async function runSendQueue(
   {
     limit = 50,
@@ -44,6 +48,7 @@ export async function runSendQueue(
   const results = [];
   let sent_count = 0;
   let failed_count = 0;
+  let processed_count = 0;
 
   // 3. Process rows with row-level atomic claims
   for (const row of rows) {
@@ -57,8 +62,11 @@ export async function runSendQueue(
             is_locked: true,
             locked_at: new Date().toISOString(),
             processing_run_id: processing_run_id,
-            claimed_by: 'queue_runner',
-            claimed_at: new Date().toISOString(),
+            metadata: {
+                ...row.metadata,
+                claimed_by: 'queue_runner',
+                claimed_at: new Date().toISOString()
+            }
         })
         .eq('id', queue_item_id)
         .eq('queue_status', 'queued')

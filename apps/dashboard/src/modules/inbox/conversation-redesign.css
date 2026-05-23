@@ -1118,37 +1118,35 @@
 }
 
 /* ════════════════════════════════════════════════════════════════
-   THREAD STATE BAR  (status / stage / temperature / autopilot)
+   THREAD STATE BAR  — 4 dropdown pills, no action bar
    ════════════════════════════════════════════════════════════════ */
 
 .nx-thread-state-bar {
   display: flex;
-  flex-direction: column;
-  gap: 0;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--nx-border-subtle);
-}
-
-/* ── Pill row ──────────────────────────────────────────────────── */
-
-.nx-thread-state-bar__pills {
-  display: flex;
   align-items: center;
   gap: 4px;
   padding: 5px 12px;
+  border-bottom: 1px solid var(--nx-border-subtle);
   background: rgba(0,0,0,0.06);
+  flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.nx-thread-state-bar__pills::-webkit-scrollbar { display: none }
+.nx-thread-state-bar::-webkit-scrollbar { display: none }
 
-/* ── DropdownPill ──────────────────────────────────────────────── */
+.nx-thread-state-bar.is-syncing {
+  opacity: 0.9;
+}
+
+/* ── DropdownPill wrapper ──────────────────────────────────────── */
 
 .nx-state-pill-wrap {
   position: relative;
   flex-shrink: 0;
 }
+
+/* ── Pill button ───────────────────────────────────────────────── */
 
 .nx-state-pill {
   display: inline-flex;
@@ -1162,19 +1160,13 @@
   letter-spacing: 0.01em;
   cursor: pointer;
   white-space: nowrap;
-  transition: filter 0.12s, opacity 0.12s;
-  background: inherit;
   line-height: 1.4;
+  transition: filter 0.12s, opacity 0.12s, border-color 0.15s;
+  font-family: inherit;
 }
 
-.nx-state-pill:hover:not(:disabled) {
-  filter: brightness(1.12);
-}
-
-.nx-state-pill:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+.nx-state-pill:hover:not(:disabled) { filter: brightness(1.14) }
+.nx-state-pill:disabled { opacity: 0.4; cursor: not-allowed }
 
 .nx-state-pill__dot {
   width: 6px;
@@ -1183,31 +1175,55 @@
   flex-shrink: 0;
 }
 
-.nx-state-pill__label {
-  color: inherit;
+/* Pending: spinning ring replaces dot */
+.nx-state-pill__spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-top-color: currentColor;
+  flex-shrink: 0;
+  animation: nx-spin 0.7s linear infinite;
 }
+
+@keyframes nx-spin {
+  to { transform: rotate(360deg) }
+}
+
+.nx-state-pill__label { color: inherit }
 
 .nx-state-pill__caret {
   font-size: 8px;
-  opacity: 0.6;
+  opacity: 0.55;
   margin-left: 1px;
 }
 
-/* ── Dropdown menu ─────────────────────────────────────────────── */
+/* Error state */
+.nx-state-pill-wrap.is-error .nx-state-pill {
+  animation: nx-shake 0.3s ease;
+}
+
+@keyframes nx-shake {
+  0%,100% { transform: translateX(0) }
+  25%      { transform: translateX(-3px) }
+  75%      { transform: translateX(3px) }
+}
+
+/* ── Floating dropdown ─────────────────────────────────────────── */
 
 .nx-state-pill__dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 5px);
   left: 0;
   z-index: 9999;
-  min-width: 160px;
-  background: rgba(18, 20, 28, 0.96);
+  min-width: 172px;
+  background: rgba(14, 16, 24, 0.97);
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 4px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+  border-radius: 9px;
+  padding: 5px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1216,18 +1232,20 @@
 .nx-state-pill__option {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  border-radius: 5px;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 6px;
   border: none;
   background: transparent;
-  color: rgba(255,255,255,0.75);
+  color: rgba(255,255,255,0.7);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
   white-space: nowrap;
+  width: 100%;
   transition: background 0.1s, color 0.1s;
+  font-family: inherit;
 }
 
 .nx-state-pill__option:hover {
@@ -1236,8 +1254,9 @@
 }
 
 .nx-state-pill__option.is-selected {
-  color: var(--opt-color, #fff);
+  color: var(--opt-color, rgba(255,255,255,0.9));
   background: var(--opt-bg, rgba(255,255,255,0.06));
+  font-weight: 600;
 }
 
 .nx-state-pill__option-dot {
@@ -1250,106 +1269,20 @@
 .nx-state-pill__option-check {
   margin-left: auto;
   font-size: 10px;
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
-/* ── Quick action bar ──────────────────────────────────────────── */
-
-.nx-thread-state-bar__actions {
-  display: flex;
-  align-items: center;
+/* Compact layout: show only the colored dot, hide text */
+.is-layout-compact .nx-thread-state-bar {
+  padding: 4px 8px;
   gap: 3px;
-  padding: 4px 12px;
-  background: rgba(0,0,0,0.04);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
-.nx-thread-state-bar__actions::-webkit-scrollbar { display: none }
-
-.nx-quick-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 5px;
-  border: 1px solid var(--nx-border-subtle);
-  background: var(--nx-bg-elevated);
-  color: var(--nx-text-secondary);
-  font-size: 10.5px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.nx-quick-action:hover {
-  background: var(--nx-bg-hover);
-  color: var(--nx-text-primary);
-  border-color: rgba(255,255,255,0.18);
-}
-
-.nx-quick-action__icon { line-height: 1; font-size: 11px }
-.nx-quick-action__label { letter-spacing: 0.01em }
-
-.nx-quick-action--hot {
-  color: #ff6b35;
-  border-color: rgba(255,107,53,0.28);
-  background: rgba(255,107,53,0.08);
-}
-.nx-quick-action--hot:hover {
-  background: rgba(255,107,53,0.16);
-  border-color: rgba(255,107,53,0.4);
-}
-
-.nx-quick-action--cold {
-  color: #64d2ff;
-  border-color: rgba(100,210,255,0.22);
-  background: rgba(100,210,255,0.07);
-}
-.nx-quick-action--cold:hover {
-  background: rgba(100,210,255,0.14);
-}
-
-.nx-quick-action--danger {
-  color: #ff453a;
-  border-color: rgba(255,69,58,0.22);
-  background: rgba(255,69,58,0.06);
-}
-.nx-quick-action--danger:hover {
-  background: rgba(255,69,58,0.14);
-  border-color: rgba(255,69,58,0.38);
-}
-
-.nx-quick-action--accent {
-  color: #a78bfa;
-  border-color: rgba(167,139,250,0.24);
-  background: rgba(167,139,250,0.08);
-}
-.nx-quick-action--accent:hover {
-  background: rgba(167,139,250,0.16);
-}
-
-.nx-quick-action--muted {
-  color: var(--nx-text-tertiary, rgba(255,255,255,0.35));
-}
-
-/* Compact layout: icons only */
-.is-layout-compact .nx-thread-state-bar__actions .nx-quick-action__label {
+.is-layout-compact .nx-state-pill__label,
+.is-layout-compact .nx-state-pill__caret {
   display: none;
 }
-.is-layout-compact .nx-thread-state-bar__pills .nx-state-pill__label {
-  display: none;
-}
-.is-layout-compact .nx-thread-state-bar__pills .nx-state-pill__caret {
-  display: none;
-}
+
 .is-layout-compact .nx-state-pill {
-  padding: 3px 5px;
-}
-.is-layout-compact .nx-quick-action {
-  padding: 4px 7px;
-  min-width: 26px;
-  justify-content: center;
+  padding: 4px 6px;
 }

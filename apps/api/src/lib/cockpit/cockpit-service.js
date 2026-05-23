@@ -318,22 +318,33 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
 }
 
 const THREAD_STATE_ALLOWED_FIELDS = new Set([
+  // visibility / workflow flags
   'is_read',
   'is_pinned',
   'is_archived',
   'assigned_user',
   'manual_review',
+  // operator-settable state fields
+  'conversation_status',
+  'seller_stage',
+  'temperature',
+  'autopilot_mode',
 ])
 
 const THREAD_STATE_FORBIDDEN_FIELDS = new Set([
   'seller_status',
   'seller_state',
-  'pipeline_stage',
   'is_hot_lead',
   'positive_flag',
   'classification',
-  'automation_status',
 ])
+
+const SAFE_STATE_VALUES = {
+  conversation_status: new Set(['new_reply','active_communication','waiting','follow_up','offer_sent','contract_sent','under_contract','closed']),
+  seller_stage:        new Set(['s1_ownership','s2_interest','s3_pricing','s4_condition','s5_offer','s6_negotiation','s7_follow_up','s8_closing']),
+  temperature:         new Set(['hot','warm','cold','dead']),
+  autopilot_mode:      new Set(['autopilot_on','autopilot_paused','manual_only']),
+}
 
 export async function patchThreadStateSafe({ payload = {}, supabase = defaultSupabase } = {}) {
   const dryRun = asBoolean(payload.dry_run, false)
@@ -359,14 +370,27 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     return blockedResponse('thread-state', 'no_allowed_patch_fields', { thread_key: threadKey, dry_run: dryRun })
   }
 
+  // Validate enum values for state fields — reject unknown values to prevent data corruption
+  for (const [field, allowed] of Object.entries(SAFE_STATE_VALUES)) {
+    if (field in allowedPatch && !allowed.has(clean(allowedPatch[field]))) {
+      return blockedResponse('thread-state', `invalid_value:${field}`, { thread_key: threadKey, value: allowedPatch[field] })
+    }
+  }
+
+  const now = new Date().toISOString()
   const rowPatch = {
     thread_key: threadKey,
-    updated_at: new Date().toISOString(),
-    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), read_at: asBoolean(allowedPatch.is_read, false) ? new Date().toISOString() : null } : {}),
+    updated_at: now,
+    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), read_at: asBoolean(allowedPatch.is_read, false) ? now : null } : {}),
     ...('is_pinned' in allowedPatch ? { is_pinned: asBoolean(allowedPatch.is_pinned, false) } : {}),
-    ...('is_archived' in allowedPatch ? { is_archived: asBoolean(allowedPatch.is_archived, false), archived_at: asBoolean(allowedPatch.is_archived, false) ? new Date().toISOString() : null } : {}),
+    ...('is_archived' in allowedPatch ? { is_archived: asBoolean(allowedPatch.is_archived, false), archived_at: asBoolean(allowedPatch.is_archived, false) ? now : null } : {}),
     ...('assigned_user' in allowedPatch ? { assigned_user: clean(allowedPatch.assigned_user) || null } : {}),
     ...('manual_review' in allowedPatch ? { manual_review: asBoolean(allowedPatch.manual_review, false) } : {}),
+    // Operator-settable state fields
+    ...('conversation_status' in allowedPatch ? { conversation_status: clean(allowedPatch.conversation_status) } : {}),
+    ...('seller_stage' in allowedPatch ? { seller_stage: clean(allowedPatch.seller_stage) } : {}),
+    ...('temperature' in allowedPatch ? { temperature: clean(allowedPatch.temperature) } : {}),
+    ...('autopilot_mode' in allowedPatch ? { autopilot_mode: clean(allowedPatch.autopilot_mode) } : {}),
   }
 
   if (dryRun) {
@@ -376,10 +400,30 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
   const { data, error } = await supabase
     .from('inbox_thread_state')
     .upsert(rowPatch, { onConflict: 'thread_key' })
-    .select('thread_key,is_read,is_pinned,is_archived,assigned_user,manual_review,updated_at')
+    .select('thread_key,is_read,is_pinned,is_archived,assigned_user,manual_review,conversation_status,seller_stage,temperature,autopilot_mode,updated_at')
     .maybeSingle()
 
-  if (error) throw error
+  if (error) {
+    // Column may not exist yet — degrade gracefully and retry without state fields
+    if (error.code === '42703' || error.message?.includes('column')) {
+      const coreFields = ['thread_key','updated_at','is_read','read_at','is_pinned','is_archived','archived_at','assigned_user','manual_review']
+      const coreRowPatch = Object.fromEntries(Object.entries(rowPatch).filter(([k]) => coreFields.includes(k)))
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('inbox_thread_state')
+        .upsert(coreRowPatch, { onConflict: 'thread_key' })
+        .select('thread_key,updated_at')
+        .maybeSingle()
+      if (fallbackError) throw fallbackError
+      return okResponse('thread-state', {
+        dry_run: false,
+        thread_key: threadKey,
+        partial: true,
+        note: 'state_columns_pending_migration',
+        diagnostics: { row: fallbackData || null },
+      })
+    }
+    throw error
+  }
 
   return okResponse('thread-state', {
     dry_run: false,

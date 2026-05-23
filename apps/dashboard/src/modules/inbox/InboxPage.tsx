@@ -114,6 +114,7 @@ import {
   getInboxViewCounts,
   getSavedPresetConfig,
   isSuppressedThread,
+  matchesViewSelection,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
   type InboxSavedFilterPreset,
@@ -636,13 +637,24 @@ export default function InboxPage() {
     }
   }, [data.allInboxCount, data.counts, decisions, threads])
 
-  const listStatCounts = useMemo(() => ([
-    { label: 'New Replies', value: viewCounts.new_replies },
-    { label: 'Priority', value: viewCounts.priority },
-    { label: 'Needs Review', value: viewCounts.needs_review },
-    { label: 'Follow-Up Due', value: viewCounts.follow_up_due },
-    { label: 'Auto-Eligible', value: viewCounts.automated },
-  ]), [viewCounts])
+  const listStatCounts = useMemo(() => {
+    console.debug('[inbox.tab.count] recalculating')
+    const counts = {
+      new_replies: threads.filter((thread) => matchesViewSelection(thread, 'new_replies')).length,
+      priority: threads.filter((thread) => matchesViewSelection(thread, 'priority')).length,
+      needs_review: threads.filter((thread) => matchesViewSelection(thread, 'needs_review')).length,
+      follow_up_due: threads.filter((thread) => matchesViewSelection(thread, 'follow_up_due')).length,
+      automated: threads.filter((thread) => matchesViewSelection(thread, 'automated')).length,
+    }
+    console.debug('[inbox.tab.count] result', counts)
+    return [
+      { label: 'New Replies', value: counts.new_replies },
+      { label: 'Priority', value: counts.priority },
+      { label: 'Needs Review', value: counts.needs_review },
+      { label: 'Follow-Up Due', value: counts.follow_up_due },
+      { label: 'Auto-Eligible', value: counts.automated },
+    ]
+  }, [threads])
 
   const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
     skipViewFilter: false,
