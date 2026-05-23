@@ -50,6 +50,7 @@ import {
   type MapStyleMode,
 } from './commandMapThemes'
 import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from '../dashboard/live/map/pin-icons'
+import type { LocationResult } from '../command-center/command.types'
 
 export type { MapStyleMode } from './commandMapThemes'
 
@@ -3222,6 +3223,7 @@ export function InboxCommandMap({
   const activityModeRef = useRef<InboxMapActivityMode>('threads')
   const [activityMode, setActivityMode] = useState<InboxMapActivityMode>(initialActivityMode)
   const [filters, setFilters] = useState<MapFilterState>({ ...defaultFilters, ...initialFilters })
+  const [tempLocation, setTempLocation] = useState<LocationResult | null>(null)
   const [selectedPinId, setSelectedPinId] = useState<string | null>(selectedThread?.id ?? null)
   const [showSelectedHidden, setShowSelectedHidden] = useState(false)
   const [buyerLayers, setBuyerLayers] = useState<BuyerLayerToggles>(defaultBuyerLayerToggles)
@@ -3237,6 +3239,8 @@ export function InboxCommandMap({
       return defaultSellerPinLayers
     }
   })
+  
+  const tempMarkerRef = useRef<maplibregl.Marker | null>(null)
   
   useEffect(() => {
     localStorage.setItem(SELLER_PINS_SETTINGS_KEY, JSON.stringify(sellerPinLayers))
@@ -3944,6 +3948,37 @@ export function InboxCommandMap({
   useEffect(() => {
     scheduleMapResize()
   }, [filtersOpen, layoutMode, dockTier, fullHeight, commandMode])
+
+  useEffect(() => {
+    const handleFlyTo = (e: Event) => {
+      const customEvent = e as CustomEvent
+      const location = customEvent.detail?.location as LocationResult | undefined
+      if (location) {
+        const map = mapRef.current
+        if (!map) return
+        
+        map.flyTo({
+          center: [location.longitude, location.latitude],
+          zoom: 14.5,
+          essential: true,
+        })
+
+        if (tempMarkerRef.current) {
+          tempMarkerRef.current.remove()
+          tempMarkerRef.current = null
+        }
+
+        tempMarkerRef.current = new maplibregl.Marker({ color: '#38bdf8' })
+          .setLngLat([location.longitude, location.latitude])
+          .addTo(map)
+
+        setTempLocation(location)
+      }
+    }
+
+    window.addEventListener('nexus:map-flyto', handleFlyTo)
+    return () => window.removeEventListener('nexus:map-flyto', handleFlyTo)
+  }, [])
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
@@ -7512,6 +7547,45 @@ export function InboxCommandMap({
       </div>}
 
       <div ref={containerRef} className="nx-icm__canvas" />
+
+      {tempLocation && (
+        <aside className="cc-map-dossier" style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, width: '320px' }}>
+          <div className="cc-map-dossier__top">
+            <strong>{tempLocation.label}</strong>
+            <span>{tempLocation.placeType || 'Location'}</span>
+          </div>
+          <span className="cc-map-dossier__address">
+            {tempLocation.latitude.toFixed(4)}, {tempLocation.longitude.toFixed(4)}
+          </span>
+          <div className="cc-map-dossier__meta">
+            <span>{tempLocation.source} source</span>
+          </div>
+          <div className="cc-map-dossier__actions">
+            <button
+              type="button"
+              className="is-active"
+              onClick={() => {
+                if (tempMarkerRef.current) {
+                  tempMarkerRef.current.remove()
+                  tempMarkerRef.current = null
+                }
+                setTempLocation(null)
+              }}
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('nexus:command-action', { detail: { action: 'search-leads', location: tempLocation } }))
+              }}
+            >
+              Find Leads
+            </button>
+          </div>
+        </aside>
+      )}
+
       {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning) && (
         <div className="nx-icm__map-status" aria-live="polite">
           {baseStyleLoading && <span className="nx-icm__map-status-pill">Loading {getCommandMapTheme(mapStyleMode).label} base style…</span>}
