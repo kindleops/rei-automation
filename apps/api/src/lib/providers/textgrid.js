@@ -262,6 +262,11 @@ export function mapTextgridFailureBucket(result) {
   const status = result.error_status ?? 0;
   const msg = String(result.error_message ?? "").toLowerCase();
 
+  // 1. Blacklist Pair Logic (21610)
+  if (msg.includes("21610") || msg.includes("blacklist")) {
+    return "provider_blacklist_pair";
+  }
+
   if (msg.includes("opt out") || msg.includes("dnc")) return "DNC";
   if (msg.includes("spam")) return "Spam";
   if (

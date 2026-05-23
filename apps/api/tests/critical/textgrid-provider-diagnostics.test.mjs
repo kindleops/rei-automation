@@ -10,6 +10,10 @@ import {
   normalizePhone,
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
+import {
+  clearSystemControlCache,
+  primeSystemControlCache,
+} from "@/lib/system-control.js";
 
 const saved_fetch = globalThis.fetch;
 const saved_sid = process.env.TEXTGRID_ACCOUNT_SID;
@@ -17,6 +21,7 @@ const saved_token = process.env.TEXTGRID_AUTH_TOKEN;
 
 afterEach(() => {
   globalThis.fetch = saved_fetch;
+  clearSystemControlCache();
   if (typeof saved_sid === "string") {
     process.env.TEXTGRID_ACCOUNT_SID = saved_sid;
   } else {
@@ -197,6 +202,7 @@ test("sendTextgridSMS: throws when HTTP status is not ok", async () => {
 test("sendTextgridSMS: throws when sid is missing", async () => {
   process.env.TEXTGRID_ACCOUNT_SID = "ACtest-sid-001";
   process.env.TEXTGRID_AUTH_TOKEN = "test-auth-token";
+  primeSystemControlCache("outbound_sms_enabled", true);
 
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ status: "queued" }), {
@@ -220,6 +226,7 @@ test("sendTextgridSMS: throws when sid is missing", async () => {
 test("sendTextgridSMS: throws when carrier status is failed", async () => {
   process.env.TEXTGRID_ACCOUNT_SID = "ACtest-sid-001";
   process.env.TEXTGRID_AUTH_TOKEN = "test-auth-token";
+  primeSystemControlCache("outbound_sms_enabled", true);
 
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ sid: "SM123", status: "failed" }), {

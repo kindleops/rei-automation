@@ -202,3 +202,8 @@ export function buildDisabledResponse(key, context = "unknown") {
 export function clearSystemControlCache() {
   _cache.clear();
 }
+
+/** Prime a flag directly into the cache (test-only — avoids hitting Supabase). */
+export function primeSystemControlCache(key, value) {
+  setCachedFlag(String(key), Boolean(value));
+}

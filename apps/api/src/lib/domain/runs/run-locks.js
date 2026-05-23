@@ -47,6 +47,10 @@ async function findRunLockState(scope) {
 
 function isLeaseActive(meta = {}, at = Date.now()) {
   if (clean(meta?.status).toLowerCase() !== "locked") return false;
+  
+  // If the lock was explicitly released, it is not active.
+  if (meta?.released_at) return false;
+
   const expires_at_ts = toTimestamp(meta?.expires_at);
   return expires_at_ts !== null && expires_at_ts > at;
 }
@@ -144,6 +148,16 @@ export async function acquireRunLock({
         : "lock_acquired",
   });
 
+  // Log acquisition
+  runtimeDeps.warn("run_lock.acquired", {
+    module: RUN_LOCK_LOGGER_KEY,
+    scope: normalized_scope,
+    record_item_id,
+    lease_token,
+    owner,
+    expires_at: next_meta.expires_at,
+  });
+
   if (!existing_meta) {
     const created = await runtimeDeps.createRuntimeStateIfAbsent({
       namespace: RUN_LOCK_NAMESPACE,
@@ -233,6 +247,12 @@ export async function releaseRunLock({
   }
 
   const existing_meta = (await findRunLockState(normalized_scope)) || {};
+  
+  // Guard: if already released, avoid unnecessary writes or duplicate logs
+  if (existing_meta.status === "released") {
+      return { ok: true, released: true, reason: "already_released" };
+  }
+
   const next_meta = {
     ...existing_meta,
     version: 1,
@@ -249,6 +269,12 @@ export async function releaseRunLock({
     namespace: RUN_LOCK_NAMESPACE,
     key: normalized_scope,
     state: next_meta,
+  });
+
+  runtimeDeps.warn("run_lock.released", {
+    module: RUN_LOCK_LOGGER_KEY,
+    scope: normalized_scope,
+    outcome,
   });
 
   return {
