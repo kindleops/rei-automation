@@ -4,7 +4,7 @@ import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
 import type { InboxThread } from '../inbox.adapter'
 import type { ThreadContext } from '../../../lib/data/inboxData'
 import type { CommandSuggestion } from '../ai-command-center'
-import { callBackend } from '../../../lib/api/backendClient'
+import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -139,18 +139,16 @@ export const Composer = ({
   const hasDraft = localDraft.trim().length > 0
   const composerDisabled = disabled || isSending || isPolishing
 
-import { callBackend } from '../../../lib/api/backendClient'
-
-// ... (inside Composer)
-
   const polishDraftText = useCallback(async (text: string) => {
     if (!text.trim() || text === lastPolishedDraftRef.current) return
     setIsPolishing(true)
     try {
-      const data = await callBackend<{ ok: boolean, polishedText: string }>('/api/cockpit/inbox/polish-draft', {
+      const res = await fetch(`${getBackendBaseUrl()}/api/cockpit/inbox/polish-draft`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-secret': getBackendSecret() },
         body: JSON.stringify({ text }),
       })
+      const data: { ok: boolean; polishedText: string } = await res.json()
       if (data.ok) {
         setLocalDraft(data.polishedText)
         lastPolishedDraftRef.current = data.polishedText

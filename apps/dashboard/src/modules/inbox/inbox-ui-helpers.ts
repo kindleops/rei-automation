@@ -54,6 +54,10 @@ export type InboxViewSelectValue =
   | 'all_inbound'
   | 'inbound_all'
   | 'outbound_active'
+  // canonical bucket views
+  | 'follow_up'
+  | 'cold'
+  | 'all_messages'
 
 
 export type InboxSavedFilterPreset =
@@ -485,13 +489,13 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
   if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply' || view === 'needs_response') return 'new_replies'
   if (view === 'priority') return 'priority'
   if (view === 'negotiating' || view === 'offer_requested') return 'negotiating'
-  if (view === 'follow_up_due') return 'follow_up_due'
+  if (view === 'follow_up' || view === 'follow_up_due') return 'follow_up'
+  if (view === 'cold' || view === 'cold_no_response' || view === 'missing_context' || view === 'not_contacted') return 'cold'
   if (view === 'waiting_on_seller' || view === 'waiting' || view === 'outbound_only' || view === 'outbound_active') return 'waiting_on_seller'
   if (view === 'automated' || view === 'auto_replied' || view === 'queued') return 'automated'
   if (view === 'needs_review' || view === 'manual_review') return 'needs_review'
-  if (view === 'cold_no_response' || view === 'missing_context') return 'cold_no_response'
-  if (view === 'dnc_opt_out' || view === 'suppressed' || view === 'opt_out' || view === 'wrong_number') return 'dnc_suppressed'
-  if (view === 'all_conversations' || view === 'all') return 'all_conversations'
+  if (view === 'dnc_opt_out' || view === 'suppressed' || view === 'opt_out' || view === 'wrong_number') return 'suppressed'
+  if (view === 'all_conversations' || view === 'all' || view === 'all_messages') return 'all_conversations'
   return null
 }
 
@@ -656,7 +660,7 @@ export const getPriorityInboxThreads = (threads: InboxWorkflowThread[]): InboxWo
   threads.filter(isPriorityCandidate)
 
 export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<string, number> => ({
-  all_messages: threads.filter((thread) => matchesViewSelection(thread, 'all_conversations')).length,
+  all_messages: threads.length,
   new_replies: threads.filter((thread) => matchesViewSelection(thread, 'new_replies')).length,
   needs_reply: threads.filter((thread) => matchesViewSelection(thread, 'needs_reply')).length,
   auto_replied: threads.filter((thread) => matchesViewSelection(thread, 'auto_replied')).length,
@@ -668,6 +672,9 @@ export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<strin
   priority: threads.filter((thread) => matchesViewSelection(thread, 'priority')).length,
   negotiating: threads.filter((thread) => matchesViewSelection(thread, 'negotiating')).length,
   follow_up_due: threads.filter((thread) => matchesViewSelection(thread, 'follow_up_due')).length,
+  // canonical
+  follow_up: threads.filter((thread) => matchesViewSelection(thread, 'follow_up')).length,
+  cold: threads.filter((thread) => matchesViewSelection(thread, 'cold')).length,
   waiting_on_seller: threads.filter((thread) => matchesViewSelection(thread, 'waiting_on_seller')).length,
   automated: threads.filter((thread) => matchesViewSelection(thread, 'automated')).length,
   active: threads.filter((thread) => matchesViewSelection(thread, 'active')).length,
@@ -684,7 +691,7 @@ export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<strin
   sent: threads.filter((thread) => matchesViewSelection(thread, 'sent')).length,
   queued: threads.filter((thread) => matchesViewSelection(thread, 'queued')).length,
   failed: threads.filter((thread) => matchesViewSelection(thread, 'failed')).length,
-  all: threads.filter((thread) => matchesViewSelection(thread, 'all_conversations')).length,
+  all: threads.length,
 })
 
 export const getSavedPresetConfig = (preset: InboxSavedFilterPreset): Partial<InboxFilterState> => {

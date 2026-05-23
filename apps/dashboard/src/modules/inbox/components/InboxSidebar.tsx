@@ -12,12 +12,10 @@ import {
 import type { InboxSourceMode } from '../../../lib/data/inboxData'
 import {
   buildConversationDecision,
-  isHotLeadDecision,
-  matchesInboxBucket,
   sortThreadsByDecision,
   type ConversationDecision,
-  type InboxBucket,
 } from '../inbox-decisioning'
+import { classifyInboxBucket, type CanonicalBucket } from '../classifyInboxBucket'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -58,8 +56,8 @@ interface InboxSidebarProps {
 }
 
 type BucketConfig = {
-  bucket: InboxBucket | 'all_messages'
-  view: InboxViewSelectValue | string
+  bucket: CanonicalBucket
+  view: InboxViewSelectValue
   label: string
   icon: string
   description: string
@@ -68,13 +66,13 @@ type BucketConfig = {
 }
 
 const BUCKETS: BucketConfig[] = [
-  { bucket: 'priority', view: 'priority', label: 'PRIORITY', icon: '🔥', description: 'Priority operations.', accentClass: 'is-hot', countKey: 'priority' },
+  { bucket: 'priority', view: 'priority', label: 'PRIORITY', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
   { bucket: 'new_replies', view: 'new_replies', label: 'NEW REPLIES', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
-  { bucket: 'needs_review', view: 'needs_review', label: 'NEEDS REVIEW', icon: '🧠', description: 'Ambiguous threads', accentClass: 'is-review', countKey: 'needs_review' },
-  { bucket: 'follow_up_due', view: 'follow_up_due', label: 'FOLLOW-UP', icon: '⏰', description: 'Follow-ups due', accentClass: 'is-outbound', countKey: 'follow_up_due' },
-  { bucket: 'waiting_on_seller', view: 'not_contacted', label: 'COLD', icon: '🥶', description: 'Leads needs warming', accentClass: 'is-cold', countKey: 'not_contacted' },
-  { bucket: 'dnc_suppressed', view: 'suppressed', label: 'SUPPRESSED', icon: '🚫', description: 'Opt-out/DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
-  { bucket: 'all_messages', view: 'all_messages', label: 'ALL MESSAGES', icon: '📦', description: 'All historic', accentClass: 'is-neutral', countKey: 'all' },
+  { bucket: 'needs_review', view: 'needs_review', label: 'NEEDS REVIEW', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
+  { bucket: 'follow_up', view: 'follow_up', label: 'FOLLOW UP', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
+  { bucket: 'cold', view: 'cold', label: 'COLD', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
+  { bucket: 'suppressed', view: 'suppressed', label: 'SUPPRESSED', icon: '🚫', description: 'Opt-out / DNC / wrong number', accentClass: 'is-dnc', countKey: 'suppressed' },
+  { bucket: 'all', view: 'all_conversations', label: 'ALL MESSAGES', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all' },
 ]
 
 const INBOX_CHIPS = BUCKETS
@@ -157,7 +155,10 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   }
 
   const timestamp = formatInboxThreadTimestamp(thread.lastMessageAt || (thread as any).lastMessageIso || thread.updatedAt)
-  const isHot = isHotLeadDecision(decision) || ['urgent', 'high'].includes(String(thread.priority || '').toLowerCase())
+  const isHot = (
+    ['HOT', 'VERY_HOT', 'READY_TO_CLOSE'].includes(decision.lead_temperature) &&
+    decision.suppression_status === 'clear'
+  ) || ['urgent', 'high'].includes(String(thread.priority || '').toLowerCase())
   const stage = (thread as any).conversationStage || decision.conversation_stage
   const stageNum = stage.includes('stage_1') ? 'S1' : stage.includes('stage_2') ? 'S2' : stage.includes('stage_3') ? 'S3' : stage.includes('stage_4') ? 'S4' : stage.includes('stage_5') ? 'S5' : ''
   
@@ -311,37 +312,20 @@ export const InboxSidebar = ({
   }, [searchableThreads])
 
   const bucketedThreads = useMemo(() => {
-    const grouped = Object.fromEntries(BUCKETS.map((b) => [b.bucket, [] as InboxWorkflowThread[]])) as Record<InboxBucket | 'all_messages', InboxWorkflowThread[]>
+    const grouped = Object.fromEntries(BUCKETS.map((b) => [b.bucket, [] as InboxWorkflowThread[]])) as Record<CanonicalBucket, InboxWorkflowThread[]>
+    const now = new Date()
     searchableThreads.forEach((thread) => {
-      const decision = decisionMap.get(thread.id)
-      if (!decision) return
-      const isSuppressed = decision.suppression_status === 'suppressed' || Boolean(thread.isSuppressed)
-      const isDead = thread.isArchived || decision.conversation_stage === 'closed'
-      
-      const negativeIntents = ['not_interested', 'wrong_number', 'no', 'not_for_sale', 'dnc', 'opt_out', 'stop', 'remove', 'dead_lead']
-      const threadUiIntent = String((decision as any).ui_intent || (thread as any).uiIntent || '').toLowerCase()
-      const isNegative = negativeIntents.includes(threadUiIntent)
-
-      grouped.all_messages.push(thread)
-      if (!isSuppressed && !isDead && !isNegative) {
-        const isPriority = matchesInboxBucket(thread, 'new_replies', decision) || 
-                           matchesInboxBucket(thread, 'needs_review', decision) || 
-                           isHotLeadDecision(decision) || 
-                           matchesInboxBucket(thread, 'follow_up_due', decision) ||
-                           ['warm_reply', 'question', 'price_discussion', 'offer_discussion', 'uncertain'].includes(threadUiIntent)
-        if (isPriority) grouped.priority.push(thread)
-      }
-      BUCKETS.filter(b => b.bucket !== 'priority' && b.bucket !== 'all_messages').forEach((b) => {
-        if (matchesInboxBucket(thread, b.bucket as InboxBucket, decision)) grouped[b.bucket].push(thread)
-      })
+      const { bucket } = classifyInboxBucket(thread, now)
+      grouped[bucket].push(thread)
+      grouped.all.push(thread)
     })
     Object.keys(grouped).forEach((bucket) => {
-      grouped[bucket as InboxBucket | 'all_messages'] = sortThreadsByDecision(grouped[bucket as InboxBucket | 'all_messages'], decisionMap).slice(0, visibleThreadCount)
+      grouped[bucket as CanonicalBucket] = sortThreadsByDecision(grouped[bucket as CanonicalBucket], decisionMap).slice(0, visibleThreadCount)
     })
     return grouped
   }, [decisionMap, searchableThreads, visibleThreadCount])
 
-  const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket] || []
+  const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket as CanonicalBucket] || []
   const handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
@@ -529,12 +513,9 @@ export const InboxSidebar = ({
 const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPreset => {
   if (view === 'new_replies') return 'new_inbounds'
   if (view === 'priority') return 'my_priority'
-  if (view === 'negotiating') return 'offer_needed'
-  if (view === 'follow_up_due') return 'offer_needed'
-  if (view === 'waiting_on_seller') return 'outbound_only'
-  if (view === 'automated') return 'auto_replied'
   if (view === 'needs_review') return 'review_required'
-  if (view === 'not_contacted' || view === 'cold_no_response') return 'missing_context'
+  if (view === 'follow_up' || view === 'follow_up_due') return 'offer_needed'
+  if (view === 'cold' || view === 'cold_no_response' || view === 'not_contacted') return 'missing_context'
   if (view === 'suppressed' || view === 'dnc_opt_out') return 'suppressed'
   return 'all_messages'
 }

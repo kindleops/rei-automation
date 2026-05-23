@@ -592,10 +592,11 @@ export default function InboxPage() {
     const hotLeads   = sv('hot_leads',   sv('positive_hot', local.hot_leads))
     const needsReview = sv('needs_review', sv('manual_review', local.needs_review))
     const automated  = sv('automated',   sv('auto_replied', local.automated))
-    const coldNoResp = sv('cold_no_response', sv('missing_context', local.cold_no_response))
+    const coldNoResp = sv('cold_no_response', sv('missing_context', local.cold ?? local.cold_no_response))
     const suppressed = sv('dnc_opt_out', sv('suppressed', local.suppressed))
     const allCount   = sv('all', data.allInboxCount ?? local.all)
-    const priorityCount = sv('priority', hotLeads + needsReview + newReplies)
+    const priorityCount = sv('priority', local.priority ?? hotLeads)
+    const followUpCount = local.follow_up ?? local.follow_up_due ?? 0
     const activeCount   = sv('active', automated + sv('outbound_active', local.active))
 
     return {
@@ -603,19 +604,23 @@ export default function InboxPage() {
       new_replies: newReplies,
       priority: priorityCount,
       negotiating: local.negotiating,
-      follow_up_due: local.follow_up_due,
+      // canonical bucket keys (sidebar uses these)
+      follow_up: followUpCount,
+      cold: coldNoResp,
+      suppressed,
+      // legacy aliases kept for backwards compat
+      follow_up_due: followUpCount,
       waiting_on_seller: local.waiting_on_seller,
       automated,
       hot_leads: hotLeads,
       needs_review: needsReview,
       cold_no_response: coldNoResp,
-      suppressed,
       failed: local.failed,
       all: allCount,
       active: activeCount,
       my_priority: priorityCount,
       new_inbounds: newReplies,
-      offer_needed: local.follow_up_due,
+      offer_needed: followUpCount,
       review_required: needsReview,
       active_conversations: activeCount,
       waiting_for_reply: local.waiting_on_seller,
@@ -706,13 +711,13 @@ export default function InboxPage() {
     setStageFilter('all_stages')
     if (decision?.inbox_bucket === 'new_replies') setViewFilter('new_replies')
     else if (decision?.inbox_bucket === 'priority') setViewFilter('priority')
+    else if (decision?.inbox_bucket === 'needs_review') setViewFilter('needs_review')
+    else if (decision?.inbox_bucket === 'follow_up' || decision?.inbox_bucket === 'follow_up_due') setViewFilter('follow_up')
+    else if (decision?.inbox_bucket === 'cold' || decision?.inbox_bucket === 'cold_no_response') setViewFilter('cold')
+    else if (decision?.inbox_bucket === 'suppressed' || decision?.inbox_bucket === 'dnc_suppressed') setViewFilter('suppressed')
     else if (decision?.inbox_bucket === 'negotiating') setViewFilter('negotiating')
-    else if (decision?.inbox_bucket === 'follow_up_due') setViewFilter('follow_up_due')
     else if (decision?.inbox_bucket === 'waiting_on_seller') setViewFilter('waiting_on_seller')
     else if (decision?.inbox_bucket === 'automated') setViewFilter('automated')
-    else if (decision?.inbox_bucket === 'needs_review') setViewFilter('needs_review')
-    else if (decision?.inbox_bucket === 'cold_no_response') setViewFilter('cold_no_response')
-    else if (decision?.inbox_bucket === 'dnc_suppressed') setViewFilter('dnc_opt_out')
     else setViewFilter('all_conversations')
   }, [decisions, selected])
 

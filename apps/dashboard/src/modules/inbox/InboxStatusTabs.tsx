@@ -1,41 +1,49 @@
-import type { InboxStatusTab } from '../../lib/data/inboxWorkflowData'
+import type { CanonicalBucket } from './classifyInboxBucket'
 
-const TAB_META: Array<{ id: InboxStatusTab; label: string }> = [
-  { id: 'priority', label: 'Priority' },
-  { id: 'needs_response', label: 'Needs Response' },
-  { id: 'sent', label: 'Sent' },
-  { id: 'queued', label: 'Queued' },
-  { id: 'scheduled', label: 'Scheduled' },
-  { id: 'failed', label: 'Failed' },
-  { id: 'archived', label: 'Archived' },
-  { id: 'all', label: 'All' },
+const TAB_META: Array<{ id: CanonicalBucket; label: string; icon: string }> = [
+  { id: 'priority',    label: 'Priority',     icon: '🔥' },
+  { id: 'new_replies', label: 'New Replies',  icon: '📥' },
+  { id: 'needs_review',label: 'Needs Review', icon: '🧠' },
+  { id: 'follow_up',   label: 'Follow Up',    icon: '⏰' },
+  { id: 'cold',        label: 'Cold',         icon: '🥶' },
+  { id: 'suppressed',  label: 'Suppressed',   icon: '🚫' },
+  { id: 'all',         label: 'All',          icon: '📦' },
 ]
 
 export const InboxStatusTabs = ({
   value,
   onChange,
+  counts,
 }: {
-  value: InboxStatusTab
-  onChange: (next: InboxStatusTab) => void
+  value: CanonicalBucket
+  onChange: (next: CanonicalBucket) => void
+  counts?: Partial<Record<CanonicalBucket, number>>
 }) => {
   return (
-    <div className="nx-inbox-status-tabs" role="tablist" aria-label="Inbox workflow tabs">
-      {TAB_META.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={value === tab.id}
-          className={`nx-inbox-status-tab ${value === tab.id ? 'is-active' : ''}`}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onChange(tab.id)
-          }}
-        >
-          {tab.label}
-        </button>
-      ))}
+    <div className="nx-inbox-status-tabs" role="tablist" aria-label="Inbox bucket tabs">
+      {TAB_META.map((tab) => {
+        const count = counts?.[tab.id]
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={value === tab.id}
+            className={`nx-inbox-status-tab ${value === tab.id ? 'is-active' : ''}`}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onChange(tab.id)
+            }}
+          >
+            <span className="nx-inbox-status-tab__icon">{tab.icon}</span>
+            <span className="nx-inbox-status-tab__label">{tab.label}</span>
+            {count !== undefined && (
+              <span className="nx-inbox-status-tab__badge">{count}</span>
+            )}
+          </button>
+        )
+      })}
     </div>
   )
 }

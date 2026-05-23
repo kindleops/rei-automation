@@ -1,4 +1,5 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import { classifyInboxBucket } from './classifyInboxBucket'
 
 export type InboxBucket =
   | 'new_replies'
@@ -11,6 +12,11 @@ export type InboxBucket =
   | 'cold_no_response'
   | 'dnc_suppressed'
   | 'all_conversations'
+  // canonical names (used by classifyInboxBucket and new sidebar)
+  | 'follow_up'
+  | 'cold'
+  | 'suppressed'
+  | 'all'
 
 export type ConversationStatus =
   | 'active'
@@ -418,49 +424,42 @@ export const buildConversationDecision = (
 
 export const resolveInboxBucket = (
   thread: InboxWorkflowThread,
-  decision: Omit<ConversationDecision, 'inbox_bucket'>,
+  _decision: Omit<ConversationDecision, 'inbox_bucket'>,
   now: Date = new Date(),
 ): InboxBucket => {
-  const isDead = includesAny(lower(get(thread, 'status', 'thread_status', 'uiIntent')), ['dead', 'wrong_number', 'dnc'])
-  if (decision.suppression_status === 'suppressed' || isDead) return 'dnc_suppressed'
-  if (decision.last_message_direction === 'inbound' && decision.unread) return 'new_replies'
-  if (decision.review_reason) return 'needs_review'
-  if (UNDERWRITING_STAGES.has(decision.conversation_stage)) return 'negotiating'
-  if (decision.next_follow_up_at && new Date(decision.next_follow_up_at).getTime() <= now.getTime() && decision.automation_status !== 'SUPPRESSED') return 'follow_up_due'
-  if (decision.conversation_status === 'waiting_on_seller') return 'waiting_on_seller'
-  if (decision.priority_score >= 70 && decision.unread) return 'priority'
-  if (decision.automation_status === 'AUTO-ELIGIBLE' || decision.automation_status === 'AUTO-QUEUED') return 'automated'
-  const coldThresholdHours = num(get(thread, 'cold_threshold_hours'), 72)
-  const lastOutboundAt = iso(get(thread, 'lastOutboundAt', 'last_outbound_at'))
-  if (
-    decision.last_message_direction === 'outbound' &&
-    !decision.has_inbound_history &&
-    lastOutboundAt &&
-    (now.getTime() - new Date(lastOutboundAt).getTime()) >= coldThresholdHours * 3600_000
-  ) {
-    return 'cold_no_response'
-  }
-  return 'all_conversations'
+  const { bucket } = classifyInboxBucket(thread, now)
+  // Map canonical names → legacy names for backwards-compat consumers
+  if (bucket === 'suppressed') return 'dnc_suppressed'
+  if (bucket === 'follow_up') return 'follow_up_due'
+  if (bucket === 'cold') return 'cold_no_response'
+  if (bucket === 'all') return 'all_conversations'
+  return bucket // 'needs_review' | 'priority' | 'new_replies' are identical
 }
 
 export const matchesInboxBucket = (
   thread: InboxWorkflowThread,
   bucket: InboxBucket,
-  decision?: ConversationDecision,
+  _decision?: ConversationDecision,
   now: Date = new Date(),
 ): boolean => {
-  const resolved = decision ?? buildConversationDecision(thread, now)
-  if (bucket === 'all_conversations') return true
-  if (bucket === 'priority') return resolved.suppression_status === 'clear' && resolved.unread && resolved.priority_score >= 70 && resolved.conversation_status !== 'dead'
-  if (bucket === 'new_replies') return resolved.suppression_status === 'clear' && resolved.last_message_direction === 'inbound' && resolved.unread
-  if (bucket === 'negotiating') return UNDERWRITING_STAGES.has(resolved.conversation_stage)
-  if (bucket === 'follow_up_due') return resolved.suppression_status === 'clear' && resolved.automation_status === 'FOLLOW-UP DUE'
-  if (bucket === 'waiting_on_seller') return resolved.suppression_status === 'clear' && resolved.automation_status === 'WAITING'
-  if (bucket === 'automated') return resolved.suppression_status === 'clear' && (resolved.automation_status === 'AUTO-ELIGIBLE' || resolved.automation_status === 'AUTO-QUEUED')
-  if (bucket === 'needs_review') return Boolean(resolved.review_reason)
-  if (bucket === 'cold_no_response') return resolved.suppression_status === 'clear' && resolveInboxBucket(thread, resolved, now) === 'cold_no_response'
-  if (bucket === 'dnc_suppressed') return resolved.suppression_status === 'suppressed'
-  return resolved.inbox_bucket === bucket
+  // Canonical buckets — delegate directly to the classifier
+  if (bucket === 'all' || bucket === 'all_conversations') return true
+  if (bucket === 'suppressed' || bucket === 'dnc_suppressed') {
+    return classifyInboxBucket(thread, now).bucket === 'suppressed'
+  }
+  if (bucket === 'needs_review') return classifyInboxBucket(thread, now).bucket === 'needs_review'
+  if (bucket === 'priority') return classifyInboxBucket(thread, now).bucket === 'priority'
+  if (bucket === 'new_replies') return classifyInboxBucket(thread, now).bucket === 'new_replies'
+  if (bucket === 'follow_up' || bucket === 'follow_up_due') return classifyInboxBucket(thread, now).bucket === 'follow_up'
+  if (bucket === 'cold' || bucket === 'cold_no_response') return classifyInboxBucket(thread, now).bucket === 'cold'
+  // Legacy-only buckets that have no canonical equivalent
+  if (bucket === 'negotiating') return UNDERWRITING_STAGES.has(buildConversationDecision(thread, now).conversation_stage)
+  if (bucket === 'waiting_on_seller') return buildConversationDecision(thread, now).automation_status === 'WAITING'
+  if (bucket === 'automated') {
+    const status = buildConversationDecision(thread, now).automation_status
+    return status === 'AUTO-ELIGIBLE' || status === 'AUTO-QUEUED'
+  }
+  return false
 }
 
 export const isHotLeadDecision = (decision: ConversationDecision): boolean =>
