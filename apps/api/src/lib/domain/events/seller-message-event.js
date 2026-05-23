@@ -18,6 +18,7 @@ export const SELLER_MESSAGE_EVENT_FIELDS = {
   timestamp: "timestamp",
   direction: "direction",
   event_type: "category",
+  type: "type",
   message_variant: "message-variant",
   master_owner: "master-owner",
   prospect: "linked-seller",
@@ -248,6 +249,7 @@ export function buildBaseSellerMessageEventFields({
   provider_message_id = null,
   timestamp = null,
   direction,
+  type,
   event_type,
   message_body = "",
   delivery_status = null,
@@ -280,6 +282,7 @@ export function buildBaseSellerMessageEventFields({
     [SELLER_MESSAGE_EVENT_FIELDS.timestamp]:
       toPodioDateField(timestamp || new Date()) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.direction]: clean(direction) || undefined,
+    [SELLER_MESSAGE_EVENT_FIELDS.type]: clean(type) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.event_type]: clean(event_type) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.message]: normalized_message_body,
     [SELLER_MESSAGE_EVENT_FIELDS.character_count]: normalized_message_body.length,

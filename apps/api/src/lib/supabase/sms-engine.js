@@ -1118,6 +1118,7 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
     message_event_key: `outbound_${queue_key}`,
     provider_message_sid: sid,
     direction: "outbound",
+    type: "outbound",
     event_type: "outbound_send",
     message_body: normalized.message_body,
     to_phone_number: normalized.to_phone_number,

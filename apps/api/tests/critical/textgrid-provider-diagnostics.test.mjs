@@ -102,6 +102,7 @@ test("mapTextgridFailureBucket: HTTP 500 -> Soft Bounce", () => {
 test("sendTextgridSMS: posts exact endpoint, auth header, and body; returns sid on success", async () => {
   process.env.TEXTGRID_ACCOUNT_SID = "ACtest-sid-001";
   process.env.TEXTGRID_AUTH_TOKEN = "test-auth-token";
+  primeSystemControlCache("outbound_sms_enabled", true);
 
   let captured_url = null;
   let captured_init = null;
@@ -156,6 +157,7 @@ test("sendTextgridSMS: posts exact endpoint, auth header, and body; returns sid 
 test("sendTextgridSMS: throws when response body is not valid JSON", async () => {
   process.env.TEXTGRID_ACCOUNT_SID = "ACtest-sid-001";
   process.env.TEXTGRID_AUTH_TOKEN = "test-auth-token";
+  primeSystemControlCache("outbound_sms_enabled", true);
 
   globalThis.fetch = async () =>
     new Response("not-json", {
@@ -179,6 +181,7 @@ test("sendTextgridSMS: throws when response body is not valid JSON", async () =>
 test("sendTextgridSMS: throws when HTTP status is not ok", async () => {
   process.env.TEXTGRID_ACCOUNT_SID = "ACtest-sid-001";
   process.env.TEXTGRID_AUTH_TOKEN = "test-auth-token";
+  primeSystemControlCache("outbound_sms_enabled", true);
 
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ message: "No route" }), {

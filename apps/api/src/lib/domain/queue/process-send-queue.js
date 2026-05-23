@@ -624,6 +624,7 @@ export function buildFailedOutboundMessageEventFields({
     provider_message_id,
     timestamp: nowPodioDateTimeCentral(),
     direction: "Outbound",
+    type: "outbound",
     event_type: "Send Failure",
     message_body,
     delivery_status: "Failed",
