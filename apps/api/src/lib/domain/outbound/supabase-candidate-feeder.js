@@ -2146,7 +2146,14 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       });
 
       if (!options.dry_run) {
-        await quarantineIdentityMismatch(candidate, candidate.identity_alignment, deps);
+        try {
+          await quarantineIdentityMismatch(candidate, candidate.identity_alignment, deps);
+        } catch (e) {
+          logger.error("identity_quarantine_helper_unavailable", {
+            error: e.message,
+            master_owner_id: candidate.master_owner_id
+          });
+        }
       }
 
       return {
