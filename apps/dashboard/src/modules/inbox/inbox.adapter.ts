@@ -4,10 +4,12 @@ import { formatRelativeTime } from '../../shared/formatters'
 import { fetchInboxModel, type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
-import { hasSupabaseEnv, supabaseAnonKeyPresent, supabaseUrlPresent } from '../../lib/supabaseClient'
+import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
+import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
 
-const LIVE_INBOX_TIMEOUT_MS = 30000
+const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
+const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
 
 const withTimeout = async <T,>(
   run: (signal: AbortSignal) => Promise<T>,
@@ -416,41 +418,57 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
 
 
 export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
+  const isRefresh = Boolean(options.cursor)
+  
+  // 1. Try to load from cache instantly for non-refresh loads
+  if (!isRefresh) {
+    const cached = sessionStorage.getItem(CACHE_KEY)
+    if (cached) {
+      try {
+        const model = JSON.parse(cached)
+        return { ...model, dataMode: 'mock_preview' }
+      } catch (e) {
+        console.warn('[Inbox] Failed to parse cache', e)
+      }
+    }
+  }
+
   if (isDev) {
-    console.log('[Inbox Live Data Gate]', {
-      hasSupabaseEnv,
-      shouldUseSupabase: shouldUseSupabase(),
-      supabaseUrlPresent,
-      anonKeyPresent: supabaseAnonKeyPresent,
-    })
+    console.log('[dashboard boot] live inbox fetch started', { options })
   }
 
   if (!hasSupabaseEnv) {
     const liveFetchError = 'Live mode enabled but Supabase env vars are missing.'
-    if (isDev) {
-      console.error('[NEXUS] Inbox live mode misconfigured.', liveFetchError)
-    }
     return emptyLiveErrorModel(liveFetchError)
   }
 
-  // Always try live if env vars exist
   try {
-    const result = await withTimeout(
-      (signal) => fetchInboxModel({ ...options, signal }),
-      LIVE_INBOX_TIMEOUT_MS,
-      `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
+    const result = await fetchWithRetry(
+      () => withTimeout(
+        (signal) => fetchInboxModel({ ...options, signal }),
+        LIVE_INBOX_TIMEOUT_MS,
+        `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
+      ),
+      { retries: 2, delay: 1000 }
     )
-    if (isDev) console.log('[NexusInbox] Data source: live', { 
-      threadCount: result.threads.length,
-      dataMode: result.dataMode,
-      totalCount: result.totalCount,
-    })
+
+    // Save to cache
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(result))
+    
+    if (isDev) console.log('[dashboard boot] live inbox fetch success')
     return result
   } catch (error) {
     const liveFetchError = error instanceof Error ? error.message : String(error)
     if (isDev) {
       console.error('[NEXUS] Inbox Supabase live load failed.', error)
     }
+    
+    // Return cache if it exists, even if fetch failed
+    const cached = sessionStorage.getItem(CACHE_KEY)
+    if (cached) {
+        return { ...JSON.parse(cached), dataMode: 'mock_preview' }
+    }
+    
     return emptyLiveErrorModel(liveFetchError)
   }
 }
