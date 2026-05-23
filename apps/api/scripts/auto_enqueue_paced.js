@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 
 const URL = 'https://real-estate-automation-three.vercel.app/api/internal/outbound/feed-master-owners';
-const AUTH = 'Bearer f07dcf24c85c16c729f70651c8a3fc2d4b835976e2a583e4c6552acf30dac128';
+const AUTH_SECRET = 'cf19bd6d9bed109c1e77c6735ebf5d196a8f04f88d8274efbd2900defe134477';
 const BATCH_LIMIT = 100; // smaller batch
 const BATCH_COUNT = 20; // 100 * 20 = 2000
 const SCAN_LIMIT = 300;
@@ -22,7 +22,7 @@ function log(...args) { const s = `[${ts()}] ${args.join(' ')}\n`; try { fs.appe
 
 function curlPost(bodyJson) {
   const body = typeof bodyJson === 'string' ? bodyJson : JSON.stringify(bodyJson);
-  const args = ['-s', '-X', 'POST', URL, '-H', `Authorization: ${AUTH}`, '-H', 'Content-Type: application/json', '-d', body];
+  const args = ['-s', '--http1.1', '-X', 'POST', URL, '-H', `x-queue-engine-secret: ${AUTH_SECRET}`, '-H', 'Content-Type: application/json', '-d', body];
   try {
     return execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   } catch (err) {

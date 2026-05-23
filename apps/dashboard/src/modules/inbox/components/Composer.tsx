@@ -138,16 +138,18 @@ export const Composer = ({
   const hasDraft = localDraft.trim().length > 0
   const composerDisabled = disabled || isSending || isPolishing
 
+import { callBackend } from '../../../lib/api/backendClient'
+
+// ... (inside Composer)
+
   const polishDraftText = useCallback(async (text: string) => {
     if (!text.trim() || text === lastPolishedDraftRef.current) return
     setIsPolishing(true)
     try {
-      const resp = await fetch('/api/cockpit/inbox/polish-draft', {
+      const data = await callBackend<{ ok: boolean, polishedText: string }>('/api/cockpit/inbox/polish-draft', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       })
-      const data = await resp.json()
       if (data.ok) {
         setLocalDraft(data.polishedText)
         lastPolishedDraftRef.current = data.polishedText

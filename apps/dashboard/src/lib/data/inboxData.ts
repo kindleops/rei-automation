@@ -2920,7 +2920,55 @@ export const getThreadMessagesForThread = async (
     
     if (queueData) {
       const queueMessages = safeArray(queueData as AnyRecord[]).map(toThreadMessageFromQueue)
-      viewMessages.push(...queueMessages)
+      
+      // Deduplicate queue rows against existing message events
+      const filteredQueue = queueMessages.filter(pending => {
+        const matchingEvent = viewMessages.find(event => {
+          if (event.direction !== 'outbound') return false
+          
+          const pMeta = pending.developerMeta || {}
+          const eMeta = event.metadata || {}
+          
+          // 1. client_send_id check
+          if (pMeta.client_send_id && pMeta.client_send_id === eMeta.client_send_id) return true
+          
+          // 2. queue_id match (via event metadata)
+          if (pMeta.queue_id && pMeta.queue_id === eMeta.queue_id) return true
+
+          // 3. Provider/Message ID match
+          if (pending.id && pending.id === event.id) return true
+          
+          // 4. Temporal/Body match (within 180s)
+          const pTs = new Date(pending.createdAt).getTime()
+          const eTs = new Date(event.createdAt).getTime()
+          if (Math.abs(pTs - eTs) < 180000 && pending.body.trim() === event.body.trim()) return true
+          
+          return false
+        })
+
+        if (matchingEvent) {
+          console.debug('[InboxLifecycle] queue row hidden because matching event exists', { body: pending.body })
+          return false
+        }
+        
+        console.debug('[InboxLifecycle] queue row rendered as pending because no event exists', { body: pending.body })
+        return true
+      })
+
+      // Dedup failed rows within 5 mins
+      const finalQueue: ThreadMessage[] = []
+      const pendingSeen = new Set<string>()
+      filteredQueue.forEach(p => {
+        const key = `${p.fromNumber}:${p.toNumber}:${p.body.trim()}:${Math.floor(new Date(p.createdAt).getTime() / 300000)}`
+        if (!pendingSeen.has(key)) {
+          pendingSeen.add(key)
+          finalQueue.push(p)
+        } else {
+          console.debug('[InboxLifecycle] failed queue deduped', { body: p.body })
+        }
+      })
+
+      viewMessages.push(...finalQueue)
     }
   } catch (err) {
     if (DEV) console.warn('[ThreadMessageHydration] send_queue fetch failed', err)
