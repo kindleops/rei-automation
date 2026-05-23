@@ -467,6 +467,8 @@ export default function InboxPage() {
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [mobileIntelOpen, setMobileIntelOpen] = useState(false)
 
   const [queueModel, setQueueModel] = useState<QueueModel | null>(null)
   const [templateInventory, setTemplateInventory] = useState<SmsTemplate[]>([])
@@ -3263,7 +3265,35 @@ export default function InboxPage() {
         />
       </div>
       ) : (
-      <div className="nx-inbox-shell">
+      <div
+        className={cls('nx-inbox-shell', mobileSidebarOpen && 'm-sidebar-open', mobileIntelOpen && 'm-intel-open')}
+        onClick={(e) => {
+          const target = e.target as HTMLElement
+          if (target.classList.contains('nx-inbox-shell')) {
+            setMobileSidebarOpen(false)
+            setMobileIntelOpen(false)
+          }
+        }}
+      >
+        {/* Mobile panel toggle buttons */}
+        <div className="nx-mobile-panel-toggles" style={{ display: 'none' }}>
+          <button
+            type="button"
+            className="nx-mobile-panel-toggle"
+            onClick={() => { setMobileSidebarOpen(v => !v); setMobileIntelOpen(false) }}
+          >
+            ☰ Threads
+          </button>
+          {showRightCommandPanel && (
+            <button
+              type="button"
+              className="nx-mobile-panel-toggle"
+              onClick={() => { setMobileIntelOpen(v => !v); setMobileSidebarOpen(false) }}
+            >
+              ◧ Intel
+            </button>
+          )}
+        </div>
         {showLeftPanel && !isDealIntelligenceView && (
           <InboxSidebar
             threads={threads}
