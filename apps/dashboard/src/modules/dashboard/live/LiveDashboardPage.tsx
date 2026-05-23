@@ -1,6 +1,9 @@
 import { useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NexusMap } from './NexusMap'
+import { useGlobalCommandSearch } from '../../command-center/useGlobalCommandSearch'
+import { GLOBAL_COMMAND_ACTION_EVENT, type CommandResult } from '../../command-center/command.types'
+import { saveRecentCommandLocation } from '../../command-center/providers/locationCommandProvider'
 import type { DashboardMapFilters, DashboardMapMode } from './map/types'
 import {
   aiScoreFromLead as mapLeadAiScore,
@@ -140,7 +143,37 @@ export const LiveDashboardPage = ({ data }: { data: LiveDashboardModel }) => {
   const [dashboardPaletteOpen, setDashboardPaletteOpen] = useState(false)
   const mapFilterSearchRef = useRef<HTMLInputElement>(null)
 
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0)
+
   const deferredMapFilterSearch = useDeferredValue(mapFilterSearch.trim().toLowerCase())
+
+  const commandContext = useMemo(() => ({
+    routePath: '/dashboard/live',
+    currentView: layoutMode,
+    selectedMarket: marketScope,
+  }), [layoutMode, marketScope])
+
+  const { results: topSearchItems, loading: topSearchLoading, groupedResults: topSearchGroups } = useGlobalCommandSearch(query, commandContext)
+
+  const handleSearchSubmit = (result: CommandResult) => {
+    if (result.location) {
+      saveRecentCommandLocation(result.location)
+    }
+    const eventName = result.action?.eventName || GLOBAL_COMMAND_ACTION_EVENT
+    if (result.payload || result.action?.eventName) {
+      window.dispatchEvent(new CustomEvent(eventName, {
+        detail: {
+          ...result.payload,
+          route: result.route,
+          resultId: result.id,
+          resultType: result.type,
+        },
+      }))
+    }
+    setSearchOpen(false)
+    setQuery('')
+  }
 
   useEffect(() => {
     const handleCopilotSplitView = (event: Event) => {
@@ -815,15 +848,112 @@ export const LiveDashboardPage = ({ data }: { data: LiveDashboardModel }) => {
           <span className="hq__health">{data.healthLabel}</span>
         </div>
 
-        <div className="hq__strip-center">
+        <div className="hq__strip-center" style={{ position: 'relative' }}>
           <Icon name="search" className="hq__search-icon" />
           <input
             className="hq__search"
             type="search"
-            placeholder="Search…"
+            placeholder="Search sellers, buyers, addresses, locations..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setSearchOpen(true)
+            }}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(event) => {
+              if (!searchOpen && event.key !== 'Escape') {
+                setSearchOpen(true)
+              }
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setSearchActiveIndex((current) => Math.min(current + 1, Math.max(topSearchItems.length - 1, 0)))
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setSearchActiveIndex((current) => Math.max(current - 1, 0))
+                return
+              }
+              if (event.key === 'Enter' && topSearchItems[searchActiveIndex]) {
+                event.preventDefault()
+                handleSearchSubmit(topSearchItems[searchActiveIndex])
+                return
+              }
+              if (event.key === 'Escape') {
+                setSearchOpen(false)
+              }
+            }}
+            onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
           />
+          {searchOpen && (topSearchGroups.groups.length > 0 || topSearchGroups.bestMatches.length > 0) ? (
+            <div className="nx-search-results-popover" role="listbox" style={{ top: 'calc(100% + 8px)', width: '480px', left: '50%', transform: 'translateX(-50%)' }}>
+              <div className="nx-search-results-popover__header">
+                <span>Map Search</span>
+                <b>{topSearchLoading ? 'Live' : `${topSearchItems.length} matches`}</b>
+              </div>
+              <div className="nx-search-results-list">
+                {topSearchGroups.bestMatches.length > 0 && (
+                  <section className="nx-search-result-group">
+                    <header className="nx-search-result-group__label">Best Matches</header>
+                    {topSearchGroups.bestMatches.map((result) => {
+                      let runningIndex = topSearchItems.findIndex((item) => item.id === result.id)
+                      const isActive = runningIndex === searchActiveIndex
+                      return (
+                        <button
+                          key={result.id}
+                          type="button"
+                          className={classes('nx-search-result-item', isActive && 'is-active')}
+                          onMouseEnter={() => setSearchActiveIndex(runningIndex)}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            handleSearchSubmit(result)
+                          }}
+                        >
+                          <span className="nx-search-result-item__row">
+                            <strong>{result.title}</strong>
+                            {result.badge ? <em>{result.badge}</em> : null}
+                          </span>
+                          <small>{result.subtitle}</small>
+                          {result.description ? <p>{result.description}</p> : null}
+                        </button>
+                      )
+                    })}
+                  </section>
+                )}
+                {topSearchGroups.groups.map((group) => {
+                  let runningIndex = -1
+                  return (
+                    <section key={group.key} className="nx-search-result-group">
+                      <header className="nx-search-result-group__label">{group.label}</header>
+                      {group.items.map((result) => {
+                        runningIndex = topSearchItems.findIndex((item) => item.id === result.id)
+                        const isActive = runningIndex === searchActiveIndex
+                        return (
+                          <button
+                            key={result.id}
+                            type="button"
+                            className={classes('nx-search-result-item', isActive && 'is-active')}
+                            onMouseEnter={() => setSearchActiveIndex(runningIndex)}
+                            onMouseDown={(event) => {
+                              event.preventDefault()
+                              handleSearchSubmit(result)
+                            }}
+                          >
+                            <span className="nx-search-result-item__row">
+                              <strong>{result.title}</strong>
+                              {result.badge ? <em>{result.badge}</em> : null}
+                            </span>
+                            <small>{result.subtitle}</small>
+                            {result.description ? <p>{result.description}</p> : null}
+                          </button>
+                        )
+                      })}
+                    </section>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="hq__strip-right">
@@ -1279,7 +1409,7 @@ const DashboardHeader = ({
       <input
         className="cc-header__input"
         type="search"
-        placeholder="Search markets, leads, alerts, agents"
+        placeholder="Search sellers, buyers, addresses, locations..."
         value={query}
         data-testid="input-command-search"
         onChange={(event) => {
