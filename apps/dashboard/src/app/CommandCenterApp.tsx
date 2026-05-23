@@ -61,6 +61,7 @@ const navItems: NavItem[] = [
   { path: '/watchlists', label: 'Watchlists', icon: 'star', shortcut: 'W', room: 'Watchlists' },
   { path: '/notifications', label: 'Notifications', icon: 'bell', shortcut: 'N', room: 'Notifications' },
   { path: '/settings', label: 'Settings', icon: 'settings', shortcut: 'S', room: 'Settings' },
+  { path: '/mobile', label: 'Mobile', icon: 'grid', shortcut: 'O', room: 'Mobile Command Center' },
 ]
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
@@ -100,6 +101,17 @@ const THEME_ALIASES: Record<string, NexusTheme> = {
 
 export const CommandCenterApp = () => {
   const path = useRoutePath()
+
+  // On first load on a mobile viewport, redirect to /mobile if not already there
+  useEffect(() => {
+    if (path === '/mobile') return
+    const isMobileViewport = window.matchMedia('(max-width: 768px)').matches
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (isMobileViewport && isTouchDevice && path === '/') {
+      pushRoutePath('/mobile')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const route = resolveRoute(path)
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
@@ -472,6 +484,18 @@ export const CommandCenterApp = () => {
   }
 
   // ── Ready State — Command-First Layout ─────────────────────────────────
+
+  // Mobile route gets full-screen treatment — no desktop shell at all
+  if (route.path === '/mobile') {
+    return (
+      <>
+        <main style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
+          {route.render(routeState.data)}
+        </main>
+        <NotificationToasts />
+      </>
+    )
+  }
 
   return (
     <div className={`nx-os ${route.path === '/' ? 'is-home-route' : ''}`}>

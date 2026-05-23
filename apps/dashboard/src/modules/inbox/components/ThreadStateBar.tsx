@@ -136,7 +136,6 @@ const AUTO_OPTIONS: PillOption<AutopilotMode>[] = (Object.keys(autopilotModeVisu
 
 // ── Pill state with optimistic update + rollback ──────────────────────────────
 
-type PendingField = 'status' | 'stage' | 'temperature' | 'autopilot' | null
 
 function useOptimisticField<T extends string>(initial: T) {
   const [value, setValue] = useState<T>(initial)
