@@ -104,7 +104,7 @@ export const GlobalCommandOverlay = ({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search inbox sellers, buyers, properties, markets, filters, actions…"
+              placeholder="Search sellers, buyers, addresses, locations, markets, actions…"
               autoComplete="off"
               spellCheck={false}
               aria-label="Search inbox sellers, buyers, properties, markets, filters, actions"

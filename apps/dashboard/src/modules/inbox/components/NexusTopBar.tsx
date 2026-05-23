@@ -539,7 +539,7 @@ export const NexusTopBar = ({
               }
             }}
             onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
-            placeholder="Search sellers, buyers, properties, conversations, markets..."
+            placeholder="Search sellers, buyers, addresses, locations, conversations..."
           />
           <kbd>CMD+K</kbd>
           {showSearchPopover ? (
