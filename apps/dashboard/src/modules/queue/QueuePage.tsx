@@ -317,6 +317,8 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
   const [viewMode, setViewMode] = useState<ViewMode>('today')
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<QueueItemStatus | 'all'>('all')
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false)
 
   const refreshData = useCallback(async () => {
     try {
@@ -375,6 +377,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
 
     if (action === 'deselect') {
       setSelectedItemId(null)
+      setMobileInspectorOpen(false)
       return
     }
 
@@ -438,6 +441,14 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
   }
 
   const selectedItem = model?.items.find((i: QueueItem) => i.id === selectedItemId) || null
+
+  const handleSelectItem = useCallback((id: string) => {
+    setSelectedItemId(id)
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      setMobileInspectorOpen(true)
+      setMobileSidebarOpen(false)
+    }
+  }, [])
 
   const filteredItems = (model?.items || []).filter((item: QueueItem) => {
     if (statusFilter !== 'all' && item.status !== statusFilter) return false
@@ -537,13 +548,23 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
             <small>FAILED</small>
             <b>{model?.failedCount || 0}</b>
           </div>
+          <button className="nx-btn nx-btn--secondary nx-mobile-panel-toggle" onClick={() => setMobileSidebarOpen(v => !v)}>
+            <Icon name="filter" /> Filters
+          </button>
           <button className="nx-btn nx-btn--secondary" onClick={refreshData}>
             <Icon name="radar" /> Refresh
           </button>
         </div>
       </header>
 
-      <div className="nx-queue-shell">
+      <div className={cls('nx-queue-shell', mobileSidebarOpen && 'm-sidebar-open', mobileInspectorOpen && 'm-inspector-open')}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).classList.contains('nx-queue-shell')) {
+            setMobileSidebarOpen(false)
+            setMobileInspectorOpen(false)
+          }
+        }}
+      >
         <aside className="nx-queue-sidebar">
           <div className="nx-queue-sidebar-section">
             <span className="nx-queue-sidebar-label">Active Capacity</span>
@@ -637,7 +658,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                             key={item.id} 
                             item={item} 
                             isSelected={selectedItemId === item.id}
-                            onClick={() => setSelectedItemId(item.id)}
+                            onClick={() => handleSelectItem(item.id)}
                           />
                         ))}
                       </div>
@@ -675,7 +696,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                         <tr 
                           key={item.id} 
                           className={cls(selectedItemId === item.id && 'is-selected')}
-                          onClick={() => setSelectedItemId(item.id)}
+                          onClick={() => handleSelectItem(item.id)}
                         >
                           <td>
                             <div className="nx-cell-owner">
@@ -725,7 +746,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
             {viewMode === 'approval' && (
               <div className="nx-approval-stack" data-testid="queue-approval-view">
                 {filteredItems.map((item: QueueItem) => (
-                  <div key={item.id} className={cls('nx-approval-card', selectedItemId === item.id && 'is-selected')} onClick={() => setSelectedItemId(item.id)}>
+                  <div key={item.id} className={cls('nx-approval-card', selectedItemId === item.id && 'is-selected')} onClick={() => handleSelectItem(item.id)}>
                     <div className="nx-approval-card-header">
                       <div className="nx-approval-seller">
                         <h4>{item.sellerName}</h4>
@@ -801,7 +822,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                         <div
                           key={item.id}
                           className={cls('nx-failure-item', selectedItemId === item.id && 'is-selected')}
-                          onClick={() => setSelectedItemId(item.id)}
+                          onClick={() => handleSelectItem(item.id)}
                         >
                           <div className="nx-failure-item-top">
                             <div className="nx-failure-item-identity">
@@ -864,7 +885,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                             key={item.id}
                             item={item}
                             isSelected={selectedItemId === item.id}
-                            onClick={() => setSelectedItemId(item.id)}
+                            onClick={() => handleSelectItem(item.id)}
                           />
                         ))}
                       </div>
@@ -900,7 +921,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                        <div
                          key={i}
                          className={cls('nx-month-cell', i === 14 && 'is-today', isSelected && 'is-selected')}
-                         onClick={() => setSelectedItemId(`day-${i}`)}
+                         onClick={() => handleSelectItem(`day-${i}`)}
                        >
                          <span className="nx-month-date">{i + 1}</span>
                          <div className="nx-month-intensity" data-level={activityLevel} />
@@ -927,7 +948,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                           key={item.id}
                           item={item}
                           isSelected={selectedItemId === item.id}
-                          onClick={() => setSelectedItemId(item.id)}
+                          onClick={() => handleSelectItem(item.id)}
                         />
                       ))}
                    </div>
