@@ -27,12 +27,6 @@ const saveRecentLocation = (location: LocationResult) => {
   }
 }
 
-// Ensure the recent save is exposed globally or we save it on execution
-// We'll listen for the action if needed, or we can just save it when it is returned? 
-// The instruction says: "Keep last 10. Show them when command bar is focused and query is empty."
-// Since `useGlobalCommandSearch` requires query length >= 2 to trigger remote providers, how do we show them when query is empty?
-// Let's modify `useGlobalCommandSearch.ts` to show recent locations if query is empty.
-
 const getMapboxToken = () => {
   return import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 }
@@ -75,7 +69,6 @@ const geocodeLocation = async (query: string): Promise<LocationResult[]> => {
   }
 }
 
-const isZip = (q: string) => /^[0-9]{5}$/.test(q)
 const isAddressLike = (q: string) => /\d+.*[a-zA-Z]/.test(q) && q.includes(' ')
 
 const parseCommandIntent = (query: string) => {
@@ -100,10 +93,8 @@ const cleanQueryForGeocoding = (query: string, intent: string | null) => {
 
 export const locationCommandProvider: GlobalCommandProvider = {
   id: 'location-provider',
-  search: async (rawQuery: string, context: GlobalCommandSearchContext): Promise<CommandResult[]> => {
-    // If empty query, return recent locations
-    // But this provider is only called if query >= 2 chars, so we need to handle recent searches differently, or update useGlobalCommandSearch.
-    
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  search: async (rawQuery: string, _context: GlobalCommandSearchContext): Promise<CommandResult[]> => {
     const intent = parseCommandIntent(rawQuery)
     const query = cleanQueryForGeocoding(rawQuery, intent)
 
@@ -121,7 +112,6 @@ export const locationCommandProvider: GlobalCommandProvider = {
 
     const results: CommandResult[] = []
 
-    // For each location, generate commands based on intent or default
     locations.forEach((loc, index) => {
       const isTop = index === 0
 
@@ -131,7 +121,7 @@ export const locationCommandProvider: GlobalCommandProvider = {
           type: 'location',
           title: `Open map at ${loc.label}`,
           subtitle: `Navigate to ${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`,
-          icon: 'map-pin',
+          icon: 'pin',
           score: isTop ? 100 : 80 - index,
           route: '/dashboard/live',
           action: {
@@ -161,7 +151,7 @@ export const locationCommandProvider: GlobalCommandProvider = {
           action: {
             id: 'search-leads',
             kind: 'dispatch_event',
-            eventName: 'nexus:command-action', // Stub event
+            eventName: 'nexus:command-action',
           },
           payload: { action: 'search-leads', location: loc },
           location: loc,
@@ -172,15 +162,15 @@ export const locationCommandProvider: GlobalCommandProvider = {
       if (!intent || intent === 'buyers') {
         results.push({
           id: `loc-buyers-${loc.id}`,
-          type: 'buyers',
+          type: 'buyer',
           title: `Show buyers near ${loc.city || loc.zip || loc.label}`,
           subtitle: 'Find disposition matches',
-          icon: 'user-check',
+          icon: 'user',
           score: isTop ? 90 : 70 - index,
           action: {
             id: 'search-buyers',
             kind: 'dispatch_event',
-            eventName: 'nexus:command-action', // Stub event
+            eventName: 'nexus:command-action',
           },
           payload: { action: 'search-buyers', location: loc },
           location: loc,
@@ -194,12 +184,12 @@ export const locationCommandProvider: GlobalCommandProvider = {
           type: 'comps',
           title: `Run comp snapshot for ${loc.label}`,
           subtitle: 'Underwrite nearby recent sales',
-          icon: 'bar-chart-2',
+          icon: 'stats',
           score: isTop ? 98 : 78 - index,
           action: {
             id: 'run-comps',
             kind: 'dispatch_event',
-            eventName: 'nexus:command-action', // Stub event
+            eventName: 'nexus:command-action',
           },
           payload: { action: 'run-comps', location: loc },
           location: loc,
