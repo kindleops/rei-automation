@@ -131,6 +131,7 @@ import './copilot/copilot.css'
 import './conversation-redesign.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
+import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../theme/nexusThemes'
 
@@ -1171,6 +1172,10 @@ export default function InboxPage() {
   const handleExecuteTopSearchResult = useCallback((result: CommandResult) => {
     if (result.route && result.route !== window.location.pathname) {
       pushRoutePath(result.route)
+    }
+
+    if (result.location) {
+      saveRecentCommandLocation(result.location)
     }
 
     const eventName = result.action?.eventName || GLOBAL_COMMAND_ACTION_EVENT
