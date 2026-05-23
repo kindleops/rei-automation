@@ -4,6 +4,7 @@ import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
 import type { InboxThread } from '../inbox.adapter'
 import type { ThreadContext } from '../../../lib/data/inboxData'
 import type { CommandSuggestion } from '../ai-command-center'
+import { callBackend } from '../../../lib/api/backendClient'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
