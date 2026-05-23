@@ -471,6 +471,8 @@ export default function InboxPage() {
   const [activityFeed, setActivityFeed] = useState<InboxActivityEvent[]>([])
   const [autonomyControls, setAutonomyControls] = useState<AutonomyControlState>(defaultAutonomyControlState)
   const messageCacheRef = useRef<Record<string, ThreadMessage[]>>({})
+  const optimisticMessageMapRef = useRef<Map<string, string>>(new Map()) // clientSendId → optimisticMessage.id
+  const inFlightSendMapRef = useRef<Set<string>>(new Set()) // clientSendIds currently in-flight
   const rawThreads = useMemo(() => (data.threads ?? []).map(toWorkflowThread), [data.threads])
   const threads = useMemo(() => {
     return rawThreads.map(t => optimisticPatches[t.id] ? { ...t, ...optimisticPatches[t.id] } : t)
@@ -506,8 +508,12 @@ export default function InboxPage() {
         lng: pin.lng,
         propertyAddress: thread.propertyAddress || pin.propertyAddress,
         latestMessageBody: thread.latestMessageBody || pin.latestMessageBody,
+        streetview_image: (thread as any).streetview_image || null,
+        map_image: (thread as any).map_image || null,
+        satellite_image: (thread as any).satellite_image || null,
       }
     })
+
     const synthetic = pins
       .filter((pin) => !seen.has(pin.threadKey || pin.id))
       .map((pin) => ({
@@ -769,9 +775,70 @@ export default function InboxPage() {
     return pendingMessagesByThread[selected.id] ?? []
   }, [pendingMessagesByThread, selected])
 
-  const displayedMessages = useMemo(() => (
-    dedupeMessages([...selectedMessages, ...selectedPendingMessages])
-  ), [selectedMessages, selectedPendingMessages])
+  const displayedMessages = useMemo(() => {
+    const events = selectedMessages.filter(m => m.direction === 'outbound')
+    const pending = selectedPendingMessages
+
+    const dedupe = (all: ThreadMessage[]) => {
+      const seen = new Set<string>()
+      const result: ThreadMessage[] = []
+      for (const msg of all) {
+        // Create unique key based on message content and timestamp for deduping
+        const key = `${msg.direction}:${msg.body.trim().toLowerCase()}:${Math.floor(new Date(msg.createdAt).getTime() / 1000)}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          result.push(msg)
+        }
+      }
+      return result
+    }
+
+    const filteredPending = pending.filter(p => {
+      const match = events.some(e => {
+        const pMeta = p.developerMeta || {}
+        const eMeta = e.metadata || {}
+        
+        // 1. metadata.client_send_id
+        if (pMeta.client_send_id && pMeta.client_send_id === eMeta.client_send_id) return true
+        
+        // 2. queue_id match (via event metadata)
+        if (pMeta.queue_id && pMeta.queue_id === eMeta.queue_id) return true
+
+        // 3. Provider ID match
+        if (p.id && p.id === e.id) return true
+        
+        // 4. Temporal/Body match (within 180 seconds)
+        const pTs = new Date(p.createdAt).getTime()
+        const eTs = new Date(e.createdAt).getTime()
+        if (Math.abs(pTs - eTs) < 180000 && p.body.trim() === e.body.trim()) return true
+        
+        return false
+      })
+
+      if (match) {
+        console.debug('[InboxLifecycle] queue row hidden because matching event exists', { body: p.body })
+        return false
+      }
+      
+      console.debug('[InboxLifecycle] queue row rendered as pending because no event exists', { body: p.body })
+      return true
+    })
+
+    // 6. Dedupe failed rows (same from/to/body within 5 min)
+    const uniquePending: ThreadMessage[] = []
+    const pendingSeen = new Set<string>()
+    filteredPending.forEach(p => {
+      const key = `${p.fromNumber}:${p.toNumber}:${p.body.trim()}:${Math.floor(new Date(p.createdAt).getTime() / 300000)}`
+      if (!pendingSeen.has(key)) {
+        pendingSeen.add(key)
+        uniquePending.push(p)
+      } else {
+        console.debug('[InboxLifecycle] failed queue deduped', { body: p.body })
+      }
+    })
+
+    return dedupe([...selectedMessages, ...uniquePending])
+  }, [selectedMessages, selectedPendingMessages])
 
   const commandIntel = useMemo(
     () => buildThreadCommandIntel(selected, displayedMessages, threadContext, threadIntelligence),
@@ -1347,7 +1414,28 @@ export default function InboxPage() {
           setSelectedMessages((current) => current.filter((message) => message.id !== String(row.id ?? '')))
           return
         }
-        mergeRealtimeMessage(toThreadMessage(row))
+        const incoming = toThreadMessage(row)
+        mergeRealtimeMessage(incoming)
+
+        // Remove any pending optimistic message that this confirmed event supersedes
+        const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
+        const rowQueueId = String(row.queue_id ?? '').trim()
+        if (rowCsid || rowQueueId) {
+          setPendingMessagesByThread((current) => {
+            const currentThreadPending = current[selected.id] ?? []
+            if (currentThreadPending.length === 0) return current
+            const filtered = currentThreadPending.filter((pending) => {
+              const pendingCsid = String(pending.developerMeta?.client_send_id ?? '').trim()
+              const pendingQueueId = String(pending.developerMeta?.queue_id ?? '').trim()
+              if (rowCsid && pendingCsid && pendingCsid === rowCsid) return false
+              if (rowQueueId && pendingQueueId && pendingQueueId === rowQueueId) return false
+              return true
+            })
+            if (filtered.length === currentThreadPending.length) return current
+            console.log('[MessageLifecycle] event merged — pending removed', { rowCsid, rowQueueId, removedCount: currentThreadPending.length - filtered.length })
+            return { ...current, [selected.id]: filtered }
+          })
+        }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, (payload) => {
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
@@ -1355,6 +1443,7 @@ export default function InboxPage() {
 
         const queueId = String(row.id ?? row.queue_id ?? '').trim()
         const nextStatus = String(row.queue_status ?? row.status ?? 'pending').trim().toLowerCase()
+        const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
 
         setPendingMessagesByThread((current) => {
           const currentThreadPending = current[selected.id] ?? []
@@ -1362,10 +1451,13 @@ export default function InboxPage() {
           let changed = false
           const nextPending = currentThreadPending.map((message) => {
             const messageQueueId = String(message.developerMeta?.queue_id ?? '').trim()
+            const messageCsid = String(message.developerMeta?.client_send_id ?? '').trim()
             const sameQueue = queueId && messageQueueId && messageQueueId === queueId
+            const sameCsid = rowCsid && messageCsid && messageCsid === rowCsid
             const sameBody = String(row.message_body ?? row.message_text ?? '').trim() && String(row.message_body ?? row.message_text ?? '').trim() === message.body.trim()
-            if (!sameQueue && !sameBody) return message
+            if (!sameQueue && !sameCsid && !sameBody) return message
             changed = true
+            if (DEV) console.log('[MessageLifecycle] queue status update', { matchedBy: sameQueue ? 'queue_id' : sameCsid ? 'client_send_id' : 'body', nextStatus })
             return {
               ...message,
               deliveryStatus: nextStatus || message.deliveryStatus,
@@ -1374,6 +1466,7 @@ export default function InboxPage() {
               developerMeta: {
                 ...(message.developerMeta ?? {}),
                 queue_id: queueId || String(message.developerMeta?.queue_id ?? ''),
+                ...(rowCsid ? { client_send_id: rowCsid } : {}),
               },
             }
           })
@@ -2249,13 +2342,14 @@ export default function InboxPage() {
       return
     }
 
+    const clientSendId = crypto.randomUUID()
     const timestamp = new Date().toISOString()
     const optimisticMessage: ThreadMessage = {
       id: `pending-${selected.id}-${Date.now()}`,
       direction: 'outbound',
       body: text.trim(),
       createdAt: timestamp,
-       timelineAt: timestamp,
+      timelineAt: timestamp,
       deliveredAt: null,
       deliveryStatus: 'pending',
       fromNumber: '',
@@ -2271,7 +2365,13 @@ export default function InboxPage() {
       source: 'operator',
       rawStatus: 'pending',
       error: null,
+      metadata: { client_send_id: clientSendId },
+      developerMeta: { client_send_id: clientSendId },
     }
+
+    optimisticMessageMapRef.current.set(clientSendId, optimisticMessage.id)
+    inFlightSendMapRef.current.add(clientSendId)
+    console.log('[MessageLifecycle] optimistic created', { clientSendId, threadId: selected.id, body: text.trim().slice(0, 40) })
 
     setPendingMessagesByThread((current) => ({
       ...current,
@@ -2283,6 +2383,7 @@ export default function InboxPage() {
       const result = await sendInboxMessageNow(selected, text, {
         selectedTemplate: template ?? null,
         threadContext,
+        clientSendId,
       })
       emitNotification({
         title: result.ok
@@ -2299,11 +2400,14 @@ export default function InboxPage() {
       })
 
       if (!result.ok) {
+        optimisticMessageMapRef.current.delete(clientSendId)
         setPendingMessagesByThread((current) => ({
           ...current,
           [selected.id]: (current[selected.id] ?? []).filter((pending) => pending.id !== optimisticMessage.id),
         }))
       } else {
+        console.log('[MessageLifecycle] queue merged', { clientSendId, queueId: result.queueId, status: result.deliveryStatus })
+
         // Optimistically update the thread so it clears from the unread queue instantly
         setOptimisticPatches((prev) => ({
           ...prev,
@@ -2330,8 +2434,10 @@ export default function InboxPage() {
                   ...pending,
                   deliveryStatus: result.deliveryStatus || 'queued',
                   rawStatus: result.deliveryStatus || 'queued',
+                  metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
                   developerMeta: {
                     ...(pending.developerMeta ?? {}),
+                    client_send_id: clientSendId,
                     queue_id: result.queueId ?? '',
                     provider_message_sid: result.providerMessageSid ?? '',
                   },
@@ -2342,6 +2448,7 @@ export default function InboxPage() {
 
       setDraftText('')
     } finally {
+      inFlightSendMapRef.current.delete(clientSendId)
       setIsSending(false)
     }
   }, [isSending, selected, selectedSuppressed, threadContext])

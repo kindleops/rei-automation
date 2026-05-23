@@ -182,6 +182,7 @@ export interface QueueReplyResult {
 
 export interface SendNowResult {
   ok: boolean
+  clientSendId?: string | null
   queueId: string | null
   messageEventId: string | null
   providerMessageSid: string | null
@@ -200,6 +201,7 @@ interface InboxTemplateSendOptions {
 
 interface InboxSendOptions extends InboxTemplateSendOptions {
   fromPhoneNumber?: string
+  clientSendId?: string | null
 }
 
 export interface QueueProcessorHealth {
@@ -2575,6 +2577,7 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
     ['queue_id', asString(row['queue_id'], '')],
     ['provider_message_sid', asString(row['provider_message_sid'], '')],
     ['event_type', asString(row['event_type'], '')],
+    ['client_send_id', asString(getNestedValue(row, 'metadata.client_send_id') ?? row['client_send_id'], '')],
   ].filter(([, value]) => value)
 
   const developerMeta = developerMetaEntries.length > 0
@@ -2714,7 +2717,12 @@ const dedupeMapPinsByThreadKey = (pins: LiveInboxMapPin[]): LiveInboxMapPin[] =>
   return Array.from(byKey.values())
 }
 
-const getMessageMergeKey = (message: ThreadMessage): string => {
+export const normalizeOutboundMessageIdentity = (message: ThreadMessage): string => {
+  const clientSendId =
+    asString(message.developerMeta?.client_send_id, '') ||
+    asString((message.metadata as AnyRecord | undefined)?.client_send_id, '')
+  if (clientSendId) return `csid:${clientSendId}`
+
   const providerId = asString(message.developerMeta?.provider_message_sid, '')
   if (providerId) return `provider:${providerId}`
 
@@ -2727,27 +2735,32 @@ const getMessageMergeKey = (message: ThreadMessage): string => {
   return `body:${message.direction}:${counterparty}:${bucket}:${body}`
 }
 
+const getMessageMergeKey = normalizeOutboundMessageIdentity
+
 const getDeliveryStatusRank = (status: string): number => {
   switch (normalizeStatus(status)) {
-    case 'failed':
-      return 5
     case 'delivered':
-      return 4
+      return 5
     case 'sent':
-      return 3
+      return 4
     case 'queued':
-      return 2
+      return 3
     case 'pending':
+      return 2
+    case 'failed':
       return 1
     default:
       return 0
   }
 }
 
-const mergeThreadMessages = (existing: ThreadMessage, incoming: ThreadMessage): ThreadMessage => {
-  const preferredStatus = getDeliveryStatusRank(incoming.deliveryStatus) >= getDeliveryStatusRank(existing.deliveryStatus)
-    ? incoming
-    : existing
+export const mergeOutboundLifecycleMessages = (existing: ThreadMessage, incoming: ThreadMessage): ThreadMessage => {
+  // message_events is always the canonical source — it represents the confirmed backend record
+  const canonical =
+    incoming.source === 'message_events' && existing.source !== 'message_events' ? incoming :
+    existing.source === 'message_events' && incoming.source !== 'message_events' ? existing :
+    getDeliveryStatusRank(incoming.deliveryStatus) >= getDeliveryStatusRank(existing.deliveryStatus) ? incoming : existing
+
   const earliestCreatedAt = new Date(existing.createdAt).getTime() <= new Date(incoming.createdAt).getTime()
     ? existing.createdAt
     : incoming.createdAt
@@ -2755,20 +2768,36 @@ const mergeThreadMessages = (existing: ThreadMessage, incoming: ThreadMessage): 
     ? existing.timelineAt
     : incoming.timelineAt
 
+  const mergedDeveloperMeta = { ...(existing.developerMeta ?? {}), ...(incoming.developerMeta ?? {}) }
+  const mergedMetadata = { ...(existing.metadata ?? {}), ...(incoming.metadata ?? {}) }
+
+  if (DEV) {
+    const key = normalizeOutboundMessageIdentity(existing)
+    if (canonical.deliveryStatus === 'delivered') {
+      console.log('[MessageLifecycle] delivered merged', { key, existingStatus: existing.deliveryStatus, incomingStatus: incoming.deliveryStatus })
+    } else {
+      console.log('[MessageLifecycle] duplicate suppressed', { key, existingSource: existing.source, incomingSource: incoming.source, resolvedStatus: canonical.deliveryStatus })
+    }
+  }
+
   return {
     ...existing,
     ...incoming,
     id: existing.id.startsWith('pending-') && !incoming.id.startsWith('pending-') ? incoming.id : existing.id,
+    source: canonical.source,
     body: incoming.body || existing.body,
     createdAt: earliestCreatedAt,
     timelineAt: earliestTimelineAt,
     deliveredAt: incoming.deliveredAt || existing.deliveredAt,
-    deliveryStatus: preferredStatus.deliveryStatus,
-    rawStatus: preferredStatus.rawStatus || incoming.rawStatus || existing.rawStatus,
+    deliveryStatus: canonical.deliveryStatus,
+    rawStatus: canonical.rawStatus || incoming.rawStatus || existing.rawStatus,
     error: incoming.error || existing.error,
-    developerMeta: { ...(existing.developerMeta ?? {}), ...(incoming.developerMeta ?? {}) },
+    metadata: mergedMetadata,
+    developerMeta: mergedDeveloperMeta,
   }
 }
+
+const mergeThreadMessages = mergeOutboundLifecycleMessages
 
 export const dedupeMessages = (messages: ThreadMessage[]): ThreadMessage[] => {
   const byKey = new Map<string, ThreadMessage>()
@@ -2824,7 +2853,8 @@ export const toThreadMessageFromQueue = (row: AnyRecord): ThreadMessage => {
     developerMeta: {
       queue_id: asString(row['id'], ''),
       queue_key: asString(row['queue_key'], ''),
-      use_case: asString(row['use_case_template'], '')
+      use_case: asString(row['use_case_template'], ''),
+      ...(asString(getNestedValue(row, 'metadata.client_send_id'), '') ? { client_send_id: asString(getNestedValue(row, 'metadata.client_send_id'), '') } : {}),
     }
   }
 }
@@ -3734,7 +3764,7 @@ export const sendInboxMessageNow = async (
 ): Promise<SendNowResult> => {
   const trimmedText = messageText.trim()
   if (!trimmedText) {
-    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Message text is required', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Message text is required', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
   }
 
   const personalization = buildQueuePersonalization(thread, trimmedText)
@@ -3742,14 +3772,14 @@ export const sendInboxMessageNow = async (
 
   const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
   if (!toPhone) {
-    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Thread has no valid phone number', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Thread has no valid phone number', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
   }
 
   // ── Suppression check ──────────────────────────────────────────────────────
   const { suppressed, reason: suppressionReason } = await checkSuppressionStatus(toPhone)
   if (suppressed) {
     if (DEV) console.warn('[sendInboxMessageNow] suppressed', { toPhone, suppressionReason })
-    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: suppressionReason ?? 'Recipient is suppressed or opted out', insertPayloadKeys: [], suppressionBlocked: true, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: suppressionReason ?? 'Recipient is suppressed or opted out', insertPayloadKeys: [], suppressionBlocked: true, sendRouteUsed: 'none', queueProcessorEligible: false }
   }
 
   // ── Resolve from number (STRICT RULE) ──────────────────────────────────────
@@ -3843,6 +3873,7 @@ export const sendInboxMessageNow = async (
   if (!isValid) {
     return {
       ok: false,
+      clientSendId: null,
       queueId: null,
       messageEventId: null,
       providerMessageSid: null,
@@ -3888,6 +3919,7 @@ export const sendInboxMessageNow = async (
       our_number: fromPhone,
       seller_phone: sellerPhone,
       note: 'queued_ready_for_processor',
+      ...(options?.clientSendId ? { client_send_id: options.clientSendId } : {}),
       ...buildQueueRoutingMetadata(thread),
       template_variables: personalization.renderVariables,
       candidate_snapshot: personalization.candidateSnapshot,
@@ -3933,7 +3965,7 @@ export const sendInboxMessageNow = async (
   const sendResult = await backendClient.sendInboxMessageNow(insertPayload)
   if (!sendResult.ok) {
     console.error('[sendInboxMessageNow] backend call FAILED:', { error: sendResult.error, message: sendResult.message, toPhone, fromPhone })
-    return { ok: false, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: sendResult.message, insertPayloadKeys, suppressionBlocked: false, sendRouteUsed: 'send_queue_queued', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: sendResult.message, insertPayloadKeys, suppressionBlocked: false, sendRouteUsed: 'send_queue_queued', queueProcessorEligible: false }
   }
 
   const queueData = sendResult.data as AnyRecord
@@ -3966,6 +3998,7 @@ export const sendInboxMessageNow = async (
 
   return {
     ok: true,
+    clientSendId: options?.clientSendId ?? null,
     queueId,
     messageEventId,
     providerMessageSid: null,

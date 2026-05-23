@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../../lib/data/commandMapData'
+import { buildStreetViewUrl } from '../inbox-normalization'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import '../comp-intelligence.css'
 
@@ -344,7 +345,7 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
           ppbd: d.ppbd || (soldPrice > 0 && d.total_bedrooms ? Math.round(soldPrice / d.total_bedrooms) : null),
           sqftPerUnit: (d as any).sqft_per_unit || (d.building_square_feet && d.units_count ? Math.round(d.building_square_feet / d.units_count) : null),
           bedsPerUnit: (d as any).beds_per_unit || (d.total_bedrooms && d.units_count ? Math.round(d.total_bedrooms / d.units_count * 10) / 10 : null),
-          imageUrl: d.streetview_image || d.satellite_image || null,
+          imageUrl: d.streetview_image || d.satellite_image || buildStreetViewUrl(d.property_address_full) || null,
           zillowUrl: buildZillowUrl(d.property_address_full),
           buyerType: d.buyer_type_label || null,
           isInstitutionalBuyer: d.is_institutional_buyer || false,
