@@ -1411,6 +1411,7 @@ export default function InboxPage() {
     const channel = supabase
       .channel(`nexus-inbox-thread-${selectedKey}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, (payload) => {
+        console.log('[InboxPage realtime message_events]', { eventType: payload.eventType, threadKey: selectedKey })
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
         if (!belongsToSelection(row)) return
         if (DEV) {
@@ -1448,6 +1449,7 @@ export default function InboxPage() {
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, (payload) => {
+        console.log('[InboxPage realtime send_queue]', { eventType: payload.eventType, threadKey: selectedKey })
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
         if (!belongsToSelection(row)) return
 
