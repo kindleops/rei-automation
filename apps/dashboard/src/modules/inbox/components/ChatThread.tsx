@@ -4,7 +4,7 @@ import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import { formatMessageDateTime } from '../../../shared/formatters'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
-import { getStatusVisual } from '../status-visuals'
+import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { ViewLayoutMode } from '../view-layout'
 
@@ -20,7 +20,7 @@ interface ChatThreadProps {
   onTogglePin?: () => void
   onToggleStar?: () => void
   onToggleArchive?: () => void
-  onThreadAction?: (id: string, action: string) => void
+  onThreadAction?: (id: string, action: string, payload?: Record<string, unknown>) => void
   onOpenDebug?: () => void
   searchQuery?: string
   layoutMode?: ViewLayoutMode
@@ -79,20 +79,6 @@ const getDeliveryPillStyle = (badge: string) => {
     case 'pending': return { color: '#9ba8c0', background: 'rgba(155, 168, 192, 0.1)', borderColor: 'rgba(155, 168, 192, 0.2)' }
     default: return { color: 'rgba(155, 168, 192, 0.5)', background: 'transparent', borderColor: 'transparent' }
   }
-}
-
-// ── Stage display helper ───────────────────────────────────────────────────
-const stageShortLabel = (conversationStage?: string | null): string => {
-  if (!conversationStage) return ''
-  const s = String(conversationStage).toLowerCase()
-  if (s.includes('stage_1') || s.includes('ownership')) return 'S1'
-  if (s.includes('stage_2') || s.includes('consider')) return 'S2'
-  if (s.includes('stage_3') || s.includes('asking')) return 'S3'
-  if (s.includes('stage_4') || s.includes('condition')) return 'S4'
-  if (s.includes('stage_5') || s.includes('offer')) return 'S5'
-  if (s.includes('negotiat')) return 'S6'
-  if (s.includes('contract') || s.includes('close')) return 'S7'
-  return ''
 }
 
 // ── Conversation atmosphere class ─────────────────────────────────────────
@@ -288,15 +274,8 @@ export const ChatThread = ({
   const phoneNumber = fallback(thread.phoneNumber || thread.canonicalE164, '')
   const propertyAddress = resolveThreadAddressLine(thread)
   const market = resolveThreadMarketBadge(thread)
-  const statusVisual = getStatusVisual(thread.inboxStatus, {
-    latestDirection: thread.latestDirection || thread.directionUsed || null,
-    lastOutboundAt: thread.lastOutboundAt ?? null,
-    lastInboundAt: thread.lastInboundAt ?? null,
-  })
-  const stageShort = stageShortLabel(thread.conversationStage)
   const matchedKeywords = getThreadMatchedKeywords(thread, searchQuery)
   const isCompact = layoutMode === 'compact'
-  const isAutoPaused = String(thread.status || '').toLowerCase().includes('pause') || (thread as any).automationStatus === 'paused'
   const atmosphereClass = getAtmosphereClass(thread, isSuppressed)
 
   return (
@@ -328,13 +307,6 @@ export const ChatThread = ({
           )}
           <div className="nx-chat-header-v2__chips">
             {market && <span className="nx-chat-chip nx-chat-chip--market">{market}</span>}
-            {stageShort && <span className="nx-chat-chip nx-chat-chip--stage">{stageShort}</span>}
-            <span
-              className="nx-chat-chip"
-              style={{ color: statusVisual.color, background: statusVisual.bg, borderColor: statusVisual.border }}
-            >
-              {statusVisual.label}
-            </span>
             {isSuppressed && <span className="nx-chat-chip nx-chat-chip--danger"><Icon name="slash" />Suppressed</span>}
           </div>
         </div>
@@ -358,50 +330,12 @@ export const ChatThread = ({
         )}
       </header>
 
-      {/* ── COMPACT ACTION STRIP ───────────────────────────────────────── */}
-      <div className="nx-chat-action-strip">
-        {thread.inboxStatus === 'new_reply' && thread.automationState === 'active' && (
-          <button
-            type="button"
-            className="nx-action-strip-btn nx-action-strip-btn--auto"
-            onClick={() => onThreadAction?.(thread.id, 'auto_reply')}
-          >
-            <Icon name="zap" /><span>Auto-Reply</span>
-          </button>
-        )}
-        <button
-          type="button"
-          className="nx-action-strip-btn nx-action-strip-btn--hot"
-          onClick={() => onThreadAction?.(thread.id, 'mark_hot')}
-          title="Flag as Hot Lead"
-        >
-          <Icon name="zap" /><span>Hot</span>
-        </button>
-        <button
-          type="button"
-          className="nx-action-strip-btn"
-          onClick={() => onThreadAction?.(thread.id, 'snooze')}
-          title="Snooze"
-        >
-          <Icon name="clock" /><span>Snooze</span>
-        </button>
-        <button
-          type="button"
-          className={cls('nx-action-strip-btn', isAutoPaused ? 'nx-action-strip-btn--resume' : 'nx-action-strip-btn--pause')}
-          onClick={() => onThreadAction?.(thread.id, isAutoPaused ? 'resume_automation' : 'pause_automation')}
-          title={isAutoPaused ? 'Resume Automation' : 'Pause Automation'}
-        >
-          <Icon name={isAutoPaused ? 'play' : 'pause'} /><span>{isAutoPaused ? 'Resume Auto' : 'Pause Auto'}</span>
-        </button>
-        <button
-          type="button"
-          className="nx-action-strip-btn nx-action-strip-btn--dnc"
-          onClick={() => onThreadAction?.(thread.id, 'suppress')}
-          title="Mark DNC / Suppress"
-        >
-          <Icon name="slash" /><span>DNC</span>
-        </button>
-      </div>
+      {/* ── THREAD STATE BAR (status / stage / temperature / autopilot pills + quick actions) ── */}
+      <ThreadStateBar
+        thread={thread}
+        onAction={(id, action, payload) => onThreadAction?.(id, action, payload as any)}
+        disabled={isSuppressed}
+      />
 
       {/* ── MESSAGE TIMELINE ──────────────────────────────────────────── */}
       <div className="nx-message-list" ref={listRef} onScroll={handleScroll}>

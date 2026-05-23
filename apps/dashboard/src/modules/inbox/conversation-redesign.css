@@ -1116,3 +1116,240 @@
   width: 40px !important;
   height: 30px !important;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   THREAD STATE BAR  (status / stage / temperature / autopilot)
+   ════════════════════════════════════════════════════════════════ */
+
+.nx-thread-state-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--nx-border-subtle);
+}
+
+/* ── Pill row ──────────────────────────────────────────────────── */
+
+.nx-thread-state-bar__pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background: rgba(0,0,0,0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nx-thread-state-bar__pills::-webkit-scrollbar { display: none }
+
+/* ── DropdownPill ──────────────────────────────────────────────── */
+
+.nx-state-pill-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.nx-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.12s, opacity 0.12s;
+  background: inherit;
+  line-height: 1.4;
+}
+
+.nx-state-pill:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.nx-state-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nx-state-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.nx-state-pill__label {
+  color: inherit;
+}
+
+.nx-state-pill__caret {
+  font-size: 8px;
+  opacity: 0.6;
+  margin-left: 1px;
+}
+
+/* ── Dropdown menu ─────────────────────────────────────────────── */
+
+.nx-state-pill__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 9999;
+  min-width: 160px;
+  background: rgba(18, 20, 28, 0.96);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 4px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nx-state-pill__option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.75);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.nx-state-pill__option:hover {
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.95);
+}
+
+.nx-state-pill__option.is-selected {
+  color: var(--opt-color, #fff);
+  background: var(--opt-bg, rgba(255,255,255,0.06));
+}
+
+.nx-state-pill__option-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.nx-state-pill__option-check {
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ── Quick action bar ──────────────────────────────────────────── */
+
+.nx-thread-state-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 12px;
+  background: rgba(0,0,0,0.04);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nx-thread-state-bar__actions::-webkit-scrollbar { display: none }
+
+.nx-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--nx-border-subtle);
+  background: var(--nx-bg-elevated);
+  color: var(--nx-text-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.nx-quick-action:hover {
+  background: var(--nx-bg-hover);
+  color: var(--nx-text-primary);
+  border-color: rgba(255,255,255,0.18);
+}
+
+.nx-quick-action__icon { line-height: 1; font-size: 11px }
+.nx-quick-action__label { letter-spacing: 0.01em }
+
+.nx-quick-action--hot {
+  color: #ff6b35;
+  border-color: rgba(255,107,53,0.28);
+  background: rgba(255,107,53,0.08);
+}
+.nx-quick-action--hot:hover {
+  background: rgba(255,107,53,0.16);
+  border-color: rgba(255,107,53,0.4);
+}
+
+.nx-quick-action--cold {
+  color: #64d2ff;
+  border-color: rgba(100,210,255,0.22);
+  background: rgba(100,210,255,0.07);
+}
+.nx-quick-action--cold:hover {
+  background: rgba(100,210,255,0.14);
+}
+
+.nx-quick-action--danger {
+  color: #ff453a;
+  border-color: rgba(255,69,58,0.22);
+  background: rgba(255,69,58,0.06);
+}
+.nx-quick-action--danger:hover {
+  background: rgba(255,69,58,0.14);
+  border-color: rgba(255,69,58,0.38);
+}
+
+.nx-quick-action--accent {
+  color: #a78bfa;
+  border-color: rgba(167,139,250,0.24);
+  background: rgba(167,139,250,0.08);
+}
+.nx-quick-action--accent:hover {
+  background: rgba(167,139,250,0.16);
+}
+
+.nx-quick-action--muted {
+  color: var(--nx-text-tertiary, rgba(255,255,255,0.35));
+}
+
+/* Compact layout: icons only */
+.is-layout-compact .nx-thread-state-bar__actions .nx-quick-action__label {
+  display: none;
+}
+.is-layout-compact .nx-thread-state-bar__pills .nx-state-pill__label {
+  display: none;
+}
+.is-layout-compact .nx-thread-state-bar__pills .nx-state-pill__caret {
+  display: none;
+}
+.is-layout-compact .nx-state-pill {
+  padding: 3px 5px;
+}
+.is-layout-compact .nx-quick-action {
+  padding: 4px 7px;
+  min-width: 26px;
+  justify-content: center;
+}
