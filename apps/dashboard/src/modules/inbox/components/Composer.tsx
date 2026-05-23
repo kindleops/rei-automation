@@ -128,17 +128,45 @@ export const Composer = ({
   const animationFrameRef = useRef<number | undefined>(undefined)
   // Tracks the last value we pushed to onTranslateDraft to prevent re-triggering.
   const lastAutoTranslatedDraftRef = useRef<string>('')
+  const lastPolishedDraftRef = useRef<string>('')
+  const [polishEnabled, setPolishEnabled] = useState(false)
+  const [isPolishing, setIsPolishing] = useState(false)
+  const [polishError, setPolishError] = useState<string | null>(null)
 
   const isListening = micState === 'recording'
   const isProcessing = micState === 'processing'
   const hasDraft = localDraft.trim().length > 0
-  const composerDisabled = disabled || isSending
+  const composerDisabled = disabled || isSending || isPolishing
+
+  const polishDraftText = useCallback(async (text: string) => {
+    if (!text.trim() || text === lastPolishedDraftRef.current) return
+    setIsPolishing(true)
+    try {
+      const resp = await fetch('/api/cockpit/inbox/polish-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      const data = await resp.json()
+      if (data.ok) {
+        setLocalDraft(data.polishedText)
+        lastPolishedDraftRef.current = data.polishedText
+      } else {
+        setPolishError('Polish unavailable — using original draft.')
+      }
+    } catch (e) {
+      setPolishError('Polish unavailable — using original draft.')
+    } finally {
+      setIsPolishing(false)
+    }
+  }, [])
 
   // Sync: parent pushes new text (translation result, template insert, post-send clear) → update localDraft.
   // Mark the pushed text as already-translated so auto-translate doesn't fire on it.
   useEffect(() => {
     setLocalDraft(draftText)
     lastAutoTranslatedDraftRef.current = draftText
+    lastPolishedDraftRef.current = draftText
   }, [draftText])
 
   useEffect(() => {
@@ -158,14 +186,20 @@ export const Composer = ({
     textarea.focus({ preventScroll: true })
   }, [thread?.id, composerDisabled])
 
-  // Auto-translate: fires 2s after typing stops when seller language is known non-English.
+  // Auto-polish & Auto-translate
   useEffect(() => {
+    if (polishEnabled && hasDraft && !isPolishing) {
+      const timer = setTimeout(() => polishDraftText(localDraft), 800)
+      return () => clearTimeout(timer)
+    }
+    
     const trimmed = localDraft.trim()
-    if (!autoTranslateDraft || !trimmed || isTranslatingDraft) return
+    if (!autoTranslateDraft || !trimmed || isTranslatingDraft || polishEnabled) return
     if (trimmed === lastAutoTranslatedDraftRef.current) return
     const timer = setTimeout(() => { onTranslateDraft?.(localDraft) }, 2000)
     return () => clearTimeout(timer)
-  }, [localDraft, autoTranslateDraft, isTranslatingDraft, onTranslateDraft])
+  }, [localDraft, autoTranslateDraft, isTranslatingDraft, onTranslateDraft, polishEnabled, polishDraftText, isPolishing, hasDraft])
+
 
   const stopVoiceAnalysis = () => {
     if (animationFrameRef.current) {
@@ -251,11 +285,16 @@ export const Composer = ({
     startVoiceAnalysis()
   }
 
-  const submitDraft = useCallback(() => {
+  const submitDraft = useCallback(async () => {
     if (composerDisabled || !hasDraft) return
-    onSend(localDraft)
+    let textToSubmit = localDraft
+    if (polishEnabled) {
+      await polishDraftText(localDraft)
+      textToSubmit = lastPolishedDraftRef.current || localDraft
+    }
+    onSend(textToSubmit)
     setLocalDraft('')
-  }, [composerDisabled, hasDraft, localDraft, onSend])
+  }, [composerDisabled, hasDraft, localDraft, polishEnabled, polishDraftText, onSend])
 
   const handleInsertTemplate = useCallback((text: string) => {
     setLocalDraft(prev => prev.trim() ? `${prev.trim()}\n\n${text}` : text)
@@ -270,7 +309,20 @@ export const Composer = ({
     : isProcessing ? 'Processing…' : isListening ? 'Stop recording' : 'Talk to type'
 
   return (
-    <div className={cls('nx-sticky-composer', isTranslatingDraft && 'is-translating-draft')}>
+    <div className={cls('nx-composer', isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft')}>
+      <div className="nx-composer-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 10px' }}>
+         <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '12px' }}>
+            <input 
+              type="checkbox" 
+              checked={polishEnabled} 
+              onChange={e => setPolishEnabled(e.target.checked)} 
+              disabled={composerDisabled}
+            />
+            <span>Operator Polish</span>
+          </label>
+          {isPolishing && <span style={{ fontSize: '11px', color: '#64748b' }}>Polishing...</span>}
+          {polishError && <span style={{ fontSize: '11px', color: '#ef4444' }}>{polishError}</span>}
+      </div>
 
       {/* ── Quick Actions Popover ─────────────────────────────────── */}
       {quickActionsOpen && (

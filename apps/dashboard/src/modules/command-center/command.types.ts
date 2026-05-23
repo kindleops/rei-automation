@@ -16,6 +16,27 @@ export type CommandResultType =
   | 'app'
   | 'filter'
   | 'system_action'
+  | 'location'
+  | 'leads'
+  | 'comps'
+  | 'underwrite'
+  | 'recent'
+
+export type LocationResult = {
+  id: string
+  label: string
+  query: string
+  latitude: number
+  longitude: number
+  address?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+  placeType?: 'address' | 'zip' | 'city' | 'county' | 'neighborhood' | 'poi' | 'unknown'
+  confidence?: number
+  source: 'mapbox' | 'backend' | 'cache' | 'stub'
+}
 
 export type CommandPreviewTone = 'default' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -50,6 +71,7 @@ export type CommandResult = {
   action?: CommandAction
   payload?: Record<string, unknown>
   preview?: CommandResultPreview
+  location?: LocationResult
   meta?: {
     provider?: string
     groupLabel?: string

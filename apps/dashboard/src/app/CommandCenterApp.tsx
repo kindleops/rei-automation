@@ -8,6 +8,7 @@ import { NotificationToasts, NotificationCenter } from '../shared/NotificationTo
 import { playSound } from '../shared/sounds'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
+import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
 import {
   GLOBAL_COMMAND_CONTEXT_EVENT,
   GLOBAL_COMMAND_OPEN_EVENT,
@@ -205,6 +206,10 @@ export const CommandCenterApp = () => {
   const executeGlobalCommand = useCallback((result: CommandResult) => {
     if (result.meta?.confirmRequired && import.meta.env.DEV) {
       console.warn('[GlobalCommand]', 'confirm-required result selected', result)
+    }
+
+    if (result.location) {
+      saveRecentCommandLocation(result.location)
     }
 
     const shouldNavigate = Boolean(result.route && result.route !== route.path)

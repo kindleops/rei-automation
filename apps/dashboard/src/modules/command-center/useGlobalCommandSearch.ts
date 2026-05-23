@@ -7,6 +7,7 @@ import { marketSearchProvider } from './providers/marketSearchProvider'
 import { propertySearchProvider } from './providers/propertySearchProvider'
 import { queueSearchProvider } from './providers/queueSearchProvider'
 import { sellerSearchProvider } from './providers/sellerSearchProvider'
+import { locationCommandProvider, getRecentCommandLocations } from './providers/locationCommandProvider'
 import type { CommandResult, CommandResultType, GlobalCommandProvider, GlobalCommandSearchContext } from './command.types'
 
 const STATIC_PROVIDERS: GlobalCommandProvider[] = [
@@ -17,6 +18,7 @@ const STATIC_PROVIDERS: GlobalCommandProvider[] = [
 ]
 
 const REMOTE_PROVIDERS: GlobalCommandProvider[] = [
+  locationCommandProvider,
   propertySearchProvider,
   sellerSearchProvider,
   buyerSearchProvider,
@@ -24,13 +26,18 @@ const REMOTE_PROVIDERS: GlobalCommandProvider[] = [
 ]
 
 const GROUP_ORDER: CommandResultType[] = [
+  'recent',
+  'location',
   'property',
   'seller',
   'conversation',
+  'leads',
   'buyer',
   'market',
   'pipeline',
   'queue',
+  'comps',
+  'underwrite',
   'map_action',
   'app',
   'filter',
@@ -38,13 +45,18 @@ const GROUP_ORDER: CommandResultType[] = [
 ]
 
 const GROUP_LABELS: Record<CommandResultType, string> = {
+  recent: 'Recent Searches',
+  location: 'Locations',
   property: 'Properties',
   seller: 'Sellers',
   conversation: 'Sellers',
+  leads: 'Leads',
   buyer: 'Buyers',
   market: 'Markets',
   pipeline: 'Pipeline',
   queue: 'Queue',
+  comps: 'Comparables',
+  underwrite: 'Underwriting',
   map_action: 'Actions',
   app: 'Actions',
   filter: 'Actions',
@@ -68,12 +80,36 @@ export const useGlobalCommandSearch = (query: string, context: GlobalCommandSear
     let active = true
     const normalizedQuery = query.trim()
     let staticSnapshot: CommandResult[] = []
+
     const immediateLoad = async () => {
       const staticResults = await Promise.all(STATIC_PROVIDERS.map((provider) => provider.search(normalizedQuery, context)))
       if (!active) return
-      const mergedStatic = dedupeResults(staticResults.flat())
+      
+      let mergedStatic = dedupeResults(staticResults.flat())
         .sort((left, right) => right.score - left.score)
         .slice(0, 20)
+
+      if (normalizedQuery.length === 0) {
+        const recents = getRecentCommandLocations().map((loc, i) => ({
+          id: `recent-${loc.id}`,
+          type: 'recent' as CommandResultType,
+          title: loc.label,
+          subtitle: `Recent Location`,
+          icon: 'clock' as const,
+          score: 100 - i,
+          route: '/dashboard/live',
+          action: {
+            id: 'fly-to',
+            kind: 'dispatch_event' as const,
+            eventName: 'nexus:map-flyto',
+          },
+          payload: { location: loc },
+          location: loc,
+          meta: { groupLabel: 'Recent Searches' },
+        }))
+        mergedStatic = [...recents, ...mergedStatic]
+      }
+
       staticSnapshot = mergedStatic
       setResults(mergedStatic)
       setLoading(normalizedQuery.length >= 2)

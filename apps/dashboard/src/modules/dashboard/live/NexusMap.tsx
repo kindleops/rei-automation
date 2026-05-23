@@ -34,6 +34,7 @@ import {
 import { buildMarketHeatFieldGeoJSON } from './map/heat-field'
 import { loadSettings, resolveMapStyleUrl } from '../../../shared/settings'
 import { playSound } from '../../../shared/sounds'
+import type { LocationResult } from '../../command-center/command.types'
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -550,9 +551,11 @@ export const NexusMap = ({
   onFocusFilterSearch,
 }: NexusMapProps) => {
   const [streetViewOpen, setStreetViewOpen] = useState(false)
+  const [tempLocation, setTempLocation] = useState<LocationResult | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
+  const tempMarkerRef = useRef<maplibregl.Marker | null>(null)
   const mapReadyRef = useRef(false)
   const eventPulsesRef = useRef<EventPulse[]>([])
   const lastTimelineCountRef = useRef(0)
@@ -737,6 +740,44 @@ export const NexusMap = ({
     })
     applyLayerVisibility()
   }
+
+  const flyToLocation = (location: LocationResult) => {
+    const map = mapRef.current
+    if (!map || !mapReadyRef.current) return
+    const tuning = viewportTuningRef.current
+    detailLevelRef.current = 'property'
+    map.flyTo({
+      center: [location.longitude, location.latitude],
+      zoom: Math.max(map.getZoom(), 14.5),
+      pitch: pitchEnabledRef.current ? 45 : 0,
+      duration: Math.round(920 * tuning.flyScale),
+      essential: true,
+    })
+    applyLayerVisibility()
+    
+    if (tempMarkerRef.current) {
+      tempMarkerRef.current.remove()
+      tempMarkerRef.current = null
+    }
+    
+    tempMarkerRef.current = new maplibregl.Marker({ color: '#38bdf8' })
+      .setLngLat([location.longitude, location.latitude])
+      .addTo(map)
+      
+    setTempLocation(location)
+  }
+
+  useEffect(() => {
+    const handleFlyTo = (e: Event) => {
+      const customEvent = e as CustomEvent
+      if (customEvent.detail?.location) {
+        flyToLocation(customEvent.detail.location)
+      }
+    }
+    
+    window.addEventListener('nexus:map-flyto', handleFlyTo)
+    return () => window.removeEventListener('nexus:map-flyto', handleFlyTo)
+  }, [])
 
   const ensureTerrainSource = () => {
     const map = mapRef.current
@@ -1939,6 +1980,44 @@ export const NexusMap = ({
     <div className="cc-nexus-map-wrap">
       {/* MapLibre canvas host — fills the .cc-map container */}
       <div ref={containerRef} className="cc-nexus-map" />
+
+      {tempLocation && !selectedLeadForMapCard ? (
+        <aside className="cc-map-dossier" role="status" aria-live="polite">
+          <div className="cc-map-dossier__top">
+            <strong>{tempLocation.label}</strong>
+            <span>{tempLocation.placeType || 'Location'}</span>
+          </div>
+          <span className="cc-map-dossier__address">
+            {tempLocation.latitude.toFixed(4)}, {tempLocation.longitude.toFixed(4)}
+          </span>
+          <div className="cc-map-dossier__meta">
+            <span>{tempLocation.source} source</span>
+          </div>
+          <div className="cc-map-dossier__actions">
+            <button
+              type="button"
+              className="is-active"
+              onClick={() => {
+                if (tempMarkerRef.current) {
+                  tempMarkerRef.current.remove()
+                  tempMarkerRef.current = null
+                }
+                setTempLocation(null)
+              }}
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('nexus:command-action', { detail: { action: 'search-leads', location: tempLocation } }))
+              }}
+            >
+              Find Leads
+            </button>
+          </div>
+        </aside>
+      ) : null}
 
       {selectedLeadForMapCard ? (
         <aside className="cc-map-dossier" role="status" aria-live="polite">
