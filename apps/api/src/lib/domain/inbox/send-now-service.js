@@ -8,7 +8,11 @@ import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/utils/phones.js";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { insertSupabaseSendQueueRow } from "@/lib/supabase/sms-engine.js";
+import {
+  insertSupabaseSendQueueRow,
+  checkBlacklistPriorFailure,
+  shouldSuppressDeliveryFailedRecipient,
+} from "@/lib/supabase/sms-engine.js";
 
 const logger = child({ module: "domain.inbox.send_now_service" });
 
@@ -264,7 +268,66 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
   const { normalized } = validation;
 
-  // ── Step 3: Insert queue row ────────────────────────────────────────
+  // ── Step 3: Delivery-failure safety guard ───────────────────────────
+  // Block sends to numbers that have recently hit 21610 blacklist or repeated
+  // delivery_failed thresholds. Non-fatal: guard errors never block the send.
+  try {
+    const blacklist_check = await checkBlacklistPriorFailure(
+      {
+        to_phone_number: normalized.to_phone_number,
+        from_phone_number: normalized.from_phone_number,
+      },
+      { supabase }
+    );
+    if (blacklist_check.blocked) {
+      logger.warn("inbox_send_blocked", {
+        reason: "provider_blacklist_pair",
+        from_phone_number: normalized.from_phone_number,
+        to_phone_number: normalized.to_phone_number,
+        prior_blacklist_count: blacklist_check.count,
+      });
+      return {
+        ok: false,
+        status: 423,
+        error: "provider_blacklist_pair",
+        queue_created: false,
+        reason: blacklist_check.reason,
+      };
+    }
+
+    const suppression_check = await shouldSuppressDeliveryFailedRecipient(
+      {
+        to_phone_number: normalized.to_phone_number,
+        from_phone_number: normalized.from_phone_number,
+      },
+      { supabase }
+    );
+    if (suppression_check.suppress) {
+      logger.warn("inbox_send_blocked", {
+        reason: "recent_delivery_failures",
+        from_phone_number: normalized.from_phone_number,
+        to_phone_number: normalized.to_phone_number,
+        recent_failure_count: suppression_check.pair_count ?? suppression_check.recipient_count,
+        suppression_window: suppression_check.window,
+        suppression_reason: suppression_check.reason,
+      });
+      return {
+        ok: false,
+        status: 423,
+        error: "recent_delivery_failures",
+        queue_created: false,
+        reason: suppression_check.reason,
+      };
+    }
+  } catch (guard_err) {
+    // Non-fatal: log and continue — never silently lose a send due to guard failure
+    logger.warn("inbox_send_guard_check_failed", {
+      message: guard_err?.message || "unknown_error",
+      to_phone_number: normalized.to_phone_number,
+    });
+  }
+
+  // ── Step 4: Insert queue row ────────────────────────────────────────
   const now = nowIso();
   const queue_id = clean(input.queue_id) || normalized.queue_key;
 

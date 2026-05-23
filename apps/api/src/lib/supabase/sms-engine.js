@@ -36,6 +36,20 @@ function addMinutesIso(value, minutes = 5) {
   return base.toISOString();
 }
 
+// Returns true for provider errors that must never be retried on the same from/to pair.
+// Covers TextGrid 21610 (From/To pair violates a blacklist rule) and any error that
+// explicitly carries retryable=false.
+function isNonRetryableProviderError(error) {
+  if (!error) return false;
+  const msg = String(error.message ?? "").toLowerCase();
+  if (msg.includes("21610")) return true;
+  if (msg.includes("blacklist rule")) return true;
+  if (error.retryable === false) return true;
+  const code = error.code ?? error.error_code;
+  if (code === "21610" || code === 21610) return true;
+  return false;
+}
+
 function asNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -1474,8 +1488,10 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
   const next_retry_count = normalized.retry_count + 1;
-  const is_final_failure = next_retry_count >= normalized.max_retries;
+  const non_retryable = isNonRetryableProviderError(error);
+  const is_final_failure = non_retryable || next_retry_count >= normalized.max_retries;
   const error_message = clean(error?.message) || "send_failed";
+  const failure_bucket = non_retryable ? "provider_blacklist_pair" : null;
 
   const payload = {
     queue_status: is_final_failure ? "failed" : "queued",
@@ -1492,13 +1508,37 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
         message: error_message,
         status: error?.status || null,
         retryable: !is_final_failure,
+        ...(non_retryable ? { non_retryable_reason: "textgrid_21610_blacklist" } : {}),
         final_queue_status: is_final_failure ? "failed" : "queued",
         recorded_at: now,
       },
+      ...(failure_bucket ? { failure_bucket, final_failure: true } : {}),
       final_queue_status: is_final_failure ? "failed" : "queued",
       finalized_at: now,
     },
   };
+
+  info("queue_failure_classified", {
+    queue_id: normalized.id,
+    from_phone_number: normalized.from_phone_number || null,
+    to_phone_number: normalized.to_phone_number || null,
+    failed_reason: error_message,
+    failure_bucket: failure_bucket || "unknown",
+    retryable: !is_final_failure,
+    non_retryable,
+    next_action: is_final_failure ? "terminal_failed" : "requeue_with_backoff",
+    retry_count: next_retry_count,
+    max_retries: normalized.max_retries,
+  });
+
+  if (non_retryable) {
+    addSentryBreadcrumb("queue_failure", "provider_blacklist_21610_terminal", {
+      queue_id: normalized.id,
+      failure_bucket: "provider_blacklist_pair",
+      from_phone_number: normalized.from_phone_number || null,
+      to_phone_number: normalized.to_phone_number || null,
+    });
+  }
 
   const updated_row = await updateSendQueueRowWithLock(
     normalized.id,
@@ -1511,6 +1551,117 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     ...normalized,
     ...payload,
   };
+}
+
+// ─── Delivery-failure safety guards ─────────────────────────────────────────
+
+/**
+ * Check whether a given from/to pair has a prior 21610 blacklist failure.
+ * Returns { blocked: true, reason, count } or { blocked: false, reason: null }.
+ * Non-fatal: any DB error returns blocked=false so sends are never silently lost.
+ */
+export async function checkBlacklistPriorFailure(
+  { to_phone_number, from_phone_number },
+  deps = {}
+) {
+  if (!to_phone_number || !from_phone_number) return { blocked: false, reason: null };
+
+  const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
+
+  try {
+    const { count } = await supabase_client
+      .from(SEND_QUEUE_TABLE)
+      .select("*", { count: "exact", head: true })
+      .eq("to_phone_number", to_phone_number)
+      .eq("from_phone_number", from_phone_number)
+      .eq("queue_status", "failed")
+      .ilike("failed_reason", "%21610%");
+
+    if (count > 0) {
+      return { blocked: true, reason: "prior_blacklist_21610", count };
+    }
+    return { blocked: false, reason: null };
+  } catch (err) {
+    warn("blacklist_check_failed", {
+      to_phone_number,
+      from_phone_number,
+      message: err?.message || "unknown_error",
+    });
+    return { blocked: false, reason: null };
+  }
+}
+
+/**
+ * Check whether a recipient has too many recent delivery_failed rows and should
+ * be temporarily suppressed.
+ *
+ * Rules:
+ *   - Same from/to pair: >= 2 delivery_failed in last 24 h → block pair
+ *   - Same to_phone (any sender): >= 3 delivery_failed in last 7 days → suppress recipient
+ *
+ * Returns { suppress: true, reason, ... } or { suppress: false, reason: null }.
+ * Non-fatal: any DB error returns suppress=false.
+ */
+export async function shouldSuppressDeliveryFailedRecipient(
+  { to_phone_number, from_phone_number },
+  deps = {}
+) {
+  if (!to_phone_number) return { suppress: false, reason: null };
+
+  const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
+  const now = deps.now || nowIso();
+  const since_24h = new Date(new Date(now).getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const since_7d = new Date(new Date(now).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    // Rule 1: same pair >= 2 failures in last 24 h
+    if (from_phone_number) {
+      const { count: pair_count } = await supabase_client
+        .from(SEND_QUEUE_TABLE)
+        .select("*", { count: "exact", head: true })
+        .eq("to_phone_number", to_phone_number)
+        .eq("from_phone_number", from_phone_number)
+        .eq("queue_status", "failed")
+        .eq("failed_reason", "delivery_failed")
+        .gte("updated_at", since_24h);
+
+      if ((pair_count ?? 0) >= 2) {
+        return {
+          suppress: true,
+          reason: "repeated_delivery_failed_same_pair",
+          pair_count,
+          window: "24h",
+        };
+      }
+    }
+
+    // Rule 2: same recipient >= 3 failures from any sender in last 7 days
+    const { count: recipient_count } = await supabase_client
+      .from(SEND_QUEUE_TABLE)
+      .select("*", { count: "exact", head: true })
+      .eq("to_phone_number", to_phone_number)
+      .eq("queue_status", "failed")
+      .eq("failed_reason", "delivery_failed")
+      .gte("updated_at", since_7d);
+
+    if ((recipient_count ?? 0) >= 3) {
+      return {
+        suppress: true,
+        reason: "repeated_delivery_failed_recipient",
+        recipient_count,
+        window: "7d",
+      };
+    }
+
+    return { suppress: false, reason: null };
+  } catch (err) {
+    warn("delivery_failed_suppression_check_failed", {
+      to_phone_number,
+      from_phone_number: from_phone_number || null,
+      message: err?.message || "unknown_error",
+    });
+    return { suppress: false, reason: null };
+  }
 }
 
 export async function releaseSkippedQueueRow(row, lock_token, reason, options = {}) {
@@ -2266,7 +2417,34 @@ export async function syncDeliveryEvent(payload, options = {}) {
   if (message_events_error) throw message_events_error;
 
   if (Array.isArray(message_events_data) && message_events_data.length > 0) {
-    const thread_key = message_events_data[0].thread_key;
+    const event = message_events_data[0];
+    const thread_key = event.thread_key;
+    const queue_id = event.metadata?.queue_id || event.queue_id;
+
+    // ── Reconcile send_queue status ───────────────────────────────────────────
+    if (queue_id) {
+      try {
+        const { data: queue_data, error: queue_error } = await supabase
+          .from(SEND_QUEUE_TABLE)
+          .update({
+            queue_status: delivery_status === "delivered" ? "delivered" : delivery_status,
+            updated_at: now,
+            delivered_at: delivery_status === "delivered" ? now : null,
+          })
+          .eq("id", queue_id)
+          .select();
+        
+        if (queue_error) {
+          info("delivery_webhook.queue_reconcile_failed", { queue_id, error: queue_error.message });
+        } else if (Array.isArray(queue_data) && queue_data.length > 0) {
+          info("delivery_webhook.queue_status_enriched", { queue_id, new_status: delivery_status });
+        }
+      } catch (qErr) {
+        info("delivery_webhook.queue_reconcile_exception", { queue_id, error: qErr.message });
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     if (thread_key) {
       try {
         await supabase
