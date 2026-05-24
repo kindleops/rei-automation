@@ -24,7 +24,9 @@ interface QueueCommandCenterProps {
   onCapsChange: (patch: Partial<QueueCommandCaps>) => void
   onRefresh: () => void
   onRunSafeBatch: () => void
+  onQueueMore: () => void
   onRunQueueNow: () => void
+  onEmergencyPause: () => void
   onReprocessPaused: (ids?: string[]) => void
   onRetryFailed: () => void
   onReconcileDelivery: () => void
@@ -55,17 +57,16 @@ const modeLabel = (mode: QueueCommandMode) => {
 const heroSentence = (
   health: QueueProcessorHealth | null,
   attentionCount: number,
-  mode: QueueCommandMode,
 ): string => {
   if (!health) return 'Connecting to queue processor...'
-  if (mode === 'off') {
+  if (String(health.summary || '').toLowerCase().includes('off')) {
     const q = health.queuedCount
     return q > 0 ? `Processor off — ${q} row${q !== 1 ? 's' : ''} waiting` : 'Processor off — queue clear'
   }
   if (health.status === 'critical') return `Critical — ${attentionCount} item${attentionCount !== 1 ? 's' : ''} need immediate attention`
   if (health.status === 'warning') return `Warning — ${attentionCount} item${attentionCount !== 1 ? 's' : ''} need review`
   if (attentionCount > 0) return `Healthy — ${attentionCount} item${attentionCount !== 1 ? 's' : ''} need review`
-  return 'All systems clear'
+  return health.summary || 'All systems clear'
 }
 
 export function QueueCommandCenter({
@@ -78,7 +79,9 @@ export function QueueCommandCenter({
   onCapsChange,
   onRefresh,
   onRunSafeBatch,
+  onQueueMore,
   onRunQueueNow,
+  onEmergencyPause,
   onReprocessPaused,
   onRetryFailed,
   onReconcileDelivery,
@@ -137,7 +140,7 @@ export function QueueCommandCenter({
 
         <div className={cls('qcc-health-badge', `is-${tone}`)}>
           <span className="qcc-health-badge__label">{healthLabel(status)}</span>
-          <p className="qcc-health-badge__sentence">{heroSentence(health, attentionItems.length, mode)}</p>
+          <p className="qcc-health-badge__sentence">{heroSentence(health, attentionItems.length)}</p>
         </div>
 
         <div className="qcc-hero__meta">
@@ -170,6 +173,15 @@ export function QueueCommandCenter({
         <div className="qcc-primary-actions">
           <button type="button" className="qcc-btn is-primary" onClick={onRunSafeBatch} disabled={busy}>
             {actionLoading === 'safe_batch' ? 'Running...' : 'Run Safe Batch'}
+          </button>
+          <button type="button" className="qcc-btn is-primary" onClick={onQueueMore} disabled={busy}>
+            {actionLoading === 'queue_more' ? 'Queueing...' : 'Queue More'}
+          </button>
+          <button type="button" className="qcc-btn is-primary" onClick={onRunQueueNow} disabled={busy || liveBlocked} title={liveBlocked ? 'Blocked — queue health is Critical' : undefined}>
+            {actionLoading === 'run_now' ? 'Running...' : 'Run Queue Now'}
+          </button>
+          <button type="button" className="qcc-btn is-secondary" onClick={onEmergencyPause} disabled={busy}>
+            {actionLoading === 'emergency_pause' ? 'Pausing...' : 'Emergency Pause'}
           </button>
           {/* TODO: wire secondary queue commands into Command-K */}
           <button type="button" className={cls('qcc-btn is-ghost', showAdvanced && 'is-active')} onClick={() => setShowAdvanced((v) => !v)}>

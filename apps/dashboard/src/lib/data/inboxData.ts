@@ -530,6 +530,56 @@ const normalizeHydratedCategoryCounts = (rows: AnyRecord[]): Record<HydratedInbo
 }
 
 export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> => {
+  try {
+    const metricsResult = await backendClient.getCockpitOpsMetrics('today')
+    if (metricsResult.ok && metricsResult.data?.diagnostics) {
+      const m = metricsResult.data.diagnostics
+      const statusValue = String(m.queue_processor_status || '').toLowerCase()
+      const status: QueueProcessorHealth['status'] =
+        statusValue.includes('blocked')
+          ? 'critical'
+          : statusValue.includes('idle')
+            ? 'warning'
+            : statusValue.includes('running')
+              ? 'healthy'
+              : 'unknown'
+      const sent = Number(m.sent_count || 0)
+      const failed = Number(m.failed_count || 0)
+      return {
+        checkedAt: new Date().toISOString(),
+        queuedCount: Number(m.queue_waiting_count || 0),
+        scheduledCount: Number(m.pending_count || 0),
+        sendingCount: 0,
+        sentTodayCount: sent,
+        deliveredTodayCount: Number(m.delivered_count || 0),
+        failedTodayCount: failed,
+        blockedCount: Number(m.queue_failed_today_count || 0),
+        pausedInvalidCount: 0,
+        duplicateSkippedCount: 0,
+        suppressionBlockedCount: 0,
+        blankBodyBlockedCount: 0,
+        routingBlockedCount: 0,
+        repliedBeforeSendCount: 0,
+        queuedOlderThanLagWindow: 0,
+        oldestQueuedAt: null,
+        latestSentAt: m.queue_last_run_at || null,
+        latestWebhookAt: null,
+        webhookHealthy: true,
+        processorHealthy: status === 'healthy',
+        status,
+        failedRate: sent > 0 ? (failed / sent) * 100 : null,
+        duplicateActiveCount: 0,
+        activeBlankRowCount: 0,
+        routingBlockedSpike: false,
+        liveAutopilotAllowed: statusValue !== 'off',
+        routingBlockedRows: [],
+        summary: String(m.queue_processor_status || 'Unknown processor state'),
+      }
+    }
+  } catch (error) {
+    console.warn('[QueueProcessorHealth] falling back to direct queue query', error)
+  }
+
   const supabase = getSupabaseClient()
   const checkedAt = new Date().toISOString()
   const lagCutoffIso = new Date(Date.now() - QUEUE_PROCESSOR_LAG_MINUTES * 60 * 1000).toISOString()

@@ -339,11 +339,22 @@ export const usePerformanceIntelligence = (window: TimeWindow = '7d') => {
         fetchAttributionCoverage()
       ])
 
+      const eligibleNumbers = numbers.filter((n) => Number(n.sends || 0) > 0)
+      const bestNumber: NumberPerformance | undefined =
+        eligibleNumbers.find((n) => n.performance_label === 'winner' || n.performance_label === 'stable') ||
+        [...eligibleNumbers].sort((a, b) => (a.failure_rate_pct || 0) - (b.failure_rate_pct || 0))[0]
+      let riskiestNumber: NumberPerformance | undefined =
+        eligibleNumbers.find((n) => n.performance_label === 'pause_candidate' || n.performance_label === 'risky') ||
+        [...eligibleNumbers].sort((a, b) => (b.failure_rate_pct || 0) - (a.failure_rate_pct || 0))[0]
+      if (bestNumber && riskiestNumber && bestNumber.textgrid_number_key === riskiestNumber.textgrid_number_key) {
+        riskiestNumber = eligibleNumbers.find((n) => n.textgrid_number_key !== bestNumber.textgrid_number_key)
+      }
+
       setOutliers({
         bestTemplate: templates.find(t => t.performance_label === 'winner') || templates[0],
         riskiestTemplate: templates.find(t => t.performance_label === 'pause_candidate' || t.performance_label === 'risky') || [...templates].sort((a, b) => (b.opt_out_rate_pct || 0) - (a.opt_out_rate_pct || 0))[0],
-        bestNumber: numbers.find(n => n.performance_label === 'winner' || n.performance_label === 'stable') || [...numbers].sort((a, b) => (a.failure_rate_pct || 0) - (b.failure_rate_pct || 0))[0],
-        riskiestNumber: numbers.find(n => n.performance_label === 'pause_candidate' || n.performance_label === 'risky') || [...numbers].sort((a, b) => (b.failure_rate_pct || 0) - (a.failure_rate_pct || 0))[0]
+        bestNumber,
+        riskiestNumber,
       })
       setCoverage(cov)
     } catch (err) {

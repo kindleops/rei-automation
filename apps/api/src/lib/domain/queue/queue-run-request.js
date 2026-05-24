@@ -34,6 +34,9 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
   const run_send_queue =
     deps.runSendQueue ||
     (await import("@/lib/domain/queue/run-send-queue.js")).runSendQueue;
+  const get_system_value =
+    deps.getSystemValue ||
+    (await import("@/lib/system-control.js")).getSystemValue;
   const build_podio_cooldown_skip_result =
     deps.buildPodioCooldownSkipResult || null;
   const route_logger = deps.logger;
@@ -121,9 +124,28 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       is_vercel_cron: auth.auth.is_vercel_cron,
     });
 
+    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "off").toLowerCase();
+    if (!dry_run && queue_processor_mode === "off") {
+      return json_response({
+        ok: false,
+        skipped: true,
+        reason: "queue_processor_mode_off",
+        queue_processor_mode,
+      }, { status: 423 });
+    }
+    if (!dry_run && auth.auth.is_vercel_cron && queue_processor_mode === "safe") {
+      return json_response({
+        ok: true,
+        skipped: true,
+        reason: "queue_processor_mode_safe_cron_no_auto_send",
+        queue_processor_mode,
+      }, { status: 200 });
+    }
+
     route_logger?.info?.("queue_run.before_run_send_queue", {
       limit,
       dry_run,
+      queue_processor_mode,
       dry_run_reason: dry_run ? "requested" : "disabled",
       rollout_mode: process.env.ROLLOUT_MODE || null,
       forced_dry_run: false,

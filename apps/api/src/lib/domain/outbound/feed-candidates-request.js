@@ -108,6 +108,9 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
   const require_cron_auth =
     options.requireCronAuth ||
     (await import("@/lib/security/cron-auth.js")).requireCronAuth;
+  const get_system_value =
+    options.getSystemValue ||
+    (await import("@/lib/system-control.js")).getSystemValue;
 
   try {
     let auth = require_cron_auth(request, route_logger);
@@ -147,6 +150,15 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
 
     const body = method === "POST" ? await request.json().catch(() => ({})) : {};
     const normalized = normalizeFeedCandidatesInput(mergeBodyAndQuery(request, method, body));
+    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "off").toLowerCase();
+    if (queue_processor_mode === "off") {
+      return json_response({
+        ok: false,
+        skipped: true,
+        reason: "queue_processor_mode_off",
+        route,
+      }, { status: 423 });
+    }
     feeder_request_meta = {
       route,
       dry_run: normalized.dry_run,

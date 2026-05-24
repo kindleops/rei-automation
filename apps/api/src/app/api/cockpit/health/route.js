@@ -1,4 +1,5 @@
 import { responseFromResult, ensureMutationAuth } from '../_shared.js'
+import { getCockpitHealth } from '@/lib/cockpit/cockpit-service.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 

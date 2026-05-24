@@ -92,6 +92,45 @@ export async function getSystemFlag(key, opts = {}) {
   }
 }
 
+export async function getSystemValue(key, opts = {}) {
+  const { supabase = defaultSupabase } = opts;
+  const normalized_key = clean(key);
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("value")
+      .eq("key", normalized_key)
+      .maybeSingle();
+    if (error) {
+      warn("system_control.fetch_value_error", { key: normalized_key, message: error.message });
+      return null;
+    }
+    return data ? clean(data.value) : null;
+  } catch (err) {
+    warn("system_control.fetch_value_unexpected_error", { key: normalized_key, message: err?.message });
+    return null;
+  }
+}
+
+export async function setSystemValues(pairs = {}, opts = {}) {
+  const { supabase = defaultSupabase } = opts;
+  const entries = Object.entries(pairs)
+    .map(([key, value]) => ({ key: clean(key), value: clean(value) }))
+    .filter((row) => row.key);
+  if (entries.length === 0) return { ok: true, updated: 0 };
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .upsert(entries, { onConflict: "key" })
+    .select("key,value,updated_at");
+  if (error) {
+    warn("system_control.set_values_error", { message: error.message, count: entries.length });
+    return { ok: false, error };
+  }
+  entries.forEach((row) => _cache.delete(row.key));
+  return { ok: true, updated: data?.length || 0, rows: data || [] };
+}
+
 /**
  * Fetch multiple flags in a single query.
  *

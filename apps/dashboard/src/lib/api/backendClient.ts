@@ -217,6 +217,47 @@ export function getQueueStatus(params?: { market?: string; limit?: number }): Pr
   return callBackend<QueueStatusResponse>(`/api/cockpit/queue/status${qs}`)
 }
 
+export interface CockpitOpsSenderPerformance {
+  sender: string
+  sent_count: number
+  delivered_count: number
+  failed_count: number
+  inbound_reply_count: number
+  opt_out_count: number
+  delivery_rate: number
+  failure_rate: number
+  reply_rate: number
+  opt_out_rate: number
+}
+
+export interface CockpitOpsMetrics {
+  window: string
+  sent_count: number
+  delivered_count: number
+  failed_count: number
+  pending_count: number
+  queued_count: number
+  received_count: number
+  reply_rate: number
+  positive_rate: number
+  negative_rate: number
+  delivery_rate: number
+  failure_rate: number
+  opt_out_rate: number
+  queue_processor_status: string
+  queue_last_run_at: string | null
+  queue_waiting_count: number
+  queue_failed_today_count: number
+  automation_hard_failure_count: number
+  sender_performance: CockpitOpsSenderPerformance[]
+  metric_source_debug: Record<string, unknown>
+}
+
+export function getCockpitOpsMetrics(window: 'today' | '24h' | '7d' | '30d' = 'today'): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: CockpitOpsMetrics }>> {
+  const qs = new URLSearchParams({ window }).toString()
+  return callBackend(`/api/cockpit/ops/metrics?${qs}`)
+}
+
 // ---------------------------------------------------------------------------
 // Feeder dry-run (read-only preview)
 // ---------------------------------------------------------------------------
@@ -465,6 +506,14 @@ export function runQueueNow(body: Record<string, unknown> = {}): Promise<Backend
   })
 }
 
+// POST /api/cockpit/queue/auto-enqueue
+export function autoEnqueueNow(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
+  return callBackend<AnyRecord>('/api/cockpit/queue/auto-enqueue', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 // POST /api/cockpit/queue/reprocess-paused
 export function reprocessPaused(body: Record<string, unknown> = {}): Promise<BackendResult<AnyRecord>> {
   return callBackend<AnyRecord>('/api/cockpit/queue/reprocess-paused', {
@@ -494,6 +543,33 @@ export function cancelStaleFollowups(body: Record<string, unknown> = {}): Promis
   return callBackend<AnyRecord>('/api/cockpit/queue/cancel-stale-followups', {
     method: 'POST',
     body: JSON.stringify(body),
+  })
+}
+
+export interface QueueControlSettings {
+  queue_processor_mode: 'off' | 'safe' | 'live'
+  queue_daily_send_cap: string
+  queue_run_limit: string
+  queue_spacing_seconds: string
+  queue_contact_window_start: string
+  queue_contact_window_end: string
+  queue_auto_pause_failure_rate: string
+  queue_auto_pause_optout_rate: string
+  queue_market_throttle: string
+  queue_sender_throttle: string
+  queue_auto_enqueue_enabled: string
+  queue_auto_send_enabled: string
+  [key: string]: string
+}
+
+export function getQueueControlSettings(): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {
+  return callBackend('/api/cockpit/queue/control')
+}
+
+export function updateQueueControlSettings(payload: Partial<QueueControlSettings>): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {
+  return callBackend('/api/cockpit/queue/control', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

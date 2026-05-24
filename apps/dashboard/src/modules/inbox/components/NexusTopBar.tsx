@@ -34,7 +34,9 @@ interface NexusTopBarProps {
   onQueueCommandModeChange: (mode: QueueCommandMode) => void
   onQueueCommandCapsChange: (patch: Partial<QueueCommandCaps>) => void
   onRunSafeBatch: () => void
+  onQueueMore: () => void
   onRunQueueNow: () => void
+  onEmergencyPause: () => void
   onReprocessPaused: (ids?: string[]) => void
   onRetryFailed: () => void
   onReconcileDelivery: () => void
@@ -110,7 +112,9 @@ export const NexusTopBar = ({
   onQueueCommandModeChange,
   onQueueCommandCapsChange,
   onRunSafeBatch,
+  onQueueMore,
   onRunQueueNow,
+  onEmergencyPause,
   onReprocessPaused,
   onRetryFailed,
   onReconcileDelivery,
@@ -474,7 +478,9 @@ export const NexusTopBar = ({
                 onCapsChange={onQueueCommandCapsChange}
                 onRefresh={() => onRefreshQueueHealth?.()}
                 onRunSafeBatch={onRunSafeBatch}
+                onQueueMore={onQueueMore}
                 onRunQueueNow={onRunQueueNow}
+                onEmergencyPause={onEmergencyPause}
                 onReprocessPaused={onReprocessPaused}
                 onRetryFailed={onRetryFailed}
                 onReconcileDelivery={onReconcileDelivery}

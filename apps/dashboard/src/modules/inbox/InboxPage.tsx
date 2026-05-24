@@ -49,6 +49,7 @@ import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
+import { getQueueControlSettings, updateQueueControlSettings } from '../../lib/api/backendClient'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
@@ -1682,6 +1683,26 @@ export default function InboxPage() {
   }, [])
 
   useEffect(() => {
+    let active = true
+    const loadQueueControl = async () => {
+      const res = await getQueueControlSettings()
+      if (!active || !res.ok) return
+      const d = res.data?.diagnostics
+      if (!d) return
+      const mode = String(d.queue_processor_mode || 'off') as QueueCommandMode
+      if (mode === 'off' || mode === 'safe' || mode === 'live') setQueueCommandMode(mode)
+      setQueueCommandCaps((current) => ({
+        ...current,
+        sends_per_run: Math.max(1, Number(d.queue_run_limit || current.sends_per_run)),
+        max_per_number_per_day: Math.max(1, Number(d.queue_sender_throttle || current.max_per_number_per_day)),
+        max_per_market_per_hour: Math.max(1, Number(d.queue_market_throttle || current.max_per_market_per_hour)),
+      }))
+    }
+    void loadQueueControl()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
     try {
       window.localStorage.setItem('nx.queue.mode', queueCommandMode)
       window.localStorage.setItem('nx.queue.caps', JSON.stringify(queueCommandCaps))
@@ -1790,6 +1811,7 @@ export default function InboxPage() {
       if (!window.confirm('Enable Live Autopilot? This allows normal scheduled processing with production caps.')) return
     }
     setQueueCommandMode(mode)
+    void updateQueueControlSettings({ queue_processor_mode: mode })
     emitNotification({
       title: 'Queue Mode Updated',
       detail: mode === 'off' ? 'Automatic queue processing is off.' : mode === 'safe' ? 'Safe Autopilot enabled with strict caps.' : 'Live Autopilot enabled.',
@@ -1798,7 +1820,15 @@ export default function InboxPage() {
   }, [queueProcessorHealth?.liveAutopilotAllowed])
 
   const handleQueueCapsChange = useCallback((patch: Partial<QueueCommandCaps>) => {
-    setQueueCommandCaps((current) => ({ ...current, ...patch }))
+    setQueueCommandCaps((current) => {
+      const next = { ...current, ...patch }
+      void updateQueueControlSettings({
+        queue_run_limit: String(next.sends_per_run),
+        queue_sender_throttle: String(next.max_per_number_per_day),
+        queue_market_throttle: String(next.max_per_market_per_hour),
+      })
+      return next
+    })
   }, [])
 
   const handleRunSafeBatch = useCallback(() => (
@@ -1822,6 +1852,38 @@ export default function InboxPage() {
       },
     })
   ), [queueCommandCaps, queueCommandMode, runQueueCommand])
+
+  const handleQueueMoreNow = useCallback(() => (
+    runQueueCommand('queue_more', '/api/cockpit/queue/auto-enqueue', {
+      body: {
+        candidate_source: 'v_sms_ready_contacts',
+        target_count: Math.max(25, queueCommandCaps.sends_per_run * 2),
+        scan_limit: 1000,
+        respect_contact_window: true,
+        mode: queueCommandMode,
+      },
+      successTitle: 'Auto Queue Completed',
+      successDetail: (payload) => {
+        const d = payload?.diagnostics ?? {}
+        return `${d.queued_count ?? 0} queued • ${d.scanned_count ?? 0} scanned • ${d.passes ?? 0} passes.`
+      },
+    })
+  ), [queueCommandCaps.sends_per_run, queueCommandMode, runQueueCommand])
+
+  const handleEmergencyPause = useCallback(async () => {
+    setQueueCommandMode('off')
+    await updateQueueControlSettings({
+      queue_processor_mode: 'off',
+      queue_auto_send_enabled: 'false',
+      queue_auto_enqueue_enabled: 'false',
+    })
+    emitNotification({
+      title: 'Emergency Pause Enabled',
+      detail: 'Queue processor mode set to off and auto controls paused.',
+      severity: 'warning',
+    })
+    await refreshQueueHealth()
+  }, [refreshQueueHealth])
 
   const handleReprocessPaused = useCallback((ids?: string[]) => (
     runQueueCommand(ids?.length ? `retry_routing:${ids[0]}` : 'reprocess_paused', '/api/cockpit/queue/reprocess-paused', {
@@ -3202,7 +3264,9 @@ export default function InboxPage() {
         onQueueCommandModeChange={handleQueueCommandModeChange}
         onQueueCommandCapsChange={handleQueueCapsChange}
         onRunSafeBatch={handleRunSafeBatch}
+        onQueueMore={handleQueueMoreNow}
         onRunQueueNow={handleRunQueueNow}
+        onEmergencyPause={handleEmergencyPause}
         onReprocessPaused={handleReprocessPaused}
         onRetryFailed={handleRetryFailedQueue}
         onReconcileDelivery={handleReconcileDelivery}
