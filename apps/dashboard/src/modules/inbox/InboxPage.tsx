@@ -46,6 +46,7 @@ import {
   toThreadMessage,
   HYDRATED_INBOX_THREADS_VIEW,
 } from '../../lib/data/inboxData'
+import { resolveThreadPrimaryName } from './inbox-ui-helpers'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
@@ -3307,6 +3308,29 @@ export default function InboxPage() {
       )}
     >
       <InboxDiagnosticsBanner debugInfo={diagnosticsStats} />
+      {/* FRONTEND CONTRACT RENDER PROOF DEBUG STRIP */}
+      <div style={{
+        background: '#e0f2fe',
+        border: '1px solid #0284c7',
+        color: '#0369a1',
+        padding: '8px 16px',
+        fontSize: '12px',
+        fontFamily: 'monospace',
+        zIndex: 9999,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px'
+      }}>
+        <div style={{ fontWeight: 'bold' }}>🔍 INBOX CONTRACT RENDER PROOF</div>
+        <div><b>Build Commit:</b> {import.meta.env.VITE_COMMIT_SHA || 'c0f982b'}</div>
+        <div><b>Backend URL:</b> {import.meta.env.VITE_BACKEND_API_URL || 'unknown'}</div>
+        <div><b>Active Endpoint:</b> /api/cockpit/inbox/threads</div>
+        <div><b>Fetch Status:</b> {data.liveFetchStatus}</div>
+        <div><b>Threads Loaded:</b> {data.threads?.length || 0}</div>
+        <div><b>First Thread API Name:</b> {(data.threads?.[0] as any)?.prospect_full_name || 'missing'}</div>
+        <div><b>First Thread Rendered Name:</b> {data.threads?.[0] ? resolveThreadPrimaryName(toWorkflowThread(data.threads[0])) : 'missing'}</div>
+      </div>
       {/* DEV ERROR BANNER */}
       {DEV && data.liveFetchError && (
         <div style={{
