@@ -54,6 +54,7 @@ import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisiti
 import { AgentsPage } from '../modules/agents/AgentsPage'
 import { loadAgents } from '../modules/agents/agents.adapter'
 import type { AgentsModel } from '../modules/agents/agents.adapter'
+import { MobileCommandCenter } from '../modules/mobile/MobileCommandCenter'
 
 interface AppRoute<TData> {
   path: string
@@ -294,6 +295,13 @@ const agentsRoute = defineRoute<AgentsModel>({
   render: (data) => <AgentsPage data={data} />,
 })
 
+const mobileRoute = defineRoute<null>({
+  path: '/mobile',
+  title: 'NEXUS | Mobile Command Center',
+  loader: async () => null,
+  render: () => <MobileCommandCenter />,
+})
+
 const routes = [
   homeRoute,
   agentsRoute,
@@ -325,6 +333,7 @@ const routes = [
   watchlistsRoute,
   queueRoute,
   dossierRoute,
+  mobileRoute,
 ]
 
 export const resolveRoute = (path: string) =>
