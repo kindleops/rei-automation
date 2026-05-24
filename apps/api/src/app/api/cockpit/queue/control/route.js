@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server.js'
-import { ensureMutationAuth } from '../../_shared.js'
+import { ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shared.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 
 export const runtime = 'nodejs'

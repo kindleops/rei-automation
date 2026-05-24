@@ -46,13 +46,18 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
     }
     const prevBaseline = 0
 
+    const formatNumber = (value: number | undefined | null, digits = 1): string => {
+      const n = Number(value)
+      return Number.isFinite(n) ? n.toFixed(digits) : "0.0"
+    }
+
     const messaging: OperationalKpi[] = [
-      { id: 'reply-rate', label: 'Reply Rate', value: metrics.reply_rate.toFixed(1), unit: '%', description: 'Inbound replies / delivered outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.reply_rate, prevBaseline), status: metrics.reply_rate > 15 ? 'good' : 'warning' },
-      { id: 'pos-reply-rate', label: 'Positive Rate', value: metrics.positive_rate.toFixed(1), unit: '%', description: 'Interested replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.positive_rate, prevBaseline), status: metrics.positive_rate > 10 ? 'good' : 'neutral' },
-      { id: 'negative-rate', label: 'Negative Rate', value: metrics.negative_rate.toFixed(1), unit: '%', description: 'Negative or blocking replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.negative_rate), status: metrics.negative_rate < 8 ? 'good' : metrics.negative_rate < 18 ? 'warning' : 'critical' },
-      { id: 'delivery-rate', label: 'Delivery Rate', value: metrics.delivery_rate.toFixed(1), unit: '%', description: 'Carrier-delivered / accepted outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.delivery_rate, prevBaseline), status: metrics.delivery_rate > 95 ? 'good' : 'critical' },
-      { id: 'failure-rate', label: 'Failure Rate', value: metrics.failure_rate.toFixed(1), unit: '%', description: 'Final provider/carrier failures', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.failure_rate), status: metrics.failure_rate < 5 ? 'good' : 'critical' },
-      { id: 'opt-out-rate', label: 'Opt-Out Rate', value: metrics.opt_out_rate.toFixed(1), unit: '%', description: 'Opt-outs across delivered sends', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.opt_out_rate), status: metrics.opt_out_rate < 3 ? 'good' : 'warning' }
+      { id: 'reply-rate', label: 'Reply Rate', value: formatNumber(metrics.reply_rate), unit: '%', description: 'Inbound replies / delivered outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.reply_rate, prevBaseline), status: metrics.reply_rate > 15 ? 'good' : 'warning' },
+      { id: 'pos-reply-rate', label: 'Positive Rate', value: formatNumber(metrics.positive_rate), unit: '%', description: 'Interested replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.positive_rate, prevBaseline), status: metrics.positive_rate > 10 ? 'good' : 'neutral' },
+      { id: 'negative-rate', label: 'Negative Rate', value: formatNumber(metrics.negative_rate), unit: '%', description: 'Negative or blocking replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.negative_rate), status: metrics.negative_rate < 8 ? 'good' : metrics.negative_rate < 18 ? 'warning' : 'critical' },
+      { id: 'delivery-rate', label: 'Delivery Rate', value: formatNumber(metrics.delivery_rate), unit: '%', description: 'Carrier-delivered / accepted outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.delivery_rate, prevBaseline), status: metrics.delivery_rate > 95 ? 'good' : 'critical' },
+      { id: 'failure-rate', label: 'Failure Rate', value: formatNumber(metrics.failure_rate), unit: '%', description: 'Final provider/carrier failures', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.failure_rate), status: metrics.failure_rate < 5 ? 'good' : 'critical' },
+      { id: 'opt-out-rate', label: 'Opt-Out Rate', value: formatNumber(metrics.opt_out_rate), unit: '%', description: 'Opt-outs across delivered sends', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.opt_out_rate), status: metrics.opt_out_rate < 3 ? 'good' : 'warning' }
     ]
 
     const volume: Array<{ id: string; label: string; value: number; tone: OperationalVolumeTone }> = [
