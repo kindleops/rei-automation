@@ -272,8 +272,10 @@ export interface CockpitOpsMetrics {
   delivered_count: number
   failed_count: number
   pending_count: number
+  queued_count_raw: number
   queued_count: number
   received_count: number
+  opt_out_count: number
   reply_rate: number
   positive_rate: number
   negative_rate: number
@@ -285,6 +287,9 @@ export interface CockpitOpsMetrics {
   queue_waiting_count: number
   queue_failed_today_count: number
   automation_hard_failure_count: number
+  threads_total: number
+  priority_threads: number
+  suppressed_threads: number
   sender_performance: CockpitOpsSenderPerformance[]
   metric_source_debug: Record<string, unknown>
 }

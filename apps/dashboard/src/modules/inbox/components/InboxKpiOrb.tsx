@@ -364,6 +364,40 @@ export const InboxKpiOrb = () => {
                 </div>
               </div>
             )}
+
+            {/* KPI Proof Strip */}
+            {kpis?.diagnostics?.metric_source_debug && (
+              <div style={{
+                margin: '16px 24px',
+                padding: '12px',
+                background: 'rgba(56, 208, 240, 0.05)',
+                border: '1px solid rgba(56, 208, 240, 0.2)',
+                borderRadius: '8px',
+                fontSize: '11px',
+                color: 'var(--nx-text-2)',
+                fontFamily: 'var(--nx-font-mono)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--nx-neon-blue)', fontWeight: 'bold' }}>
+                  <Icon name="check-circle" /> Canonical Backend Verification
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div><strong>Generated At:</strong> {new Date(kpis.diagnostics.metric_source_debug.metrics_generated_at).toLocaleString()}</div>
+                  <div><strong>Window (UTC):</strong> {new Date(kpis.diagnostics.metric_source_debug.window_start).toLocaleDateString()} - {new Date(kpis.diagnostics.metric_source_debug.window_end).toLocaleDateString()}</div>
+                  <div><strong>Backend Core:</strong> {kpis.diagnostics.metric_source_debug.backend_version}</div>
+                  <div><strong>Cache Status:</strong> {kpis.diagnostics.metric_source_debug.cached ? 'HIT' : 'MISS (Live DB)'}</div>
+                  <div><strong>Execution Time:</strong> {kpis.diagnostics.metric_source_debug.aggregation_runtime_ms}ms</div>
+                  <div><strong>Duplicates Detected:</strong> {kpis.diagnostics.metric_source_debug.duplicate_rows_detected}</div>
+                </div>
+                <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Canonical Source Tables:</div>
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <span><span style={{ color: 'var(--nx-cyan)' }}>inbox_thread_state</span> (Threads)</span>
+                    <span><span style={{ color: 'var(--nx-cyan)' }}>message_events</span> (Volumes, Rates)</span>
+                    <span><span style={{ color: 'var(--nx-cyan)' }}>send_queue</span> (Ops Health)</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <footer className="nx-orb-dashboard__footer">

@@ -25,6 +25,7 @@ export interface OperationalKpis {
     value: number
     tone: 'good' | 'warning' | 'critical' | 'neutral'
   }>
+  diagnostics?: any
   lastUpdated: string
 }
 
@@ -72,14 +73,14 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
       { id: 'queue-failed', label: 'Queue Failures', value: metrics.queue_failed_today_count, description: 'Failed send_queue rows (ops failures)', category: 'automation', timeWindow, isAvailable: true, status: metrics.queue_failed_today_count > 0 ? 'critical' : 'good' }
     ]
 
-    const noVerifiedData = metrics.metric_source_debug?.message_rows === 0
+    const noVerifiedData = metrics.sent_count === 0 && metrics.received_count === 0
     const quality: OperationalKpi[] = [
-      { id: 'hot-leads', label: 'Hot Leads', value: noVerifiedData ? 'No verified data yet' : 0, description: 'Threads flagged with high intent', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: 'neutral' },
-      { id: 'avg-acq-score', label: 'Avg Acq Score', value: noVerifiedData ? 'No verified data yet' : '0', description: 'Mean acquisition score across inbox', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: 'neutral' }
+      { id: 'hot-leads', label: 'Priority Leads', value: noVerifiedData ? 'No verified data yet' : metrics.priority_threads, description: 'Threads flagged with high priority or hot intent', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: metrics.priority_threads > 0 ? 'good' : 'neutral' },
+      { id: 'suppressed', label: 'Suppressed', value: noVerifiedData ? 'No verified data yet' : metrics.suppressed_threads, description: 'Threads actively suppressed from outreach', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: 'neutral' }
     ]
 
     const pipeline: OperationalKpi[] = [
-      { id: 'underwrites', label: 'Total Underwrites', value: 'No verified data yet', description: 'Awaiting verified underwriting source rows', category: 'pipeline', timeWindow, isAvailable: false, status: 'neutral' },
+      { id: 'underwrites', label: 'Total Threads', value: metrics.threads_total, description: 'Total conversations across all inbox states', category: 'pipeline', timeWindow, isAvailable: true, status: 'neutral' },
       { id: 'offers-ready', label: 'Offers Ready', value: 'No verified data yet', description: 'Awaiting verified offer source rows', category: 'pipeline', timeWindow, isAvailable: false, status: 'neutral' }
     ]
 
@@ -98,6 +99,7 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
       pipeline,
       financial,
       volume,
+      diagnostics: metrics,
       lastUpdated: new Date().toISOString()
     }
   } catch (err) {
