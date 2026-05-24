@@ -1681,12 +1681,11 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
   const bestPhone = asString(row['best_phone'] ?? row['phone'] ?? row['canonical_e164'] ?? row['seller_phone'] ?? row['phoneNumber'], '')
   const sellerPhone = normalizePhone(bestPhone)
   
-  const prospectName = asString(row['prospect_name'], '')
-  const ownerName = asString(row['owner_name'], '')
-  const firstName = asString(row['first_name'], '')
-  const ownerDisplayName = prospectName || ownerName || firstName || (bestPhone ? formatDisplayPhone(bestPhone) : 'Unknown Owner')
+  const prospectName = asString(row['prospect_full_name'] ?? row['prospect_name'], '')
+  const firstName = asString(row['prospect_first_name'] ?? row['first_name'], '')
+  const ownerDisplayName = prospectName || firstName
   
-  const propertyAddressFull = asString(row['property_address_full'] ?? row['address'] ?? row['propertyAddressFull'], 'No Address')
+  const propertyAddressFull = asString(row['property_address_full'] ?? row['address'] ?? row['propertyAddressFull'], '')
   const latestMessageBody = asString(
     row['latest_message_body'] ??
     row['latest_inbound_message_body'] ??
@@ -1696,7 +1695,7 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
     row['message_body'] ??
     row['latest_outbound_message_body'] ??
     row['latest_outbound_body'],
-    'No recent message',
+    '',
   )
   
   const uiIntent = normalizeStatus(row['detected_intent'] ?? row['ui_intent'] ?? row['uiIntent'] ?? 'needs_review')
@@ -1743,7 +1742,7 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
     deliveryStatus: queueStatus,
     failureReason: asString(row['failure_reason'] ?? row['failureReason'] ?? row['error_message'], ''),
     isOptOut: asBoolean(row['is_opt_out'] ?? row['isOptOut'], false),
-    propertyAddress: propertyAddressFull !== 'No Address' ? propertyAddressFull : undefined,
+    propertyAddress: propertyAddressFull || undefined,
     propertyAddressFull,
     market: asString(row['market'] ?? row['marketName'] ?? row['market_id'], 'unknown'),
     marketName: asString(row['market_name'] ?? row['marketName'] ?? row['market'], ''),
@@ -2491,24 +2490,16 @@ export const getInboxThreads = async (
     const latestDirection = normalizeMessageDirection({ direction: row.latest_direction })
     const unreadCount = Math.max(0, asNumber(row.unread_count, latestDirection === 'inbound' && !asBoolean(row.is_read, false) ? 1 : 0))
 
-    // Fallback display name order:
-    // 1. prospect_full_name
-    // 2. owner_display_name
-    // 3. seller_display_name
-    // 4. seller_phone
-    // 5. thread_key
+    // Canonical display identity must come from prospects.full_name.
     const sellerPhone = asString(row.best_phone || row.seller_phone || row.canonical_e164 || row.phone, '')
     const canonicalE164 = asString(row.canonical_e164 || sellerPhone, '')
     const bestPhone = sellerPhone
     const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
     
     const ownerDisplayName = [
-      asString(row.prospect_full_name || row.prospect_name || row.first_name, ''),
-      asString(row.owner_display_name || row.owner_name, ''),
-      asString(row.seller_display_name || row.seller_name, ''),
-      displayPhone || '',
-      asString(row.thread_key, ''),
-    ].find(v => v && v.trim()) || 'Unknown Owner'
+      asString(row.prospect_full_name, ''),
+      asString(row.prospect_first_name || row.first_name, ''),
+    ].find(v => v && v.trim()) || ''
 
     // Fallback address order:
     // 1. property_address_full
@@ -2518,14 +2509,14 @@ export const getInboxThreads = async (
     const address = [
       asString(row.property_address_full, ''),
       asString(row.property_address, ''),
-    ].find(v => v && v.trim()) || 'Unknown Property'
+    ].find(v => v && v.trim()) || ''
     
     // filter_market comes from v_inbox_enriched (properties.market); fall back to
     // the view's own market field which comes from message_events and is usually 'unknown'.
     const market = asString(row.filter_market ?? (row.market !== 'unknown' ? row.market : null), '') || asString(row.market, '')
-    const marketLabel = (market && market !== 'unknown' && market !== 'Unknown') ? market : 'Unknown Market'
+    const marketLabel = (market && market !== 'unknown' && market !== 'Unknown') ? market : ''
     
-    const latestBody = asString(row.latest_message_body, '') || 'No recent message'
+    const latestBody = asString(row.latest_message_body, '')
     const propertyType = asString(row.property_type, '')
     const propertyClass = asString(row.property_class, '')
     const queueStatus = normalizeStatus(row.queue_status ?? '')

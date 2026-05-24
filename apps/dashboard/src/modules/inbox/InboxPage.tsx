@@ -590,23 +590,22 @@ export default function InboxPage() {
       return Number.isFinite(ts) && ts >= startOfDay && String(thread.deliveryStatus || '').toLowerCase() === 'delivered'
     }).length
 
-    // Prefer server-side counts from inbox_category_counts view (full DB totals) over
-    // local counts (which only reflect the 200 loaded threads).
+    // Canonical counts come from backend contract (/api/cockpit/inbox/threads).
     const srv = data.counts ?? {}
-    const sv = (key: string, fallback: number) => {
+    const sv = (key: string) => {
       const v = srv[key]
-      return (typeof v === 'number' && v >= 0) ? v : fallback
+      return (typeof v === 'number' && v >= 0) ? v : 0
     }
-    const newReplies = sv('new_inbound', sv('needs_reply', local.new_replies))
-    const hotLeads   = sv('hot_leads',   sv('positive_hot', local.hot_leads))
-    const needsReview = sv('needs_review', sv('manual_review', local.needs_review))
-    const automated  = sv('automated',   sv('auto_replied', local.automated))
-    const coldNoResp = sv('cold_no_response', sv('missing_context', local.cold ?? local.cold_no_response))
-    const suppressed = sv('dnc_opt_out', sv('suppressed', local.suppressed))
-    const allCount   = sv('all', data.allInboxCount ?? local.all)
-    const priorityCount = sv('priority', local.priority ?? hotLeads)
-    const followUpCount = local.follow_up ?? local.follow_up_due ?? 0
-    const activeCount   = sv('active', automated + sv('outbound_active', local.active))
+    const newReplies = sv('new_replies')
+    const hotLeads = sv('priority')
+    const needsReview = sv('needs_review')
+    const automated = 0
+    const coldNoResp = sv('cold')
+    const suppressed = sv('suppressed')
+    const allCount = sv('all_messages')
+    const priorityCount = sv('priority')
+    const followUpCount = sv('follow_up')
+    const activeCount = Math.max(0, allCount - suppressed)
 
     return {
       ...local,
