@@ -6247,22 +6247,24 @@ export const IntelligencePanel = ({
         )}
         
         {/* Visible Dossier Proof Strip */}
-        <div style={{ background: '#111827', padding: '12px 16px', borderTop: '1px solid #374151', fontSize: '11px', fontFamily: 'monospace', color: '#9CA3AF' }}>
-          <div style={{ color: '#E5E7EB', fontWeight: 'bold', marginBottom: '8px' }}>DOSSIER PROOF STRIP</div>
-          <div>Thread Key: {thread.threadKey || thread.id}</div>
-          <div>Dossier Fetch Status: {dossierLoading ? 'Loading' : threadDossier ? 'Loaded' : 'None'}</div>
-          <div>Endpoint Called: /api/cockpit/inbox/thread-dossier?thread_key={thread.threadKey || thread.id}</div>
-          <div>Prospect Loaded: {threadDossier?.prospect ? 'Yes' : 'No'}</div>
-          <div>Property Loaded: {threadDossier?.property ? 'Yes' : 'No'}</div>
-          <div>Master Owner Loaded: {threadDossier?.master_owner ? 'Yes' : 'No'}</div>
-          <div>Message Events Count: {Array.isArray(threadDossier?.message_events) ? threadDossier?.message_events?.length : 0}</div>
-          <div>Send Queue Rows Count: {Array.isArray(threadDossier?.send_queue) ? threadDossier?.send_queue?.length : 0}</div>
-          <div>Buyer Entities Count: {Array.isArray(threadDossier?.buyer_entities) ? threadDossier?.buyer_entities?.length : 0}</div>
-          <div>Buyer Purchase Events Count: {Array.isArray(threadDossier?.buyer_purchase_events) ? threadDossier?.buyer_purchase_events?.length : 0}</div>
-          <div>Buyer Matches Count: {Array.isArray(threadDossier?.buyer_matches) ? threadDossier?.buyer_matches?.length : 0}</div>
-          <div>Recently Sold Count: {Array.isArray(threadDossier?.recently_sold) ? threadDossier?.recently_sold?.length : 0}</div>
-          <div>Failed Tables: {Array.isArray(threadDossier?.errors) && threadDossier.errors.length > 0 ? threadDossier.errors.map((e: any) => e.table || e.message || 'unknown').join(', ') : 'None'}</div>
-        </div>
+        {(import.meta.env.DEV || import.meta.env.VITE_SHOW_DEBUG === "true") && (
+          <div style={{ background: '#111827', padding: '12px 16px', borderTop: '1px solid #374151', fontSize: '11px', fontFamily: 'monospace', color: '#9CA3AF' }}>
+            <div style={{ color: '#E5E7EB', fontWeight: 'bold', marginBottom: '8px' }}>DOSSIER PROOF STRIP</div>
+            <div>Thread Key: {thread.threadKey || thread.id}</div>
+            <div>Dossier Fetch Status: {dossierLoading ? 'Loading' : threadDossier ? 'Loaded' : 'None'}</div>
+            <div>Endpoint Called: /api/cockpit/inbox/thread-dossier?thread_key={thread.threadKey || thread.id}</div>
+            <div>Prospect Loaded: {threadDossier?.prospect ? 'Yes' : 'No'}</div>
+            <div>Property Loaded: {threadDossier?.property ? 'Yes' : 'No'}</div>
+            <div>Master Owner Loaded: {threadDossier?.master_owner ? 'Yes' : 'No'}</div>
+            <div>Message Events Count: {Array.isArray(threadDossier?.message_events) ? threadDossier?.message_events?.length : 0}</div>
+            <div>Send Queue Rows Count: {Array.isArray(threadDossier?.send_queue) ? threadDossier?.send_queue?.length : 0}</div>
+            <div>Buyer Entities Count: {Array.isArray(threadDossier?.buyer_entities) ? threadDossier?.buyer_entities?.length : 0}</div>
+            <div>Buyer Purchase Events Count: {Array.isArray(threadDossier?.buyer_purchase_events) ? threadDossier?.buyer_purchase_events?.length : 0}</div>
+            <div>Buyer Matches Count: {Array.isArray(threadDossier?.buyer_matches) ? threadDossier?.buyer_matches?.length : 0}</div>
+            <div>Recently Sold Count: {Array.isArray(threadDossier?.recently_sold) ? threadDossier?.recently_sold?.length : 0}</div>
+            <div>Failed Tables: {Array.isArray(threadDossier?.errors) && threadDossier.errors.length > 0 ? threadDossier.errors.map((e: any) => e.table || e.message || 'unknown').join(', ') : 'None'}</div>
+          </div>
+        )}
 
         {threadDossier && !dossierLoading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>

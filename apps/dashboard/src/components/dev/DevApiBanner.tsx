@@ -8,6 +8,9 @@ export const DevApiBanner = () => {
     setConfig(getBackendApiConfig())
   }, [])
 
+  const isDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_DEBUG === "true"
+  if (!isDebug) return null
+
   const commitSha = import.meta.env.VITE_COMMIT_SHA || 'local'
   const buildTime = import.meta.env.VITE_BUILD_TIME || new Date().toISOString()
   const projectName = import.meta.env.VITE_VERCEL_PROJECT || 'rei-automation-dashboard'

@@ -4,7 +4,8 @@ export interface InboxDiagnosticsBannerProps {
 }
 
 export function InboxDiagnosticsBanner({ counts, diagnostics }: InboxDiagnosticsBannerProps) {
-  if (!counts && !diagnostics) return null
+  const isDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_DEBUG === "true"
+  if (!isDebug || (!counts && !diagnostics)) return null
 
   return (
     <div style={{

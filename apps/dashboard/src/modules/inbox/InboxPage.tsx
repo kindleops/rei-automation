@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread } from './inbox.adapter'
+import { preloadKpis } from '../../lib/data/operationalKpis'
 import './inbox-universal.css'
 import {
   updateThreadStage,
@@ -415,6 +416,12 @@ export default function InboxPage() {
 }
 
 function InboxPageInternal() {
+  const DEV = import.meta.env.DEV
+
+  useEffect(() => {
+    preloadKpis()
+  }, [])
+
   const { 
     data, 
     loading: dataLoading, 
@@ -3333,38 +3340,7 @@ function InboxPageInternal() {
       )}
     >
       <InboxDiagnosticsBanner counts={data.counts} diagnostics={data.diagnostics} />
-      {/* FRONTEND CONTRACT RENDER PROOF DEBUG STRIP */}
-      <div style={{
-        background: '#e0f2fe',
-        border: '1px solid #0284c7',
-        color: '#0369a1',
-        padding: '8px 16px',
-        fontSize: '12px',
-        fontFamily: 'monospace',
-        zIndex: 9999,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px'
-      }}>
-        <div style={{ fontWeight: 'bold' }}>🔍 INBOX CONTRACT RENDER PROOF</div>
-        <div><b>Build Commit:</b> {import.meta.env.VITE_COMMIT_SHA || 'c0f982b'}</div>
-        <div><b>Backend URL:</b> {import.meta.env.VITE_BACKEND_API_URL || 'unknown'}</div>
-        <div><b>Active Endpoint:</b> /api/cockpit/inbox/threads</div>
-        <div><b>Fetch Status:</b> {data.liveFetchStatus}</div>
-        <div><b>Disabled Reason:</b> {String(hookError || data.liveFetchError || 'none')}</div>
-        <div><b>Auth Ready:</b> {hasSupabaseEnv ? 'yes' : 'no'}</div>
-        <div><b>Has Backend URL:</b> {Boolean(import.meta.env.VITE_BACKEND_API_URL) ? 'yes' : 'no'}</div>
-        <div><b>Has Ops Secret:</b> {Boolean(import.meta.env.VITE_BACKEND_API_SECRET) ? 'yes' : 'no'}</div>
-        <div><b>Is Demo Mode:</b> {DEV ? 'yes' : 'no'}</div>
-        <div><b>Is Mock Mode:</b> {data.dataMode === 'mock_preview' ? 'yes' : 'no'}</div>
-        <div><b>Active Filter Key:</b> {viewFilter}</div>
-        <div><b>Active Category:</b> {stageFilter}</div>
-        <div><b>Route Ready:</b> yes</div>
-        <div><b>Threads Loaded:</b> {data.threads?.length || 0}</div>
-        <div><b>First Thread API Name:</b> {(data.threads?.[0] as any)?.prospect_full_name || 'missing'}</div>
-        <div><b>First Thread Rendered Name:</b> {data.threads?.[0] ? resolveThreadPrimaryName(toWorkflowThread(data.threads[0])) : 'missing'}</div>
-      </div>
+
 
       <NexusTopBar
         onSelectSearchResult={handleSelect}
