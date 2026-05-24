@@ -362,6 +362,7 @@ export interface InboxModel {
   orphanCount?: number
   latestFetchMs?: number
   realtimeConnected?: boolean
+  diagnostics?: Record<string, any>
 }
 
 export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {

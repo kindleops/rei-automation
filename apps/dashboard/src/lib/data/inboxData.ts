@@ -2027,6 +2027,189 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   }
 }
 
+// --- CANONICAL HYDRATION HELPER ---
+const hydrateInboxThreads = async (supabase: any, rawEvents: AnyRecord[]): Promise<{ threads: AnyRecord[], diagnostics: Record<string, any> }> => {
+  // LAYER 1: BASE MESSAGES
+  // Group events by thread_key
+  const threadsMap = new Map<string, AnyRecord>()
+  
+  for (const event of rawEvents) {
+    const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(":")
+    const key = String(event.thread_key || phones || "unknown")
+
+    if (!threadsMap.has(key)) {
+      threadsMap.set(key, {
+        thread_key: key,
+        latest_message_at: event.created_at,
+        latest_message_body: event.message_body,
+        latest_direction: event.direction,
+        unread_count: event.direction === "inbound" ? 1 : 0,
+        is_read: event.direction !== "inbound",
+        phone: event.from_phone_number !== "+10000000000" ? event.from_phone_number : event.to_phone_number,
+        best_phone: event.from_phone_number,
+        inbox_category: "hot_leads",
+        
+        master_owner_id: event.master_owner_id as string,
+        property_id: event.property_id as string,
+        prospect_id: event.prospect_id as string,
+        queue_id: event.queue_id as string,
+        textgrid_number_id: event.textgrid_number_id as string,
+        
+        seller_display_name: event.seller_display_name as string,
+        property_address: event.property_address as string,
+        market: event.market as string,
+      })
+    } else {
+      // Accumulate missing IDs from older messages in the same thread if missing
+      const t = threadsMap.get(key)!
+      t.master_owner_id = t.master_owner_id || (event.master_owner_id as string)
+      t.property_id = t.property_id || (event.property_id as string)
+      t.prospect_id = t.prospect_id || (event.prospect_id as string)
+      t.queue_id = t.queue_id || (event.queue_id as string)
+      t.textgrid_number_id = t.textgrid_number_id || (event.textgrid_number_id as string)
+      t.seller_display_name = t.seller_display_name || (event.seller_display_name as string)
+      t.property_address = t.property_address || (event.property_address as string)
+      t.market = t.market || (event.market as string)
+    }
+  }
+  
+  const threads = Array.from(threadsMap.values())
+
+  let light_hydration_success_count = 0
+  let light_hydration_failed_count = 0
+  const full_dossier_status = "deferred_to_layer_3"
+
+  let masterOwnerHydratedCount = 0
+  let propertyHydratedCount = 0
+  let prospectHydratedCount = 0
+  let missingMasterOwnerIds = 0
+  let missingPropertyIds = 0
+  let missingProspectIds = 0
+  let hydrationError: string | null = null
+
+  // LAYER 2: LIGHT THREAD SUMMARY (Enrichment)
+  try {
+    const masterOwnerIds = new Set<string>()
+    const propertyIds = new Set<string>()
+    const prospectIds = new Set<string>()
+    const queueIdsToFetch = new Set<string>()
+
+    // Collect queue_ids to recover missing IDs
+    for (const t of threads) {
+      if ((!t.master_owner_id || !t.property_id || !t.prospect_id) && t.queue_id) {
+        queueIdsToFetch.add(t.queue_id as string)
+      }
+    }
+
+    // Fetch from send_queue to recover missing IDs
+    let queueRows: Record<string, AnyRecord> = {}
+    if (queueIdsToFetch.size > 0) {
+      const { data: qData } = await supabase
+        .from("send_queue")
+        .select("id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market, current_stage, pipeline_stage, seller_status")
+        .in("id", Array.from(queueIdsToFetch))
+      
+      if (qData) {
+        for (const row of qData) {
+          queueRows[row.id as string] = row
+        }
+      }
+    }
+
+    // Apply recovered IDs
+    for (const t of threads) {
+      if (t.queue_id && queueRows[t.queue_id as string]) {
+        const q = queueRows[t.queue_id as string]
+        t.master_owner_id = t.master_owner_id || q.master_owner_id
+        t.property_id = t.property_id || q.property_id
+        t.prospect_id = t.prospect_id || q.prospect_id
+        t.textgrid_number_id = t.textgrid_number_id || q.textgrid_number_id
+        t.seller_display_name = t.seller_display_name || q.seller_display_name
+        t.property_address = t.property_address || q.property_address
+        t.market = t.market || q.market
+        t.queue_stage = q.current_stage
+        t.pipeline_stage = q.pipeline_stage
+        t.seller_status = q.seller_status
+      }
+      if (t.master_owner_id) masterOwnerIds.add(t.master_owner_id as string)
+      else missingMasterOwnerIds++
+      
+      if (t.property_id) propertyIds.add(t.property_id as string)
+      else missingPropertyIds++
+      
+      if (t.prospect_id) prospectIds.add(t.prospect_id as string)
+      else missingProspectIds++
+    }
+
+    // Fetch Master Owners, Properties, Prospects
+    const masterOwnersMap = new Map<string, AnyRecord>()
+    if (masterOwnerIds.size > 0) {
+      const { data } = await supabase.from("master_owners").select("id, display_name, final_acquisition_score").in("id", Array.from(masterOwnerIds))
+      for (const r of (data || [])) masterOwnersMap.set(r.id as string, r)
+    }
+
+    const propertiesMap = new Map<string, AnyRecord>()
+    if (propertyIds.size > 0) {
+      const { data } = await supabase.from("properties").select("property_id, property_address_full, market, property_type, estimated_repair_cost, estimated_value, equity_percent").in("property_id", Array.from(propertyIds))
+      for (const r of (data || [])) propertiesMap.set(r.property_id as string, r)
+    }
+
+    const prospectsMap = new Map<string, AnyRecord>()
+    if (prospectIds.size > 0) {
+      const { data } = await supabase.from("prospects").select("id, full_name, first_name").in("id", Array.from(prospectIds))
+      for (const r of (data || [])) prospectsMap.set(r.id as string, r)
+    }
+
+    // Merge Data
+    for (const t of threads) {
+      const mo = masterOwnersMap.get(t.master_owner_id as string)
+      const prop = propertiesMap.get(t.property_id as string)
+      const pros = prospectsMap.get(t.prospect_id as string)
+      
+      if (mo) masterOwnerHydratedCount++
+      if (prop) propertyHydratedCount++
+      if (pros) prospectHydratedCount++
+
+      t.owner_display_name = mo?.display_name || t.seller_display_name
+      t.final_acquisition_score = mo?.final_acquisition_score
+      
+      t.property_address_full = prop?.property_address_full || t.property_address
+      if (prop?.market) t.market = prop.market
+      t.property_type = prop?.property_type
+      t.estimated_repair_cost = prop?.estimated_repair_cost
+      t.estimated_value = prop?.estimated_value
+      t.equity_percent = prop?.equity_percent
+      
+      t.prospect_full_name = pros?.full_name
+      t.first_name = pros?.first_name
+    }
+
+    light_hydration_success_count = threads.length
+  } catch (err) {
+    console.error("[hydrateInboxThreads] Layer 2 Light Hydration failed:", err)
+    light_hydration_failed_count = threads.length
+    hydrationError = String(err)
+  }
+  
+  const diagnostics = {
+    base_messages_loaded: rawEvents.length,
+    threads_built_from_base: threads.length,
+    light_hydration_success_count,
+    light_hydration_failed_count,
+    full_dossier_status,
+    master_owner_hydrated_count: masterOwnerHydratedCount,
+    property_hydrated_count: propertyHydratedCount,
+    prospect_hydrated_count: prospectHydratedCount,
+    missing_master_owner_ids: missingMasterOwnerIds,
+    missing_property_ids: missingPropertyIds,
+    missing_prospect_ids: missingProspectIds,
+    hydration_error: hydrationError,
+  }
+  
+  return { threads, diagnostics }
+}
+// ------------------------------------
+
 /**
  * CANONICAL FUNCTION: Fetch both backend count and rows for a specific view.
  * Ensures parity between sidebar badges and rendered list.
@@ -2041,80 +2224,34 @@ export const getInboxRowsForView = async (
   rendered_count: number;
   has_more: boolean;
   next_cursor: string | null;
+  debugInfo?: Record<string, any>;
 }> => {
   const supabase = getSupabaseClient()
   const page_size = options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
   const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
 
-  // const viewName = options.sourceMode === 'all_sellers' 
-  //  ? 'v_seller_work_items' 
-  //  : HYDRATED_INBOX_THREADS_VIEW
-
   // TEMPORARY BYPASS: query message_events directly
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at', { count: 'exact' })
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
     .in('direction', ['inbound', 'outbound'])
     .order('created_at', { ascending: false })
     .range(offset, offset + page_size - 1)
-
-  // Apply Search/Advanced Filters (Bypassed)
-  // query = applyInboxSearchServerFilter(query, options.filters?.query)
-  // query = applyInboxAdvancedServerFilters(query, options.filters?.advanced)
-
-  // View-Specific Logic (Bypassed)
-  // if (view === ('all_inbound' as any) || view === ('inbound_all' as any)) {
-  //   query = query.gt('inbound_count', 0)
-  // } else if (view === ('archived' as any)) {
-  //   query = query.eq('is_archived', true)
-  // } else if (view === ('scheduled' as any)) {
-  //   query = query.eq('execution_state', 'scheduled')
-  // } else if (view === ('queued' as any)) {
-  //   query = query.in('execution_state', ['ready', 'active'])
-  // } else {
-  //   const categories = getHydratedCategoriesForView(view)
-  //   if (categories.length === 1) {
-  //     query = query.eq('inbox_category', categories[0])
-  //   } else if (categories.length > 1) {
-  //     query = query.in('inbox_category', categories)
-  //   }
-  // }
-
-  // Canonical Ordering: latest_message_at desc nullslast is mandatory for performance
-  // query = query.order('latest_message_at', { ascending: false, nullsFirst: false })
-
-  // query = query.range(offset, offset + page_size - 1)
 
   if (options.signal) query = query.abortSignal(options.signal)
 
   let data: AnyRecord[] = []
   let count: number | null = null
   let errorBody: string | null = null
+  let diagnostics: Record<string, any> = {}
+  
   try {
     const result = await query
     if (result.error) throw result.error
-
-    // Group by thread_key / phones
-    const threadsMap = new Map<string, AnyRecord>()
-    for (const event of (result.data || [])) {
-      const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(':')
-      const key = event.thread_key || phones || 'unknown'
-
-      if (!threadsMap.has(key)) {
-        threadsMap.set(key, {
-          thread_key: key,
-          latest_message_at: event.created_at,
-          latest_message_body: event.message_body,
-          latest_direction: event.direction,
-          unread_count: event.direction === 'inbound' ? 1 : 0,
-          is_read: event.direction !== 'inbound',
-          phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
-          best_phone: event.from_phone_number,
-          inbox_category: 'hot_leads',
-        })
-      }
-    }
-    data = Array.from(threadsMap.values())
+    
+    const hydrated = await hydrateInboxThreads(supabase, result.data || [])
+    data = hydrated.threads
+    diagnostics = hydrated.diagnostics
     count = result.count ?? null
   } catch (err) {
     errorBody = mapErrorMessage(err)
@@ -2126,7 +2263,6 @@ export const getInboxRowsForView = async (
             error: errorBody
         })
     }
-    // We do NOT throw here if we want to show a debug banner, but wait, the prompt says "Revert any recent frontend change that silently returns [] on API failure." So throwing is the right thing to do to avoid silent empty states, AND we need to show a banner on the UI.
     throw new Error(`Inbox bypass query failed: ${errorBody}`)
   }
   const rows = data.map((row, index) => normalizeInboxThread(row, offset, index))
@@ -2137,14 +2273,15 @@ export const getInboxRowsForView = async (
     rows,
     rendered_count: rows.length,
     has_more: (count ?? 0) > offset + rows.length,
-    next_cursor: (count ?? 0) > offset + rows.length ? String(offset + page_size) : null
+    next_cursor: (count ?? 0) > offset + rows.length ? String(offset + page_size) : null,
+    debugInfo: diagnostics
   }
 }
 
 export const getInboxThreads = async (
   filters: InboxThreadFilters = {},
   options: InboxFetchOptions = {},
-): Promise<{ threads: InboxThread[], totalAvailable: number }> => {
+): Promise<{ threads: InboxThread[], totalAvailable: number, debugInfo?: Record<string, any> }> => {
   const supabase = getSupabaseClient()
   const supabaseEnabled = hasSupabaseEnv && shouldUseSupabase()
   
@@ -2187,52 +2324,24 @@ export const getInboxThreads = async (
 
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at', { count: 'exact' })
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
     .in('direction', ['inbound', 'outbound'])
     .order('created_at', { ascending: false })
     .range(startOffset, startOffset + maxRows - 1)
 
-  // Temporarily bypass all filters
-  // query = applyInboxSearchServerFilter(query, filterState.query)
-  // query = applyInboxAdvancedServerFilters(query, filterState.advanced)
-  // if (viewCategories.length === 1) {
-  //   query = query.eq('inbox_category', viewCategories[0])
-  // } else if (viewCategories.length > 1) {
-  //   query = query.in('inbox_category', viewCategories)
-  // }
-
-  // if (filterState.stage && filterState.stage !== 'all_stages') {
-  //   query = query.eq('stage', filterState.stage)
-  // }
   if (options.signal) query = query.abortSignal(options.signal)
 
   let data: AnyRecord[] = []
   let queryError: string | null = null
+  let diagnostics: Record<string, any> = {}
+  
   try {
     const result = await query
     if (result.error) throw result.error
     
-    // Group by thread_key / phones
-    const threadsMap = new Map<string, AnyRecord>()
-    for (const event of (result.data || [])) {
-      const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(':')
-      const key = event.thread_key || phones || 'unknown'
-      
-      if (!threadsMap.has(key)) {
-        threadsMap.set(key, {
-          thread_key: key,
-          latest_message_at: event.created_at,
-          latest_message_body: event.message_body,
-          latest_direction: event.direction,
-          unread_count: event.direction === 'inbound' ? 1 : 0,
-          is_read: event.direction !== 'inbound',
-          phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
-          best_phone: event.from_phone_number,
-          inbox_category: 'hot_leads', // temporary dummy
-        })
-      }
-    }
-    data = Array.from(threadsMap.values())
+    const hydrated = await hydrateInboxThreads(supabase, result.data || [])
+    data = hydrated.threads
+    diagnostics = hydrated.diagnostics
   } catch (err) {
     queryError = mapErrorMessage(err)
     if (DEV) {
@@ -2243,9 +2352,6 @@ export const getInboxThreads = async (
             error: queryError
         })
     }
-    // We do NOT throw here as requested: "Revert any recent frontend change that silently returns [] on API failure."
-    // Actually we do throw here, and let the caller show the error banner. Or wait, if we bypass, it shouldn't fail.
-    // If it still fails, the UI needs to handle the error. For now, throw it so UI handles it if we implement that.
     throw new Error(`Inbox threads bypass query failed: ${queryError}`)
   }
 
@@ -2538,7 +2644,7 @@ export const getInboxThreads = async (
     })
   }
 
-  return { threads: dedupedThreads, totalAvailable: countError ? dedupedThreads.length : (totalAvailable ?? dedupedThreads.length) }
+  return { threads: dedupedThreads, totalAvailable: countError ? dedupedThreads.length : (totalAvailable ?? dedupedThreads.length), debugInfo: diagnostics }
 }
 
 export const fetchInboxMapPins = async (
@@ -2591,10 +2697,20 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const lastLiveFetchAt = new Date().toISOString()
   const filterState = options.filters || {}
   
-  const [viewResult, mapPins] = await Promise.all([
-    getInboxRowsForView((filterState.view || 'priority') as InboxViewSelectValue, options),
-    fetchInboxMapPins(filterState),
-  ])
+  let viewResult: any = { rows: [], backend_count: 0, debugInfo: {} }
+  try {
+    viewResult = await getInboxRowsForView((filterState.view || 'priority') as InboxViewSelectValue, options)
+  } catch (err) {
+    if (DEV) console.warn('[fetchInboxModel] viewResult failed', err)
+    viewResult.debugInfo = { error: String(err) }
+  }
+
+  let mapPins: LiveInboxMapPin[] = []
+  try {
+    mapPins = await fetchInboxMapPins(filterState)
+  } catch (err) {
+    if (DEV) console.warn('[fetchInboxModel] mapPins failed', err)
+  }
 
   let allInboundCount = 0
   try {
@@ -2607,7 +2723,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     if (DEV) console.warn('[fetchInboxModel] allInboundCount fetch failed', err)
   }
 
-  const { rows: threads, backend_count: totalAvailable } = viewResult
+  const { rows: threads, backend_count: totalAvailable, debugInfo } = viewResult
   let countsRows: AnyRecord[] = []
 
   try {
@@ -2631,9 +2747,9 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const suppressedThreadsCount = categoryCounts.dnc_opt_out
   const loadedCount = threads.length
   
-  const fullyHydratedCount = threads.filter((t) => t.propertyId).length
-  const partiallyHydratedCount = threads.filter((t) => !t.propertyId).length
-  const orphanCount = threads.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
+  const fullyHydratedCount = threads.filter((t: InboxThread) => t.propertyId).length
+  const partiallyHydratedCount = threads.filter((t: InboxThread) => !t.propertyId).length
+  const orphanCount = threads.filter((t: InboxThread) => !t.propertyId && !t.ownerId && !t.prospectId).length
   const latestFetchMs = 0
 
   const pageSize = options.limit ?? options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
@@ -2646,7 +2762,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     unreadCount: unreadThreadsCount,
     urgentCount: categoryCounts.hot_leads,
     totalCount: totalAvailable,
-    aiDraftCount: threads.filter((thread) => thread.aiDraft !== null).length,
+    aiDraftCount: threads.filter((thread: InboxThread) => thread.aiDraft !== null).length,
     dataMode: 'live',
     liveFetchStatus: 'active',
     liveFetchError: null,
@@ -2690,6 +2806,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     orphanCount,
     latestFetchMs,
     mapPins,
+    diagnostics: debugInfo,
   }
 }
 

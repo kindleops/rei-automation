@@ -3279,7 +3279,7 @@ export default function InboxPage() {
       )}
 
       {/* PRODUCTION DEBUG BANNER */}
-      {!DEV && (data.loadedCount === 0 || threads.length === 0) && (
+      {!DEV && (data.loadedCount === 0 || threads.length === 0 || !!data.diagnostics) && (
         <div style={{
           background: '#fff3cd',
           border: '1px solid #f5c6cb',
@@ -3293,14 +3293,18 @@ export default function InboxPage() {
           flexDirection: 'column',
           gap: '4px'
         }}>
-          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS (loadedCount=0)</div>
+          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS</div>
           <div><b>Endpoint Called:</b> message_events (bypassed {HYDRATED_INBOX_THREADS_VIEW})</div>
           <div><b>Status Code:</b> {data.liveFetchError ? 'Failed' : '200 OK'}</div>
           <div><b>Error:</b> {data.liveFetchError || 'None'}</div>
-          <div><b>Raw Row Count Before Filters:</b> {data.loadedCount ?? 0}</div>
-          <div><b>Row Count After Filters:</b> {threads.length}</div>
-          <div><b>Active Filter:</b> {viewFilter}</div>
-          <div><b>Exclusion Reason Top 5:</b> N/A (bypassed)</div>
+          <div><b>Raw Row Count Before Filters:</b> {data.diagnostics?.raw_messages_loaded ?? data.loadedCount ?? 0}</div>
+          <div><b>Row Count After Filters:</b> {data.diagnostics?.threads_built ?? threads.length}</div>
+          <div><b>Master Owners Hydrated:</b> {data.diagnostics?.master_owner_hydrated_count ?? 0}</div>
+          <div><b>Properties Hydrated:</b> {data.diagnostics?.property_hydrated_count ?? 0}</div>
+          <div><b>Prospects Hydrated:</b> {data.diagnostics?.prospect_hydrated_count ?? 0}</div>
+          <div><b>Missing Master Owners:</b> {data.diagnostics?.missing_master_owner_ids ?? 0}</div>
+          <div><b>Missing Properties:</b> {data.diagnostics?.missing_property_ids ?? 0}</div>
+          <div><b>Missing Prospects:</b> {data.diagnostics?.missing_prospect_ids ?? 0}</div>
         </div>
       )}
 
