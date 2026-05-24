@@ -2028,23 +2028,55 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
 }
 
 // --- CANONICAL HYDRATION HELPER ---
+const normalizeEventDirection = (row: any): string => {
+  const eventType = String(row.event_type || '').toLowerCase();
+  if (eventType.includes('inbound')) return 'inbound';
+  if (row.received_at) return 'inbound';
+  if (eventType.includes('outbound')) return 'outbound';
+  if (row.sent_at) return 'outbound';
+  if (row.direction && ['inbound', 'outbound'].includes(row.direction)) return row.direction;
+  return 'unknown';
+}
+
 const hydrateInboxThreads = async (supabase: any, rawEvents: AnyRecord[]): Promise<{ threads: AnyRecord[], diagnostics: Record<string, any> }> => {
   // LAYER 1: BASE MESSAGES
   // Group events by thread_key
   const threadsMap = new Map<string, AnyRecord>()
   
+  let raw_inbound_events = 0
+  let raw_outbound_events = 0
+  let normalized_inbound_events = 0
+  let normalized_outbound_events = 0
+
   for (const event of rawEvents) {
+    if (event.direction === 'inbound') raw_inbound_events++
+    if (event.direction === 'outbound') raw_outbound_events++
+
+    const normalizedDirection = normalizeEventDirection(event)
+    if (normalizedDirection === 'inbound') normalized_inbound_events++
+    if (normalizedDirection === 'outbound') normalized_outbound_events++
+    
+    let derivedThreadKey = event.thread_key
+    if (!derivedThreadKey) {
+      if (normalizedDirection === 'inbound' && event.from_phone_number && event.from_phone_number !== '+10000000000') {
+        derivedThreadKey = event.from_phone_number
+      } else if (normalizedDirection === 'outbound' && event.to_phone_number) {
+        derivedThreadKey = event.to_phone_number
+      }
+    }
+    if (!derivedThreadKey) derivedThreadKey = event.metadata?.enrichment?.thread_key || event.provider_message_sid
+
     const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(":")
-    const key = String(event.thread_key || phones || "unknown")
+    const key = String(derivedThreadKey || phones || "unknown")
 
     if (!threadsMap.has(key)) {
       threadsMap.set(key, {
         thread_key: key,
         latest_message_at: event.created_at,
         latest_message_body: event.message_body,
-        latest_direction: event.direction,
-        unread_count: event.direction === "inbound" ? 1 : 0,
-        is_read: event.direction !== "inbound",
+        latest_direction: normalizedDirection,
+        unread_count: normalizedDirection === "inbound" ? 1 : 0,
+        is_read: normalizedDirection !== "inbound",
         phone: event.from_phone_number !== "+10000000000" ? event.from_phone_number : event.to_phone_number,
         best_phone: event.from_phone_number,
         inbox_category: "hot_leads",
@@ -2191,6 +2223,14 @@ const hydrateInboxThreads = async (supabase: any, rawEvents: AnyRecord[]): Promi
     hydrationError = String(err)
   }
   
+  let threads_with_latest_inbound = 0
+  let threads_with_latest_outbound = 0
+
+  for (const t of threads) {
+    if (t.latest_direction === 'inbound') threads_with_latest_inbound++
+    if (t.latest_direction === 'outbound') threads_with_latest_outbound++
+  }
+
   const diagnostics = {
     base_messages_loaded: rawEvents.length,
     threads_built_from_base: threads.length,
@@ -2204,6 +2244,12 @@ const hydrateInboxThreads = async (supabase: any, rawEvents: AnyRecord[]): Promi
     missing_property_ids: missingPropertyIds,
     missing_prospect_ids: missingProspectIds,
     hydration_error: hydrationError,
+    raw_inbound_events,
+    raw_outbound_events,
+    normalized_inbound_events,
+    normalized_outbound_events,
+    threads_with_latest_inbound,
+    threads_with_latest_outbound,
   }
   
   return { threads, diagnostics }
@@ -2233,8 +2279,8 @@ export const getInboxRowsForView = async (
   // TEMPORARY BYPASS: query message_events directly
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
-    .in('direction', ['inbound', 'outbound'])
+    .select('thread_key, to_phone_number, from_phone_number, direction, event_type, received_at, sent_at, metadata, provider_message_sid, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
+    .or('direction.in.(inbound,outbound),event_type.in.(inbound_message,outbound_send),received_at.not.is.null,sent_at.not.is.null')
     .order('created_at', { ascending: false })
     .range(offset, offset + page_size - 1)
 
@@ -2324,8 +2370,8 @@ export const getInboxThreads = async (
 
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
-    .in('direction', ['inbound', 'outbound'])
+    .select('thread_key, to_phone_number, from_phone_number, direction, event_type, received_at, sent_at, metadata, provider_message_sid, message_body, created_at, queue_id, master_owner_id, property_id, prospect_id, textgrid_number_id, seller_display_name, property_address, market', { count: 'exact' })
+    .or('direction.in.(inbound,outbound),event_type.in.(inbound_message,outbound_send),received_at.not.is.null,sent_at.not.is.null')
     .order('created_at', { ascending: false })
     .range(startOffset, startOffset + maxRows - 1)
 

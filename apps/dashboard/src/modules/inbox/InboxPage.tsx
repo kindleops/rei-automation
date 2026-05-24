@@ -60,6 +60,8 @@ import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
+import { InboxDiagnosticsBanner } from './components/InboxDiagnosticsBanner'
+import { resolveInboxThreadState } from './resolveInboxThreadState'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
 import { CompIntelligenceWorkspace } from './components/CompIntelligenceWorkspace'
@@ -670,6 +672,40 @@ export default function InboxPage() {
       { label: 'Auto-Eligible', value: counts.automated },
     ]
   }, [resolveThreadsForView])
+
+  const diagnosticsStats = useMemo(() => {
+    let newRepliesCount = 0
+    let priorityCount = 0
+    let needsReviewCount = 0
+    const exclusionReasons: Record<string, number> = {}
+
+    for (const thread of threads) {
+      const { bucket, reasons } = resolveInboxThreadState(thread as unknown as InboxWorkflowThread)
+      
+      if (bucket === 'new_replies') newRepliesCount++
+      if (bucket === 'priority') priorityCount++
+      if (bucket === 'needs_review') needsReviewCount++
+      
+      if (bucket !== 'new_replies' && bucket !== 'priority' && bucket !== 'needs_review') {
+        for (const reason of reasons) {
+          exclusionReasons[reason] = (exclusionReasons[reason] || 0) + 1
+        }
+      }
+    }
+
+    const top5ExclusionReasons = Object.entries(exclusionReasons)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([reason, count]) => `${reason} (${count})`)
+
+    return {
+      ...(data.debugInfo || {}),
+      new_replies_count: newRepliesCount,
+      priority_count: priorityCount,
+      needs_review_count: needsReviewCount,
+      top_5_exclusion_reasons: top5ExclusionReasons.join(', ') || 'None'
+    }
+  }, [threads, data.debugInfo])
 
   const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
 
@@ -3255,6 +3291,7 @@ export default function InboxPage() {
         isCustomMultiView && 'is-multi-view-active',
       )}
     >
+      <InboxDiagnosticsBanner debugInfo={diagnosticsStats} />
       {/* DEV ERROR BANNER */}
       {DEV && data.liveFetchError && (
         <div style={{

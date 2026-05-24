@@ -84,30 +84,40 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     return { bucket: 'suppressed', reasons }
   }
 
+  // 1.5. Needs Review
+  const autoReplyStatus = str(getAny(thread, 'auto_reply_status', 'autoReplyStatus'))
+  const safetyStatus = str(getAny(thread, 'safety_status', 'safetyStatus'))
+  const needsReviewAutoReply = hasAny(autoReplyStatus, ['failed', 'needs_review', 'pending_review'])
+  const needsReviewSafety = hasAny(safetyStatus, ['review', 'blocked'])
+  const needsReviewInbound = direction.includes('inbound') && (!intent || intent === 'unknown' || intent === '')
+
+  if (needsReviewAutoReply || needsReviewSafety || needsReviewInbound) {
+    reasons.push('needs review flag (auto reply, safety, or uncategorized inbound)')
+    return { bucket: 'needs_review', reasons }
+  }
+
   // 2. New Replies
-  // Visible rows = Count. (Inbound + Unread + Not Archived).
-  if (direction.includes('inbound') && isUnread) {
-    reasons.push('inbound direction and unread')
+  const sellerStatus = str(getAny(thread, 'seller_status', 'sellerStatus'))
+  const isTerminalStatus = hasAny(sellerStatus, ['not_interested', 'no', 'wrong_number', 'dnc', 'closed'])
+  
+  if (direction.includes('inbound') && !isArchived && !suppressed && !isTerminalStatus) {
+    reasons.push('inbound direction and not suppressed/archived')
     return { bucket: 'new_replies', reasons }
   }
 
   // 3. Priority
-  // Priority: Visible rows = Count. (Active inbound engagement, high AI scores, positive keywords, active negotiation stage, or explicit priority flag).
-  const isExplicitPriority = bool(getAny(thread, 'showInPriorityInbox', 'show_in_priority_inbox', 'isPriority')) || 
-                             str(getAny(thread, 'priorityBucket', 'priority_bucket')) === 'priority'
-  const isHighScore = num(getAny(thread, 'priority_score', 'priorityScore', 'finalAcquisitionScore', 'motivationScore', 'aiScore')) >= 70
-  const isPositive = hasAny(messageBlob, ['interested', 'yes', 'make offer', 'call me', 'how much', 'price', 'offer']) || 
-                     hasAny(intent, ['seller_interested', 'price_interest'])
-  const isNegotiating = hasAny(stage, ['offer_requested', 'offer_ready', 'contract_ready', 'underwriting', 'price_discussion'])
+  const priorityLevel = str(getAny(thread, 'priority'))
+  const risk = str(getAny(thread, 'risk'))
+  const isPriorityIntent = hasAny(intent, ['positive_interest', 'price_provided', 'asks_question', 'wants_offer'])
+  const isPriorityLevel = hasAny(priorityLevel, ['high', 'urgent'])
+  const isPriorityRisk = risk === 'needs_review'
   
-  // Note: Priority bucket typically requires the latest direction to be inbound, or user specifically starred/prioritized it
+  const isPriority = direction.includes('inbound') || isPriorityIntent || isPriorityLevel || isPriorityRisk || needsReviewAutoReply
   const isExplicitNegative = hasAny(messageBlob, ['not interested', 'no thanks', 'stop texting', 'wrong number']) ||
-    hasAny(intent, ['not_interested', 'wrong_number', 'opt_out'])
-  if (!isExplicitNegative && (isExplicitPriority || isHighScore || (direction.includes('inbound') && (isPositive || isNegotiating)))) {
-    if (isExplicitPriority) reasons.push('explicit priority flag')
-    if (isHighScore) reasons.push('high priority score')
-    if (isPositive) reasons.push('positive keywords/intent')
-    if (isNegotiating) reasons.push('negotiation stage')
+    hasAny(intent, ['not_interested', 'wrong_number', 'opt_out']) || isTerminalStatus
+    
+  if (isPriority && !isExplicitNegative && !isArchived && !suppressed) {
+    reasons.push('priority flags/intent')
     return { bucket: 'priority', reasons }
   }
 
