@@ -378,7 +378,7 @@ export const InboxKpiOrb = () => {
                 fontFamily: 'var(--nx-font-mono)'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--nx-neon-blue)', fontWeight: 'bold' }}>
-                  <Icon name="check-circle" /> Canonical Backend Verification
+                  <Icon name="check" /> Canonical Backend Verification
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <div><strong>Generated At:</strong> {new Date(kpis.diagnostics.metric_source_debug.metrics_generated_at).toLocaleString()}</div>

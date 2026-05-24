@@ -47,12 +47,11 @@ import {
   toThreadMessage,
 } from '../../lib/data/inboxData'
 import { ErrorBoundary } from '../../shared/ErrorBoundary'
-import { resolveThreadPrimaryName } from './inbox-ui-helpers'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
-import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
+import { getSupabaseClient } from '../../lib/supabaseClient'
 import { getQueueControlSettings, updateQueueControlSettings, getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
@@ -425,14 +424,12 @@ function InboxPageInternal() {
   const { 
     data, 
     loading: dataLoading, 
-    error: hookError,
-    refresh: refreshInbox, 
-    loadMore, 
+    refresh: refreshInbox,
+    loadMore,
     recentlyUpdatedThreadIds,
     sourceMode,
     setSourceMode
   } = useInboxData()
-  const DEV = Boolean(import.meta.env.DEV)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [activeContext, setActiveContextState] = useState<ActiveInboxContext>({ sourceView: 'inbox' })

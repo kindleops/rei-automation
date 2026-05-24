@@ -151,7 +151,7 @@ const setupGlobalRealtime = () => {
     }
   }
 
-  const messageSub = supabase
+  supabase
     .channel('kpi-engine-messages')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, (payload: any) => {
       const newRow = payload.new
@@ -180,7 +180,7 @@ const setupGlobalRealtime = () => {
       Object.values(globalLiveStore).forEach(store => store.realtimeConnected = connected)
     })
 
-  const queueSub = supabase
+  supabase
     .channel('kpi-engine-queue')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, (payload: any) => {
       const newRow = payload.new
@@ -208,7 +208,7 @@ const setupGlobalRealtime = () => {
     })
     .subscribe()
 
-  const threadSub = supabase
+  supabase
     .channel('kpi-engine-threads')
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_thread_state' }, (payload: any) => {
       const newRow = payload.new
