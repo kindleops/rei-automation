@@ -2,9 +2,17 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../_shared.js'
 import { supabase, hasSupabaseConfig } from '@/lib/supabase/client.js'
 import { getSystemFlags } from '@/lib/system-control.js'
+import { getCorsHeaders } from '@/lib/cors.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+export async function OPTIONS(request) {
+  return new NextResponse(null, {
+    status: 204,
+    headers: getCorsHeaders(request),
+  })
+}
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -240,6 +248,6 @@ export async function GET(request) {
     },
   }
 
-  return NextResponse.json({ ok: true, action: 'ops-metrics', diagnostics: response }, { status: 200 })
+  return NextResponse.json({ ok: true, action: 'ops-metrics', diagnostics: response }, { status: 200, headers: getCorsHeaders(request) })
 }
 
