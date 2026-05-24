@@ -31,8 +31,6 @@
     "proof:no-repeated-questions": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/no-repeated-questions.proof.mjs",
     "proof:stage-progression": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/stage-progression.proof.mjs",
     "proof:seller-temperature": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/seller-temperature.proof.mjs",
-    "proof:identity": "node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/proof-identity-guard.js",
-    "audit:identity": "node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/audit-identity-mismatches.js",
     "start": "next start",
     "discord:register": "node scripts/register-discord-commands.mjs"
   },
@@ -50,5 +48,10 @@
   },
   "engines": {
     "node": ">=18.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "@types/react": "^19.2.15",
+    "typescript": "^6.0.3"
   }
 }
