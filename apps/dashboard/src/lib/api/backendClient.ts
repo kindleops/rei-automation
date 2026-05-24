@@ -433,7 +433,21 @@ export function fetchLiveInbox(
   queryString: string,
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
-  return callBackend(`/api/cockpit/inbox/live?${queryString}`, { signal })
+  return callBackend(`/api/cockpit/inbox/threads?${queryString}`, { signal })
+}
+
+export function fetchInboxThreadMessages(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/thread-messages?${queryString}`, { signal })
+}
+
+export function fetchInboxThreadDossier(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/thread-dossier?${queryString}`, { signal })
 }
 
 // GET /api/internal/dashboard/nexus — live dashboard model.

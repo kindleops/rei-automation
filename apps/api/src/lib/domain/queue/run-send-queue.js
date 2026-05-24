@@ -130,6 +130,7 @@ export async function runSendQueue(
   const results = [];
   let sent_count = 0;
   let failed_count = 0;
+  let skipped_count = 0;
   let processed_count = 0;
 
   // 3. Process rows with row-level atomic claims
@@ -169,17 +170,22 @@ export async function runSendQueue(
         const result = await process_item(claimed, { ...deps, now, supabaseClient: supabase });
         processed_count += 1;
         
-        if (result.ok) {
+        if (result?.sent) {
             sent_count += 1;
-            results.push({ ok: true, queue_item_id });
+            results.push({ ok: true, queue_item_id, outcome: "sent", reason: result?.reason || null });
             log_info("queue_row_processed", { queue_item_id, status: 'sent' });
+        } else if (result?.skipped) {
+            skipped_count += 1;
+            results.push({ ok: true, queue_item_id, outcome: "skipped", reason: result?.reason || "skipped" });
+            log_info("queue_row_skipped", { queue_item_id, reason: result?.reason || "skipped" });
         } else {
             failed_count += 1;
-            results.push({ ok: false, queue_item_id, reason: result.reason });
-            log_warn("queue_row_failed", { queue_item_id, reason: result.reason });
+            results.push({ ok: true, queue_item_id, outcome: "failed", reason: result?.reason || "send_failed" });
+            log_warn("queue_row_failed", { queue_item_id, reason: result?.reason || "send_failed" });
         }
     } catch (err) {
         failed_count += 1;
+        results.push({ ok: true, queue_item_id, outcome: "failed", reason: err?.message || "unhandled_queue_row_error" });
         log_warn("queue_row_failed", { queue_item_id, error: err.message });
     }
   }
@@ -196,6 +202,7 @@ export async function runSendQueue(
     ok: true, 
     sent_count, 
     failed_count, 
+    skipped_count,
     claimed_count: rows.length,
     processed_count,
     results,

@@ -13,6 +13,7 @@ import {
   checkBlacklistPriorFailure,
   shouldSuppressDeliveryFailedRecipient,
 } from "@/lib/supabase/sms-engine.js";
+import { classifyQueueBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
 
 const logger = child({ module: "domain.inbox.send_now_service" });
 
@@ -260,9 +261,11 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
     return {
       ok: false,
-      status: 400,
+      status: 200,
       error: validation.error,
       queue_created: false,
+      queue_row_id: null,
+      handled: true,
     };
   }
 
@@ -288,9 +291,11 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       });
       return {
         ok: false,
-        status: 423,
+        status: 200,
         error: "provider_blacklist_pair",
         queue_created: false,
+        queue_row_id: null,
+        handled: true,
         reason: blacklist_check.reason,
       };
     }
@@ -313,9 +318,11 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       });
       return {
         ok: false,
-        status: 423,
+        status: 200,
         error: "recent_delivery_failures",
         queue_created: false,
+        queue_row_id: null,
+        handled: true,
         reason: suppression_check.reason,
       };
     }
@@ -370,13 +377,15 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
   return {
     ok: queue_result?.ok !== false,
-    status: queue_result?.ok !== false ? 200 : 400,
+    status: 200,
     error: queue_result?.ok !== false
       ? null
       : (queue_result?.reason || "queue_insert_failed"),
     queue_created: queue_result?.ok !== false,
+    queue_row_id: queue_result?.queue_row_id || queue_result?.item_id || null,
     queue_id: queue_result?.queue_id || queue_id,
     queue_key: normalized.queue_key,
+    failure: queue_result?.ok !== false ? null : classifyQueueBusinessOutcome({ reason: queue_result?.reason }),
     result: queue_result,
   };
 }

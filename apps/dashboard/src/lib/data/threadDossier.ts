@@ -1,3 +1,5 @@
+import { fetchInboxThreadDossier } from '../api/backendClient'
+
 export interface ThreadDossier {
   thread_key: string
   resolvedIds: {
@@ -22,10 +24,8 @@ export interface ThreadDossier {
 }
 
 export async function fetchThreadDossier(thread_key: string): Promise<ThreadDossier> {
-  const res = await fetch(`/api/cockpit/inbox/thread-dossier?thread_key=${encodeURIComponent(thread_key)}`)
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error((body as any)?.error ?? `HTTP ${res.status}`)
-  }
-  return res.json() as Promise<ThreadDossier>
+  const qs = new URLSearchParams({ thread_key }).toString()
+  const result = await fetchInboxThreadDossier(qs)
+  if (!result.ok) throw new Error(result.message || result.error || `HTTP ${result.status}`)
+  return result.data as ThreadDossier
 }

@@ -12,6 +12,7 @@ import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import { updateContactOutreachState } from "@/lib/domain/outreach/outreach-service.js";
+import { classifyQueueBusinessOutcome, isHandledBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -707,8 +708,7 @@ export async function claimSendQueueRow(row, deps = {}) {
       processing_run_id,
       run_started_at,
       claimed_at: metadata.claimed_at || claimed_at,
-      claimed_by: metadata.claimed_by || "queue_runner",
-    },
+      },
     updated_at: claimed_at,
   };
 
@@ -1142,7 +1142,6 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
     market: normalized.market || null,
     thread_key,
     auto_reply_status: normalized.type === "auto_reply" ? "sent" : null,
-    auto_reply_queue_id: normalized.type === "auto_reply" ? String(normalized.id || "") : null,
     detected_intent: normalized.detected_intent || null,
     stage_before: normalized.stage_before || normalized.current_stage || null,
     stage_after: normalized.stage_after || normalized.current_stage || null,
@@ -1359,15 +1358,22 @@ export async function writeOutboundFailureMessageEvent(row, error, options = {})
   // the DB write is real or injected via options — telemetry is a side-effect
   // that applies in all cases.
   const normalized_for_sentry = normalizeSendQueueRow(row);
-  captureRouteException(error, {
-    route: "sms-engine/writeOutboundFailureMessageEvent",
-    subsystem: "sms_engine",
-    context: {
-      queue_row_id: normalized_for_sentry.id,
-      queue_key: normalized_for_sentry.queue_key,
-      master_owner_id: normalized_for_sentry.master_owner_id,
-    },
+  const handled_outcome = classifyQueueBusinessOutcome({
+    message: error?.message,
+    reason: options?.send_result?.error_message || options?.send_result?.reason,
+    code: error?.code || options?.send_result?.error_status,
   });
+  if (!handled_outcome?.handled) {
+    captureRouteException(error, {
+      route: "sms-engine/writeOutboundFailureMessageEvent",
+      subsystem: "sms_engine",
+      context: {
+        queue_row_id: normalized_for_sentry.id,
+        queue_key: normalized_for_sentry.queue_key,
+        master_owner_id: normalized_for_sentry.master_owner_id,
+      },
+    });
+  }
   addSentryBreadcrumb("sms_send", "sms_send_failed", {
     queue_row_id: normalized_for_sentry.id,
     queue_key: normalized_for_sentry.queue_key,
@@ -1385,19 +1391,21 @@ export async function writeOutboundFailureMessageEvent(row, error, options = {})
     error_message: error?.message || String(error),
   });
 
-  sendCriticalAlert({
-    title: "SMS Send Failed",
-    description: `Failed to send SMS for queue row ${normalized_for_sentry.id ?? "unknown"}`,
-    color: 0xe74c3c,
-    fields: [
-      { name: "Queue Row ID", value: String(normalized_for_sentry.id ?? "?"), inline: true },
-      { name: "Master Owner ID", value: String(normalized_for_sentry.master_owner_id ?? "?"), inline: true },
-      { name: "Touch", value: String(normalized_for_sentry.touch_number ?? "?"), inline: true },
-      { name: "Error", value: (error?.message || String(error)).slice(0, 256), inline: false },
-    ],
-    timestamp: new Date().toISOString(),
-    footer: { text: "sms_engine/writeOutboundFailureMessageEvent" },
-  });
+  if (!handled_outcome?.handled) {
+    sendCriticalAlert({
+      title: "SMS Send Failed",
+      description: `Failed to send SMS for queue row ${normalized_for_sentry.id ?? "unknown"}`,
+      color: 0xe74c3c,
+      fields: [
+        { name: "Queue Row ID", value: String(normalized_for_sentry.id ?? "?"), inline: true },
+        { name: "Master Owner ID", value: String(normalized_for_sentry.master_owner_id ?? "?"), inline: true },
+        { name: "Touch", value: String(normalized_for_sentry.touch_number ?? "?"), inline: true },
+        { name: "Error", value: (error?.message || String(error)).slice(0, 256), inline: false },
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: "sms_engine/writeOutboundFailureMessageEvent" },
+    });
+  }
 
   if (typeof options.writeOutboundFailureMessageEvent === "function") {
     return options.writeOutboundFailureMessageEvent(payload);
@@ -1426,15 +1434,17 @@ export async function writeOutboundFailureMessageEvent(row, error, options = {})
     .maybeSingle();
 
   if (insert_error) {
-    captureRouteException(insert_error, {
-      route: "sms-engine/writeOutboundFailureMessageEvent/db_write",
-      subsystem: "sms_engine",
-      context: {
-        queue_row_id: normalized_for_sentry.id,
-        queue_key: normalized_for_sentry.queue_key,
-        master_owner_id: normalized_for_sentry.master_owner_id,
-      },
-    });
+    if (!isHandledBusinessOutcome({ message: insert_error?.message, reason: insert_error?.code })) {
+      captureRouteException(insert_error, {
+        route: "sms-engine/writeOutboundFailureMessageEvent/db_write",
+        subsystem: "sms_engine",
+        context: {
+          queue_row_id: normalized_for_sentry.id,
+          queue_key: normalized_for_sentry.queue_key,
+          master_owner_id: normalized_for_sentry.master_owner_id,
+        },
+      });
+    }
     throw insert_error;
   }
   return insert_data || payload;
@@ -1484,10 +1494,15 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
   const next_retry_count = normalized.retry_count + 1;
-  const non_retryable = isNonRetryableProviderError(error);
+  const classified = classifyQueueBusinessOutcome({
+    message: error?.message,
+    reason: error?.reason || options?.send_result?.reason,
+    code: error?.code || error?.status || options?.send_result?.error_status,
+  });
+  const non_retryable = classified?.handled ? classified.retryable === false : isNonRetryableProviderError(error);
   const is_final_failure = non_retryable || next_retry_count >= normalized.max_retries;
   const error_message = clean(error?.message) || "send_failed";
-  const failure_bucket = non_retryable ? "provider_blacklist_pair" : null;
+  const failure_bucket = classified?.failure_bucket || (non_retryable ? "provider_blacklist_pair" : null);
 
   const payload = {
     queue_status: is_final_failure ? "failed" : "queued",
@@ -1503,12 +1518,15 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       provider_error: {
         message: error_message,
         status: error?.status || null,
+        code: error?.code || null,
         retryable: !is_final_failure,
         ...(non_retryable ? { non_retryable_reason: "textgrid_21610_blacklist" } : {}),
         final_queue_status: is_final_failure ? "failed" : "queued",
         recorded_at: now,
       },
-      ...(failure_bucket ? { failure_bucket, final_failure: true } : {}),
+      ...(failure_bucket ? { failure_bucket, failure_reason: classified?.reason || error_message, final_failure: true } : {}),
+      ...(classified?.reason === "invalid_to_number" ? { recipient_suppressed: true, recipient_suppression_reason: "invalid_to_number" } : {}),
+      ...(classified?.reason === "provider_blacklist_pair" ? { pair_suppressed: true, pair_suppression_reason: "provider_blacklist_pair" } : {}),
       final_queue_status: is_final_failure ? "failed" : "queued",
       finalized_at: now,
     },
@@ -2763,7 +2781,6 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     safety_status: clean(row.safety_status || "pending") || "pending",
     type: clean(row.type || "outbound") || "outbound",
     source_event_id: row.source_event_id || null,
-    inbound_message_id: clean(row.inbound_message_id) || null,
     detected_intent: clean(row.detected_intent) || null,
     stage_before: clean(row.stage_before) || null,
     stage_after: clean(row.stage_after) || null,

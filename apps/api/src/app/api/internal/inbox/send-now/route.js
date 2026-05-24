@@ -12,6 +12,8 @@ import { child } from "@/lib/logging/logger.js";
 import { requireOpsDashboardAuth } from "@/lib/security/dashboard-auth.js";
 import { createInboxSendNowQueueRow } from "@/lib/domain/inbox/send-now-service.js";
 import { getSystemFlag } from "@/lib/system-control.js";
+import { processSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
+import { classifyQueueBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +54,11 @@ export async function POST(request) {
 
     // ── Create queue row via service ─────────────────────────────────
     const result = await createInboxSendNowQueueRow(body);
+    let row_result = null;
+    const dry_run = body?.dry_run === true;
+    if (result?.queue_created && result?.queue_row_id && !dry_run) {
+      row_result = await processSendQueueItem(result.queue_row_id, { now: new Date().toISOString() });
+    }
 
     logger.info("inbox_send_now.completed", {
       ok: result.ok,
@@ -62,14 +69,35 @@ export async function POST(request) {
 
     return NextResponse.json(
       {
-        ok: result.ok,
+        ok: true,
+        handled: true,
+        outcome: result.ok ? "queued" : "blocked",
         error: result.error || null,
         queue_id: result.queue_id || null,
         queue_key: result.queue_key || null,
+        queue_row_id: result.queue_row_id || null,
+        row_result,
+        failure: result.ok ? null : {
+          reason: result.error || "send_now_blocked",
+          failure_bucket: classifyQueueBusinessOutcome({ reason: result.error })?.failure_bucket || null,
+        },
       },
-      { status: result.status }
+      { status: 200 }
     );
   } catch (error) {
+    const handled = classifyQueueBusinessOutcome({
+      message: error?.message,
+      reason: error?.reason,
+      code: error?.code || error?.status,
+    });
+    if (handled?.handled) {
+      return NextResponse.json({
+        ok: true,
+        handled: true,
+        outcome: "failed",
+        failure: handled,
+      }, { status: 200 });
+    }
     logger.error("inbox_send_now.failed", {
       error: error?.message || "unknown",
     });

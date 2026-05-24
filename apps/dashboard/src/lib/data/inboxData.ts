@@ -1775,10 +1775,12 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
   const rawMessages = safeArray(payload['messages'] as AnyRecord[])
   const rawPins = safeArray((payload['mapPins'] ?? payload['map_pins']) as AnyRecord[])
   const pagination = (payload['pagination'] ?? {}) as AnyRecord
+  const nextCursor = asString(payload['next_cursor'], '') || asString(pagination['nextCursor'] ?? pagination['next_cursor'], '')
+  const diagnostics = (payload['diagnostics'] ?? {}) as AnyRecord
   return {
     threads: rawThreads.map(normalizeLiveThread),
     messages: rawMessages.map(toThreadMessage),
-    counts: (payload['counts'] ?? {}) as Record<string, number | null | undefined>,
+    counts: (payload['counts'] ?? { all: asNumber(diagnostics['threads_built'], rawThreads.length) }) as Record<string, number | null | undefined>,
     mapPins: rawPins.map((pin, index) => ({
       id: asString(pin['id'], `pin:${index}`),
       threadKey: asString(pin['thread_key'] ?? pin['threadKey'], ''),
@@ -1792,8 +1794,8 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
     })),
     pagination: {
       cursor: asString(pagination['cursor'], '') || null,
-      nextCursor: asString(pagination['nextCursor'] ?? pagination['next_cursor'], '') || null,
-      hasMore: asBoolean(pagination['hasMore'] ?? pagination['has_more'], rawThreads.length >= fallbackLimit),
+      nextCursor: nextCursor || null,
+      hasMore: asBoolean(pagination['hasMore'] ?? pagination['has_more'], Boolean(nextCursor) || rawThreads.length >= fallbackLimit),
       limit: asNumber(pagination['limit'], fallbackLimit),
       total: Number.isFinite(Number(pagination['total'])) ? Number(pagination['total']) : null,
     },
@@ -1810,8 +1812,21 @@ export const fetchLiveInbox = async ({
   map = true,
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
+  void direction
+  void q
+  void keywordGroup
+  void map
   const params = new URLSearchParams()
-  const entries: Record<string, unknown> = { filter, direction, q, keywordGroup, cursor, limit, map: map ? '1' : '0' }
+  const tabByFilter: Record<string, string> = {
+    all: 'all_messages',
+    needs_reply: 'new_replies',
+    positive_hot: 'priority',
+    manual_review: 'needs_review',
+    auto_replied: 'follow_up',
+    outbound_only: 'cold',
+    suppressed: 'suppressed',
+  }
+  const entries: Record<string, unknown> = { tab: tabByFilter[filter] || 'all_messages', cursor, limit }
   Object.entries(entries).forEach(([key, value]) => {
     const param = toQueryParam(value)
     if (param) params.set(key, param)
@@ -1823,9 +1838,7 @@ export const fetchLiveInbox = async ({
     throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
   }
   const payload = result.data as AnyRecord
-  const normalizedPayload = asBoolean(payload['ok'], false)
-    ? ((payload['diagnostics'] as AnyRecord) ?? payload)
-    : payload
+  const normalizedPayload = payload
   return normalizeLiveInboxResponse(normalizedPayload, limit)
 }
 
@@ -3176,128 +3189,20 @@ export const getThreadMessagesForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   options: ThreadMessageFetchOptions = {},
 ): Promise<ThreadMessage[]> => {
-  const supabase = getSupabaseClient()
   const threadKey = thread.threadKey || thread.id
   if (!threadKey) return []
-
-  const pageSize = MESSAGE_EVENTS_THREAD_PAGE_SIZE
-  const maxPages = Math.max(1, options.maxPages ?? 50)
-  const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : null
-
-  const rows: AnyRecord[] = []
-  let viewErrorMessage: string | null = null
-
-  // 1. Fetch from hydrated view or message_events
-  try {
-    for (let page = 0; page < maxPages; page += 1) {
-      const { data, error } = await supabase
-        .from('inbox_messages_hydrated')
-        .select('*')
-        .eq('thread_key', threadKey)
-        .order('message_created_at', { ascending: true })
-        .range(page * pageSize, page * pageSize + pageSize - 1)
-
-      if (error) throw new Error(mapErrorMessage(error))
-
-      const batch = safeArray(data as AnyRecord[])
-      rows.push(...batch)
-      if (maxMessages !== null && rows.length >= maxMessages) break
-      if (batch.length < pageSize) break
-    }
-  } catch (error) {
-    viewErrorMessage = mapErrorMessage(error)
-    if (DEV) {
-      console.warn('[ThreadMessageHydration] inbox_messages_hydrated failed, falling back to message_events', {
-        threadKey,
-        error: viewErrorMessage,
-      })
-    }
+  const params = new URLSearchParams({
+    thread_key: threadKey,
+    limit: String(options.maxMessages && options.maxMessages > 0 ? options.maxMessages : 500),
+  })
+  const result = await backendClient.fetchInboxThreadMessages(params.toString())
+  if (!result.ok) {
+    if (DEV) console.warn('[ThreadMessagesContract] backend failed, fallback to message_events', result)
+    return getThreadMessagesFromMessageEvents(thread, options)
   }
-
-  const viewMessages = rows.map(toThreadMessage)
-  
-  if (viewMessages.length === 0) {
-    const fallbackMessages = await getThreadMessagesFromMessageEvents(thread, options)
-    viewMessages.push(...fallbackMessages)
-  }
-
-  // 2. Fetch from send_queue to show pending/approval drafts in timeline
-  try {
-    const phoneVariants = buildPhoneVariants(thread.phoneNumber || thread.canonicalE164 || '')
-    const { data: queueData } = await supabase
-      .from('send_queue')
-      .select('*')
-      .or(`to_phone_number.in.(${phoneVariants.map(v => `"${v}"`).join(',')}),queue_key.eq."${threadKey}"`)
-      .in('queue_status', ['approval', 'queued', 'scheduled', 'failed'])
-      .order('created_at', { ascending: true })
-    
-    if (queueData) {
-      const queueMessages = safeArray(queueData as AnyRecord[]).map(toThreadMessageFromQueue)
-      
-      // Deduplicate queue rows against existing message events
-      const filteredQueue = queueMessages.filter(pending => {
-        const matchingEvent = viewMessages.find(event => {
-          if (event.direction !== 'outbound') return false
-          
-          const pMeta = pending.developerMeta || {}
-          const eMeta = event.metadata || {}
-          
-          // 1. client_send_id check
-          if (pMeta.client_send_id && pMeta.client_send_id === eMeta.client_send_id) return true
-          
-          // 2. queue_id match (via event metadata)
-          if (pMeta.queue_id && pMeta.queue_id === eMeta.queue_id) return true
-
-          // 3. Provider/Message ID match
-          if (pending.id && pending.id === event.id) return true
-          
-          // 4. Temporal/Body match (within 180s)
-          const pTs = new Date(pending.createdAt).getTime()
-          const eTs = new Date(event.createdAt).getTime()
-          if (Math.abs(pTs - eTs) < 180000 && pending.body.trim() === event.body.trim()) return true
-          
-          return false
-        })
-
-        if (matchingEvent) {
-          console.debug('[InboxLifecycle] queue row hidden because matching event exists', { body: pending.body })
-          return false
-        }
-        
-        console.debug('[InboxLifecycle] queue row rendered as pending because no event exists', { body: pending.body })
-        return true
-      })
-
-      // Dedup failed rows within 5 mins
-      const finalQueue: ThreadMessage[] = []
-      const pendingSeen = new Set<string>()
-      filteredQueue.forEach(p => {
-        const key = `${p.fromNumber}:${p.toNumber}:${p.body.trim()}:${Math.floor(new Date(p.createdAt).getTime() / 300000)}`
-        if (!pendingSeen.has(key)) {
-          pendingSeen.add(key)
-          finalQueue.push(p)
-        } else {
-          console.debug('[InboxLifecycle] failed queue deduped', { body: p.body })
-        }
-      })
-
-      viewMessages.push(...finalQueue)
-    }
-  } catch (err) {
-    if (DEV) console.warn('[ThreadMessageHydration] send_queue fetch failed', err)
-  }
-
-  const mapped = dedupeMessages(viewMessages)
-
-  if (DEV) {
-    console.log('[ThreadMessageHydration]', {
-      threadKey,
-      viewRows: viewMessages.length,
-      mergedRows: mapped.length,
-    })
-  }
-
-  return mapped
+  const payload = result.data as AnyRecord
+  const rows = safeArray((payload['messages'] as AnyRecord[]) || [])
+  return dedupeMessages(rows.map(toThreadMessage))
 }
 
 

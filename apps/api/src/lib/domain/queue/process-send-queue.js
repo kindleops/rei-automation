@@ -40,6 +40,7 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
 import { isManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { classifyQueueBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -323,6 +324,25 @@ function toFailureResult(queue_row = null, error = null) {
     failed_reason: clean(error?.message) || "queue_processing_failed",
     queue_row_id,
     queue_item_id: queue_row_id,
+  };
+}
+
+function toHandledQueueOutcome(queue_row = null, outcome = {}, extras = {}) {
+  const queue_row_id = getQueueRowId(queue_row);
+  const reason = clean(outcome?.reason || extras?.reason || "handled_business_outcome");
+  const final_status = clean(extras?.final_queue_status || extras?.queue_status || "failed") || "failed";
+  return {
+    ok: true,
+    handled: true,
+    sent: false,
+    skipped: final_status === "queued" || final_status.startsWith("paused_") || final_status === "cancelled",
+    failed: final_status === "failed",
+    reason,
+    queue_status: final_status,
+    final_queue_status: final_status,
+    queue_row_id,
+    queue_item_id: queue_row_id,
+    ...extras,
   };
 }
 
@@ -1274,15 +1294,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         reason: "missing_seller_first_name",
       });
 
-      return {
-        ok: false,
-        skipped: true,
-        reason: "missing_seller_first_name",
+      return toHandledQueueOutcome(queue_row, { reason: "missing_seller_name" }, {
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
-        queue_row_id,
-        queue_item_id: queue_row_id,
-      };
+      });
     }
 
     info("queue.textgrid_send_attempt", {
@@ -1343,15 +1358,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         body_preview: String(message_fields.body || "").slice(0, 60),
       });
 
-      return {
-        ok: false,
-        skipped: true,
-        reason: "blank_greeting_before_send",
+      return toHandledQueueOutcome(queue_row, { reason: "blank_body" }, {
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
-        queue_row_id,
-        queue_item_id: queue_row_id,
-      };
+      });
     }
 
     captureSystemEvent("sms_send_started", {
@@ -1364,12 +1374,63 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       campaign_id: queue_row.metadata?.campaign_id ?? null,
     });
 
-    const send_result = await send_textgrid_sms({
-      to: message_fields.to,
-      from: message_fields.from,
-      body: message_fields.body,
-      seller_first_name,
-    });
+    let send_result;
+    try {
+      send_result = await send_textgrid_sms({
+        to: message_fields.to,
+        from: message_fields.from,
+        body: message_fields.body,
+        seller_first_name,
+      });
+    } catch (first_send_error) {
+      const first_class = classifyQueueBusinessOutcome({
+        message: first_send_error?.message,
+        reason: first_send_error?.reason || first_send_error?.data?.reason,
+        code: first_send_error?.code || first_send_error?.status,
+      });
+      const fallback_enabled =
+        (queue_row?.metadata?.content_filter_fallback_enabled ?? true) !== false;
+      const already_attempted = queue_row?.metadata?.content_filter_fallback_attempted === true;
+      if (first_class?.reason === "provider_content_filter" && fallback_enabled && !already_attempted) {
+        const fallback_body = clean(
+          queue_row?.metadata?.fallback_message_body ||
+          "Quick follow-up from our team. When is a good time to connect?"
+        );
+        queue_row = normalizeSendQueueRow({
+          ...queue_row,
+          message_body: fallback_body,
+          message_text: fallback_body,
+          metadata: {
+            ...(queue_row.metadata || {}),
+            content_filter_fallback_attempted: true,
+            content_filter_original_body: message_fields.body,
+            original_template_id: queue_row.template_id || null,
+            fallback_template_id: queue_row.metadata?.fallback_template_id || "content_filter_fallback_v1",
+          },
+        });
+        try {
+          const supabase_client = getSupabase(deps);
+          await supabase_client
+            .from(QUEUE_TABLE)
+            .update({
+              message_body: fallback_body,
+              message_text: fallback_body,
+              metadata: queue_row.metadata,
+              updated_at: now,
+            })
+            .eq("id", queue_row_id)
+            .eq("lock_token", lock_token);
+        } catch {}
+        send_result = await send_textgrid_sms({
+          to: message_fields.to,
+          from: message_fields.from,
+          body: fallback_body,
+          seller_first_name,
+        });
+      } else {
+        throw first_send_error;
+      }
+    }
 
     console.log("TEXTGRID RAW RESPONSE", send_result?.raw ?? null);
     console.log("SEND RESULT", send_result);
@@ -1524,6 +1585,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // Blank greeting errors from TextGrid guard should pause as name_missing not failed.
     const is_blank_greeting_error = /blank.*(greeting|name)|missing.*seller_first_name/i.test(error?.message || "");
     const is_blacklist_error = /21610|blacklist/i.test(error?.message || "");
+    const classified = classifyQueueBusinessOutcome({
+      message: error?.message,
+      reason: error?.reason || error?.data?.reason,
+      code: error?.code || error?.status || error?.data?.status,
+    });
     
     if (is_blank_greeting_error) {
       try {
@@ -1553,15 +1619,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       } catch (_pause_err) {
         warn("queue.blank_greeting_pause_failed", { queue_row_id });
       }
-      return {
-        ok: false,
-        skipped: true,
-        reason: "blank_greeting_textgrid_guard",
+      return toHandledQueueOutcome(queue_row, { reason: "blank_body" }, {
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
-        queue_row_id,
-        queue_item_id: queue_row_id,
-      };
+      });
     }
 
     if (is_blacklist_error) {
@@ -1600,10 +1661,19 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         });
       }
 
+      const final_queue_status = failed_row?.queue_status || "failed";
+      if (classified?.handled) {
+        return toHandledQueueOutcome(queue_row, classified, {
+          queue_status: final_queue_status,
+          final_queue_status,
+          failure_bucket: classified.failure_bucket || null,
+          retryable: classified.retryable !== false,
+        });
+      }
       return {
         ...toFailureResult(queue_row, error),
-        queue_status: failed_row?.queue_status || "failed",
-        final_queue_status: failed_row?.queue_status || "failed",
+        queue_status: final_queue_status,
+        final_queue_status,
       };
     } catch (update_error) {
       warn("queue.send.fail_update_failed", {
