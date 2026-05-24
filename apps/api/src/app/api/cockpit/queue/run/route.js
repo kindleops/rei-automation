@@ -23,14 +23,14 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}))
   const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'off').toLowerCase()
   if (configuredMode === 'off') {
-    return NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
+    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
   }
 
   const requestedMode = clean(body.mode || configuredMode || 'safe').toLowerCase()
   const runLimit = Math.max(1, Math.min(250, asNumber(body.limit ?? body.caps?.queue_run_limit, asNumber(await getSystemValue('queue_run_limit'), 50))))
   const result = await runSendQueue({ limit: runLimit, dry_run: false }, {})
 
-  return NextResponse.json({
+  return withCors(request, NextResponse.json({
     ok: result?.ok !== false,
     action: 'queue-run',
     diagnostics: {
@@ -39,10 +39,14 @@ export async function POST(request) {
       run_limit: runLimit,
       result,
       summary: {
-        sent: Number(result?.sent_count || 0),
+        sent: Number(result?.sent_count || 0)),
         failed: Number(result?.failed_count || 0),
         blocked: Number(result?.blocked_count || 0),
       },
     },
   }, { status: result?.ok === false ? 500 : 200 })
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request));
 }

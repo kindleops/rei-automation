@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server.js";
-import { ensureMutationAuth } from "../../_shared.js";
+import { ensureMutationAuth, handleOptionsResponse, withCors } from "../../_shared.js";
 import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 
 export const runtime = "nodejs";
@@ -213,9 +213,9 @@ function buildCountsFromCanonicalRows(rows) {
 
 export async function GET(request) {
   const auth = ensureMutationAuth(request);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) return withCors(request, auth.response);
   if (!hasSupabaseConfig()) {
-    return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    return withCors(request, NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 }));
   }
 
   const { searchParams } = new URL(request.url);
@@ -496,7 +496,7 @@ export async function GET(request) {
     const counts = buildCountsFromCanonicalRows(canonicalCountRows);
 
     const next_cursor = lastRawRow ? encodeCursor(lastRawRow) : null;
-    return NextResponse.json(
+    return withCors(request, NextResponse.json(
       {
         ok: true,
         threads,
@@ -505,9 +505,9 @@ export async function GET(request) {
         diagnostics,
       },
       { status: 200 }
-    );
+    ));
   } catch (error) {
-    return NextResponse.json(
+    return withCors(request, NextResponse.json(
       {
         ok: false,
         error: "inbox_threads_failed",
@@ -518,6 +518,10 @@ export async function GET(request) {
         diagnostics,
       },
       { status: 500 }
-    );
+    ));
   }
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }

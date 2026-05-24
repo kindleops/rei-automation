@@ -10,3 +10,7 @@ export async function GET(request) {
   const result = await getCockpitQueueStatus()
   return responseFromResult(result, 200)
 }
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
+}

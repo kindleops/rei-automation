@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server.js";
-import { ensureMutationAuth } from "../../_shared.js";
+import { ensureMutationAuth, handleOptionsResponse, withCors } from "../../_shared.js";
 import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getCorsHeaders } from "@/lib/cors.js";
 
@@ -26,9 +26,9 @@ export async function OPTIONS(request) {
 
 export async function GET(request) {
   const auth = ensureMutationAuth(request);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) return withCors(request, auth.response);
   if (!hasSupabaseConfig()) {
-    return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500, headers: getCorsHeaders(request) });
+    return withCors(request, NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500, headers: getCorsHeaders(request) }));
   }
 
   const { searchParams } = new URL(request.url);
@@ -92,12 +92,12 @@ export async function GET(request) {
       },
     };
 
-    return NextResponse.json({ ok: true, action: "ops-metrics", diagnostics }, { status: 200, headers: getCorsHeaders(request) });
+    return withCors(request, NextResponse.json({ ok: true, action: "ops-metrics", diagnostics }, { status: 200, headers: getCorsHeaders(request) }));
   } catch (error) {
-    return NextResponse.json({
+    return withCors(request, NextResponse.json({
       ok: false,
       error: "ops_metrics_failed",
       message: error?.message || "Unknown ops metrics error",
-    }, { status: 500, headers: getCorsHeaders(request) });
+    }, { status: 500, headers: getCorsHeaders(request) }));
   }
 }

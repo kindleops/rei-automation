@@ -10,5 +10,9 @@ export async function GET(request) {
   if (!auth.ok) return auth.response
   const { searchParams } = new URL(request.url)
   const data = await getLiveInbox(Object.fromEntries(searchParams.entries()))
-  return NextResponse.json({ ok: true, action: 'inbox-live', diagnostics: data }, { status: 200 })
+  return withCors(request, NextResponse.json({ ok: true, action: 'inbox-live', diagnostics: data }, { status: 200 })
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request));
 }

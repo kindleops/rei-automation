@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server.js";
-import { ensureMutationAuth } from "../../_shared.js";
+import { ensureMutationAuth, handleOptionsResponse, withCors } from "../../_shared.js";
 import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 
 export const runtime = "nodejs";
@@ -44,9 +44,9 @@ function normalizeDirection(row) {
 
 export async function GET(request) {
   const auth = ensureMutationAuth(request);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) return withCors(request, auth.response);
   if (!hasSupabaseConfig()) {
-    return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    return withCors(request, NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 }));
   }
 
   const { searchParams } = new URL(request.url);
@@ -55,7 +55,7 @@ export async function GET(request) {
   const cursor = parseCursor(searchParams.get("cursor"));
 
   if (!thread_key) {
-    return NextResponse.json({ ok: false, error: "missing_thread_key" }, { status: 400 });
+    return withCors(request, NextResponse.json({ ok: false, error: "missing_thread_key" }, { status: 400 }));
   }
 
   try {
@@ -79,7 +79,7 @@ export async function GET(request) {
       }))
       .sort((a, b) => new Date(a.timeline_at || 0).getTime() - new Date(b.timeline_at || 0).getTime());
 
-    return NextResponse.json({
+    return withCors(request, NextResponse.json({
       ok: true,
       thread_key,
       messages: normalized,
@@ -87,15 +87,19 @@ export async function GET(request) {
       diagnostics: {
         rows_returned: normalized.length,
       },
-    }, { status: 200 });
+    }, { status: 200 }));
   } catch (error) {
-    return NextResponse.json({
+    return withCors(request, NextResponse.json({
       ok: false,
       error: "thread_messages_failed",
       message: error?.message || "Unknown thread message error",
       thread_key,
       messages: [],
       next_cursor: null,
-    }, { status: 500 });
+    }, { status: 500 }));
   }
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }

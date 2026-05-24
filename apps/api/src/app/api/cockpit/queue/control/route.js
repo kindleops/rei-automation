@@ -65,7 +65,7 @@ export async function GET(request) {
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return auth.response
   const values = await loadSettings()
-  return NextResponse.json({ ok: true, action: 'queue-control:get', diagnostics: values }, { status: 200 })
+  return withCors(request, NextResponse.json({ ok: true, action: 'queue-control:get', diagnostics: values }, { status: 200 })
 }
 
 export async function POST(request) {
@@ -75,9 +75,13 @@ export async function POST(request) {
   const patch = parseBody(body)
   const result = await setSystemValues(patch)
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
+    return withCors(request, NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 }))
   }
   const values = await loadSettings()
-  return NextResponse.json({ ok: true, action: 'queue-control:set', diagnostics: values }, { status: 200 })
+  return withCors(request, NextResponse.json({ ok: true, action: 'queue-control:set', diagnostics: values }, { status: 200 }))
 }
 
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request));
+}

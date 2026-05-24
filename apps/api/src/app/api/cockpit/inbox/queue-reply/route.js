@@ -12,3 +12,7 @@ export async function POST(request) {
   const status = result.ok ? 200 : (result.reason === 'invalid_canonical_thread_key' ? 400 : 423)
   return responseFromResult(result, status)
 }
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
+}

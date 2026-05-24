@@ -11,3 +11,7 @@ export async function POST(request) {
   const status = result.ok ? 200 : (result.reason === 'queue_item_not_found' ? 404 : 400)
   return responseFromResult(result, status)
 }
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
+}

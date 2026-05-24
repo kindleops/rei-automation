@@ -15,7 +15,7 @@ export async function POST(request) {
     const { text, preserveNumbers = true } = await request.json();
 
     if (!text || typeof text !== 'string') {
-      return NextResponse.json({ ok: false, error: 'Invalid input' }, { status: 400 });
+      return withCors(request, NextResponse.json({ ok: false, error: 'Invalid input' }, { status: 400 }));
     }
 
     const messages = [
@@ -26,16 +26,20 @@ export async function POST(request) {
     const result = await callBigPickle(messages, { expectJson: false, temperature: 0.2 });
 
     if (!result) {
-      return NextResponse.json({ ok: false, error: 'Polish unavailable' }, { status: 500 });
+      return withCors(request, NextResponse.json({ ok: false, error: 'Polish unavailable' }, { status: 500 }));
     }
 
-    return NextResponse.json({
+    return withCors(request, NextResponse.json({
       ok: true,
       polishedText: result.trim(),
-    });
+    }));
 
   } catch (error) {
     console.error('[PolishDraft] Error:', error);
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
+    return withCors(request, NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 }));
   }
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }

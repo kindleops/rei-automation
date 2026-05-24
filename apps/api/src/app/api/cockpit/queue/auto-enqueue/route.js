@@ -31,7 +31,7 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}))
   const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'off').toLowerCase()
   if (configuredMode === 'off') {
-    return NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
+    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
   }
 
   const target_count = Math.max(1, Math.min(1000, asNumber(body.target_count, 100)))
@@ -78,7 +78,7 @@ export async function POST(request) {
     offset += scan_limit
   }
 
-  return NextResponse.json({
+  return withCors(request, NextResponse.json({
     ok: true,
     action: 'queue-auto-enqueue',
     diagnostics: {
@@ -90,5 +90,9 @@ export async function POST(request) {
       passes,
       pass_results,
     },
-  }, { status: 200 })
+  }, { status: 200 }))
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request));
 }
