@@ -51,7 +51,7 @@ import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
-import { getSupabaseClient } from '../../lib/supabaseClient'
+import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getQueueControlSettings, updateQueueControlSettings, getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
@@ -410,6 +410,7 @@ export default function InboxPage() {
   const { 
     data, 
     loading: dataLoading, 
+    error: hookError,
     refresh: refreshInbox, 
     loadMore, 
     recentlyUpdatedThreadIds,
@@ -3327,62 +3328,19 @@ export default function InboxPage() {
         <div><b>Backend URL:</b> {import.meta.env.VITE_BACKEND_API_URL || 'unknown'}</div>
         <div><b>Active Endpoint:</b> /api/cockpit/inbox/threads</div>
         <div><b>Fetch Status:</b> {data.liveFetchStatus}</div>
+        <div><b>Disabled Reason:</b> {String(hookError || data.liveFetchError || 'none')}</div>
+        <div><b>Auth Ready:</b> {hasSupabaseEnv ? 'yes' : 'no'}</div>
+        <div><b>Has Backend URL:</b> {Boolean(import.meta.env.VITE_BACKEND_API_URL) ? 'yes' : 'no'}</div>
+        <div><b>Has Ops Secret:</b> {Boolean(import.meta.env.VITE_BACKEND_API_SECRET) ? 'yes' : 'no'}</div>
+        <div><b>Is Demo Mode:</b> {DEV ? 'yes' : 'no'}</div>
+        <div><b>Is Mock Mode:</b> {data.dataMode === 'mock_preview' ? 'yes' : 'no'}</div>
+        <div><b>Active Filter Key:</b> {viewFilter}</div>
+        <div><b>Active Category:</b> {stageFilter}</div>
+        <div><b>Route Ready:</b> yes</div>
         <div><b>Threads Loaded:</b> {data.threads?.length || 0}</div>
         <div><b>First Thread API Name:</b> {(data.threads?.[0] as any)?.prospect_full_name || 'missing'}</div>
         <div><b>First Thread Rendered Name:</b> {data.threads?.[0] ? resolveThreadPrimaryName(toWorkflowThread(data.threads[0])) : 'missing'}</div>
       </div>
-      {/* DEV ERROR BANNER */}
-      {DEV && data.liveFetchError && (
-        <div style={{
-          background: '#fee2e2',
-          border: '1px solid #ef4444',
-          color: '#b91c1c',
-          padding: '8px 16px',
-          fontSize: '12px',
-          fontFamily: 'monospace',
-          zIndex: 9999,
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px'
-        }}>
-          <div style={{ fontWeight: 'bold' }}>⚠️ [DEV] Inbox Query Failed</div>
-          <div><b>Error:</b> {data.liveFetchError}</div>
-          <div><b>Endpoint:</b> {HYDRATED_INBOX_THREADS_VIEW}</div>
-          <div><b>Mode:</b> {data.dataMode}</div>
-          <div><b>Fallback:</b> {String(data.dataMode) === 'fallback_error' ? 'LocalStorage Cache' : 'None'}</div>
-        </div>
-      )}
-
-      {/* PRODUCTION DEBUG BANNER */}
-      {!DEV && (data.loadedCount === 0 || threads.length === 0 || !!data.diagnostics) && (
-        <div style={{
-          background: '#fff3cd',
-          border: '1px solid #f5c6cb',
-          color: '#856404',
-          padding: '8px 16px',
-          fontSize: '12px',
-          fontFamily: 'monospace',
-          zIndex: 9999,
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px'
-        }}>
-          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS</div>
-          <div><b>Endpoint Called:</b> message_events (bypassed {HYDRATED_INBOX_THREADS_VIEW})</div>
-          <div><b>Status Code:</b> {data.liveFetchError ? 'Failed' : '200 OK'}</div>
-          <div><b>Error:</b> {data.liveFetchError || 'None'}</div>
-          <div><b>Raw Row Count Before Filters:</b> {data.diagnostics?.raw_messages_loaded ?? data.loadedCount ?? 0}</div>
-          <div><b>Row Count After Filters:</b> {data.diagnostics?.threads_built ?? threads.length}</div>
-          <div><b>Master Owners Hydrated:</b> {data.diagnostics?.master_owner_hydrated_count ?? 0}</div>
-          <div><b>Properties Hydrated:</b> {data.diagnostics?.property_hydrated_count ?? 0}</div>
-          <div><b>Prospects Hydrated:</b> {data.diagnostics?.prospect_hydrated_count ?? 0}</div>
-          <div><b>Missing Master Owners:</b> {data.diagnostics?.missing_master_owner_ids ?? 0}</div>
-          <div><b>Missing Properties:</b> {data.diagnostics?.missing_property_ids ?? 0}</div>
-          <div><b>Missing Prospects:</b> {data.diagnostics?.missing_prospect_ids ?? 0}</div>
-        </div>
-      )}
 
       <NexusTopBar
         onSelectSearchResult={handleSelect}

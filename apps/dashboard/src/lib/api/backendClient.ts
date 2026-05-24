@@ -80,7 +80,6 @@ export interface BackendApiSecretResult {
 
 export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
   const secret = (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined) || ''
-  if (!secret && import.meta.env.PROD) throw new Error('Missing VITE_BACKEND_API_SECRET')
   return {
     secret,
     debug: {
@@ -158,7 +157,9 @@ async function callBackend<T = unknown>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
-    'x-ops-dashboard-secret': secret,
+  }
+  if (secret) {
+    headers['x-ops-dashboard-secret'] = secret
   }
 
   // Attach Supabase session JWT for future API-side JWT validation.
