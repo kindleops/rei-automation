@@ -699,13 +699,13 @@ export default function InboxPage() {
       .map(([reason, count]) => `${reason} (${count})`)
 
     return {
-      ...(data.debugInfo || {}),
+      ...(data.diagnostics || {}),
       new_replies_count: newRepliesCount,
       priority_count: priorityCount,
       needs_review_count: needsReviewCount,
       top_5_exclusion_reasons: top5ExclusionReasons.join(', ') || 'None'
     }
-  }, [threads, data.debugInfo])
+  }, [threads, data.diagnostics])
 
   const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
 

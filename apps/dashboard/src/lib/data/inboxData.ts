@@ -2064,7 +2064,7 @@ const hydrateInboxThreads = async (supabase: any, rawEvents: AnyRecord[]): Promi
         derivedThreadKey = event.to_phone_number
       }
     }
-    if (!derivedThreadKey) derivedThreadKey = event.metadata?.enrichment?.thread_key || event.provider_message_sid
+    if (!derivedThreadKey) derivedThreadKey = (event.metadata as Record<string, any>)?.enrichment?.thread_key || event.provider_message_sid
 
     const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(":")
     const key = String(derivedThreadKey || phones || "unknown")

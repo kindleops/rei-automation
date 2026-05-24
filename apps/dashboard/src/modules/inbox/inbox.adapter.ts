@@ -1,36 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
-import { fetchInboxModel, type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
+import { type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
-import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
+import { fetchWithRetry as _fetchWithRetry } from '../../lib/utils/fetchWithRetry'
 import { resolveInboxThreadState } from './resolveInboxThreadState'
+import {
+  fetchBaseEvents,
+  groupIntoThreads,
+  baseThreadToInboxThread,
+  hydrateEnrichments,
+  type BaseThread,
+} from '../../lib/data/inboxBase'
 
-const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
-const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
-
-const withTimeout = async <T,>(
-  run: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-  timeoutMessage: string,
-): Promise<T> => {
-  const controller = new AbortController()
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
-  try {
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-    return await run(controller.signal)
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(timeoutMessage)
-    }
-    throw error
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId)
-  }
-}
 
 const emptyLiveErrorModel = (liveFetchError: string): InboxModel => {
   if (isDev) {
@@ -419,92 +404,6 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
 }
 
 
-export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
-  const isRefresh = Boolean(options.cursor)
-  
-  // 1. Try to load from cache instantly for non-refresh loads
-  if (!isRefresh) {
-    const cached = localStorage.getItem(CACHE_KEY)
-    if (cached) {
-      try {
-        const model = JSON.parse(cached)
-        return { ...model, dataMode: 'mock_preview' }
-      } catch (e) {
-        console.warn('[Inbox] Failed to parse cache', e)
-      }
-    }
-  }
-
-  if (isDev) {
-    console.log('[dashboard boot] live inbox fetch started', { options })
-  }
-
-  if (!hasSupabaseEnv) {
-    const liveFetchError = 'Live mode enabled but Supabase env vars are missing.'
-    return emptyLiveErrorModel(liveFetchError)
-  }
-
-  try {
-    const result = await fetchWithRetry(
-      () => withTimeout(
-        (signal) => fetchInboxModel({ ...options, signal }),
-        LIVE_INBOX_TIMEOUT_MS,
-        `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
-      ),
-      { retries: 2, delay: 1000 }
-    )
-
-    // Save lightweight cache: timestamp + first 25 lightweight threads
-    try {
-      const lightweightThreads = result.threads.slice(0, 25).map(t => ({
-        id: t.id,
-        threadKey: t.threadKey,
-        ownerName: t.ownerName,
-        subject: t.subject,
-        preview: t.preview,
-        status: t.status,
-        lastMessageIso: t.lastMessageIso,
-        unreadCount: t.unreadCount,
-        priority: t.priority,
-        inboxCategory: t.inboxCategory,
-        uiIntent: t.uiIntent,
-      }))
-      
-      const cachePayload = JSON.stringify({
-        ...result,
-        threads: lightweightThreads,
-        lastLiveFetchAt: new Date().toISOString(),
-        dataMode: 'mock_preview',
-      })
-      
-      localStorage.setItem(CACHE_KEY, cachePayload)
-    } catch (cacheError) {
-      console.warn('[Inbox] Failed to save lightweight cache', cacheError)
-      // If even lightweight fails, clear it to be safe
-      localStorage.removeItem(CACHE_KEY)
-    }
-    
-    if (isDev) console.log('[dashboard boot] live inbox fetch success')
-    return result
-  } catch (error) {
-    const liveFetchError = error instanceof Error ? error.message : String(error)
-    if (isDev) {
-      console.error('[NEXUS] Inbox Supabase live load failed.', error)
-    }
-    
-    // Return cache if it exists, even if fetch failed
-    const cached = localStorage.getItem(CACHE_KEY)
-    if (cached) {
-      try {
-        return { ...JSON.parse(cached), dataMode: 'fallback_error', liveFetchError }
-      } catch (e) {
-        return emptyLiveErrorModel(liveFetchError)
-      }
-    }
-    
-    return emptyLiveErrorModel(liveFetchError)
-  }
-}
 
 export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   const lastAt = t.lastMessageIso || new Date().toISOString()
@@ -579,6 +478,29 @@ const EMPTY_MODEL: InboxModel = {
 
 const threadIdentity = (thread: Pick<InboxThread, 'id' | 'threadKey'>): string =>
   thread.threadKey || thread.id
+
+function buildBaseModel(
+  threads: InboxThread[],
+  groupedCount: number,
+  dataMode: 'live' | 'mock_preview' = 'mock_preview',
+): InboxModel {
+  const inboundCount = threads.filter(t => t.latestDirection === 'inbound').length
+  return {
+    ...EMPTY_MODEL,
+    threads,
+    dataMode,
+    liveFetchStatus: 'active',
+    liveFetchError: null,
+    totalCount: threads.length,
+    unreadCount: inboundCount,
+    urgentCount: inboundCount,
+    allInboxCount: threads.length,
+    groupedThreadCount: groupedCount,
+    messageEventsCount: groupedCount,
+    lastLiveFetchAt: new Date().toISOString(),
+    loadedCount: threads.length,
+  }
+}
 
 
 // selectedThreadPreserved: merge refreshes into existing rows instead of replacing the list.
@@ -656,42 +578,71 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
     loadingRef.current = loading
   }, [loading])
 
-  const runLoad = useCallback(async (options: InboxFetchOptions, mode: 'refresh' | 'append') => {
+  const runLoad = useCallback(async (_options: InboxFetchOptions, mode: 'refresh' | 'append') => {
     const requestSeq = ++requestSeqRef.current
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     if (dataRef.current.threads.length === 0) setLoading(true)
 
-    const runOptions = { ...options, signal: controller.signal }
+    if (!hasSupabaseEnv) {
+      setData(emptyLiveErrorModel('Supabase env vars missing'))
+      setLoading(false)
+      return dataRef.current
+    }
+
+    let baseThreads: BaseThread[] = []
+
     try {
-      const model = await loadInbox(runOptions)
-      if (requestSeq !== requestSeqRef.current) {
-        if (isDev) console.log('[useInboxData] request superseded', { requestSeq, current: requestSeqRef.current })
-        return dataRef.current
-      }
-      setData((prev) => mergeInboxModels(prev, model ?? EMPTY_MODEL, mode))
+      // Phase 1 — base query: fetch → group → render immediately
+      const events = await fetchBaseEvents(controller.signal)
+      if (requestSeq !== requestSeqRef.current) return dataRef.current
+
+      baseThreads = groupIntoThreads(events)
+      const baseInboxThreads = baseThreads.map(t => baseThreadToInboxThread(t))
+      const baseModel = buildBaseModel(baseInboxThreads, baseThreads.length)
+
+      setData(prev => mergeInboxModels(prev, baseModel, mode))
       setError(null)
+      setLoading(false)
       lastRefreshAtRef.current = new Date().toISOString()
+
       if (isDev) {
-        console.log('[useInboxData] refresh complete', {
-          refreshReason: 'manual',
-          sourceMode: options.sourceMode,
-          lastRefreshAt: lastRefreshAtRef.current,
-          rowCount: model?.threads?.length ?? 0,
-          totalCount: model?.totalCount ?? 0,
-          dataMode: model?.dataMode,
+        console.log('[useInboxData] phase1 complete', {
+          events: events.length,
+          threads: baseThreads.length,
         })
       }
-      return model
     } catch (err) {
       if (controller.signal.aborted) return dataRef.current
       setError(err)
-      if (isDev) console.error('[NEXUS] useInboxData load failed', err)
-      return dataRef.current
-    } finally {
+      if (isDev) console.error('[NEXUS] useInboxData base load failed', err)
       if (requestSeq === requestSeqRef.current) setLoading(false)
+      return dataRef.current
     }
+
+    // Phase 2 — hydration: runs after render, failure MUST NOT blank inbox
+    if (baseThreads.length > 0 && requestSeq === requestSeqRef.current) {
+      try {
+        const enrichments = await hydrateEnrichments(baseThreads)
+        if (requestSeq !== requestSeqRef.current) return dataRef.current
+
+        const enrichedThreads = baseThreads.map(t => baseThreadToInboxThread(t, enrichments.get(t.thread_key)))
+        const enrichedModel = buildBaseModel(enrichedThreads, baseThreads.length, 'live')
+        setData(prev => mergeInboxModels(prev, enrichedModel, 'refresh'))
+
+        if (isDev) {
+          console.log('[useInboxData] phase2 hydration complete', {
+            enriched: enrichments.size,
+          })
+        }
+      } catch (hydrateErr) {
+        // Hydration failure must not blank the inbox — base threads remain
+        if (isDev) console.warn('[useInboxData] hydration failed, keeping base threads', hydrateErr)
+      }
+    }
+
+    return dataRef.current
   }, [])
 
   const refresh = useCallback(async (options: InboxFetchOptions = {}) => {

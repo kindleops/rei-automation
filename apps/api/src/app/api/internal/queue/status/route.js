@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
+import { getCorsHeaders } from "@/lib/cors.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+export async function OPTIONS(request) {
+  return new NextResponse(null, {
+    status: 204,
+    headers: getCorsHeaders(request),
+  });
+}
+
 export async function GET(request) {
   const auth = requireInternalSecret(request);
-  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error || "unauthorized" }, { status: auth.status || 401 });
-  if (!hasSupabaseConfig()) return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error || "unauthorized" }, { status: auth.status || 401, headers: getCorsHeaders(request) });
+  if (!hasSupabaseConfig()) return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500, headers: getCorsHeaders(request) });
   const { data, error } = await supabase.from("send_queue").select("queue_status,type").limit(10000);
   if (error) throw error;
   const counts = {};
@@ -18,5 +26,5 @@ export async function GET(request) {
     counts[status] = (counts[status] || 0) + 1;
     counts[`${type}:${status}`] = (counts[`${type}:${status}`] || 0) + 1;
   }
-  return NextResponse.json({ ok: true, route: "internal/queue/status", counts });
+  return NextResponse.json({ ok: true, route: "internal/queue/status", counts }, { headers: getCorsHeaders(request) });
 }

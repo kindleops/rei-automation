@@ -17,10 +17,6 @@ export interface BucketClassification {
   reasons: string[]
 }
 
-const num = (v: unknown, fallback = 0): number => {
-  const n = Number(String(v ?? '').replace(/[,$\s]/g, ''))
-  return Number.isFinite(n) ? n : fallback
-}
 
 const bool = (v: unknown): boolean => {
   if (typeof v === 'boolean') return v
@@ -51,10 +47,7 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
 
   const direction = getDirection(thread)
   const isArchived = bool(getAny(thread, 'isArchived', 'is_archived', 'archived', 'threadIsArchived'))
-  const isUnread = bool(getAny(thread, 'unread', 'isUnread', 'is_unread', 'needsResponse', 'needsReply')) ||
-                   num(getAny(thread, 'unreadCount', 'unread_count')) > 0 ||
-                   (!bool(getAny(thread, 'isRead', 'is_read', 'threadIsRead')))
-  
+
   // 1. Suppressed
   const suppressed = bool(getAny(thread, 'isSuppressed', 'threadIsSuppressed', 'is_suppressed')) ||
                      bool(getAny(thread, 'isOptOut', 'is_opt_out', 'opt_out')) ||
@@ -122,6 +115,7 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   }
 
   // 4. Negotiating / Follow Up
+  const isNegotiating = hasAny(stage, ['negotiating', 'negotiation', 'in_negotiation'])
   if (isNegotiating) {
     reasons.push('negotiation stage fallback')
     return { bucket: 'negotiating', reasons }
