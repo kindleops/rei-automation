@@ -3245,6 +3245,29 @@ export default function InboxPage() {
         isCustomMultiView && 'is-multi-view-active',
       )}
     >
+      {/* DEV ERROR BANNER */}
+      {DEV && data.liveFetchError && (
+        <div style={{
+          background: '#fee2e2',
+          border: '1px solid #ef4444',
+          color: '#b91c1c',
+          padding: '8px 16px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          zIndex: 9999,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px'
+        }}>
+          <div style={{ fontWeight: 'bold' }}>⚠️ [DEV] Inbox Query Failed</div>
+          <div><b>Error:</b> {data.liveFetchError}</div>
+          <div><b>Endpoint:</b> {HYDRATED_INBOX_THREADS_VIEW}</div>
+          <div><b>Mode:</b> {data.dataMode}</div>
+          <div><b>Fallback:</b> {data.dataMode === 'fallback_error' ? 'LocalStorage Cache' : 'None'}</div>
+        </div>
+      )}
+
       <NexusTopBar
         onSelectSearchResult={handleSelect}
         topSearchQuery={topSearchQuery}

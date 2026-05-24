@@ -423,7 +423,7 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
   
   // 1. Try to load from cache instantly for non-refresh loads
   if (!isRefresh) {
-    const cached = sessionStorage.getItem(CACHE_KEY)
+    const cached = localStorage.getItem(CACHE_KEY)
     if (cached) {
       try {
         const model = JSON.parse(cached)
@@ -453,8 +453,35 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
       { retries: 2, delay: 1000 }
     )
 
-    // Save to cache
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(result))
+    // Save lightweight cache: timestamp + first 25 lightweight threads
+    try {
+      const lightweightThreads = result.threads.slice(0, 25).map(t => ({
+        id: t.id,
+        threadKey: t.threadKey,
+        ownerName: t.ownerName,
+        subject: t.subject,
+        preview: t.preview,
+        status: t.status,
+        lastMessageIso: t.lastMessageIso,
+        unreadCount: t.unreadCount,
+        priority: t.priority,
+        inboxCategory: t.inboxCategory,
+        uiIntent: t.uiIntent,
+      }))
+      
+      const cachePayload = JSON.stringify({
+        ...result,
+        threads: lightweightThreads,
+        lastLiveFetchAt: new Date().toISOString(),
+        dataMode: 'mock_preview',
+      })
+      
+      localStorage.setItem(CACHE_KEY, cachePayload)
+    } catch (cacheError) {
+      console.warn('[Inbox] Failed to save lightweight cache', cacheError)
+      // If even lightweight fails, clear it to be safe
+      localStorage.removeItem(CACHE_KEY)
+    }
     
     if (isDev) console.log('[dashboard boot] live inbox fetch success')
     return result
@@ -465,9 +492,13 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     }
     
     // Return cache if it exists, even if fetch failed
-    const cached = sessionStorage.getItem(CACHE_KEY)
+    const cached = localStorage.getItem(CACHE_KEY)
     if (cached) {
-        return { ...JSON.parse(cached), dataMode: 'mock_preview' }
+      try {
+        return { ...JSON.parse(cached), dataMode: 'fallback_error', liveFetchError }
+      } catch (e) {
+        return emptyLiveErrorModel(liveFetchError)
+      }
     }
     
     return emptyLiveErrorModel(liveFetchError)

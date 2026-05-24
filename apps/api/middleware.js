@@ -5,10 +5,13 @@ import { NextResponse } from 'next/server'
 const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',
   'https://nexus-dashboard.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://real-estate-automation-three.vercel.app',
 ])
 
 const ALLOW_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-const ALLOW_HEADERS = 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept'
+const ALLOW_HEADERS = 'Content-Type, Authorization, x-ops-dashboard-secret, x-internal-api-secret, x-queue-engine-secret, X-Requested-With, Accept'
 const MAX_AGE = '86400'
 
 function resolveOrigin(origin) {

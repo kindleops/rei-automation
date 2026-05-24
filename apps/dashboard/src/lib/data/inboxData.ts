@@ -246,9 +246,27 @@ const QUEUE_PROCESSOR_LAG_MINUTES = 10
 
 const DEV = Boolean(import.meta.env?.DEV)
 const MESSAGE_EVENTS_THREAD_PAGE_SIZE = 250
-export const HYDRATED_INBOX_PAGE_SIZE = 200
+export const HYDRATED_INBOX_PAGE_SIZE = 100
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_inbox_enriched'
 export const HYDRATED_INBOX_COUNTS_VIEW = 'inbox_category_counts'
+
+const INBOX_LIST_COLUMNS = [
+  'thread_key', 'latest_message_at', 'latest_message_body', 'latest_direction',
+  'unread_count', 'is_read', 'inbox_category', 'priority_bucket',
+  'final_acquisition_score', 'priority_score', 'ui_intent', 'detected_intent',
+  'stage', 'queue_stage', 'workflow_stage', 'is_archived',
+  'prospect_full_name', 'prospect_name', 'first_name',
+  'owner_display_name', 'owner_name', 'seller_display_name', 'seller_name',
+  'property_address_full', 'property_address', 'filter_market', 'market',
+  'property_type', 'property_class', 'queue_status', 'automation_state',
+  'is_hot_lead', 'is_new_inbound', 'inbound_count', 'outbound_count',
+  'language_preference', 'latitude', 'longitude',
+  'is_pinned', 'is_starred', 'is_hidden', 'is_suppressed', 'is_dnc', 'has_opt_out',
+  'show_in_priority_inbox', 'display_name', 'display_address', 'display_phone',
+  'display_market', 'display_status', 'display_score',
+  'seller_state', 'seller_status', 'execution_state', 'pipeline_stage',
+  'master_owner_id', 'prospect_id', 'property_id', 'best_phone', 'seller_phone', 'canonical_e164', 'phone'
+].join(',')
 
 const HYDRATED_INBOX_CATEGORIES = [
   'hot_leads',
@@ -1868,10 +1886,28 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     hidden: 'dnc_opt_out',
     all_inbound: 'all_inbound' as any,
   }
-  const category = (PRIORITY_BUCKET_MAP[rawCategory] ?? 'cold_no_response') as HydratedInboxCategory
   const finalAcquisitionScore = asNumber(row.final_acquisition_score, 0)
   const latestDirection = normalizeMessageDirection({ direction: row.latest_direction })
   const unreadCount = Math.max(0, asNumber(row.unread_count, latestDirection === 'inbound' && !asBoolean(row.is_read, false) ? 1 : 0))
+
+  const threadStage = normalizeStatus(row.stage ?? row.queue_stage ?? row.detected_intent ?? row.inbox_category ?? 'ownership_check')
+  const isArchived = asBoolean(row.is_archived || row.thread_is_archived, false)
+  const isSuppressed = asBoolean(row.is_dnc || row.has_opt_out || row.is_suppressed, false)
+  
+  let category = (PRIORITY_BUCKET_MAP[rawCategory] ?? 'cold_no_response') as HydratedInboxCategory
+
+  // FORCE New Replies (new_inbound) category if specific conditions are met
+  const shouldBeNewInbound = latestDirection === 'inbound' && 
+                             unreadCount > 0 && 
+                             threadStage === 'needs_response' &&
+                             !isArchived && 
+                             !isSuppressed &&
+                             threadStage !== 'wrong_number' &&
+                             threadStage !== 'dnc_opt_out'
+
+  if (shouldBeNewInbound) {
+    category = 'new_inbound'
+  }
 
   const sellerPhone = asString(row.best_phone || row.seller_phone || row.canonical_e164 || row.phone, '')
   const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
@@ -1893,8 +1929,6 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   const queueStatus = normalizeStatus(row.queue_status ?? '')
   const automationState = normalizeStatus(row.automation_state ?? row.queue_status ?? '')
   const detectedIntent = normalizeStatus(row.ui_intent ?? row.detected_intent ?? '')
-  const threadStage = normalizeStatus(row.stage ?? row.queue_stage ?? row.detected_intent ?? row.inbox_category ?? 'ownership_check')
-  const isDnc = asBoolean(row.is_dnc || row.has_opt_out || row.is_suppressed, false) || category === 'dnc_opt_out'
   const isAutomated = category === 'automated' || automationState.includes('auto')
   
   const status: InboxThread['status'] = unreadCount > 0 ? 'unread' : 'read'
@@ -1975,12 +2009,12 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     inbox_category: category,
     workflowStatus: queueStatus || automationState || category,
     workflowStage: threadStage,
-    isArchived: asBoolean(row.is_archived, false),
-    isRead: asBoolean(row.is_read, false),
+    isArchived,
+    isRead: unreadCount === 0,
     isPinned: asBoolean(row.is_pinned, false),
     isStarred: asBoolean(row.is_starred, false),
-    isSuppressed: isDnc,
-    isDnc,
+    isSuppressed,
+    isDnc: isSuppressed || category === 'dnc_opt_out',
 
     // Universal Seller Work Item Fields
     is_uncontacted: asBoolean(row.is_uncontacted, false),
@@ -2015,7 +2049,7 @@ export const getInboxRowsForView = async (
     ? 'v_seller_work_items' 
     : HYDRATED_INBOX_THREADS_VIEW
 
-  let query: any = supabase.from(viewName).select('*', { count: 'exact' })
+  let query: any = supabase.from(viewName).select(INBOX_LIST_COLUMNS, { count: 'exact' })
 
   // Apply Search/Advanced Filters
   query = applyInboxSearchServerFilter(query, options.filters?.query)
@@ -2039,20 +2073,8 @@ export const getInboxRowsForView = async (
     }
   }
 
-  // Canonical Ordering
-  if (options.sourceMode === 'all_sellers') {
-    // For All Sellers, sort hot/replied/scheduled/contacted above not_contacted by default
-    // We use the seller_state logic from the view which has implicit priority
-    query = query
-      .order('final_acquisition_score', { ascending: false, nullsFirst: false })
-      .order('priority_score', { ascending: false, nullsFirst: false })
-      .order('latest_message_at', { ascending: false, nullsFirst: false })
-  } else {
-    query = query
-      .order('latest_message_at', { ascending: false, nullsFirst: false })
-      .order('final_acquisition_score', { ascending: false, nullsFirst: false })
-      .order('priority_score', { ascending: false, nullsFirst: false })
-  }
+  // Canonical Ordering: latest_message_at desc nullslast is mandatory for performance
+  query = query.order('latest_message_at', { ascending: false, nullsFirst: false })
   
   query = query.range(offset, offset + page_size - 1)
 
@@ -2062,18 +2084,20 @@ export const getInboxRowsForView = async (
   let count: number | null = null
   try {
     const result = await query
+    if (result.error) throw result.error
     data = safeArray(result.data as AnyRecord[])
     count = result.count ?? null
   } catch (err) {
-    if (DEV) console.warn('[getInboxRowsForView] query failed, returning empty', mapErrorMessage(err))
-    return {
-      view_key: view,
-      backend_count: 0,
-      rows: [],
-      rendered_count: 0,
-      has_more: false,
-      next_cursor: null,
+    const errorBody = mapErrorMessage(err)
+    if (DEV) {
+        console.error('[getInboxRowsForView] query failed', {
+            view,
+            offset,
+            page_size,
+            error: errorBody
+        })
     }
+    throw new Error(`Inbox query failed: ${errorBody}`)
   }
 
   const rows = data.map((row, index) => normalizeInboxThread(row, offset, index))
@@ -2134,10 +2158,8 @@ export const getInboxThreads = async (
 
   let query: any = supabase
     .from(HYDRATED_INBOX_THREADS_VIEW)
-    .select('*')
+    .select(INBOX_LIST_COLUMNS)
     .order('latest_message_at', { ascending: false, nullsFirst: false })
-    .order('final_acquisition_score', { ascending: false, nullsFirst: false })
-    .order('priority_score', { ascending: false, nullsFirst: false })
     .range(startOffset, startOffset + maxRows - 1)
 
   query = applyInboxSearchServerFilter(query, filterState.query)
@@ -2157,10 +2179,19 @@ export const getInboxThreads = async (
   let queryError: string | null = null
   try {
     const result = await query
+    if (result.error) throw result.error
     data = safeArray(result.data as AnyRecord[])
   } catch (err) {
     queryError = mapErrorMessage(err)
-    if (DEV) console.error('[getInboxThreads] query error:', queryError)
+    if (DEV) {
+        console.error('[getInboxThreads] query failed', {
+            filterState,
+            startOffset,
+            maxRows,
+            error: queryError
+        })
+    }
+    throw new Error(`Inbox threads query failed: ${queryError}`)
   }
 
   const totalAvailable = countError ? supressNullCount(null) : supressNullCount(rawCount)
