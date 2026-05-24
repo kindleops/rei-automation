@@ -2053,7 +2053,7 @@ export const getInboxRowsForView = async (
   // TEMPORARY BYPASS: query message_events directly
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, unread', { count: 'exact' })
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at', { count: 'exact' })
     .in('direction', ['inbound', 'outbound'])
     .order('created_at', { ascending: false })
     .range(offset, offset + page_size - 1)
@@ -2187,7 +2187,7 @@ export const getInboxThreads = async (
 
   let query: any = supabase
     .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, unread', { count: 'exact' })
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at', { count: 'exact' })
     .in('direction', ['inbound', 'outbound'])
     .order('created_at', { ascending: false })
     .range(startOffset, startOffset + maxRows - 1)
