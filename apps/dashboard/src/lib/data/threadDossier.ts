@@ -17,8 +17,12 @@ export interface ThreadDossier {
   prospect: Record<string, unknown> | null
   phones: Record<string, unknown>[]
   emails: Record<string, unknown>[]
+  buyer_entities?: Record<string, unknown>[]
+  buyer_purchase_events?: Record<string, unknown>[]
+  buyer_matches?: Record<string, unknown>[]
+  recently_sold?: Record<string, unknown>[]
   diagnostics: Record<string, string | null>
-  errors: string[]
+  errors: any[]
   partial: boolean
   fetched_at: string
 }
