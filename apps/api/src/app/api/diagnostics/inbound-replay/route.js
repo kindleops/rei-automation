@@ -44,11 +44,11 @@ const defaultDeps = {
 
 let runtimeDeps = { ...defaultDeps };
 
-export function __setInboundReplayTestDeps(overrides = {}) {
+function __setInboundReplayTestDeps(overrides = {}) {
   runtimeDeps = { ...runtimeDeps, ...overrides };
 }
 
-export function __resetInboundReplayTestDeps() {
+function __resetInboundReplayTestDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 
@@ -60,7 +60,7 @@ function normalizeMode(raw_mode = null) {
  * Test hook: normalize inbound message body aliases for diagnostics/inbound-replay.
  * Internal normalization only; does not alter queueing/SMS behavior.
  */
-export function __normalizeInboundReplayExampleBody(example = null) {
+function __normalizeInboundReplayExampleBody(example = null) {
   return normalizeInboundReplayExampleBody(example);
 }
 

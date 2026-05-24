@@ -373,7 +373,7 @@ function buildManualResult(reply_text = "") {
   };
 }
 
-export async function resolveReplyContentForMode(
+async function resolveReplyContentForMode(
   {
     message_event_id = "",
     reply_mode = "auto_template",
