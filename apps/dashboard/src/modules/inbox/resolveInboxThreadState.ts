@@ -79,6 +79,10 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     reasons.push('suppressed via intent/keywords')
     return { bucket: 'suppressed', reasons }
   }
+  if (hasAny(intent, ['not_interested', 'wrong_number', 'opt_out'])) {
+    reasons.push('terminal intent suppression')
+    return { bucket: 'suppressed', reasons }
+  }
 
   // 2. New Replies
   // Visible rows = Count. (Inbound + Unread + Not Archived).
@@ -97,7 +101,9 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   const isNegotiating = hasAny(stage, ['offer_requested', 'offer_ready', 'contract_ready', 'underwriting', 'price_discussion'])
   
   // Note: Priority bucket typically requires the latest direction to be inbound, or user specifically starred/prioritized it
-  if (isExplicitPriority || isHighScore || (direction.includes('inbound') && (isPositive || isNegotiating))) {
+  const isExplicitNegative = hasAny(messageBlob, ['not interested', 'no thanks', 'stop texting', 'wrong number']) ||
+    hasAny(intent, ['not_interested', 'wrong_number', 'opt_out'])
+  if (!isExplicitNegative && (isExplicitPriority || isHighScore || (direction.includes('inbound') && (isPositive || isNegotiating)))) {
     if (isExplicitPriority) reasons.push('explicit priority flag')
     if (isHighScore) reasons.push('high priority score')
     if (isPositive) reasons.push('positive keywords/intent')

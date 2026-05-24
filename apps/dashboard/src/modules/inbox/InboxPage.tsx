@@ -114,7 +114,6 @@ import {
   getInboxViewCounts,
   getSavedPresetConfig,
   isSuppressedThread,
-  matchesViewSelection,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
   type InboxSavedFilterPreset,
@@ -639,16 +638,28 @@ export default function InboxPage() {
     }
   }, [data.allInboxCount, data.counts, decisions, threads])
 
+  const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
+    skipViewFilter: false,
+    skipStageFilter: false,
+  }), [])
+
+  const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => (
+    applyInboxFilters(threads, {
+      search: searchQuery,
+      stage: stageFilter,
+      view,
+      advanced: advancedFilters,
+    }, serverFilterOptions)
+  ), [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads])
+
   const listStatCounts = useMemo(() => {
-    console.debug('[inbox.tab.count] recalculating')
     const counts = {
-      new_replies: threads.filter((thread) => matchesViewSelection(thread, 'new_replies')).length,
-      priority: threads.filter((thread) => matchesViewSelection(thread, 'priority')).length,
-      needs_review: threads.filter((thread) => matchesViewSelection(thread, 'needs_review')).length,
-      follow_up_due: threads.filter((thread) => matchesViewSelection(thread, 'follow_up_due')).length,
-      automated: threads.filter((thread) => matchesViewSelection(thread, 'automated')).length,
+      new_replies: resolveThreadsForView('new_replies').length,
+      priority: resolveThreadsForView('priority').length,
+      needs_review: resolveThreadsForView('needs_review').length,
+      follow_up_due: resolveThreadsForView('follow_up_due').length,
+      automated: resolveThreadsForView('automated').length,
     }
-    console.debug('[inbox.tab.count] result', counts)
     return [
       { label: 'New Replies', value: counts.new_replies },
       { label: 'Priority', value: counts.priority },
@@ -656,21 +667,9 @@ export default function InboxPage() {
       { label: 'Follow-Up Due', value: counts.follow_up_due },
       { label: 'Auto-Eligible', value: counts.automated },
     ]
-  }, [threads])
+  }, [resolveThreadsForView])
 
-  const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
-    skipViewFilter: false,
-    skipStageFilter: false,
-  }), [])
-
-  const filtered = useMemo(() => (
-    applyInboxFilters(threads, {
-      search: searchQuery,
-      stage: stageFilter,
-      view: viewFilter,
-      advanced: advancedFilters,
-    }, serverFilterOptions)
-  ), [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads, viewFilter])
+  const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
 
   // Pipeline view shows all loaded threads (not just priority-filtered ones).
   // Search and advanced filters still apply; view filter is intentionally skipped
@@ -1394,6 +1393,14 @@ export default function InboxPage() {
     const selectedPropertyId = selected.propertyId || ''
     const selectedProspectId = selected.prospectId || ''
     const supabase = getSupabaseClient()
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefreshInbox = () => {
+      if (refreshTimer) return
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        void refreshInbox()
+      }, 200)
+    }
 
     const mergeRealtimeMessage = (incoming: ThreadMessage) => {
       messageCacheRef.current[selectedKey] = dedupeMessages([
@@ -1441,6 +1448,7 @@ export default function InboxPage() {
         }
         const incoming = toThreadMessage(row)
         mergeRealtimeMessage(incoming)
+        scheduleRefreshInbox()
 
         // Remove any pending optimistic message that this confirmed event supersedes
         const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
@@ -1498,6 +1506,7 @@ export default function InboxPage() {
           })
           return changed ? { ...current, [selected.id]: dedupeMessages(nextPending) } : current
         })
+        scheduleRefreshInbox()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, (payload) => {
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
@@ -1515,14 +1524,16 @@ export default function InboxPage() {
             workflowStage: row.thread_stage || current.workflowStage,
           }
         })
+        scheduleRefreshInbox()
       })
       .subscribe()
 
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer)
       void supabase.removeChannel(channel)
     }
-  }, [DEV, data.dataMode, selected])
+  }, [DEV, data.dataMode, refreshInbox, selected])
 
   const handleTranslateThread = useCallback(async () => {
     if (!threadHasInboundMessages) return

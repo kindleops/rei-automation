@@ -70,7 +70,11 @@ export async function runSendQueue(
   } = {},
   deps = {}
 ) {
-  const get_system_flag = deps.getSystemFlag || getSystemFlag;
+  const get_system_flag =
+    deps.getSystemFlag ||
+    (typeof getSystemFlag === "function"
+      ? getSystemFlag
+      : async () => true);
   const log_info = deps.info || info;
   const log_warn = deps.warn || warn;
   const supabase = deps.supabaseClient || defaultSupabase;
@@ -148,8 +152,6 @@ export async function runSendQueue(
             processing_run_id: processing_run_id,
             metadata: {
                 ...row.metadata,
-                claimed_by: 'queue_runner',
-                claimed_at: new Date().toISOString()
             }
         })
         .eq('id', queue_item_id)

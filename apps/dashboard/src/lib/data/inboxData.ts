@@ -1478,6 +1478,20 @@ export const normalizeMessageDirection = (row: AnyRecord): 'inbound' | 'outbound
   if (['inbound', 'incoming', 'received', 'reply', 'from_seller'].includes(direction)) return 'inbound'
   if (['outbound', 'outgoing', 'sent', 'queued', 'to_seller'].includes(direction)) return 'outbound'
 
+  const typeDirection = normalizeStatus(
+    getFirstDeep(
+      row,
+      ['type'],
+      [
+        'metadata.type', 'metadata.payload.type',
+        'payload.type', 'raw_payload.type', 'event.type', 'data.type',
+        'textgrid_payload.type', 'webhook_payload.type', 'details.type',
+      ],
+    ),
+  )
+  if (typeDirection === 'outbound') return 'outbound'
+  if (typeDirection === 'inbound') return 'inbound'
+
   const eventType = normalizeStatus(
     getFirstDeep(
       row,

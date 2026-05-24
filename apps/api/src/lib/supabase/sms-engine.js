@@ -1312,50 +1312,44 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
 
   const supabase = getSupabase(options);
 
-  let data, error;
   try {
-    ({ data, error } = await supabase
+    const { data, error } = await supabase
       .from(MESSAGE_EVENTS_TABLE)
       .upsert(payload, {
         onConflict: "message_event_key",
         ignoreDuplicates: false,
       })
       .select()
-      .maybeSingle());
+      .maybeSingle();
+
+    if (error) {
+      warn("message_events.upsert_failed", {
+        queue_row_id: normalized.id,
+        queue_key: normalized.queue_key,
+        message: error?.message || "Unknown error",
+        payload: {
+          message_event_key: payload.message_event_key,
+          to_phone_number: payload.to_phone_number,
+        },
+      });
+    } else {
+      addSentryBreadcrumb("sms_send", "sms_send_succeeded", {
+        queue_row_id: normalized.id,
+        queue_key: normalized.queue_key,
+        provider_message_id: normalized.provider_message_id,
+        master_owner_id: normalized.master_owner_id,
+      });
+      return data || payload;
+    }
   } catch (db_error) {
-    captureRouteException(db_error, {
-      route: "sms-engine/writeOutboundSuccessMessageEvent",
-      subsystem: "sms_engine",
-      context: {
-        queue_row_id: normalized.id,
-        queue_key: normalized.queue_key,
-        master_owner_id: normalized.master_owner_id,
-      },
+    warn("message_events.upsert_caught", {
+      queue_row_id: normalized.id,
+      queue_key: normalized.queue_key,
+      message: db_error?.message || "Unknown caught error",
     });
-    throw db_error;
   }
 
-  if (error) {
-    captureRouteException(error, {
-      route: "sms-engine/writeOutboundSuccessMessageEvent",
-      subsystem: "sms_engine",
-      context: {
-        queue_row_id: normalized.id,
-        queue_key: normalized.queue_key,
-        master_owner_id: normalized.master_owner_id,
-      },
-    });
-    throw error;
-  }
-
-  addSentryBreadcrumb("sms_send", "sms_send_succeeded", {
-    queue_row_id: normalized.id,
-    queue_key: normalized.queue_key,
-    provider_message_id: normalized.provider_message_id,
-    master_owner_id: normalized.master_owner_id,
-  });
-
-  return data || payload;
+  return payload;
 }
 
 export async function writeOutboundFailureMessageEvent(row, error, options = {}) {

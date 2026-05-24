@@ -44,14 +44,22 @@ export async function POST(request) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
   if (!auth.ok) {
-    // Auth errors must also carry CORS headers or the browser sees a network failure.
     return NextResponse.json(
       await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
       { status: auth.response.status, headers: cors }
     )
   }
   const payload = await parseJsonSafe(request)
-  const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
-  const status = result.ok ? 200 : (result.reason === 'invalid_canonical_thread_key' ? 400 : 423)
-  return NextResponse.json(result, { status, headers: cors })
+  
+  try {
+    const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
+    const status = result.ok ? 200 : (result.reason === 'invalid_canonical_thread_key' ? 400 : 423)
+    return NextResponse.json(result, { status, headers: cors })
+  } catch (error) {
+    console.error('send-now.failed', { error: error?.message })
+    return NextResponse.json(
+      { ok: false, error: 'send_now_failed', message: error?.message },
+      { status: 500, headers: cors }
+    )
+  }
 }

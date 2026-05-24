@@ -35,6 +35,7 @@ import {
   writeOutboundFailureMessageEvent,
   writeOutboundSuccessMessageEvent,
 } from "@/lib/supabase/sms-engine.js";
+import { addSentryBreadcrumb } from "@/lib/monitoring/sentry.js";
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
@@ -1522,6 +1523,8 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
     // Blank greeting errors from TextGrid guard should pause as name_missing not failed.
     const is_blank_greeting_error = /blank.*(greeting|name)|missing.*seller_first_name/i.test(error?.message || "");
+    const is_blacklist_error = /21610|blacklist/i.test(error?.message || "");
+    
     if (is_blank_greeting_error) {
       try {
         const supabase_client = getSupabase(deps);
@@ -1559,6 +1562,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         queue_row_id,
         queue_item_id: queue_row_id,
       };
+    }
+
+    if (is_blacklist_error) {
+        addSentryBreadcrumb("queue_failure", "provider_blacklist_21610_terminal", { queue_row_id, error: error?.message });
     }
 
     try {

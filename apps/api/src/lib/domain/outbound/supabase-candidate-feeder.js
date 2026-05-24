@@ -3817,3 +3817,23 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
 }
 
 export { REASON_CODES };
+
+async function quarantineIdentityMismatch(candidate, identity_alignment, deps = {}) {
+  try {
+    console.warn("[identity_mismatch.quarantine]", {
+      master_owner_id: candidate?.master_owner_id,
+      property_id: candidate?.property_id,
+      phone_id: candidate?.best_phone_id || candidate?.phone_id,
+      to_phone_number: candidate?.canonical_e164 || candidate?.phone,
+      identity_alignment_status: identity_alignment?.status,
+      identity_alignment_score: identity_alignment?.score,
+    });
+
+    return { ok: true, quarantined: true };
+  } catch (error) {
+    console.warn("[identity_mismatch.quarantine_failed]", {
+      error: error?.message,
+    });
+    return { ok: false, quarantined: false, error: error?.message };
+  }
+}
