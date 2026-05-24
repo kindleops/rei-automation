@@ -266,6 +266,99 @@ const isPresent = (value: unknown): boolean => {
 
 const asStr = (value: unknown): string => normalizeText(value)
 
+const hasValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0
+  return String(value).trim().length > 0
+}
+
+const firstPresent = (...values: unknown[]) => {
+  for (const value of values) {
+    if (hasValue(value)) return value
+  }
+  return undefined
+}
+
+const buildHydratedThread = (
+  thread: WorkflowThread,
+  intelligence: ThreadIntelligenceRecord | null,
+  threadDossier: ThreadDossier | null,
+): WorkflowThread => {
+  const property = (threadDossier?.property ?? {}) as Record<string, unknown>
+  const prospect = (threadDossier?.prospect ?? {}) as Record<string, unknown>
+  const owner = (threadDossier?.master_owner ?? {}) as Record<string, unknown>
+  const state = (threadDossier?.inbox_thread_state ?? {}) as Record<string, unknown>
+  const intel = (intelligence ?? {}) as Record<string, unknown>
+  const base = (thread ?? {}) as unknown as Record<string, unknown>
+
+  const hydrated: Record<string, unknown> = {
+    ...owner,
+    ...prospect,
+    ...property,
+    ...state,
+    ...intel,
+    ...base,
+  }
+
+  hydrated.latitude = firstPresent(base.latitude, base.lat, intel.latitude, intel.lat, property.latitude, property.lat)
+  hydrated.longitude = firstPresent(base.longitude, base.lng, intel.longitude, intel.lng, property.longitude, property.lng)
+  hydrated.lat = hydrated.latitude
+  hydrated.lng = hydrated.longitude
+
+  hydrated.phoneNumber = firstPresent(
+    base.phoneNumber, base.phone, base.displayPhone, base.canonicalE164, base.sellerPhone,
+    prospect.best_phone, prospect.phone, prospect.phone_number,
+    owner.best_phone, owner.phone, owner.phone_number,
+    intel.best_phone, intel.phone, intel.phone_number,
+  )
+  hydrated.prospect_best_phone = firstPresent(
+    base.prospect_best_phone, base.best_phone,
+    prospect.best_phone, prospect.phone, prospect.phone_number,
+    owner.best_phone,
+    intel.best_phone,
+  )
+  hydrated.displayPhone = firstPresent(base.displayPhone, hydrated.phoneNumber)
+  hydrated.canonicalE164 = firstPresent(
+    base.canonicalE164,
+    prospect.canonical_e164,
+    owner.canonical_e164,
+    intel.canonical_e164,
+    hydrated.phoneNumber,
+  )
+
+  hydrated.propertyAddress = firstPresent(
+    base.propertyAddress, base.property_address,
+    property.property_address, property.address,
+    intel.property_address, intel.address,
+  )
+  hydrated.propertyAddressFull = firstPresent(
+    base.propertyAddressFull, base.property_address_full, hydrated.propertyAddress,
+    property.property_address_full, property.property_address, property.address,
+    intel.property_address_full, intel.property_address, intel.address,
+  )
+
+  hydrated.ownerName = firstPresent(
+    base.ownerName, base.owner_name, base.sellerName, base.seller_display_name,
+    owner.owner_full_name, owner.owner_name, owner.display_name, owner.full_name,
+    prospect.full_name, prospect.name,
+    intel.owner_full_name, intel.owner_name, intel.prospect_full_name,
+  )
+  hydrated.prospect_full_name = firstPresent(
+    base.prospect_full_name,
+    prospect.full_name, prospect.name,
+    intel.prospect_full_name,
+    hydrated.ownerName,
+  )
+  hydrated.prospect_best_email = firstPresent(
+    base.prospect_best_email, base.best_email_1,
+    prospect.best_email, prospect.email,
+    owner.best_email, owner.email,
+    intel.best_email,
+  )
+
+  return hydrated as unknown as WorkflowThread
+}
+
 
 const getAvailableFields = (group: Record<string, unknown>): string[] =>
   Object.entries(group).filter(([, v]) => isPresent(v)).map(([k]) => k)
@@ -6203,7 +6296,14 @@ export const IntelligencePanel = ({
     )
   }
 
-  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread, threadDossier), [intelligence, thread, threadDossier])
+  const hydratedThread = useMemo(
+    () => buildHydratedThread(thread, intelligence, threadDossier),
+    [thread, intelligence, threadDossier],
+  )
+  const snapshot = useMemo(
+    () => normalizePropertySnapshot(intelligence || null, hydratedThread, threadDossier),
+    [intelligence, hydratedThread, threadDossier],
+  )
   const { data: phase3 } = usePhase3Intelligence(thread.threadKey)
   const panelClassMode = layoutMode === 'compact'
     ? 'compact'
@@ -6224,16 +6324,16 @@ export const IntelligencePanel = ({
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
           <ErrorBoundary fallbackName="CompactDealIntelligenceCapsule">
-            <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} />
+            <CompactDealIntelligenceCapsule thread={hydratedThread} snapshot={snapshot} messages={messages} />
           </ErrorBoundary>
         ) : layoutMode === 'medium' ? (
           <ErrorBoundary fallbackName="MediumDealWorkspace">
-            <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} />
+            <MediumDealWorkspace thread={hydratedThread} snapshot={snapshot} messages={messages} phase3={phase3} />
           </ErrorBoundary>
         ) : (
           <ErrorBoundary fallbackName="DealCommandDossier">
             <DealCommandDossier
-              thread={thread}
+              thread={hydratedThread}
               snapshot={snapshot}
               messages={messages}
               phase3={phase3}
