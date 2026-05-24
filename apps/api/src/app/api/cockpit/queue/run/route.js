@@ -18,12 +18,12 @@ function asNumber(value, fallback = 0) {
 
 export async function POST(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
 
   const body = await request.json().catch(() => ({}))
   const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'off').toLowerCase()
   if (configuredMode === 'off') {
-    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
+    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 }))
   }
 
   const requestedMode = clean(body.mode || configuredMode || 'safe').toLowerCase()
@@ -39,14 +39,14 @@ export async function POST(request) {
       run_limit: runLimit,
       result,
       summary: {
-        sent: Number(result?.sent_count || 0)),
+        sent: Number(result?.sent_count || 0),
         failed: Number(result?.failed_count || 0),
         blocked: Number(result?.blocked_count || 0),
       },
     },
-  }, { status: result?.ok === false ? 500 : 200 })
+  }, { status: result?.ok === false ? 500 : 200 }))
 }
 
 export async function OPTIONS(request) {
-  return handleOptionsResponse(request));
+  return handleOptionsResponse(request);
 }

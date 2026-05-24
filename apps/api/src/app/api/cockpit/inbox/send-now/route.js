@@ -45,9 +45,9 @@ export async function POST(request) {
   const auth = ensureMutationAuth(request)
   if (!auth.ok) {
     return withCors(request, NextResponse.json(
-      await auth.response.json()).catch(() => ({ ok: false, error: 'unauthorized' })),
+      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
       { status: auth.response.status, headers: cors }
-    )
+    ))
   }
   const payload = await parseJsonSafe(request)
   

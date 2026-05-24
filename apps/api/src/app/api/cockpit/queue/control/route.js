@@ -63,14 +63,14 @@ async function loadSettings() {
 
 export async function GET(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
   const values = await loadSettings()
-  return withCors(request, NextResponse.json({ ok: true, action: 'queue-control:get', diagnostics: values }, { status: 200 })
+  return withCors(request, NextResponse.json({ ok: true, action: 'queue-control:get', diagnostics: values }, { status: 200 }))
 }
 
 export async function POST(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
   const body = await request.json().catch(() => ({}))
   const patch = parseBody(body)
   const result = await setSystemValues(patch)
@@ -83,5 +83,5 @@ export async function POST(request) {
 
 
 export async function OPTIONS(request) {
-  return handleOptionsResponse(request));
+  return handleOptionsResponse(request);
 }

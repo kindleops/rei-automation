@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
   const payload = await parseJsonSafe(request)
   const result = await patchThreadStateSafe({ payload }).catch((err) => ({
     ok: false,

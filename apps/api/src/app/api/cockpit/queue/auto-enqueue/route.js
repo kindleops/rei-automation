@@ -26,12 +26,12 @@ function asBoolean(value, fallback = false) {
 
 export async function POST(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
 
   const body = await request.json().catch(() => ({}))
   const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'off').toLowerCase()
   if (configuredMode === 'off') {
-    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
+    return withCors(request, NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 }))
   }
 
   const target_count = Math.max(1, Math.min(1000, asNumber(body.target_count, 100)))
@@ -94,5 +94,5 @@ export async function POST(request) {
 }
 
 export async function OPTIONS(request) {
-  return handleOptionsResponse(request));
+  return handleOptionsResponse(request);
 }

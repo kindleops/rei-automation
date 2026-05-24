@@ -9,7 +9,7 @@ export async function GET(request) {
       .select('*')
 
     if (error) {
-      return withCors(request, NextResponse.json({ error: error.message }, { status: 500 })
+      return withCors(request, NextResponse.json({ error: error.message }, { status: 500 }))
     }
 
     const debugResults = threads.map(thread => {
@@ -54,5 +54,5 @@ export async function GET(request) {
 }
 
 export async function OPTIONS(request) {
-  return handleOptionsResponse(request));
+  return handleOptionsResponse(request);
 }
