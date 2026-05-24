@@ -360,14 +360,14 @@ export const resolveInboxSellerNameWithSource = (row: Record<string, unknown>): 
   }
 
   const candidates: Array<{ val: unknown; source: string }> = [
+    { val: row.prospect_full_name || row.prospectFullName, source: 'prospect_full_name' },
+    { val: firstName && lastName ? `${firstName} ${lastName}` : firstName || null, source: 'prospect_names' },
     { val: row.owner_display_name || row.ownerDisplayName, source: 'owner_display_name' },
     { val: row.seller_display_name || row.sellerDisplayName, source: 'seller_display_name' },
     { val: row.seller_name || row.sellerName, source: 'seller_name' },
     { val: row.owner_name || row.ownerName, source: 'owner_name' },
-    { val: row.prospect_full_name || row.prospectFullName, source: 'prospect_full_name' },
     { val: row.primary_owner_name || row.primaryOwnerName, source: 'primary_owner_name' },
     { val: row.contact_name || row.contactName, source: 'contact_name' },
-    { val: firstName && lastName ? `${firstName} ${lastName}` : firstName || null, source: 'prospect_names' },
     { val: ownerFirstName && ownerLastName ? `${ownerFirstName} ${ownerLastName}` : ownerFirstName || null, source: 'owner_names' },
     { val: row.property_owner_name || row.propertyOwnerName, source: 'property_owner_name' },
     { val: row.prospect_cnam || row.prospectCnam, source: 'prospect_cnam' },
@@ -1837,6 +1837,7 @@ export const fetchLiveInbox = async ({
     throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
   }
   const payload = result.data as AnyRecord
+  console.log("[INBOX CONTRACT THREAD SAMPLE]", payload?.threads?.[0])
   const normalizedPayload = payload
   return normalizeLiveInboxResponse(normalizedPayload, limit)
 }

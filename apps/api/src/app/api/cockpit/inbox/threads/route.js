@@ -95,6 +95,18 @@ function parseIso(value) {
   return Number.isFinite(ts) ? new Date(ts).toISOString() : null;
 }
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  const text = clean(value);
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function computeThreadBucket(thread) {
   if (thread.is_suppressed) return "suppressed";
   if (thread.is_priority) return "priority";
@@ -220,6 +232,7 @@ export async function GET(request) {
     exclusion_reasons: {},
     counts_source: "inbox_thread_state",
     count_rows_scanned: 0,
+    prospect_resolution_threads_with_null_name: [],
   };
 
   try {
@@ -286,11 +299,10 @@ export async function GET(request) {
     const propertyIds = uniq([...threadsByKey.values()].map((t) => t.property_id));
     const masterOwnerIds = uniq([...threadsByKey.values()].map((t) => t.master_owner_id));
 
-    const [stateRes, prospectRes, propertyRes, aiStateRes, ownerRes] = await Promise.all([
+    const [stateRes, propertyRes, aiStateRes, ownerRes] = await Promise.all([
       threadKeys.length
         ? supabase.from("inbox_thread_state").select("*").in("thread_key", threadKeys)
         : Promise.resolve({ data: [], error: null }),
-      prospectIds.length ? supabase.from("prospects").select("*").in("prospect_id", prospectIds) : Promise.resolve({ data: [], error: null }),
       propertyIds.length ? supabase.from("properties").select("*").in("property_id", propertyIds) : Promise.resolve({ data: [], error: null }),
       threadKeys.length
         ? supabase.from("thread_ai_state").select("*").in("thread_key", threadKeys)
@@ -299,27 +311,12 @@ export async function GET(request) {
     ]);
 
     if (stateRes?.error) throw stateRes.error;
-    if (prospectRes?.error) throw prospectRes.error;
     if (propertyRes?.error) throw propertyRes.error;
     if (aiStateRes?.error) throw aiStateRes.error;
     if (ownerRes?.error) throw ownerRes.error;
 
-    const prospects = Array.isArray(prospectRes.data) ? [...prospectRes.data] : [];
     const owners = Array.isArray(ownerRes.data) ? ownerRes.data : [];
     const ownerById = new Map(owners.map((r) => [clean(r.master_owner_id), r]));
-    const ownerBestProspectIds = uniq(owners.map((r) => r.best_prospect_id));
-    if (ownerBestProspectIds.length > 0) {
-      const extraProspects = await supabase.from("prospects").select("*").in("prospect_id", ownerBestProspectIds);
-      if (!extraProspects.error && Array.isArray(extraProspects.data)) {
-        prospects.push(...extraProspects.data);
-      }
-    }
-
-    const unresolvedProspectIds = prospectIds.filter((id) => !prospects.some((p) => clean(p.prospect_id) === id));
-    if (unresolvedProspectIds.length > 0) {
-      const byIdRes = await supabase.from("prospects").select("*").in("id", unresolvedProspectIds);
-      if (!byIdRes.error && Array.isArray(byIdRes.data)) prospects.push(...byIdRes.data);
-    }
 
     const properties = Array.isArray(propertyRes.data) ? [...propertyRes.data] : [];
     const unresolvedPropertyIds = propertyIds.filter((id) => !properties.some((p) => clean(p.property_id) === id));
@@ -328,17 +325,73 @@ export async function GET(request) {
       if (!byIdRes.error && Array.isArray(byIdRes.data)) properties.push(...byIdRes.data);
     }
 
-    const stateByThreadKey = new Map((stateRes.data || []).map((r) => [clean(r.thread_key), r]));
+    const stateRows = Array.isArray(stateRes.data) ? stateRes.data : [];
+    const stateByThreadKey = new Map(stateRows.map((r) => [clean(r.thread_key), r]));
     const aiByThreadKey = new Map((aiStateRes.data || []).map((r) => [clean(r.thread_key), r]));
-    const prospectsById = new Map(
-      prospects.flatMap((r) => {
-        const keys = uniq([r.prospect_id, r.id]);
-        return keys.map((k) => [k, r]);
-      })
-    );
     const propertiesById = new Map(
       properties.flatMap((r) => {
         const keys = uniq([r.property_id, r.id]);
+        return keys.map((k) => [k, r]);
+      })
+    );
+
+    const sendQueueRowsForBridge = threadKeys.length
+      ? await supabase
+          .from("send_queue")
+          .select("thread_key,master_owner_id,property_id,prospect_id")
+          .in("thread_key", threadKeys)
+          .limit(5000)
+      : { data: [], error: null };
+    if (sendQueueRowsForBridge?.error) throw sendQueueRowsForBridge.error;
+    const sendQueueRows = Array.isArray(sendQueueRowsForBridge.data) ? sendQueueRowsForBridge.data : [];
+    const sendQueueByThreadKey = new Map();
+    for (const row of sendQueueRows) {
+      const key = clean(row.thread_key);
+      if (!key || sendQueueByThreadKey.has(key)) continue;
+      sendQueueByThreadKey.set(key, row);
+    }
+
+    const resolvedProspectIds = [];
+    const bridgeMetaByThreadKey = new Map();
+    for (const thread of [...threadsByKey.values()]) {
+      const state = stateByThreadKey.get(clean(thread.thread_key)) || {};
+      const owner = ownerById.get(clean(thread.master_owner_id)) || {};
+      const queue = sendQueueByThreadKey.get(clean(thread.thread_key)) || {};
+      const ownerJoinedProspectIds = parseJsonArray(owner.joined_prospect_ids_json).map((id) => clean(id)).filter(Boolean);
+      const candidateSteps = [
+        { step: "inbox_thread_state.prospect_id", value: clean(state.prospect_id) },
+        { step: "message_events.prospect_id", value: clean(thread.prospect_id) },
+        { step: "send_queue.prospect_id", value: clean(queue.prospect_id) },
+        { step: "master_owners.best_prospect_id", value: clean(owner.best_prospect_id) },
+        { step: "master_owners.joined_prospect_ids_json", value: clean(ownerJoinedProspectIds[0]) },
+      ];
+      const winner = candidateSteps.find((s) => Boolean(s.value));
+      const resolvedProspectId = winner?.value || null;
+      if (resolvedProspectId) resolvedProspectIds.push(resolvedProspectId);
+      bridgeMetaByThreadKey.set(clean(thread.thread_key), {
+        resolved_prospect_id: resolvedProspectId,
+        succeeded_step: winner?.step || null,
+        failed_steps: candidateSteps.filter((s) => !s.value).map((s) => s.step),
+      });
+    }
+
+    const uniqueResolvedProspectIds = uniq(resolvedProspectIds);
+    const prospectRows = uniqueResolvedProspectIds.length
+      ? await supabase.from("prospects").select("*").in("prospect_id", uniqueResolvedProspectIds)
+      : { data: [], error: null };
+    if (prospectRows?.error) throw prospectRows.error;
+    const prospects = Array.isArray(prospectRows.data) ? prospectRows.data : [];
+    const unresolvedProspects = uniqueResolvedProspectIds.filter(
+      (id) => !prospects.some((p) => clean(p.prospect_id) === id)
+    );
+    let prospectByIdRows = [];
+    if (unresolvedProspects.length > 0) {
+      const byIdRes = await supabase.from("prospects").select("*").in("id", unresolvedProspects);
+      if (!byIdRes.error && Array.isArray(byIdRes.data)) prospectByIdRows = byIdRes.data;
+    }
+    const prospectsById = new Map(
+      [...prospects, ...prospectByIdRows].flatMap((r) => {
+        const keys = uniq([r.prospect_id, r.id]);
         return keys.map((k) => [k, r]);
       })
     );
@@ -347,7 +400,8 @@ export async function GET(request) {
       const state = stateByThreadKey.get(clean(thread.thread_key)) || {};
       const ai = aiByThreadKey.get(clean(thread.thread_key)) || {};
       const owner = ownerById.get(clean(thread.master_owner_id)) || null;
-      const resolvedProspectId = clean(thread.prospect_id || state.prospect_id || owner?.best_prospect_id);
+      const bridgeMeta = bridgeMetaByThreadKey.get(clean(thread.thread_key)) || {};
+      const resolvedProspectId = clean(bridgeMeta.resolved_prospect_id);
       const prospect = prospectsById.get(resolvedProspectId) || null;
       const property = propertiesById.get(clean(thread.property_id)) || null;
       const detectedIntent = clean(state.detected_intent || state.last_intent || ai.detected_intent || ai.last_intent || "");
@@ -385,7 +439,7 @@ export async function GET(request) {
         status.toLowerCase() === "follow_up";
       const isCold = isNegativeIntent(detectedIntent) || status.toLowerCase() === "cold";
 
-      return {
+      const normalizedThread = {
         ...thread,
         prospect_id: resolvedProspectId || thread.prospect_id || null,
         prospect_full_name: prospect?.full_name || null,
@@ -411,6 +465,23 @@ export async function GET(request) {
         is_follow_up: isFollowUp,
         is_cold: isCold,
       };
+      if (!normalizedThread.prospect_full_name) {
+        diagnostics.prospect_resolution_threads_with_null_name.push({
+          thread_key: normalizedThread.thread_key,
+          resolved_master_owner_id: normalizedThread.master_owner_id || null,
+          resolved_property_id: normalizedThread.property_id || null,
+          resolved_prospect_id: normalizedThread.prospect_id || null,
+          bridge: {
+            succeeded_step: bridgeMeta.succeeded_step || null,
+            failed_steps: bridgeMeta.failed_steps || [],
+            exact_query: {
+              prospects_by_prospect_id_in: uniqueResolvedProspectIds,
+              prospects_by_id_in: unresolvedProspects,
+            },
+          },
+        });
+      }
+      return normalizedThread;
     });
 
     threads = threads

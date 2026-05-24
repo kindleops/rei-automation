@@ -6098,7 +6098,7 @@ export const IntelligencePanel = ({
     )
   }
 
-  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
+  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread, threadDossier), [intelligence, thread, threadDossier])
   const { data: phase3 } = usePhase3Intelligence(thread.threadKey)
   const panelClassMode = layoutMode === 'compact'
     ? 'compact'

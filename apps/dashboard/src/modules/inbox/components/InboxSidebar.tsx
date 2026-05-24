@@ -201,6 +201,10 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
         <div className="nx-thread-card-rebuilt__header">
           <div className="nx-thread-card-rebuilt__identity">
             <span className="nx-thread-card-rebuilt__name">{name}</span>
+            <div style={{ fontSize: '10px', color: '#ff4444', lineHeight: 1.2, marginTop: '2px', marginBottom: '2px' }}>
+              API name: {(thread as any).prospect_full_name || (thread as any).prospect_name || 'missing'} <br/>
+              Rendered name: {name}
+            </div>
             <span className="nx-thread-card-rebuilt__address">{address}</span>
           </div>
           <div className="nx-thread-card-rebuilt__right">
@@ -235,6 +239,9 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
       </div>
       <div className="nx-ops75-col nx-ops75-col--seller">
         <span className="nx-ops75-name">{name}</span>
+        <div style={{ fontSize: '10px', color: '#ff4444', lineHeight: 1.2 }}>
+          API name: {(thread as any).prospect_full_name || (thread as any).prospect_name || 'missing'}<br/>Rendered name: {name}
+        </div>
         <span className="nx-ops75-address">{address}</span>
       </div>
       <div className="nx-ops75-col nx-ops75-col--msg">
