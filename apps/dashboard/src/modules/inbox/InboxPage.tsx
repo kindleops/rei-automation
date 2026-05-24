@@ -721,39 +721,7 @@ function InboxPageInternal() {
     ]
   }, [resolveThreadsForView])
 
-  const diagnosticsStats = useMemo(() => {
-    let newRepliesCount = 0
-    let priorityCount = 0
-    let needsReviewCount = 0
-    const exclusionReasons: Record<string, number> = {}
 
-    for (const thread of threads) {
-      const { bucket, reasons } = resolveInboxThreadState(thread as unknown as InboxWorkflowThread)
-      
-      if (bucket === 'new_replies') newRepliesCount++
-      if (bucket === 'priority') priorityCount++
-      if (bucket === 'needs_review') needsReviewCount++
-      
-      if (bucket !== 'new_replies' && bucket !== 'priority' && bucket !== 'needs_review') {
-        for (const reason of reasons) {
-          exclusionReasons[reason] = (exclusionReasons[reason] || 0) + 1
-        }
-      }
-    }
-
-    const top5ExclusionReasons = Object.entries(exclusionReasons)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([reason, count]) => `${reason} (${count})`)
-
-    return {
-      ...(data.diagnostics || {}),
-      new_replies_count: newRepliesCount,
-      priority_count: priorityCount,
-      needs_review_count: needsReviewCount,
-      top_5_exclusion_reasons: top5ExclusionReasons.join(', ') || 'None'
-    }
-  }, [threads, data.diagnostics])
 
   const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
 
@@ -3129,6 +3097,7 @@ function InboxPageInternal() {
 
     if (view === 'list') {
       return (
+        <ErrorBoundary fallbackName="InboxConversationTable">
         <InboxConversationTable
           threads={filtered}
           selectedId={selected?.id ?? null}
@@ -3140,6 +3109,7 @@ function InboxPageInternal() {
           onDensityChange={setTableDensity}
           onSelect={handleSelect}
         />
+        </ErrorBoundary>
       )
     }
 
@@ -3187,6 +3157,7 @@ function InboxPageInternal() {
 
     if (view === 'deal_intelligence') {
       return (
+        <ErrorBoundary fallbackName="IntelligencePanel">
         <IntelligencePanel
           thread={selected}
           threadContext={threadContext}
@@ -3202,6 +3173,7 @@ function InboxPageInternal() {
           panelMode={paneMode === 'single' ? 'full' : paneWidth === '25' || paneWidth === '50' ? 'half' : 'default'}
           layoutMode={layoutMode}
         />
+        </ErrorBoundary>
       )
     }
 
@@ -3703,21 +3675,23 @@ function InboxPageInternal() {
           </div>
         </aside>
         ) : showRightCommandPanel ? (
-          <IntelligencePanel
-            thread={selected}
-            threadContext={threadContext}
-            intelligence={threadIntelligence}
-            threadDossier={threadDossier}
-            dossierLoading={dossierLoading}
-            onStatusChange={handleStatusChange}
-            onStageChange={handleStageChange}
-            onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-            onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
-            onOpenAi={() => setActiveOverlay('ai')}
-            messages={displayedMessages}
-            panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
-            layoutMode={getViewLayoutMode(workspaceWidths['deal_intelligence'] ?? '25')}
-          />
+          <ErrorBoundary fallbackName="IntelligencePanel">
+            <IntelligencePanel
+              thread={selected}
+              threadContext={threadContext}
+              intelligence={threadIntelligence}
+              threadDossier={threadDossier}
+              dossierLoading={dossierLoading}
+              onStatusChange={handleStatusChange}
+              onStageChange={handleStageChange}
+              onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
+              onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
+              onOpenAi={() => setActiveOverlay('ai')}
+              messages={displayedMessages}
+              panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
+              layoutMode={getViewLayoutMode(workspaceWidths['deal_intelligence'] ?? '25')}
+            />
+          </ErrorBoundary>
         ) : null}
       </div>
       )}
