@@ -2107,7 +2107,7 @@ export const getInboxRowsForView = async (
           latest_message_body: event.message_body,
           latest_direction: event.direction,
           unread_count: event.direction === 'inbound' ? 1 : 0,
-          is_read: event.unread === false,
+          is_read: event.direction !== 'inbound',
           phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
           best_phone: event.from_phone_number,
           inbox_category: 'hot_leads',
@@ -2225,7 +2225,7 @@ export const getInboxThreads = async (
           latest_message_body: event.message_body,
           latest_direction: event.direction,
           unread_count: event.direction === 'inbound' ? 1 : 0,
-          is_read: event.unread === false,
+          is_read: event.direction !== 'inbound',
           phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
           best_phone: event.from_phone_number,
           inbox_category: 'hot_leads', // temporary dummy
