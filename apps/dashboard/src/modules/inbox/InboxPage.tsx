@@ -44,7 +44,6 @@ import {
   type ThreadContext,
   dedupeMessages,
   toThreadMessage,
-  HYDRATED_INBOX_THREADS_VIEW,
 } from '../../lib/data/inboxData'
 import { resolveThreadPrimaryName } from './inbox-ui-helpers'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
