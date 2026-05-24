@@ -8,43 +8,7 @@ import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { fetchWithRetry as _fetchWithRetry } from '../../lib/utils/fetchWithRetry'
 import { resolveInboxThreadState } from './resolveInboxThreadState'
-import {
-  fetchBaseEvents,
-  groupIntoThreads,
-  baseThreadToInboxThread,
-  hydrateEnrichments,
-  type BaseThread,
-} from '../../lib/data/inboxBase'
 
-
-const emptyLiveErrorModel = (liveFetchError: string): InboxModel => {
-  if (isDev) {
-    console.log('[NexusInbox] Data source: fallback_error')
-  }
-  return {
-    threads: [],
-    unreadCount: 0,
-    urgentCount: 0,
-    totalCount: 0,
-    aiDraftCount: 0,
-    dataMode: 'mock_preview',
-    liveFetchStatus: 'fallback_error',
-    liveFetchError,
-    messageEventsCount: null,
-    messageEventsRawCount: null,
-    groupedThreadCount: null,
-    priorityInboxCount: null,
-    activeInboxCount: null,
-    waitingInboxCount: null,
-    allInboxCount: null,
-    unreadThreadsCount: null,
-    sendQueueCount: null,
-    archivedThreadsCount: null,
-    hiddenThreadsCount: null,
-    suppressedThreadsCount: null,
-    lastLiveFetchAt: new Date().toISOString(),
-  }
-}
 
 export interface InboxThread {
   id: string
@@ -479,28 +443,7 @@ const EMPTY_MODEL: InboxModel = {
 const threadIdentity = (thread: Pick<InboxThread, 'id' | 'threadKey'>): string =>
   thread.threadKey || thread.id
 
-function buildBaseModel(
-  threads: InboxThread[],
-  groupedCount: number,
-  dataMode: 'live' | 'mock_preview' = 'mock_preview',
-): InboxModel {
-  const inboundCount = threads.filter(t => t.latestDirection === 'inbound').length
-  return {
-    ...EMPTY_MODEL,
-    threads,
-    dataMode,
-    liveFetchStatus: 'active',
-    liveFetchError: null,
-    totalCount: threads.length,
-    unreadCount: inboundCount,
-    urgentCount: inboundCount,
-    allInboxCount: threads.length,
-    groupedThreadCount: groupedCount,
-    messageEventsCount: groupedCount,
-    lastLiveFetchAt: new Date().toISOString(),
-    loadedCount: threads.length,
-  }
-}
+
 
 
 // selectedThreadPreserved: merge refreshes into existing rows instead of replacing the list.

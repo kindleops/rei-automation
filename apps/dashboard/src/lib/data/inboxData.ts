@@ -103,6 +103,7 @@ export interface LiveInboxResponse {
   counts: Record<string, number | null | undefined>
   mapPins: LiveInboxMapPin[]
   pagination: LiveInboxPagination
+  diagnostics?: Record<string, any>
 }
 
 export interface ThreadMessage {
@@ -1841,7 +1842,7 @@ export const fetchLiveInbox = async ({
     endpoint: '/api/cockpit/inbox/threads',
     counts: payload.counts,
     diagnostics: payload.diagnostics,
-    firstThread: payload.threads?.[0],
+    firstThread: (payload.threads as any[])?.[0],
   })
   const normalizedPayload = payload
   return normalizeLiveInboxResponse(normalizedPayload, limit)
