@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
-import { type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
+import { fetchLiveInbox, type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
@@ -585,22 +585,38 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
     abortRef.current = controller
     if (dataRef.current.threads.length === 0) setLoading(true)
 
-    if (!hasSupabaseEnv) {
-      setData(emptyLiveErrorModel('Supabase env vars missing'))
-      setLoading(false)
-      return dataRef.current
-    }
-
-    let baseThreads: BaseThread[] = []
-
     try {
-      // Phase 1 — base query: fetch → group → render immediately
-      const events = await fetchBaseEvents(controller.signal)
+      const response = await fetchLiveInbox({
+        filter: _options.filters?.view ?? 'all',
+        q: _options.filters?.query ?? '',
+        cursor: _options.cursor ?? null,
+        limit: _options.limit ?? 200,
+        signal: controller.signal,
+      })
       if (requestSeq !== requestSeqRef.current) return dataRef.current
 
-      baseThreads = groupIntoThreads(events)
-      const baseInboxThreads = baseThreads.map(t => baseThreadToInboxThread(t))
-      const baseModel = buildBaseModel(baseInboxThreads, baseThreads.length)
+      const liveThreads = response.threads as InboxThread[]
+      const inboundCount = liveThreads.filter(t => t.latestDirection === 'inbound').length
+
+      const baseModel: InboxModel = {
+        ...EMPTY_MODEL,
+        threads: liveThreads,
+        dataMode: 'live',
+        liveFetchStatus: 'active',
+        liveFetchError: null,
+        totalCount: liveThreads.length,
+        unreadCount: inboundCount,
+        urgentCount: inboundCount,
+        allInboxCount: liveThreads.length,
+        groupedThreadCount: response.counts?.all ?? liveThreads.length,
+        messageEventsCount: response.counts?.all ?? liveThreads.length,
+        lastLiveFetchAt: new Date().toISOString(),
+        loadedCount: liveThreads.length,
+        counts: response.counts,
+        mapPins: response.mapPins,
+        pagination: response.pagination,
+        diagnostics: response.diagnostics,
+      }
 
       setData(prev => mergeInboxModels(prev, baseModel, mode))
       setError(null)
@@ -608,38 +624,17 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       lastRefreshAtRef.current = new Date().toISOString()
 
       if (isDev) {
-        console.log('[useInboxData] phase1 complete', {
-          events: events.length,
-          threads: baseThreads.length,
+        console.log('[useInboxData] fetchLiveInbox complete', {
+          threads: liveThreads.length,
+          counts: response.counts,
         })
       }
-    } catch (err) {
+    } catch (err: any) {
       if (controller.signal.aborted) return dataRef.current
       setError(err)
-      if (isDev) console.error('[NEXUS] useInboxData base load failed', err)
+      if (isDev) console.error('[NEXUS] useInboxData live load failed', err)
       if (requestSeq === requestSeqRef.current) setLoading(false)
       return dataRef.current
-    }
-
-    // Phase 2 — hydration: runs after render, failure MUST NOT blank inbox
-    if (baseThreads.length > 0 && requestSeq === requestSeqRef.current) {
-      try {
-        const enrichments = await hydrateEnrichments(baseThreads)
-        if (requestSeq !== requestSeqRef.current) return dataRef.current
-
-        const enrichedThreads = baseThreads.map(t => baseThreadToInboxThread(t, enrichments.get(t.thread_key)))
-        const enrichedModel = buildBaseModel(enrichedThreads, baseThreads.length, 'live')
-        setData(prev => mergeInboxModels(prev, enrichedModel, 'refresh'))
-
-        if (isDev) {
-          console.log('[useInboxData] phase2 hydration complete', {
-            enriched: enrichments.size,
-          })
-        }
-      } catch (hydrateErr) {
-        // Hydration failure must not blank the inbox — base threads remain
-        if (isDev) console.warn('[useInboxData] hydration failed, keeping base threads', hydrateErr)
-      }
     }
 
     return dataRef.current

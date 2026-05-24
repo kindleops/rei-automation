@@ -1837,7 +1837,12 @@ export const fetchLiveInbox = async ({
     throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
   }
   const payload = result.data as AnyRecord
-  console.log("[INBOX CONTRACT THREAD SAMPLE]", payload?.threads?.[0])
+  console.log("[INBOX CONTRACT RESPONSE]", {
+    endpoint: '/api/cockpit/inbox/threads',
+    counts: payload.counts,
+    diagnostics: payload.diagnostics,
+    firstThread: payload.threads?.[0],
+  })
   const normalizedPayload = payload
   return normalizeLiveInboxResponse(normalizedPayload, limit)
 }
