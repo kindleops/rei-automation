@@ -604,12 +604,17 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       proxy: {
         '/api/cockpit': {
-          target: 'http://localhost:3000',
+          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/ops': {
+          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
         },
         '/api/internal': {
-          target: 'http://localhost:3000',
+          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
         }

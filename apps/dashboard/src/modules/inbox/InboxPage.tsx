@@ -44,12 +44,13 @@ import {
   type ThreadContext,
   dedupeMessages,
   toThreadMessage,
+  HYDRATED_INBOX_THREADS_VIEW,
 } from '../../lib/data/inboxData'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
-import { getQueueControlSettings, updateQueueControlSettings } from '../../lib/api/backendClient'
+import { getQueueControlSettings, updateQueueControlSettings, getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
@@ -1750,9 +1751,18 @@ export default function InboxPage() {
   ) => {
     setQueueCommandActionLoading(actionKey)
     try {
-      const response = await fetch(endpoint, {
+      const { secret } = getBackendApiSecretDebugSafe()
+      const baseUrl = getBackendBaseUrl()
+      // Ensure endpoint starts with /
+      const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+      const url = `${baseUrl}${path}`
+
+      const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-ops-dashboard-secret': secret
+        },
         body: JSON.stringify(options?.body ?? {}),
       })
       const payload = await response.json().catch(() => ({}))
@@ -3264,7 +3274,33 @@ export default function InboxPage() {
           <div><b>Error:</b> {data.liveFetchError}</div>
           <div><b>Endpoint:</b> {HYDRATED_INBOX_THREADS_VIEW}</div>
           <div><b>Mode:</b> {data.dataMode}</div>
-          <div><b>Fallback:</b> {data.dataMode === 'fallback_error' ? 'LocalStorage Cache' : 'None'}</div>
+          <div><b>Fallback:</b> {String(data.dataMode) === 'fallback_error' ? 'LocalStorage Cache' : 'None'}</div>
+        </div>
+      )}
+
+      {/* PRODUCTION DEBUG BANNER */}
+      {!DEV && (data.loadedCount === 0 || threads.length === 0) && (
+        <div style={{
+          background: '#fff3cd',
+          border: '1px solid #f5c6cb',
+          color: '#856404',
+          padding: '8px 16px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          zIndex: 9999,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px'
+        }}>
+          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS (loadedCount=0)</div>
+          <div><b>Endpoint Called:</b> message_events (bypassed {HYDRATED_INBOX_THREADS_VIEW})</div>
+          <div><b>Status Code:</b> {data.liveFetchError ? 'Failed' : '200 OK'}</div>
+          <div><b>Error:</b> {data.liveFetchError || 'None'}</div>
+          <div><b>Raw Row Count Before Filters:</b> {data.loadedCount ?? 0}</div>
+          <div><b>Row Count After Filters:</b> {threads.length}</div>
+          <div><b>Active Filter:</b> {viewFilter}</div>
+          <div><b>Exclusion Reason Top 5:</b> N/A (bypassed)</div>
         </div>
       )}
 

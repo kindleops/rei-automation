@@ -75,6 +75,7 @@ const isInbound = (t: InboxThread) =>
 export const MobileInboxTab = ({ onNewReplyCount }: MobileInboxTabProps) => {
   const [threads, setThreads] = useState<InboxThread[]>([])
   const [loading, setLoading] = useState(true)
+  const [errorInfo, setErrorInfo] = useState<string | null>(null)
   const [selectedThread, setSelectedThread] = useState<InboxThread | null>(null)
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [messagesLoading, setMessagesLoading] = useState(false)
@@ -86,13 +87,18 @@ export const MobileInboxTab = ({ onNewReplyCount }: MobileInboxTabProps) => {
 
   const loadThreads = useCallback(async () => {
     try {
+      setErrorInfo(null)
       const result = await getInboxThreads({}, { maxRows: 50 })
       const list = result.threads
       setThreads(list)
       const newCount = list.filter(isInbound).length
       onNewReplyCount?.(newCount)
+      if (list.length === 0) {
+        setErrorInfo('Loaded 0 threads. (bypassed to message_events)')
+      }
     } catch (err) {
       console.error('[MobileInbox] load failed', err)
+      setErrorInfo(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -291,6 +297,28 @@ export const MobileInboxTab = ({ onNewReplyCount }: MobileInboxTabProps) => {
   // ── Thread list ─────────────────────────────────────────────────────────────
   return (
     <div className="nx-m-inbox">
+      {errorInfo && (
+        <div style={{
+          background: '#fff3cd',
+          border: '1px solid #f5c6cb',
+          color: '#856404',
+          padding: '8px 16px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          zIndex: 9999,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          margin: '8px'
+        }}>
+          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS</div>
+          <div><b>Endpoint Called:</b> message_events (bypass)</div>
+          <div><b>Error:</b> {errorInfo}</div>
+          <div><b>Status:</b> {errorInfo.includes('bypassed') ? '200 OK' : 'Failed'}</div>
+        </div>
+      )}
+
       <div className="nx-m-bucket-tabs">
         <button
           className={`nx-m-bucket-tab ${stageFilter === 'all' ? 'is-active' : ''}`}

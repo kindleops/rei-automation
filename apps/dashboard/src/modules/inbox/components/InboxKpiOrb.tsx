@@ -23,8 +23,10 @@ export const InboxKpiOrb = () => {
   const previousKpiSnapshotRef = useRef<Record<string, string>>({})
   const updateTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
-  const { kpis, isLive, recommendations } = useOperationalKpis(timeWindow)
+  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow)
   const { outliers, coverage } = usePerformanceIntelligence(timeWindow as TimeWindow)
+
+  const error = kpiError
 
   const allKpisList = useMemo(() => {
     if (!kpis) return []
@@ -193,6 +195,40 @@ export const InboxKpiOrb = () => {
           </header>
 
           <div className="nx-orb-dashboard__content">
+            {error && (
+              <div style={{
+                margin: '16px',
+                padding: '12px',
+                background: 'rgba(255, 0, 0, 0.1)',
+                border: '1px solid rgba(255, 0, 0, 0.3)',
+                borderRadius: '8px',
+                color: '#ff6b6b',
+                fontSize: '12px'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Icon name="alert" />
+                  Telemetry Link Failure
+                </div>
+                <div style={{ fontFamily: 'monospace', opacity: 0.9 }}>
+                  {error instanceof Error ? error.message : String(error)}
+                </div>
+                <button 
+                  onClick={() => refreshKpis()}
+                  style={{
+                    marginTop: '8px',
+                    background: 'rgba(255,255,255,0.1)',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '10px'
+                  }}
+                >
+                  Retry Connection
+                </button>
+              </div>
+            )}
             <div className="nx-orb-dashboard__scroll-area">
               {volumeCards.length > 0 && (
                 <section className="nx-orb-dashboard__section">

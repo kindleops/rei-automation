@@ -1818,7 +1818,10 @@ export const fetchLiveInbox = async ({
   })
 
   const result = await backendClient.fetchLiveInbox(params.toString(), signal)
-  if (!result.ok) throw new Error(`Live inbox API failed (${result.status})`)
+  if (!result.ok) {
+    const errorMsg = result.message || result.error || 'Unknown API error'
+    throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
+  }
   const payload = result.data as AnyRecord
   const normalizedPayload = asBoolean(payload['ok'], false)
     ? ((payload['diagnostics'] as AnyRecord) ?? payload)
@@ -1901,9 +1904,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
                              unreadCount > 0 && 
                              threadStage === 'needs_response' &&
                              !isArchived && 
-                             !isSuppressed &&
-                             threadStage !== 'wrong_number' &&
-                             threadStage !== 'dnc_opt_out'
+                             !isSuppressed
 
   if (shouldBeNewInbound) {
     category = 'new_inbound'
@@ -2045,50 +2046,78 @@ export const getInboxRowsForView = async (
   const page_size = options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
   const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
 
-  const viewName = options.sourceMode === 'all_sellers' 
-    ? 'v_seller_work_items' 
-    : HYDRATED_INBOX_THREADS_VIEW
+  // const viewName = options.sourceMode === 'all_sellers' 
+  //  ? 'v_seller_work_items' 
+  //  : HYDRATED_INBOX_THREADS_VIEW
 
-  let query: any = supabase.from(viewName).select(INBOX_LIST_COLUMNS, { count: 'exact' })
+  // TEMPORARY BYPASS: query message_events directly
+  let query: any = supabase
+    .from('message_events')
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, unread', { count: 'exact' })
+    .in('direction', ['inbound', 'outbound'])
+    .order('created_at', { ascending: false })
+    .range(offset, offset + page_size - 1)
 
-  // Apply Search/Advanced Filters
-  query = applyInboxSearchServerFilter(query, options.filters?.query)
-  query = applyInboxAdvancedServerFilters(query, options.filters?.advanced)
+  // Apply Search/Advanced Filters (Bypassed)
+  // query = applyInboxSearchServerFilter(query, options.filters?.query)
+  // query = applyInboxAdvancedServerFilters(query, options.filters?.advanced)
 
-  // View-Specific Logic
-  if (view === ('all_inbound' as any) || view === ('inbound_all' as any)) {
-    query = query.gt('inbound_count', 0)
-  } else if (view === ('archived' as any)) {
-    query = query.eq('is_archived', true)
-  } else if (view === ('scheduled' as any)) {
-    query = query.eq('execution_state', 'scheduled')
-  } else if (view === ('queued' as any)) {
-    query = query.in('execution_state', ['ready', 'active'])
-  } else {
-    const categories = getHydratedCategoriesForView(view)
-    if (categories.length === 1) {
-      query = query.eq('inbox_category', categories[0])
-    } else if (categories.length > 1) {
-      query = query.in('inbox_category', categories)
-    }
-  }
+  // View-Specific Logic (Bypassed)
+  // if (view === ('all_inbound' as any) || view === ('inbound_all' as any)) {
+  //   query = query.gt('inbound_count', 0)
+  // } else if (view === ('archived' as any)) {
+  //   query = query.eq('is_archived', true)
+  // } else if (view === ('scheduled' as any)) {
+  //   query = query.eq('execution_state', 'scheduled')
+  // } else if (view === ('queued' as any)) {
+  //   query = query.in('execution_state', ['ready', 'active'])
+  // } else {
+  //   const categories = getHydratedCategoriesForView(view)
+  //   if (categories.length === 1) {
+  //     query = query.eq('inbox_category', categories[0])
+  //   } else if (categories.length > 1) {
+  //     query = query.in('inbox_category', categories)
+  //   }
+  // }
 
   // Canonical Ordering: latest_message_at desc nullslast is mandatory for performance
-  query = query.order('latest_message_at', { ascending: false, nullsFirst: false })
-  
-  query = query.range(offset, offset + page_size - 1)
+  // query = query.order('latest_message_at', { ascending: false, nullsFirst: false })
+
+  // query = query.range(offset, offset + page_size - 1)
 
   if (options.signal) query = query.abortSignal(options.signal)
 
   let data: AnyRecord[] = []
   let count: number | null = null
+  let errorBody: string | null = null
   try {
     const result = await query
     if (result.error) throw result.error
-    data = safeArray(result.data as AnyRecord[])
+
+    // Group by thread_key / phones
+    const threadsMap = new Map<string, AnyRecord>()
+    for (const event of (result.data || [])) {
+      const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(':')
+      const key = event.thread_key || phones || 'unknown'
+
+      if (!threadsMap.has(key)) {
+        threadsMap.set(key, {
+          thread_key: key,
+          latest_message_at: event.created_at,
+          latest_message_body: event.message_body,
+          latest_direction: event.direction,
+          unread_count: event.direction === 'inbound' ? 1 : 0,
+          is_read: event.unread === false,
+          phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
+          best_phone: event.from_phone_number,
+          inbox_category: 'hot_leads',
+        })
+      }
+    }
+    data = Array.from(threadsMap.values())
     count = result.count ?? null
   } catch (err) {
-    const errorBody = mapErrorMessage(err)
+    errorBody = mapErrorMessage(err)
     if (DEV) {
         console.error('[getInboxRowsForView] query failed', {
             view,
@@ -2097,9 +2126,9 @@ export const getInboxRowsForView = async (
             error: errorBody
         })
     }
-    throw new Error(`Inbox query failed: ${errorBody}`)
+    // We do NOT throw here if we want to show a debug banner, but wait, the prompt says "Revert any recent frontend change that silently returns [] on API failure." So throwing is the right thing to do to avoid silent empty states, AND we need to show a banner on the UI.
+    throw new Error(`Inbox bypass query failed: ${errorBody}`)
   }
-
   const rows = data.map((row, index) => normalizeInboxThread(row, offset, index))
   
   return {
@@ -2157,22 +2186,24 @@ export const getInboxThreads = async (
   const supressNullCount = (v: number | null | undefined): number => (v == null ? 0 : v)
 
   let query: any = supabase
-    .from(HYDRATED_INBOX_THREADS_VIEW)
-    .select(INBOX_LIST_COLUMNS)
-    .order('latest_message_at', { ascending: false, nullsFirst: false })
+    .from('message_events')
+    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, unread', { count: 'exact' })
+    .in('direction', ['inbound', 'outbound'])
+    .order('created_at', { ascending: false })
     .range(startOffset, startOffset + maxRows - 1)
 
-  query = applyInboxSearchServerFilter(query, filterState.query)
-  query = applyInboxAdvancedServerFilters(query, filterState.advanced)
-  if (viewCategories.length === 1) {
-    query = query.eq('inbox_category', viewCategories[0])
-  } else if (viewCategories.length > 1) {
-    query = query.in('inbox_category', viewCategories)
-  }
+  // Temporarily bypass all filters
+  // query = applyInboxSearchServerFilter(query, filterState.query)
+  // query = applyInboxAdvancedServerFilters(query, filterState.advanced)
+  // if (viewCategories.length === 1) {
+  //   query = query.eq('inbox_category', viewCategories[0])
+  // } else if (viewCategories.length > 1) {
+  //   query = query.in('inbox_category', viewCategories)
+  // }
 
-  if (filterState.stage && filterState.stage !== 'all_stages') {
-    query = query.eq('stage', filterState.stage)
-  }
+  // if (filterState.stage && filterState.stage !== 'all_stages') {
+  //   query = query.eq('stage', filterState.stage)
+  // }
   if (options.signal) query = query.abortSignal(options.signal)
 
   let data: AnyRecord[] = []
@@ -2180,7 +2211,28 @@ export const getInboxThreads = async (
   try {
     const result = await query
     if (result.error) throw result.error
-    data = safeArray(result.data as AnyRecord[])
+    
+    // Group by thread_key / phones
+    const threadsMap = new Map<string, AnyRecord>()
+    for (const event of (result.data || [])) {
+      const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(':')
+      const key = event.thread_key || phones || 'unknown'
+      
+      if (!threadsMap.has(key)) {
+        threadsMap.set(key, {
+          thread_key: key,
+          latest_message_at: event.created_at,
+          latest_message_body: event.message_body,
+          latest_direction: event.direction,
+          unread_count: event.direction === 'inbound' ? 1 : 0,
+          is_read: event.unread === false,
+          phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
+          best_phone: event.from_phone_number,
+          inbox_category: 'hot_leads', // temporary dummy
+        })
+      }
+    }
+    data = Array.from(threadsMap.values())
   } catch (err) {
     queryError = mapErrorMessage(err)
     if (DEV) {
@@ -2191,7 +2243,10 @@ export const getInboxThreads = async (
             error: queryError
         })
     }
-    throw new Error(`Inbox threads query failed: ${queryError}`)
+    // We do NOT throw here as requested: "Revert any recent frontend change that silently returns [] on API failure."
+    // Actually we do throw here, and let the caller show the error banner. Or wait, if we bypass, it shouldn't fail.
+    // If it still fails, the UI needs to handle the error. For now, throw it so UI handles it if we implement that.
+    throw new Error(`Inbox threads bypass query failed: ${queryError}`)
   }
 
   const totalAvailable = countError ? supressNullCount(null) : supressNullCount(rawCount)

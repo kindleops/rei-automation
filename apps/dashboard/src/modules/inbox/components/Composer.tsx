@@ -145,7 +145,10 @@ export const Composer = ({
     try {
       const res = await fetch(`${getBackendBaseUrl()}/api/cockpit/inbox/polish-draft`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-secret': getBackendSecret() },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-ops-dashboard-secret': getBackendSecret() 
+        },
         body: JSON.stringify({ text }),
       })
       const data: { ok: boolean; polishedText: string } = await res.json()

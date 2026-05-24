@@ -97,14 +97,6 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
     }
   } catch (err) {
     console.error('[KPI] Unexpected error:', err)
-    return {
-      messaging: [],
-      quality: [],
-      automation: [],
-      pipeline: [],
-      financial: [],
-      volume: [],
-      lastUpdated: new Date().toISOString()
-    }
+    throw err // Rethrow so the hook can catch it
   }
 }

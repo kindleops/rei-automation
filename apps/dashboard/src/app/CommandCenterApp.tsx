@@ -8,6 +8,7 @@ import { NotificationToasts, NotificationCenter } from '../shared/NotificationTo
 import { playSound } from '../shared/sounds'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
+import { DevApiBanner } from '../components/dev/DevApiBanner'
 import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
 import {
   GLOBAL_COMMAND_CONTEXT_EVENT,
@@ -551,6 +552,8 @@ export const CommandCenterApp = () => {
         open={notifCenterOpen}
         onClose={() => setNotifCenterOpen(false)}
       />
+
+      <DevApiBanner />
     </div>
   )
 }

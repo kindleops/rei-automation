@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon } from '../../shared/icons'
+import { getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
 
 export interface TemplateStat {
   template_id: string
@@ -66,7 +67,15 @@ export const TemplateAnalytics = () => {
         recommendation: recommendationFilter === 'all' ? '' : recommendationFilter,
         risk_level: riskFilter === 'all' ? '' : riskFilter
       })
-      const response = await fetch(`/api/internal/analytics/templates/ownership-check?${params.toString()}`)
+      const { secret } = getBackendApiSecretDebugSafe()
+      const baseUrl = getBackendBaseUrl()
+      const url = `${baseUrl}/api/internal/analytics/templates/ownership-check?${params.toString()}`
+
+      const response = await fetch(url, {
+        headers: {
+          'x-ops-dashboard-secret': secret
+        }
+      })
       const result = await response.json()
       if (result.success) {
         setStats(result.data)

@@ -20,7 +20,15 @@ export const getBackendBaseUrl = (): string => {
     url = (import.meta.env.VITE_NEXUS_API_URL as string | undefined) || ''
   }
 
-  if (url) return url.replace(/\/$/, '')
+  if (url) {
+    const cleanUrl = url.replace(/\/$/, '')
+    // Only log once at boot via a global check
+    if (import.meta.env.DEV && typeof window !== 'undefined' && !(window as any).__BACKEND_URL_LOGGED) {
+      console.log(`[BACKEND_API] Using VITE_BACKEND_API_URL: ${cleanUrl}`)
+      ;(window as any).__BACKEND_URL_LOGGED = true
+    }
+    return cleanUrl
+  }
 
   // In production, never fall back to localhost — fail clearly if the env var is missing.
   if (import.meta.env.PROD) {
@@ -32,16 +40,27 @@ export const getBackendBaseUrl = (): string => {
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      url = 'http://localhost:3000'
-      return url
+      const fallback = 'http://localhost:3000'
+      if (!(window as any).__BACKEND_URL_LOGGED) {
+        console.warn(`[BACKEND_API] VITE_BACKEND_API_URL is missing. Falling back to localhost: ${fallback}`)
+        ;(window as any).__BACKEND_URL_LOGGED = true
+      }
+      return fallback
     }
     
     // Vercel autodiscovery
     if (hostname.includes('vercel.app')) {
+      let discovery = ''
       if (hostname.includes('dashboard')) {
-        return `https://${hostname.replace('-dashboard', '')}`
+        discovery = `https://${hostname.replace('-dashboard', '')}`
+      } else {
+        discovery = window.location.origin
       }
-      return window.location.origin
+      if (!(window as any).__BACKEND_URL_LOGGED) {
+        console.log(`[BACKEND_API] Vercel autodiscovery: ${discovery}`)
+        ;(window as any).__BACKEND_URL_LOGGED = true
+      }
+      return discovery
     }
   }
 
@@ -60,8 +79,8 @@ export interface BackendApiSecretResult {
 }
 
 export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
-  const secret = import.meta.env.VITE_BACKEND_API_SECRET as string | undefined
-  if (!secret) throw new Error('Missing VITE_BACKEND_API_SECRET')
+  const secret = (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined) || ''
+  if (!secret && import.meta.env.PROD) throw new Error('Missing VITE_BACKEND_API_SECRET')
   return {
     secret,
     debug: {
@@ -69,6 +88,22 @@ export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
       first6: secret.slice(0, 6),
       last4: secret.slice(-4),
     },
+  }
+}
+
+export interface BackendApiConfig {
+  baseUrl: string
+  hasSecret: boolean
+  secretDebug?: BackendApiSecretDebug
+}
+
+export function getBackendApiConfig(): BackendApiConfig {
+  const baseUrl = getBackendBaseUrl()
+  const { secret, debug } = getBackendApiSecretDebugSafe()
+  return {
+    baseUrl,
+    hasSecret: secret.length > 0,
+    secretDebug: debug,
   }
 }
 
