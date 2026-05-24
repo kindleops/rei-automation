@@ -14,9 +14,25 @@ function uniq(values = []) {
 }
 
 async function safeFetchOne(table, id) {
-  if (!id) return { row: null, error: null };
-  const { data, error } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
-  return { row: data || null, error };
+  if (!id) return { row: null, error: null, key: null };
+  const keyCandidatesByTable = {
+    master_owners: ["id", "master_owner_id"],
+    properties: ["id", "property_id"],
+    prospects: ["id", "prospect_id"],
+  };
+  const keys = keyCandidatesByTable[table] || ["id"];
+  let lastError = null;
+  for (const key of keys) {
+    const { data, error } = await supabase.from(table).select("*").eq(key, id).maybeSingle();
+    if (!error) return { row: data || null, error: null, key };
+    const msg = String(error?.message || "").toLowerCase();
+    if (msg.includes(`column ${table}.${key} does not exist`) || msg.includes("does not exist")) {
+      lastError = error;
+      continue;
+    }
+    return { row: null, error, key };
+  }
+  return { row: null, error: lastError, key: null };
 }
 
 export async function GET(request) {
