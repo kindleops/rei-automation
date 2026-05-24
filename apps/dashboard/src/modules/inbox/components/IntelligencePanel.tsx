@@ -37,6 +37,7 @@ import type { ViewLayoutMode } from '../view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+import { ErrorBoundary } from '../../../shared/ErrorBoundary'
 
 import { detectPropertyCategory } from '../helpers/propertyHelpers'
 import { WatchBell } from '../../../shared/WatchBell'
@@ -5956,9 +5957,9 @@ function RawDossierField({ label, value }: { label: string; value: unknown }) {
   )
 }
 
-function RawDossierTable({ title, rows }: { title: string; rows: Record<string, unknown>[] }) {
+function RawDossierTable({ title, rows }: { title: string; rows: any }) {
   const [open, setOpen] = useState(false)
-  if (rows.length === 0) return null
+  if (!Array.isArray(rows) || rows.length === 0) return null
   return (
     <div style={{ marginBottom: 10 }}>
       <button
@@ -5980,9 +5981,9 @@ function RawDossierTable({ title, rows }: { title: string; rows: Record<string, 
   )
 }
 
-function RawDossierRecord({ title, obj }: { title: string; obj: Record<string, unknown> | null }) {
+function RawDossierRecord({ title, obj }: { title: string; obj: any }) {
   const [open, setOpen] = useState(false)
-  if (!obj) return null
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null
   const entries = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && v !== '')
   if (entries.length === 0) return null
   return (
@@ -6016,35 +6017,139 @@ function RawDossierSection({ dossier, loading }: { dossier: ThreadDossier | null
     )
   }
   if (!dossier) return null
-  const hasErrors = dossier.errors.length > 0
+  const hasErrors = Array.isArray(dossier.errors) && dossier.errors.length > 0
 
   return (
-    <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-        <span>RAW DOSSIER</span>
-        {hasErrors && <span style={{ color: '#f59e0b', fontWeight: 400 }}>partial ({dossier.errors.length} warn)</span>}
+    <ErrorBoundary fallbackName="RawDossierSection">
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+          <span>RAW DOSSIER</span>
+          {hasErrors && <span style={{ color: '#f59e0b', fontWeight: 400 }}>partial ({dossier.errors.length} warn)</span>}
+        </div>
+
+        <RawDossierRecord title="Master Owner" obj={dossier?.master_owner} />
+        <RawDossierRecord title="Property" obj={dossier?.property} />
+        <RawDossierRecord title="Prospect" obj={dossier?.prospect} />
+        <RawDossierRecord title="Inbox Thread State" obj={dossier?.inbox_thread_state} />
+        <RawDossierRecord title="Thread AI State" obj={dossier?.thread_ai_state} />
+        <RawDossierTable title="Send Queue" rows={dossier?.send_queue} />
+        <RawDossierTable title="Phones" rows={dossier?.phones} />
+        <RawDossierTable title="Emails" rows={dossier?.emails} />
+        <RawDossierTable title="Message Events" rows={dossier?.message_events} />
+
+        {hasErrors && (
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ fontSize: 10, color: 'var(--nx-text-muted, #888)', cursor: 'pointer' }}>Diagnostics</summary>
+            <pre style={{ fontSize: 10, marginTop: 4, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderRadius: 4, padding: '4px 6px', whiteSpace: 'pre-wrap' }}>
+              {dossier.errors.join('\n')}
+            </pre>
+          </details>
+        )}
       </div>
-
-      <RawDossierRecord title="Master Owner" obj={dossier.master_owner} />
-      <RawDossierRecord title="Property" obj={dossier.property} />
-      <RawDossierRecord title="Prospect" obj={dossier.prospect} />
-      <RawDossierRecord title="Inbox Thread State" obj={dossier.inbox_thread_state} />
-      <RawDossierRecord title="Thread AI State" obj={dossier.thread_ai_state} />
-      <RawDossierTable title="Send Queue" rows={dossier.send_queue} />
-      <RawDossierTable title="Phones" rows={dossier.phones} />
-      <RawDossierTable title="Emails" rows={dossier.emails} />
-      <RawDossierTable title="Message Events" rows={dossier.message_events} />
-
-      {hasErrors && (
-        <details style={{ marginTop: 8 }}>
-          <summary style={{ fontSize: 10, color: 'var(--nx-text-muted, #888)', cursor: 'pointer' }}>Diagnostics</summary>
-          <pre style={{ fontSize: 10, marginTop: 4, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderRadius: 4, padding: '4px 6px', whiteSpace: 'pre-wrap' }}>
-            {dossier.errors.join('\n')}
-          </pre>
-        </details>
-      )}
-    </div>
+    </ErrorBoundary>
   )
+}
+
+function ProspectIntelSection({ prospect }: { prospect: any }) {
+  if (!prospect || typeof prospect !== 'object') return null;
+  return (
+    <ErrorBoundary fallbackName="ProspectIntelSection">
+      <DossierCard className="nx-mapped-intel-card">
+        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Prospect Intel</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <IntelField label="Full Name" value={prospect?.full_name} />
+          <IntelField label="First Name" value={prospect?.first_name} />
+          <IntelField label="Gender" value={prospect?.gender} />
+          <IntelField label="Language" value={prospect?.language_preference} />
+          <IntelField label="Marital Status" value={prospect?.marital_status} />
+          <IntelField label="Education" value={prospect?.education_model} />
+          <IntelField label="Occupation Group" value={prospect?.occupation_group} />
+          <IntelField label="Occupation Code" value={prospect?.occupation_code} />
+          <IntelField label="Household Income" value={prospect?.est_household_income} />
+          <IntelField label="Net Asset Value" value={prospect?.net_asset_value} />
+          <IntelField label="Buying Power" value={prospect?.buying_power} />
+          <IntelField label="Matching Flags" value={prospect?.matching_flags} />
+          <IntelField label="Person Flags" value={prospect?.person_flags_text} />
+          <IntelField label="Contact Score" value={prospect?.contact_score_final} />
+          <IntelField label="Best Phone" value={prospect?.best_phone} />
+          <IntelField label="Best Email" value={prospect?.best_email} />
+          <IntelField label="Rank Confidence" value={prospect?.rank_confidence} />
+          <IntelField label="Timezone" value={prospect?.timezone} />
+          <IntelField label="SMS Eligible" value={prospect?.sms_eligible ? 'Yes' : 'No'} />
+          <IntelField label="Priority Tier" value={prospect?.priority_tier} />
+        </div>
+      </DossierCard>
+    </ErrorBoundary>
+  );
+}
+
+function PropertyIntelSection({ property }: { property: any }) {
+  if (!property || typeof property !== 'object') return null;
+  return (
+    <ErrorBoundary fallbackName="PropertyIntelSection">
+      <DossierCard className="nx-mapped-intel-card">
+        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Property / Asset</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <IntelField label="Address" value={property?.property_address_full} />
+          <IntelField label="City/State/Zip" value={`${property?.property_address_city || ''} ${property?.property_address_state || ''} ${property?.property_address_zip || ''}`} />
+          <IntelField label="Market" value={property?.market} />
+          <IntelField label="Type" value={property?.property_type} />
+          <IntelField label="Estimated Value" value={property?.estimated_value} />
+          <IntelField label="Cash Offer" value={property?.cash_offer} />
+          <IntelField label="Equity Amount" value={property?.equity_amount} />
+          <IntelField label="Equity Percent" value={property?.equity_percent} />
+          <IntelField label="Total Loan Balance" value={property?.total_loan_balance} />
+          <IntelField label="Tax Amount" value={property?.tax_amt} />
+          <IntelField label="Sale Date" value={property?.sale_date} />
+          <IntelField label="Sale Price" value={property?.sale_price} />
+          <IntelField label="Units" value={property?.units_count} />
+          <IntelField label="Square Feet" value={property?.building_square_feet} />
+          <IntelField label="Year Built" value={property?.year_built} />
+          <IntelField label="Beds/Baths" value={`${property?.total_bedrooms || '-'}/${property?.total_baths || '-'}`} />
+          <IntelField label="Lot Size" value={property?.lot_acreage || property?.lot_square_feet} />
+          <IntelField label="Flood Zone" value={property?.flood_zone} />
+          <IntelField label="Property Flags" value={property?.property_flags_text} />
+          <IntelField label="Tags" value={property?.podio_tags} />
+          <IntelField label="AI Score" value={property?.ai_score} />
+          <IntelField label="Rehab Level" value={property?.rehab_level} />
+          <IntelField label="Final Score" value={property?.final_acquisition_score} />
+          <IntelField label="Repair Cost" value={property?.estimated_repair_cost} />
+        </div>
+      </DossierCard>
+    </ErrorBoundary>
+  );
+}
+
+function MasterOwnerIntelSection({ owner }: { owner: any }) {
+  if (!owner || typeof owner !== 'object') return null;
+  return (
+    <ErrorBoundary fallbackName="MasterOwnerIntelSection">
+      <DossierCard className="nx-mapped-intel-card">
+        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Master Owner / Portfolio</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <IntelField label="Display Name" value={owner?.display_name} />
+          <IntelField label="Primary Address" value={owner?.primary_owner_address} />
+          <IntelField label="Owner Type" value={owner?.owner_type_guess} />
+          <IntelField label="Routing Market" value={owner?.routing_market} />
+          <IntelField label="Best Language" value={owner?.best_language} />
+          <IntelField label="Contactability" value={owner?.contactability_score} />
+          <IntelField label="Financial Pressure" value={owner?.financial_pressure_score} />
+          <IntelField label="Urgency Score" value={owner?.urgency_score} />
+          <IntelField label="Priority Score" value={owner?.priority_score} />
+          <IntelField label="Total Value" value={owner?.portfolio_total_value} />
+          <IntelField label="Total Equity" value={owner?.portfolio_total_equity} />
+          <IntelField label="Total Loan" value={owner?.portfolio_total_loan_balance} />
+          <IntelField label="Total Payment" value={owner?.portfolio_total_loan_payment} />
+          <IntelField label="Total Tax" value={owner?.portfolio_total_tax_amount} />
+          <IntelField label="Total Units" value={owner?.portfolio_total_units} />
+          <IntelField label="Property Count" value={owner?.property_count} />
+          <IntelField label="Tax Delinquent" value={owner?.tax_delinquent_count} />
+          <IntelField label="Active Liens" value={owner?.active_lien_count} />
+          <IntelField label="Tags" value={owner?.seller_tags_text} />
+        </div>
+      </DossierCard>
+    </ErrorBoundary>
+  );
 }
 
 export interface IntelligencePanelProps {
@@ -6118,22 +6223,50 @@ export const IntelligencePanel = ({
 
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
-          <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} />
+          <ErrorBoundary fallbackName="CompactDealIntelligenceCapsule">
+            <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} />
+          </ErrorBoundary>
         ) : layoutMode === 'medium' ? (
-          <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} />
+          <ErrorBoundary fallbackName="MediumDealWorkspace">
+            <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} />
+          </ErrorBoundary>
         ) : (
-          <DealCommandDossier
-            thread={thread}
-            snapshot={snapshot}
-            messages={messages}
-            phase3={phase3}
-            intelligence={intelligence}
-            layoutMode={layoutMode}
-            onOpenMap={onOpenMap}
-            onOpenDossier={onOpenDossier}
-            onOpenAi={onOpenAi}
-          />
+          <ErrorBoundary fallbackName="DealCommandDossier">
+            <DealCommandDossier
+              thread={thread}
+              snapshot={snapshot}
+              messages={messages}
+              phase3={phase3}
+              intelligence={intelligence}
+              layoutMode={layoutMode}
+              onOpenMap={onOpenMap}
+              onOpenDossier={onOpenDossier}
+              onOpenAi={onOpenAi}
+            />
+          </ErrorBoundary>
         )}
+        
+        {/* Visible Dossier Proof Strip */}
+        <div style={{ background: '#111827', padding: '12px 16px', borderTop: '1px solid #374151', fontSize: '11px', fontFamily: 'monospace', color: '#9CA3AF' }}>
+          <div style={{ color: '#E5E7EB', fontWeight: 'bold', marginBottom: '8px' }}>DOSSIER PROOF STRIP</div>
+          <div>Thread Key: {thread.threadKey || thread.id}</div>
+          <div>Dossier Fetch Status: {dossierLoading ? 'Loading' : threadDossier ? 'Loaded' : 'None'}</div>
+          <div>Master Owner Loaded: {threadDossier?.master_owner ? 'Yes' : 'No'}</div>
+          <div>Property Loaded: {threadDossier?.property ? 'Yes' : 'No'}</div>
+          <div>Prospect Loaded: {threadDossier?.prospect ? 'Yes' : 'No'}</div>
+          <div>Message Events: {Array.isArray(threadDossier?.message_events) ? threadDossier?.message_events?.length : 0}</div>
+          <div>Send Queue Rows: {Array.isArray(threadDossier?.send_queue) ? threadDossier?.send_queue?.length : 0}</div>
+          <div>Errors: {Array.isArray(threadDossier?.errors) ? threadDossier?.errors?.length : 0}</div>
+        </div>
+
+        {threadDossier && !dossierLoading && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
+            <ProspectIntelSection prospect={threadDossier.prospect} />
+            <MasterOwnerIntelSection owner={threadDossier.master_owner} />
+            <PropertyIntelSection property={threadDossier.property} />
+          </div>
+        )}
+
         <RawDossierSection dossier={threadDossier} loading={dossierLoading} />
       </div>
     </aside>

@@ -45,6 +45,7 @@ import {
   dedupeMessages,
   toThreadMessage,
 } from '../../lib/data/inboxData'
+import { ErrorBoundary } from '../../shared/ErrorBoundary'
 import { resolveThreadPrimaryName } from './inbox-ui-helpers'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
@@ -406,6 +407,14 @@ const computeWorkspaceWidths = (
 }
 
 export default function InboxPage() {
+  return (
+    <ErrorBoundary fallbackName="InboxPage">
+      <InboxPageInternal />
+    </ErrorBoundary>
+  )
+}
+
+function InboxPageInternal() {
   const { 
     data, 
     loading: dataLoading, 
@@ -488,6 +497,42 @@ export default function InboxPage() {
   const threads = useMemo(() => {
     return rawThreads.map(t => optimisticPatches[t.id] ? { ...t, ...optimisticPatches[t.id] } : t)
   }, [rawThreads, optimisticPatches])
+
+  // GLOBAL ERROR LISTENERS
+  useEffect(() => {
+    const handleWindowError = (e: ErrorEvent) => {
+      console.error('[INBOX CRASH EVENT]', {
+        message: e.message,
+        stack: e.error?.stack,
+        selectedThreadKey
+      })
+    }
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      console.error('[INBOX UNHANDLED REJECTION]', {
+        reason: e.reason,
+        selectedThreadKey
+      })
+    }
+    window.addEventListener('error', handleWindowError)
+    window.addEventListener('unhandledrejection', handleRejection)
+    return () => {
+      window.removeEventListener('error', handleWindowError)
+      window.removeEventListener('unhandledrejection', handleRejection)
+    }
+  }, [selectedThreadKey])
+
+  useEffect(() => {
+    console.log('[INBOX STATE SNAPSHOT BEFORE RENDER]', {
+      threadsCount: threads.length,
+      selectedThreadKey,
+      selectedThread: selectedId,
+      dossierStatus: dossierLoading ? 'loading' : threadDossier ? 'loaded' : 'null',
+      dossierKeys: threadDossier ? Object.keys(threadDossier) : [],
+      prospectType: typeof threadDossier?.prospect,
+      propertyType: typeof threadDossier?.property,
+      masterOwnerType: typeof threadDossier?.master_owner,
+    })
+  }, [threads.length, selectedThreadKey, selectedId, dossierLoading, threadDossier])
 
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
     const withCoords = threads.filter((t) => {
@@ -2977,6 +3022,7 @@ export default function InboxPage() {
 
   const renderSmsThreadPane = (layoutMode: ReturnType<typeof getViewLayoutMode> = 'full') => (
     <section className="nx-workspace-pane-surface nx-workspace-pane-surface--sms-thread">
+      <ErrorBoundary fallbackName="ChatThread">
       <ChatThread
         thread={selected}
         messages={displayedMessagesWithTranslation}
@@ -2995,7 +3041,9 @@ export default function InboxPage() {
         isTranslatingThread={threadTranslationLoading}
         onTranslateThread={handleTranslateThread}
       />
+      </ErrorBoundary>
 
+      <ErrorBoundary fallbackName="Composer">
       <Composer
         draftText={draftText}
         onSend={handleSend}
@@ -3020,6 +3068,7 @@ export default function InboxPage() {
         onTranslateDraft={handleTranslateDraft}
         autoTranslateDraft={!!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)}
       />
+      </ErrorBoundary>
     </section>
   )
 
@@ -3035,6 +3084,7 @@ export default function InboxPage() {
         `is-width-${paneWidth}`,
       )}
     >
+      <ErrorBoundary fallbackName="InboxSidebar">
       <InboxSidebar
         threads={threads}
         selectedId={selected?.id ?? null}
@@ -3058,6 +3108,7 @@ export default function InboxPage() {
         densityMode={paneMode === 'single' || paneWidth === '75' || paneWidth === '100' ? 'full' : 'compact'}
         inboxMode={paneWidth === '25' ? 'rail25' : paneWidth === '50' ? 'review50' : paneWidth === '75' ? 'ops75' : 'full100'}
       />
+      </ErrorBoundary>
     </section>
   )
 
@@ -3096,37 +3147,39 @@ export default function InboxPage() {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
           <div className="nx-map-right-body nx-map-right-body--workspace">
-            <InboxCommandMap
-              threads={mapThreads}
-              visibleThreads={filtered}
-              selectedThread={selected}
-              selectedThreadMessages={displayedMessages}
-              selectedThreadMessagesLoading={messagesLoading}
-              quickReplyDraft={draftText}
-              onQuickReplyDraftChange={setDraftText}
-              onQuickReplySend={(text) => handleSend(text)}
-              quickReplyDisabled={selectedSuppressed || isSending}
-              zoomedIn
-              sourceMode={mapSourceMode}
-              onSourceModeChange={setMapSourceMode}
-              onSelectThreadId={handleSelect}
-              onSelectSellerContext={handleMapSellerContext}
-              onSelectActivity={handleActivityNavigation}
-              onBackgroundClick={() => {}}
-              onOpenDealIntelligence={handleOpenDealIntelligence}
-              buyerCommandData={buyerCommandData}
-              buyerFilters={buyerFilters}
-              onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
-              selectedBuyerKey={selectedBuyerKey}
-              onSelectBuyerKey={setSelectedBuyerKey}
-              initialMapStyleMode={commandMapTheme}
-              onStateChange={(state) => {
-                setCommandMapTheme(state.mapStyleMode)
-                setCommandMapMarket(state.filters.market || '')
-              }}
-              fullHeight={paneMode === 'single'}
-              layoutMode={layoutMode}
-            />
+            <ErrorBoundary fallbackName="InboxCommandMap">
+              <InboxCommandMap
+                threads={mapThreads}
+                visibleThreads={filtered}
+                selectedThread={selected}
+                selectedThreadMessages={displayedMessages}
+                selectedThreadMessagesLoading={messagesLoading}
+                quickReplyDraft={draftText}
+                onQuickReplyDraftChange={setDraftText}
+                onQuickReplySend={(text) => handleSend(text)}
+                quickReplyDisabled={selectedSuppressed || isSending}
+                zoomedIn
+                sourceMode={mapSourceMode}
+                onSourceModeChange={setMapSourceMode}
+                onSelectThreadId={handleSelect}
+                onSelectSellerContext={handleMapSellerContext}
+                onSelectActivity={handleActivityNavigation}
+                onBackgroundClick={() => {}}
+                onOpenDealIntelligence={handleOpenDealIntelligence}
+                buyerCommandData={buyerCommandData}
+                buyerFilters={buyerFilters}
+                onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
+                selectedBuyerKey={selectedBuyerKey}
+                onSelectBuyerKey={setSelectedBuyerKey}
+                initialMapStyleMode={commandMapTheme}
+                onStateChange={(state) => {
+                  setCommandMapTheme(state.mapStyleMode)
+                  setCommandMapMarket(state.filters.market || '')
+                }}
+                fullHeight={paneMode === 'single'}
+                layoutMode={layoutMode}
+              />
+            </ErrorBoundary>
           </div>
         </section>
       )
@@ -3218,7 +3271,7 @@ export default function InboxPage() {
               </div>
             ))}
           </div>
-          <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} />
+          <ErrorBoundary fallbackName="MetricsWarRoom"><MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} /></ErrorBoundary>
         </section>
       )
     }
@@ -3307,7 +3360,7 @@ export default function InboxPage() {
         isCustomMultiView && 'is-multi-view-active',
       )}
     >
-      <InboxDiagnosticsBanner debugInfo={diagnosticsStats} />
+      <InboxDiagnosticsBanner counts={data.counts} diagnostics={data.diagnostics} />
       {/* FRONTEND CONTRACT RENDER PROOF DEBUG STRIP */}
       <div style={{
         background: '#e0f2fe',
@@ -3468,7 +3521,8 @@ export default function InboxPage() {
           )}
         </div>
         {showLeftPanel && !isDealIntelligenceView && (
-          <InboxSidebar
+          <ErrorBoundary fallbackName="InboxSidebar">
+      <InboxSidebar
             threads={threads}
             selectedId={selected?.id ?? null}
             activeViewFilter={viewFilter}
@@ -3491,10 +3545,12 @@ export default function InboxPage() {
             densityMode={leftPanelMode === 'full' ? 'full' : 'compact'}
             inboxMode="rail25"
           />
+          </ErrorBoundary>
         )}
 
         {isDoubleSided && (
-          <InboxSidebar
+          <ErrorBoundary fallbackName="InboxSidebar">
+      <InboxSidebar
             threads={threads}
             selectedId={selected?.id ?? null}
             activeViewFilter={rightViewFilter}
@@ -3517,7 +3573,9 @@ export default function InboxPage() {
             densityMode="compact"
             inboxMode="review50"
           />
+          </ErrorBoundary>
         )}
+
 
         <main
           className={cls(
@@ -3612,6 +3670,7 @@ export default function InboxPage() {
               </div>
             </div>
             <div className="nx-map-right-body">
+              <ErrorBoundary fallbackName="InboxCommandMap">
               <InboxCommandMap
                 threads={mapThreads}
                 visibleThreads={filtered}
@@ -3625,21 +3684,22 @@ export default function InboxPage() {
                 zoomedIn={mapMode !== 'side'}
                 sourceMode={mapSourceMode}
                 onSourceModeChange={setMapSourceMode}
-              onSelectThreadId={handleSelect}
-              onSelectSellerContext={handleMapSellerContext}
-              onBackgroundClick={() => {}}
-              onOpenDealIntelligence={handleOpenDealIntelligence}
-              buyerCommandData={buyerCommandData}
-              buyerFilters={buyerFilters}
-              onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
-              selectedBuyerKey={selectedBuyerKey}
-              onSelectBuyerKey={setSelectedBuyerKey}
-              initialMapStyleMode={commandMapTheme}
-              onStateChange={(state) => {
-                setCommandMapTheme(state.mapStyleMode)
-                setCommandMapMarket(state.filters.market || '')
-              }}
-            />
+                onSelectThreadId={handleSelect}
+                onSelectSellerContext={handleMapSellerContext}
+                onBackgroundClick={() => {}}
+                onOpenDealIntelligence={handleOpenDealIntelligence}
+                buyerCommandData={buyerCommandData}
+                buyerFilters={buyerFilters}
+                onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
+                selectedBuyerKey={selectedBuyerKey}
+                onSelectBuyerKey={setSelectedBuyerKey}
+                initialMapStyleMode={commandMapTheme}
+                onStateChange={(state) => {
+                  setCommandMapTheme(state.mapStyleMode)
+                  setCommandMapMarket(state.filters.market || '')
+                }}
+              />
+              </ErrorBoundary>
           </div>
         </aside>
         ) : showRightCommandPanel ? (
