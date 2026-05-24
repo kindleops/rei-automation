@@ -1195,6 +1195,7 @@ function buildFailureMessageEvent(row, error, options = {}) {
   return {
     message_event_key: `failed_${queue_key}_${timestamp_key}`,
     direction: "outbound",
+    type: "outbound",
     event_type: "outbound_send_failed",
     message_body: normalized.message_body,
     to_phone_number: normalized.to_phone_number,

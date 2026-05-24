@@ -1,5 +1,5 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import { classifyInboxBucket } from './classifyInboxBucket'
+import { resolveInboxThreadState } from './resolveInboxThreadState'
 
 export type InboxBucket =
   | 'new_replies'
@@ -427,7 +427,7 @@ export const resolveInboxBucket = (
   _decision: Omit<ConversationDecision, 'inbox_bucket'>,
   now: Date = new Date(),
 ): InboxBucket => {
-  const { bucket } = classifyInboxBucket(thread, now)
+  const { bucket } = resolveInboxThreadState(thread, now)
   // Map canonical names → legacy names for backwards-compat consumers
   if (bucket === 'suppressed') return 'dnc_suppressed'
   if (bucket === 'follow_up') return 'follow_up_due'
@@ -445,13 +445,13 @@ export const matchesInboxBucket = (
   // Canonical buckets — delegate directly to the classifier
   if (bucket === 'all' || bucket === 'all_conversations') return true
   if (bucket === 'suppressed' || bucket === 'dnc_suppressed') {
-    return classifyInboxBucket(thread, now).bucket === 'suppressed'
+    return resolveInboxThreadState(thread, now).bucket === 'suppressed'
   }
-  if (bucket === 'needs_review') return classifyInboxBucket(thread, now).bucket === 'needs_review'
-  if (bucket === 'priority') return classifyInboxBucket(thread, now).bucket === 'priority'
-  if (bucket === 'new_replies') return classifyInboxBucket(thread, now).bucket === 'new_replies'
-  if (bucket === 'follow_up' || bucket === 'follow_up_due') return classifyInboxBucket(thread, now).bucket === 'follow_up'
-  if (bucket === 'cold' || bucket === 'cold_no_response') return classifyInboxBucket(thread, now).bucket === 'cold'
+  if (bucket === 'needs_review') return resolveInboxThreadState(thread, now).bucket === 'needs_review'
+  if (bucket === 'priority') return resolveInboxThreadState(thread, now).bucket === 'priority'
+  if (bucket === 'new_replies') return resolveInboxThreadState(thread, now).bucket === 'new_replies'
+  if (bucket === 'follow_up' || bucket === 'follow_up_due') return resolveInboxThreadState(thread, now).bucket === 'follow_up'
+  if (bucket === 'cold' || bucket === 'cold_no_response') return resolveInboxThreadState(thread, now).bucket === 'cold'
   // Legacy-only buckets that have no canonical equivalent
   if (bucket === 'negotiating') return UNDERWRITING_STAGES.has(buildConversationDecision(thread, now).conversation_stage)
   if (bucket === 'waiting_on_seller') return buildConversationDecision(thread, now).automation_status === 'WAITING'

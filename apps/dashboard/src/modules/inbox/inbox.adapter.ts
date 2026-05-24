@@ -7,6 +7,7 @@ import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } f
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
+import { resolveInboxThreadState } from './resolveInboxThreadState'
 
 const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
@@ -761,7 +762,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
                 const body = row.message_body || row.rendered_message || ''
                 const at = row.message_created_at || row.event_timestamp || new Date().toISOString()
                 
-                threads[idx] = {
+                const updatedThread: InboxThread = {
                   ...threads[idx],
                   preview: body,
                   lastMessageIso: at,
@@ -774,8 +775,13 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
                   unreadCount: direction === 'inbound' ? (threads[idx].unreadCount || 0) + 1 : 0,
                   needsReply: direction === 'inbound',
                   isRead: direction !== 'inbound',
-                  inboxCategory: direction === 'outbound' && threads[idx].inboxCategory === 'new_inbound' ? 'outbound_active' : threads[idx].inboxCategory,
                 }
+                
+                // Ensure bucket is accurately updated
+                const bucket = resolveInboxThreadState(toWorkflowThread(updatedThread)).bucket
+                updatedThread.inboxCategory = bucket === 'suppressed' ? 'dnc_opt_out' : (bucket === 'cold' ? 'cold_no_response' : bucket)
+
+                threads[idx] = updatedThread
                 
                 // Sort after update
                 threads.sort((a, b) => new Date(b.lastMessageIso).getTime() - new Date(a.lastMessageIso).getTime())
