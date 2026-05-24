@@ -63,7 +63,7 @@ import { InboxConversationTable, type ConversationTableSort } from './components
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
 import { InboxDiagnosticsBanner } from './components/InboxDiagnosticsBanner'
-import { resolveInboxThreadState } from './resolveInboxThreadState'
+
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
 import { CompIntelligenceWorkspace } from './components/CompIntelligenceWorkspace'
