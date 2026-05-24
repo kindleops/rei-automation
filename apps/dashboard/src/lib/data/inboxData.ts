@@ -250,7 +250,7 @@ export const HYDRATED_INBOX_PAGE_SIZE = 100
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_inbox_enriched'
 export const HYDRATED_INBOX_COUNTS_VIEW = 'inbox_category_counts'
 
-const INBOX_LIST_COLUMNS = [
+export const INBOX_LIST_COLUMNS = [
   'thread_key', 'latest_message_at', 'latest_message_body', 'latest_direction',
   'unread_count', 'is_read', 'inbox_category', 'priority_bucket',
   'final_acquisition_score', 'priority_score', 'ui_intent', 'detected_intent',
