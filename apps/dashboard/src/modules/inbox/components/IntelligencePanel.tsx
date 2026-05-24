@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
+import type { ThreadDossier } from '../../../lib/data/threadDossier'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { PanelMode } from '../inbox-layout-state'
 import {
@@ -5916,10 +5917,142 @@ const DealCommandDossier = ({
   </div>
 )
 
+// ── Raw Dossier Section ───────────────────────────────────────────────────────
+
+function RawDossierField({ label, value }: { label: string; value: unknown }) {
+  const [expanded, setExpanded] = useState(false)
+  if (value === null || value === undefined) return null
+  const isObj = typeof value === 'object'
+  const display = isObj ? JSON.stringify(value, null, 2) : String(value)
+  const isLong = display.length > 120 || display.includes('\n')
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 2 }}>
+        {label}
+      </div>
+      {isLong && !expanded ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--nx-accent, #4a9eff)', padding: 0 }}
+        >
+          {isObj ? '{ ... } expand' : `${display.slice(0, 80)}… expand`}
+        </button>
+      ) : (
+        <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--nx-text, #e0e0e0)', background: 'var(--nx-surface-2, rgba(255,255,255,0.05))', borderRadius: 4, padding: '4px 6px' }}>
+          {display}
+          {isLong && (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              style={{ display: 'block', marginTop: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--nx-text-muted, #888)', padding: 0 }}
+            >
+              collapse
+            </button>
+          )}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function RawDossierTable({ title, rows }: { title: string; rows: Record<string, unknown>[] }) {
+  const [open, setOpen] = useState(false)
+  if (rows.length === 0) return null
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--nx-text, #e0e0e0)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}
+      >
+        <span style={{ opacity: 0.5 }}>{open ? '▾' : '▸'}</span>
+        {title} <span style={{ opacity: 0.5, fontWeight: 400 }}>({rows.length})</span>
+      </button>
+      {open && rows.map((row, i) => (
+        <div key={i} style={{ borderLeft: '2px solid var(--nx-accent, #4a9eff)', paddingLeft: 8, marginBottom: 8 }}>
+          {Object.entries(row).map(([k, v]) => v !== null && v !== undefined && v !== '' ? (
+            <RawDossierField key={k} label={k} value={v} />
+          ) : null)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RawDossierRecord({ title, obj }: { title: string; obj: Record<string, unknown> | null }) {
+  const [open, setOpen] = useState(false)
+  if (!obj) return null
+  const entries = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && v !== '')
+  if (entries.length === 0) return null
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--nx-text, #e0e0e0)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}
+      >
+        <span style={{ opacity: 0.5 }}>{open ? '▾' : '▸'}</span>
+        {title}
+      </button>
+      {open && (
+        <div style={{ borderLeft: '2px solid var(--nx-accent, #4a9eff)', paddingLeft: 8 }}>
+          {entries.map(([k, v]) => <RawDossierField key={k} label={k} value={v} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RawDossierSection({ dossier, loading }: { dossier: ThreadDossier | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8 }}>
+          RAW DOSSIER
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--nx-text-muted, #888)' }}>Loading full dossier…</div>
+      </div>
+    )
+  }
+  if (!dossier) return null
+  const hasErrors = dossier.errors.length > 0
+
+  return (
+    <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+        <span>RAW DOSSIER</span>
+        {hasErrors && <span style={{ color: '#f59e0b', fontWeight: 400 }}>partial ({dossier.errors.length} warn)</span>}
+      </div>
+
+      <RawDossierRecord title="Master Owner" obj={dossier.master_owner} />
+      <RawDossierRecord title="Property" obj={dossier.property} />
+      <RawDossierRecord title="Prospect" obj={dossier.prospect} />
+      <RawDossierRecord title="Inbox Thread State" obj={dossier.inbox_thread_state} />
+      <RawDossierRecord title="Thread AI State" obj={dossier.thread_ai_state} />
+      <RawDossierTable title="Send Queue" rows={dossier.send_queue} />
+      <RawDossierTable title="Phones" rows={dossier.phones} />
+      <RawDossierTable title="Emails" rows={dossier.emails} />
+      <RawDossierTable title="Message Events" rows={dossier.message_events} />
+
+      {hasErrors && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ fontSize: 10, color: 'var(--nx-text-muted, #888)', cursor: 'pointer' }}>Diagnostics</summary>
+          <pre style={{ fontSize: 10, marginTop: 4, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderRadius: 4, padding: '4px 6px', whiteSpace: 'pre-wrap' }}>
+            {dossier.errors.join('\n')}
+          </pre>
+        </details>
+      )}
+    </div>
+  )
+}
+
 export interface IntelligencePanelProps {
   thread: WorkflowThread | null
   threadContext?: ThreadContext | null
   intelligence?: ThreadIntelligenceRecord | null
+  threadDossier?: ThreadDossier | null
+  dossierLoading?: boolean
   panelMode?: Exclude<PanelMode, 'hidden'>
   layoutMode?: ViewLayoutMode
   isSuppressed?: boolean
@@ -5936,6 +6069,8 @@ export const IntelligencePanel = ({
   thread,
   threadContext,
   intelligence = null,
+  threadDossier = null,
+  dossierLoading = false,
   isSuppressed = false,
   panelMode = 'default',
   layoutMode = 'full',
@@ -5999,6 +6134,7 @@ export const IntelligencePanel = ({
             onOpenAi={onOpenAi}
           />
         )}
+        <RawDossierSection dossier={threadDossier} loading={dossierLoading} />
       </div>
     </aside>
   )

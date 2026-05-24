@@ -47,6 +47,7 @@ import {
   HYDRATED_INBOX_THREADS_VIEW,
 } from '../../lib/data/inboxData'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
+import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
@@ -467,6 +468,8 @@ export default function InboxPage() {
   // translate panel is now local to Composer; showTranslation drives nothing
   const [layoutState, setLayoutState] = useState(defaultInboxLayoutState)
   const [dossierFull, setDossierFull] = useState(false)
+  const [threadDossier, setThreadDossier] = useState<ThreadDossier | null>(null)
+  const [dossierLoading, setDossierLoading] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
@@ -1345,6 +1348,7 @@ export default function InboxPage() {
       setSelectedMessages([])
       setThreadContext(null)
       setThreadIntelligence(null)
+      setThreadDossier(null)
       setThreadTranslations({})
       setThreadViewMode('original')
       setDetectedThreadLanguage(null)
@@ -1368,6 +1372,16 @@ export default function InboxPage() {
     setThreadIntelligence((selected ?? null) as unknown as ThreadIntelligenceRecord | null)
 
     let active = true
+
+    // Fetch full dossier independently — failure must not affect messages/context
+    const dossierKey = selected.threadKey || selected.id
+    if (dossierKey) {
+      setDossierLoading(true)
+      fetchThreadDossier(dossierKey)
+        .then(dossier => { if (active) setThreadDossier(dossier) })
+        .catch(err => { if (DEV) console.warn('[InboxPage] dossier fetch failed', err) })
+        .finally(() => { if (active) setDossierLoading(false) })
+    }
 
     Promise.all([
       getThreadMessagesForThread(selected),
@@ -3124,6 +3138,8 @@ export default function InboxPage() {
           thread={selected}
           threadContext={threadContext}
           intelligence={threadIntelligence}
+          threadDossier={threadDossier}
+          dossierLoading={dossierLoading}
           onStatusChange={handleStatusChange}
           onStageChange={handleStageChange}
           onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
@@ -3429,6 +3445,8 @@ export default function InboxPage() {
             thread={selected}
             threadContext={threadContext}
             intelligence={threadIntelligence}
+            threadDossier={threadDossier}
+            dossierLoading={dossierLoading}
             onStatusChange={handleStatusChange}
             onStageChange={handleStageChange}
             onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
@@ -3649,6 +3667,8 @@ export default function InboxPage() {
             thread={selected}
             threadContext={threadContext}
             intelligence={threadIntelligence}
+            threadDossier={threadDossier}
+            dossierLoading={dossierLoading}
             onStatusChange={handleStatusChange}
             onStageChange={handleStageChange}
             onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
