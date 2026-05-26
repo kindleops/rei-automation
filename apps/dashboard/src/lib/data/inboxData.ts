@@ -321,19 +321,6 @@ const HYDRATED_CATEGORY_BY_VIEW: Partial<Record<string, HydratedInboxCategory | 
 
 const HYDRATED_PRIORITY_CATEGORIES = new Set<HydratedInboxCategory>(['hot_leads', 'needs_review', 'new_inbound'])
 
-const EMPTY_HYDRATED_CATEGORY_COUNTS: Record<HydratedInboxCategory | 'all' | 'all_inbound', number> = {
-  hot_leads: 0,
-  needs_review: 0,
-  new_inbound: 0,
-  automated: 0,
-  outbound_active: 0,
-  cold_no_response: 0,
-  dnc_opt_out: 0,
-  all_inbound: 0,
-  not_contacted: 0,
-  all: 0,
-}
-
 /** Values that map 1:1 to `nexus_inbox_threads_v.stage` / `inbox_thread_state.stage`. */
 export const SERVER_INBOX_THREAD_STAGE_VALUES = new Set([
   'new_reply',
@@ -527,45 +514,6 @@ const getHydratedCategoriesForView = (view: string | undefined): HydratedInboxCa
   const mapped = HYDRATED_CATEGORY_BY_VIEW[view]
   if (!mapped) return []
   return Array.isArray(mapped) ? mapped : [mapped]
-}
-
-const readHydratedCategoryCount = (row: AnyRecord, key: string): number => {
-  const direct = asNumber(row[key], Number.NaN)
-  if (Number.isFinite(direct)) return direct
-  return asNumber(
-    row[`${key}_count`] ??
-    row[`${key}_threads`] ??
-    row[`${key}_total`] ??
-    row.thread_count ??
-    row.total_count ??
-    row.count,
-    0,
-  )
-}
-
-const normalizeHydratedCategoryCounts = (rows: AnyRecord[]): Record<HydratedInboxCategory | 'all_inbound' | 'all', number> => {
-  const counts = { ...EMPTY_HYDRATED_CATEGORY_COUNTS, all_inbound: 0 } as any
-  if (rows.length === 0) return counts
-
-  const first = rows[0] ?? {}
-  if (Object.prototype.hasOwnProperty.call(first, 'inbox_category') || Object.prototype.hasOwnProperty.call(first, 'category')) {
-    rows.forEach((row) => {
-      const category = asString(row.inbox_category ?? row.category, '').toLowerCase() as HydratedInboxCategory
-      if (category in counts) {
-        counts[category] = readHydratedCategoryCount(row, category)
-      }
-    })
-  } else {
-    for (const category of HYDRATED_INBOX_CATEGORIES) {
-      counts[category] = readHydratedCategoryCount(first, category)
-    }
-    counts.all = readHydratedCategoryCount(first, 'all')
-  }
-
-  if (!counts.all) {
-    counts.all = HYDRATED_INBOX_CATEGORIES.reduce((sum, category) => sum + (counts[category] ?? 0), 0)
-  }
-  return counts
 }
 
 export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> => {
@@ -1977,11 +1925,6 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     
     owner: { name: ownerName },
     property: { address: propertyAddress, market },
-    latestMessage: {
-      body: latestMessageBody,
-      at: latestMessageAt,
-      direction: latestMessageDirection
-    },
     state: {
       bucket: inboxBucket,
       status,
@@ -2017,7 +1960,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     canonicalE164: bestPhone,
     marketName: market,
     propertyAddressFull: propertyAddress,
-  } as InboxThread
+  } as unknown as InboxThread
 }
 
 /**
@@ -2062,17 +2005,13 @@ export const getInboxRowsForView = async (
       })()
 
   // Normalize the threads response to support all shapes
-  const threadsRaw =
-    payload?.data?.threads ??
-    payload?.threads ??
-    payload?.items ??
-    payload?.data ??
-    []
+  const payloadRecord = payload as AnyRecord
+  const dataRecord = (payloadRecord?.data as AnyRecord) || {}
+  const threadsRaw = Array.isArray(dataRecord.threads) 
+    ? dataRecord.threads 
+    : (Array.isArray(payloadRecord?.threads) ? payloadRecord.threads : [])
 
-  const countRaw =
-    payload?.data?.count ??
-    payload?.count ??
-    threadsRaw.length
+  const countRaw = Number(dataRecord.count ?? payloadRecord?.count ?? threadsRaw.length)
 
   if (DEV && result.ok) {
     console.log('[Inbox] /threads payload', {
@@ -2102,8 +2041,8 @@ export const getInboxRowsForView = async (
         if (DEV) console.error('[getInboxRowsForView] fetchLiveInbox failed', err)
         emitNotification({
           title: 'Live Inbox Error',
-          body: 'Failed to fetch live inbox data. Returning empty view.',
-          severity: 'error'
+          detail: 'Failed to fetch live inbox data. Returning empty view.',
+          severity: 'critical'
         })
         return { threads: [], pagination: { total: 0, has_more: false } }
       })
@@ -2113,7 +2052,7 @@ export const getInboxRowsForView = async (
   const fallbackThreads = safeArray((diagnostics.threads ?? []) as AnyRecord[])
   const rowsRaw = result.ok ? safeArray(threadsRaw) : fallbackThreads
 
-  const rows = rowsRaw.map((row, index) => normalizeInboxThread(row, offset, index))
+  const rows = rowsRaw.map((row, index) => normalizeInboxThread(row as AnyRecord, offset, index))
   const pagination = (diagnostics.pagination ?? {}) as AnyRecord
   const backendCount = result.ok ? asNumber(countRaw, rows.length) : asNumber(pagination.total, rows.length)
   const nextCursor = result.ok ? null : asString(pagination.next_cursor ?? pagination.nextCursor, '') || null
@@ -2562,7 +2501,7 @@ export const fetchInboxMapPins = async (
     if (error.message?.includes('does not exist')) {
       emitNotification({
         title: 'Map pins unavailable',
-        body: 'Map pins unavailable — view missing.',
+        detail: 'Map pins unavailable — view missing.',
         severity: 'warning'
       })
     }
@@ -2630,8 +2569,9 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   try {
     const res = await backendClient.fetchInboxCounts(options.signal)
     if (res.ok) {
-      const payload = res.data as AnyRecord
-      const rawCounts = (payload?.data?.counts ?? payload?.counts ?? payload?.data ?? {}) as AnyRecord
+      const payloadRecord = res.data as AnyRecord
+      const dataRecord = (payloadRecord?.data as AnyRecord) || {}
+      const rawCounts = (dataRecord.counts ?? payloadRecord.counts ?? payloadRecord.data ?? {}) as AnyRecord
       
       categoryCounts = {
         hot_leads: Number(rawCounts.priority) || 0,

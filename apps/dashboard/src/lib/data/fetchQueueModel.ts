@@ -122,14 +122,14 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     return { data: results.flatMap(r => r.data || []) }
   }
 
-  const fetchTargetChunked = async (qArrChunk: string[], tArrChunk: string[]) => {
+  const fetchTargetChunked = async (_qArrChunk: string[], _tArrChunk: string[]) => {
     // Disabled: frontend direct Supabase calls querying huge in(...) lists for sms_campaign_targets
     return { data: [] }
   }
 
   const [propRes, evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
     fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100),
-    fetchChunked(qArr, async chunk => ({ data: [] }), 30), // Disabled message_events
+    fetchChunked(qArr, async _chunk => ({ data: [] }), 30), // Disabled message_events
     (async () => {
       if (qArr.length === 0 && tArr.length === 0) return { data: [] }
       const qChunks = chunkArray(qArr, 30)
@@ -146,7 +146,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       return { data: results.flatMap(r => r.data || []) }
     })(),
     fetchChunked(cArr, async chunk => await supabase.from('sms_campaigns').select('id,campaign_name').in('id', chunk).limit(500), 100),
-    fetchChunked(oArr, async chunk => ({ data: [] }), 100), // Disabled master_owners
+    fetchChunked(oArr, async _chunk => ({ data: [] }), 100), // Disabled master_owners
     supabase.from('textgrid_numbers').select('*')
   ])
 
