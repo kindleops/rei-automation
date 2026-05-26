@@ -51,21 +51,24 @@ const highlightText = (text: string, terms: string[]) => {
   ))
 }
 
-const normalizeDeliveryBadge = (message: ThreadMessage): 'failed' | 'queued' | 'pending' | 'sent' | 'delivered' | 'approval' | 'unknown' => {
-  const status = String(message.deliveryStatus || '').toLowerCase()
-  if (status === 'failed') return 'failed'
+const normalizeDeliveryBadge = (message: ThreadMessage): 'failed' | 'sent' | 'delivered' | 'sending' | 'unknown' => {
+  // Precedence: delivered > sent > failed
+  if (message.deliveredAt) return 'delivered'
+  
+  const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
   if (status === 'delivered') return 'delivered'
-  if (status === 'sent') return 'sent'
-  if (status === 'queued') return 'queued'
-  if (status === 'pending') return 'pending'
-  if (status === 'approval') return 'approval'
+  
   const raw = String(message.rawStatus || '').toLowerCase()
-  if (raw.includes('fail') || raw.includes('error') || raw.includes('undeliver')) return 'failed'
   if (raw.includes('delivered')) return 'delivered'
-  if (raw.includes('sent') || raw === 'success') return 'sent'
-  if (raw.includes('queue')) return 'queued'
-  if (raw.includes('pending') || raw.includes('schedule')) return 'pending'
-  if (raw.includes('approval')) return 'approval'
+  
+  if (status === 'sent' || raw.includes('sent') || raw === 'success') return 'sent'
+  if (status === 'failed' || raw.includes('fail') || raw.includes('error') || raw.includes('undeliver')) return 'failed'
+  if (status === 'sending' || raw.includes('sending')) return 'sending'
+  
+  // Requirement: No queued / processing / status disputed labels in conversation UI.
+  // Map any other queue-like state to 'sent' for a smooth UI, though ideally they aren't in this list.
+  if (raw.includes('queue') || raw.includes('pending') || raw.includes('schedule') || raw.includes('approval')) return 'sent'
+  
   return 'unknown'
 }
 
@@ -74,9 +77,7 @@ const getDeliveryPillStyle = (badge: string) => {
     case 'delivered': return { color: '#30d158', background: 'rgba(48, 209, 88, 0.12)', borderColor: 'rgba(48, 209, 88, 0.25)' }
     case 'sent': return { color: '#64d2ff', background: 'rgba(100, 210, 255, 0.12)', borderColor: 'rgba(100, 210, 255, 0.25)' }
     case 'failed': return { color: '#ff453a', background: 'rgba(255, 69, 58, 0.12)', borderColor: 'rgba(255, 69, 58, 0.25)' }
-    case 'queued': return { color: '#ffd60a', background: 'rgba(255, 214, 10, 0.12)', borderColor: 'rgba(255, 214, 10, 0.25)' }
-    case 'approval': return { color: '#a78bfa', background: 'rgba(167, 139, 250, 0.12)', borderColor: 'rgba(167, 139, 250, 0.25)' }
-    case 'pending': return { color: '#9ba8c0', background: 'rgba(155, 168, 192, 0.1)', borderColor: 'rgba(155, 168, 192, 0.2)' }
+    case 'sending': return { color: '#ffd60a', background: 'rgba(255, 214, 10, 0.12)', borderColor: 'rgba(255, 214, 10, 0.25)', fontStyle: 'italic' }
     default: return { color: 'rgba(155, 168, 192, 0.5)', background: 'transparent', borderColor: 'transparent' }
   }
 }
@@ -405,16 +406,9 @@ export const ChatThread = ({
                         className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}
                         style={getDeliveryPillStyle(deliveryBadge)}
                       >
-                        {deliveryBadge === 'approval' ? 'Needs Approval' : titleCase(deliveryBadge)}
+                        {titleCase(deliveryBadge)}
                       </span>
 
-                      {deliveryBadge === 'approval' && (
-                        <div className="nx-approval-actions">
-                          <button type="button" className="nx-approve-btn" onClick={() => onThreadAction?.(thread.id, 'approve_queue:' + msg.id)} title="Approve &amp; Send"><Icon name="check" /></button>
-                          <button type="button" className="nx-edit-btn" onClick={() => onThreadAction?.(thread.id, 'edit_queue:' + msg.id)} title="Edit Draft"><Icon name="file-text" /></button>
-                          <button type="button" className="nx-cancel-btn" onClick={() => onThreadAction?.(thread.id, 'cancel_queue:' + msg.id)} title="Cancel"><Icon name="x" /></button>
-                        </div>
-                      )}
                       {deliveryBadge === 'failed' && (
                         <button type="button" className="nx-retry-btn" onClick={() => onThreadAction?.(thread.id, 'retry_send')} title="Retry"><Icon name="refresh-cw" /></button>
                       )}

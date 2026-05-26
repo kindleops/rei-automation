@@ -1475,7 +1475,7 @@ const MiniTimeline = ({ thread, messages, limit = 8 }: { thread: WorkflowThread;
   const syntheticItems = [
     { label: 'First touch', time: thread.updatedAt, detail: 'Initial contact sequence opened.', done: true },
     { label: 'AI classified', time: thread.lastMessageAt, detail: thread.uiIntent || getSellerStageVisual(thread.conversationStage).label, done: true },
-    { label: 'Auto response queued', time: thread.aiDraft ? thread.updatedAt : null, detail: thread.aiDraft || 'No draft queued.', done: Boolean(thread.aiDraft) },
+    { label: 'Auto-reply prepared', time: thread.aiDraft ? thread.updatedAt : null, detail: thread.aiDraft || 'No draft prepared.', done: Boolean(thread.aiDraft) },
     { label: 'Delivered', time: thread.lastOutboundAt, detail: (thread as any).deliveryStatus || 'Outbound delivery recorded.', done: Boolean(thread.lastOutboundAt) },
     { label: 'Escalation triggered', time: thread.inboxStatus === 'needs_review' ? thread.updatedAt : null, detail: 'Operator review required.', done: thread.inboxStatus === 'needs_review', active: thread.inboxStatus === 'needs_review' },
     { label: 'Offer generated', time: thread.updatedAt, detail: formatMoney(Number(thread.cashOffer || 0)) || 'Awaiting offer model.', done: isPresent(thread.cashOffer) },
@@ -1678,7 +1678,7 @@ export const ConversationPanel = ({ thread, messages }: { thread: WorkflowThread
           <FieldTile label="Timeline" value={thread.lastMessageAt ? formatRelativeTime(thread.lastMessageAt) : null} />
           <FieldTile label="Thread State" value={getStatusVisual(thread.inboxStatus).label} />
           <FieldTile label="Current Stage" value={getSellerStageVisual(thread.conversationStage).label} />
-          <FieldTile label="Queued Reply" value={thread.aiDraft} />
+          <FieldTile label="Draft Reply" value={thread.aiDraft} />
         </FieldGrid>
       </PanelSection>
     </div>

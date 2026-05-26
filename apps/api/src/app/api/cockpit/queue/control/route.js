@@ -21,7 +21,7 @@ const CONTROL_KEYS = [
 ]
 
 const DEFAULTS = {
-  queue_processor_mode: 'off',
+  queue_processor_mode: 'paused',
   queue_daily_send_cap: '500',
   queue_run_limit: '50',
   queue_spacing_seconds: '45',
@@ -47,7 +47,7 @@ function parseBody(body = {}) {
   }
   if (patch.queue_processor_mode) {
     const mode = clean(patch.queue_processor_mode).toLowerCase()
-    patch.queue_processor_mode = ['off', 'safe', 'live'].includes(mode) ? mode : 'off'
+    patch.queue_processor_mode = ['off', 'safe', 'live', 'paused', 'assisted', 'automatic'].includes(mode) ? mode : 'paused'
   }
   return patch
 }
@@ -72,6 +72,37 @@ export async function POST(request) {
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return auth.response
   const body = await request.json().catch(() => ({}))
+  
+  if (body.action === 'safe_batch') {
+    const { runSendQueue } = await import('@/lib/domain/queue/run-send-queue.js')
+    const limit = Math.max(1, Math.min(25, Number(body.limit) || 10))
+    const result = await runSendQueue({ limit, dry_run: false }, {})
+    return NextResponse.json({
+      ok: result?.ok !== false,
+      action: 'safe_batch',
+      rows_sent: Number(result?.sent_count || 0),
+      block_reasons: {
+        failed: Number(result?.failed_count || 0),
+        blocked: Number(result?.blocked_count || 0)
+      }
+    }, { status: result?.ok === false ? 500 : 200 })
+  }
+
+  if (body.action === 'run_due_queue') {
+    const { runSendQueue } = await import('@/lib/domain/queue/run-send-queue.js')
+    const limit = Math.max(1, Math.min(250, Number(body.limit) || Number(body.caps?.queue_run_limit) || 50))
+    const result = await runSendQueue({ limit, dry_run: false }, {})
+    return NextResponse.json({
+      ok: result?.ok !== false,
+      action: 'run_due_queue',
+      rows_sent: Number(result?.sent_count || 0),
+      block_reasons: {
+        failed: Number(result?.failed_count || 0),
+        blocked: Number(result?.blocked_count || 0)
+      }
+    }, { status: result?.ok === false ? 500 : 200 })
+  }
+
   const patch = parseBody(body)
   const result = await setSystemValues(patch)
   if (!result.ok) {

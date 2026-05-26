@@ -6,12 +6,8 @@ import {
   processSendQueueItem as defaultProcessSendQueueItem,
   loadQueueRowById
 } from "@/lib/domain/queue/process-send-queue.js";
-import { 
-  loadRunnableSendQueueRows,
-  normalizeSendQueueRow
-} from "@/lib/supabase/sms-engine.js";
-import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
-
+import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
+import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 function normalizeRows(data) {
   return Array.isArray(data) ? data : [];
 }
@@ -85,6 +81,25 @@ export async function runSendQueue(
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
 
+  // Canonical lifecycle reconciliation before claiming rows so stale runnable
+  // rows don't re-enter active processing unexpectedly.
+  try {
+    const reconcile = await (deps.reconcileCanonicalQueueLifecycle || reconcileCanonicalQueueLifecycle)({
+      now,
+      dry_run,
+      stale_minutes: deps.stale_queue_minutes ?? 180,
+      lease_minutes: deps.processing_lease_minutes ?? 10,
+      max_rows: 1000,
+      supabaseClient: supabase,
+      supabase,
+    });
+    log_info("queue.lifecycle_reconcile", reconcile);
+  } catch (reconcile_error) {
+    log_warn("queue.lifecycle_reconcile_failed", {
+      error: reconcile_error?.message || "unknown_error",
+    });
+  }
+
   // ── System control gate ────────────────────────────────────────────────
   if (!dry_run) {
     const queue_runner_enabled = await get_system_flag("queue_runner_enabled");
@@ -130,9 +145,11 @@ export async function runSendQueue(
   const results = [];
   let sent_count = 0;
   let failed_count = 0;
+  let skipped_count = 0;
   let processed_count = 0;
 
-  // 3. Process rows with row-level atomic claims
+  // 3. Process rows with canonical row-level atomic claims in processSendQueueItem.
+  // Do not pre-claim here; the processor owns claim->send->finalize.
   for (const row of rows) {
     const queue_item_id = row.id;
     
@@ -142,44 +159,70 @@ export async function runSendQueue(
         continue;
     }
 
-    // Atomic Claim
-    const { data: claimed, error: claim_error } = await supabase
-        .from('send_queue')
-        .update({
-            queue_status: 'processing',
-            is_locked: true,
-            locked_at: new Date().toISOString(),
-            processing_run_id: processing_run_id,
-            metadata: {
-                ...row.metadata,
-            }
-        })
-        .eq('id', queue_item_id)
-        .eq('queue_status', 'queued')
-        .is('is_locked', false)
-        .select()
-        .single();
-
-    if (claim_error || !claimed) {
-        log_warn("queue_row_claim_failed", { queue_item_id });
-        continue;
-    }
+    log_info("queue_row_selected", {
+      queue_item_id,
+      queue_status: row.queue_status,
+      message_type: row.message_type || null,
+      use_case_template: row.use_case_template || null,
+      scheduled_for: row.scheduled_for || null,
+      to_phone_number: row.to_phone_number || null,
+      from_phone_number: row.from_phone_number || null,
+    });
 
     try {
-        const result = await process_item(claimed, { ...deps, now, supabaseClient: supabase });
+        const result = await process_item(row, {
+          ...deps,
+          now,
+          supabaseClient: supabase,
+          processing_run_id,
+          run_started_at,
+        });
         processed_count += 1;
         
-        if (result.ok) {
+        if (result?.sent) {
             sent_count += 1;
-            results.push({ ok: true, queue_item_id });
-            log_info("queue_row_processed", { queue_item_id, status: 'sent' });
+            results.push({
+              ok: true,
+              queue_item_id,
+              status: 'sent',
+              provider_message_id: result.provider_message_id || null,
+            });
+            log_info("queue_row_provider_send_attempted", {
+              queue_item_id,
+              provider_message_id: result.provider_message_id || null,
+              final_queue_status: result.final_queue_status || result.queue_status || 'sent',
+            });
+        } else if (result?.skipped) {
+            skipped_count += 1;
+            results.push({
+              ok: true,
+              skipped: true,
+              queue_item_id,
+              reason: result.reason || 'skipped',
+              final_queue_status: result.final_queue_status || result.queue_status || null,
+            });
+            log_info("queue_row_skipped", {
+              queue_item_id,
+              reason: result.reason || 'skipped',
+              final_queue_status: result.final_queue_status || result.queue_status || null,
+            });
         } else {
             failed_count += 1;
-            results.push({ ok: false, queue_item_id, reason: result.reason });
-            log_warn("queue_row_failed", { queue_item_id, reason: result.reason });
+            results.push({
+              ok: false,
+              queue_item_id,
+              reason: result?.reason || 'failed',
+              final_queue_status: result?.final_queue_status || result?.queue_status || null,
+            });
+            log_warn("queue_row_failed", {
+              queue_item_id,
+              reason: result?.reason || 'failed',
+              final_queue_status: result?.final_queue_status || result?.queue_status || null,
+            });
         }
     } catch (err) {
         failed_count += 1;
+        results.push({ ok: false, queue_item_id, reason: err?.message || 'queue_processing_exception' });
         log_warn("queue_row_failed", { queue_item_id, error: err.message });
     }
   }
@@ -189,6 +232,7 @@ export async function runSendQueue(
       claimed_count: rows.length,
       sent_count,
       failed_count,
+      skipped_count,
       batch_duration_ms: Date.now() - new Date(run_started_at).getTime()
   });
 
@@ -196,6 +240,7 @@ export async function runSendQueue(
     ok: true, 
     sent_count, 
     failed_count, 
+    skipped_count,
     claimed_count: rows.length,
     processed_count,
     results,

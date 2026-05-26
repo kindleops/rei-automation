@@ -44,13 +44,12 @@ import {
   type ThreadContext,
   dedupeMessages,
   toThreadMessage,
-  HYDRATED_INBOX_THREADS_VIEW,
 } from '../../lib/data/inboxData'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
-import { getQueueControlSettings, updateQueueControlSettings, getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
+import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
@@ -77,6 +76,7 @@ import { AdvancedFiltersPopover } from './components/AdvancedFiltersPopover'
 import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
+import { InboxCampaignView } from '../campaigns/InboxCampaignView'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -196,6 +196,7 @@ const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; de
   { key: 'metrics', label: 'Metrics View', description: 'Inbox KPI command center with automation and reply health.' },
   { key: 'comp_intelligence', label: 'Comp Intelligence View', description: 'Subject property, ARV, offer range, and comp signals.' },
   { key: 'buyer_match', label: 'Buyer Match View', description: 'Buyer demand, dispo fit, and buyer-match readiness.' },
+  { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
 ]
 
 type NexusWorkspaceKey =
@@ -313,6 +314,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'command_map', label: 'Map', description: 'Command map for market and routing context.' },
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
+  { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
 ]
 
 const MAX_TOGGLED_VIEWS = 4
@@ -449,7 +451,7 @@ export default function InboxPage() {
     return (initial as NexusGlobalThemeId) || 'dark'
   })
   const [activeAccentPalette, setActiveAccentPalette] = useState<AccentPalette>(() => loadSettings().accentPalette)
-  const [queueCommandMode, setQueueCommandMode] = useState<QueueCommandMode>('off')
+  const [queueCommandMode, setQueueCommandMode] = useState<QueueCommandMode>('paused')
   const [queueCommandCaps, setQueueCommandCaps] = useState<QueueCommandCaps>(DEFAULT_QUEUE_COMMAND_CAPS)
   const [queueCommandActionLoading, setQueueCommandActionLoading] = useState<string | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
@@ -585,23 +587,23 @@ export default function InboxPage() {
       return Number.isFinite(ts) && ts >= startOfDay && String(thread.deliveryStatus || '').toLowerCase() === 'delivered'
     }).length
 
-    // Prefer server-side counts from inbox_category_counts view (full DB totals) over
-    // local counts (which only reflect the 200 loaded threads).
+    // Category tab counts must be global backend counts (pagination-safe).
     const srv = data.counts ?? {}
     const sv = (key: string, fallback: number) => {
       const v = srv[key]
       return (typeof v === 'number' && v >= 0) ? v : fallback
     }
-    const newReplies = sv('new_inbound', sv('needs_reply', local.new_replies))
-    const hotLeads   = sv('hot_leads',   sv('positive_hot', local.hot_leads))
+
+    const allCount = sv('all', data.allInboxCount ?? local.all)
+    const newReplies = sv('new_replies', sv('new_inbound', sv('needs_reply', local.new_replies)))
+    const priorityCount = sv('priority', sv('hot_leads', local.priority ?? local.hot_leads))
     const needsReview = sv('needs_review', sv('manual_review', local.needs_review))
-    const automated  = sv('automated',   sv('auto_replied', local.automated))
-    const coldNoResp = sv('cold_no_response', sv('missing_context', local.cold ?? local.cold_no_response))
-    const suppressed = sv('dnc_opt_out', sv('suppressed', local.suppressed))
-    const allCount   = sv('all', data.allInboxCount ?? local.all)
-    const priorityCount = sv('priority', local.priority ?? hotLeads)
-    const followUpCount = local.follow_up ?? local.follow_up_due ?? 0
-    const activeCount   = sv('active', automated + sv('outbound_active', local.active))
+    const followUpCount = sv('follow_up', sv('follow_up_due', local.follow_up ?? local.follow_up_due ?? 0))
+    const suppressed = sv('suppressed', sv('dnc_opt_out', local.suppressed))
+    const coldNoResp = sv('cold', sv('cold_no_response', local.cold ?? local.cold_no_response))
+    const automated = sv('automated', sv('auto_replied', local.automated))
+    const hotLeads = sv('hot_leads', local.hot_leads)
+    const activeCount = local.active
 
     return {
       ...local,
@@ -800,20 +802,6 @@ export default function InboxPage() {
     const events = selectedMessages.filter(m => m.direction === 'outbound')
     const pending = selectedPendingMessages
 
-    const dedupe = (all: ThreadMessage[]) => {
-      const seen = new Set<string>()
-      const result: ThreadMessage[] = []
-      for (const msg of all) {
-        // Create unique key based on message content and timestamp for deduping
-        const key = `${msg.direction}:${msg.body.trim().toLowerCase()}:${Math.floor(new Date(msg.createdAt).getTime() / 1000)}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push(msg)
-        }
-      }
-      return result
-    }
-
     const filteredPending = pending.filter(p => {
       const match = events.some(e => {
         const pMeta = p.developerMeta || {}
@@ -858,7 +846,7 @@ export default function InboxPage() {
       }
     })
 
-    return dedupe([...selectedMessages, ...uniquePending])
+    return dedupeMessages([...selectedMessages, ...uniquePending])
   }, [selectedMessages, selectedPendingMessages])
 
   const commandIntel = useMemo(
@@ -990,10 +978,25 @@ export default function InboxPage() {
     }
     setSavedPreset(preset)
     const config = getSavedPresetConfig(preset)
+    const nextStage = (config.stage ?? stageFilter)
+    const nextView = (config.view ?? viewFilter)
+    const nextAdvanced = { ...advancedFilters, ...(config.advanced ?? {}) }
     if (config.stage) setStageFilter(config.stage)
     if (config.view) setViewFilter(config.view)
     if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
-  }, [DEV])
+
+    // Load category-specific rows from backend so paginated local state reflects the selected tab.
+    void refreshInbox({
+      filters: {
+        view: nextView,
+        stage: nextStage,
+        query: searchQuery,
+        advanced: nextAdvanced,
+      },
+      cursor: null,
+      limit: 100,
+    })
+  }, [DEV, advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
 
   const applyRightSavedPreset = useCallback((preset: InboxSavedFilterPreset) => {
     if (DEV) {
@@ -1675,7 +1678,7 @@ export default function InboxPage() {
       }
       const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
       const savedCaps = window.localStorage.getItem('nx.queue.caps')
-      if (savedMode === 'off' || savedMode === 'safe' || savedMode === 'live') setQueueCommandMode(savedMode)
+      if (savedMode === 'paused' || savedMode === 'assisted' || savedMode === 'automatic') setQueueCommandMode(savedMode)
       if (savedCaps) {
         const parsed = JSON.parse(savedCaps) as Partial<QueueCommandCaps>
         setQueueCommandCaps((current) => ({ ...current, ...parsed }))
@@ -1690,8 +1693,8 @@ export default function InboxPage() {
       if (!active || !res.ok) return
       const d = res.data?.diagnostics
       if (!d) return
-      const mode = String(d.queue_processor_mode || 'off') as QueueCommandMode
-      if (mode === 'off' || mode === 'safe' || mode === 'live') setQueueCommandMode(mode)
+      const mode = String(d.queue_processor_mode || 'paused') as QueueCommandMode
+      if (mode === 'paused' || mode === 'assisted' || mode === 'automatic') setQueueCommandMode(mode)
       setQueueCommandCaps((current) => ({
         ...current,
         sends_per_run: Math.max(1, Number(d.queue_run_limit || current.sends_per_run)),
@@ -1751,22 +1754,16 @@ export default function InboxPage() {
   ) => {
     setQueueCommandActionLoading(actionKey)
     try {
-      const { secret } = getBackendApiSecretDebugSafe()
-      const baseUrl = getBackendBaseUrl()
-      // Ensure endpoint starts with /
       const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
-      const url = `${baseUrl}${path}`
-
-      const response = await fetch(url, {
+      const result = await callBackend<any>(path, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-ops-dashboard-secret': secret
-        },
         body: JSON.stringify(options?.body ?? {}),
       })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok || payload?.ok === false) {
+      if (!result.ok) {
+        throw new Error(String(result.error || result.message || 'Queue action failed'))
+      }
+      const payload = result.data || {}
+      if (payload?.ok === false) {
         throw new Error(String(payload?.error || 'Queue action failed'))
       }
       await refreshQueueHealth()
@@ -1809,25 +1806,18 @@ export default function InboxPage() {
   }, [refreshQueueHealth])
 
   const handleQueueCommandModeChange = useCallback((mode: QueueCommandMode) => {
-    if (mode === 'live') {
-      if (queueProcessorHealth?.liveAutopilotAllowed === false) {
-        emitNotification({
-          title: 'Live Autopilot Blocked',
-          detail: 'Queue health is Critical. Resolve blank rows, duplicate collisions, routing blocks, or stale webhooks first.',
-          severity: 'warning',
-        })
-        return
-      }
-      if (!window.confirm('Enable Live Autopilot? This allows normal scheduled processing with production caps.')) return
+    if (mode === 'automatic') {
+      if (!window.confirm('Enable Automatic Mode? This allows the feeder to run and send rows automatically.')) return
     }
     setQueueCommandMode(mode)
-    void updateQueueControlSettings({ queue_processor_mode: mode })
+    const backendMode = mode === 'automatic' ? 'live' : mode === 'assisted' ? 'safe' : 'off'
+    void updateQueueControlSettings({ queue_processor_mode: backendMode })
     emitNotification({
       title: 'Queue Mode Updated',
-      detail: mode === 'off' ? 'Automatic queue processing is off.' : mode === 'safe' ? 'Safe Autopilot enabled with strict caps.' : 'Live Autopilot enabled.',
-      severity: mode === 'live' ? 'warning' : 'success',
+      detail: mode === 'paused' ? 'Automatic queue processing is paused.' : mode === 'assisted' ? 'Assisted Autopilot enabled. Feeder runs but sends require approval.' : 'Automatic Autopilot enabled.',
+      severity: mode === 'automatic' ? 'warning' : 'success',
     })
-  }, [queueProcessorHealth?.liveAutopilotAllowed])
+  }, [])
 
   const handleQueueCapsChange = useCallback((patch: Partial<QueueCommandCaps>) => {
     setQueueCommandCaps((current) => {
@@ -1842,46 +1832,65 @@ export default function InboxPage() {
   }, [])
 
   const handleRunSafeBatch = useCallback(() => (
-    runQueueCommand('safe_batch', '/api/cockpit/queue/run-safe-batch', {
-      body: { caps: queueCommandCaps },
-      successTitle: 'Safe Batch Completed',
+    runQueueCommand('safe_batch', '/api/cockpit/queue/control', {
+      body: { action: 'safe_batch', limit: 10, caps: queueCommandCaps },
+      successTitle: 'Small Batch Sent',
       successDetail: (payload) => {
-        const summary = payload?.summary ?? {}
-        return `${summary.sent ?? 0} sent • ${summary.blocked ?? 0} blocked • ${summary.routing_blocked ?? 0} routing blocked • ${summary.replied_before_send ?? 0} replied before send.`
+        if (!payload) return 'No response received'
+        const { rows_sent = 0, block_reasons = {}, error } = payload
+        const reasons = Object.entries(block_reasons)
+          .filter(([_, count]) => Number(count) > 0)
+          .map(([reason, count]) => `${count} ${reason}`)
+          .join(', ')
+        return `${rows_sent} rows sent.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
   ), [queueCommandCaps, runQueueCommand])
 
   const handleRunQueueNow = useCallback(() => (
-    runQueueCommand('run_now', '/api/cockpit/queue/run', {
-      body: { caps: queueCommandCaps, mode: queueCommandMode },
-      successTitle: 'Queue Run Completed',
+    runQueueCommand('run_now', '/api/cockpit/queue/control', {
+      body: { action: 'run_due_queue', caps: queueCommandCaps, mode: queueCommandMode },
+      successTitle: 'Queue Run Started',
       successDetail: (payload) => {
-        const summary = payload?.summary ?? {}
-        return `${summary.sent ?? 0} sent • ${summary.failed ?? 0} failed • ${summary.blocked ?? 0} blocked.`
+        if (!payload) return 'No response received'
+        const { rows_sent = 0, block_reasons = {}, error } = payload
+        const reasons = Object.entries(block_reasons)
+          .filter(([_, count]) => Number(count) > 0)
+          .map(([reason, count]) => `${count} ${reason}`)
+          .join(', ')
+        return `${rows_sent} rows sent.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
   ), [queueCommandCaps, queueCommandMode, runQueueCommand])
 
   const handleQueueMoreNow = useCallback(() => (
-    runQueueCommand('queue_more', '/api/cockpit/queue/auto-enqueue', {
+    runQueueCommand('queue_more', '/api/cockpit/queue/queue-more', {
       body: {
-        candidate_source: 'v_sms_ready_contacts',
+        candidate_source: 'v_sms_ready_contacts_expanded',
         target_count: Math.max(25, queueCommandCaps.sends_per_run * 2),
         scan_limit: 1000,
         respect_contact_window: true,
+        only_first_touch: true,
         mode: queueCommandMode,
       },
-      successTitle: 'Auto Queue Completed',
+      successTitle: 'Find Sellers Completed',
       successDetail: (payload) => {
-        const d = payload?.diagnostics ?? {}
-        return `${d.queued_count ?? 0} queued • ${d.scanned_count ?? 0} scanned • ${d.passes ?? 0} passes.`
+        if (!payload) return 'No response received'
+        const { rows_created = 0, rows_scheduled = 0, candidates_scanned = 0, block_reasons = {}, error } = payload
+        if (rows_created === 0 && rows_scheduled === 0) {
+          const reasons = Object.entries(block_reasons)
+            .filter(([_, count]) => Number(count) > 0)
+            .map(([reason, count]) => `${count} ${reason}`)
+            .join(', ')
+          return `0 rows queued. ${reasons ? `Top blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
+        }
+        return `${rows_created} queued, ${rows_scheduled} scheduled • ${candidates_scanned} scanned.${error ? ` Error: ${error}` : ''}`
       },
     })
   ), [queueCommandCaps.sends_per_run, queueCommandMode, runQueueCommand])
 
   const handleEmergencyPause = useCallback(async () => {
-    setQueueCommandMode('off')
+    setQueueCommandMode('paused')
     await updateQueueControlSettings({
       queue_processor_mode: 'off',
       queue_auto_send_enabled: 'false',
@@ -1960,6 +1969,83 @@ export default function InboxPage() {
       window.clearInterval(interval)
     }
   }, [DEV])
+
+  // ── ALWAYS-ON AUTOPILOT LOOP ──────────────────────────────────────────────
+  const autopilotStateRef = useRef({
+    mode: queueCommandMode,
+    caps: queueCommandCaps,
+    health: queueProcessorHealth
+  })
+
+  useEffect(() => {
+    autopilotStateRef.current = { mode: queueCommandMode, caps: queueCommandCaps, health: queueProcessorHealth }
+  }, [queueCommandMode, queueCommandCaps, queueProcessorHealth])
+
+  useEffect(() => {
+    let active = true
+
+    const runFeederSilently = async () => {
+      if (!active) return
+      const { mode, caps, health } = autopilotStateRef.current
+      if (mode !== 'assisted' && mode !== 'automatic') return
+      
+      const targetCount = Math.max(50, caps.sends_per_run * 2)
+      const currentActive = (health?.queuedCount ?? 0) + (health?.scheduledCount ?? 0)
+      
+      if (currentActive < targetCount) {
+        try {
+          await callBackend('/api/cockpit/queue/queue-more', {
+            method: 'POST',
+            body: JSON.stringify({
+              candidate_source: 'v_sms_ready_contacts',
+              target_count: targetCount,
+              scan_limit: 1000,
+              respect_contact_window: true,
+              only_first_touch: true,
+              mode: mode,
+            }),
+          })
+          void refreshQueueHealth()
+        } catch (error) {
+          if (DEV) console.warn('[Autopilot] Feeder run failed', error)
+        }
+      }
+    }
+
+    const runQueueSilently = async () => {
+      if (!active) return
+      const { mode, caps } = autopilotStateRef.current
+      if (mode !== 'automatic') return
+
+      try {
+        await callBackend('/api/cockpit/queue/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            caps: caps,
+            mode: mode,
+          }),
+        })
+        void refreshQueueHealth()
+      } catch (error) {
+        if (DEV) console.warn('[Autopilot] Queue runner failed', error)
+      }
+    }
+
+    const feederInterval = window.setInterval(() => { void runFeederSilently() }, 2 * 60 * 1000)
+    const runnerInterval = window.setInterval(() => { void runQueueSilently() }, 60 * 1000)
+
+    const initialTimeout = window.setTimeout(() => {
+      void runFeederSilently()
+      void runQueueSilently()
+    }, 5000)
+
+    return () => {
+      active = false
+      window.clearInterval(feederInterval)
+      window.clearInterval(runnerInterval)
+      window.clearTimeout(initialTimeout)
+    }
+  }, [DEV, refreshQueueHealth])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2332,6 +2418,16 @@ export default function InboxPage() {
       if (kind === 'apply_inbox_view') {
         const nextView = typeof detail.view === 'string' ? detail.view as InboxViewSelectValue : 'priority'
         setViewFilter(nextView)
+        void refreshInbox({
+          filters: {
+            view: nextView,
+            stage: stageFilter,
+            query: searchQuery,
+            advanced: advancedFilters,
+          },
+          cursor: null,
+          limit: 100,
+        })
         if (sourceModeFromEvent === 'all_sellers' || nextView === 'not_contacted') {
           setSourceMode('all_sellers')
         }
@@ -2360,7 +2456,7 @@ export default function InboxPage() {
 
     window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
     return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
-  }, [handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, setSourceMode, setActiveContext])
+  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, searchQuery, setSourceMode, setActiveContext, stageFilter])
 
   const handleMapSellerContext = useCallback((context: {
     propertyId?: string
@@ -2460,7 +2556,7 @@ export default function InboxPage() {
       createdAt: timestamp,
       timelineAt: timestamp,
       deliveredAt: null,
-      deliveryStatus: 'pending',
+      deliveryStatus: 'sending',
       fromNumber: '',
       toNumber: selected.canonicalE164 || selected.phoneNumber || '',
       ownerId: selected.ownerId || '',
@@ -2472,7 +2568,7 @@ export default function InboxPage() {
       templateName: template?.useCase ?? null,
       agentId: null,
       source: 'operator',
-      rawStatus: 'pending',
+      rawStatus: 'sending',
       error: null,
       metadata: { client_send_id: clientSendId },
       developerMeta: { client_send_id: clientSendId },
@@ -2489,33 +2585,67 @@ export default function InboxPage() {
 
     setIsSending(true)
     try {
-      const result = await sendInboxMessageNow(selected, text, {
+      let result = await sendInboxMessageNow(selected, text, {
         selectedTemplate: template ?? null,
         threadContext,
         clientSendId,
       })
+      const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
+      if (overrideAllowed) {
+        const retryMessage =
+          result.backendReason === 'recent_delivery_failures'
+            ? 'Recent delivery issue detected. Retry anyway?'
+            : result.backendReason === 'content_blocked'
+              ? 'Potential content issue detected. Send anyway?'
+              : 'This send was blocked, but operator override is allowed. Retry anyway?'
+        const retry = window.confirm(retryMessage)
+        if (retry) {
+          result = await sendInboxMessageNow(selected, text, {
+            selectedTemplate: template ?? null,
+            threadContext,
+            clientSendId,
+            operatorOverride: true,
+          })
+        }
+      }
       emitNotification({
         title: result.ok
-          ? (result.queueProcessorEligible ? 'Queued For Immediate Send' : 'Queued (Processor Delayed)')
+          ? 'Message Sent'
           : 'Send Failed',
         detail: result.ok
-          ? (result.queueProcessorEligible
-            ? `Queue row ${result.queueId ?? 'created'} is eligible for immediate send`
-            : (result.errorMessage ?? `Queue row ${result.queueId ?? 'created'} created, but processing appears delayed`))
+          ? (result.deliveryStatus === 'delivered'
+            ? 'Message delivered.'
+            : 'Provider accepted the message.')
           : (result.errorMessage ?? 'Could not queue message for send'),
         severity: result.ok
-          ? (result.queueProcessorEligible ? 'success' : 'warning')
+          ? 'success'
           : 'critical',
       })
 
       if (!result.ok) {
-        optimisticMessageMapRef.current.delete(clientSendId)
         setPendingMessagesByThread((current) => ({
           ...current,
-          [selected.id]: (current[selected.id] ?? []).filter((pending) => pending.id !== optimisticMessage.id),
+          [selected.id]: dedupeMessages((current[selected.id] ?? []).map((pending) => (
+            pending.id !== optimisticMessage.id
+              ? pending
+              : {
+                  ...pending,
+                  deliveryStatus: 'failed',
+                  rawStatus: 'failed',
+                  error: result.errorMessage,
+                  metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
+                  developerMeta: {
+                    ...(pending.developerMeta ?? {}),
+                    client_send_id: clientSendId,
+                    ...(result.queueId ? { queue_id: result.queueId } : {}),
+                    ...(result.providerMessageSid ? { provider_message_sid: result.providerMessageSid } : {}),
+                    ...(result.messageEventId ? { message_event_id: result.messageEventId } : {}),
+                  },
+                }
+          ))),
         }))
       } else {
-        console.log('[MessageLifecycle] queue merged', { clientSendId, queueId: result.queueId, status: result.deliveryStatus })
+        console.log('[MessageLifecycle] send merged', { clientSendId, queueId: result.queueId, status: result.deliveryStatus })
 
         // Optimistically update the thread so it clears from the unread queue instantly
         setOptimisticPatches((prev) => ({
@@ -2541,14 +2671,15 @@ export default function InboxPage() {
               ? pending
               : {
                   ...pending,
-                  deliveryStatus: result.deliveryStatus || 'queued',
-                  rawStatus: result.deliveryStatus || 'queued',
+                  deliveryStatus: result.deliveryStatus || 'sent',
+                  rawStatus: result.deliveryStatus || 'sent',
                   metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
                   developerMeta: {
                     ...(pending.developerMeta ?? {}),
                     client_send_id: clientSendId,
                     queue_id: result.queueId ?? '',
                     provider_message_sid: result.providerMessageSid ?? '',
+                    ...(result.messageEventId ? { message_event_id: result.messageEventId } : {}),
                   },
                 }
           ))),
@@ -3213,6 +3344,18 @@ export default function InboxPage() {
       )
     }
 
+    if (view === 'campaigns') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <InboxCampaignView
+            selectedThread={selected}
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
+          />
+        </section>
+      )
+    }
+
     if (view === 'closing_desk') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--queue">
@@ -3255,55 +3398,6 @@ export default function InboxPage() {
         isCustomMultiView && 'is-multi-view-active',
       )}
     >
-      {/* DEV ERROR BANNER */}
-      {DEV && data.liveFetchError && (
-        <div style={{
-          background: '#fee2e2',
-          border: '1px solid #ef4444',
-          color: '#b91c1c',
-          padding: '8px 16px',
-          fontSize: '12px',
-          fontFamily: 'monospace',
-          zIndex: 9999,
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px'
-        }}>
-          <div style={{ fontWeight: 'bold' }}>⚠️ [DEV] Inbox Query Failed</div>
-          <div><b>Error:</b> {data.liveFetchError}</div>
-          <div><b>Endpoint:</b> {HYDRATED_INBOX_THREADS_VIEW}</div>
-          <div><b>Mode:</b> {data.dataMode}</div>
-          <div><b>Fallback:</b> {String(data.dataMode) === 'fallback_error' ? 'LocalStorage Cache' : 'None'}</div>
-        </div>
-      )}
-
-      {/* PRODUCTION DEBUG BANNER */}
-      {!DEV && (data.loadedCount === 0 || threads.length === 0) && (
-        <div style={{
-          background: '#fff3cd',
-          border: '1px solid #f5c6cb',
-          color: '#856404',
-          padding: '8px 16px',
-          fontSize: '12px',
-          fontFamily: 'monospace',
-          zIndex: 9999,
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px'
-        }}>
-          <div style={{ fontWeight: 'bold' }}>⚠️ PRODUCTION INBOX DIAGNOSTICS (loadedCount=0)</div>
-          <div><b>Endpoint Called:</b> message_events (bypassed {HYDRATED_INBOX_THREADS_VIEW})</div>
-          <div><b>Status Code:</b> {data.liveFetchError ? 'Failed' : '200 OK'}</div>
-          <div><b>Error:</b> {data.liveFetchError || 'None'}</div>
-          <div><b>Raw Row Count Before Filters:</b> {data.loadedCount ?? 0}</div>
-          <div><b>Row Count After Filters:</b> {threads.length}</div>
-          <div><b>Active Filter:</b> {viewFilter}</div>
-          <div><b>Exclusion Reason Top 5:</b> N/A (bypassed)</div>
-        </div>
-      )}
-
       <NexusTopBar
         onSelectSearchResult={handleSelect}
         topSearchQuery={topSearchQuery}
@@ -3492,6 +3586,7 @@ export default function InboxPage() {
             activeWorkspaceView === 'metrics' && 'is-metrics-mode',
             activeWorkspaceView === 'comp_intelligence' && 'is-comp-mode',
             activeWorkspaceView === 'buyer_match' && 'is-buyer-mode',
+            activeWorkspaceView === 'campaigns' && 'is-campaigns-mode',
             isCommandMapView && 'is-command-map-mode',
           )}
         >

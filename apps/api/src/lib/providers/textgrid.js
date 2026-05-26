@@ -294,10 +294,13 @@ export async function sendTextgridSMS({
   client_reference_id = null,
   message_type = "sms",
   seller_first_name = null,
+  bypass_system_control = false,
+  bypass_content_guards = false,
+  bypass_reason = null,
 }) {
   // ── System control gate ────────────────────────────────────────────────
   const sms_enabled = await getSystemFlag("outbound_sms_enabled", { failClosedOnError: false });
-  if (!sms_enabled) {
+  if (!sms_enabled && !bypass_system_control) {
     info("send.blocked_system_control", {
       flag: "outbound_sms_enabled",
       to_input: to,
@@ -307,6 +310,14 @@ export async function sendTextgridSMS({
       "sendTextgridSMS: outbound_sms_enabled flag is false — send blocked by system_control",
       { to, from, body }
     );
+  }
+  if (!sms_enabled && bypass_system_control) {
+    info("send.bypassed_system_control", {
+      flag: "outbound_sms_enabled",
+      to_input: to,
+      client_reference_id,
+      bypass_reason: clean(bypass_reason) || "manual_operator_send",
+    });
   }
 
   const normalized_to = normalizePhone(to);
@@ -328,7 +339,7 @@ export async function sendTextgridSMS({
 
   // ── Content guards ────────────────────────────────────────────────────
   // Block messages with blank seller greeting ("Hello ,").
-  if (BLANK_GREETING_RE.test(trimmed_body)) {
+  if (!bypass_content_guards && BLANK_GREETING_RE.test(trimmed_body)) {
     info("send.blocked_missing_name", {
       reason: "blank_seller_greeting",
       client_reference_id,
@@ -341,7 +352,7 @@ export async function sendTextgridSMS({
   }
 
   // Block messages with unresolved template placeholders.
-  if (UNRESOLVED_PLACEHOLDER_RE.test(trimmed_body)) {
+  if (!bypass_content_guards && UNRESOLVED_PLACEHOLDER_RE.test(trimmed_body)) {
     info("send.blocked_missing_name", {
       reason: "unresolved_placeholder",
       client_reference_id,
@@ -354,7 +365,7 @@ export async function sendTextgridSMS({
   }
 
   // Block if explicit seller_first_name is empty.
-  if (seller_first_name !== null && String(seller_first_name).trim() === "") {
+  if (!bypass_content_guards && seller_first_name !== null && String(seller_first_name).trim() === "") {
     info("send.blocked_missing_name", {
       reason: "seller_first_name_blank",
       client_reference_id,

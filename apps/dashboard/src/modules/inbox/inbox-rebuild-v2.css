@@ -255,6 +255,24 @@
   color: #fff;
 }
 
+.nx-sidebar-rebuilt__telemetry-indicator {
+  color: #f59e0b;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.nx-sidebar-rebuilt__telemetry-indicator svg {
+  width: 12px;
+  height: 12px;
+}
+
 .nx-sidebar-rebuilt__saved-list-panel {
   background: rgba(20, 25, 35, 0.95);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -316,17 +334,54 @@
   box-shadow: inset 3px 0 0 #0a84ff;
 }
 
-.nx-thread-card-rebuilt.is-unread::before {
+/* 4.1. Category Strips (Solid) */
+.nx-thread-card-rebuilt::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(to bottom, #0a84ff, #30d158);
   border-radius: 3px 0 0 3px;
-  opacity: 0.8;
+  opacity: 0;
+  transition: all 0.2s ease;
 }
+
+/* Show strip if (unread OR specifically categorized) AND is-inbound */
+.nx-thread-card-rebuilt.is-inbound.is-unread::before,
+.nx-thread-card-rebuilt.is-inbound.is-category-positive::before,
+.nx-thread-card-rebuilt.is-inbound.is-category-negative::before,
+.nx-thread-card-rebuilt.is-inbound.is-category-autopilot::before,
+.nx-thread-card-rebuilt.is-inbound.is-category-review::before {
+  opacity: 1;
+}
+
+/* Color Mapping */
+.nx-thread-card-rebuilt.is-category-positive::before { background-color: #30d158; } /* Green */
+.nx-thread-card-rebuilt.is-category-negative::before { background-color: #ff453a; } /* Red */
+.nx-thread-card-rebuilt.is-category-autopilot::before { background-color: #bf5af2; } /* Purple */
+.nx-thread-card-rebuilt.is-category-review::before { background-color: #ffd60a; }   /* Yellow */
+
+/* Fallback/Default for unread inbound without specific category */
+.nx-thread-card-rebuilt.is-inbound.is-unread:not([class*="is-category-"])::before {
+  background-color: #0a84ff; /* Blue */
+}
+
+/* Delivery Status Icon (Outbound ONLY) */
+.nx-thread-card-rebuilt.is-outbound .nx-thread-card-rebuilt__delivery-status {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.nx-thread-card-rebuilt__delivery-status.is-sent { color: #30d158; opacity: 0.8; }
+.nx-thread-card-rebuilt__delivery-status.is-delivered { color: #30d158; }
+.nx-thread-card-rebuilt__delivery-status.is-failed { color: #ff453a; }
 
 /* Checkbox and Icons */
 .nx-thread-card-rebuilt__left {

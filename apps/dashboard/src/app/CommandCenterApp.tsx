@@ -8,7 +8,6 @@ import { NotificationToasts, NotificationCenter } from '../shared/NotificationTo
 import { playSound } from '../shared/sounds'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
-import { DevApiBanner } from '../components/dev/DevApiBanner'
 import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
 import {
   GLOBAL_COMMAND_CONTEXT_EVENT,
@@ -35,7 +34,7 @@ const initialState: RouteLoadState = {
 
 // ── Nav Items ──────────────────────────────────────────────────────────────
 
-type NavIconName = 'radar' | 'inbox' | 'alert' | 'stats' | 'map' | 'users' | 'file-text' | 'settings' | 'bell' | 'star' | 'grid' | 'target'
+type NavIconName = 'radar' | 'inbox' | 'alert' | 'stats' | 'map' | 'users' | 'file-text' | 'settings' | 'bell' | 'star' | 'grid' | 'target' | 'send'
 
 interface NavItem {
   path: string
@@ -62,6 +61,7 @@ const navItems: NavItem[] = [
   { path: '/watchlists', label: 'Watchlists', icon: 'star', shortcut: 'W', room: 'Watchlists' },
   { path: '/notifications', label: 'Notifications', icon: 'bell', shortcut: 'N', room: 'Notifications' },
   { path: '/settings', label: 'Settings', icon: 'settings', shortcut: 'S', room: 'Settings' },
+  { path: '/campaigns', label: 'Campaigns', icon: 'send', shortcut: 'P', room: 'Campaign Command Center' },
   { path: '/mobile', label: 'Mobile', icon: 'grid', shortcut: 'O', room: 'Mobile Command Center' },
 ]
 
@@ -553,7 +553,6 @@ export const CommandCenterApp = () => {
         onClose={() => setNotifCenterOpen(false)}
       />
 
-      <DevApiBanner />
     </div>
   )
 }

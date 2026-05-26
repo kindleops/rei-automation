@@ -55,11 +55,14 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
 
     if (!cron_auth.authorized) {
       const queue_secret = String(
-        deps.queueEngineSecret ?? process.env.QUEUE_ENGINE_SHARED_SECRET ?? ""
+        deps.queueEngineSecret ??
+        process.env.QUEUE_ENGINE_SHARED_SECRET ??
+        (await get_system_value("queue_engine_shared_secret")) ??
+        ""
       ).trim();
       if (!queue_secret) {
         route_logger?.warn?.("queue_engine_secret.not_configured", {
-          hint: "Set QUEUE_ENGINE_SHARED_SECRET to protect this endpoint from non-cron callers",
+          hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
         });
       } else {
         const get_secret_auth = deps.getSharedSecretAuthResult ||
@@ -124,15 +127,7 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       is_vercel_cron: auth.auth.is_vercel_cron,
     });
 
-    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "off").toLowerCase();
-    if (!dry_run && queue_processor_mode === "off") {
-      return json_response({
-        ok: false,
-        skipped: true,
-        reason: "queue_processor_mode_off",
-        queue_processor_mode,
-      }, { status: 423 });
-    }
+    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
     if (!dry_run && auth.auth.is_vercel_cron && queue_processor_mode === "safe") {
       return json_response({
         ok: true,

@@ -1,4 +1,6 @@
-import { getCockpitOpsMetrics } from '../api/backendClient'
+import { getCockpitOpsMetrics, type CockpitOpsSections, type OpsMessageTypeSection, type OpsQueueHealthSection } from '../api/backendClient'
+
+export type { OpsMessageTypeSection, OpsQueueHealthSection }
 
 export interface OperationalKpi {
   id: string
@@ -25,6 +27,7 @@ export interface OperationalKpis {
     value: number
     tone: 'good' | 'warning' | 'critical' | 'neutral'
   }>
+  sections: CockpitOpsSections | null
   lastUpdated: string
 }
 
@@ -93,6 +96,7 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
       pipeline,
       financial,
       volume,
+      sections: metrics.sections ?? null,
       lastUpdated: new Date().toISOString()
     }
   } catch (err) {

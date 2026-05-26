@@ -6,7 +6,8 @@ import {
 } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { IconName } from '../../shared/icons'
-import { buildConversationDecision, isHotLeadDecision, matchesInboxBucket, type InboxBucket } from './inbox-decisioning'
+import { buildConversationDecision, isHotLeadDecision, type InboxBucket } from './inbox-decisioning'
+import { resolveInboxThreadState } from './resolveInboxThreadState'
 
 export type InboxStageSelectValue =
   | 'all_stages'
@@ -501,6 +502,7 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
 
 export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxViewSelectValue): boolean => {
   const decision = buildConversationDecision(thread)
+  const canonical = resolveInboxThreadState(thread)
   const isArchived = Boolean(thread.isArchived || thread.inboxStatus === 'closed')
 
   let matches = true
@@ -514,19 +516,28 @@ export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxVie
   else if (view === 'all_inbound' || view === 'inbound_all') matches = decision.has_inbound_history
   else if (view === 'hot_leads' || view === 'positive_hot') matches = isHotLeadDecision(decision)
   else if (view === 'spanish_language') matches = decision.language === 'spanish'
-  else if (view === 'inbound') matches = decision.last_message_direction === 'inbound' && !isArchived
-  else if (view === 'outbound') matches = decision.last_message_direction === 'outbound' && !isArchived
+  else if (view === 'inbound') matches = canonical.flags.latest_direction === 'inbound' && !isArchived
+  else if (view === 'outbound') matches = canonical.flags.latest_direction === 'outbound' && !isArchived
   else if (view === 'active') matches = decision.active && decision.suppression_status === 'clear' && !isArchived
   else if (view === 'sent') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'sent' && !isArchived
   else if (view === 'failed') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'failed' && !isArchived
   else {
     const bucket = bucketFromView(view)
-    matches = bucket ? matchesInboxBucket(thread, bucket, decision) : true
+    matches = bucket ? (
+      bucket === 'all_conversations'
+        ? true
+        : (
+          bucket === 'follow_up_due'
+            ? canonical.bucket === 'follow_up'
+            : bucket === 'cold_no_response'
+              ? canonical.bucket === 'cold'
+              : bucket === 'dnc_suppressed'
+                ? canonical.bucket === 'suppressed'
+                : canonical.bucket === bucket
+        )
+    ) : true
   }
 
-  if (!matches) {
-    console.debug('[InboxLifecycle] thread filtered out', { threadId: thread.id, view })
-  }
   return matches
 }
 
@@ -709,14 +720,14 @@ export const getSavedPresetConfig = (preset: InboxSavedFilterPreset): Partial<In
   if (preset === 'positive_hot') return { view: 'hot_leads' }
   if (preset === 'manual_review') return { view: 'needs_review' }
   if (preset === 'auto_replied') return { view: 'automated' }
-  if (preset === 'missing_context') return { view: 'cold_no_response' }
+  if (preset === 'missing_context') return { view: 'cold' }
   if (preset === 'all_inbound' || preset === 'inbound_all') return { view: 'all_inbound' }
   if (preset === 'my_priority') return { view: 'priority' }
   if (preset === 'new_inbounds') return { view: 'new_replies', stage: 'all_stages' }
   if (preset === 'high_motivation') return { view: 'active', advanced: { motivationMin: 70 } }
-  if (preset === 'offer_needed') return { view: 'follow_up_due', stage: 'all_stages' }
+  if (preset === 'offer_needed') return { view: 'follow_up', stage: 'all_stages' }
   if (preset === 'review_required') return { view: 'needs_review', stage: 'all_stages' }
-  if (preset === 'suppressed') return { view: 'dnc_opt_out' }
+  if (preset === 'suppressed') return { view: 'suppressed' }
   if (preset === 'language_focus') return { view: 'spanish_language', advanced: { language: 'spanish' } }
   if (preset === 'wrong_numbers') return { view: 'wrong_number' }
   if (preset === 'starred') return { view: 'starred', stage: 'all_stages' }

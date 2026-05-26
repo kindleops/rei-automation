@@ -159,7 +159,9 @@ export const NexusTopBar = ({
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [openControlMenu, setOpenControlMenu] = useState<null | 'workspace'>(null)
   const [activeSubmenu, setActiveSubmenu] = useState<WorkspaceSubmenu>(null)
-  const [openQuickMenu, setOpenQuickMenu] = useState<null | 'tasks' | 'activity' | 'profile' | 'status'>(null)
+  const [openQuickMenu, setOpenQuickMenu] = useState<null | 'tasks' | 'activity' | 'profile'>(null)
+  const [isQueuePanelPinned, setIsQueuePanelPinned] = useState(false)
+  const [isQueuePanelHovered, setIsQueuePanelHovered] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [isCompactMenu, setIsCompactMenu] = useState(false)
@@ -447,18 +449,18 @@ export const NexusTopBar = ({
         </div>
         <div
           className="nx-notification-control"
-          onMouseEnter={() => setOpenQuickMenu('status')}
-          onMouseLeave={() => setOpenQuickMenu((current) => current === 'status' ? null : current)}
+          onMouseEnter={() => setIsQueuePanelHovered(true)}
+          onMouseLeave={() => setIsQueuePanelHovered(false)}
         >
           <button
             type="button"
-            className={cls('nx-processor-button nx-processor-button--compact', `is-${processorStatus}`)}
+            className={cls('nx-processor-button nx-processor-button--compact', `is-${processorStatus}`, isQueuePanelPinned && 'is-active')}
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              setOpenQuickMenu((current) => current === 'status' ? null : 'status')
+              setIsQueuePanelPinned((prev) => !prev)
             }}
-            aria-expanded={openQuickMenu === 'status'}
+            aria-expanded={isQueuePanelPinned || isQueuePanelHovered}
             title={`Queue Processor · ${processorHealthLabel}`}
           >
             <span className={cls('nx-queue-indicator', `is-${processorStatus}`)}>
@@ -466,8 +468,8 @@ export const NexusTopBar = ({
               {processorStatus === 'healthy' ? <i className="nx-queue-indicator-dot" /> : null}
             </span>
           </button>
-          {openQuickMenu === 'status' ? (
-            <div className="nx-liquid-popover nx-liquid-popover--processor" role="status">
+          {isQueuePanelPinned || isQueuePanelHovered ? (
+            <div className="nx-liquid-popover nx-liquid-popover--processor" role="status" onClick={(e) => e.stopPropagation()}>
               <QueueCommandCenter
                 health={queueProcessorHealth}
                 loading={queueProcessorHealthLoading}
@@ -485,6 +487,10 @@ export const NexusTopBar = ({
                 onRetryFailed={onRetryFailed}
                 onReconcileDelivery={onReconcileDelivery}
                 onCancelStaleFollowUps={onCancelStaleFollowUps}
+                onClose={() => {
+                  setIsQueuePanelPinned(false)
+                  setIsQueuePanelHovered(false)
+                }}
               />
             </div>
           ) : null}

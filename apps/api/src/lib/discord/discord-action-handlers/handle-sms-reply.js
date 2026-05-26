@@ -306,13 +306,21 @@ async function suppressInboundContact({ message_event_id = "", discord_user_id =
 
   const from_phone_number = clean(event_row?.from_phone_number || event_row?.metadata?.from_phone_number || event_row?.metadata?.inbound_from);
   if (from_phone_number) {
-    await supabase.from("sms_suppression_list").insert({
-      phone_number: from_phone_number,
-      suppression_reason,
-      is_active: true,
-      suppressed_by_discord_user_id: discord_user_id,
-      suppressed_at: new Date().toISOString(),
-    }).maybeSingle().catch(() => null);
+    if (suppression_reason === "wrong_number") {
+      await supabase.from("phones").update({
+        phone_contact_status: "wrong_number",
+        wrong_number_at: new Date().toISOString(),
+        wrong_number_source_thread_key: from_phone_number,
+      }).eq("canonical_e164", from_phone_number).catch(() => null);
+    } else {
+      await supabase.from("sms_suppression_list").insert({
+        phone_number: from_phone_number,
+        suppression_reason,
+        is_active: true,
+        suppressed_by_discord_user_id: discord_user_id,
+        suppressed_at: new Date().toISOString(),
+      }).maybeSingle().catch(() => null);
+    }
   }
 
   return updateMessageEventMetadata(

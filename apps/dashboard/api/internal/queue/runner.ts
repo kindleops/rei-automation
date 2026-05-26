@@ -110,7 +110,7 @@ export const runQueueBatch = async (caps: Partial<QueueRunCaps> = {}): Promise<a
     guard_failed: 0,
   }
 
-  const orQuery = `queue_status.in.(queued,pending,approved,ready),and(queue_status.eq.scheduled,or(scheduled_for_utc.lte.${now},scheduled_for.lte.${now},and(scheduled_for_utc.is.null,scheduled_for.is.null,created_at.lte.${now})))`;
+  const orQuery = `queue_status.in.(queued,pending,approved,approval,ready),and(queue_status.eq.scheduled,or(scheduled_for_utc.lte.${now},scheduled_for.lte.${now},and(scheduled_for_utc.is.null,scheduled_for.is.null,created_at.lte.${now})))`;
 
   const { data: queueItems, error: fetchError } = await supabase
     .from('send_queue')

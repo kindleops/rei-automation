@@ -17,6 +17,31 @@ const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
 const WEBHOOK_LOG_TABLE = "webhook_log";
+const CANONICAL_ACTIVE_QUEUE_STATUSES = ["queued", "pending", "approval", "scheduled", "processing"];
+const CANONICAL_TERMINAL_QUEUE_STATUSES = [
+  "sent",
+  "delivered",
+  "carrier_blocked",
+  "duplicate_blocked",
+  "invalid_number",
+  "opted_out",
+  "failed_transport",
+  "failed",
+  "blocked",
+  "cancelled",
+  "expired",
+];
+
+function mapTransportTerminalStatus({ error_message = "", error_status = "" } = {}) {
+  const msg = lower(error_message);
+  const status = lower(error_status);
+  const combined = `${msg} ${status}`;
+  if (combined.includes("duplicate")) return "duplicate_blocked";
+  if (combined.includes("21610") || combined.includes("opt out") || combined.includes("opt-out") || combined.includes("stop")) return "opted_out";
+  if (combined.includes("invalid") || combined.includes("not a valid phone") || combined.includes("unknown destination")) return "invalid_number";
+  if (combined.includes("carrier") || combined.includes("spam") || combined.includes("blocked")) return "carrier_blocked";
+  return "failed_transport";
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -153,6 +178,23 @@ function toTimestamp(value) {
   if (!value) return null;
   const parsed = new Date(value).getTime();
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function toIsoOrNull(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function isLifecycleDebugEnabled() {
+  const flag = lower(process.env.SMS_LIFECYCLE_DEBUG || process.env.VITE_SHOW_DEBUG || "");
+  return ["1", "true", "yes", "on"].includes(flag);
+}
+
+function debugLifecycle(event, payload = {}) {
+  if (!isLifecycleDebugEnabled()) return;
+  info(`sms_lifecycle.${event}`, payload);
 }
 
 function normalizeQueueStatusValue(value) {
@@ -697,8 +739,10 @@ export async function claimSendQueueRow(row, deps = {}) {
   const metadata = ensureObject(normalized.metadata);
   const processing_run_id = clean(deps.processing_run_id || deps.run_id || metadata.processing_run_id || lock_token);
   const run_started_at = clean(deps.run_started_at || metadata.run_started_at || claimed_at);
+  const processing_lease_minutes = Math.max(Number(deps.processing_lease_minutes ?? deps.processingLeaseMinutes ?? 10), 1);
+  const processing_timeout_at = addMinutesIso(claimed_at, processing_lease_minutes);
   const payload = {
-    queue_status: "sending",
+    queue_status: "processing",
     is_locked: true,
     locked_at: claimed_at,
     lock_token,
@@ -706,6 +750,9 @@ export async function claimSendQueueRow(row, deps = {}) {
       ...metadata,
       processing_run_id,
       run_started_at,
+      processing_started_at: claimed_at,
+      processing_worker_id: processing_run_id,
+      processing_timeout_at,
       claimed_at: metadata.claimed_at || claimed_at,
       claimed_by: metadata.claimed_by || "queue_runner",
     },
@@ -1155,6 +1202,7 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
       source: "supabase_send_queue",
       queue_key,
       send_result,
+      client_send_id: normalized.metadata?.client_send_id || null,
       enrichment: {
         thread_key,
         property_id: normalized.property_id || null,
@@ -1660,6 +1708,164 @@ export async function shouldSuppressDeliveryFailedRecipient(
   }
 }
 
+export async function reconcileCanonicalQueueLifecycle(options = {}) {
+  const supabase = getSupabase(options);
+  const now = options.now || nowIso();
+  const stale_minutes = Math.max(Number(options.stale_minutes ?? 180), 1);
+  const lease_minutes = Math.max(Number(options.lease_minutes ?? 10), 1);
+  const stale_cutoff = new Date(new Date(now).getTime() - stale_minutes * 60 * 1000).toISOString();
+  const lease_cutoff = new Date(new Date(now).getTime() - lease_minutes * 60 * 1000).toISOString();
+  const max_rows = Math.max(Number(options.max_rows ?? 500), 1);
+  const dry_run = Boolean(options.dry_run);
+
+  const { data: active_rows, error: active_error } = await supabase
+    .from(SEND_QUEUE_TABLE)
+    .select("id,queue_status,created_at,updated_at,scheduled_for,scheduled_for_utc,sent_at,delivered_at,provider_message_id,textgrid_message_id,is_locked,lock_token,retry_count,max_retries,dedupe_key,to_phone_number,from_phone_number,metadata")
+    .in("queue_status", CANONICAL_ACTIVE_QUEUE_STATUSES)
+    .order("updated_at", { ascending: true })
+    .limit(max_rows);
+  if (active_error) throw active_error;
+
+  const rows = Array.isArray(active_rows) ? active_rows : [];
+  const active_with_send_evidence = rows.filter((row) =>
+    Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at)
+  );
+  const stale_rows = rows.filter((row) => (toTimestamp(row.updated_at || row.created_at) ?? 0) <= (toTimestamp(stale_cutoff) ?? 0));
+  const past_due_scheduled = rows.filter((row) => {
+    const status = lower(row.queue_status);
+    if (!["scheduled", "queued"].includes(status)) return false;
+    const schedule_at = row.scheduled_for_utc || row.scheduled_for;
+    const schedule_ts = toTimestamp(schedule_at);
+    return schedule_ts !== null && schedule_ts <= (toTimestamp(now) ?? Date.now());
+  });
+  const expired_leases = rows.filter((row) => {
+    const status = lower(row.queue_status);
+    if (status !== "processing") return false;
+    const timeout_at = toTimestamp(row.metadata?.processing_timeout_at) ?? toTimestamp(row.locked_at) ?? toTimestamp(row.updated_at);
+    return timeout_at !== null && timeout_at <= (toTimestamp(now) ?? Date.now());
+  });
+  const duplicate_map = new Map();
+  rows.forEach((row) => {
+    const key = clean(row.dedupe_key);
+    if (!key) return;
+    duplicate_map.set(key, (duplicate_map.get(key) ?? 0) + 1);
+  });
+  const duplicate_fingerprints = Array.from(duplicate_map.entries()).filter(([, count]) => count > 1).map(([key]) => key);
+  const retried_gt_one = rows.filter((row) => Number(row.retry_count || 0) > 1);
+
+  const updates = [];
+  for (const row of active_with_send_evidence) {
+    updates.push({
+      id: row.id,
+      patch: {
+        queue_status: row.delivered_at ? "delivered" : "sent",
+        is_locked: false,
+        lock_token: null,
+        locked_at: null,
+        updated_at: now,
+      },
+    });
+  }
+
+  for (const row of stale_rows) {
+    const status = lower(row.queue_status);
+    const has_send_evidence = Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at);
+    let next_status = status;
+    let failed_reason = null;
+    if (has_send_evidence) {
+      next_status = "cancelled";
+      failed_reason = "stale_row_with_send_evidence_cancelled";
+    } else if (Number(row.retry_count || 0) >= Number(row.max_retries || 3)) {
+      next_status = "failed";
+      failed_reason = "stale_max_retries_exceeded";
+    } else {
+      next_status = "expired";
+      failed_reason = "stale_runnable_row_expired";
+    }
+
+    if (next_status !== status) {
+      updates.push({
+        id: row.id,
+        patch: {
+          queue_status: next_status,
+          failed_reason,
+          is_locked: false,
+          lock_token: null,
+          locked_at: null,
+          metadata: {
+            ...(row.metadata || {}),
+            processing_started_at: null,
+            processing_worker_id: null,
+            processing_timeout_at: null,
+          },
+          updated_at: now,
+        },
+      });
+    }
+  }
+
+  for (const row of past_due_scheduled) {
+    const status = lower(row.queue_status);
+    if (status !== "scheduled") continue;
+    updates.push({
+      id: row.id,
+      patch: {
+        queue_status: "queued",
+        updated_at: now,
+      },
+    });
+  }
+
+  for (const row of expired_leases) {
+    updates.push({
+      id: row.id,
+      patch: {
+        queue_status: "expired",
+        failed_reason: "processing_lease_expired_manual_review",
+        is_locked: false,
+        lock_token: null,
+        locked_at: null,
+        metadata: {
+          ...(row.metadata || {}),
+          processing_started_at: null,
+          processing_worker_id: null,
+          processing_timeout_at: null,
+        },
+        updated_at: now,
+      },
+    });
+  }
+
+  const deduped_updates = Array.from(
+    new Map(updates.map((entry) => [String(entry.id), entry])).values()
+  );
+
+  if (!dry_run) {
+    for (const { id, patch } of deduped_updates) {
+      await supabase
+        .from(SEND_QUEUE_TABLE)
+        .update(patch)
+        .eq("id", id);
+    }
+  }
+
+  return {
+    ok: true,
+    now,
+    dry_run,
+    stale_minutes,
+    lease_minutes,
+    scanned_active_rows: rows.length,
+    stale_rows: stale_rows.length,
+    past_due_scheduled_rows: past_due_scheduled.length,
+    expired_processing_leases: expired_leases.length,
+    duplicate_fingerprint_count: duplicate_fingerprints.length,
+    retried_gt_one_count: retried_gt_one.length,
+    reconciled_rows: deduped_updates.length,
+    lock_conflicts: 0,
+  };
+}
+
 export async function releaseSkippedQueueRow(row, lock_token, reason, options = {}) {
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
@@ -1896,7 +2102,7 @@ export async function recycleClaimedSendingRow(row, lock_token, reason = "finali
     return null;
   }
 
-  if (lower(latest.queue_status) !== "sending") {
+  if (!["sending", "processing"].includes(lower(latest.queue_status))) {
     return null;
   }
 
@@ -1960,7 +2166,7 @@ export async function recycleClaimedSendingRow(row, lock_token, reason = "finali
     .from(SEND_QUEUE_TABLE)
     .update(payload)
     .eq("id", queue_row_id)
-    .eq("queue_status", "sending")
+    .in("queue_status", ["sending", "processing"])
     .select()
     .maybeSingle();
 
@@ -1986,7 +2192,7 @@ export async function finalizeClaimedSendQueueRows(claimed_rows = [], options = 
     try {
       const latest = await loadClaimedQueueRow(row, options);
       const metadata_final_status = normalizeQueueStatusValue(latest?.metadata?.final_queue_status);
-      if (!latest || isTerminalQueueStatus(latest.queue_status) || lower(latest.queue_status) !== "sending") {
+      if (!latest || isTerminalQueueStatus(latest.queue_status) || !["sending", "processing"].includes(lower(latest.queue_status))) {
         continue;
       }
       if (metadata_final_status && isTerminalQueueStatus(metadata_final_status)) {
@@ -2358,59 +2564,129 @@ export async function logInboundMessageEvent(payload, options = {}) {
 export async function syncDeliveryEvent(payload, options = {}) {
   const now = options.now || nowIso();
   const provider_message_sid = clean(payload?.message_id || payload?.provider_message_sid || payload?.sid);
+  if (!provider_message_sid) {
+    return {
+      provider_message_sid: null,
+      provider_status: null,
+      message_events_count: 0,
+      send_queue_count: 0,
+      skipped: "missing_provider_message_sid",
+    };
+  }
   const provider_status = lower(payload?.status || payload?.provider_delivery_status);
   const raw_carrier_status = clean(payload?.error_status || payload?.status || "");
-  const delivery_status =
+  const incoming_delivery_status =
     provider_status === "delivered"
       ? "delivered"
       : ["failed", "undelivered", "error"].includes(provider_status)
         ? "failed"
         : provider_status || "sent";
+  const incoming_sent_at = toIsoOrNull(payload?.sent_at) || now;
+  const incoming_delivered_at = toIsoOrNull(payload?.delivered_at) || now;
 
-  const message_events_payload = {
-    provider_delivery_status: provider_status || null,
-    raw_carrier_status: raw_carrier_status || null,
-    delivery_status,
-    updated_at: now,
-  };
-
-  if (provider_status === "delivered") {
-    message_events_payload.delivered_at = pickFirst(payload?.delivered_at, now);
-  } else if (["failed", "undelivered", "error"].includes(provider_status)) {
-    message_events_payload.failed_at = now;
-    message_events_payload.error_message =
-      clean(payload?.error_message) || "delivery_failed";
-    message_events_payload.failure_reason =
-      clean(payload?.error_message) || "delivery_failed";
-    message_events_payload.failure_bucket =
-      mapTextgridFailureBucket({
-        ok: false,
-        error_message: payload?.error_message,
-        error_status: payload?.error_status,
-      }) || null;
-  }
+  let existing_events = [];
+  let final_delivery_status = incoming_delivery_status;
 
   if (typeof options.syncDeliveryEvent === "function") {
     // Analytics fires before DI early return — delivery_status is already computed.
     captureSystemEvent("sms_delivery_updated", {
       provider_message_sid: provider_message_sid || null,
-      delivery_status,
+      delivery_status: final_delivery_status,
       provider_delivery_status: provider_status || null,
       error_status: clean(payload?.error_status) || null,
       error_message: clean(payload?.error_message) || null,
     });
-    return options.syncDeliveryEvent(provider_message_sid, message_events_payload);
+    return options.syncDeliveryEvent(provider_message_sid, {
+      provider_delivery_status: provider_status || null,
+      raw_carrier_status: raw_carrier_status || null,
+      delivery_status: final_delivery_status,
+      updated_at: now,
+    });
   }
-
   const supabase = getSupabase(options);
-
-  const { data: message_events_data, error: message_events_error } = await supabase
+  const { data: loaded_events, error: existing_events_error } = await supabase
     .from(MESSAGE_EVENTS_TABLE)
-    .update(message_events_payload)
-    .eq("provider_message_sid", provider_message_sid)
-    .select();
+    .select("id, thread_key, queue_id, metadata, delivery_status, sent_at, delivered_at, failed_at")
+    .eq("provider_message_sid", provider_message_sid);
 
-  if (message_events_error) throw message_events_error;
+  if (existing_events_error) throw existing_events_error;
+  existing_events = loaded_events || [];
+  const any_delivered_already = existing_events.some((row) => {
+    return lower(row?.delivery_status) === "delivered" || Boolean(row?.delivered_at);
+  });
+  const any_sent_already = existing_events.some((row) => {
+    const status = lower(row?.delivery_status);
+    return status === "sent" || status === "delivered" || Boolean(row?.sent_at);
+  });
+  final_delivery_status =
+    incoming_delivery_status === "delivered" || any_delivered_already
+      ? "delivered"
+      : (
+        (incoming_delivery_status === "failed" && any_sent_already)
+          ? "sent"
+          : incoming_delivery_status
+      );
+  const message_events_data = [];
+  for (const existing of existing_events || []) {
+    const existing_sent_at = toIsoOrNull(existing.sent_at);
+    const existing_delivered_at = toIsoOrNull(existing.delivered_at);
+    const merged_sent_at = existing_sent_at || incoming_sent_at;
+    let merged_delivered_at =
+      final_delivery_status === "delivered"
+        ? (existing_delivered_at || incoming_delivered_at)
+        : null;
+    if (merged_delivered_at && merged_sent_at && toTimestamp(merged_delivered_at) < toTimestamp(merged_sent_at)) {
+      merged_delivered_at = merged_sent_at;
+    }
+
+    const event_update = {
+      provider_delivery_status: provider_status || null,
+      raw_carrier_status: raw_carrier_status || null,
+      delivery_status: final_delivery_status,
+      sent_at: merged_sent_at,
+      delivered_at: merged_delivered_at,
+      updated_at: now,
+    };
+
+    if (final_delivery_status === "delivered" || final_delivery_status === "sent") {
+      event_update.failed_at = null;
+      event_update.error_message = null;
+      event_update.failure_reason = null;
+      event_update.failure_bucket = null;
+    } else if (["failed", "undelivered", "error"].includes(provider_status)) {
+      event_update.failed_at = now;
+      event_update.error_message = clean(payload?.error_message) || "delivery_failed";
+      event_update.failure_reason = clean(payload?.error_message) || "delivery_failed";
+      event_update.failure_bucket =
+        mapTextgridFailureBucket({
+          ok: false,
+          error_message: payload?.error_message,
+          error_status: payload?.error_status,
+        }) || null;
+    }
+
+    const { data: updated_event, error: update_event_error } = await supabase
+      .from(MESSAGE_EVENTS_TABLE)
+      .update(event_update)
+      .eq("id", existing.id)
+      .select()
+      .maybeSingle();
+
+    if (update_event_error) throw update_event_error;
+    if (updated_event) message_events_data.push(updated_event);
+
+    debugLifecycle("event_reconcile", {
+      provider_sid: provider_message_sid,
+      event_id: existing.id,
+      provider_raw_status: provider_status || null,
+      queue_status: null,
+      event_type: "outbound_send",
+      sent_at: event_update.sent_at,
+      delivered_at: event_update.delivered_at,
+      failure_reason: event_update.failure_reason || null,
+      reconciliation_source: "sync_delivery_event",
+    });
+  }
 
   if (Array.isArray(message_events_data) && message_events_data.length > 0) {
     const event = message_events_data[0];
@@ -2423,17 +2699,17 @@ export async function syncDeliveryEvent(payload, options = {}) {
         const { data: queue_data, error: queue_error } = await supabase
           .from(SEND_QUEUE_TABLE)
           .update({
-            queue_status: delivery_status === "delivered" ? "delivered" : delivery_status,
-            updated_at: now,
-            delivered_at: delivery_status === "delivered" ? now : null,
-          })
+          queue_status: final_delivery_status === "delivered" ? "delivered" : final_delivery_status,
+          updated_at: now,
+          delivered_at: final_delivery_status === "delivered" ? now : null,
+        })
           .eq("id", queue_id)
           .select();
         
         if (queue_error) {
           info("delivery_webhook.queue_reconcile_failed", { queue_id, error: queue_error.message });
         } else if (Array.isArray(queue_data) && queue_data.length > 0) {
-          info("delivery_webhook.queue_status_enriched", { queue_id, new_status: delivery_status });
+          info("delivery_webhook.queue_status_enriched", { queue_id, new_status: final_delivery_status });
         }
       } catch (qErr) {
         info("delivery_webhook.queue_reconcile_exception", { queue_id, error: qErr.message });
@@ -2445,7 +2721,7 @@ export async function syncDeliveryEvent(payload, options = {}) {
       try {
         await supabase
           .from("inbox_thread_state")
-          .update({ latest_delivery_status: delivery_status })
+          .update({ latest_delivery_status: final_delivery_status })
           .eq("thread_key", thread_key);
       } catch (err) {
         console.error("FAILED TO UPDATE THREAD STATE DELIVERY STATUS", err);
@@ -2458,7 +2734,7 @@ export async function syncDeliveryEvent(payload, options = {}) {
         await updateContactOutreachState({
             master_owner_id: ev.master_owner_id,
             to_phone_number: ev.to_phone_number,
-            event_type: delivery_status === 'delivered' ? 'delivered' : 'failed',
+            event_type: final_delivery_status === 'delivered' ? 'delivered' : 'failed',
             message_event_id: ev.id,
             timestamp: ev.delivered_at || ev.updated_at || now
         }, options);
@@ -2472,18 +2748,31 @@ export async function syncDeliveryEvent(payload, options = {}) {
     textgrid_message_id: provider_message_sid || null,
   };
 
-  if (provider_status === "delivered") {
-    queue_payload.delivered_at = pickFirst(payload?.delivered_at, now);
+  if (final_delivery_status === "delivered") {
+    queue_payload.sent_at = pickFirst(incoming_sent_at, now);
+    queue_payload.delivered_at = pickFirst(incoming_delivered_at, now);
+    if (
+      queue_payload.delivered_at &&
+      queue_payload.sent_at &&
+      toTimestamp(queue_payload.delivered_at) < toTimestamp(queue_payload.sent_at)
+    ) {
+      queue_payload.delivered_at = queue_payload.sent_at;
+    }
     queue_payload.delivery_confirmed = "confirmed";
     queue_payload.queue_status = "delivered";
+    queue_payload.failed_reason = null;
   } else if (["failed", "undelivered", "error"].includes(provider_status)) {
+    const terminal_status = mapTransportTerminalStatus({
+      error_message: payload?.error_message,
+      error_status: payload?.error_status,
+    });
     queue_payload.delivery_confirmed = "failed";
     queue_payload.failed_reason =
       clean(payload?.error_message) || "delivery_failed";
-    queue_payload.queue_status = "failed";
+    queue_payload.queue_status = final_delivery_status === "sent" ? "sent" : terminal_status;
   } else if (provider_status === "sent") {
     queue_payload.queue_status = "sent";
-    queue_payload.sent_at = pickFirst(payload?.sent_at, now);
+    queue_payload.sent_at = pickFirst(incoming_sent_at, now);
   }
 
   const { data: send_queue_data, error: send_queue_error } = await supabase
@@ -2494,9 +2783,33 @@ export async function syncDeliveryEvent(payload, options = {}) {
 
   if (send_queue_error) throw send_queue_error;
 
+  for (const row of send_queue_data || []) {
+    const sent_at = toIsoOrNull(row?.sent_at);
+    let delivered_at = toIsoOrNull(row?.delivered_at);
+    if (delivered_at && sent_at && toTimestamp(delivered_at) < toTimestamp(sent_at)) {
+      delivered_at = sent_at;
+      await supabase
+        .from(SEND_QUEUE_TABLE)
+        .update({ delivered_at, updated_at: now })
+        .eq("id", row.id);
+    }
+
+    debugLifecycle("queue_reconcile", {
+      queue_row_id: row?.id || null,
+      provider_sid: provider_message_sid,
+      provider_raw_status: provider_status || null,
+      queue_status: row?.queue_status || null,
+      event_type: "outbound_send",
+      sent_at,
+      delivered_at,
+      failure_reason: row?.failed_reason || null,
+      reconciliation_source: "sync_delivery_event",
+    });
+  }
+
   captureSystemEvent("sms_delivery_updated", {
     provider_message_sid: provider_message_sid || null,
-    delivery_status,
+    delivery_status: final_delivery_status,
     provider_delivery_status: provider_status || null,
     error_status: clean(payload?.error_status) || null,
     error_message: clean(payload?.error_message) || null,
@@ -2506,6 +2819,7 @@ export async function syncDeliveryEvent(payload, options = {}) {
   return {
     provider_message_sid,
     provider_status,
+    final_delivery_status,
     message_events_count: Array.isArray(message_events_data) ? message_events_data.length : 0,
     send_queue_count: Array.isArray(send_queue_data) ? send_queue_data.length : 0,
   };

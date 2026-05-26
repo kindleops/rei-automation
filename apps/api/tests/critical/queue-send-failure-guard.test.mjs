@@ -19,8 +19,9 @@
  *    - DB error → not blocked (non-fatal)
  *
  * 4. createInboxSendNowQueueRow guard
- *    - Prior 21610 → returns provider_blacklist_pair, no row created
- *    - Repeated delivery_failed → returns recent_delivery_failures, no row created
+ *    - Prior 21610/manual recent failures warn only for manual send-now
+ *    - Missing routing returns explicit missing_routing and writes paused audit row
+ *    - Queue insert failures return explicit queue_insert_failure
  *    - Clean number → row created normally
  */
 
@@ -300,54 +301,87 @@ const VALID_PAYLOAD = {
   message_body: "Test message",
 };
 
-test("createInboxSendNowQueueRow: prior 21610 → blocked with provider_blacklist_pair, no row inserted", async () => {
+function makeDuplicateGuardSupabase(duplicateCount = 0) {
+  return {
+    from: () => ({
+      select: () => {
+        const chain = {
+          eq: function () { return this; },
+          in: function () { return this; },
+          contains: function () { return this; },
+          gte: async function () { return { count: duplicateCount, error: null }; },
+        };
+        return chain;
+      },
+    }),
+  };
+}
+
+test("createInboxSendNowQueueRow: prior 21610 becomes warning-only for manual send-now", async () => {
   let insert_called = false;
 
-  // blacklist check returns 1 prior failure, suppression returns clean
-  const supabase = makeSupabaseCountSequence([1, 0, 0]);
+  const supabase = makeDuplicateGuardSupabase(0);
 
   const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
-    insertImpl: async () => { insert_called = true; return { ok: true }; },
+    insertImpl: async (row) => {
+      insert_called = true;
+      return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-21610" };
+    },
     resolveFromImpl: async () => null,
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: true, reason: "prior_blacklist_21610", count: 1 }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
     supabase,
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error, "provider_blacklist_pair");
-  assert.equal(result.queue_created, false);
-  assert.equal(insert_called, false, "must not insert when blacklist blocked");
+  assert.equal(result.ok, true);
+  assert.equal(result.queue_created, true);
+  assert.equal(insert_called, true, "manual send-now should still insert");
+  assert.deepEqual(result.warning_codes, ["provider_blacklist_pair"]);
 });
 
-test("createInboxSendNowQueueRow: repeated delivery_failed → blocked with recent_delivery_failures, no row inserted", async () => {
+test("createInboxSendNowQueueRow: repeated delivery_failed becomes warning-only for manual send-now", async () => {
   let insert_called = false;
 
-  // blacklist=0, pair delivery_failed=3 → suppressed
-  const supabase = makeSupabaseCountSequence([0, 3]);
+  const supabase = makeDuplicateGuardSupabase(0);
 
   const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
-    insertImpl: async () => { insert_called = true; return { ok: true }; },
+    insertImpl: async (row) => {
+      insert_called = true;
+      return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-delivery" };
+    },
     resolveFromImpl: async () => null,
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({
+      suppress: true,
+      reason: "repeated_delivery_failed_same_pair",
+      pair_count: 3,
+      window: "24h",
+    }),
     supabase,
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.error, "recent_delivery_failures");
-  assert.equal(result.queue_created, false);
-  assert.equal(insert_called, false, "must not insert when delivery suppressed");
+  assert.equal(result.ok, true);
+  assert.equal(result.queue_created, true);
+  assert.equal(insert_called, true, "manual send-now should still insert");
+  assert.deepEqual(result.warning_codes, ["recent_delivery_failures"]);
 });
 
 test("createInboxSendNowQueueRow: clean number → row inserted normally", async () => {
   let insert_called = false;
 
-  // blacklist=0, pair=0, recipient=0 → clean
-  const supabase = makeSupabaseCountSequence([0, 0, 0]);
+  const supabase = makeDuplicateGuardSupabase(0);
 
   const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
     insertImpl: async (row) => {
       insert_called = true;
-      return { ok: true, queue_id: row.queue_id || row.queue_key };
+      return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-clean" };
     },
     resolveFromImpl: async () => null,
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
     supabase,
   });
 
@@ -359,24 +393,58 @@ test("createInboxSendNowQueueRow: clean number → row inserted normally", async
 test("createInboxSendNowQueueRow: guard DB failure → row still inserted (non-fatal)", async () => {
   let insert_called = false;
 
-  // Supabase that throws on the guard query
-  const supabase = {
-    from: () => ({
-      select: () => { throw new Error("DB offline"); },
-      eq: function () { return this; },
-      maybeSingle: async () => ({ data: null }),
-    }),
-  };
+  const supabase = makeDuplicateGuardSupabase(0);
 
   const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
     insertImpl: async (row) => {
       insert_called = true;
-      return { ok: true, queue_id: row.queue_key };
+      return { ok: true, queue_id: row.queue_key, queue_row_id: "row-guard-fail" };
     },
     resolveFromImpl: async () => null,
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => { throw new Error("DB offline"); },
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
     supabase,
   });
 
   assert.equal(result.ok, true, "guard failure must not block the send");
   assert.equal(insert_called, true);
+});
+
+test("createInboxSendNowQueueRow: missing from routing returns missing_routing and records paused audit row", async () => {
+  const result = await createInboxSendNowQueueRow(
+    {
+      thread_key: VALID_PAYLOAD.thread_key,
+      to_phone_number: VALID_PAYLOAD.to_phone_number,
+      message_body: VALID_PAYLOAD.message_body,
+    },
+    {
+      insertImpl: async () => ({ ok: true, queue_row_id: "audit-row-1", queue_id: "audit-row-1" }),
+      resolveFromImpl: async () => null,
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "missing_routing");
+  assert.equal(result.queue_inserted, true);
+  assert.equal(result.queue_row_id, "audit-row-1");
+  assert.equal(result.queue_status, "paused_invalid_queue_row");
+});
+
+test("createInboxSendNowQueueRow: insert exception returns explicit queue_insert_failure", async () => {
+  const supabase = makeDuplicateGuardSupabase(0);
+
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+    insertImpl: async () => { throw new Error("insert exploded"); },
+    resolveFromImpl: async () => null,
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
+    supabase,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "queue_insert_failure");
+  assert.equal(result.reason, "queue_insert_failure");
+  assert.equal(result.queue_inserted, false);
 });

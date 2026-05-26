@@ -10,6 +10,7 @@ import {
 import { requireCronOrEngineAuth } from "@/lib/security/cron-auth.js";
 import { runQueueReconcileRunner } from "@/lib/workers/queue-reconcile-runner.js";
 import { reconcileSupabaseDeliveryStatuses } from "@/lib/domain/events/normalize-delivery-status.js";
+import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 import { buildDisabledResponse, getSystemFlag } from "@/lib/system-control.js";
 
 export const runtime = "nodejs";
@@ -80,6 +81,15 @@ export async function GET(request) {
       logger.warn("queue_reconcile.supabase_delivery_reconcile_failed", { error: err?.message });
       return { ok: false, total_normalized: 0 };
     });
+    const canonical_lifecycle_result = await reconcileCanonicalQueueLifecycle({
+      limit,
+      stale_minutes: stale_after_minutes,
+      lease_minutes: 10,
+      dry_run: false,
+    }).catch((err) => {
+      logger.warn("queue_reconcile.canonical_lifecycle_failed", { error: err?.message });
+      return { ok: false, reconciled_rows: 0 };
+    });
 
     logger.info("queue_reconcile.completed", {
       method: "GET",
@@ -99,6 +109,7 @@ export async function GET(request) {
         route: "internal/queue/reconcile",
         result,
         supabase_delivery_reconcile: supabase_delivery_result,
+        canonical_lifecycle_reconcile: canonical_lifecycle_result,
       },
       { status: statusForResult(result) }
     );
@@ -195,6 +206,15 @@ export async function POST(request) {
       logger.warn("queue_reconcile.supabase_delivery_reconcile_failed", { error: err?.message });
       return { ok: false, total_normalized: 0 };
     });
+    const canonical_lifecycle_result = await reconcileCanonicalQueueLifecycle({
+      limit,
+      stale_minutes: stale_after_minutes,
+      lease_minutes: 10,
+      dry_run: false,
+    }).catch((err) => {
+      logger.warn("queue_reconcile.canonical_lifecycle_failed", { error: err?.message });
+      return { ok: false, reconciled_rows: 0 };
+    });
 
     logger.info("queue_reconcile.completed", {
       method: "POST",
@@ -214,6 +234,7 @@ export async function POST(request) {
         route: "internal/queue/reconcile",
         result,
         supabase_delivery_reconcile: supabase_delivery_result,
+        canonical_lifecycle_reconcile: canonical_lifecycle_result,
       },
       { status: statusForResult(result) }
     );

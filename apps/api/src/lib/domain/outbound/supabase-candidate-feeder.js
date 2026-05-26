@@ -18,6 +18,8 @@ const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_outbound_candidate_freshness",
   "outbound_candidate_snapshot",
   "v_sms_ready_contacts",
+  "v_sms_ready_contacts_clean",
+  "v_sms_ready_contacts_expanded",
   "v_sms_campaign_queue_candidates",
   "v_launch_sms_tier1",
 ]);
@@ -25,6 +27,7 @@ const CANDIDATE_SOURCE_AVAILABLE_HINT = [
   "v_outbound_discovery_fresh",
   "v_sms_campaign_queue_candidates",
   "v_sms_ready_contacts",
+  "v_sms_ready_contacts_expanded",
   "v_launch_sms_tier1",
 ];
 
@@ -52,9 +55,41 @@ const REASON_CODES = Object.freeze({
   IDENTITY_MISMATCH: "IDENTITY_MISMATCH",
   IDENTITY_NOT_VERIFIED: "IDENTITY_NOT_VERIFIED",
   MARKET_IDENTITY_QUARANTINE: "MARKET_IDENTITY_QUARANTINE",
+  ACTIVE_QUEUE_ITEM: "ACTIVE_QUEUE_ITEM",
+  PRIOR_TOUCH_COOLDOWN: "PRIOR_TOUCH_COOLDOWN",
 });
 
 const logger = child({ module: "domain.outbound.supabase_candidate_feeder" });
+const RELATIONSHIP_PROBE_TEMPLATE_IDS = new Set(["840801", "840802"]);
+const RESIDENTIAL_PROPERTY_GROUPS = new Set([
+  "sfr",
+  "duplex",
+  "triplex",
+  "fourplex",
+  "small_multifamily",
+]);
+const RELATIONSHIP_PROBE_ALLOWED_PROSPECT_FLAGS = new Set([
+  "Family",
+  "Resident",
+  "Potential Owner",
+  "Likely Renting",
+  "Potentially Linked To Company",
+]);
+const STANDARD_OWNERSHIP_ONLY_PROSPECT_FLAGS = new Set([
+  "Likely Owner",
+  "Linked To Company",
+]);
+const EXACT_PROSPECT_MATCHING_FLAG_LOOKUP = new Map(
+  [
+    "Family",
+    "Resident",
+    "Potential Owner",
+    "Likely Renting",
+    "Potentially Linked To Company",
+    "Likely Owner",
+    "Linked To Company",
+  ].map((flag) => [normalizeProspectMatchingFlagToken(flag), flag])
+);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -62,6 +97,10 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function normalizeProspectMatchingFlagToken(value) {
+  return lower(value).replace(/\s+/g, " ");
 }
 
 function asBoolean(value, fallback = false) {
@@ -75,6 +114,12 @@ function asBoolean(value, fallback = false) {
 function asNumber(value, fallback = null) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toTimestamp(value) {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? null : ts;
 }
 
 function asPositiveInteger(value, fallback = null) {
@@ -101,6 +146,73 @@ function pick(...values) {
     if (value !== null && value !== undefined && clean(value) !== "") return value;
   }
   return null;
+}
+
+function extractExactProspectMatchingFlags(value) {
+  if (!clean(value)) return [];
+  const seen = new Set();
+  const flags = [];
+  for (const token of clean(value).split(/[,\n;|]+/)) {
+    const canonical = EXACT_PROSPECT_MATCHING_FLAG_LOOKUP.get(normalizeProspectMatchingFlagToken(token));
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    flags.push(canonical);
+  }
+  return flags;
+}
+
+function getTemplateReferenceId(template = {}) {
+  return clean(pick(template?.template_id, template?.id, template?.item_id, template?.podio_template_id)) || null;
+}
+
+function isRelationshipProbeTemplate(template = {}) {
+  const template_id = getTemplateReferenceId(template);
+  return Boolean(template_id && RELATIONSHIP_PROBE_TEMPLATE_IDS.has(template_id));
+}
+
+function isGenericOwnershipTemplateBody(template = {}) {
+  const body = lower(pick(template?.template_body, template?.english_translation, ""));
+  if (!body) return false;
+  if (body.includes("duplex") || body.includes("triplex") || body.includes("fourplex")) return false;
+  if (body.includes("units") && !body.includes("units?")) return false;
+  return true;
+}
+
+function canRenderOwnershipTemplateWithoutPropertyType(template = {}, candidate = {}, selector = {}) {
+  if (lower(selector.use_case) !== "ownership_check") return false;
+
+  const property_type = clean(
+    pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
+  );
+  if (property_type) return false;
+
+  const property_address_full = clean(
+    pick(candidate.property_address_full, candidate.property_address, candidate.raw?.property_address_full)
+  );
+  if (!property_address_full) return false;
+
+  const allowed = Array.isArray(template.allowed_property_groups)
+    ? template.allowed_property_groups.map((group) => lower(group)).filter(Boolean)
+    : [];
+  if (!allowed.length) return false;
+  if (!allowed.every((group) => RESIDENTIAL_PROPERTY_GROUPS.has(group))) return false;
+
+  return isGenericOwnershipTemplateBody(template);
+}
+
+function logTemplateRenderFailure(candidate = {}, reason = "", details = {}) {
+  logger.warn("feeder.template_render_failed", {
+    module: "domain.outbound.supabase_candidate_feeder",
+    master_owner_id: candidate.master_owner_id,
+    property_id: candidate.property_id,
+    template_id: clean(details.template_id) || null,
+    selected_template_id: clean(details.selected_template_id || details.template_id) || null,
+    reason: clean(reason) || null,
+    missing_variables: Array.isArray(details.missing_variables) ? details.missing_variables : [],
+    template_routing_reason: clean(details.template_routing_reason) || null,
+    candidate_group: clean(details.candidate_group) || null,
+    property_type: clean(details.property_type) || null,
+  });
 }
 
 function isLikelyPhoneValue(value) {
@@ -403,6 +515,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   );
   const seller_first_name = clean(pick(row.seller_first_name, row.phone_first_name, phone_first_name));
   const seller_full_name = clean(pick(row.seller_full_name, row.phone_full_name, phone_full_name));
+  const prospect_matching_flags = clean(pick(row.prospect_matching_flags, row.matching_flags));
 
   const candidate = {
     raw: row,
@@ -504,8 +617,10 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     // Identity alignment fields
     likely_owner: asBoolean(pick(row.likely_owner), null),
     likely_renting: asBoolean(pick(row.likely_renting), null),
-    matching_flags: clean(pick(row.matching_flags)),
+    matching_flags: prospect_matching_flags,
+    prospect_matching_flags,
     person_flags_text: clean(pick(row.person_flags_text)),
+    person_flags_json: row.person_flags_json ?? null,
     owner_type_guess: clean(pick(row.owner_type_guess)),
     phone_owner: clean(pick(row.phone_owner)),
     prospect_cnam: clean(pick(row.prospect_cnam, row.cnam)),
@@ -535,9 +650,19 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const seller_identity = resolveSellerIdentity(candidate);
+  const hydrated_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   return {
     ...candidate,
     ...seller_identity,
+    seller_full_name: hydrated_seller_full_name || "",
     seller_name: seller_identity.seller_first_name || "",
   };
 }
@@ -551,6 +676,12 @@ function mapReasonToDiagnosticCounter(reason) {
   }
   if (reason === REASON_CODES.PENDING_PRIOR_TOUCH) {
     return "pending_prior_touch_block_count";
+  }
+  if (reason === REASON_CODES.ACTIVE_QUEUE_ITEM) {
+    return "active_queue_block_count";
+  }
+  if (reason === REASON_CODES.PRIOR_TOUCH_COOLDOWN) {
+    return "prior_touch_cooldown_block_count";
   }
   if (reason === REASON_CODES.DUPLICATE_QUEUE_ITEM) {
     return "duplicate_queue_block_count";
@@ -924,6 +1055,15 @@ function buildNeutralGreetingMessage(variable_payload = {}) {
 
 function buildTemplateVariablePayload(candidate = {}) {
   const seller_identity = resolveSellerIdentity(candidate);
+  const resolved_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   const owner_display_name = clean(
     pick(candidate.raw?.display_name, candidate.owner_display_name, candidate.raw?.owner_display_name)
   );
@@ -1015,6 +1155,22 @@ function buildTemplateVariablePayload(candidate = {}) {
       agent_name_raw
     )
   ) || "Alex";
+  const property_zip = clean(
+    pick(
+      candidate.property_zip,
+      candidate.raw?.property_address_zip,
+      candidate.raw?.property_zip,
+      ""
+    )
+  );
+  const property_county_name = clean(
+    pick(
+      candidate.property_address_county_name,
+      candidate.raw?.property_address_county_name,
+      candidate.raw?.property_county_name,
+      ""
+    )
+  );
 
   const payload = {
     seller_first_name: seller_identity.seller_first_name || "",
@@ -1024,7 +1180,7 @@ function buildTemplateVariablePayload(candidate = {}) {
     seller_display_name: seller_identity.seller_display_name || "",
     owner_display_name,
     owner_name: owner_display_name || candidate.seller_name || "",
-    seller_full_name: seller_identity.seller_full_name || "",
+    seller_full_name: resolved_seller_full_name || "",
     seller_name_source: seller_identity.seller_name_source,
     seller_name_missing: seller_identity.seller_name_missing,
     property_address_full,
@@ -1040,7 +1196,11 @@ function buildTemplateVariablePayload(candidate = {}) {
     state: property_state,
     property_address_state: property_state,
     seller_state: property_state,
-    property_zip: clean(candidate.property_zip),
+    property_zip,
+    property_address_zip: property_zip,
+    zip: property_zip,
+    property_address_county_name: property_county_name,
+    county: property_county_name,
     offer_price: formatCurrency(candidate.cash_offer),
     cash_offer: candidate.cash_offer,
     agent_name: agent_first_name,
@@ -1226,6 +1386,70 @@ function filterTemplatesByPreferredLanguage(templates = [], selector = {}) {
         .map((template) => clean(pick(template?.language, template?.metadata?.language, "")))
         .filter(Boolean)
     ).size > 1,
+  };
+}
+
+function resolveProspectTemplateRouting(candidate = {}, selector = {}, templates = []) {
+  const prospect_matching_flags = extractExactProspectMatchingFlags(candidate.matching_flags);
+  const identity_unknown = lower(candidate?.identity_alignment?.status) === "unknown";
+  const normalized_use_case = lower(selector.use_case);
+  const rows = Array.isArray(templates) ? templates : [];
+
+  if (normalized_use_case !== "ownership_check") {
+    return {
+      blocked: false,
+      templates: rows,
+      prospect_matching_flags,
+      template_routing_reason: "template_routing_not_applicable",
+    };
+  }
+
+  const use_case_templates = rows.filter((template) => lower(template?.use_case) === normalized_use_case);
+  const standard_templates = use_case_templates.filter((template) => !isRelationshipProbeTemplate(template));
+  const relationship_probe_templates = use_case_templates.filter((template) => isRelationshipProbeTemplate(template));
+  const has_standard_only_flag = prospect_matching_flags.some((flag) =>
+    STANDARD_OWNERSHIP_ONLY_PROSPECT_FLAGS.has(flag)
+  );
+  const has_relationship_probe_flag = prospect_matching_flags.some((flag) =>
+    RELATIONSHIP_PROBE_ALLOWED_PROSPECT_FLAGS.has(flag)
+  );
+
+  if (has_standard_only_flag) {
+    return {
+      blocked: false,
+      templates: standard_templates,
+      prospect_matching_flags,
+      template_routing_reason: "exact_prospect_flag_standard_ownership_only",
+    };
+  }
+
+  if (has_relationship_probe_flag) {
+    return {
+      blocked: false,
+      templates: relationship_probe_templates.length ? relationship_probe_templates : standard_templates,
+      prospect_matching_flags,
+      template_routing_reason: relationship_probe_templates.length
+        ? "exact_prospect_flag_relationship_probe"
+        : "exact_prospect_flag_standard_ownership_fallback",
+    };
+  }
+
+  if (identity_unknown) {
+    return {
+      blocked: true,
+      templates: [],
+      prospect_matching_flags,
+      template_routing_reason: "identity_unknown_without_exact_prospect_flag",
+      reason_code: REASON_CODES.NO_TEMPLATE,
+      reason: "no_safe_template_for_identity_unknown",
+    };
+  }
+
+  return {
+    blocked: false,
+    templates: standard_templates,
+    prospect_matching_flags,
+    template_routing_reason: "no_exact_prospect_flag_standard_ownership_only",
   };
 }
 
@@ -2008,8 +2232,11 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
   }
 
   const supabase = getSupabase(deps);
-  const statuses = ["queued", "scheduled", "pending", "approved", "ready", "sending", "sent", "delivered"];
+  const active_statuses = ["queued", "scheduled", "pending", "approved", "ready", "sending"];
+  const completed_statuses = ["sent", "delivered"];
+  const all_statuses = [...active_statuses, ...completed_statuses];
   const phone = normalizePhone(candidate.canonical_e164);
+  const duplicate_body_cooldown_hours = asPositiveInteger(options.duplicate_body_cooldown_hours, 24);
 
   // 1. Check send_queue for active or recently completed rows
   const { data, error, count } = await supabase
@@ -2017,7 +2244,7 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     .select("id,queue_status,queue_key,touch_number,to_phone_number,use_case_template,metadata,scheduled_for,sent_at,created_at,updated_at", { count: "exact" })
     .eq("master_owner_id", candidate.master_owner_id)
     .eq("property_id", candidate.property_id)
-    .in("queue_status", statuses)
+    .in("queue_status", all_statuses)
     .eq("touch_number", candidate.touch_number)
     .limit(20);
 
@@ -2025,15 +2252,47 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
 
   const rows = Array.isArray(data) ? data : [];
 
-  const matched = rows.find((row) => {
+  const matched_active = rows.find((row) => {
     const row_phone = normalizePhone(row?.to_phone_number);
     const template_use_case = getQueueRowUseCase(row);
-    return row_phone === phone && template_use_case === clean(candidate.template_use_case);
+    return row_phone === phone && template_use_case === clean(candidate.template_use_case) && active_statuses.includes(row.queue_status);
   });
 
-  if (matched) {
+  if (matched_active) {
     return {
       duplicate: true,
+      active_queue_block: true,
+      reason_code: REASON_CODES.ACTIVE_QUEUE_ITEM,
+      policy: {
+        match_basis: [
+          "master_owner_id",
+          "property_id",
+          "touch_number",
+          "to_phone_number",
+          "template_use_case"
+        ],
+        blocking_statuses: active_statuses
+      },
+      matched_row: matched_active,
+      scanned_duplicate_rows_count: count ?? rows.length
+    };
+  }
+
+  const cooldown_ms = duplicate_body_cooldown_hours * 60 * 60 * 1000;
+  const matched_completed_cooldown = rows.find((row) => {
+    const row_phone = normalizePhone(row?.to_phone_number);
+    const template_use_case = getQueueRowUseCase(row);
+    if (row_phone !== phone || template_use_case !== clean(candidate.template_use_case) || !completed_statuses.includes(row.queue_status)) {
+       return false;
+    }
+    const timestamp = new Date(row.sent_at || row.updated_at || row.created_at).getTime();
+    return Date.now() - timestamp < cooldown_ms;
+  });
+
+  if (matched_completed_cooldown) {
+    return {
+      duplicate: true,
+      duplicate_body_block: true,
       reason_code: REASON_CODES.DUPLICATE_QUEUE_ITEM,
       policy: {
         match_basis: [
@@ -2043,28 +2302,15 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
           "to_phone_number",
           "template_use_case"
         ],
-        blocking_statuses: statuses
+        blocking_statuses: completed_statuses,
+        cooldown_hours: duplicate_body_cooldown_hours
       },
-      matched_row: {
-        id: matched.id,
-        queue_status: matched.queue_status,
-        queue_key: matched.queue_key,
-        touch_number: matched.touch_number,
-        to_phone_number_masked: maskPhone(matched.to_phone_number),
-        template_use_case: clean(
-          matched?.metadata?.template_use_case || matched?.metadata?.selected_use_case || matched?.use_case_template
-        ),
-        scheduled_for: matched.scheduled_for,
-        sent_at: matched.sent_at,
-        created_at: matched.created_at,
-        updated_at: matched.updated_at
-      },
+      matched_row: matched_completed_cooldown,
       scanned_duplicate_rows_count: count ?? rows.length
     };
   }
 
-  // 2. Check message_events for recent outbound (72 hours)
-  // Condition: Same phone AND (Same Owner OR Same Property)
+  // 2. Check message_events for recent outbound duplicate bodies (72 hours check but bound to cooldown)
   const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
   
   const { data: recentEvents, error: eventError } = await supabase
@@ -2081,18 +2327,21 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     console.error("[hasDuplicateQueueItem] message_events check failed:", eventError.message);
   } else if (recentEvents && recentEvents.length > 0) {
     const event = recentEvents[0];
-    return {
-      duplicate: true,
-      recently_contacted: true,
-      reason_code: REASON_CODES.RECENTLY_CONTACTED,
-      matched_event: {
-        id: event.id,
-        created_at: event.created_at,
-        phone_masked: maskPhone(event.to_phone_number),
-        master_owner_id: event.master_owner_id,
-        property_id: event.property_id
-      }
-    };
+    const timestamp = new Date(event.created_at).getTime();
+    if (Date.now() - timestamp < cooldown_ms) {
+      return {
+        duplicate: true,
+        recently_contacted: true,
+        reason_code: REASON_CODES.RECENTLY_CONTACTED,
+        matched_event: {
+          id: event.id,
+          created_at: event.created_at,
+          phone_masked: maskPhone(event.to_phone_number),
+          master_owner_id: event.master_owner_id,
+          property_id: event.property_id
+        }
+      };
+    }
   }
 
   return {
@@ -2449,6 +2698,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     property_type_scope: clean(candidate.raw?.property_type_scope) || null,
     deal_strategy: clean(candidate.raw?.deal_strategy) || null,
   };
+  const template_routing_details = {
+    prospect_matching_flags: extractExactProspectMatchingFlags(candidate.matching_flags),
+    selected_template_id: null,
+    template_routing_reason: lower(selector.use_case) === "ownership_check"
+      ? "template_routing_pending"
+      : "template_routing_not_applicable",
+  };
 
   const is_cold_s1_fetch = isS1OwnershipCheckRotation(selector);
   const fetch_limit = is_cold_s1_fetch ? 500 : 200;
@@ -2499,6 +2755,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         missing_variables: [],
         variable_payload_preview: {},
         selected_template_preview: null,
+        ...template_routing_details,
       };
     }
 
@@ -2532,9 +2789,38 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const language_filtered = filterTemplatesByPreferredLanguage(templates, selector);
   fetch_diagnostics.template_count_after_language_filter = language_filtered.templates.length;
   templates = language_filtered.templates;
+  const prospect_template_routing = resolveProspectTemplateRouting(candidate, selector, templates);
+  template_routing_details.prospect_matching_flags = prospect_template_routing.prospect_matching_flags;
+  template_routing_details.template_routing_reason = prospect_template_routing.template_routing_reason;
+
+  if (prospect_template_routing.blocked) {
+    logger.warn("feeder.template_routing_blocked", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      prospect_matching_flags: template_routing_details.prospect_matching_flags,
+      selected_template_id: null,
+      template_routing_reason: template_routing_details.template_routing_reason,
+    });
+    return {
+      ok: false,
+      reason_code: prospect_template_routing.reason_code || REASON_CODES.NO_TEMPLATE,
+      reason: prospect_template_routing.reason || "no_safe_template_for_identity_unknown",
+      template: null,
+      rendered_message_body: null,
+      missing_variables: [],
+      variable_payload_preview: buildTemplateVariablePayload(candidate),
+      selected_template_preview: null,
+      ...template_routing_details,
+    };
+  }
+
+  templates = prospect_template_routing.templates;
 
   // ── Phase B: Strict Property Template Matching ──────────────────────────
   const candidate_group = candidate.canonical_property_group || "other_commercial";
+  const property_type = clean(
+    pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
+  );
   const property_matched_templates = templates.filter((t) => {
     const allowed = Array.isArray(t.allowed_property_groups) ? t.allowed_property_groups : [];
     const prohibited = Array.isArray(t.prohibited_property_groups) ? t.prohibited_property_groups : [];
@@ -2542,20 +2828,28 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     // 1. Hard block if group is explicitly prohibited
     if (prohibited.includes(candidate_group)) return false;
     
-    // 2. If allowed list exists, group MUST be in it
-    if (allowed.length > 0 && !allowed.includes(candidate_group)) return false;
+    // 2. If allowed list exists, group MUST be in it unless this is a
+    // generic ownership-check template and property_type is simply absent.
+    if (allowed.length > 0 && !allowed.includes(candidate_group)) {
+      if (!canRenderOwnershipTemplateWithoutPropertyType(t, candidate, selector)) return false;
+    }
     
     // 3. Fallback check: No duplex/triplex wording for SFR
     if (candidate_group === 'sfr') {
-      const body = lower(t.template_body || '');
-      if (body.includes('duplex') || body.includes('triplex') || body.includes('fourplex')) return false;
-      if (body.includes('units') && !body.includes('units?')) return false; // "how many units?" is okay
+      if (!isGenericOwnershipTemplateBody(t)) return false;
     }
     
     return true;
   });
 
   if (!property_matched_templates.length && templates.length > 0) {
+    logTemplateRenderFailure(candidate, "property_template_mismatch", {
+      selected_template_id: null,
+      missing_variables: [],
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2565,12 +2859,20 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       missing_variables: [],
       variable_payload_preview: buildTemplateVariablePayload(candidate),
       selected_template_preview: null,
+      ...template_routing_details,
     };
   }
   
   templates = property_matched_templates;
 
   if (!templates.length) {
+    logger.info("feeder.template_routing_no_template", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      prospect_matching_flags: template_routing_details.prospect_matching_flags,
+      selected_template_id: null,
+      template_routing_reason: template_routing_details.template_routing_reason,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.NO_TEMPLATE,
@@ -2598,6 +2900,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         selected_index: -1,
         ...fetch_diagnostics,
       },
+      ...template_routing_details,
     };
   }
 
@@ -2643,6 +2946,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       };
 
   selected_template = rotation_choice.selected || selected_template;
+  template_routing_details.selected_template_id = getTemplateReferenceId(selected_template);
   const template_rotation = buildTemplateRotationDiagnostics({
     rotation_enabled,
     rotation_seed,
@@ -2654,6 +2958,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     preferred_language: language_filtered.preferred_language,
     fetch_diagnostics,
   });
+  logger.info("feeder.template_routing_selected", {
+    master_owner_id: candidate.master_owner_id,
+    property_id: candidate.property_id,
+    prospect_matching_flags: template_routing_details.prospect_matching_flags,
+    selected_template_id: template_routing_details.selected_template_id,
+    template_routing_reason: template_routing_details.template_routing_reason,
+  });
 
   const selected_template_with_source = selected_template
     ? { ...selected_template, source: "sms_templates" }
@@ -2662,6 +2973,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const rewritten_source_body = rewriteAddressPlaceholdersForColdS1(source_body, selector);
 
   if (!rewritten_source_body) {
+    logTemplateRenderFailure(candidate, "rendered_message_empty", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: [],
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2682,17 +3000,27 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
   const seller_identity = resolveSellerIdentity(candidate);
+  const resolved_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   const variable_payload = buildTemplateVariablePayload(candidate);
   variable_payload.seller_first_name = seller_identity.seller_first_name || "";
   variable_payload.first_name = seller_identity.seller_first_name || "";
   variable_payload.owner_first_name = seller_identity.seller_first_name || "";
   variable_payload.seller_name = seller_identity.seller_display_name || "";
   variable_payload.seller_display_name = seller_identity.seller_display_name || "";
-  variable_payload.seller_full_name = seller_identity.seller_full_name || "";
+  variable_payload.seller_full_name = resolved_seller_full_name || "";
   variable_payload.seller_name_source = seller_identity.seller_name_source;
   variable_payload.seller_name_missing = seller_identity.seller_name_missing;
   const raw_agent_name = clean(
@@ -2740,6 +3068,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         template_id: selected_template?.template_id || selected_template?.id || null,
         rendered_preview: normalized_rendered.slice(0, 80),
       });
+    logTemplateRenderFailure(candidate, "blank_greeting_rendered", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
@@ -2762,6 +3097,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2777,6 +3113,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         template_id: selected_template?.template_id || selected_template?.id || null,
         missing_vars: missing_name_vars,
       });
+    logTemplateRenderFailure(candidate, "missing_required_name_variable", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
@@ -2787,9 +3130,17 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       missing_variables: rendered.missing_variables,
       variable_payload_preview: variable_payload,
       template_rotation,
+      ...template_routing_details,
     };
   }
   if (!normalized_rendered) {
+    logTemplateRenderFailure(candidate, "rendered_message_empty", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2810,10 +3161,18 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
   if (hasBlankLocationPattern(normalized_rendered)) {
+    logTemplateRenderFailure(candidate, "blank_location_placeholder", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2836,6 +3195,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2847,6 +3207,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       variable_payload.property_street_address
     )
   ) {
+    logTemplateRenderFailure(candidate, "full_address_rendered_in_cold_sms", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2870,6 +3237,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2881,6 +3249,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     has_full_agent_name &&
     rendered_lower.includes(lower(agent_name_raw))
   ) {
+    logTemplateRenderFailure(candidate, "agent_full_name_rendered", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2904,6 +3279,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2929,6 +3305,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     stage_code: selected_template?.stage_code || selector.stage_code,
     stage_label: selected_template?.stage_label || selector.stage_label,
     language: selected_template?.language || selector.preferred_language,
+    ...template_routing_details,
   };
 }
 
@@ -3041,6 +3418,12 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       agent_full_name_raw: agent_name_raw || null,
       selected_agent_display_name: agent_name_raw || null,
       seller_identity,
+      phone_rotation_reason: candidate.phone_rank > 1 ? "wrong_number" : null,
+      phone_rank: Number(candidate.phone_rank) || 1,
+      candidate_confidence_score: candidate.candidate_confidence_score || null,
+      prior_phone_id: options.prior_phone_id || null,
+      rotated_from_thread_key: options.rotated_from_thread_key || null,
+      duplicate_body_cooldown_applied: options.rotation_duplicate_cooldown_applied === true,
       candidate_snapshot: {
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
@@ -3187,12 +3570,15 @@ export function buildFeederDiagnostics(summary = {}) {
     scanned_count: Number(summary.scanned_count || 0),
     eligible_count: Number(summary.eligible_count || 0),
     queued_count: Number(summary.queued_count || 0),
+    scheduled_count: Number(summary.scheduled_count || 0),
     skipped_count: Number(summary.skipped_count || 0),
     routing_block_count: Number(summary.routing_block_count || 0),
     suppression_block_count: Number(summary.suppression_block_count || 0),
     contact_window_block_count: Number(summary.contact_window_block_count || 0),
     pending_prior_touch_block_count: Number(summary.pending_prior_touch_block_count || 0),
     duplicate_queue_block_count: Number(summary.duplicate_queue_block_count || 0),
+    active_queue_block_count: Number(summary.active_queue_block_count || 0),
+    prior_touch_cooldown_block_count: Number(summary.prior_touch_cooldown_block_count || 0),
     batch_duplicate_block_count: Number(summary.batch_duplicate_block_count || 0),
     template_block_count: Number(summary.template_block_count || 0),
     no_template_count: Number(summary.no_template_count || 0),
@@ -3264,6 +3650,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   );
 
   const identity_blocked_markets = input.identity_blocked_markets ?? (await getSystemFlag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
+  const identity_gate_mode = clean(input.identity_gate_mode || "strict").toLowerCase();
+  const allow_identity_unknown = asBoolean(input.allow_identity_unknown, false);
   // ─────────────────────────────────────────────────────────────────────────
 
   const options = {
@@ -3288,6 +3676,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     schedule_interval_seconds_min: asPositiveInteger(input.schedule_interval_seconds_min, 45),
     schedule_interval_seconds_max: asPositiveInteger(input.schedule_interval_seconds_max, 180),
     timezone_filter: clean(input.timezone_filter) || null,
+    identity_gate_mode,
+    allow_identity_unknown,
     allow_weak_identity_outbound,
     identity_blocked_markets,
     now,
@@ -3308,12 +3698,15 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       scanned_count: 0,
       eligible_count: 0,
       queued_count: 0,
+      scheduled_count: 0,
       skipped_count: 0,
       routing_block_count: 0,
       suppression_block_count: 0,
       contact_window_block_count: 0,
       pending_prior_touch_block_count: 0,
       duplicate_queue_block_count: 0,
+      active_queue_block_count: 0,
+      prior_touch_cooldown_block_count: 0,
       batch_duplicate_block_count: 0,
       template_block_count: 0,
       no_template_count: 0,
@@ -3360,12 +3753,15 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     scanned_count: source.scanned_count,
     eligible_count: 0,
     queued_count: 0,
+    scheduled_count: 0,
     skipped_count: 0,
     routing_block_count: 0,
     suppression_block_count: 0,
     contact_window_block_count: 0,
     pending_prior_touch_block_count: 0,
     duplicate_queue_block_count: 0,
+    active_queue_block_count: 0,
+    prior_touch_cooldown_block_count: 0,
     batch_duplicate_block_count: 0,
     template_block_count: 0,
     no_template_count: 0,
@@ -3408,6 +3804,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const seenOwnerPhoneTouch = new Set();
   const seenOwners = new Set();
   const allow_multiple_per_owner = asBoolean(input.allow_multiple_per_owner, false);
+  const only_first_touch = asBoolean(input.only_first_touch, false);
+
   for (const candidate of source.rows) {
     // Operational telemetry for freshness
     if (candidate.never_contacted === true) {
@@ -3420,6 +3818,26 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       summary.skipped_count += 1;
       continue;
     }
+
+    // ── First Touch Enforcer ────────────────────────────────────────────────
+    if (only_first_touch && candidate.never_contacted !== true && candidate.last_touch_number > 0) {
+       const first_touch_cooldown_days = asPositiveInteger(options.first_touch_cooldown_days, 30);
+       const cooldown_ms = first_touch_cooldown_days * 24 * 60 * 60 * 1000;
+       const last_contact_timestamp = candidate.latest_message_at || candidate.latest_contact_at;
+       
+       if (last_contact_timestamp && (Date.now() - new Date(last_contact_timestamp).getTime() < cooldown_ms)) {
+         summary.skipped_count += 1;
+         summary.prior_touch_cooldown_block_count += 1;
+         summary.sample_skips.push({
+           reason_code: REASON_CODES.PRIOR_TOUCH_COOLDOWN,
+           reason: "first_touch_cooldown",
+           master_owner_id: candidate.master_owner_id,
+           property_id: candidate.property_id,
+         });
+         continue;
+       }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const phoneKey = clean(candidate.canonical_e164 || candidate.phone_number || candidate.best_phone_id || "");
     const ownerKey = clean(candidate.master_owner_id);
@@ -3564,6 +3982,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         reason: rendered.reason,
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        prospect_matching_flags: rendered.prospect_matching_flags || [],
+        selected_template_id:
+          rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
+        template_routing_reason: rendered.template_routing_reason || null,
         ...(options.dry_run && options.debug_templates
           ? {
               template_lookup_use_case: candidate.template_lookup_use_case || candidate.template_use_case || null,
@@ -3675,6 +4097,23 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     if (ownerPhoneTouchKey) seenOwnerPhoneTouch.add(ownerPhoneTouchKey);
     if (ownerKey) seenOwners.add(ownerKey);
 
+    let prior_phone_id = null;
+    let rotated_from_thread_key = null;
+    if (candidate.phone_rank > 1) {
+      const priorPhonesQuery = await defaultSupabase
+        .from("phones")
+        .select("phone_id, wrong_number_source_thread_key")
+        .eq("master_owner_id", candidate.master_owner_id)
+        .eq("phone_contact_status", "wrong_number")
+        .order("wrong_number_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (priorPhonesQuery.data) {
+        prior_phone_id = priorPhonesQuery.data.phone_id;
+        rotated_from_thread_key = priorPhonesQuery.data.wrong_number_source_thread_key;
+      }
+    }
+
     const queue_result = await createSendQueueItem(
       candidate,
       {
@@ -3683,6 +4122,9 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         rendered_message_body: rendered.rendered_message_body,
         template_id: rendered.template?.template_id || rendered.template?.item_id || null,
         template_source: rendered.template?.source || "supabase",
+        prior_phone_id,
+        rotated_from_thread_key,
+        rotation_duplicate_cooldown_applied: eligibility.duplicate_body_cooldown_applied === true,
         template_use_case: rendered.template_use_case,
         template_name: rendered.template?.template_name || null,
         template_stage_code: rendered.stage_code || rendered.template?.stage_code || null,
@@ -3732,12 +4174,20 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         reason: queue_result.reason || "queue_create_failed",
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        prospect_matching_flags: rendered.prospect_matching_flags || [],
+        selected_template_id:
+          rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
+        template_routing_reason: rendered.template_routing_reason || null,
         ..._preview,
       });
       continue;
     }
 
-    summary.queued_count += 1;
+    if (queue_result.inserted?.queue_status === "scheduled" || (scheduled_for && toTimestamp(scheduled_for) > Date.now())) {
+      summary.scheduled_count = (summary.scheduled_count || 0) + 1;
+    } else {
+      summary.queued_count += 1;
+    }
     if (!summary.first_scheduled_for) summary.first_scheduled_for = scheduled_for;
     summary.last_scheduled_for = scheduled_for;
     summary.selected_textgrid_market_counts[routing.selected.market || "unknown"] =
@@ -3774,7 +4224,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       routing_block_reason: null,
       template_use_case: rendered.template_use_case,
       template_id: rendered.template?.template_id || rendered.template?.id || null,
+      selected_template_id:
+        rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
       template_name: rendered.template?.template_name || null,
+      prospect_matching_flags: rendered.prospect_matching_flags || [],
+      template_routing_reason: rendered.template_routing_reason || null,
       stage_code: rendered.stage_code || rendered.template?.stage_code || null,
       language: rendered.language || rendered.template?.language || null,
       template_rotation_enabled: Boolean(rendered.template_rotation?.enabled),

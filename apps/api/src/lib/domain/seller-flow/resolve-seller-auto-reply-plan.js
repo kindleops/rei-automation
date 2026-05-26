@@ -18,9 +18,9 @@ const AUTO_REPLY_WHITELIST = new Set([
 const STAGE_CODES = {
   ownership_check: "S1",
   info_source_explanation: "S1B",
-  consider_selling: "S2",
-  asking_price: "S3",
-  confirm_basics: "S4A",
+  selling_interest: "S2",
+  price_or_offer: "S3",
+  seller_price_received: "S4A",
   condition_probe: "S4B",
   creative_probe: "S4C",
   offer_reveal_cash: "S5A",
@@ -169,17 +169,16 @@ export function resolveNextSellerStage(input) {
     case "listed_or_unavailable": return "listed_or_unavailable";
     case "tenant_or_occupancy": return "tenant_or_occupancy";
     case "ownership_confirmed":
-      return is_ownership_check ? "consider_selling" : "confirm_basics";
+      return "selling_interest";
     case "positive_interest":
     case "conditional_interest":
-      return "confirm_basics";
+      return "price_or_offer";
     case "info_request":
       return is_ownership_check ? "info_source_explanation" : "manual_review";
     case "asks_offer":
-      return "asking_price";
+      return "price_or_offer";
     case "asking_price_value":
-      if (input?.underwriting_signals?.cash_offer_ready) return "confirm_basics";
-      return "condition_probe";
+      return "seller_price_received";
     case "condition_signal":
       return "condition_probe";
     case "unclear":
@@ -199,10 +198,10 @@ export function resolveAutoReplyUseCase(input) {
   if (next_stage === "not_interested") return "not_interested";
   if (next_stage === "listed_or_unavailable") return "listed_or_unavailable";
   if (next_stage === "tenant_or_occupancy") return "tenant_or_occupancy";
-  if (next_stage === "consider_selling") return "consider_selling";
+  if (next_stage === "selling_interest") return "selling_interest";
   if (next_stage === "info_source_explanation") return "who_is_this";
-  if (next_stage === "asking_price") return "seller_asking_price";
-  if (next_stage === "confirm_basics") return "price_works_confirm_basics";
+  if (next_stage === "price_or_offer") return "price_or_offer";
+  if (next_stage === "seller_price_received") return "seller_price_received";
   if (next_stage === "condition_probe") return "price_high_condition_probe";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
 
@@ -242,10 +241,10 @@ async function checkDuplicateReply(input) {
   const to = input.inbound_event?.inbound_to || input.inbound_event?.to || "";
 
   if (source_event_id || message_id) {
-    let query = supabase.from("send_queue").select("id").limit(1);
+    let query = supabase.from("message_events").select("id").eq("direction", "outbound").limit(1);
     
     if (source_event_id) {
-       query = query.eq("metadata->>source_inbound_event_id", source_event_id);
+       query = query.eq("metadata->>source_event_id", source_event_id);
     } else {
        query = query.eq("metadata->>source_inbound_message_id", message_id);
     }
@@ -258,8 +257,9 @@ async function checkDuplicateReply(input) {
   const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
   const hash = crypto.createHash('sha256').update(`${from}:${to}:${body}`).digest('hex');
   
-  const { data: hashData } = await supabase.from("send_queue")
+  const { data: hashData } = await supabase.from("message_events")
     .select("id")
+    .eq("direction", "outbound")
     .eq("metadata->>inbound_hash", hash)
     .gte("created_at", tenMinsAgo)
     .limit(1);

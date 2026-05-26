@@ -1,6 +1,9 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { getSystemFlags } from '@/lib/system-control.js'
-import { createInboxSendNowQueueRow } from '@/lib/domain/inbox/send-now-service.js'
+import { createInboxSendNowQueueRow, executeManualInboxSendNow } from '@/lib/domain/inbox/send-now-service.js'
+import { child } from '@/lib/logging/logger.js'
+
+const logger = child({ module: 'cockpit.cockpit_service' })
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -17,6 +20,9 @@ function asBoolean(value, fallback = false) {
 function toStatus(value) {
   return clean(value).toLowerCase()
 }
+
+const CANONICAL_ACTIVE_QUEUE_STATUSES = ['queued', 'pending', 'approval', 'scheduled', 'processing']
+const CANONICAL_TERMINAL_QUEUE_STATUSES = ['sent', 'delivered', 'failed', 'blocked', 'cancelled', 'expired', 'duplicate_blocked']
 
 export function isCanonicalThreadKey(threadKey) {
   // Canonical thread_key is strictly E.164: +1 followed by 10 digits.
@@ -70,6 +76,20 @@ function blockedResponse(action, reason, extras = {}) {
   return { ok: false, action, blocked: true, reason, ...extras }
 }
 
+function buildInboxActionLogMeta(action, payload = {}, threadKey, flags = null) {
+  const meta = {
+    action,
+    thread_key: threadKey || null,
+    to_phone_number: clean(payload.to_phone_number || payload.phone) || null,
+    from_phone_number: clean(payload.from_phone_number || payload.our_number) || null,
+    message_body_length: clean(payload.message_body || payload.message_text).length,
+    operator_override: asBoolean(payload.operator_override, false) || asBoolean(payload.force, false),
+  }
+
+  if (flags && typeof flags === 'object') meta.flags = flags
+  return meta
+}
+
 export async function getCockpitHealth({ getFlags = getSystemFlags } = {}) {
   const flags = await getFlags([
     'dashboard_live_enabled',
@@ -83,22 +103,46 @@ export async function getCockpitHealth({ getFlags = getSystemFlags } = {}) {
 }
 
 export async function getCockpitQueueStatus({ supabase = defaultSupabase } = {}) {
-  const { data, error } = await supabase
+  const canonical_statuses = [
+    ...CANONICAL_ACTIVE_QUEUE_STATUSES,
+    ...CANONICAL_TERMINAL_QUEUE_STATUSES,
+    'sending',
+    'ready',
+    'approved',
+    'paused_invalid_queue_row',
+    'paused_max_retries',
+    'paused_name_missing',
+    'incident_quarantine',
+    'unknown',
+  ]
+
+  const count_queries = canonical_statuses.map((status) =>
+    supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .eq('queue_status', status)
+  )
+
+  const total_query = supabase
     .from('send_queue')
-    .select('queue_status,type')
-    .limit(10000)
+    .select('id', { count: 'exact', head: true })
 
-  if (error) throw error
-
+  const settled = await Promise.all([...count_queries, total_query])
   const counts = {}
-  for (const row of data || []) {
-    const status = toStatus(row.queue_status || 'unknown')
-    const type = toStatus(row.type || 'outbound')
-    counts[status] = (counts[status] || 0) + 1
-    counts[`${type}:${status}`] = (counts[`${type}:${status}`] || 0) + 1
-  }
+  canonical_statuses.forEach((status, idx) => {
+    counts[status] = settled[idx]?.count ?? 0
+  })
+  counts.total = settled[settled.length - 1]?.count ?? 0
+  counts.active_total = CANONICAL_ACTIVE_QUEUE_STATUSES.reduce((sum, s) => sum + (counts[s] || 0), 0)
+  counts.terminal_total = CANONICAL_TERMINAL_QUEUE_STATUSES.reduce((sum, s) => sum + (counts[s] || 0), 0)
 
-  return okResponse('queue_status', { diagnostics: { counts } })
+  return okResponse('queue_status', {
+    diagnostics: {
+      counts,
+      canonical_active_statuses: CANONICAL_ACTIVE_QUEUE_STATUSES,
+      canonical_terminal_statuses: CANONICAL_TERMINAL_QUEUE_STATUSES,
+    },
+  })
 }
 
 export async function runQueueAction({ action, payload = {}, supabase = defaultSupabase, getFlags = getSystemFlags } = {}) {
@@ -208,8 +252,19 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
   })
 }
 
-export async function runInboxAction({ action, payload = {}, supabase = defaultSupabase, getFlags = getSystemFlags } = {}) {
+export async function runInboxAction({
+  action,
+  payload = {},
+  supabase = defaultSupabase,
+  getFlags = getSystemFlags,
+} = {}) {
   const dryRun = asBoolean(payload.dry_run, true)
+  const operatorOverride = asBoolean(payload.operator_override, false) || asBoolean(payload.force, false)
+  const requestedToPhone = clean(payload.to_phone_number || payload.phone)
+
+  if (action === 'send-now' && !hasValidPhone(requestedToPhone)) {
+    return blockedResponse(action, 'invalid_number', { status: 400, dry_run: dryRun, thread_key: null })
+  }
 
   // Resolve thread_key with fallbacks:
   // 1. payload.thread_key (top-level, set by buildQueueRoutingColumns when thread.threadKey is truthy)
@@ -224,26 +279,63 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
   }
 
   const flags = await getFlags([
+    'automation_enabled',
+    'operator_send_enabled',
     'outbound_sms_enabled',
     'queue_runner_enabled',
     'auto_reply_enabled',
     'followup_enabled',
+    'feeder_enabled',
+    'queue_auto_enqueue_enabled',
   ])
 
-  if (!flags.outbound_sms_enabled) return blockedResponse(action, 'outbound_sms_disabled', { dry_run: dryRun, thread_key: threadKey })
-  if (!flags.queue_runner_enabled) return blockedResponse(action, 'queue_runner_disabled', { dry_run: dryRun, thread_key: threadKey })
+  const isManualOperatorSend = action === 'send-now'
+  const overrideAllowed = isManualOperatorSend && operatorOverride === true
+  const logMeta = buildInboxActionLogMeta(action, payload, threadKey, flags)
+
+  if (isManualOperatorSend) {
+    logger.info('cockpit_send_now.requested', logMeta)
+    if (flags.automation_enabled === false) {
+      logger.info('cockpit_send_now.gate_bypassed', { ...logMeta, reason: 'automation_disabled' })
+    }
+    if (flags.feeder_enabled === false) {
+      logger.info('cockpit_send_now.gate_bypassed', { ...logMeta, reason: 'feeder_disabled' })
+    }
+    if (flags.queue_auto_enqueue_enabled === false) {
+      logger.info('cockpit_send_now.gate_bypassed', { ...logMeta, reason: 'queue_batch_disabled' })
+    }
+    if (flags.operator_send_enabled === false) {
+      logger.info('cockpit_send_now.gate_bypassed', {
+        ...logMeta,
+        reason: 'operator_send_disabled',
+      })
+    }
+  }
+
+  if (!isManualOperatorSend && !flags.outbound_sms_enabled && !overrideAllowed) {
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'outbound_sms_disabled' })
+    return blockedResponse(action, 'outbound_sms_disabled', { status: 423, dry_run: dryRun, thread_key: threadKey })
+  }
+  if (!isManualOperatorSend && !flags.queue_runner_enabled && !overrideAllowed) {
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'queue_runner_disabled' })
+    return blockedResponse(action, 'queue_runner_disabled', { status: 423, dry_run: dryRun, thread_key: threadKey })
+  }
 
   if (action === 'auto-reply' && !flags.auto_reply_enabled) {
-    return blockedResponse(action, 'auto_reply_disabled', { dry_run: dryRun, thread_key: threadKey })
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'auto_reply_disabled' })
+    return blockedResponse(action, 'auto_reply_disabled', { status: 423, dry_run: dryRun, thread_key: threadKey })
   }
 
   if (['queue-reply', 'schedule-reply'].includes(action) && !flags.followup_enabled) {
-    return blockedResponse(action, 'followup_disabled', { dry_run: dryRun, thread_key: threadKey })
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'followup_disabled' })
+    return blockedResponse(action, 'followup_disabled', { status: 423, dry_run: dryRun, thread_key: threadKey })
   }
 
   const intent = clean(payload.intent || payload.last_intent || payload.detected_intent)
   if (action === 'auto-reply' && isNegativeOrWrongNumberIntent(intent)) {
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'negative_or_wrong_number_intent_blocked', intent })
     return blockedResponse(action, 'negative_or_wrong_number_intent_blocked', {
+      status: 423,
       dry_run: dryRun,
       thread_key: threadKey,
       diagnostics: { intent },
@@ -255,10 +347,17 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
 
   if (['send-now', 'queue-reply', 'schedule-reply'].includes(action)) {
     if (!hasValidPhone(toPhone)) {
-      return blockedResponse(action, 'invalid_to_phone_number', { dry_run: dryRun, thread_key: threadKey })
+      const reason = action === 'send-now' ? 'invalid_number' : 'invalid_to_phone_number'
+      logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason })
+      return blockedResponse(action, reason, { status: 400, dry_run: dryRun, thread_key: threadKey })
     }
-    if (!hasValidPhone(fromPhone)) {
-      return blockedResponse(action, 'invalid_from_phone_number', { dry_run: dryRun, thread_key: threadKey })
+    if (action !== 'send-now' && !hasValidPhone(fromPhone)) {
+      logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'invalid_from_phone_number' })
+      return blockedResponse(action, 'invalid_from_phone_number', { status: 400, dry_run: dryRun, thread_key: threadKey })
+    }
+    if (action === 'send-now' && clean(fromPhone) && !hasValidPhone(fromPhone)) {
+      logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'missing_routing' })
+      return blockedResponse(action, 'missing_routing', { status: 400, dry_run: dryRun, thread_key: threadKey })
     }
   }
 
@@ -271,10 +370,12 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
 
   if (stateErr) throw stateErr
   if (toStatus(threadState?.status) === 'paused_review') {
-    return blockedResponse(action, 'paused_review', { dry_run: dryRun, thread_key: threadKey })
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'paused_review' })
+    return blockedResponse(action, 'paused_review', { status: 423, dry_run: dryRun, thread_key: threadKey })
   }
   if ((threadState?.metadata || {}).incident_quarantine === true) {
-    return blockedResponse(action, 'incident_quarantine', { dry_run: dryRun, thread_key: threadKey })
+    logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: 'incident_quarantine' })
+    return blockedResponse(action, 'incident_quarantine', { status: 423, dry_run: dryRun, thread_key: threadKey })
   }
 
   if (dryRun) {
@@ -289,29 +390,137 @@ export async function runInboxAction({ action, payload = {}, supabase = defaultS
 
   // ── send-now: create queue row and return result ─────────────────────────
   if (action === 'send-now') {
-    const sendResult = await createInboxSendNowQueueRow(
-      { ...payload, thread_key: threadKey },
+    const sendResult = await executeManualInboxSendNow(
+      {
+        ...payload,
+        thread_key: threadKey,
+        source: clean(payload.source) || 'inbox',
+        action: 'send_now',
+        created_from: clean(payload.created_from) || 'leadcommand_inbox',
+      },
       { supabase }
     )
 
     if (!sendResult.ok) {
-      return blockedResponse(action, sendResult.error || 'send_queue_insert_failed', {
+      logger.warn('cockpit_inbox_action.early_exit', {
+        ...logMeta,
+        reason: sendResult.reason || sendResult.error || 'queue_insert_failure',
+        detail_reason: sendResult.detail_reason || null,
+        queue_inserted: sendResult.queue_inserted === true,
+        queue_row_id: sendResult.queue_row_id || sendResult.queue_audit_id || null,
+        queue_status: sendResult.queue_status || null,
+      })
+      return blockedResponse(action, sendResult.reason || sendResult.error || 'queue_insert_failure', {
+        status: sendResult.status || 423,
         dry_run: false,
         thread_key: threadKey,
-        diagnostics: { send_error: sendResult.error },
+        queue_created: sendResult.queue_created === true,
+        queue_inserted: sendResult.queue_inserted === true,
+        queue_row_id: sendResult.queue_row_id || sendResult.queue_audit_id || null,
+        queue_audit_id: sendResult.queue_audit_id || sendResult.queue_row_id || null,
+        queue_id: sendResult.queue_id || sendResult.queue_audit_id || null,
+        queue_key: sendResult.queue_key || null,
+        queue_status: sendResult.queue_status || null,
+        message_event_id: sendResult.message_event_id || null,
+        provider_message_id: sendResult.provider_message_id || sendResult.provider_message_sid || null,
+        delivery_status_display: sendResult.delivery_status_display || null,
+        hard_block: sendResult.hard_block === true,
+        operator_override_allowed: sendResult.operator_override_allowed === true,
+        diagnostics: {
+          send_error: sendResult.error || null,
+          detail_reason: sendResult.detail_reason || null,
+          send_now_proof: sendResult.proof || null,
+          warning_codes: sendResult.warning_codes || [],
+        },
       })
+    }
+
+      logger.info('cockpit_send_now.completed', {
+        ...logMeta,
+        queue_created: sendResult.queue_created === true,
+        queue_inserted: sendResult.queue_inserted === true,
+        queue_row_id: sendResult.queue_row_id || sendResult.queue_audit_id || null,
+        queue_id: sendResult.queue_id || sendResult.queue_audit_id || null,
+        queue_status: sendResult.queue_status || 'queued',
+        warning_codes: sendResult.warning_codes || [],
+      })
+    return okResponse(action, {
+      dry_run: false,
+      thread_key: threadKey,
+      queue_id: sendResult.queue_id || sendResult.queue_audit_id || null,
+      queue_row_id: sendResult.queue_row_id || sendResult.queue_audit_id || null,
+      queue_audit_id: sendResult.queue_audit_id || sendResult.queue_row_id || null,
+      queue_key: sendResult.queue_key || null,
+      queue_created: sendResult.queue_created,
+      queue_inserted: sendResult.queue_inserted === true,
+      queue_status: sendResult.queue_status || 'sent',
+      message_event_id: sendResult.message_event_id || null,
+      provider_message_id: sendResult.provider_message_id || sendResult.provider_message_sid || null,
+      delivery_status_display: sendResult.delivery_status_display || 'sent',
+      diagnostics: {
+        send_now_proof: sendResult.proof || null,
+        queue_send_result: sendResult.diagnostics?.queue_send_result || null,
+        warning_codes: sendResult.warning_codes || [],
+      },
+    })
+  }
+
+  if (action === 'queue-reply' || action === 'schedule-reply' || action === 'auto-reply') {
+    const messageType = action === 'auto-reply' ? 'auto_reply' : (action === 'schedule-reply' ? 'manual_scheduled_reply' : 'manual_reply')
+    const useCaseTemplate = clean(payload.use_case_template || payload.useCaseTemplate || (action === 'auto-reply' ? 'auto_reply' : 'manual_reply'))
+    const scheduledFor = clean(payload.scheduled_for || payload.scheduled_for_utc || payload.scheduledAt)
+
+    const queueResult = await createInboxSendNowQueueRow(
+      {
+        ...payload,
+        thread_key: threadKey,
+        source: clean(payload.source) || 'inbox',
+        action: action === 'auto-reply' ? 'auto_reply' : (action === 'schedule-reply' ? 'schedule_reply' : 'queue_reply'),
+        created_from: clean(payload.created_from) || 'leadcommand_inbox',
+        message_type: messageType,
+        use_case_template: useCaseTemplate,
+        type: 'outbound',
+        scheduled_for: scheduledFor || undefined,
+      },
+      { supabase }
+    )
+
+    if (!queueResult.ok || !queueResult.queue_id) {
+      return blockedResponse(action, queueResult.error || 'send_queue_insert_failed', {
+        status: queueResult.status || 423,
+        dry_run: false,
+        thread_key: threadKey,
+        diagnostics: { send_error: queueResult.error },
+      })
+    }
+
+    if (action === 'schedule-reply' && scheduledFor) {
+      const patch = {
+        queue_status: 'scheduled',
+        scheduled_for: scheduledFor,
+        scheduled_for_utc: scheduledFor,
+        scheduled_for_local: scheduledFor,
+        updated_at: new Date().toISOString(),
+      }
+      const { error: scheduleError } = await supabase
+        .from('send_queue')
+        .update(patch)
+        .eq('id', queueResult.queue_row_id || queueResult.queue_id)
+      if (scheduleError) throw scheduleError
     }
 
     return okResponse(action, {
       dry_run: false,
       thread_key: threadKey,
-      queue_id: sendResult.queue_id || null,
-      queue_key: sendResult.queue_key || null,
-      queue_created: sendResult.queue_created,
+      queue_id: queueResult.queue_id,
+      queue_key: queueResult.queue_key || null,
+      queue_created: true,
+      queue_status: action === 'schedule-reply' ? 'scheduled' : 'queued',
     })
   }
 
   return blockedResponse(action, 'action_not_implemented', {
+    status: 400,
     dry_run: false,
     thread_key: threadKey,
   })
@@ -431,4 +640,3 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     diagnostics: { row: data || null },
   })
 }
-

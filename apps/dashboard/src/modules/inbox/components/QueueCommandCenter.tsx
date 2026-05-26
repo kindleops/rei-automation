@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
+import { emitNotification } from '../../../shared/NotificationToast'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-export type QueueCommandMode = 'off' | 'safe' | 'live'
+export type QueueCommandMode = 'paused' | 'assisted' | 'automatic'
 
 export interface QueueCommandCaps {
   sends_per_run: number
@@ -31,6 +32,11 @@ interface QueueCommandCenterProps {
   onRetryFailed: () => void
   onReconcileDelivery: () => void
   onCancelStaleFollowUps: () => void
+  onClose?: () => void
+  // TODO: wire to backend API endpoint /api/queue/backfill-message-events
+  onBackfillMessageEvents?: () => void
+  // TODO: wire to backend API endpoint /api/queue/write-suppression-from-failures
+  onWriteSuppressionFromFailures?: () => void
 }
 
 const toneFor = (health: QueueProcessorHealth | null): 'good' | 'warning' | 'critical' | 'neutral' => {
@@ -49,9 +55,9 @@ const healthLabel = (status: string) => {
 }
 
 const modeLabel = (mode: QueueCommandMode) => {
-  if (mode === 'safe') return 'Safe Autopilot'
-  if (mode === 'live') return 'Live Autopilot'
-  return 'Off'
+  if (mode === 'assisted') return 'Assisted Autopilot'
+  if (mode === 'automatic') return 'Automatic'
+  return 'Paused'
 }
 
 const heroSentence = (
@@ -69,6 +75,50 @@ const heroSentence = (
   return health.summary || 'All systems clear'
 }
 
+// ── Why Critical Panel ────────────────────────────────────────────────────
+interface WhyCriticalPanelProps {
+  health: QueueProcessorHealth
+}
+
+function WhyCriticalPanel({ health }: WhyCriticalPanelProps) {
+  const reasons = [
+    { label: 'Unknown failures',          count: health.failedTodayCount,         tone: 'red'   as const },
+    { label: 'Failed today',              count: health.failedTodayCount,         tone: 'red'   as const },
+    { label: 'Missing message events',    count: health.activeBlankRowCount ?? 0, tone: 'amber' as const },
+    { label: 'Missing property hydration',count: 0,                               tone: 'amber' as const }, // TODO: wire real count
+    { label: 'Missing seller hydration',  count: 0,                               tone: 'amber' as const }, // TODO: wire real count
+    { label: 'Webhook issues',            count: health.webhookHealthy ? 0 : 1,  tone: 'red'   as const },
+    { label: 'Routing / template gaps',   count: health.routingBlockedCount,      tone: 'amber' as const },
+  ]
+  const active = reasons.filter(r => r.count > 0)
+  return (
+    <div className="qcc-why-critical-panel">
+      <div className="qcc-why-critical-panel__head">
+        <span className="qcc-why-critical-panel__dot" />
+        Why Critical? — {active.length} reason{active.length !== 1 ? 's' : ''}
+      </div>
+      <div className="qcc-why-critical-panel__body">
+        {reasons.map(r => (
+          <div
+            key={r.label}
+            className={cls(
+              'qcc-why-critical-row',
+              r.count > 0 ? `is-active-${r.tone}` : '',
+            )}
+          >
+            <span className={cls('qcc-why-critical-row__dot', `is-${r.count > 0 ? r.tone : 'muted'}`)} />
+            <span className="qcc-why-critical-row__label">{r.label}</span>
+            <span className={cls('qcc-why-critical-row__count', r.count > 0 ? `is-${r.tone}` : 'is-muted')}>
+              {r.count > 0 ? r.count : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────
 export function QueueCommandCenter({
   health,
   loading,
@@ -86,12 +136,21 @@ export function QueueCommandCenter({
   onRetryFailed,
   onReconcileDelivery,
   onCancelStaleFollowUps,
+  onClose,
+  onBackfillMessageEvents,
+  onWriteSuppressionFromFailures,
 }: QueueCommandCenterProps) {
+  // Default stubs for new actions when not wired by parent
+  const handleBackfill = onBackfillMessageEvents ?? (() =>
+    emitNotification({ title: 'Backfill Message Events', detail: 'TODO: wire to backend API /api/queue/backfill-message-events', severity: 'warning', sound: 'notification' })
+  )
+  const handleWriteSuppression = onWriteSuppressionFromFailures ?? (() =>
+    emitNotification({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API /api/queue/write-suppression-from-failures', severity: 'warning', sound: 'notification' })
+  )
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   const tone = toneFor(health)
   const status = health?.status ?? 'unknown'
-  const liveBlocked = health?.liveAutopilotAllowed === false
   const busy = loading || actionLoading !== null
 
   // Derive "needs attention" items from health counts
@@ -136,6 +195,16 @@ export function QueueCommandCenter({
           >
             {loading ? '⟳' : '↻'}
           </button>
+          {onClose && (
+            <button
+              type="button"
+              className="qcc-refresh-btn"
+              onClick={onClose}
+              title="Close panel"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <div className={cls('qcc-health-badge', `is-${tone}`)}>
@@ -157,57 +226,67 @@ export function QueueCommandCenter({
       {/* ── SECTION 2: Mode + Primary Actions ──────────────────────── */}
       <div className="qcc-mode-band">
         <div className="qcc-segment">
-          <button type="button" className={cls('qcc-chip', mode === 'off' && 'is-active')} onClick={() => onModeChange('off')} disabled={busy}>Off</button>
-          <button type="button" className={cls('qcc-chip', mode === 'safe' && 'is-active')} onClick={() => onModeChange('safe')} disabled={busy}>Safe</button>
+          <button type="button" className={cls('qcc-chip', mode === 'paused' && 'is-active')} onClick={() => onModeChange('paused')} disabled={busy}>Paused</button>
+          <button type="button" className={cls('qcc-chip', mode === 'assisted' && 'is-active')} onClick={() => onModeChange('assisted')} disabled={busy}>Assisted</button>
           <button
             type="button"
-            className={cls('qcc-chip', mode === 'live' && 'is-active')}
-            onClick={() => onModeChange('live')}
-            disabled={busy || liveBlocked}
-            title={liveBlocked ? 'Live Autopilot blocked — queue health is Critical' : undefined}
+            className={cls('qcc-chip', mode === 'automatic' && 'is-active')}
+            onClick={() => onModeChange('automatic')}
+            disabled={busy}
           >
-            Live
+            Automatic
           </button>
         </div>
 
         <div className="qcc-primary-actions">
-          <button type="button" className="qcc-btn is-primary" onClick={onRunSafeBatch} disabled={busy}>
-            {actionLoading === 'safe_batch' ? 'Running...' : 'Run Safe Batch'}
-          </button>
           <button type="button" className="qcc-btn is-primary" onClick={onQueueMore} disabled={busy}>
-            {actionLoading === 'queue_more' ? 'Queueing...' : 'Queue More'}
+            {actionLoading === 'queue_more' ? 'Finding...' : 'Find Sellers'}
           </button>
-          <button type="button" className="qcc-btn is-primary" onClick={onRunQueueNow} disabled={busy || liveBlocked} title={liveBlocked ? 'Blocked — queue health is Critical' : undefined}>
-            {actionLoading === 'run_now' ? 'Running...' : 'Run Queue Now'}
+          <button type="button" className="qcc-btn is-primary" onClick={onRunSafeBatch} disabled={busy}>
+            {actionLoading === 'safe_batch' ? 'Sending...' : 'Send Small Batch'}
           </button>
-          <button type="button" className="qcc-btn is-secondary" onClick={onEmergencyPause} disabled={busy}>
-            {actionLoading === 'emergency_pause' ? 'Pausing...' : 'Emergency Pause'}
-          </button>
-          {/* TODO: wire secondary queue commands into Command-K */}
+          {mode !== 'automatic' && (
+            <button type="button" className="qcc-btn is-primary" onClick={() => onModeChange('automatic')} disabled={busy}>
+              Start Automatic
+            </button>
+          )}
+          {mode !== 'paused' && (
+            <button type="button" className="qcc-btn is-secondary" onClick={onEmergencyPause} disabled={busy}>
+              {actionLoading === 'emergency_pause' ? 'Pausing...' : 'Pause Outbound'}
+            </button>
+          )}
           <button type="button" className={cls('qcc-btn is-ghost', showAdvanced && 'is-active')} onClick={() => setShowAdvanced((v) => !v)}>
-            {showAdvanced ? 'Hide' : 'Advanced'}
+            {showAdvanced ? 'Hide Options' : 'Review Queue'}
           </button>
         </div>
         <p className="qcc-cmd-hint">Press <kbd>⌘K</kbd> for queue commands</p>
 
-        {/* TODO: move advanced queue diagnostics into command palette / advanced drawer */}
         {showAdvanced && (
           <div className="qcc-advanced">
+            {/* Why Critical? — shows when health is critical */}
+            {health?.status === 'critical' && <WhyCriticalPanel health={health} />}
+
             <div className="qcc-advanced__actions">
-              <button type="button" className="qcc-btn is-secondary" onClick={onRunQueueNow} disabled={busy || liveBlocked} title={liveBlocked ? 'Blocked — queue health is Critical' : undefined}>
-                {actionLoading === 'run_now' ? 'Running...' : 'Run Queue Now'}
+              <button type="button" className="qcc-btn is-secondary" onClick={onRunQueueNow} disabled={busy}>
+                {actionLoading === 'run_now' ? 'Start Sending...' : 'Run Queue Once'}
               </button>
               <button type="button" className="qcc-btn is-secondary" onClick={() => onReprocessPaused()} disabled={busy}>
                 {actionLoading === 'reprocess_paused' ? 'Reprocessing...' : 'Reprocess Paused'}
               </button>
               <button type="button" className="qcc-btn is-secondary" onClick={onRetryFailed} disabled={busy}>
-                {actionLoading === 'retry_failed' ? 'Retrying...' : 'Retry Failed'}
+                {actionLoading === 'retry_failed' ? 'Retrying...' : 'Retry Failed Safe'}
               </button>
               <button type="button" className="qcc-btn is-secondary" onClick={onReconcileDelivery} disabled={busy}>
                 {actionLoading === 'reconcile_delivery' ? 'Reconciling...' : 'Reconcile Delivery'}
               </button>
+              <button type="button" className="qcc-btn is-secondary" onClick={handleBackfill} disabled={busy}>
+                Backfill Message Events
+              </button>
+              <button type="button" className="qcc-btn is-secondary" onClick={handleWriteSuppression} disabled={busy}>
+                Write Suppression From Failures
+              </button>
               <button type="button" className="qcc-btn is-secondary" onClick={onCancelStaleFollowUps} disabled={busy}>
-                {actionLoading === 'cancel_stale_followups' ? 'Cancelling...' : 'Cancel Stale Follow-Ups'}
+                {actionLoading === 'cancel_stale_followups' ? 'Clearing...' : 'Clear Stale Scheduled'}
               </button>
             </div>
             <div className="qcc-caps-grid">
@@ -234,21 +313,31 @@ export function QueueCommandCenter({
         )}
       </div>
 
-      {/* ── SECTION 3: Key Metrics ──────────────────────────────────── */}
-      <div className="qcc-metrics">
-        {([
-          ['Queued', health?.queuedCount ?? 0, null],
-          ['Scheduled', health?.scheduledCount ?? 0, null],
-          ['Sent Today', health?.sentTodayCount ?? 0, null],
-          ['Delivered Today', health?.deliveredTodayCount ?? 0, (health?.deliveredTodayCount ?? 0) > 0 ? 'good' : null],
-          ['Routing Blocked', health?.routingBlockedCount ?? 0, (health?.routingBlockedCount ?? 0) > 0 ? 'warning' : null],
-          ['Failed Today', health?.failedTodayCount ?? 0, (health?.failedTodayCount ?? 0) > 0 ? 'critical' : null],
-        ] as Array<[string, number, string | null]>).map(([label, value, accent]) => (
-          <div key={label} className={cls('qcc-metric', accent && `is-${accent}`)}>
-            <strong>{value}</strong>
-            <span>{label}</span>
-          </div>
-        ))}
+      {/* ── SECTION 3: Live Status Display ─────────────────────────── */}
+      <div className="qcc-status-grid">
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">System Status</p>
+          <div className="qcc-status-item"><span>Mode</span><strong>{modeLabel(mode)}</strong></div>
+          <div className="qcc-status-item"><span>Feeder Last</span><strong>{lastCheck}</strong></div>
+          <div className="qcc-status-item"><span>Feeder Next</span><strong>{mode !== 'paused' ? 'Soon' : 'Paused'}</strong></div>
+          <div className="qcc-status-item"><span>Rows Blocked</span><strong className={(health?.blockedCount ?? 0) > 0 ? 'qcc-text-warning' : ''}>{health?.blockedCount ?? 0}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Queue Status</p>
+          <div className="qcc-status-item"><span>Queued Now</span><strong>{health?.queuedCount ?? 0}</strong></div>
+          <div className="qcc-status-item"><span>Scheduled</span><strong>{health?.scheduledCount ?? 0}</strong></div>
+          <div className="qcc-status-item"><span>Sending Now</span><strong>{health?.sendingCount ?? 0}</strong></div>
+          <div className="qcc-status-item"><span>Sent Today</span><strong>{health?.sentTodayCount ?? 0}</strong></div>
+          <div className="qcc-status-item"><span>Delivered</span><strong className={(health?.deliveredTodayCount ?? 0) > 0 ? 'qcc-text-good' : ''}>{health?.deliveredTodayCount ?? 0}</strong></div>
+          <div className="qcc-status-item"><span>Failed Today</span><strong className={(health?.failedTodayCount ?? 0) > 0 ? 'qcc-text-critical' : ''}>{health?.failedTodayCount ?? 0}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Health</p>
+          <div className="qcc-status-item"><span>Feeder</span><strong className={health?.processorHealthy ? 'qcc-text-good' : 'qcc-text-warning'}>{health?.processorHealthy ? 'Healthy' : 'Degraded'}</strong></div>
+          <div className="qcc-status-item"><span>Runner</span><strong className={health?.processorHealthy ? 'qcc-text-good' : 'qcc-text-warning'}>{health?.processorHealthy ? 'Healthy' : 'Degraded'}</strong></div>
+          <div className="qcc-status-item"><span>TextGrid</span><strong className={health?.webhookHealthy ? 'qcc-text-good' : 'qcc-text-warning'}>{health?.webhookHealthy ? 'Healthy' : 'Degraded'}</strong></div>
+          <div className="qcc-status-item"><span>Database</span><strong className="qcc-text-good">Healthy</strong></div>
+        </div>
       </div>
 
       {/* ── SECTION 4: Needs Attention ──────────────────────────────── */}

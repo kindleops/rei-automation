@@ -7,7 +7,6 @@ import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } f
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
-import { resolveInboxThreadState } from './resolveInboxThreadState'
 
 const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
@@ -92,6 +91,11 @@ export interface InboxThread {
   directionUsed?: string
   autoReplyStatus?: string
   deliveryStatus?: string
+  latestDeliveryStatus?: string
+  latestDeliveredAt?: string | null
+  latestSentAt?: string | null
+  latestProviderSid?: string
+  lastDeliveredAt?: string | null
   failureReason?: string
   propertyAddress?: string
   propertyAddressFull?: string
@@ -419,21 +423,6 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
 
 
 export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
-  const isRefresh = Boolean(options.cursor)
-  
-  // 1. Try to load from cache instantly for non-refresh loads
-  if (!isRefresh) {
-    const cached = localStorage.getItem(CACHE_KEY)
-    if (cached) {
-      try {
-        const model = JSON.parse(cached)
-        return { ...model, dataMode: 'mock_preview' }
-      } catch (e) {
-        console.warn('[Inbox] Failed to parse cache', e)
-      }
-    }
-  }
-
   if (isDev) {
     console.log('[dashboard boot] live inbox fetch started', { options })
   }
@@ -808,10 +797,6 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
                   isRead: direction !== 'inbound',
                 }
                 
-                // Ensure bucket is accurately updated
-                const bucket = resolveInboxThreadState(toWorkflowThread(updatedThread)).bucket
-                updatedThread.inboxCategory = bucket === 'suppressed' ? 'dnc_opt_out' : (bucket === 'cold' ? 'cold_no_response' : bucket)
-
                 threads[idx] = updatedThread
                 
                 // Sort after update
@@ -899,4 +884,3 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
 
   return { data, loading, error, refresh, loadMore, recentlyUpdatedThreadIds, sourceMode, setSourceMode: setMode }
 }
-

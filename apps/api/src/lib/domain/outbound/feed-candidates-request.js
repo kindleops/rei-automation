@@ -17,6 +17,11 @@ function asBoolean(value, fallback = false) {
   return fallback;
 }
 
+function asOptionalBoolean(value) {
+  if (value === undefined || value === null || clean(value) === "") return null;
+  return asBoolean(value, false);
+}
+
 function asPositiveInteger(value, fallback = null) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
@@ -57,6 +62,9 @@ export function normalizeFeedCandidatesInput(input = {}) {
     schedule_interval_seconds_min: asPositiveInteger(input.schedule_interval_seconds_min, 45),
     schedule_interval_seconds_max: asPositiveInteger(input.schedule_interval_seconds_max, 180),
     timezone_filter: clean(input.timezone_filter) || null,
+    identity_gate_mode: clean(input.identity_gate_mode) || null,
+    allow_identity_unknown: asOptionalBoolean(input.allow_identity_unknown),
+    allow_weak_identity_outbound: asOptionalBoolean(input.allow_weak_identity_outbound),
   };
 }
 
@@ -88,6 +96,9 @@ function mergeBodyAndQuery(request, method, body = {}) {
     "schedule_interval_seconds_min",
     "schedule_interval_seconds_max",
     "timezone_filter",
+    "identity_gate_mode",
+    "allow_identity_unknown",
+    "allow_weak_identity_outbound",
   ]) {
     const value = search_params.get(key);
     if (value !== null) merged[key] = value;
@@ -116,10 +127,14 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
     let auth = require_cron_auth(request, route_logger);
 
     if (!auth.authorized) {
-      const queue_secret = String(process.env.QUEUE_ENGINE_SHARED_SECRET ?? "").trim();
+      const queue_secret = String(
+        process.env.QUEUE_ENGINE_SHARED_SECRET ??
+        (await get_system_value("queue_engine_shared_secret")) ??
+        ""
+      ).trim();
       if (!queue_secret) {
         route_logger?.warn?.("queue_engine_secret.not_configured", {
-          hint: "Set QUEUE_ENGINE_SHARED_SECRET to protect this endpoint from non-cron callers",
+          hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
         });
         return auth.response;
       }
@@ -150,15 +165,7 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
 
     const body = method === "POST" ? await request.json().catch(() => ({})) : {};
     const normalized = normalizeFeedCandidatesInput(mergeBodyAndQuery(request, method, body));
-    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "off").toLowerCase();
-    if (queue_processor_mode === "off") {
-      return json_response({
-        ok: false,
-        skipped: true,
-        reason: "queue_processor_mode_off",
-        route,
-      }, { status: 423 });
-    }
+    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
     feeder_request_meta = {
       route,
       dry_run: normalized.dry_run,

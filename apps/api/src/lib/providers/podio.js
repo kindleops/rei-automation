@@ -114,7 +114,9 @@ const REQUIRED_ENV = {
 };
 
 for (const [key, value] of Object.entries(REQUIRED_ENV)) {
-  if (!value) throw new Error(`[Podio] Missing required env var: ${key}`);
+  if (!value) {
+    console.warn(`[Podio] Missing required env var: ${key}. Podio integration will be disabled.`);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -288,7 +288,13 @@ export function calculateOwnerProspectAlignment(input = {}) {
  */
 export function isIdentityEligibleForLiveOutbound(alignment = {}, options = {}) {
   const { status, hardBlock } = alignment;
-  const allowWeak = options.allow_weak_identity_outbound === true;
+  const identity_gate_mode = lower(clean(options.identity_gate_mode || "strict"));
+  const allowWeak =
+    options.allow_weak_identity_outbound === true ||
+    identity_gate_mode === "relaxed";
+  const allowUnknown =
+    options.allow_identity_unknown === true ||
+    identity_gate_mode === "relaxed";
 
   if (hardBlock || status === "mismatch") {
     return { eligible: false, reason: "identity_mismatch" };
@@ -302,9 +308,19 @@ export function isIdentityEligibleForLiveOutbound(alignment = {}, options = {}) 
     return { eligible: true, reason: "household_association_allowed" };
   }
 
-  if (status === "weak" || status === "unknown") {
+  if (status === "weak") {
     if (allowWeak) {
       return { eligible: true, reason: "identity_weak_allowed" };
+    }
+    return { eligible: false, reason: "identity_not_verified" };
+  }
+
+  if (status === "unknown") {
+    if (allowUnknown || allowWeak) {
+      return {
+        eligible: true,
+        reason: allowUnknown ? "identity_unknown_allowed" : "identity_weak_allowed",
+      };
     }
     return { eligible: false, reason: "identity_not_verified" };
   }

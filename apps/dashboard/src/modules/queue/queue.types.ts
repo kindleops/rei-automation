@@ -106,6 +106,31 @@ export interface QueueItem {
   retryEligible: boolean
   approvalReason: string | null
   priorThreadSummary: string | null
+
+  // New Hydration Fields
+  campaignId: string | null
+  campaignName: string | null
+  campaignTargetId: string | null
+  campaignTargetStatus: string | null
+  
+  sellerFirstName: string | null
+  sellerFullName: string | null
+  
+  propertyCity: string | null
+  propertyState: string | null
+  propertyZip: string | null
+  
+  routingTier: number | null
+  routingRuleName: string | null
+  
+  lastEventType: string | null
+  lastEventAt: string | null
+  lastEventStatus: string | null
+  
+  failureCategory: string | null
+  diagnosticFlags: string[]
+  rowSource: 'campaign' | 'feeder' | 'manual' | 'auto_reply' | 'unknown'
+  guardReason: string | null
 }
 
 export interface QueueModel {

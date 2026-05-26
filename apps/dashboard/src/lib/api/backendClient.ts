@@ -12,6 +12,28 @@
 import type { AnyRecord } from '../data/shared'
 
 export const getBackendBaseUrl = (): string => {
+  const isBrowser = typeof window !== 'undefined'
+
+  // In local dev, prefer the local API server over a remote Vercel URL.
+  // This keeps the dashboard pointed at the checked-out backend code instead of
+  // a stale deployment when we are actively debugging on localhost.
+  if (import.meta.env.DEV && isBrowser) {
+    const hostname = window.location.hostname
+    const runtimeOverride = window.localStorage.getItem('backend_api_url_override')?.trim() || ''
+    if (runtimeOverride) {
+      return runtimeOverride.replace(/\/$/, '')
+    }
+
+    const explicitRemote = ((import.meta.env.VITE_BACKEND_API_FORCE_REMOTE as string | undefined) || '').toLowerCase() === 'true'
+    if (!explicitRemote && (hostname === 'localhost' || hostname === '127.0.0.1')) {
+      if (!(window as any).__BACKEND_URL_LOGGED) {
+        console.warn(`[BACKEND_API] Local dev detected. Will use relative paths via proxy.`)
+        ;(window as any).__BACKEND_URL_LOGGED = true
+      }
+      return ''
+    }
+  }
+
   // Primary: VITE_BACKEND_API_URL
   let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
 
@@ -23,7 +45,7 @@ export const getBackendBaseUrl = (): string => {
   if (url) {
     const cleanUrl = url.replace(/\/$/, '')
     // Only log once at boot via a global check
-    if (import.meta.env.DEV && typeof window !== 'undefined' && !(window as any).__BACKEND_URL_LOGGED) {
+    if (import.meta.env.DEV && isBrowser && !(window as any).__BACKEND_URL_LOGGED) {
       console.log(`[BACKEND_API] Using VITE_BACKEND_API_URL: ${cleanUrl}`)
       ;(window as any).__BACKEND_URL_LOGGED = true
     }
@@ -37,15 +59,14 @@ export const getBackendBaseUrl = (): string => {
   }
 
   // Dev-only localhost fallback
-  if (typeof window !== 'undefined') {
+  if (isBrowser) {
     const hostname = window.location.hostname
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      const fallback = 'http://localhost:3000'
       if (!(window as any).__BACKEND_URL_LOGGED) {
-        console.warn(`[BACKEND_API] VITE_BACKEND_API_URL is missing. Falling back to localhost: ${fallback}`)
+        console.warn(`[BACKEND_API] VITE_BACKEND_API_URL is missing. Will use relative paths via proxy.`)
         ;(window as any).__BACKEND_URL_LOGGED = true
       }
-      return fallback
+      return ''
     }
     
     // Vercel autodiscovery
@@ -135,7 +156,7 @@ function notReady<T = unknown>(message: string): BackendResult<T> {
   }
 }
 
-async function callBackend<T = unknown>(
+export async function callBackend<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<BackendResult<T>> {
@@ -265,8 +286,92 @@ export interface CockpitOpsSenderPerformance {
   opt_out_rate: number
 }
 
+export interface OpsMessageTypeSection {
+  queued: number
+  scheduled: number
+  processing: number
+  sent: number
+  delivered: number
+  failed: number
+  failed_queue: number
+  cancelled: number
+  expired: number
+  content_blocked: number
+  duplicate_blocked: number
+  invalid_number: number
+  opted_out: number
+  replies: number
+  opt_outs: number
+  positive_replies: number
+  negative_replies: number
+  unclear_replies: number
+  // null means no data (denominator was 0)
+  delivery_rate: number | null
+  failure_rate: number | null
+  reply_rate: number | null
+  opt_out_rate: number | null
+  positive_rate: number | null
+  negative_rate: number | null
+}
+
+export interface OpsQueueHealthSection {
+  queued_active: number
+  scheduled_future: number
+  processing: number
+  stale_active: number
+  content_blocked_today: number
+  duplicate_blocked: number
+  expired: number
+  cancelled: number
+  failed_total: number
+  failed_by_reason: Record<string, number>
+}
+
+export interface OpsFailureReasonSection {
+  total: number
+  by_reason: Record<string, number>
+}
+
+export interface OpsTemplateOutlier {
+  template_id: string
+  sent: number
+  failed: number
+  blocked: number
+  failure_rate: number | null
+}
+
+export interface OpsNumberOutlier {
+  number: string
+  sent: number
+  delivered: number
+  failed: number
+  replies: number
+  opt_outs: number
+  delivery_rate: number | null
+  failure_rate: number | null
+  reply_rate: number | null
+  opt_out_rate: number | null
+}
+
+export interface CockpitOpsSections {
+  first_touch: OpsMessageTypeSection
+  auto_replies: {
+    stage_1: OpsMessageTypeSection
+    stage_2: OpsMessageTypeSection
+    stage_3: OpsMessageTypeSection
+  }
+  manual_replies: OpsMessageTypeSection
+  follow_up: OpsMessageTypeSection
+  unknown: OpsMessageTypeSection
+  queue_health: OpsQueueHealthSection
+  failure_reasons: OpsFailureReasonSection
+  template_outliers: { top: OpsTemplateOutlier[] }
+  number_outliers: { top: OpsNumberOutlier[] }
+}
+
 export interface CockpitOpsMetrics {
   window: string
+  generated_at?: string
   sent_count: number
   delivered_count: number
   failed_count: number
@@ -285,6 +390,7 @@ export interface CockpitOpsMetrics {
   queue_failed_today_count: number
   automation_hard_failure_count: number
   sender_performance: CockpitOpsSenderPerformance[]
+  sections?: CockpitOpsSections
   metric_source_debug: Record<string, unknown>
 }
 
@@ -434,6 +540,27 @@ export function fetchLiveInbox(
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
   return callBackend(`/api/cockpit/inbox/live?${queryString}`, { signal })
+}
+
+export function fetchInboxThreads(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/threads?${queryString}`, { signal })
+}
+
+export function fetchInboxThreadMessages(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/thread-messages?${queryString}`, { signal })
+}
+
+export function fetchInboxThreadDossier(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/thread-dossier?${queryString}`, { signal })
 }
 
 // GET /api/internal/dashboard/nexus — live dashboard model.
@@ -629,5 +756,93 @@ export function updateThreadState(
   return callBackend<ThreadStateResult>('/api/cockpit/inbox/thread-state', {
     method: 'PATCH',
     body: JSON.stringify({ thread_key: threadKey, ...patch }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Targeting Studio endpoints
+// ---------------------------------------------------------------------------
+
+export interface CampaignFilterOptionsResponse {
+  states: Array<{ value: string; label: string; count: number }>
+  markets: Array<{ value: string; label: string; count: number }>
+  counties: Array<{ value: string; label: string; count: number }>
+  cities: Array<{ value: string; label: string; count: number }>
+  zip_codes: Array<{ value: string; label: string; count: number }>
+  property_tags: Array<{ value: string; label: string; count: number }>
+  property_types: Array<{ value: string; label: string; count: number }>
+  property_classes: Array<{ value: string; label: string; count: number }>
+  owner_types: Array<{ value: string; label: string; count: number }>
+  owner_type_guesses: Array<{ value: string; label: string; count: number }>
+  person_flags: Array<{ value: string; label: string; count: number }>
+  languages: Array<{ value: string; label: string; count: number }>
+  agent_families: Array<{ value: string; label: string; count: number }>
+  agent_personas: Array<{ value: string; label: string; count: number }>
+  contact_windows: Array<{ value: string; label: string; count: number }>
+  sender_markets: Array<{ value: string; label: string; count: number; healthy_count: number }>
+  template_use_cases: Array<{ value: string; label: string; count: number }>
+  stage_codes: Array<{ value: string; label: string; count: number }>
+}
+
+export function getCampaignFilterOptions(): Promise<BackendResult<CampaignFilterOptionsResponse>> {
+  return callBackend<CampaignFilterOptionsResponse>('/api/cockpit/campaigns/filter-options')
+}
+
+export interface PreviewTargetsResponse {
+  total_matching_properties: number
+  owners_matched: number
+  phones_matched: number
+  suppressed_count: number
+  opt_out_count: number
+  wrong_number_count: number
+  blacklist_pair_count: number
+  not_interested_count: number
+  duplicate_phone_count: number
+  duplicate_owner_count: number
+  active_queue_duplicate_count: number
+  missing_property_count: number
+  missing_phone_count: number
+  missing_sender_route_count: number
+  missing_template_count: number
+  clean_ready_targets: number
+  readiness_score: number
+  warnings: string[]
+  blockers: string[]
+  by_market: any[]
+  by_state: any[]
+  by_tag: any[]
+  by_owner_type: any[]
+  by_language: any[]
+}
+
+export function previewCampaignTargets(payload: Record<string, unknown>): Promise<BackendResult<PreviewTargetsResponse>> {
+  return callBackend<PreviewTargetsResponse>('/api/cockpit/campaigns/preview-targets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface BuildTargetsResponse {
+  success: boolean
+  built_count: number
+  message?: string
+}
+
+export function buildCampaignTargets(campaignId: string): Promise<BackendResult<BuildTargetsResponse>> {
+  return callBackend<BuildTargetsResponse>(`/api/cockpit/campaigns/${campaignId}/build-targets`, {
+    method: 'POST',
+  })
+}
+
+export interface QueueBatchResponse {
+  success: boolean
+  queued_count: number
+  message?: string
+}
+
+export function queueCampaignBatch(campaignId: string, limit: number, interval_seconds: number): Promise<BackendResult<QueueBatchResponse>> {
+  return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-batch`, {
+    method: 'POST',
+    body: JSON.stringify({ limit, interval_seconds }),
   })
 }

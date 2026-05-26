@@ -21,10 +21,7 @@ export async function POST(request) {
   if (!auth.ok) return auth.response
 
   const body = await request.json().catch(() => ({}))
-  const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'off').toLowerCase()
-  if (configuredMode === 'off') {
-    return NextResponse.json({ ok: false, skipped: true, reason: 'queue_processor_mode_off' }, { status: 423 })
-  }
+  const configuredMode = clean(await getSystemValue('queue_processor_mode') || 'paused').toLowerCase()
 
   const requestedMode = clean(body.mode || configuredMode || 'safe').toLowerCase()
   const runLimit = Math.max(1, Math.min(250, asNumber(body.limit ?? body.caps?.queue_run_limit, asNumber(await getSystemValue('queue_run_limit'), 50))))

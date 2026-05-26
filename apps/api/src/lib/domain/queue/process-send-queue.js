@@ -1166,8 +1166,6 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       now,
     });
 
-    const manual_inbox_send = isManualInboxSend(queue_row);
-
     console.log("CONTACT WINDOW CHECK", {
       row_id: queue_row_id,
       allowed: contact_window.allowed,
@@ -1294,6 +1292,93 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       from: message_fields.from,
       manual_inbox_send: Boolean(manual_inbox_send),
     });
+
+    // ── Hard Idempotency Lock ───────────────────────────────────────────
+    // Prevent duplicate sends if the same content was sent to the same number recently (24h).
+    // This protects against loops caused by database update failures or crashes.
+    const supabase_client = getSupabase(deps);
+    const normalized_body = clean(message_fields.body);
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // 1. Check if the row itself already has evidence of a previous send attempt
+    const evidence_sid = clean(queue_row.provider_message_id || queue_row.textgrid_message_id || queue_row.metadata?.provider_message_sid);
+    if (evidence_sid) {
+      warn("queue.idempotency_blocked_sid_exists", {
+        queue_row_id,
+        provider_message_id: evidence_sid,
+        to: message_fields.to,
+      });
+
+      // Mark as sent and return success to move the row out of the runnable pool.
+      // We don't re-send because we already have a SID.
+      return {
+        ok: true,
+        sent: true,
+        skipped: false,
+        reason: "idempotency_blocked_sid_exists",
+        queue_status: "sent",
+        final_queue_status: "sent",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+        provider_message_id: evidence_sid,
+      };
+    }
+
+    // 2. Check message_events for any identical outbound message to this number in the last 24h.
+    const { data: recent_sends, error: send_check_err } = await supabase_client
+      .from("message_events")
+      .select("id, created_at, provider_message_sid, message_body")
+      .eq("to_phone_number", message_fields.to)
+      .eq("direction", "outbound")
+      .gte("created_at", twentyFourHoursAgo)
+      .limit(10); // Check multiple in case of high volume
+
+    if (send_check_err) {
+      warn("queue.idempotency_check_failed", {
+        queue_row_id,
+        error: send_check_err.message,
+      });
+    } else {
+      const duplicate_event = recent_sends?.find(event => clean(event.message_body) === normalized_body);
+      
+      if (duplicate_event) {
+        warn("queue.idempotency_blocked_recent_duplicate", {
+          queue_row_id,
+          matched_event_id: duplicate_event.id,
+          to: message_fields.to,
+          body_preview: normalized_body.slice(0, 50),
+        });
+
+        // Terminal Block: Mark row as duplicate_blocked
+        await supabase_client
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "duplicate_blocked",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              skip_reason: "hard_idempotency_blocked_24h",
+              matched_event_id: duplicate_event.id,
+              matched_sid: duplicate_event.provider_message_sid,
+              finalized_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+
+        return {
+          ok: true,
+          skipped: true,
+          reason: "hard_idempotency_blocked_24h",
+          queue_status: "duplicate_blocked",
+          final_queue_status: "duplicate_blocked",
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
+    }
 
     console.log("ABOUT TO SEND MESSAGE");
     console.log("SENDING SMS", {
@@ -1520,6 +1605,48 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       message: error?.message || "Unknown error",
       manual_inbox_send: Boolean(manual_inbox_send),
     });
+
+    // ── Duplicate Block Detection ────────────────────────────────────────
+    // If the provider specifically returns a duplicate error, treat as terminal.
+    const error_msg_lower = String(error?.message || "").toLowerCase();
+    const is_duplicate_error = error_msg_lower.includes("duplicate message") || 
+                              error_msg_lower.includes("already sent") ||
+                              (error?.data?.error && String(error.data.error).toLowerCase().includes("duplicate"));
+    
+    if (is_duplicate_error) {
+      warn("queue.provider_duplicate_detected", { queue_row_id, to: queue_row.to_phone_number });
+      try {
+        const supabase_client = getSupabase(deps);
+        await supabase_client
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "duplicate_blocked",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            failed_reason: "provider_duplicate_message",
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              final_queue_status: "duplicate_blocked",
+              provider_error: error?.message,
+              finalized_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+      } catch (_dup_err) {
+        warn("queue.duplicate_mark_failed", { queue_row_id });
+      }
+      return {
+        ok: true, // It's "ok" because we handled it as a terminal state
+        skipped: true,
+        reason: "provider_duplicate_message",
+        queue_status: "duplicate_blocked",
+        final_queue_status: "duplicate_blocked",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
 
     // Blank greeting errors from TextGrid guard should pause as name_missing not failed.
     const is_blank_greeting_error = /blank.*(greeting|name)|missing.*seller_first_name/i.test(error?.message || "");

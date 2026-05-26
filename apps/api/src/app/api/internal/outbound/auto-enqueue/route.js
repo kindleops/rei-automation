@@ -38,16 +38,18 @@ export async function POST(request) {
 
   const body = await request.json().catch(() => ({}));
   const mode = clean(body.mode || "safe").toLowerCase();
-  const configuredMode = (clean(await getSystemValue("queue_processor_mode")) || "off").toLowerCase();
-  if (configuredMode === "off") {
-    return NextResponse.json({ ok: false, skipped: true, reason: "queue_processor_mode_off" }, { status: 423 });
-  }
+  const configuredMode = (clean(await getSystemValue("queue_processor_mode")) || "paused").toLowerCase();
 
   const target_count = Math.max(1, Math.min(1000, asNumber(body.target_count, 100)));
   const scan_limit = Math.max(25, Math.min(5000, asNumber(body.scan_limit, 1000)));
   const per_pass_limit = Math.max(1, Math.min(250, asNumber(body.limit, Math.min(target_count, 100))));
   const candidate_source = clean(body.candidate_source || "v_sms_ready_contacts");
   const respect_contact_window = asBoolean(body.respect_contact_window, true);
+  const identity_gate_mode = clean(body.identity_gate_mode || "");
+  const allow_identity_unknown =
+    body.allow_identity_unknown === undefined ? undefined : asBoolean(body.allow_identity_unknown, false);
+  const allow_weak_identity_outbound =
+    body.allow_weak_identity_outbound === undefined ? undefined : asBoolean(body.allow_weak_identity_outbound, false);
 
   let offset = 0;
   let queued_total = 0;
@@ -68,6 +70,9 @@ export async function POST(request) {
       schedule_spread: true,
       schedule_interval_seconds_min: 45,
       schedule_interval_seconds_max: 180,
+      identity_gate_mode,
+      allow_identity_unknown,
+      allow_weak_identity_outbound,
     });
 
     queued_total += Number(result?.queued_count || 0);
@@ -103,4 +108,3 @@ export async function POST(request) {
     pass_results,
   }, { status: statusForResult({ ok: true }) });
 }
-

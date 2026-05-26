@@ -11,20 +11,31 @@ import {
   normalizeCandidateRow,
   resolveSellerIdentity,
 } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
-import { statusForResult } from "@/lib/domain/outbound/feed-candidates-request.js";
+import { normalizeFeedCandidatesInput, statusForResult } from "@/lib/domain/outbound/feed-candidates-request.js";
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
 
 function makeSupabaseWithCandidates(candidates = [], sourceName = "v_sms_campaign_queue_candidates") {
   return {
     from(table) {
+      const rows = table === sourceName ? candidates : [];
+      const missing_table_error = { code: "42P01", message: `missing ${table}` };
       return {
         select() {
           return {
+            order() {
+              return this;
+            },
+            range(start = 0, end = rows.length - 1) {
+              if (table === sourceName) {
+                return Promise.resolve({ data: rows.slice(start, end + 1), error: null });
+              }
+              return Promise.resolve({ data: [], error: missing_table_error });
+            },
             limit() {
               if (table === sourceName) {
-                return Promise.resolve({ data: candidates, error: null });
+                return Promise.resolve({ data: rows, error: null });
               }
-              return Promise.resolve({ data: [], error: { code: "42P01", message: `missing ${table}` } });
+              return Promise.resolve({ data: [], error: missing_table_error });
             },
           };
         },
@@ -77,6 +88,33 @@ function makeTextgridSupabase(numbers = []) {
       };
     },
   };
+}
+
+function makeOwnershipTemplate(template_id, overrides = {}) {
+  return {
+    id: `tpl-${template_id}`,
+    template_id: String(template_id),
+    use_case: "ownership_check",
+    stage_code: "S1",
+    language: "English",
+    is_active: true,
+    template_body: "Quick question about {property_address}",
+    ...overrides,
+  };
+}
+
+function makeTemplateRoutingCandidate(overrides = {}) {
+  return normalizeCandidateRow({
+    display_name: "Taylor Owner",
+    owner_display_name: "Taylor Owner",
+    prospect_full_name: "Taylor Owner",
+    property_address_full: "123 Main St, Houston, TX 77002",
+    property_address_state: "TX",
+    touch_number: 1,
+    template_use_case: "ownership_check",
+    stage_code: "S1",
+    ...overrides,
+  });
 }
 
 test("feed candidates statusForResult propagates valid result statuses", () => {
@@ -309,6 +347,107 @@ test("evaluateCandidateEligibility blocks duplicate queue items", async () => {
   assert.equal(decision.reason_code, REASON_CODES.DUPLICATE_QUEUE_ITEM);
 });
 
+test("normalizeFeedCandidatesInput preserves identity gate overrides", () => {
+  const normalized = normalizeFeedCandidatesInput({
+    identity_gate_mode: "relaxed",
+    allow_identity_unknown: "true",
+    allow_weak_identity_outbound: "false",
+  });
+
+  assert.equal(normalized.identity_gate_mode, "relaxed");
+  assert.equal(normalized.allow_identity_unknown, true);
+  assert.equal(normalized.allow_weak_identity_outbound, false);
+});
+
+test("evaluateCandidateEligibility allows unknown identity when allow_identity_unknown is true", async () => {
+  const decision = await evaluateCandidateEligibility(
+    {
+      ...makeCandidate(10),
+      identity_alignment: {
+        status: "unknown",
+        hardBlock: false,
+        reasons: ["missing_prospect_name"],
+        score: 0,
+      },
+    },
+    {
+      template_use_case: "ownership_check",
+      within_contact_window_now: true,
+      allow_identity_unknown: true,
+      now: new Date().toISOString(),
+    },
+    {
+      hasDuplicateQueueItem: async () => false,
+      hasActiveQueueItem: async () => false,
+    }
+  );
+
+  assert.equal(decision.ok, true);
+});
+
+test("runSupabaseCandidateFeeder relaxed identity gate can queue identity_unknown rows for testing", async () => {
+  let create_calls = 0;
+
+  const result = await runSupabaseCandidateFeeder(
+    {
+      dry_run: true,
+      limit: 5,
+      scan_limit: 5,
+      candidate_source: "v_sms_campaign_queue_candidates",
+      campaign_session_id: "session-identity-relaxed",
+      template_use_case: "ownership_check",
+      within_contact_window_now: false,
+      routing_safe_only: true,
+      identity_gate_mode: "relaxed",
+      allow_identity_unknown: true,
+    },
+    {
+      supabase: makeSupabaseWithCandidates([
+        makeCandidate(11, {
+          display_name: "John Smith",
+          prospect_full_name: null,
+          prospect_display_name: null,
+          full_name: null,
+          phone_full_name: null,
+          phone_owner: null,
+          prospect_cnam: null,
+        }),
+      ]),
+      hasDuplicateQueueItem: async () => false,
+      chooseTextgridNumber: async () => ({
+        ok: true,
+        routing_allowed: true,
+        routing_tier: "exact_market_match",
+        selection_reason: "exact_market_match",
+        routing_rule_name: "exact_market_match",
+        selected: {
+          id: 12,
+          phone_number: "+18325550111",
+          market: "houston",
+        },
+      }),
+      renderOutboundTemplate: async () => ({
+        ok: true,
+        template: { item_id: "tpl_identity_relaxed", source: "supabase" },
+        template_use_case: "ownership_check",
+        rendered_message_body: "Hi John, quick question about your property.",
+      }),
+      createSendQueueItem: async () => {
+        create_calls += 1;
+        return { ok: true, queued: false, queue_key: "identity-relaxed-key", queue_row_id: null };
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal((result.queued_count || 0) + (result.scheduled_count || 0), 1);
+  assert.equal(result.sample_created_queue_items.length, 1);
+  assert.equal(result.identity_unknown_count, 1);
+  assert.equal(result.identity_live_eligible_count, 1);
+  assert.equal(result.identity_live_ineligible_count, 0);
+  assert.equal(create_calls, 0);
+});
+
 test("runSendQueue dry_run never calls processSendQueueItem", async () => {
   let processed = 0;
 
@@ -386,6 +525,12 @@ test("normalizeCandidateRow maps v_sms_ready_contacts columns correctly", () => 
     equity_percent: 30.5,
     priority_tier: "tier_1",
     sms_eligible: true,
+    primary_prospect_id: "prospect_primary_123",
+    canonical_prospect_id: "prospect_canonical_456",
+    likely_owner: true,
+    matching_flags: "Family; Resident",
+    person_flags_text: "Family; Resident",
+    person_flags_json: ["Family", "Resident"],
   };
 
   const candidate = normalizeCandidateRow(row);
@@ -403,6 +548,13 @@ test("normalizeCandidateRow maps v_sms_ready_contacts columns correctly", () => 
   assert.equal(candidate.state_code, "NC");
   assert.equal(candidate.best_phone_id, "ph_best_00a");
   assert.equal(candidate.phone_id, "ph_best_00a");
+  assert.equal(candidate.primary_prospect_id, "prospect_primary_123");
+  assert.equal(candidate.canonical_prospect_id, "prospect_canonical_456");
+  assert.equal(candidate.likely_owner, true);
+  assert.equal(candidate.matching_flags, "Family; Resident");
+  assert.equal(candidate.prospect_matching_flags, "Family; Resident");
+  assert.equal(candidate.person_flags_text, "Family; Resident");
+  assert.deepEqual(candidate.person_flags_json, ["Family", "Resident"]);
 });
 
 test("master_owner.best_phone_id is used over other linked phones", () => {
@@ -1510,6 +1662,138 @@ test("Persona mismatch falls back to null persona template", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.template.template_id, "tpl-null");
+});
+
+for (const prospect_flag of [
+  "Family",
+  "Resident",
+  "Potential Owner",
+  "Likely Renting",
+  "Potentially Linked To Company",
+]) {
+  test(`${prospect_flag} -> can use 840801/840802`, async () => {
+    const result = await renderOutboundTemplate(
+      makeTemplateRoutingCandidate({ matching_flags: prospect_flag }),
+      {},
+      {
+        fetchSmsTemplates: async () => [
+          makeOwnershipTemplate("ownership-standard-1"),
+          makeOwnershipTemplate("840801"),
+          makeOwnershipTemplate("840802"),
+        ],
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.prospect_matching_flags, [prospect_flag]);
+    assert.equal(result.template_routing_reason, "exact_prospect_flag_relationship_probe");
+    assert.ok(["840801", "840802"].includes(result.selected_template_id));
+  });
+}
+
+for (const prospect_flag of ["Likely Owner", "Linked To Company"]) {
+  test(`${prospect_flag} -> standard ownership check only`, async () => {
+    const result = await renderOutboundTemplate(
+      makeTemplateRoutingCandidate({ matching_flags: prospect_flag }),
+      {},
+      {
+        fetchSmsTemplates: async () => [
+          makeOwnershipTemplate("ownership-standard-1"),
+          makeOwnershipTemplate("840801"),
+          makeOwnershipTemplate("840802"),
+        ],
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.prospect_matching_flags, [prospect_flag]);
+    assert.equal(result.template_routing_reason, "exact_prospect_flag_standard_ownership_only");
+    assert.equal(result.selected_template_id, "ownership-standard-1");
+  });
+}
+
+test("Likely Owner + property_address_full + seller_first_name renders normal ownership-check template", async () => {
+  const result = await renderOutboundTemplate(
+    makeTemplateRoutingCandidate({
+      matching_flags: "Likely Owner",
+      seller_first_name: "Taylor",
+      seller_full_name: "Taylor Owner",
+      property_address_full: "123 Main St, Houston, TX 77002",
+      property_address_city: "Houston",
+      property_address_state: "TX",
+      property_address_zip: "77002",
+      market: "Houston, TX",
+      property_type: null,
+    }),
+    {},
+    {
+      fetchSmsTemplates: async () => [
+        makeOwnershipTemplate("ownership-standard-render", {
+          allowed_property_groups: ["sfr", "duplex", "triplex", "fourplex", "small_multifamily"],
+          template_body:
+            "Hello {{seller_first_name}} ({{seller_full_name}}), this is {{agent_name}}. I am a local buyer in {{property_address_city}}, {{property_address_state}} {{property_address_zip}} near {{market}}. Do you still own {{property_address}}?",
+        }),
+        makeOwnershipTemplate("840801"),
+      ],
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.selected_template_id, "ownership-standard-render");
+  assert.equal(result.template_routing_reason, "exact_prospect_flag_standard_ownership_only");
+  assert.match(result.rendered_message_body, /Taylor/);
+  assert.match(result.rendered_message_body, /Taylor Owner/);
+  assert.match(result.rendered_message_body, /Houston, TX 77002/);
+  assert.match(result.rendered_message_body, /Houston, TX/);
+  assert.match(result.rendered_message_body, /123 Main St/);
+});
+
+test("no flag -> no 840801/840802", async () => {
+  const result = await renderOutboundTemplate(
+    makeTemplateRoutingCandidate({ matching_flags: "" }),
+    {},
+    {
+      fetchSmsTemplates: async () => [
+        makeOwnershipTemplate("ownership-standard-1"),
+        makeOwnershipTemplate("840801"),
+        makeOwnershipTemplate("840802"),
+      ],
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.prospect_matching_flags, []);
+  assert.equal(result.template_routing_reason, "no_exact_prospect_flag_standard_ownership_only");
+  assert.equal(result.selected_template_id, "ownership-standard-1");
+});
+
+test("identity_unknown with no flag -> no_safe_template_for_identity_unknown", async () => {
+  const result = await renderOutboundTemplate(
+    makeTemplateRoutingCandidate({
+      matching_flags: "",
+      prospect_full_name: null,
+      prospect_display_name: null,
+      full_name: null,
+      phone_full_name: null,
+      phone_owner: null,
+      prospect_cnam: null,
+    }),
+    {},
+    {
+      fetchSmsTemplates: async () => [
+        makeOwnershipTemplate("ownership-standard-1"),
+        makeOwnershipTemplate("840801"),
+        makeOwnershipTemplate("840802"),
+      ],
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason_code, REASON_CODES.NO_TEMPLATE);
+  assert.equal(result.reason, "no_safe_template_for_identity_unknown");
+  assert.deepEqual(result.prospect_matching_flags, []);
+  assert.equal(result.template_routing_reason, "identity_unknown_without_exact_prospect_flag");
+  assert.equal(result.selected_template_id, null);
 });
 
 test("No template rows return NO_TEMPLATE", async () => {

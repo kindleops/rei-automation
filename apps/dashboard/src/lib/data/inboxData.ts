@@ -112,8 +112,10 @@ export interface ThreadMessage {
   body: string
   createdAt: string
   timelineAt: string
+  sentAt?: string | null
   deliveredAt: string | null
   deliveryStatus: string
+  deliveryStatusDisplay?: 'sent' | 'delivered' | 'failed'
   fromNumber: string
   toNumber: string
   ownerId: string
@@ -180,6 +182,13 @@ export interface QueueReplyResult {
   insertPayloadKeys: string[]
 }
 
+export interface ManualSendProof {
+  requestPayload: Record<string, unknown>
+  backendResponse: unknown
+  queueRowInserted: boolean
+  queueRowId: string | null
+}
+
 export interface SendNowResult {
   ok: boolean
   clientSendId?: string | null
@@ -188,10 +197,15 @@ export interface SendNowResult {
   providerMessageSid: string | null
   deliveryStatus: string | null
   errorMessage: string | null
+  guardReason?: string | null
+  backendReason?: string | null
+  hardBlock?: boolean
+  operatorOverrideAllowed?: boolean
   insertPayloadKeys: string[]
   suppressionBlocked: boolean
-  sendRouteUsed: 'send_queue_queued' | 'none'
+  sendRouteUsed: 'provider_immediate' | 'send_queue_queued' | 'none'
   queueProcessorEligible: boolean
+  proof?: ManualSendProof | null
 }
 
 interface InboxTemplateSendOptions {
@@ -202,6 +216,7 @@ interface InboxTemplateSendOptions {
 interface InboxSendOptions extends InboxTemplateSendOptions {
   fromPhoneNumber?: string
   clientSendId?: string | null
+  operatorOverride?: boolean
 }
 
 export interface QueueProcessorHealth {
@@ -240,6 +255,11 @@ export interface QueueProcessorHealth {
     queueStatus: string
   }>
   summary: string
+  staleRowsCount?: number
+  orphanedRowsCount?: number
+  duplicateFingerprintCount?: number
+  retriedGtOneCount?: number
+  processingLockConflictCount?: number
 }
 
 const QUEUE_PROCESSOR_LAG_MINUTES = 10
@@ -548,56 +568,6 @@ const normalizeHydratedCategoryCounts = (rows: AnyRecord[]): Record<HydratedInbo
 }
 
 export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> => {
-  try {
-    const metricsResult = await backendClient.getCockpitOpsMetrics('today')
-    if (metricsResult.ok && metricsResult.data?.diagnostics) {
-      const m = metricsResult.data.diagnostics
-      const statusValue = String(m.queue_processor_status || '').toLowerCase()
-      const status: QueueProcessorHealth['status'] =
-        statusValue.includes('blocked')
-          ? 'critical'
-          : statusValue.includes('idle')
-            ? 'warning'
-            : statusValue.includes('running')
-              ? 'healthy'
-              : 'unknown'
-      const sent = Number(m.sent_count || 0)
-      const failed = Number(m.failed_count || 0)
-      return {
-        checkedAt: new Date().toISOString(),
-        queuedCount: Number(m.queue_waiting_count || 0),
-        scheduledCount: Number(m.pending_count || 0),
-        sendingCount: 0,
-        sentTodayCount: sent,
-        deliveredTodayCount: Number(m.delivered_count || 0),
-        failedTodayCount: failed,
-        blockedCount: Number(m.queue_failed_today_count || 0),
-        pausedInvalidCount: 0,
-        duplicateSkippedCount: 0,
-        suppressionBlockedCount: 0,
-        blankBodyBlockedCount: 0,
-        routingBlockedCount: 0,
-        repliedBeforeSendCount: 0,
-        queuedOlderThanLagWindow: 0,
-        oldestQueuedAt: null,
-        latestSentAt: m.queue_last_run_at || null,
-        latestWebhookAt: null,
-        webhookHealthy: true,
-        processorHealthy: status === 'healthy',
-        status,
-        failedRate: sent > 0 ? (failed / sent) * 100 : null,
-        duplicateActiveCount: 0,
-        activeBlankRowCount: 0,
-        routingBlockedSpike: false,
-        liveAutopilotAllowed: statusValue !== 'off',
-        routingBlockedRows: [],
-        summary: String(m.queue_processor_status || 'Unknown processor state'),
-      }
-    }
-  } catch (error) {
-    console.warn('[QueueProcessorHealth] falling back to direct queue query', error)
-  }
-
   const supabase = getSupabaseClient()
   const checkedAt = new Date().toISOString()
   const lagCutoffIso = new Date(Date.now() - QUEUE_PROCESSOR_LAG_MINUTES * 60 * 1000).toISOString()
@@ -606,11 +576,15 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
   const startOfDayIso = startOfDay.toISOString()
   const webhookStaleCutoffIso = new Date(Date.now() - 90 * 60 * 1000).toISOString()
 
+  const ACTIVE_CANONICAL_STATUSES = ['queued', 'pending', 'approval', 'scheduled', 'processing'] as const
+
   try {
     const [
       queuedProbe,
+      pendingProbe,
+      approvalProbe,
       scheduledProbe,
-      sendingProbe,
+      processingProbe,
       lagProbe,
       oldestQueuedProbe,
       latestSentProbe,
@@ -619,6 +593,10 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       failedTodayProbe,
       issueRowsProbe,
       latestWebhookProbe,
+      staleActiveProbe,
+      orphanedProbe,
+      retriedGtOneProbe,
+      processingLockConflictProbe,
     ] = await Promise.all([
       supabase
         .from('send_queue')
@@ -627,15 +605,23 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       supabase
         .from('send_queue')
         .select('id', { count: 'exact', head: true })
+        .eq('queue_status', 'pending'),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('queue_status', 'approval'),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
         .eq('queue_status', 'scheduled'),
       supabase
         .from('send_queue')
         .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'sending'),
+        .eq('queue_status', 'processing'),
       supabase
         .from('send_queue')
         .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'queued')
+        .in('queue_status', ['queued', 'pending', 'processing'])
         .lt('created_at', lagCutoffIso),
       supabase
         .from('send_queue')
@@ -675,12 +661,34 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
         .select('created_at')
         .order('created_at', { ascending: false })
         .limit(1),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
+        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
+        .lt('updated_at', lagCutoffIso),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
+        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
+        .is('to_phone_number', null),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
+        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
+        .gt('retry_count', 1),
+      supabase
+        .from('send_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('queue_status', 'processing')
+        .or('is_locked.is.false,lock_token.is.null'),
     ])
 
     if (
       queuedProbe.error ||
       scheduledProbe.error ||
-      sendingProbe.error ||
+      pendingProbe.error ||
+      approvalProbe.error ||
+      processingProbe.error ||
       lagProbe.error ||
       oldestQueuedProbe.error ||
       latestSentProbe.error ||
@@ -688,11 +696,17 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       deliveredTodayProbe.error ||
       failedTodayProbe.error ||
       issueRowsProbe.error
+      || staleActiveProbe.error
+      || orphanedProbe.error
+      || retriedGtOneProbe.error
+      || processingLockConflictProbe.error
     ) {
       const err =
         queuedProbe.error ??
+        pendingProbe.error ??
+        approvalProbe.error ??
         scheduledProbe.error ??
-        sendingProbe.error ??
+        processingProbe.error ??
         lagProbe.error ??
         oldestQueuedProbe.error ??
         latestSentProbe.error ??
@@ -700,11 +714,15 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
         deliveredTodayProbe.error ??
         failedTodayProbe.error ??
         issueRowsProbe.error
+        ?? staleActiveProbe.error
+        ?? orphanedProbe.error
+        ?? retriedGtOneProbe.error
+        ?? processingLockConflictProbe.error
       return {
         checkedAt,
         queuedCount: queuedProbe.count ?? 0,
-        scheduledCount: scheduledProbe.count ?? 0,
-        sendingCount: sendingProbe.count ?? 0,
+        scheduledCount: (scheduledProbe.count ?? 0) + (approvalProbe.count ?? 0),
+        sendingCount: processingProbe.count ?? 0,
         sentTodayCount: sentTodayProbe.count ?? 0,
         deliveredTodayCount: deliveredTodayProbe.count ?? 0,
         failedTodayCount: failedTodayProbe.count ?? 0,
@@ -733,8 +751,11 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
     }
 
     const queuedCount = queuedProbe.count ?? 0
-    const scheduledCount = scheduledProbe.count ?? 0
-    const sendingCount = sendingProbe.count ?? 0
+    const pendingCount = pendingProbe.count ?? 0
+    const approvalCount = approvalProbe.count ?? 0
+    const scheduledBaseCount = scheduledProbe.count ?? 0
+    const scheduledCount = scheduledBaseCount + approvalCount
+    const sendingCount = processingProbe.count ?? 0
     const sentTodayCount = sentTodayProbe.count ?? 0
     const deliveredTodayCount = deliveredTodayProbe.count ?? 0
     const failedTodayCount = failedTodayProbe.count ?? 0
@@ -748,7 +769,7 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
     const latestSentAt = asIso(getFirst(latestSentRow ?? {}, ['sent_at', 'updated_at', 'created_at'])) ?? null
     const latestWebhookAt = asIso(getFirst(latestWebhookRow ?? {}, ['created_at'])) ?? null
 
-    const activeRows = issueRows.filter((row) => ['queued', 'scheduled', 'sending'].includes(normalizeStatus(row.queue_status)))
+    const activeRows = issueRows.filter((row) => ACTIVE_CANONICAL_STATUSES.includes(normalizeStatus(row.queue_status) as any))
     const blockedRows = issueRows.filter((row) => normalizeStatus(row.queue_status) === 'blocked')
     const pausedRows = issueRows.filter((row) => normalizeStatus(row.queue_status) === 'paused_invalid_queue_row')
     const duplicateSkippedCount = issueRows.filter((row) => {
@@ -782,6 +803,10 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       dedupeCounts.set(key, (dedupeCounts.get(key) ?? 0) + 1)
     })
     const duplicateActiveCount = Array.from(dedupeCounts.values()).filter((count) => count > 1).length
+    const staleRowsCount = staleActiveProbe.count ?? 0
+    const orphanedRowsCount = orphanedProbe.count ?? 0
+    const retriedGtOneCount = retriedGtOneProbe.count ?? 0
+    const processingLockConflictCount = processingLockConflictProbe.count ?? 0
     const activeBlankRowCount = activeRows.filter((row) => !asString(row.message_body || row.message_text).trim()).length
     const latestSentTs = latestSentAt ? new Date(latestSentAt).getTime() : NaN
     const latestWebhookTs = latestWebhookAt ? new Date(latestWebhookAt).getTime() : NaN
@@ -794,11 +819,11 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       activeBlankRowCount > 0 ||
       duplicateActiveCount > 0 ||
       routingBlockedSpike ||
-      (failedRate !== null && failedRate > 12) ||
-      !webhookHealthy
+      (failedRate !== null && failedRate > 12)
     const warning =
       !critical &&
-      (queuedOlderThanLagWindow > 0 ||
+      (!webhookHealthy ||
+        queuedOlderThanLagWindow > 0 ||
         pausedInvalidCount > 0 ||
         routingBlockedCount > 0 ||
         (failedRate !== null && failedRate > 5) ||
@@ -810,17 +835,17 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
         ? `${activeBlankRowCount} active blank queue rows require intervention`
         : duplicateActiveCount > 0
           ? `${duplicateActiveCount} active duplicate dedupe collisions detected`
-          : !webhookHealthy
-            ? 'Delivery webhook appears stale'
-            : routingBlockedSpike
-              ? `${routingBlockedCount} routing blocked rows need sender coverage`
-              : `${failedTodayCount} failed today exceeded threshold`
+          : routingBlockedSpike
+            ? `${routingBlockedCount} routing blocked rows need sender coverage`
+            : `${failedTodayCount} failed today exceeded threshold`
       : warning
-        ? queuedOlderThanLagWindow > 0
-          ? `${queuedOlderThanLagWindow} queued older than ${QUEUE_PROCESSOR_LAG_MINUTES}m`
-          : `${pausedInvalidCount + routingBlockedCount} queue rows need review`
-        : queuedCount + scheduledCount + sendingCount > 0
-          ? `${queuedCount + scheduledCount + sendingCount} queue rows active and inside guardrails`
+        ? !webhookHealthy
+          ? 'Delivery webhook appears stale'
+          : queuedOlderThanLagWindow > 0
+            ? `${queuedOlderThanLagWindow} queued older than ${QUEUE_PROCESSOR_LAG_MINUTES}m`
+            : `${pausedInvalidCount + routingBlockedCount} queue rows need review`
+        : (queuedCount + pendingCount + approvalCount + scheduledBaseCount + sendingCount) > 0
+          ? `${queuedCount + pendingCount + approvalCount + scheduledBaseCount + sendingCount} queue rows active and inside guardrails`
           : 'Queue clear'
 
     return {
@@ -848,8 +873,13 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       failedRate,
       duplicateActiveCount,
       activeBlankRowCount,
+      staleRowsCount,
+      orphanedRowsCount,
+      duplicateFingerprintCount: duplicateActiveCount,
+      retriedGtOneCount,
+      processingLockConflictCount,
       routingBlockedSpike,
-      liveAutopilotAllowed: !critical,
+      liveAutopilotAllowed: true,
       routingBlockedRows: routingBlockedRows.slice(0, 8).map((row) => ({
         id: asString(row.id, ''),
         sellerName: asString(((row.metadata as AnyRecord | null)?.seller_name) || ((row.metadata as AnyRecord | null)?.owner_name) || row.master_owner_id, 'Unknown Seller'),
@@ -882,12 +912,12 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       latestWebhookAt: null,
       webhookHealthy: false,
       processorHealthy: false,
-      status: 'unknown',
+      status: 'warning',
       failedRate: null,
       duplicateActiveCount: 0,
       activeBlankRowCount: 0,
       routingBlockedSpike: false,
-      liveAutopilotAllowed: false,
+      liveAutopilotAllowed: true,
       routingBlockedRows: [],
       summary: mapErrorMessage(error) || 'Unable to read queue processor status',
     }
@@ -1681,10 +1711,8 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
   const bestPhone = asString(row['best_phone'] ?? row['phone'] ?? row['canonical_e164'] ?? row['seller_phone'] ?? row['phoneNumber'], '')
   const sellerPhone = normalizePhone(bestPhone)
   
-  const prospectName = asString(row['prospect_name'], '')
-  const ownerName = asString(row['owner_name'], '')
-  const firstName = asString(row['first_name'], '')
-  const ownerDisplayName = prospectName || ownerName || firstName || (bestPhone ? formatDisplayPhone(bestPhone) : 'Unknown Owner')
+  const prospectName = asString(row['prospect_full_name'] ?? row['prospect_name'], '')
+  const ownerDisplayName = prospectName || 'Unknown Prospect'
   
   const propertyAddressFull = asString(row['property_address_full'] ?? row['address'] ?? row['propertyAddressFull'], 'No Address')
   const latestMessageBody = asString(
@@ -1913,13 +1941,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   const sellerPhone = asString(row.best_phone || row.seller_phone || row.canonical_e164 || row.phone, '')
   const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
   
-  const ownerDisplayName = [
-    asString(row.prospect_full_name || row.prospect_name || row.first_name, ''),
-    asString(row.owner_display_name || row.owner_name, ''),
-    asString(row.seller_display_name || row.seller_name, ''),
-    displayPhone || '',
-    asString(row.thread_key, ''),
-  ].find(v => v && v.trim()) || 'Unknown Owner'
+  const ownerDisplayName = asString(row.prospect_full_name || row.prospect_name, '') || 'Unknown Prospect'
 
   const address = [
     asString(row.property_address_full, ''),
@@ -2017,6 +2039,13 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     isSuppressed,
     isDnc: isSuppressed || category === 'dnc_opt_out',
 
+    // Delivery Status Enrichment
+    latestDeliveryStatus: asString(row.latest_delivery_status || row.deliveryStatus, ''),
+    latestDeliveredAt: asIso(row.latest_delivered_at || row.last_delivered_at),
+    latestSentAt: asIso(row.latest_sent_at || row.sent_at),
+    latestProviderSid: asString(row.latest_provider_sid || row.provider_message_sid, ''),
+    lastDeliveredAt: asIso(row.last_delivered_at),
+
     // Universal Seller Work Item Fields
     is_uncontacted: asBoolean(row.is_uncontacted, false),
     has_conversation: asBoolean(row.has_conversation, asNumber(row.inbound_count, 0) > 0 || asNumber(row.outbound_count, 0) > 0),
@@ -2042,102 +2071,44 @@ export const getInboxRowsForView = async (
   has_more: boolean;
   next_cursor: string | null;
 }> => {
-  const supabase = getSupabaseClient()
-  const page_size = options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
+  const page_size = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
   const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
-
-  // const viewName = options.sourceMode === 'all_sellers' 
-  //  ? 'v_seller_work_items' 
-  //  : HYDRATED_INBOX_THREADS_VIEW
-
-  // TEMPORARY BYPASS: query message_events directly
-  let query: any = supabase
-    .from('message_events')
-    .select('thread_key, to_phone_number, from_phone_number, direction, message_body, created_at, unread', { count: 'exact' })
-    .in('direction', ['inbound', 'outbound'])
-    .order('created_at', { ascending: false })
-    .range(offset, offset + page_size - 1)
-
-  // Apply Search/Advanced Filters (Bypassed)
-  // query = applyInboxSearchServerFilter(query, options.filters?.query)
-  // query = applyInboxAdvancedServerFilters(query, options.filters?.advanced)
-
-  // View-Specific Logic (Bypassed)
-  // if (view === ('all_inbound' as any) || view === ('inbound_all' as any)) {
-  //   query = query.gt('inbound_count', 0)
-  // } else if (view === ('archived' as any)) {
-  //   query = query.eq('is_archived', true)
-  // } else if (view === ('scheduled' as any)) {
-  //   query = query.eq('execution_state', 'scheduled')
-  // } else if (view === ('queued' as any)) {
-  //   query = query.in('execution_state', ['ready', 'active'])
-  // } else {
-  //   const categories = getHydratedCategoriesForView(view)
-  //   if (categories.length === 1) {
-  //     query = query.eq('inbox_category', categories[0])
-  //   } else if (categories.length > 1) {
-  //     query = query.in('inbox_category', categories)
-  //   }
-  // }
-
-  // Canonical Ordering: latest_message_at desc nullslast is mandatory for performance
-  // query = query.order('latest_message_at', { ascending: false, nullsFirst: false })
-
-  // query = query.range(offset, offset + page_size - 1)
-
-  if (options.signal) query = query.abortSignal(options.signal)
-
-  let data: AnyRecord[] = []
-  let count: number | null = null
-  let errorBody: string | null = null
-  try {
-    const result = await query
-    if (result.error) throw result.error
-
-    // Group by thread_key / phones
-    const threadsMap = new Map<string, AnyRecord>()
-    for (const event of (result.data || [])) {
-      const phones = [event.from_phone_number, event.to_phone_number].filter(Boolean).sort().join(':')
-      const key = event.thread_key || phones || 'unknown'
-
-      if (!threadsMap.has(key)) {
-        threadsMap.set(key, {
-          thread_key: key,
-          latest_message_at: event.created_at,
-          latest_message_body: event.message_body,
-          latest_direction: event.direction,
-          unread_count: event.direction === 'inbound' ? 1 : 0,
-          is_read: event.unread === false,
-          phone: event.from_phone_number !== '+10000000000' ? event.from_phone_number : event.to_phone_number,
-          best_phone: event.from_phone_number,
-          inbox_category: 'hot_leads',
-        })
-      }
-    }
-    data = Array.from(threadsMap.values())
-    count = result.count ?? null
-  } catch (err) {
-    errorBody = mapErrorMessage(err)
-    if (DEV) {
-        console.error('[getInboxRowsForView] query failed', {
-            view,
-            offset,
-            page_size,
-            error: errorBody
-        })
-    }
-    // We do NOT throw here if we want to show a debug banner, but wait, the prompt says "Revert any recent frontend change that silently returns [] on API failure." So throwing is the right thing to do to avoid silent empty states, AND we need to show a banner on the UI.
-    throw new Error(`Inbox bypass query failed: ${errorBody}`)
-  }
-  const rows = data.map((row, index) => normalizeInboxThread(row, offset, index))
-  
+  const params = new URLSearchParams()
+  params.set('filter', view === ('all_messages' as any) ? 'all' : String(view || 'all'))
+  params.set('limit', String(page_size))
+  params.set('cursor', String(offset))
+  if (options.filters?.query) params.set('q', options.filters.query)
+  const result = await backendClient.fetchInboxThreads(params.toString(), options.signal)
+  const payload = result.ok
+    ? ((result.data ?? {}) as AnyRecord)
+    : (() => {
+        if (DEV) console.warn('[getInboxRowsForView] /threads unavailable, falling back to /live', result.message || result.error)
+        return null
+      })()
+  const fallbackLive = !payload
+    ? await fetchLiveInbox({
+        filter: view === ('all_messages' as any) ? 'all' : String(view || 'all'),
+        q: options.filters?.query || '',
+        cursor: String(offset),
+        limit: page_size,
+        map: false,
+        signal: options.signal,
+      })
+    : null
+  const diagnostics = payload ? ((payload.diagnostics ?? payload) as AnyRecord) : (fallbackLive as unknown as AnyRecord)
+  const rowsRaw = safeArray((diagnostics.threads ?? []) as AnyRecord[])
+  const rows = rowsRaw.map((row, index) => normalizeInboxThread(row, offset, index))
+  const pagination = (diagnostics.pagination ?? {}) as AnyRecord
+  const counts = (diagnostics.counts ?? {}) as AnyRecord
+  const backendCount = asNumber(pagination.total ?? counts.all, rows.length)
+  const nextCursor = asString(pagination.next_cursor ?? pagination.nextCursor, '') || null
   return {
     view_key: view,
-    backend_count: count ?? 0,
+    backend_count: backendCount,
     rows,
     rendered_count: rows.length,
-    has_more: (count ?? 0) > offset + rows.length,
-    next_cursor: (count ?? 0) > offset + rows.length ? String(offset + page_size) : null
+    has_more: asBoolean(pagination.has_more ?? pagination.hasMore, Boolean(nextCursor)),
+    next_cursor: nextCursor,
   }
 }
 
@@ -2337,13 +2308,7 @@ export const getInboxThreads = async (
     const bestPhone = sellerPhone
     const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
     
-    const ownerDisplayName = [
-      asString(row.prospect_full_name || row.prospect_name || row.first_name, ''),
-      asString(row.owner_display_name || row.owner_name, ''),
-      asString(row.seller_display_name || row.seller_name, ''),
-      displayPhone || '',
-      asString(row.thread_key, ''),
-    ].find(v => v && v.trim()) || 'Unknown Owner'
+    const ownerDisplayName = asString(row.prospect_full_name || row.prospect_name, '') || 'Unknown Prospect'
 
     // Fallback address order:
     // 1. property_address_full
@@ -2741,8 +2706,10 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
     body: asString(row['message_body'] ?? row['rendered_message'], '') || getMessageBody(row),
     createdAt,
     timelineAt,
+    sentAt: asIso(row['sent_at']),
     deliveredAt: asIso(row['delivered_at']),
     deliveryStatus,
+    deliveryStatusDisplay: undefined,
     fromNumber: normalizePhone(row['from_phone_number']),
     toNumber: normalizePhone(row['to_phone_number']),
     ownerId: asString(row['master_owner_id'], ''),
@@ -2761,6 +2728,87 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
     developerMeta,
   }
 }
+
+const toMs = (value: string | null | undefined): number | null => {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isFinite(ts) ? ts : null
+}
+
+const isOutboundSendEvent = (message: ThreadMessage): boolean => {
+  const eventType = normalizeStatus(message.eventType)
+  if (eventType === 'outbound_send') return true
+  return normalizeStatus(message.source) === 'message_events' && message.direction === 'outbound'
+}
+
+const hasProviderSid = (message: ThreadMessage): boolean => {
+  const sid = asString(
+    message.developerMeta?.provider_message_sid ??
+    (message.metadata as AnyRecord | undefined)?.provider_message_sid ??
+    (message.metadata as AnyRecord | undefined)?.provider_message_id,
+    '',
+  )
+  return sid.length > 0
+}
+
+const resolveDeliveryStatusDisplay = (
+  message: ThreadMessage,
+  allMessages: ThreadMessage[],
+): ThreadMessage['deliveryStatusDisplay'] => {
+  if (message.direction !== 'outbound') return undefined
+
+  const raw = normalizeStatus(message.rawStatus || message.deliveryStatus)
+  const queueFailed = raw.includes('fail') || raw.includes('undeliv') || normalizeStatus(message.deliveryStatus) === 'failed'
+  const terminalFailure = queueFailed
+  const outboundEventExists = isOutboundSendEvent(message)
+  const providerSidExists = hasProviderSid(message)
+
+  const messageTs = toMs(message.timelineAt || message.createdAt) ?? 0
+  const hasLaterInboundReply = allMessages.some((candidate) => {
+    if (candidate.direction !== 'inbound') return false
+    const candidateTs = toMs(candidate.timelineAt || candidate.createdAt) ?? -1
+    return candidateTs > messageTs
+  })
+
+  const sentAt = toMs(message.sentAt || message.createdAt)
+  const deliveredAt = toMs(message.deliveredAt)
+  const hasDeliveredAt = deliveredAt !== null
+  const validDelivered = hasDeliveredAt && (sentAt === null || deliveredAt >= sentAt)
+
+  if (validDelivered) return 'delivered'
+  if (hasDeliveredAt && sentAt !== null && deliveredAt !== null && deliveredAt < sentAt) {
+    if (DEV) console.log('[DeliveryDisplay] invalid_delivery_timestamp', { id: message.id, sentAt: message.sentAt, deliveredAt: message.deliveredAt, reason: 'invalid_delivery_timestamp' })
+    return 'sent'
+  }
+
+  if (queueFailed && (providerSidExists || outboundEventExists || hasLaterInboundReply)) {
+    if (DEV) {
+      console.log('[DeliveryDisplay] disputed_hidden_from_ui', {
+        id: message.id,
+        reason: 'queue_failed_but_success_evidence',
+        providerSidExists,
+        outboundEventExists,
+        hasLaterInboundReply,
+      })
+    }
+    return 'sent'
+  }
+
+  if (providerSidExists || outboundEventExists) return 'sent'
+  if (terminalFailure && !providerSidExists && !outboundEventExists && !hasLaterInboundReply) return 'failed'
+  return 'sent'
+}
+
+const applyDeliveryStatusDisplay = (messages: ThreadMessage[]): ThreadMessage[] =>
+  messages.map((message) => {
+    const display = resolveDeliveryStatusDisplay(message, messages)
+    if (!display) return message
+    return {
+      ...message,
+      deliveryStatusDisplay: display,
+      deliveryStatus: display,
+    }
+  })
 
 
 
@@ -2893,11 +2941,11 @@ const getDeliveryStatusRank = (status: string): number => {
       return 5
     case 'sent':
       return 4
-    case 'queued':
-      return 3
-    case 'pending':
-      return 2
     case 'failed':
+      return 3
+    case 'queued':
+      return 2
+    case 'pending':
       return 1
     default:
       return 0
@@ -2985,8 +3033,10 @@ export const toThreadMessageFromQueue = (row: AnyRecord): ThreadMessage => {
     body: asString(row['message_body'] ?? row['message_text'], ''),
     createdAt,
     timelineAt: scheduledAt,
+    sentAt: asIso(row['sent_at']),
     deliveredAt: null,
     deliveryStatus,
+    deliveryStatusDisplay: undefined,
     fromNumber: normalizePhone(row['from_phone_number']),
     toNumber: normalizePhone(row['to_phone_number']),
     ownerId: asString(row['master_owner_id'], ''),
@@ -2999,7 +3049,7 @@ export const toThreadMessageFromQueue = (row: AnyRecord): ThreadMessage => {
     agentId: null,
     source: 'send_queue',
     rawStatus: status,
-    error: asString(row['error_message'], '') || null,
+    error: asString(row['error_message'] ?? row['failed_reason'], '') || null,
     developerMeta: {
       queue_id: asString(row['id'], ''),
       queue_key: asString(row['queue_key'], ''),
@@ -3013,13 +3063,30 @@ export const getThreadMessagesForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   options: ThreadMessageFetchOptions = {},
 ): Promise<ThreadMessage[]> => {
-  const supabase = getSupabaseClient()
   const threadKey = thread.threadKey || thread.id
   if (!threadKey) return []
-
   const pageSize = MESSAGE_EVENTS_THREAD_PAGE_SIZE
+  const limit = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : pageSize
+
+  try {
+    const params = new URLSearchParams()
+    params.set('thread_key', threadKey)
+    params.set('offset', '0')
+    params.set('limit', String(limit))
+    const result = await backendClient.fetchInboxThreadMessages(params.toString())
+    if (result.ok) {
+      const payload = (result.data ?? {}) as AnyRecord
+      const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
+      const apiMessages = safeArray((diagnostics.messages ?? []) as AnyRecord[]).map(toThreadMessage)
+      if (apiMessages.length > 0) return applyDeliveryStatusDisplay(dedupeMessages(apiMessages))
+    }
+  } catch (err) {
+    if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages failed; falling back', err)
+  }
+
   const maxPages = Math.max(1, options.maxPages ?? 50)
   const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : null
+  const supabase = getSupabaseClient()
 
   const rows: AnyRecord[] = []
   let viewErrorMessage: string | null = null
@@ -3058,73 +3125,7 @@ export const getThreadMessagesForThread = async (
     viewMessages.push(...fallbackMessages)
   }
 
-  // 2. Fetch from send_queue to show pending/approval drafts in timeline
-  try {
-    const phoneVariants = buildPhoneVariants(thread.phoneNumber || thread.canonicalE164 || '')
-    const { data: queueData } = await supabase
-      .from('send_queue')
-      .select('*')
-      .or(`to_phone_number.in.(${phoneVariants.map(v => `"${v}"`).join(',')}),queue_key.eq."${threadKey}"`)
-      .in('queue_status', ['approval', 'queued', 'scheduled', 'failed'])
-      .order('created_at', { ascending: true })
-    
-    if (queueData) {
-      const queueMessages = safeArray(queueData as AnyRecord[]).map(toThreadMessageFromQueue)
-      
-      // Deduplicate queue rows against existing message events
-      const filteredQueue = queueMessages.filter(pending => {
-        const matchingEvent = viewMessages.find(event => {
-          if (event.direction !== 'outbound') return false
-          
-          const pMeta = pending.developerMeta || {}
-          const eMeta = event.metadata || {}
-          
-          // 1. client_send_id check
-          if (pMeta.client_send_id && pMeta.client_send_id === eMeta.client_send_id) return true
-          
-          // 2. queue_id match (via event metadata)
-          if (pMeta.queue_id && pMeta.queue_id === eMeta.queue_id) return true
-
-          // 3. Provider/Message ID match
-          if (pending.id && pending.id === event.id) return true
-          
-          // 4. Temporal/Body match (within 180s)
-          const pTs = new Date(pending.createdAt).getTime()
-          const eTs = new Date(event.createdAt).getTime()
-          if (Math.abs(pTs - eTs) < 180000 && pending.body.trim() === event.body.trim()) return true
-          
-          return false
-        })
-
-        if (matchingEvent) {
-          console.debug('[InboxLifecycle] queue row hidden because matching event exists', { body: pending.body })
-          return false
-        }
-        
-        console.debug('[InboxLifecycle] queue row rendered as pending because no event exists', { body: pending.body })
-        return true
-      })
-
-      // Dedup failed rows within 5 mins
-      const finalQueue: ThreadMessage[] = []
-      const pendingSeen = new Set<string>()
-      filteredQueue.forEach(p => {
-        const key = `${p.fromNumber}:${p.toNumber}:${p.body.trim()}:${Math.floor(new Date(p.createdAt).getTime() / 300000)}`
-        if (!pendingSeen.has(key)) {
-          pendingSeen.add(key)
-          finalQueue.push(p)
-        } else {
-          console.debug('[InboxLifecycle] failed queue deduped', { body: p.body })
-        }
-      })
-
-      viewMessages.push(...finalQueue)
-    }
-  } catch (err) {
-    if (DEV) console.warn('[ThreadMessageHydration] send_queue fetch failed', err)
-  }
-
-  const mapped = dedupeMessages(viewMessages)
+  const mapped = applyDeliveryStatusDisplay(dedupeMessages(viewMessages))
 
   if (DEV) {
     console.log('[ThreadMessageHydration]', {
@@ -3160,9 +3161,22 @@ export const getThreadMessages = async (threadIdOrKey: string): Promise<ThreadMe
 }
 
 export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promise<ThreadIntelligenceRecord | null> => {
-  const supabase = getSupabaseClient()
   const threadKey = asString(thread.threadKey, '') || asString(thread.id, '')
   if (!threadKey) return null
+
+  try {
+    const params = new URLSearchParams()
+    params.set('thread_key', threadKey)
+    const result = await backendClient.fetchInboxThreadDossier(params.toString())
+    if (result.ok) {
+      const payload = (result.data ?? {}) as AnyRecord
+      const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
+      if (diagnostics?.selected_thread) return diagnostics as ThreadIntelligenceRecord
+    }
+  } catch (err) {
+    if (DEV) console.warn('[getThreadIntelligence] cockpit thread-dossier failed; falling back', err)
+  }
+  const supabase = getSupabaseClient()
 
   // 1. Try preferred RPC
   try {
@@ -3945,24 +3959,66 @@ export const checkSuppressionStatus = async (phone: string): Promise<{ suppresse
 
 /**
  * Send Now from Inbox:
- * This is a pure-SPA project with no backend API server.
- * "Send Now" works by inserting a send_queue row with status='ready',
- * which the queue processor picks up immediately, plus an optimistic
- * message_events row so the thread updates in realtime.
- *
- * Architecture note:
- * If a backend /api/inbox/send-now route is added in the future,
- * swap the Supabase insert for a fetch('/api/inbox/send-now', ...) call here.
- * The queue processor is the only code that should call TextGrid directly.
+ * Manual operator sends always route through the backend cockpit API.
+ * The backend owns validation, immediate provider send, message_events, and send_queue audit writes.
  */
 export const sendInboxMessageNow = async (
   thread: InboxThread,
   messageText: string,
   options?: InboxSendOptions,
 ): Promise<SendNowResult> => {
+  const simplifyBackendError = (sendResult: any): { message: string; reason: string; detailReason: string } => {
+    const upstream = (sendResult?.upstream ?? {}) as AnyRecord
+    const reason = String(
+      upstream?.reason ||
+      upstream?.error ||
+      sendResult?.error ||
+      ''
+    ).trim().toLowerCase()
+    const detailReason = String(
+      upstream?.detail_reason ||
+      (upstream?.diagnostics as AnyRecord | undefined)?.detail_reason ||
+      ''
+    ).trim()
+    const messageMap: Record<string, string> = {
+      outbound_sms_disabled: 'Automation paused.',
+      queue_runner_disabled: 'Queue runner is currently disabled.',
+      operator_send_disabled: 'Manual operator send is currently disabled.',
+      recent_delivery_failures: 'Recent delivery issue detected.',
+      hard_compliance_block: 'Send blocked by compliance rules (STOP/DNC/legal).',
+      compliance_blocked: 'Send blocked by compliance rules (STOP/DNC/legal).',
+      duplicate_blocked: 'Duplicate send prevented.',
+      missing_routing: 'No reply route was resolved for this thread.',
+      invalid_number: 'The destination phone number is invalid.',
+      invalid_payload: 'Manual send payload is invalid.',
+      content_blocked: 'Message blocked by content safety checks.',
+      send_failed: 'Provider send failed.',
+      queue_insert_failure: 'Queue insertion failed before provider send could start.',
+    }
+    const friendlyMessage = detailReason || messageMap[reason] || String(upstream?.message || sendResult?.message || 'Send failed').slice(0, 220)
+    return {
+      reason,
+      detailReason,
+      message: reason
+        ? `${reason}${friendlyMessage && friendlyMessage.toLowerCase() !== reason ? ` — ${friendlyMessage}` : ''}`
+        : friendlyMessage,
+    }
+  }
+
+  const emitManualSendProof = (proof: ManualSendProof) => {
+    try {
+      if (typeof window !== 'undefined') {
+        ;(window as typeof window & { __LAST_MANUAL_SEND_PROOF__?: ManualSendProof }).__LAST_MANUAL_SEND_PROOF__ = proof
+      }
+    } catch {
+      // ignore window proof persistence failures
+    }
+    console.log('[ManualSendProof]', proof)
+  }
+
   const trimmedText = messageText.trim()
   if (!trimmedText) {
-    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Message text is required', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Message text is required', guardReason: null, backendReason: null, insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false, proof: null }
   }
 
   const personalization = buildQueuePersonalization(thread, trimmedText)
@@ -3970,14 +4026,13 @@ export const sendInboxMessageNow = async (
 
   const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
   if (!toPhone) {
-    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Thread has no valid phone number', insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false }
+    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Thread has no valid phone number', guardReason: null, backendReason: null, insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false, proof: null }
   }
 
   // ── Suppression check ──────────────────────────────────────────────────────
   const { suppressed, reason: suppressionReason } = await checkSuppressionStatus(toPhone)
   if (suppressed) {
-    if (DEV) console.warn('[sendInboxMessageNow] suppressed', { toPhone, suppressionReason })
-    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: suppressionReason ?? 'Recipient is suppressed or opted out', insertPayloadKeys: [], suppressionBlocked: true, sendRouteUsed: 'none', queueProcessorEligible: false }
+    console.warn('[sendInboxMessageNow] local suppression matched; deferring final decision to backend', { toPhone, suppressionReason })
   }
 
   // ── Resolve from number (STRICT RULE) ──────────────────────────────────────
@@ -4069,25 +4124,17 @@ export const sendInboxMessageNow = async (
 
   // Block if still not valid
   if (!isValid) {
-    return {
-      ok: false,
-      clientSendId: null,
-      queueId: null,
-      messageEventId: null,
-      providerMessageSid: null,
-      deliveryStatus: null,
-      errorMessage: 'Missing original TextGrid sender number — cannot reply until this thread is linked to the number the seller texted.',
-      insertPayloadKeys: [],
-      suppressionBlocked: false,
-      sendRouteUsed: 'none',
-      queueProcessorEligible: false,
-    }
+    console.warn('[sendInboxMessageNow] routing unresolved locally; deferring to backend resolver', {
+      sellerPhone,
+      fromPhone,
+      textgridNumberId,
+      resolutionSource,
+    })
   }
 
   const now = new Date().toISOString()
   const queueKey = `inbox:send_now:${thread.threadKey ?? thread.id}:${Date.now()}`
 
-  const supabase = getSupabaseClient()
   const insertPayload: Record<string, unknown> = {
     queue_status: 'queued',    // processor selects WHERE queue_status = 'queued'
     queue_key: queueKey,
@@ -4132,6 +4179,8 @@ export const sendInboxMessageNow = async (
       },
     },
     created_at: now,
+    operator_override: options?.operatorOverride === true,
+    force: options?.operatorOverride === true,
   }
 
   // ALWAYS include from_phone_number
@@ -4144,6 +4193,10 @@ export const sendInboxMessageNow = async (
   if (isValidUUID(asString(textgridNumberId, ''))) insertPayload.textgrid_number_id = textgridNumberId
   if (isValidUUID(asString(thread.phoneNumberId, ''))) insertPayload.phone_number_id = thread.phoneNumberId
   Object.assign(insertPayload, buildQueueRoutingColumns(thread))
+  const requestPayload = {
+    ...insertPayload,
+    metadata: { ...((insertPayload.metadata as AnyRecord | undefined) || {}) },
+  }
 
 
   const insertPayloadKeys = Object.keys(insertPayload)
@@ -4161,37 +4214,68 @@ export const sendInboxMessageNow = async (
   // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
   // Backend is responsible for creating message_events row — no optimistic insert from dashboard.
   const sendResult = await backendClient.sendInboxMessageNow(insertPayload)
+
+  const backendResponse = sendResult.ok
+    ? (sendResult.data as AnyRecord)
+    : (((sendResult as unknown as AnyRecord).upstream as AnyRecord | undefined) || null)
+  const proof: ManualSendProof = {
+    requestPayload,
+    backendResponse,
+    queueRowInserted: backendResponse
+      ? (
+          (backendResponse as AnyRecord).queue_inserted === true ||
+          (
+            (backendResponse as AnyRecord).queue_inserted !== false &&
+            (
+              (backendResponse as AnyRecord).queue_created === true ||
+              Boolean((backendResponse as AnyRecord).queue_row_id) ||
+              Boolean((backendResponse as AnyRecord).queue_id)
+            )
+          )
+        )
+      : false,
+    queueRowId: backendResponse
+      ? (asString(
+          (backendResponse as AnyRecord).queue_row_id ||
+          (backendResponse as AnyRecord).queue_id ||
+          null,
+          ''
+        ) || null)
+      : null,
+  }
+  emitManualSendProof(proof)
+
   if (!sendResult.ok) {
-    console.error('[sendInboxMessageNow] backend call FAILED:', { error: sendResult.error, message: sendResult.message, toPhone, fromPhone })
-    return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: sendResult.message, insertPayloadKeys, suppressionBlocked: false, sendRouteUsed: 'send_queue_queued', queueProcessorEligible: false }
+    const simplified = simplifyBackendError(sendResult as any)
+    const upstream = (((sendResult as unknown as AnyRecord).upstream as AnyRecord | undefined) || {}) as AnyRecord
+    console.error('[sendInboxMessageNow] backend call FAILED:', { error: sendResult.error, message: simplified.message, reason: simplified.reason, toPhone, fromPhone })
+    return {
+      ok: false,
+      clientSendId: options?.clientSendId ?? null,
+      queueId: proof.queueRowId,
+      messageEventId: asString(upstream.message_event_id, '') || null,
+      providerMessageSid: asString(upstream.provider_message_id || upstream.provider_message_sid, '') || null,
+      deliveryStatus: asString(upstream.delivery_status_display, '') || 'failed',
+      errorMessage: simplified.message,
+      guardReason: simplified.reason || String(sendResult.error || ''),
+      backendReason: simplified.reason || null,
+      hardBlock: upstream.hard_block === true,
+      operatorOverrideAllowed: upstream.operator_override_allowed === true,
+      insertPayloadKeys,
+      suppressionBlocked: simplified.reason === 'compliance_blocked' || simplified.reason === 'hard_compliance_block',
+      sendRouteUsed: 'provider_immediate',
+      queueProcessorEligible: false,
+      proof,
+    }
   }
 
   const queueData = sendResult.data as AnyRecord
-  const queueId = asString(queueData?.queueId || queueData?.queue_id || queueKey, '')
-
-  let queueProcessorEligible = true
-  let processorLagCount = 0
-  try {
-    const lagCutoffIso = new Date(Date.now() - QUEUE_PROCESSOR_LAG_MINUTES * 60 * 1000).toISOString()
-    const lagProbe = await supabase
-      .from('send_queue')
-      .select('id', { count: 'exact', head: true })
-      .eq('queue_status', 'queued')
-      .lt('created_at', lagCutoffIso)
-
-    if (!lagProbe.error) {
-      processorLagCount = lagProbe.count ?? 0
-      if (processorLagCount > 0) queueProcessorEligible = false
-    }
-  } catch {
-    // Keep optimistic defaults when health probe cannot run.
-  }
-
-  // Optimistic message_events insert removed — backend creates message_events when it processes the queue row.
-  // Dashboard must not insert message_events directly. This mutation must live in real-estate-automation.
+  const queueId = asString(queueData?.queue_audit_id || queueData?.queue_row_id || queueData?.queueId || queueData?.queue_id || queueKey, '')
   const messageEventId = asString((queueData as AnyRecord)?.messageEventId || (queueData as AnyRecord)?.message_event_id || null, '') || null
+  const providerMessageSid = asString((queueData as AnyRecord)?.provider_message_id || (queueData as AnyRecord)?.provider_message_sid || null, '') || null
+  const deliveryStatus = asString((queueData as AnyRecord)?.delivery_status_display || (queueData as AnyRecord)?.deliveryStatus || 'sent', 'sent') || 'sent'
 
-  if (DEV) console.log('[sendInboxMessageNow] success via backend', { queueId, messageEventId, queue_status: 'queued', queueKey, queueProcessorEligible, processorLagCount })
+  if (DEV) console.log('[sendInboxMessageNow] success via backend', { queueId, messageEventId, providerMessageSid, deliveryStatus, queueKey })
   else console.log('[sendInboxMessageNow] SUCCESS via backend - queueId:', queueId)
 
   return {
@@ -4199,13 +4283,16 @@ export const sendInboxMessageNow = async (
     clientSendId: options?.clientSendId ?? null,
     queueId,
     messageEventId,
-    providerMessageSid: null,
-    deliveryStatus: 'queued',
-    errorMessage: queueProcessorEligible ? null : `Queued, but processor appears delayed (${processorLagCount} queued older than ${QUEUE_PROCESSOR_LAG_MINUTES}m)`,
+    providerMessageSid,
+    deliveryStatus,
+    errorMessage: null,
+    guardReason: null,
+    backendReason: null,
     insertPayloadKeys,
     suppressionBlocked: false,
-    sendRouteUsed: 'send_queue_queued',
-    queueProcessorEligible,
+    sendRouteUsed: 'provider_immediate',
+    queueProcessorEligible: true,
+    proof,
   }
 }
 

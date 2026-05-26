@@ -6,6 +6,7 @@ const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_outbound_discovery_fresh",
   "outbound_candidate_snapshot",
   "v_sms_ready_contacts",
+  "v_sms_ready_contacts_clean",
   "v_sms_campaign_queue_candidates",
   "v_launch_sms_tier1",
 ]);

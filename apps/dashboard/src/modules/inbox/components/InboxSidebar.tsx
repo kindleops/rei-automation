@@ -125,6 +125,26 @@ const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
   return values.some((value) => value.toLowerCase().includes(search))
 }
 
+const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
+  const raw = readString(
+    thread,
+    'status_bucket',
+    'inbox_category',
+    'inboxCategory',
+    'priority_bucket',
+    'priorityBucket',
+  ).toLowerCase()
+  if (!raw) return null
+  if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
+  if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
+  if (raw.includes('needs_review') || raw.includes('manual_review')) return 'needs_review'
+  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated')) return 'follow_up'
+  if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
+  if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
+  if (raw.includes('all')) return 'all'
+  return null
+}
+
 const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecision) => {
   const name = resolveThreadPrimaryName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Owner'
   const address = resolveThreadAddressLine(thread) || readString(thread, 'property_address_full', 'propertyAddressFull') || 'Property Unknown'
@@ -172,8 +192,42 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   if ((thread as any).absenteeOwner || (decision as any).absentee_owner) intelTags.push('Absentee')
   if ((thread as any).distressScore > 70) intelTags.push('Distressed')
 
+  // 1. Delivery Status Logic (Outbound ONLY)
+  let deliveryStatus: 'sent' | 'delivered' | 'failed' | null = null
+  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase()
+
+  if (latestDirection === 'outbound') {
+    const latestDeliveredAt = (thread as any).latestDeliveredAt || (thread as any).lastDeliveredAt
+    const latestSentAt = (thread as any).latestSentAt || (thread as any).sentAt
+    const latestStatus = String((thread as any).latestDeliveryStatus || (thread as any).deliveryStatus || '').toLowerCase()
+
+    if (latestDeliveredAt || latestStatus === 'delivered') {
+      deliveryStatus = 'delivered'
+    } else if (latestStatus === 'failed') {
+      deliveryStatus = 'failed'
+    } else if (latestSentAt || (thread as any).latestProviderSid || (thread as any).outbound_count > 0) {
+      deliveryStatus = 'sent'
+    }
+  }
+
+  // 2. Visual Category Logic (Inbound ONLY)
+  let visualCategory: 'positive' | 'negative' | 'autopilot' | 'review' | 'none' = 'none'
   
-  return { name, address, market, propertyType, pTypeShort, preview, timestamp, isHot, stage, stageNum, intelTags }
+  if (latestDirection === 'inbound') {
+    const intent = String((decision as any).ui_intent || (thread as any).uiIntent || '').toLowerCase()
+    
+    if (['yes', 'interested', 'positive', 'hot'].includes(intent) || isHot) {
+      visualCategory = 'positive'
+    } else if (['not_interested', 'no', 'negative', 'dnc', 'opt_out'].includes(intent)) {
+      visualCategory = 'negative'
+    } else if (thread.inboxCategory === 'automated' || (thread as any).automation_status === 'active' || (thread as any).automation_state === 'active') {
+      visualCategory = 'autopilot'
+    } else if (thread.inboxStatus === 'needs_review' || intent === 'question') {
+      visualCategory = 'review'
+    }
+  }
+
+  return { name, address, market, propertyType, pTypeShort, preview, timestamp, isHot, stage, stageNum, intelTags, deliveryStatus, visualCategory }
 }
 
 const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
@@ -188,10 +242,21 @@ const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
 )
 
 const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
-  const { name, address, market, pTypeShort, preview, timestamp, isHot, stageNum, intelTags } = getThreadVars(thread, decision)
+  const { name, address, market, pTypeShort, preview, timestamp, isHot, stageNum, intelTags, deliveryStatus, visualCategory } = getThreadVars(thread, decision)
+  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase()
+  const isInbound = latestDirection === 'inbound'
+  const isOutbound = latestDirection === 'outbound'
+
   return (
     <div role="button" tabIndex={0}
-      className={cls('nx-thread-card-rebuilt', selected && 'is-selected', decision.unread && 'is-unread')}
+      className={cls(
+        'nx-thread-card-rebuilt',
+        selected && 'is-selected',
+        decision.unread && 'is-unread',
+        isInbound && 'is-inbound',
+        isOutbound && 'is-outbound',
+        `is-category-${visualCategory}`
+      )}
       data-thread-id={thread.id} onClick={() => onSelect(thread.id)}
     >
       <div className="nx-thread-card-rebuilt__left">
@@ -217,6 +282,15 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
           {intelTags.length > 0 && <><span className="nx-thread-card-rebuilt__dot">•</span><span style={{color: '#a1a1aa'}}>{intelTags[0]}</span></>}
         </div>
         <div className="nx-thread-card-rebuilt__preview">{preview}</div>
+
+        {/* Delivery Status Icon */}
+        {deliveryStatus && (
+          <div className={cls('nx-thread-card-rebuilt__delivery-status', `is-${deliveryStatus}`)}>
+            {deliveryStatus === 'delivered' ? <Icon name="check-double" style={{ width: 14, height: 14 }} /> : 
+             deliveryStatus === 'failed' ? <Icon name="close" style={{ width: 14, height: 14 }} /> : 
+             <Icon name="check" style={{ width: 14, height: 14 }} />}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -287,8 +361,18 @@ export const InboxSidebar = ({
 }: InboxSidebarProps) => {
   const groupsRef = useRef<HTMLDivElement | null>(null)
   const loadingErrorMessage = formatLoadingError(loadingError)
+  const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
+    if (activeViewFilter === 'follow_up_due') return 'follow_up'
+    if (activeViewFilter === 'dnc_opt_out') return 'suppressed'
+    if (activeViewFilter === 'cold_no_response') return 'cold'
+    if (activeViewFilter === 'all' || activeViewFilter === 'all_messages') return 'all_conversations'
+    return activeViewFilter
+  }, [activeViewFilter])
 
-  const activeBucketConfig = useMemo(() => BUCKETS.find((bucket) => bucket.view === activeViewFilter) ?? BUCKETS.find((bucket) => bucket.bucket === 'priority') ?? BUCKETS[0], [activeViewFilter])
+  const activeBucketConfig = useMemo(
+    () => BUCKETS.find((bucket) => bucket.view === canonicalActiveView) ?? BUCKETS.find((bucket) => bucket.bucket === 'priority') ?? BUCKETS[0],
+    [canonicalActiveView],
+  )
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
   const [savedFilters, setSavedFilters] = useState<LocalSavedFilter[]>([])
   const [showManageLists, setShowManageLists] = useState(false)
@@ -315,7 +399,10 @@ export const InboxSidebar = ({
     const grouped = Object.fromEntries(BUCKETS.map((b) => [b.bucket, [] as InboxWorkflowThread[]])) as Record<CanonicalBucket, InboxWorkflowThread[]>
     const now = new Date()
     searchableThreads.forEach((thread) => {
-      const { bucket } = classifyInboxBucket(thread, now)
+      const stateBucket = resolveBucketFromThreadState(thread)
+      const { bucket } = stateBucket
+        ? { bucket: stateBucket }
+        : classifyInboxBucket(thread, now)
       grouped[bucket].push(thread)
       grouped.all.push(thread)
     })
@@ -326,6 +413,14 @@ export const InboxSidebar = ({
   }, [decisionMap, searchableThreads, visibleThreadCount])
 
   const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket as CanonicalBucket] || []
+  const fallbackActiveThreads = useMemo(() => {
+    if (activeGroupThreads.length > 0) return activeGroupThreads
+    if (canonicalActiveView === 'all_conversations') return activeGroupThreads
+    if (searchQuery.trim().length > 0) return activeGroupThreads
+    // If backend already returned rows for a tab slice but local bucket mapping is sparse,
+    // never render a blank tab: show loaded rows.
+    return sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
+  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount])
   const handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
@@ -363,7 +458,7 @@ export const InboxSidebar = ({
       </div>
       <div className="nx-sidebar-rebuilt__chips-wrap" role="tablist">
         {INBOX_CHIPS.map((item) => {
-          const countValue = numberOrNull(viewCounts[item.countKey]) ?? bucketedThreads[item.bucket]?.length ?? 0
+          const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
           return (
             <button key={item.view} type="button" className={cls('nx-inbox-chip-v2', isActive && 'is-active', item.accentClass)} onClick={(e) => {
@@ -384,6 +479,11 @@ export const InboxSidebar = ({
   const renderSecondaryControls = () => (
     <>
       <div className="nx-sidebar-rebuilt__secondary-controls">
+        {loadingErrorMessage && (
+          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={loadingErrorMessage}>
+            <Icon name="alert" /> Telemetry Degraded
+          </span>
+        )}
         <button type="button" onClick={() => {
           const name = typeof window !== 'undefined' ? window.prompt('Save current filter as:') : null
           if (!name) return
@@ -424,7 +524,7 @@ export const InboxSidebar = ({
 
   const renderListContent = (RowComp: any) => (
     <div className="nx-sidebar-rebuilt__threads">
-      {activeGroupThreads.length > 0 ? activeGroupThreads.map((thread) => {
+      {fallbackActiveThreads.length > 0 ? fallbackActiveThreads.map((thread) => {
         const decision = decisionMap.get(thread.id)
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={onSelect} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
@@ -440,7 +540,6 @@ export const InboxSidebar = ({
           <div className="nx-review50-left" ref={groupsRef}>
             {renderTopActions()}
             {renderSecondaryControls()}
-            {loadingErrorMessage && <div className="nx-sidebar-rebuilt__error"><Icon name="alert" /><span>{loadingErrorMessage}</span></div>}
             {renderMultiSelectBar()}
             <div className="nx-sidebar-rebuilt__list-container">
               {renderListContent(ConversationRow)}
@@ -463,7 +562,6 @@ export const InboxSidebar = ({
             {renderSecondaryControls()}
           </div>
           <div className="nx-full100-center" ref={groupsRef}>
-            {loadingErrorMessage && <div className="nx-sidebar-rebuilt__error"><Icon name="alert" /><span>{loadingErrorMessage}</span></div>}
             {renderMultiSelectBar()}
             <div className="nx-ops75-table-header">
               <div className="nx-ops75-col nx-ops75-col--check"></div>
@@ -490,7 +588,6 @@ export const InboxSidebar = ({
   return (
     <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
       {renderTopActions()}
-      {loadingErrorMessage && <div className="nx-sidebar-rebuilt__error"><Icon name="alert" /><span>{loadingErrorMessage}</span></div>}
       <div className="nx-sidebar-rebuilt__list-container" ref={groupsRef}>
         {renderSecondaryControls()}
         {renderMultiSelectBar()}

@@ -2080,6 +2080,7 @@
 
 .qcc-primary-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -2195,7 +2196,46 @@
   font-weight: 600;
 }
 
-/* ── SECTION 3: Key Metrics ──────────────────────────────────────── */
+/* ── SECTION 3: Key Metrics / Live Status Grid ─────────────────────── */
+.qcc-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.qcc-status-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qcc-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.qcc-status-item span {
+  color: rgba(172, 198, 232, 0.5);
+  font-weight: 600;
+}
+
+.qcc-status-item strong {
+  color: rgba(244, 247, 252, 0.9);
+  font-weight: 800;
+}
+
+.qcc-text-warning { color: #ffd234 !important; }
+.qcc-text-critical { color: #ff8080 !important; }
+.qcc-text-good { color: #5ae08b !important; }
+
 .qcc-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2406,6 +2446,9 @@
 @media (max-width: 900px) {
   .qcc-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .qcc-status-grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 }
 
