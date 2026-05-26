@@ -8,7 +8,7 @@ import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
 
-const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
+const LIVE_INBOX_TIMEOUT_MS = 10000 // 10s timeout guard
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
 
 const withTimeout = async <T,>(
@@ -808,7 +808,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
           }
           
           // Surgical update if it's a thread state change
-          if (table === 'inbox_thread_state' && payload.new) {
+          if (table === 'operator_thread_state' && payload.new) {
             setData(prev => {
               const threads = [...prev.threads]
               const idx = threads.findIndex(t => (t.threadKey || t.id) === threadKey)
@@ -857,7 +857,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
         .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, triggerRefresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
         .subscribe((status) => {
           setData((prev) => ({ ...prev, realtimeConnected: status === 'SUBSCRIBED' }))
         })

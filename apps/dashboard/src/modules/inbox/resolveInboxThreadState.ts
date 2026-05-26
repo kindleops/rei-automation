@@ -86,7 +86,7 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     ),
   )
   const stage = str(getAny(thread, 'current_stage', 'thread_stage', 'conversation_stage', 'conversationStage'))
-  const statusBucket = str(getAny(thread, 'status_bucket', 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket'))
+  const statusBucket = str(getAny(thread, 'inbox_bucket', 'inboxBucket', 'status_bucket', 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket'))
   const priorityValue = str(getAny(thread, 'priority'))
   const followUpAtRaw = String(getAny(thread, 'follow_up_at', 'next_follow_up_at', 'followUpAt', 'nextFollowUpAt') ?? '').trim()
   const followUpAt = followUpAtRaw || null

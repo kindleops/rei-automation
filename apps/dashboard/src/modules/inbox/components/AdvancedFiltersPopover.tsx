@@ -84,6 +84,7 @@ export const AdvancedFiltersPopover = ({
     { id: 'Campaign / Messaging', icon: 'send', count: [advancedFilters.assignedAgent].filter(Boolean).length },
     { id: 'Market / Routing', icon: 'map', count: [advancedFilters.market, advancedFilters.state, advancedFilters.zip].filter(Boolean).length },
     { id: 'Timeline', icon: 'clock', count: [advancedFilters.activityDateFrom, advancedFilters.activityDateTo].filter(Boolean).length },
+    { id: 'Deal Intelligence', icon: 'radar', count: [advancedFilters.arvConfidenceMin, advancedFilters.estimatedSpreadMin, advancedFilters.buyerDemandScoreMin, advancedFilters.valuationSnapshotExists].filter(Boolean).length },
     { id: 'Custom', icon: 'settings', count: 0 },
   ]
 
@@ -301,6 +302,27 @@ export const AdvancedFiltersPopover = ({
                 </div>
               )}
 
+              {activeCategory === 'Deal Intelligence' && (
+                <div className="nx-cmd-filter-section">
+                  <h3>Deal Intelligence</h3>
+                  <FieldRow label="ARV Confidence Min">
+                    <input type="number" value={numberInput(advancedFilters.arvConfidenceMin)} onChange={(event) => patch({ arvConfidenceMin: asNumber(event.target.value) })} />
+                  </FieldRow>
+                  <FieldRow label="Estimated Spread Min">
+                    <input type="number" value={numberInput(advancedFilters.estimatedSpreadMin)} onChange={(event) => patch({ estimatedSpreadMin: asNumber(event.target.value) })} />
+                  </FieldRow>
+                  <FieldRow label="Buyer Demand Min">
+                    <input type="number" value={numberInput(advancedFilters.buyerDemandScoreMin)} onChange={(event) => patch({ buyerDemandScoreMin: asNumber(event.target.value) })} />
+                  </FieldRow>
+                  <FieldRow label="Snapshot Status">
+                    <select value={advancedFilters.valuationSnapshotExists ?? ''} onChange={(event) => patch({ valuationSnapshotExists: (event.target.value as any) || undefined })}>
+                      <option value="">Any</option>
+                      <option value="yes">Snapshot Exists</option>
+                      <option value="no">No Snapshot</option>
+                    </select>
+                  </FieldRow>
+                </div>
+              )}
             </div>
           </div>
         </div>

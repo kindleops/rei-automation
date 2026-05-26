@@ -237,6 +237,15 @@ export interface InboxAdvancedFilters {
   tagsInclude?: string[]
   tagsExclude?: string[]
   
+  // L) DEAL INTELLIGENCE (NEW)
+  arvConfidenceMin?: number
+  estimatedSpreadMin?: number
+  buyerDemandScoreMin?: number
+  ppuBelowMarket?: boolean
+  ppsfBelowMarket?: boolean
+  largeApartmentPriorityScoreMin?: number
+  valuationSnapshotExists?: 'yes' | 'no'
+
   // Legacy
   householdIncomeMin?: number
   householdIncomeMax?: number

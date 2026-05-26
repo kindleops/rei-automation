@@ -1355,6 +1355,111 @@
   font-weight: 500;
   cursor: pointer;
 }
-.nx-cmd-btn-primary:hover {
-  background: var(--nx-accent-hover);
+/* ── Deal Intelligence Card (Inbox) ────────────────────────────────────────── */
+
+.nx-deal-intel-card {
+  margin: 16px 20px;
+  background: rgba(48, 209, 88, 0.03);
+  border: 1px solid rgba(48, 209, 88, 0.1);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.nx-deal-intel-card__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.nx-deal-intel-card__head svg {
+  color: #30d158;
+  width: 18px;
+  height: 18px;
+}
+
+.nx-deal-intel-card__head strong {
+  font-size: 14px;
+  color: #fff;
+  flex: 1;
+}
+
+.nx-deal-intel-card__date {
+  font-size: 10px;
+  color: rgba(130, 155, 200, 0.5);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.nx-deal-intel-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.nx-deal-intel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nx-deal-intel-item label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: rgba(130, 155, 200, 0.5);
+  font-weight: 800;
+}
+
+.nx-deal-intel-item strong {
+  font-size: 16px;
+  color: #fff;
+}
+
+.nx-deal-intel-item.is-highlight strong {
+  color: #30d158;
+  font-size: 20px;
+}
+
+.nx-deal-intel-card__footer {
+  display: flex;
+  gap: 8px;
+}
+
+.nx-deal-intel-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nx-deal-intel-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.nx-deal-intel-btn.is-primary {
+  background: #30d158;
+  color: #000;
+  border-color: #30d158;
+}
+
+.nx-deal-intel-btn.is-primary:hover {
+  background: #28bc4c;
+  transform: translateY(-1px);
+}
+
+.nx-deal-intel-btn svg {
+  width: 14px;
+  height: 14px;
 }

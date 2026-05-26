@@ -12,9 +12,9 @@ export const getAuthClient = (): SupabaseClient => {
   if (!authClient) {
     authClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
       },
     })
   }

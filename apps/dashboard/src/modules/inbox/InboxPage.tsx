@@ -1513,7 +1513,7 @@ export default function InboxPage() {
         })
         scheduleRefreshInbox()
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, (payload) => {
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
         if (!belongsToSelection(row)) return
         if (DEV) console.log('[InboxPage realtime dossier update]', { threadKey: selectedKey, eventType: payload.eventType })
@@ -2986,7 +2986,7 @@ export default function InboxPage() {
     updateAutonomyControl,
   ])
 
-  if (dataLoading) return (
+  if (dataLoading && data.threads.length === 0) return (
     <div className="nx-premium-inbox">
       <div className="nx-inbox-loading-state">
         <div className="nx-loading-spinner" />
@@ -3222,12 +3222,14 @@ export default function InboxPage() {
           onStatusChange={handleStatusChange}
           onStageChange={handleStageChange}
           onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
+          onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
           onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
           messages={displayedMessages}
           panelMode={paneMode === 'single' ? 'full' : paneWidth === '25' || paneWidth === '50' ? 'half' : 'default'}
           layoutMode={layoutMode}
         />
+
       )
     }
 
@@ -3305,14 +3307,6 @@ export default function InboxPage() {
     if (view === 'comp_intelligence') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
-          <div className="nx-workspace-card-grid">
-            {['Comps', 'ARV', 'Repairs', 'Offer Stack', 'Underwriting', 'Creative Structure'].map((title) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="layers" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">Section mapped under Comp Intelligence.</p>
-              </div>
-            ))}
-          </div>
           <CompIntelligenceWorkspace thread={selected} />
         </section>
       )
@@ -3322,23 +3316,22 @@ export default function InboxPage() {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--intel-grid">
           <BuyerMatchWorkspace
-            buyerCommandData={buyerCommandData}
-            buyerFilters={buyerFilters}
-            onBuyerFiltersChange={setBuyerFilters}
-            selectedBuyerKey={selectedBuyerKey}
-            onSelectBuyerKey={setSelectedBuyerKey}
-            paneMode={paneMode}
+            propertySnapshot={{
+              property_id: selected?.propertyId || (selected as Record<string, unknown> | null)?.property_id as string,
+              address: selected?.propertyAddressFull || (selected as Record<string, unknown> | null)?.property_address_full as string || (selected as Record<string, unknown> | null)?.property_address as string || ((selected as Record<string, unknown> | null)?.address as string) || 'Property Unknown',
+              market: selected?.market || ((selected as Record<string, unknown> | null)?.property_address_city as string) || 'Market Unknown',
+              zip: ((selected as Record<string, unknown> | null)?.property_address_zip as string) || '',
+              state: ((selected as Record<string, unknown> | null)?.property_address_state as string) || '',
+              property_type: selected?.propertyType || ((selected as Record<string, unknown> | null)?.property_type as string) || '',
+              beds: (selected as Record<string, unknown> | null)?.beds as number | null,
+              baths: (selected as Record<string, unknown> | null)?.baths as number | null,
+              sqft: (selected as Record<string, unknown> | null)?.sqft as number | null,
+              estimated_value: (selected as Record<string, unknown> | null)?.estimated_value as number | null,
+              arv: (selected as Record<string, unknown> | null)?.arv_estimate as number | null || (selected as Record<string, unknown> | null)?.estimated_value as number | null,
+              dispo_strategy: (selected as Record<string, unknown> | null)?.dispo_strategy as string
+            }}
             paneWidth={paneWidth}
-            selectedPropertyLabel={
-              selected?.propertyAddressFull
-              || (selected as Record<string, unknown> | null)?.property_address_full as string
-              || (selected as Record<string, unknown> | null)?.property_address as string
-              || ((selected as Record<string, unknown> | null)?.address as string)
-              || 'Property Unknown'
-            }
-            selectedMarket={selected?.market || ((selected as Record<string, unknown> | null)?.property_address_city as string) || 'Market Unknown'}
-            selectedZip={((selected as Record<string, unknown> | null)?.property_address_zip as string) || ''}
-            selectedPropertyType={selected?.propertyType || ((selected as Record<string, unknown> | null)?.property_type as string) || ''}
+            apiBase="/api/cockpit"
           />
         </section>
       )
@@ -3485,12 +3478,14 @@ export default function InboxPage() {
             onStatusChange={handleStatusChange}
             onStageChange={handleStageChange}
             onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-          onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
-          onOpenAi={() => setActiveOverlay('ai')}
-          messages={displayedMessages}
-          panelMode="full"
-          layoutMode="full"
-        />
+            onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
+            onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
+            onOpenAi={() => setActiveOverlay('ai')}
+            messages={displayedMessages}
+            panelMode="full"
+            layoutMode="full"
+          />
+
       </div>
       ) : (
       <div
@@ -3607,6 +3602,7 @@ export default function InboxPage() {
               <div className="nx-filtered-out-notice__actions">
                 <button type="button" onClick={handleResetFilters}>Clear filters</button>
                 <button type="button" onClick={showSelectedInFilter}>Show selected</button>
+                <button type="button" onClick={() => handleThreadAction(selected, 'pin')}>Keep selected pinned</button>
               </div>
             </div>
           )}
@@ -3706,6 +3702,7 @@ export default function InboxPage() {
             onStatusChange={handleStatusChange}
             onStageChange={handleStageChange}
             onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
+            onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
             onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
             onOpenAi={() => setActiveOverlay('ai')}
             messages={displayedMessages}

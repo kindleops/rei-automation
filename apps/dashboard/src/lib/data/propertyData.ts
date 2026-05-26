@@ -1776,31 +1776,30 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
   const supabase = getSupabaseClient()
   const take = (rows: AnyRecord[] | null | undefined) => safeArray(rows as AnyRecord[])
 
+  const chunkArray = <T>(arr: T[], size: number): T[][] => {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size))
+  }
+
+  const fetchChunked = async (arr: string[], fetcher: (chunk: string[]) => Promise<{ data: any[] | null }>) => {
+    if (arr.length === 0) return { data: [] }
+    const chunks = chunkArray(arr, 50)
+    const results = await Promise.all(chunks.map(fetcher))
+    return { data: results.flatMap(r => r.data || []) }
+  }
+
+  const cleanIds = (ids: (string | null)[]) => Array.from(new Set(ids.filter(Boolean) as string[]))
+  const oIds = cleanIds(ownerIds)
+  const pIds = cleanIds(propertyIds)
+
   const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts] = await Promise.all([
-    ownerIds.length
-      ? supabase.from('master_owners').select('*').in('master_owner_id', ownerIds).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
-    ownerIds.length
-      ? supabase.from('prospects').select('*').in('master_owner_id', ownerIds).limit(1500)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('phones').select('*').in('property_id', propertyIds).limit(2000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('emails').select('*').in('property_id', propertyIds).limit(2000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('message_events').select('*').in('property_id', propertyIds).order('created_at', { ascending: false }).limit(3000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('send_queue').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(3000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('property_cash_offer_snapshots').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('contracts').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
+    fetchChunked(oIds, async chunk => await supabase.from('master_owners').select('*').in('master_owner_id', chunk).limit(1000)),
+    fetchChunked(oIds, async chunk => await supabase.from('prospects').select('*').in('master_owner_id', chunk).limit(1500)),
+    fetchChunked(pIds, async chunk => await supabase.from('phones').select('*').in('property_id', chunk).limit(2000)),
+    fetchChunked(pIds, async chunk => await supabase.from('emails').select('*').in('property_id', chunk).limit(2000)),
+    fetchChunked(pIds, async chunk => await supabase.from('message_events').select('*').in('property_id', chunk).order('created_at', { ascending: false }).limit(3000)),
+    fetchChunked(pIds, async chunk => await supabase.from('send_queue').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(3000)),
+    fetchChunked(pIds, async chunk => await supabase.from('property_cash_offer_snapshots').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
+    fetchChunked(pIds, async chunk => await supabase.from('contracts').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
   ])
 
   return {

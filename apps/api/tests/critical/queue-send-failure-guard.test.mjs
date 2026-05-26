@@ -448,3 +448,29 @@ test("createInboxSendNowQueueRow: insert exception returns explicit queue_insert
   assert.equal(result.reason, "queue_insert_failure");
   assert.equal(result.queue_inserted, false);
 });
+
+test("createInboxSendNowQueueRow blocks if to and from numbers are the same", async () => {
+  let auditRow = null;
+  const deps = {
+    insertImpl: async (row) => {
+      auditRow = row;
+      return { queue_row_id: 999 };
+    },
+    resolveFromImpl: async () => "+13235589881",
+    hardComplianceCheckImpl: async () => ({ blocked: false }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false }),
+  };
+
+  const result = await createInboxSendNowQueueRow({
+    to_phone_number: "+13235589881",
+    from_phone_number: "+13235589881",
+    message_body: "Testing to myself",
+    thread_key: "+13235589881",
+  }, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "SAME_FROM_TO_NUMBER");
+  assert.equal(auditRow.queue_status, "paused_invalid_queue_row");
+  assert.equal(auditRow.metadata.validation_error, "SAME_FROM_TO_NUMBER");
+});

@@ -51,64 +51,33 @@ export async function GET(request) {
 
   try {
     const { searchParams } = new URL(request.url)
-    const offset = Math.max(0, Number.parseInt(clean(searchParams.get('cursor') ?? searchParams.get('offset')) || '0', 10) || 0)
-    const pageLimit = Math.min(200, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '100', 10) || 100))
-    const queryText = clean(searchParams.get('q'))
-
-    let query = supabase
-      .from('v_inbox_enriched')
-      .select('*', { count: 'exact' })
-      .order('latest_message_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + pageLimit - 1)
-
-    if (queryText) {
-      const q = `%${queryText}%`
-      query = query.or([
-        `prospect_full_name.ilike.${q}`,
-        `owner_display_name.ilike.${q}`,
-        `seller_display_name.ilike.${q}`,
-        `property_address_full.ilike.${q}`,
-        `best_phone.ilike.${q}`,
-        `seller_phone.ilike.${q}`,
-        `thread_key.ilike.${q}`,
-        `detected_intent.ilike.${q}`,
-        `filter_market.ilike.${q}`,
-      ].join(','))
+    
+    // Delegate entirely to live-inbox-service to bypass the broken 15s timeout on v_operator_inbox_threads
+    const { getLiveInbox } = await import('@/lib/domain/inbox/live-inbox-service.js')
+    
+    // Map bucket parameter to filter parameter for live-inbox
+    const bucket = clean(searchParams.get('bucket')) || 'all'
+    const params = Object.fromEntries(searchParams.entries())
+    if (bucket && bucket !== 'all' && !params.filter) {
+      params.filter = bucket
     }
-
-    const [{ data, error, count }, countsRes] = await Promise.all([
-      query,
-      supabase.from('inbox_category_counts').select('*').limit(1),
-    ])
-
-    if (error) throw error
-    const rows = Array.isArray(data) ? data : []
-    const total = Number.isFinite(Number(count)) ? Number(count) : rows.length
-    const pageThreads = rows
-    const nextOffset = offset + pageThreads.length
-    const countsRow = Array.isArray(countsRes.data) && countsRes.data.length > 0 ? countsRes.data[0] : null
-    const counts = countsRow || { all: total }
-    const diagnostics = {
-      threads: pageThreads,
-      counts,
-      pagination: {
-        cursor: String(offset),
-        next_cursor: nextOffset < total ? String(nextOffset) : null,
-        has_more: nextOffset < total,
-        limit: pageLimit,
-        total,
+    
+    const data = await getLiveInbox(params)
+    
+    return NextResponse.json({ 
+      ok: true, 
+      action: 'inbox-live-fallback',
+      data: {
+        threads: data.threads,
+        counts: data.counts,
+        pagination: data.pagination
       },
-    }
-    return NextResponse.json({ ok: true, action: 'inbox-threads', diagnostics }, { status: 200, headers: cors })
+      diagnostics: data 
+    }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
-      {
-        ok: false,
-        action: 'inbox-threads',
-        error: 'inbox_threads_failed',
-        message: error?.message || 'Unknown inbox threads error',
-      },
-      { status: 500, headers: cors },
+      { ok: false, error: error.message },
+      { status: 500, headers: cors }
     )
   }
 }

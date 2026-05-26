@@ -370,6 +370,138 @@
 .ci-pop-action { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; text-align: center; text-decoration: none; }
 .ci-pop-action.is-on { background: rgba(72, 138, 236, 0.2); border-color: #488ae0; }
 
+.ci-comp-row__reasoning {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.ci-reasoning-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.ci-reason {
+  font-size: 9px;
+  color: rgba(130, 155, 200, 0.5);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.ci-reason strong {
+  color: rgba(224, 237, 255, 0.8);
+  display: block;
+  font-size: 11px;
+}
+
+.ci-outlier-warn {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  color: #ff453a;
+  font-weight: 600;
+}
+
+/* ── Offer Engine ────────────────────────────────────────────────────────── */
+
+.ci-offer-engine {
+  margin-top: 24px;
+  padding: 20px;
+  background: rgba(48, 209, 88, 0.03);
+  border: 1px solid rgba(48, 209, 88, 0.1);
+  border-radius: 12px;
+}
+
+.ci-offer-engine .ci-eyebrow {
+  color: #30d158;
+  margin-bottom: 16px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  font-size: 9px;
+}
+
+.ci-offer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.ci-offer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ci-offer-item span {
+  font-size: 9px;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: rgba(130, 155, 200, 0.5);
+}
+
+.ci-offer-item strong {
+  font-size: 16px;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.ci-offer-item.is-target strong {
+  color: #30d158;
+  font-size: 20px;
+}
+
+.ci-offer-item.is-mao strong {
+  color: #ff9f0a;
+}
+
+/* ── Deal Actions ────────────────────────────────────────────────────────── */
+
+.ci-deal-actions {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ci-deal-btn {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ci-deal-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.ci-deal-btn.is-primary {
+  background: #30d158;
+  border-color: #30d158;
+  color: #000;
+}
+
+.ci-deal-btn.is-primary:hover {
+  background: #28bc4c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(48, 209, 88, 0.2);
+}
+
+.ci-deal-btn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
 /* ── Confidence Badge ─────────────────────────────────────────────────────── */
 
 .ci-conf-badge { position: relative; width: 70px; height: 70px; }

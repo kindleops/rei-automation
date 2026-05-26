@@ -29,6 +29,8 @@ export const getSupabaseClient = (): SupabaseClient => {
     cachedClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
       },
     })
   }

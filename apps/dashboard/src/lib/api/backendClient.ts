@@ -542,18 +542,25 @@ export function fetchLiveInbox(
   return callBackend(`/api/cockpit/inbox/live?${queryString}`, { signal })
 }
 
+export function fetchInboxCounts(
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/counts`, { signal })
+}
+
 export function fetchInboxThreads(
   queryString: string,
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
-  return callBackend(`/api/cockpit/inbox/threads?${queryString}`, { signal })
+  return callBackend(`/api/cockpit/threads?${queryString}`, { signal })
 }
 
 export function fetchInboxThreadMessages(
+  threadKey: string,
   queryString: string,
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
-  return callBackend(`/api/cockpit/inbox/thread-messages?${queryString}`, { signal })
+  return callBackend(`/api/cockpit/inbox/threads/${threadKey}/messages?${queryString}`, { signal })
 }
 
 export function fetchInboxThreadDossier(
@@ -561,6 +568,34 @@ export function fetchInboxThreadDossier(
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
   return callBackend(`/api/cockpit/inbox/thread-dossier?${queryString}`, { signal })
+}
+
+export function fetchDealContextList(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context${queryString ? `?${queryString}` : ''}`, { signal })
+}
+
+export function fetchDealContextByProperty(
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/property/${encodeURIComponent(propertyId)}`, { signal })
+}
+
+export function fetchDealContextByThread(
+  threadKey: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/thread/${encodeURIComponent(threadKey)}`, { signal })
+}
+
+export function fetchDealContextCounts(
+  queryString = '',
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/counts${queryString ? `?${queryString}` : ''}`, { signal })
 }
 
 // GET /api/internal/dashboard/nexus — live dashboard model.
@@ -753,9 +788,9 @@ export function updateThreadState(
   threadKey: string,
   patch: Record<string, unknown>,
 ): Promise<BackendResult<ThreadStateResult>> {
-  return callBackend<ThreadStateResult>('/api/cockpit/inbox/thread-state', {
+  return callBackend<ThreadStateResult>(`/api/cockpit/inbox/threads/${threadKey}`, {
     method: 'PATCH',
-    body: JSON.stringify({ thread_key: threadKey, ...patch }),
+    body: JSON.stringify(patch),
   })
 }
 

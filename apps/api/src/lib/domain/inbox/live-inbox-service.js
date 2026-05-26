@@ -1,5 +1,6 @@
 import { supabase as defaultSupabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
+import { getDealContextCounts, listDealContexts } from "@/lib/domain/deal-context/deal-context-service.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -48,21 +49,28 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
 
 function rowMatchesFilter(row = {}, filter = "all") {
   const f = lower(filter) || "all";
+  const bucket = lower(row.inbox_bucket || 'all');
+  if (bucket === f) return true; // Direct match on real Supabase operator_thread_state
+  if (f === "all") return true;
+
   const dir = normalizeDirection(row.direction);
   const flags = row.flags || classifyInboxMessage(row);
   const ar = lower(row.auto_reply_status || object(row.metadata).auto_reply_status);
-  if (f === "all") return true;
+
+  // Fallback mappings if inbox_bucket isn't set yet
   if (f === "inbound_only") return dir === "inbound";
   if (f === "outbound_only") return dir === "outbound";
-  if (f === "needs_reply") return dir === "inbound" && !["queued", "sent", "suppressed"].includes(ar);
-  if (f === "auto_replied") return ["queued", "sent", "delivered"].includes(ar);
+  if (f === "needs_reply" || f === "new_replies") return dir === "inbound" && !["queued", "sent", "suppressed"].includes(ar);
+  if (f === "auto_replied" || f === "automated") return ["queued", "sent", "delivered"].includes(ar);
   if (f === "auto_reply_failed") return ["failed", "error"].includes(ar);
-  if (f === "positive_hot") return flags.positive_hot;
+  if (f === "positive_hot" || f === "priority") return flags.positive_hot || bucket === "priority";
   if (f === "offer_requested") return flags.offer_requested;
   if (f === "wrong_number") return flags.wrong_number;
-  if (f === "opt_out") return flags.opt_out;
+  if (f === "opt_out" || f === "suppressed" || f === "dnc_opt_out") return flags.opt_out || bucket === "suppressed";
   if (f === "missing_context") return !row.property_id && !row.master_owner_id && !object(row.metadata)?.enrichment?.property_id;
-  if (f === "manual_review") return flags.manual_review || ar === "manual_review";
+  if (f === "manual_review" || f === "needs_review") return flags.manual_review || ar === "manual_review" || bucket === "needs_review";
+  if (f === "waiting_on_seller" || f === "waiting" || f === "outbound_active") return bucket === "waiting_on_seller" || (dir === "outbound" && !flags.opt_out);
+  if (f === "follow_up" || f === "follow_up_due") return bucket === "follow_up";
   return true;
 }
 
@@ -86,6 +94,11 @@ function buildThreads(messages = []) {
         needs_reply: rowMatchesFilter(message, "needs_reply"),
         positive_hot: Boolean(message.flags?.positive_hot || existing.positive_hot),
         auto_reply_status: message.auto_reply_status || existing.auto_reply_status || null,
+        inbox_bucket: message.inbox_bucket || existing.inbox_bucket || null,
+        review_status: message.review_status || existing.review_status || null,
+        conversation_stage: message.conversation_stage || existing.conversation_stage || null,
+        seller_stage: message.seller_stage || existing.seller_stage || null,
+        lead_temperature: message.lead_temperature || existing.lead_temperature || null,
       });
     }
     byThread.set(key, existing);
@@ -116,25 +129,111 @@ async function loadMapPins(supabase, query, filteredRows = []) {
 
 export async function getLiveInbox(params = {}, deps = {}) {
   if (!deps.supabase && !hasSupabaseConfig()) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  const supabase = deps.supabase || defaultSupabase;
   const limit = int(params.limit, DEFAULT_LIMIT);
-  const direction = lower(params.direction || "all");
-  const cursor = parseCursor(params.cursor);
   const wantsMap = bool(params.map);
-  let scanLimit = Math.max(limit * 4, 500);
-  if (params.filter && params.filter !== "all") scanLimit = Math.max(scanLimit, 2000);
+  const filter = lower(params.filter || "all");
+  const offset = int(params.offset, 0);
 
-  let q = supabase.from("inbox_chat_timeline_hydrated").select("*").order("event_timestamp", { ascending: false }).limit(scanLimit);
-  if (direction === "inbound" || direction === "outbound") q = q.eq("direction", direction);
-  if (cursor?.t) q = q.lt("event_timestamp", cursor.t);
-  if (clean(params.q)) q = q.ilike("message_body", `%${clean(params.q)}%`);
-  const { data, error } = await q;
-  if (error) throw error;
-  let rows = (Array.isArray(data) ? data : []).map((row) => applyInboxRowComputedFields(row, params));
-  if (params.keyword_group) rows = rows.filter((row) => findMatchedKeywords(row.message_body || "", [params.keyword_group]).length > 0);
-  rows = rows.filter((row) => rowMatchesFilter(row, params.filter || "all"));
-  rows.sort((a, b) => asTime(b.latest_activity_at) - asTime(a.latest_activity_at));
-  const pageRows = rows.slice(0, limit);
-  const mapPins = wantsMap ? await loadMapPins(supabase, params, rows) : [];
-  return { threads: buildThreads(pageRows), messages: pageRows, counts: buildCounts(rows), mapPins, pagination: { limit, returned: pageRows.length, has_more: rows.length > limit || (Array.isArray(data) && data.length === scanLimit), next_cursor: pageRows.length ? cursorFor(pageRows[pageRows.length - 1]) : null } };
+  const dealContextParams = {
+    limit,
+    offset,
+    q: clean(params.q),
+    order_by: 'latest_message_at',
+  };
+
+  if (filter === "new_replies" || filter === "priority" || filter === "needs_review" || filter === "follow_up" || filter === "cold" || filter === "suppressed") {
+    dealContextParams.inbox_bucket = filter;
+  }
+  if (filter === "dnc_opt_out") {
+    dealContextParams.inbox_bucket = "suppressed";
+  }
+  if (filter === "unlinked") {
+    dealContextParams.context_type = "unlinked_thread";
+  }
+  if (lower(params.direction) === "inbound") {
+    dealContextParams.latest_message_direction = "inbound";
+  }
+  if (lower(params.direction) === "outbound") {
+    dealContextParams.latest_message_direction = "outbound";
+  }
+
+  const [contexts, counts] = await Promise.all([
+    listDealContexts(dealContextParams, deps),
+    getDealContextCounts({}, deps),
+  ]);
+
+  let rows = (contexts.rows || []).map((row) => ({
+    ...row,
+    id: row.deal_context_id,
+    latest_activity_at: row.latest_message_at || row.updated_at || row.created_at || null,
+    latest_direction: row.latest_message_direction || null,
+    direction: row.latest_message_direction || null,
+    phone: row.canonical_e164 || null,
+    best_phone: row.canonical_e164 || null,
+    seller_phone: row.canonical_e164 || null,
+    owner_name: row.owner_name || null,
+    prospect_full_name: object(row.prospect_data).full_name || null,
+    prospect_name: object(row.prospect_data).full_name || null,
+    property_address: row.property_address_full || null,
+    market_name: row.market || null,
+    conversation_stage: row.universal_stage || null,
+    seller_stage: row.universal_stage || null,
+    queue_stage: row.universal_stage || null,
+    workflow_stage: row.universal_stage || null,
+    review_status: row.universal_status || null,
+    auto_reply_status: row.queue_status || null,
+    failure_reason: object(row.queue_data).failed_reason || null,
+    latest_intent: object(row.thread_state_data).reply_intent || null,
+    final_acquisition_score: row.final_acquisition_score || row.priority_score || null,
+    priority_score: row.priority_score || null,
+    lat: row.latitude || null,
+    lng: row.longitude || null,
+  }));
+
+  if (params.keyword_group) {
+    rows = rows.filter((row) => findMatchedKeywords(row.latest_message_body || "", [params.keyword_group]).length > 0);
+  }
+
+  rows = rows
+    .map((row) => applyInboxRowComputedFields(row, params))
+    .filter((row) => rowMatchesFilter(row, filter))
+    .sort((a, b) => asTime(b.latest_activity_at) - asTime(a.latest_activity_at));
+
+  const mapPins = wantsMap
+    ? rows
+        .filter((row) => Number.isFinite(Number(row.latitude)) && Number.isFinite(Number(row.longitude)))
+        .map((row) => ({
+          id: row.deal_context_id,
+          thread_key: row.thread_key || null,
+          latitude: Number(row.latitude),
+          longitude: Number(row.longitude),
+          status: row.universal_status || null,
+          stage: row.universal_stage || null,
+          owner_name: row.owner_name || null,
+          property_address: row.property_address_full || null,
+          latest_message_body: row.latest_message_body || null,
+        }))
+    : [];
+
+  return {
+    threads: rows,
+    messages: [],
+    counts: {
+      all: counts.total || 0,
+      priority: counts.by_inbox_bucket?.priority || 0,
+      new_replies: counts.by_inbox_bucket?.new_replies || 0,
+      needs_review: counts.by_inbox_bucket?.needs_review || 0,
+      follow_up: counts.by_inbox_bucket?.follow_up || 0,
+      cold: counts.by_inbox_bucket?.cold || 0,
+      suppressed: counts.by_inbox_bucket?.suppressed || 0,
+      unlinked: counts.by_context_type?.unlinked_thread || 0,
+    },
+    mapPins,
+    pagination: {
+      limit,
+      returned: rows.length,
+      has_more: contexts.pagination?.has_more || false,
+      next_cursor: contexts.pagination?.next_offset != null ? String(contexts.pagination.next_offset) : null,
+    },
+  };
 }

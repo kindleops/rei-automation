@@ -2969,14 +2969,17 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
 
   if (is_inbox_send_now && normalizeQueueStatusValue(row.queue_status) === "queued") {
     const has_message_body = Boolean(clean(row.message_body || row.message_text));
-    const has_to_phone = Boolean(resolveQueueDestinationPhone(row).phone);
-    const has_from_phone = Boolean(normalizePhone(row.from_phone_number));
+    const to_phone = resolveQueueDestinationPhone(row).phone;
+    const from_phone = normalizePhone(row.from_phone_number);
+    const has_to_phone = Boolean(to_phone);
+    const has_from_phone = Boolean(from_phone);
     const has_thread_key = Boolean(payload.thread_key || row.thread_key);
     const message_body = clean(row.message_body || row.message_text);
     const is_manual = clean(row.message_type || row.use_case_template).toLowerCase() === "manual_reply";
     const min_body_length = is_manual ? 2 : 10;
+    const is_same_number = has_to_phone && has_from_phone && to_phone === from_phone;
 
-    if (!has_thread_key || !has_to_phone || !has_from_phone || !has_message_body || message_body.length < min_body_length) {
+    if (!has_thread_key || !has_to_phone || !has_from_phone || !has_message_body || message_body.length < min_body_length || is_same_number) {
       const paused_row = {
         ...insertPayloadForGuard(row, now),
         queue_status: "paused_invalid_queue_row",
@@ -2990,6 +2993,7 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
           guard_reason: !has_thread_key ? "missing_thread_key"
             : !has_to_phone ? "missing_to_phone_number"
             : !has_from_phone ? "missing_from_phone_number"
+            : is_same_number ? "SAME_FROM_TO_NUMBER"
             : !has_message_body ? "missing_message_body"
             : "message_too_short",
         },

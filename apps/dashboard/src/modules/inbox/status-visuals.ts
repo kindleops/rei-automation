@@ -170,6 +170,78 @@ export const sellerStageVisuals: Record<SellerStage, StatusVisual> = {
     pulse: 'rgba(125,135,151,0.3)',
     description: 'Lead dead or suppressed.',
   },
+
+  // ── Multifamily Stages (DealMachine MF Comp Mode) ────────────────────
+  mf_ownership_check: {
+    label: 'MF Ownership Check',
+    color: '#aab3c5', bg: 'rgba(170,179,197,0.12)', border: 'rgba(170,179,197,0.28)', dot: '#aab3c5', pulse: 'rgba(170,179,197,0.28)',
+    description: 'Verifying multifamily property ownership.',
+  },
+  mf_interested: {
+    label: 'MF Interested',
+    color: '#64d2ff', bg: 'rgba(100,210,255,0.12)', border: 'rgba(100,210,255,0.3)', dot: '#64d2ff', pulse: 'rgba(100,210,255,0.3)',
+    description: 'Multifamily owner expressed interest.',
+  },
+  mf_units_confirmed: {
+    label: 'MF Units Confirmed',
+    color: '#0a84ff', bg: 'rgba(10,132,255,0.12)', border: 'rgba(10,132,255,0.35)', dot: '#0a84ff', pulse: 'rgba(10,132,255,0.35)',
+    description: 'Number of units verified with owner.',
+  },
+  mf_occupancy_requested: {
+    label: 'MF Occupancy Requested',
+    color: '#bf5af2', bg: 'rgba(191,90,242,0.12)', border: 'rgba(191,90,242,0.35)', dot: '#bf5af2', pulse: 'rgba(191,90,242,0.35)',
+    description: 'Awaiting occupancy data from owner.',
+  },
+  mf_rent_roll_requested: {
+    label: 'MF Rent Roll Requested',
+    color: '#ff9f0a', bg: 'rgba(255,159,10,0.12)', border: 'rgba(255,159,10,0.35)', dot: '#ff9f0a', pulse: 'rgba(255,159,10,0.35)',
+    description: 'Awaiting rent roll documentation.',
+  },
+  mf_gross_rents_requested: {
+    label: 'MF Gross Rents Requested',
+    color: '#ffd60a', bg: 'rgba(255,214,10,0.12)', border: 'rgba(255,214,10,0.35)', dot: '#ffd60a', pulse: 'rgba(255,214,10,0.35)',
+    description: 'Awaiting gross rent figures.',
+  },
+  mf_asking_price_requested: {
+    label: 'MF Asking Price Requested',
+    color: '#ff453a', bg: 'rgba(255,69,58,0.12)', border: 'rgba(255,69,58,0.35)', dot: '#ff453a', pulse: 'rgba(255,69,58,0.35)',
+    description: 'Awaiting owner price expectations.',
+  },
+  mf_underwriting_needed: {
+    label: 'MF Underwriting Needed',
+    color: '#30d158', bg: 'rgba(48,209,88,0.12)', border: 'rgba(48,209,88,0.35)', dot: '#30d158', pulse: 'rgba(48,209,88,0.35)',
+    description: 'Income data collected; needs underwriting.',
+  },
+  mf_offer_needed: {
+    label: 'MF Offer Needed',
+    color: '#34c759', bg: 'rgba(52,199,89,0.14)', border: 'rgba(52,199,89,0.36)', dot: '#34c759', pulse: 'rgba(52,199,89,0.36)',
+    description: 'Underwriting complete; offer needs preparation.',
+  },
+  mf_offer_sent: {
+    label: 'MF Offer Sent',
+    color: '#007aff', bg: 'rgba(0,122,255,0.12)', border: 'rgba(0,122,255,0.32)', dot: '#007aff', pulse: 'rgba(0,122,255,0.32)',
+    description: 'Multifamily offer delivered to owner.',
+  },
+  mf_negotiation: {
+    label: 'MF Negotiation',
+    color: '#ff9f43', bg: 'rgba(255,159,67,0.12)', border: 'rgba(255,159,67,0.34)', dot: '#ff9f43', pulse: 'rgba(255,159,67,0.32)',
+    description: 'Negotiating multifamily terms.',
+  },
+  mf_contract_requested: {
+    label: 'MF Contract Requested',
+    color: '#ff3b30', bg: 'rgba(255,59,48,0.14)', border: 'rgba(255,59,48,0.36)', dot: '#ff3b30', pulse: 'rgba(255,59,48,0.36)',
+    description: 'Owner agreed; contract needed.',
+  },
+  mf_dead: {
+    label: 'MF Dead',
+    color: '#7d8797', bg: 'rgba(125,135,151,0.1)', border: 'rgba(125,135,151,0.24)', dot: '#7d8797', pulse: 'rgba(125,135,151,0.2)',
+    description: 'Multifamily lead is dead.',
+  },
+  mf_suppressed: {
+    label: 'MF Suppressed',
+    color: '#ff6b64', bg: 'rgba(255,107,100,0.1)', border: 'rgba(255,107,100,0.28)', dot: '#ff453a', pulse: 'rgba(255,107,100,0.28)',
+    description: 'Multifamily lead suppressed.',
+  },
 }
 
 export const automationStateVisuals: Record<AutomationState, { label: string; color: string }> = {
@@ -233,6 +305,10 @@ export const getWorkflowStatusOptionValue = (
 const VALID_SELLER_STAGES = new Set<string>([
   'ownership_check', 'interest_probe', 'seller_response', 'price_discovery',
   'condition_details', 'offer_reveal', 'negotiation', 'contract_path',
+  'mf_ownership_check', 'mf_interested', 'mf_units_confirmed', 'mf_occupancy_requested',
+  'mf_rent_roll_requested', 'mf_gross_rents_requested', 'mf_asking_price_requested',
+  'mf_underwriting_needed', 'mf_offer_needed', 'mf_offer_sent', 'mf_negotiation',
+  'mf_contract_requested', 'mf_dead', 'mf_suppressed',
 ])
 
 export const getSellerStageVisual = (stage?: string | null): StatusVisual => {

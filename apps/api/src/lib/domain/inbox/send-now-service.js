@@ -217,6 +217,9 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
   if (!from_phone_number) {
     return { ok: false, status: 400, error: "missing_from_phone_number" };
   }
+  if (to_phone_number === from_phone_number) {
+    return { ok: false, status: 400, error: "SAME_FROM_TO_NUMBER" };
+  }
   if (!message_body) {
     return { ok: false, status: 400, error: "missing_message_body" };
   }

@@ -104,12 +104,49 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
   const cArr = Array.from(campaignIds)
   const tArr = Array.from(targetIds)
 
+  const chunkArray = <T>(arr: T[], size: number): T[][] => {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+      arr.slice(i * size, i * size + size)
+    )
+  }
+
+  const fetchChunked = async (arr: string[], fetcher: (chunk: string[]) => Promise<{ data: any[] | null }>, chunkSize = 100) => {
+    if (arr.length === 0) return { data: [] }
+    const chunks = chunkArray(arr, chunkSize)
+    const results = []
+    // Execute with limited concurrency (e.g. 5 at a time)
+    for (let i = 0; i < chunks.length; i += 5) {
+      const batch = chunks.slice(i, i + 5)
+      results.push(...await Promise.all(batch.map(fetcher)))
+    }
+    return { data: results.flatMap(r => r.data || []) }
+  }
+
+  const fetchTargetChunked = async (qArrChunk: string[], tArrChunk: string[]) => {
+    // Disabled: frontend direct Supabase calls querying huge in(...) lists for sms_campaign_targets
+    return { data: [] }
+  }
+
   const [propRes, evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
-    pArr.length > 0 ? supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', pArr).limit(3000) : Promise.resolve({ data: [] }),
-    qArr.length > 0 ? supabase.from('message_events').select('*').in('queue_id', qArr).limit(5000) : Promise.resolve({ data: [] }),
-    qArr.length > 0 || tArr.length > 0 ? supabase.from('sms_campaign_targets').select('*').or(`queue_row_id.in.(${qArr.join(',') || 'none'}),id.in.(${tArr.join(',') || 'none'})`).limit(3000) : Promise.resolve({ data: [] }),
-    cArr.length > 0 ? supabase.from('sms_campaigns').select('id,campaign_name').in('id', cArr).limit(500) : Promise.resolve({ data: [] }),
-    oArr.length > 0 ? supabase.from('master_owners').select('master_owner_id,display_name,first_name,entity_name').in('master_owner_id', oArr).limit(3000) : Promise.resolve({ data: [] }),
+    fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100),
+    fetchChunked(qArr, async chunk => ({ data: [] }), 30), // Disabled message_events
+    (async () => {
+      if (qArr.length === 0 && tArr.length === 0) return { data: [] }
+      const qChunks = chunkArray(qArr, 30)
+      const tChunks = chunkArray(tArr, 30)
+      const maxLen = Math.max(qChunks.length, tChunks.length)
+      const results = []
+      for (let i = 0; i < maxLen; i += 5) {
+        const batch = Array.from({ length: Math.min(5, maxLen - i) }).map((_, j) => {
+          const idx = i + j
+          return fetchTargetChunked(qChunks[idx] || [], tChunks[idx] || [])
+        })
+        results.push(...await Promise.all(batch))
+      }
+      return { data: results.flatMap(r => r.data || []) }
+    })(),
+    fetchChunked(cArr, async chunk => await supabase.from('sms_campaigns').select('id,campaign_name').in('id', chunk).limit(500), 100),
+    fetchChunked(oArr, async chunk => ({ data: [] }), 100), // Disabled master_owners
     supabase.from('textgrid_numbers').select('*')
   ])
 
