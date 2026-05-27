@@ -183,6 +183,8 @@ const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
 const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
   const raw = readString(
     thread,
+    'inbox_bucket',
+    'inboxBucket',
     'status_bucket',
     'inbox_category',
     'inboxCategory',
@@ -193,11 +195,11 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
   if (raw.includes('needs_review') || raw.includes('manual_review')) return 'needs_review'
-  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated')) return 'follow_up'
-  if (raw.includes('dead') || raw.includes('wrong_number')) return 'dead'
+  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated') || raw.includes('waiting_on_seller') || raw.includes('waiting')) return 'follow_up'
+  if (raw.includes('dead') || raw.includes('wrong_number') || raw.includes('not_interested')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
   if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
-  if (raw.includes('all')) return 'all'
+  if (raw === 'all' || raw === 'all_messages' || raw === 'all_conversations') return 'all'
   return null
 }
 
@@ -539,9 +541,10 @@ export const InboxSidebar = ({
   const groupsRef = useRef<HTMLDivElement | null>(null)
   const loadingErrorMessage = formatLoadingError(loadingError)
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
-    if (activeViewFilter === 'follow_up_due') return 'follow_up'
-    if (activeViewFilter === 'dnc_opt_out') return 'suppressed'
-    if (activeViewFilter === 'cold_no_response') return 'cold'
+    if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'follow_up'
+    if (activeViewFilter === 'dnc_opt_out' || activeViewFilter === 'opt_out') return 'suppressed'
+    if (activeViewFilter === 'cold_no_response' || activeViewFilter === 'not_contacted') return 'cold'
+    if (activeViewFilter === 'wrong_number' || activeViewFilter === 'not_interested') return 'dead'
     if (activeViewFilter === 'all' || activeViewFilter === 'all_messages') return 'all_conversations'
     return activeViewFilter
   }, [activeViewFilter])
@@ -565,7 +568,19 @@ export const InboxSidebar = ({
     try { window.localStorage.setItem(LOCAL_SAVED_FILTERS_KEY, JSON.stringify(next)) } catch {}
   }
 
-  const searchableThreads = useMemo(() => threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery)), [threads, recentlyUpdatedThreadIds, searchQuery])
+  const searchableThreads = useMemo(() => {
+    let list = threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery))
+    if (selectedId) {
+      const alreadyExists = list.some((t) => t.id === selectedId)
+      if (!alreadyExists) {
+        const selectedThread = threads.find((t) => t.id === selectedId)
+        if (selectedThread) {
+          list = [selectedThread, ...list]
+        }
+      }
+    }
+    return list
+  }, [threads, recentlyUpdatedThreadIds, searchQuery, selectedId])
   const decisionMap = useMemo(() => {
     const map = new Map<string, ConversationDecision>()
     searchableThreads.forEach((thread) => map.set(thread.id, buildConversationDecision(thread)))
@@ -591,13 +606,24 @@ export const InboxSidebar = ({
 
   const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket as CanonicalBucket] || []
   const fallbackActiveThreads = useMemo(() => {
-    if (activeGroupThreads.length > 0) return activeGroupThreads
-    if (canonicalActiveView === 'all_conversations') return activeGroupThreads
-    if (searchQuery.trim().length > 0) return activeGroupThreads
-    // If backend already returned rows for a tab slice but local bucket mapping is sparse,
-    // never render a blank tab: show loaded rows.
-    return sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
-  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount])
+    let base = activeGroupThreads.length > 0 ? activeGroupThreads : (
+      (canonicalActiveView === 'all_conversations' || searchQuery.trim().length > 0)
+        ? activeGroupThreads
+        : sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
+    )
+
+    if (selectedId) {
+      const alreadyExists = base.some((t) => t.id === selectedId)
+      if (!alreadyExists) {
+        const selectedThread = searchableThreads.find((t) => t.id === selectedId)
+        if (selectedThread) {
+          base = [selectedThread, ...base]
+        }
+      }
+    }
+
+    return base
+  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount, selectedId])
   const handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
@@ -706,7 +732,7 @@ export const InboxSidebar = ({
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={onSelect} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
       }) : <div className="nx-sidebar-rebuilt__empty">No conversations match this filter.</div>}
-      {canLoadMore && <div className="nx-sidebar-rebuilt__load-more"><button type="button" className="nx-load-more-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLoadMore(); }}>Loading more...</button></div>}
+      {canLoadMore && <div className="nx-sidebar-rebuilt__load-more"><button type="button" className="nx-load-more-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLoadMore(); }}>Load More</button></div>}
     </div>
   )
 

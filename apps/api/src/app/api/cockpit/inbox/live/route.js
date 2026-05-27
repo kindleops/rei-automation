@@ -13,7 +13,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
     const data = await getLiveInbox(Object.fromEntries(searchParams.entries()))
-    return NextResponse.json({ ok: true, action: 'inbox-live', diagnostics: data }, { status: 200, headers: cors })
+    return NextResponse.json({ ok: true, ...data }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: 'live_inbox_failed', message: error.message },

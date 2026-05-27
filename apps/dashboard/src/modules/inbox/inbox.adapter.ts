@@ -383,7 +383,7 @@ export interface InboxModel {
   urgentCount: number
   totalCount: number
   aiDraftCount: number
-  dataMode: 'live' | 'mock_preview'
+  dataMode: 'live' | 'mock_preview' | 'fallback_error'
   liveFetchStatus: 'active' | 'error' | 'disabled' | 'fallback_error'
   liveFetchError: string | null
   messageEventsCount: number | null
@@ -638,6 +638,9 @@ const mergeInboxModels = (prev: InboxModel, next: InboxModel, mode: 'refresh' | 
     }
   }
 
+  // If next is empty but not an error (e.g. an empty bucket), we allow it to replace.
+  // But if it's an error and we have NOTHING, we return next (which is empty with error).
+
   if (isDev && next.threads.length > 0) {
     console.log('[Inbox] live inbox success', { 
       threads: next.threads.length, 
@@ -648,15 +651,20 @@ const mergeInboxModels = (prev: InboxModel, next: InboxModel, mode: 'refresh' | 
 
   const prevByKey = new Map(prev.threads.map((thread) => [threadIdentity(thread), thread]))
   const mergedById = new Map<string, InboxThread>()
+  
+  // mode === 'refresh' means we are switching tabs or doing a full refresh.
+  // We want to replace the list ONLY with successful results.
   const ordered = mode === 'append'
     ? [...prev.threads, ...next.threads]
     : next.threads
+
   for (const thread of ordered) {
     const key = threadIdentity(thread)
     const base = prevByKey.get(key)
     const existing = mergedById.get(key)
     mergedById.set(key, existing ? { ...existing, ...thread } : { ...base, ...thread })
   }
+
   return {
     ...prev,
     ...next,
@@ -769,7 +777,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       sourceMode,
       filters: options.filters !== undefined ? options.filters : lastFetchRef.current.filters,
       cursor: options.cursor ?? null,
-      maxRows: options.maxRows ?? lastFetchRef.current.maxRows ?? 1000,
+      maxRows: options.maxRows ?? lastFetchRef.current.maxRows ?? 50,
     }
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -793,8 +801,8 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       filters: lastFetchRef.current.filters,
       cursor,
       offset: cursor ? undefined : dataRef.current.threads.length,
-      maxRows: options.maxRows ?? 1000,
-      limit: options.limit ?? options.maxRows ?? 1000,
+      maxRows: options.maxRows ?? 50,
+      limit: options.limit ?? options.maxRows ?? 50,
     }
     return runLoad(moreOptions, 'append')
   }, [loading, runLoad, sourceMode])
