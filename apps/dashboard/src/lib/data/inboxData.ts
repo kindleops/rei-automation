@@ -1951,8 +1951,9 @@ export const getInboxRowsForView = async (
   counts?: AnyRecord | null;
 }> => {
   const page_size = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
-  const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
-  
+  const rawCursor = options.cursor ?? null
+  const numericOffset = options.offset ?? 0
+
   let inbox_bucket = 'all_messages'
   if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply') inbox_bucket = 'new_replies'
   else if (view === 'priority' || view === 'negotiating') inbox_bucket = 'priority'
@@ -1968,7 +1969,7 @@ export const getInboxRowsForView = async (
   const live = await fetchLiveInbox({
     filter: liveFilter,
     q: options.filters?.query || '',
-    cursor: String(offset),
+    cursor: rawCursor ?? String(numericOffset),
     limit: page_size,
     map: false,
     signal: options.signal,
@@ -1989,7 +1990,7 @@ export const getInboxRowsForView = async (
   const rawRows = live.rawRows ?? safeArray(live.threads as unknown as AnyRecord[])
   if (DEV) console.log('[Inbox] live inbox success', { threads: rawRows.length, counts: live.counts })
 
-  const normalizedRows = rawRows.map((row, index) => normalizeInboxThread(row, offset, index))
+  const normalizedRows = rawRows.map((row, index) => normalizeInboxThread(row, numericOffset, index))
   const finalCounts = (live.counts as AnyRecord) || null
   const finalPagination = (live.pagination as unknown as AnyRecord) || {}
   const backendCount = asNumber(live.pagination?.total, normalizedRows.length)
@@ -2631,22 +2632,24 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const deadThreadsCount = categoryCounts.dead
   const loadedCount = threads.length
   
-  const fullyHydratedCount = threads.filter((t) => t.propertyId).length
-  const partiallyHydratedCount = threads.filter((t) => !t.propertyId).length
-  const orphanCount = threads.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
+  const threadList = threads as InboxThread[]
+  const fullyHydratedCount = threadList.filter((t) => t.propertyId).length
+  const partiallyHydratedCount = threadList.filter((t) => !t.propertyId).length
+  const orphanCount = threadList.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
   const latestFetchMs = 0
 
   const pageSize = options.limit ?? options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
-  const cursorOffset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
-  const nextOffset = cursorOffset + threads.length
-  const hasMoreActual = nextOffset < totalAvailable
+  // Use the backend-provided cursor and has_more — never recalculate with parseInt
+  // so base64 keyset cursors pass through intact for Load More.
+  const nextCursorRaw = viewResult?.next_cursor ?? null
+  const hasMoreActual = viewResult?.has_more ?? (nextCursorRaw != null)
 
   return {
     threads,
     unreadCount: unreadThreadsCount,
     urgentCount: categoryCounts.hot_leads,
     totalCount: totalAvailable,
-    aiDraftCount: threads.filter((thread) => thread.aiDraft !== null).length,
+    aiDraftCount: threadList.filter((thread) => thread.aiDraft !== null).length,
     dataMode: 'live',
     liveFetchStatus: 'active',
     liveFetchError: null,
@@ -2684,8 +2687,8 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
       all: allInboxCount,
     },
     pagination: {
-      cursor: String(cursorOffset),
-      nextCursor: hasMoreActual ? String(nextOffset) : null,
+      cursor: options.cursor ?? null,
+      nextCursor: nextCursorRaw,
       hasMore: hasMoreActual,
       limit: pageSize,
       total: totalAvailable,
@@ -3116,8 +3119,9 @@ export const getThreadMessagesForThread = async (
     const result = await backendClient.fetchInboxThreadMessages(threadKey, params.toString())
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
-      const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
-      const apiMessages = safeArray((diagnostics.messages ?? []) as AnyRecord[]).map(toThreadMessage)
+      // Prefer root messages (flat response); fall back to diagnostics wrapper for compat
+      const rawMessages = (payload.messages ?? (payload.diagnostics as AnyRecord)?.messages ?? []) as AnyRecord[]
+      const apiMessages = safeArray(rawMessages).map(toThreadMessage)
       if (apiMessages.length > 0) return applyDeliveryStatusDisplay(dedupeMessages(apiMessages))
     }
   } catch (err) {

@@ -653,14 +653,18 @@ export default function InboxPage() {
     skipStageFilter: false,
   }), [])
 
-  const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => (
-    applyInboxFilters(threads, {
+  const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => {
+    const isFallback = data.liveFetchStatus === 'fallback_error'
+    return applyInboxFilters(threads, {
       search: searchQuery,
       stage: stageFilter,
       view,
       advanced: advancedFilters,
-    }, serverFilterOptions)
-  ), [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads])
+    }, {
+      ...serverFilterOptions,
+      skipViewFilter: isFallback || serverFilterOptions.skipViewFilter
+    })
+  }, [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads, data.liveFetchStatus])
 
   const listStatCounts = useMemo(() => {
     const counts = {

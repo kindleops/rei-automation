@@ -565,7 +565,19 @@ export const InboxSidebar = ({
     try { window.localStorage.setItem(LOCAL_SAVED_FILTERS_KEY, JSON.stringify(next)) } catch {}
   }
 
-  const searchableThreads = useMemo(() => threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery)), [threads, recentlyUpdatedThreadIds, searchQuery])
+  const searchableThreads = useMemo(() => {
+    let list = threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery))
+    if (selectedId) {
+      const alreadyExists = list.some((t) => t.id === selectedId)
+      if (!alreadyExists) {
+        const selectedThread = threads.find((t) => t.id === selectedId)
+        if (selectedThread) {
+          list = [selectedThread, ...list]
+        }
+      }
+    }
+    return list
+  }, [threads, recentlyUpdatedThreadIds, searchQuery, selectedId])
   const decisionMap = useMemo(() => {
     const map = new Map<string, ConversationDecision>()
     searchableThreads.forEach((thread) => map.set(thread.id, buildConversationDecision(thread)))
@@ -591,13 +603,24 @@ export const InboxSidebar = ({
 
   const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket as CanonicalBucket] || []
   const fallbackActiveThreads = useMemo(() => {
-    if (activeGroupThreads.length > 0) return activeGroupThreads
-    if (canonicalActiveView === 'all_conversations') return activeGroupThreads
-    if (searchQuery.trim().length > 0) return activeGroupThreads
-    // If backend already returned rows for a tab slice but local bucket mapping is sparse,
-    // never render a blank tab: show loaded rows.
-    return sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
-  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount])
+    let base = activeGroupThreads.length > 0 ? activeGroupThreads : (
+      (canonicalActiveView === 'all_conversations' || searchQuery.trim().length > 0)
+        ? activeGroupThreads
+        : sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
+    )
+
+    if (selectedId) {
+      const alreadyExists = base.some((t) => t.id === selectedId)
+      if (!alreadyExists) {
+        const selectedThread = searchableThreads.find((t) => t.id === selectedId)
+        if (selectedThread) {
+          base = [selectedThread, ...base]
+        }
+      }
+    }
+
+    return base
+  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount, selectedId])
   const handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
