@@ -473,6 +473,48 @@ const SectionEmptyState = ({ text }: { text: string }) => (
   </div>
 )
 
+const DealContextPayloadCard = ({
+  thread,
+  intelligence,
+}: {
+  thread: WorkflowThread
+  intelligence: ThreadIntelligenceRecord | null
+}) => {
+  const records = [
+    ['property_data', (intelligence as any)?.property_data ?? (thread as any).property_data],
+    ['master_owner_data', (intelligence as any)?.master_owner_data ?? (thread as any).master_owner_data],
+    ['prospect_data', (intelligence as any)?.prospect_data ?? (thread as any).prospect_data],
+    ['phone_data', (intelligence as any)?.phone_data ?? (thread as any).phone_data],
+    ['email_data', (intelligence as any)?.email_data ?? (thread as any).email_data],
+    ['thread_state_data', (intelligence as any)?.thread_state_data ?? (thread as any).thread_state_data],
+    ['queue_data', (intelligence as any)?.queue_data ?? (thread as any).queue_data],
+    ['latest_message_event_data', (intelligence as any)?.latest_message_event_data ?? (thread as any).latest_message_event_data],
+    ['valuation_data', (intelligence as any)?.valuation_data ?? (thread as any).valuation_data],
+    ['buyer_match_data', (intelligence as any)?.buyer_match_data ?? (thread as any).buyer_match_data],
+  ].filter(([, value]) => value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0)
+
+  if (records.length === 0) return null
+
+  return (
+    <DossierCard className="nx-deal-context-payload">
+      <div className="nx-dossier-section__title">
+        <Icon name="database" />
+        <span>DEALCONTEXT PAYLOAD</span>
+      </div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {records.map(([label, value]) => (
+          <details key={label} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{label}</summary>
+            <pre style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: 12, lineHeight: 1.45 }}>
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </DossierCard>
+  )
+}
+
 const ScoreRing = ({
   label,
   value,
@@ -6005,6 +6047,7 @@ const DealCommandDossier = ({
         <LinkedRecordsCard thread={thread} />
       </div>
     </div>
+    <DealContextPayloadCard thread={thread} intelligence={intelligence} />
     <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenComps={onOpenComps} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
   </div>
 )

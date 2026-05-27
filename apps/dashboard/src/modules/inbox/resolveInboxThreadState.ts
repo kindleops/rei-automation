@@ -9,6 +9,7 @@ export type CanonicalBucket =
   | 'automated'
   | 'needs_review'
   | 'cold'
+  | 'dead'
   | 'suppressed'
   | 'all'
 
@@ -37,6 +38,8 @@ const bool = (v: unknown): boolean => {
 
 const str = (...values: unknown[]): string =>
   values.map((v) => String(v ?? '').trim()).filter(Boolean).join(' ').toLowerCase()
+
+const lower = (v: unknown): string => String(v ?? '').trim().toLowerCase()
 
 const hasAny = (haystack: string, terms: string[]): boolean => terms.some((t) => haystack.includes(t))
 
@@ -109,7 +112,12 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   const showInPriority = bool(getAny(thread, 'is_hot_lead', 'isHotLead', 'show_in_priority_inbox', 'showInPriorityInbox'))
   const isHotLead = bool(getAny(thread, 'is_hot_lead', 'isHotLead')) || hasAny(priorityValue, ['urgent', 'high']) || num(getAny(thread, 'priority_score', 'priorityScore')) >= 80
 
-  const isPriorityExcluded = isSuppressed ||
+  const isDead = bool(getAny(thread, 'is_dead', 'isDead')) || 
+    lower(getAny(thread, 'universal_status', 'universalStatus')) === 'dead' ||
+    hasAny(intent, ['not_interested', 'wrong_number', 'dead']) ||
+    hasAny(statusBucket, ['dead'])
+
+  const isPriorityExcluded = isSuppressed || isDead ||
     hasAny(intent, ['not_interested', 'no', 'wrong_number', 'dnc', 'opt_out', 'stop', 'hostile', 'legal', 'tenant', 'realtor', 'listed_or_unavailable', 'already_sold']) ||
     hasAny(messageBlob, ['not interested', 'wrong number', 'tenant', 'realtor', 'already sold'])
 
@@ -132,6 +140,7 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     if (hasAny(statusBucket, ['new_reply', 'new_replies', 'new_inbound', 'needs_reply'])) return 'new_replies'
     if (hasAny(statusBucket, ['needs_review', 'manual_review'])) return 'needs_review'
     if (hasAny(statusBucket, ['follow_up', 'follow_up_due'])) return 'follow_up'
+    if (hasAny(statusBucket, ['dead', 'wrong_number'])) return 'dead'
     if (hasAny(statusBucket, ['suppressed', 'dnc_opt_out', 'dnc', 'opt_out'])) return 'suppressed'
     if (hasAny(statusBucket, ['cold', 'cold_no_response', 'not_contacted'])) return 'cold'
     return null
@@ -141,6 +150,9 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   if (isSuppressed) {
     bucket = 'suppressed'
     reasons.push('hard suppression/compliance')
+  } else if (isDead) {
+    bucket = 'dead'
+    reasons.push('dead lead')
   } else if (bucketFromBackend) {
     bucket = bucketFromBackend
     reasons.push(`backend_status_bucket(${statusBucket})`)

@@ -468,6 +468,8 @@ export default function InboxPage() {
   const [layoutState, setLayoutState] = useState(defaultInboxLayoutState)
   const [dossierFull, setDossierFull] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
+  const hasLoadedInitialInboxRef = useRef(false)
+  const selectedThreadFallbackRef = useRef<InboxWorkflowThread | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -601,18 +603,21 @@ export default function InboxPage() {
     const followUpCount = sv('follow_up', sv('follow_up_due', local.follow_up ?? local.follow_up_due ?? 0))
     const suppressed = sv('suppressed', sv('dnc_opt_out', local.suppressed))
     const coldNoResp = sv('cold', sv('cold_no_response', local.cold ?? local.cold_no_response))
+    const deadCount = sv('dead', local.dead ?? local.wrong_number ?? 0)
     const automated = sv('automated', sv('auto_replied', local.automated))
     const hotLeads = sv('hot_leads', local.hot_leads)
     const activeCount = local.active
 
     return {
       ...local,
+      all_messages: allCount,
       new_replies: newReplies,
       priority: priorityCount,
       negotiating: local.negotiating,
       // canonical bucket keys (sidebar uses these)
       follow_up: followUpCount,
       cold: coldNoResp,
+      dead: deadCount,
       suppressed,
       // legacy aliases kept for backwards compat
       follow_up_due: followUpCount,
@@ -621,6 +626,7 @@ export default function InboxPage() {
       hot_leads: hotLeads,
       needs_review: needsReview,
       cold_no_response: coldNoResp,
+      wrong_number: deadCount,
       failed: local.failed,
       all: allCount,
       active: activeCount,
@@ -692,6 +698,13 @@ export default function InboxPage() {
     setVisibleThreadCount(prev => prev + 200)
   }, [loadMore])
 
+  const currentInboxQuery = useMemo(() => ({
+    view: viewFilter,
+    stage: stageFilter,
+    query: searchQuery,
+    advanced: advancedFilters,
+  }), [advancedFilters, searchQuery, stageFilter, viewFilter])
+
   const selected = useMemo(() => {
     if (selectedId) {
       const byId = threads.find((thread) => thread.id === selectedId)
@@ -701,8 +714,21 @@ export default function InboxPage() {
       const byThreadKey = threads.find((thread) => (thread.threadKey || thread.id) === selectedThreadKey)
       if (byThreadKey) return byThreadKey
     }
+    const fallback = selectedThreadFallbackRef.current
+    if (fallback) {
+      if (selectedId && fallback.id === selectedId) return fallback
+      if (selectedThreadKey && (fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
+    }
     return selectedId ? null : (filtered[0] ?? threads[0] ?? null)
   }, [filtered, threads, selectedId, selectedThreadKey])
+
+  useEffect(() => {
+    if (!selected) return
+    const inLoadedThreads = threads.some((thread) => thread.id === selected.id || (thread.threadKey || thread.id) === (selected.threadKey || selected.id))
+    if (inLoadedThreads) {
+      selectedThreadFallbackRef.current = selected
+    }
+  }, [selected, threads])
   const buyerCommandData = useBuyerCommandData(selected, buyerFilters)
 
   useEffect(() => {
@@ -723,20 +749,32 @@ export default function InboxPage() {
   const showSelectedInFilter = useCallback(() => {
     if (!selected) return
     const decision = decisions.get(selected.id)
+    let nextView: InboxViewSelectValue = 'all_conversations'
     setSearchQuery('')
     setAdvancedFilters({ outOfStateOwner: 'all' })
     setStageFilter('all_stages')
-    if (decision?.inbox_bucket === 'new_replies') setViewFilter('new_replies')
-    else if (decision?.inbox_bucket === 'priority') setViewFilter('priority')
-    else if (decision?.inbox_bucket === 'needs_review') setViewFilter('needs_review')
-    else if (decision?.inbox_bucket === 'follow_up' || decision?.inbox_bucket === 'follow_up_due') setViewFilter('follow_up')
-    else if (decision?.inbox_bucket === 'cold' || decision?.inbox_bucket === 'cold_no_response') setViewFilter('cold')
-    else if (decision?.inbox_bucket === 'suppressed' || decision?.inbox_bucket === 'dnc_suppressed') setViewFilter('suppressed')
-    else if (decision?.inbox_bucket === 'negotiating') setViewFilter('negotiating')
-    else if (decision?.inbox_bucket === 'waiting_on_seller') setViewFilter('waiting_on_seller')
-    else if (decision?.inbox_bucket === 'automated') setViewFilter('automated')
-    else setViewFilter('all_conversations')
-  }, [decisions, selected])
+    if (decision?.inbox_bucket === 'new_replies') nextView = 'new_replies'
+    else if (decision?.inbox_bucket === 'priority') nextView = 'priority'
+    else if (decision?.inbox_bucket === 'needs_review') nextView = 'needs_review'
+    else if (decision?.inbox_bucket === 'follow_up' || decision?.inbox_bucket === 'follow_up_due') nextView = 'follow_up'
+    else if (decision?.inbox_bucket === 'cold' || decision?.inbox_bucket === 'cold_no_response') nextView = 'cold'
+    else if (decision?.inbox_bucket === 'dead') nextView = 'dead'
+    else if (decision?.inbox_bucket === 'suppressed' || decision?.inbox_bucket === 'dnc_suppressed') nextView = 'suppressed'
+    else if (decision?.inbox_bucket === 'negotiating') nextView = 'negotiating'
+    else if (decision?.inbox_bucket === 'waiting_on_seller') nextView = 'waiting_on_seller'
+    else if (decision?.inbox_bucket === 'automated') nextView = 'automated'
+    setViewFilter(nextView)
+    void refreshInbox({
+      filters: {
+        view: nextView,
+        stage: 'all_stages',
+        query: '',
+        advanced: { outOfStateOwner: 'all' },
+      },
+      cursor: null,
+      limit: 100,
+    })
+  }, [decisions, refreshInbox, selected])
 
   useEffect(() => {
     if (!selected) return
@@ -1026,7 +1064,17 @@ export default function InboxPage() {
     setViewFilter('priority')
     setAdvancedFilters({ outOfStateOwner: 'all' })
     setSavedPreset('my_priority')
-  }, [])
+    void refreshInbox({
+      filters: {
+        view: 'priority',
+        stage: 'all_stages',
+        query: '',
+        advanced: { outOfStateOwner: 'all' },
+      },
+      cursor: null,
+      limit: 100,
+    })
+  }, [refreshInbox])
 
   const handleFocusWorkspaceView = useCallback((view: InboxWorkspaceView) => {
     setSelectedWorkspaceViews((current) => {
@@ -1291,17 +1339,12 @@ export default function InboxPage() {
     })
   }, [selectedWorkspaceViews])
 
-  const liveThreadQuery = useMemo(() => ({
-    view: 'all',
-    stage: 'all_stages',
-    query: '',
-    advanced: {},
-  }), [])
-
   useEffect(() => {
+    if (hasLoadedInitialInboxRef.current) return
+    hasLoadedInitialInboxRef.current = true
     setVisibleThreadCount(1000)
-    refreshInbox({ filters: liveThreadQuery })
-  }, [liveThreadQuery, refreshInbox])
+    void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
+  }, [currentInboxQuery, refreshInbox])
 
 
 
@@ -2165,7 +2208,7 @@ export default function InboxPage() {
       }
       if (!options?.skipRefresh) {
         if (DEV) console.log(`[NexusInbox] Refreshing data for: ${label}`)
-        await refreshInbox({ filters: liveThreadQuery })
+        await refreshInbox({ filters: currentInboxQuery })
       } else {
         if (DEV) console.log(`[NexusInbox] Skipping refresh (optimistic only) for: ${label}`)
       }
@@ -2178,7 +2221,7 @@ export default function InboxPage() {
     } catch (err) {
       emitNotification({ title: 'Error', detail: String(err), severity: 'critical' })
     }
-  }, [refreshInbox, liveThreadQuery, DEV])
+  }, [refreshInbox, currentInboxQuery, DEV])
 
   const handleThreadAction = useCallback(async (target: string | InboxWorkflowThread, action: string) => {
     const thread = typeof target === 'string' ? threads.find((t) => t.id === target) : target

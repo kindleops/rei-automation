@@ -90,7 +90,7 @@
   flex: 1;
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 13px;
   padding: 0 10px;
   outline: none;
@@ -133,8 +133,8 @@
 
 .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--nexus-text);
+  border-color: var(--nexus-muted);
 }
 
 .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button svg {
@@ -167,13 +167,13 @@
 
 .nx-inbox-chip-v2:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox-chip-v2.is-active {
   background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
@@ -252,7 +252,7 @@
 }
 
 .nx-sidebar-rebuilt__secondary-controls button:hover {
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-sidebar-rebuilt__telemetry-indicator {
@@ -274,7 +274,7 @@
 }
 
 .nx-sidebar-rebuilt__saved-list-panel {
-  background: rgba(20, 25, 35, 0.95);
+  background: var(--nexus-panel-strong);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 8px 14px;
 }
@@ -313,7 +313,7 @@
 
 .nx-thread-card-rebuilt {
   display: flex;
-  background: rgba(20, 25, 35, 0.5);
+  background: var(--nexus-surface-overlay);
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 12px;
   padding: 8px 10px;
@@ -324,8 +324,8 @@
 }
 
 .nx-thread-card-rebuilt:hover {
-  background: rgba(30, 35, 45, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--nexus-panel-strong);
+  border-color: var(--nexus-muted);
 }
 
 .nx-thread-card-rebuilt.is-selected {
@@ -449,7 +449,7 @@
 .nx-thread-card-rebuilt.is-selected .nx-thread-card-rebuilt__action-btn {
   opacity: 1;
   filter: blur(0px);
-  color: #fff;
+  color: var(--nexus-text);
   background: rgba(255, 255, 255, 0.1);
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
 }
@@ -556,7 +556,7 @@
   position: sticky;
   top: 10px;
   margin: 0 10px 14px;
-  background: rgba(30, 35, 45, 0.95);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -580,7 +580,7 @@
 }
 
 .nx-inbox-rebuilt-floating-bar__count strong {
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 12px;
 }
 
@@ -604,7 +604,7 @@
 
 .nx-inbox-rebuilt-floating-bar__actions button:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 /* =========================================
@@ -652,7 +652,7 @@
 .nx-thread-table-row-ops75 {
   display: flex;
   align-items: center;
-  background: rgba(20, 25, 35, 0.3);
+  background: var(--nexus-surface-overlay);
   border: 1px solid rgba(255, 255, 255, 0.03);
   border-radius: 8px;
   padding: 8px 12px;
@@ -662,8 +662,8 @@
 }
 
 .nx-thread-table-row-ops75:hover {
-  background: rgba(30, 35, 45, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--nexus-panel-strong);
+  border-color: var(--nexus-muted);
 }
 
 .nx-thread-table-row-ops75.is-selected {
@@ -701,7 +701,7 @@
 .nx-ops75-name {
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--nexus-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -789,7 +789,7 @@
 
 .nx-ops75-action-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 /* =========================================
@@ -855,7 +855,7 @@
 
 .nx-deal-snapshot__header h2 {
   font-size: 18px;
-  color: #fff;
+  color: var(--nexus-text);
   margin: 0 0 4px;
 }
 
@@ -1381,7 +1381,7 @@
 
 .nx-deal-intel-card__head strong {
   font-size: 14px;
-  color: #fff;
+  color: var(--nexus-text);
   flex: 1;
 }
 
@@ -1414,7 +1414,7 @@
 
 .nx-deal-intel-item strong {
   font-size: 16px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-deal-intel-item.is-highlight strong {
@@ -1437,7 +1437,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 10px;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;

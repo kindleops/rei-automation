@@ -20,11 +20,8 @@ export async function OPTIONS(request) {
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: 'unauthorized' },
-      { status: 401, headers: cors }
-    )
+  if (auth && auth.status >= 400) {
+    return auth
   }
 
   const { thread_key } = params
@@ -45,6 +42,21 @@ export async function GET(request, { params }) {
       .range(offset, offset + limit - 1)
 
     if (error) throw error
+
+    if (!data) {
+      return NextResponse.json(
+        {
+          ok: true,
+          data: {
+            messages: [],
+            count: 0,
+            thread_key
+          },
+          warnings: ["messages_service_returned_null"]
+        },
+        { status: 200, headers: cors }
+      )
+    }
 
     const rows = Array.isArray(data) ? data : []
     const total = Number.isFinite(Number(count)) ? Number(count) : rows.length

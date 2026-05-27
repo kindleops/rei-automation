@@ -196,7 +196,7 @@
 
 .sqd-action-pill:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--nexus-muted);
   color: rgba(220, 235, 255, 0.9);
 }
 
@@ -343,7 +343,7 @@
 
 .sqd-icon-action:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--nexus-muted);
   color: rgba(200, 220, 255, 0.9);
 }
 

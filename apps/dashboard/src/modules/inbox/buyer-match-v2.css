@@ -266,7 +266,7 @@
   gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid rgba(169, 190, 255, 0.07);
-  background: rgba(8, 12, 22, 0.80);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(12px);
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -868,7 +868,7 @@
   padding: 16px;
   border-radius: 18px;
   border: 1px solid rgba(169, 190, 255, 0.08);
-  background: rgba(12, 18, 36, 0.80);
+  background: var(--nexus-panel-strong);
   display: flex;
   flex-direction: column;
   gap: 12px;

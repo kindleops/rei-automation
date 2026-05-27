@@ -19,6 +19,37 @@ import {
   type AnyRecord,
 } from './shared'
 import { emitNotification } from '../../shared/NotificationToast'
+import { normalizeDealContext } from './dealContext'
+
+const TEXTGRID_NUMBERS = new Set([
+  '+16128060495', '+13235589881', '+17866052999', '+19804589889', 
+  '+13234104544', '+14704920588', '+14693131600', '+12818458577', 
+  '+19048774448', '+17042405818'
+])
+
+function isTextGridNumber(phone: string | null | undefined): boolean {
+  if (!phone) return false
+  const digits = String(phone).replace(/\D/g, '')
+  let normalized = phone
+  if (digits.length === 10) normalized = `+1${digits}`
+  else if (digits.length === 11 && digits.startsWith('1')) normalized = `+${digits}`
+  else if (digits) normalized = `+${digits}`
+  return TEXTGRID_NUMBERS.has(normalized || '')
+}
+
+const toE164 = (value: unknown): string => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const normalized = normalizePhone(raw)
+  if (!normalized) return ''
+  if (normalized.startsWith('+')) return normalized
+
+  const digits = normalized.replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  return `+${digits}`
+}
 
 /**
  * Confirmed message_events schema — direct column references used below:
@@ -104,6 +135,7 @@ export interface LiveInboxResponse {
   counts: Record<string, number | null | undefined>
   mapPins: LiveInboxMapPin[]
   pagination: LiveInboxPagination
+  rawRows?: AnyRecord[]
 }
 
 export interface ThreadMessage {
@@ -296,6 +328,7 @@ const HYDRATED_INBOX_CATEGORIES = [
   'automated',
   'outbound_active',
   'cold_no_response',
+  'dead',
   'dnc_opt_out',
   'all_inbound',
   'not_contacted',
@@ -311,7 +344,8 @@ const HYDRATED_CATEGORY_BY_VIEW: Partial<Record<string, HydratedInboxCategory | 
   outbound_only: 'outbound_active',
   missing_context: 'cold_no_response',
   suppressed: 'dnc_opt_out',
-  wrong_number: 'dnc_opt_out',
+  dead: 'dead',
+  wrong_number: 'dead',
   opt_out: 'dnc_opt_out',
   priority: ['hot_leads', 'needs_review', 'new_inbound'],
   active: ['automated', 'outbound_active'],
@@ -1652,101 +1686,7 @@ const toQueryParam = (value: unknown): string | null => {
 }
 
 const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
-  const threadKey = asString(row['thread_key'] ?? row['threadKey'] ?? row['id'], '') || `live:${index}`
-  const latestMessageIso = asIso(row['latest_message_at'] ?? row['latestMessageAt'] ?? row['lastMessageIso']) ?? new Date().toISOString()
-  const latestDirection = normalizeMessageDirection({ direction: row['latest_direction'] ?? row['latestDirection'] ?? row['direction'] })
-  
-  // Mapping based on requirements
-  const bestPhone = asString(row['best_phone'] ?? row['phone'] ?? row['canonical_e164'] ?? row['seller_phone'] ?? row['phoneNumber'], '')
-  const sellerPhone = normalizePhone(bestPhone)
-  
-  const prospectName = asString(row['prospect_full_name'] ?? row['prospect_name'], '')
-  const ownerDisplayName = prospectName || 'Unknown Prospect'
-  
-  const propertyAddressFull = asString(row['property_address_full'] ?? row['address'] ?? row['propertyAddressFull'], 'No Address')
-  const latestMessageBody = asString(
-    row['latest_message_body'] ??
-    row['latest_inbound_message_body'] ??
-    row['latest_inbound_body'] ??
-    row['latestMessageBody'] ??
-    row['preview'] ??
-    row['message_body'] ??
-    row['latest_outbound_message_body'] ??
-    row['latest_outbound_body'],
-    'No recent message',
-  )
-  
-  const uiIntent = normalizeStatus(row['latest_intent'] ?? row['detected_intent'] ?? row['ui_intent'] ?? row['uiIntent'] ?? 'needs_review')
-  const inboxCategory = asString(row['inbox_bucket'] ?? row['inbox_category'] ?? row['category'], 'all')
-  const queueStatus = asString(row['queue_status'] ?? row['delivery_status'], '')
-  
-  const stage = asString(row['conversation_stage'] ?? row['seller_stage'] ?? row['queue_stage'] ?? row['thread_stage'] ?? row['detected_intent'] ?? row['inbox_category'] ?? row['workflow_stage'], 'ownership_check')
-  const score = asNumber(row['final_acquisition_score'] ?? row['priority_score'], 0)
-  
-  const needsReply = asBoolean(row['needs_reply'] ?? row['needsReply'] ?? row['show_in_priority_inbox'] ?? row['showInPriorityInbox'], latestDirection === 'inbound' && !queueStatus)
-  
-  return {
-    ...row, // Preserve all unmapped dossier fields from the proxy
-    id: threadKey,
-    leadId: asString(row['property_id'] ?? row['propertyId'] ?? row['master_owner_id'] ?? row['ownerId'], threadKey),
-    marketId: asString(row['market'] ?? row['marketId'] ?? row['market_name'], 'unknown') || 'unknown',
-    ownerName: ownerDisplayName,
-    sellerName: asString(row['seller_name'] ?? row['owner_name'] ?? ownerDisplayName, ''),
-    subject: propertyAddressFull,
-    preview: latestMessageBody,
-    status: asBoolean(row['is_archived'] ?? row['isArchived'], false) ? 'archived' : (needsReply ? 'unread' : 'read'),
-    priority: needsReply ? 'urgent' : 'normal',
-    sentiment: uiIntent === 'potential_interest' || uiIntent === 'price_anchor' ? 'hot' : 'neutral',
-    messageCount: asNumber(row['message_count'] ?? row['messageCount'], 0),
-    lastMessageLabel: formatRelativeTime(latestMessageIso),
-    lastMessageIso: latestMessageIso,
-    unreadCount: needsReply ? 1 : 0,
-    aiDraft: queueStatus && queueStatus.includes('queued') ? 'Auto-reply decision available.' : null,
-    labels: [uiIntent, inboxCategory].filter(Boolean),
-    threadKey,
-    ownerId: asString(row['master_owner_id'] ?? row['ownerId'], '') || undefined,
-    prospectId: asString(row['prospect_id'] ?? row['prospectId'], '') || undefined,
-    propertyId: asString(row['property_id'] ?? row['propertyId'], '') || undefined,
-    phoneNumberId: asString(row['phone_number_id'] ?? row['phoneNumberId'] ?? row['best_phone_id'], '') || undefined,
-    textgridNumberId: asString(row['textgrid_number_id'] ?? row['textgridNumberId'], '') || undefined,
-    phoneNumber: sellerPhone || undefined,
-    canonicalE164: sellerPhone || undefined,
-    sellerPhone: sellerPhone || undefined,
-    ourNumber: normalizePhone(row['our_number'] ?? row['ourNumber'] ?? row['textgrid_phone']) || undefined,
-    directionUsed: latestDirection,
-    latestDirection,
-    autoReplyStatus: queueStatus,
-    needsReply,
-    needsResponse: needsReply,
-    deliveryStatus: queueStatus,
-    failureReason: asString(row['failure_reason'] ?? row['failureReason'] ?? row['error_message'], ''),
-    isOptOut: asBoolean(row['is_opt_out'] ?? row['isOptOut'], false),
-    propertyAddress: propertyAddressFull !== 'No Address' ? propertyAddressFull : undefined,
-    propertyAddressFull,
-    market: asString(row['market'] ?? row['marketName'] ?? row['market_id'], 'unknown'),
-    marketName: asString(row['market_name'] ?? row['marketName'] ?? row['market'], ''),
-    lastInboundAt: latestDirection === 'inbound' ? latestMessageIso : asIso(row['last_inbound_at'] ?? row['lastInboundAt']),
-    lastOutboundAt: latestDirection === 'outbound' ? latestMessageIso : asIso(row['last_outbound_at'] ?? row['lastOutboundAt']),
-    unread: needsReply,
-    uiIntent,
-    priorityBucket: normalizeStatus(row['inbox_bucket'] ?? row['inboxCategory'] ?? row['priority_bucket'] ?? row['priorityBucket'] ?? (needsReply ? 'priority' : 'active')),
-    workflowStatus: normalizeStatus(row['review_status'] ?? row['conversation_status'] ?? row['workflow_status'] ?? row['workflowStatus'] ?? row['status'] ?? 'open'),
-    workflowStage: stage,
-    threadWorkflowStatus: normalizeStatus(row['review_status'] ?? row['conversation_status'] ?? row['workflow_status'] ?? row['workflowStatus'] ?? row['status'] ?? 'open'),
-    threadWorkflowStage: stage,
-    ownerDisplayName,
-    latestMessageBody,
-    latestMessageAt: latestMessageIso,
-    matchedKeywords: safeArray((row['matched_keywords'] ?? row['matchedKeywords']) as string[]),
-    lat: asNumber(row['lat'] ?? row['latitude'], 0),
-    lng: asNumber(row['lng'] ?? row['longitude'], 0),
-    ownerType: asString(row['owner_type'] ?? row['ownerType'], ''),
-    propertyType: asString(row['property_type'] ?? row['propertyType'], ''),
-    propertyClass: asString(row['property_class'] ?? row['propertyClass'], ''),
-    finalAcquisitionScore: score,
-    priorityScore: score,
-    inboxCategory,
-  } as InboxThread
+  return normalizeInboxThread(row, 0, index)
 }
 
 
@@ -1757,6 +1697,7 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
   const pagination = (payload['pagination'] ?? {}) as AnyRecord
   return {
     threads: rawThreads.map(normalizeLiveThread),
+    rawRows: rawThreads,
     messages: rawMessages.map(toThreadMessage),
     counts: (payload['counts'] ?? {}) as Record<string, number | null | undefined>,
     mapPins: rawPins.map((pin, index) => ({
@@ -1835,37 +1776,17 @@ const runFilteredQuery = async (
 }
 
 export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): InboxThread => {
-  const id = asString(row.thread_key, `hydrated-thread:${offset + index}`)
-  const threadKey = id
-  const masterOwnerId = asString(row.master_owner_id, '')
-  const propertyId = asString(row.property_id, '')
-  const ownerName = asString(row.owner_name ?? row.prospect_name, 'Unknown Owner')
-  const sellerName = ownerName
-  const propertyAddress = asString(row.property_address ?? row.property_address_full, 'Unknown Address')
-  const address = propertyAddress
-  const market = asString(row.market, 'Unknown Market')
-  const phone = threadKey
-  const bestPhone = asString(row.best_phone ?? row.seller_phone ?? row.canonical_e164, '')
-  const latestMessageBody = asString(row.latest_message_body ?? row.last_message_body, '')
-  const latestMessageAt = asIso(row.latest_message_at ?? row.last_message_at) ?? new Date().toISOString()
-  const latestMessageDirection = normalizeMessageDirection({ direction: row.latest_message_direction ?? row.direction })
-  const direction = latestMessageDirection
-  const inboxBucket = asString(row.inbox_bucket ?? row.inbox_category ?? row.priority_bucket, 'all_messages').toLowerCase()
-  const status = normalizeStatus(row.universal_status ?? row.inbox_status ?? 'unknown')
-  const stage = normalizeStatus(row.universal_stage ?? row.conversation_stage ?? row.stage ?? 'unknown')
-  const universalStatus = status
-  const universalStage = stage
-  const unreadCountRaw = asNumber(row.unread_count ?? row.unread, 0)
-  const unreadCount = Math.max(0, unreadCountRaw)
-  const replyIntent = asString(row.reply_intent ?? row.ui_intent ?? row.detected_intent, '')
-  const leadTemperature = asString(row.lead_temperature ?? row.priority_score, '')
-  const suppressionStatus = asString(row.suppression_status, '')
-  const optOut = asBoolean(row.opt_out ?? row.is_dnc ?? row.has_opt_out ?? row.is_suppressed, false)
-  const wrongNumber = asBoolean(row.wrong_number, false)
-  const notInterested = asBoolean(row.not_interested, false)
-  const needsReview = asBoolean(row.needs_review, false)
-
-  // Map to the existing PRIORITY_BUCKET_MAP if possible
+  const dc = normalizeDealContext(row)
+  const threadKey = dc.thread_key || asString(row.threadKey || row.thread_key || row.id, `thread:${offset + index}`)
+  
+  const latestMessageAt = asIso(dc.latestActivityAt || dc.latest_message_at || row.latest_message_at || row.last_message_at) || new Date().toISOString()
+  const latestMessageDirection = normalizeMessageDirection({ direction: dc.latestMessageDirection || dc.latest_message_direction || row.latest_message_direction || row.direction })
+  
+  const unreadCount = asNumber(row.unread_count ?? row.unread, 0)
+  const needsReply = unreadCount > 0 || (latestMessageDirection === 'inbound' && !row.queue_status)
+  
+  const inboxBucket = asString(dc.inboxBucket || dc.inbox_bucket || row.inbox_bucket || row.inbox_category || 'all_messages').toLowerCase()
+  
   const PRIORITY_BUCKET_MAP: Record<string, HydratedInboxCategory> = {
     hot: 'hot_leads',
     priority: 'hot_leads',
@@ -1893,73 +1814,123 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
 
   return {
     ...row,
-    id,
-    threadKey,
-    thread_id: threadKey,
-    masterOwnerId,
-    propertyId,
-    ownerName,
-    sellerName,
-    propertyAddress,
-    address,
-    market,
-    phone,
-    bestPhone,
-    latestMessageBody,
-    latestMessageAt,
-    latestMessageDirection,
-    direction,
-    inboxBucket,
-    status,
-    stage,
-    universalStatus,
-    universalStage,
-    unreadCount,
-    replyIntent,
-    leadTemperature,
-    suppressionStatus,
-    optOut,
-    wrongNumber,
-    notInterested,
-    needsReview,
-    
-    owner: { name: ownerName },
-    property: { address: propertyAddress, market },
-    state: {
-      bucket: inboxBucket,
-      status,
-      stage
-    },
-
-    // Legacy fallback fields UI might still depend on
-    leadId: propertyId || masterOwnerId || threadKey,
-    marketId: market,
-    ownerDisplayName: ownerName,
-    subject: propertyAddress,
-    preview: latestMessageBody,
-    latest_message_body: latestMessageBody,
-    latestMessage: latestMessageBody,
-    latest_activity_at: latestMessageAt,
-    latest_message_direction: latestMessageDirection,
+    ...dc,
+    id: threadKey,
+    leadId: dc.property_id || dc.master_owner_id || threadKey,
+    ownerId: dc.masterOwnerId || dc.master_owner_id || (row.ownerId as string | undefined) || null,
+    propertyId: dc.propertyId || dc.property_id || null,
+    prospectId: dc.prospectId || dc.prospect_id || null,
+    phoneNumberId: dc.phoneId || dc.phone_id || null,
+    textgridNumberId: dc.textgridNumberId || dc.textgrid_number_id || asString(row.textgridNumberId || row.textgrid_number_id, '') || undefined,
+    queueId: dc.queueRowId || dc.queue_row_id || null,
+    marketId: dc.market || 'unknown',
+    ownerName: dc.ownerName,
+    sellerName: dc.sellerDisplayName || dc.ownerName,
+    subject: dc.propertyAddress,
+    preview: dc.latestMessageBody,
+    status: (row.isArchived || row.is_archived) ? 'archived' : (needsReply ? 'unread' : 'read'),
+    priority: (category === 'hot_leads' || category === 'new_inbound') ? 'urgent' : 'normal',
+    sentiment: (dc.reply_intent === 'potential_interest' || dc.reply_intent === 'price_anchor') ? 'hot' : 'neutral',
+    messageCount: asNumber(row.message_count || row.messageCount, 1),
     lastMessageLabel: formatRelativeTime(latestMessageAt),
     lastMessageIso: latestMessageAt,
-    unread: unreadCount > 0,
+    unreadCount,
+    aiDraft: row.ai_draft || row.aiDraft || null,
+    labels: safeArray((row.labels || row.tags) as string[]),
+    threadKey,
+    
+    // Explicit phone mapping
+    sellerPhone: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
+    ourNumber: isTextGridNumber(dc.senderPhone) ? dc.senderPhone : (isTextGridNumber(dc.sellerPhone) ? dc.sellerPhone : dc.senderPhone),
+    phoneNumber: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
+    canonicalE164: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
+    
+    latestDirection: latestMessageDirection,
+    latestMessage: dc.latestMessageBody,
+    latestMessageBody: dc.latestMessageBody,
+    latestMessageAt,
+    latestMessageDirection,
+    latest_activity_at: dc.latestActivityAt || latestMessageAt,
+    
+    ownerDisplayName: dc.displayName || dc.ownerName,
+    propertyAddress: dc.propertyAddress,
+    propertyAddressFull: dc.propertyAddress,
+    market: dc.market,
+    propertyState: dc.propertyState,
+    propertyZip: dc.propertyZip,
+    propertyCounty: dc.propertyCounty,
+    displayName: dc.displayName,
+    firstName: dc.firstName,
+    fullName: dc.fullName,
+    sellerDisplayName: dc.sellerDisplayName,
+    statusText: dc.status,
+    stage: dc.stage,
+    bucket: dc.bucket,
+    universalStatus: dc.universalStatus,
+    universalStage: dc.universalStage,
+    inboxBucket: dc.inboxBucket,
+    conversationStageLabel: dc.conversationStage,
+    reviewStatus: dc.reviewStatus,
+    autoReplyStatus: dc.autoReplyStatus,
+    replyIntent: dc.reply_intent,
+    leadTemperature: dc.lead_temperature,
+    cashOffer: dc.cash_offer,
+    estimatedValue: dc.estimated_value,
+    equityAmount: dc.equity_amount,
+    equityPercent: dc.equity_percent,
+    estimatedRepairCost: dc.estimated_repair_cost,
+    finalAcquisitionScore: dc.final_acquisition_score,
+    priorityScore: dc.priority_score,
+    propertyTags: dc.propertyTags,
+    sellerTags: dc.sellerTags,
+    lat: dc.latitude,
+    lng: dc.longitude,
+    latitude: dc.latitude,
+    longitude: dc.longitude,
+    optOut: dc.optOut,
+    wrongNumber: dc.wrongNumber,
+    notInterested: dc.notInterested,
+    needsReview: dc.needsReview,
+    suppressed: dc.suppressed,
+    isOptOut: dc.optOut,
+    property_address_full: dc.propertyAddress,
+    owner_name: dc.ownerName,
+    display_name: dc.displayName,
+    seller_phone: dc.sellerPhone,
+    sender_phone: dc.senderPhone,
+    universal_status: dc.universalStatus,
+    universal_stage: dc.universalStage,
+    inbox_bucket: dc.inboxBucket,
+    
+    owner: { name: dc.owner_name },
+    property: { address: dc.property_address_full, market: dc.market },
+    state: {
+      bucket: dc.inboxBucket,
+      status: dc.universalStatus,
+      stage: dc.universalStage
+    },
+    
+    // Nested DealContext objects for IntelligencePanel
+    property_data: dc.property,
+    master_owner_data: dc.masterOwner,
+    prospect_data: dc.prospect,
+    phone_data: dc.phoneData,
+    email_data: dc.email,
+    thread_state_data: dc.threadState,
+    campaign_data: dc.campaign,
+    queue_data: dc.queue,
+    suppression_data: dc.suppression,
+    valuation_data: dc.valuation,
+    buyer_match_data: dc.buyerMatch,
+    latest_message_event_data: dc.latestMessageEvent,
+    contact_stack_json: dc.contactStack,
+    
+    unread: needsReply,
     priorityBucket: category,
     inboxCategory: category,
     inbox_category: category,
-    workflowStatus: status,
-    workflowStage: stage,
-    isArchived: false,
-    isRead: unreadCount === 0,
-    isPinned: false,
-    isStarred: false,
-    isSuppressed: optOut,
-    isDnc: optOut,
-    sellerPhone: bestPhone,
-    display_phone: bestPhone ? formatDisplayPhone(bestPhone) : '',
-    canonicalE164: bestPhone,
-    marketName: market,
-    propertyAddressFull: propertyAddress,
+    workflowStatus: dc.universalStatus,
+    workflowStage: dc.universalStage,
   } as unknown as InboxThread
 }
 
@@ -1977,6 +1948,7 @@ export const getInboxRowsForView = async (
   rendered_count: number;
   has_more: boolean;
   next_cursor: string | null;
+  counts?: AnyRecord | null;
 }> => {
   const page_size = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
   const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
@@ -1986,95 +1958,69 @@ export const getInboxRowsForView = async (
   else if (view === 'priority' || view === 'negotiating') inbox_bucket = 'priority'
   else if (view === 'follow_up' || view === 'follow_up_due') inbox_bucket = 'follow_up'
   else if (view === 'cold' || view === 'cold_no_response' || view === 'waiting_on_seller') inbox_bucket = 'cold'
+  else if (view === 'dead' || view === 'wrong_number') inbox_bucket = 'dead'
   else if (view === 'needs_review' || view === 'manual_review') inbox_bucket = 'needs_review'
   else if (view === 'suppressed' || view === 'dnc_opt_out' || view === 'opt_out') inbox_bucket = 'suppressed'
   else if (view === 'all_messages' || view === 'all') inbox_bucket = 'all_messages'
-  
-  const params = new URLSearchParams()
-  params.set('inbox_bucket', inbox_bucket)
-  params.set('limit', String(page_size))
-  params.set('cursor', String(offset))
-  if (options.filters?.query) params.set('q', options.filters.query)
-  
-  const result = await backendClient.fetchInboxThreads(params.toString(), options.signal)
-  const payload = result.ok
-    ? ((result.data ?? {}) as AnyRecord)
-    : (() => {
-        if (DEV) console.warn('[getInboxRowsForView] /threads unavailable, falling back to /live', result.message || result.error)
-        return null
-      })()
+  const endpoint = '/api/cockpit/inbox/live'
+  const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
 
-  // Normalize the threads response to support all shapes
-  const payloadRecord = payload as AnyRecord
-  const dataRecord = (payloadRecord?.data as AnyRecord) || {}
-  const threadsRaw = Array.isArray(dataRecord.threads) 
-    ? dataRecord.threads 
-    : (Array.isArray(payloadRecord?.threads) ? payloadRecord.threads : [])
-
-  const countRaw = Number(dataRecord.count ?? payloadRecord?.count ?? threadsRaw.length)
-
-  if (DEV && result.ok) {
-    console.log('[Inbox] /threads payload', {
-      ok: result.ok,
-      threadCount: threadsRaw.length,
-      count: countRaw,
-      sample: threadsRaw[0]
+  const live = await fetchLiveInbox({
+    filter: liveFilter,
+    q: options.filters?.query || '',
+    cursor: String(offset),
+    limit: page_size,
+    map: false,
+    signal: options.signal,
+  }).catch((err) => {
+    if (DEV) console.warn('[Inbox] live inbox failed - preserving previous data', err)
+    emitNotification({
+      title: 'Live Inbox Error',
+      detail: 'Failed to fetch live inbox data. Visibility maintained via cache/local state.',
+      severity: 'warning',
     })
-    console.log('[Inbox] fetch complete', {
-      url: '/api/cockpit/threads',
-      status: result.status,
-      threadCount: threadsRaw.length,
-      count: countRaw
-    })
+    throw err
+  })
+
+  if (!live) {
+    throw new Error(`Live inbox source unavailable for view "${view}"`)
   }
 
-  // Stop falling back to /live if /threads returned ok: true
-  const fallbackLive = !result.ok
-    ? await fetchLiveInbox({
-        filter: view === ('all_messages' as any) ? 'all' : String(view || 'all'),
-        q: options.filters?.query || '',
-        cursor: String(offset),
-        limit: page_size,
-        map: false,
-        signal: options.signal,
-      }).catch(err => {
-        if (DEV) console.error('[getInboxRowsForView] fetchLiveInbox failed', err)
-        emitNotification({
-          title: 'Live Inbox Error',
-          detail: 'Failed to fetch live inbox data. Returning empty view.',
-          severity: 'critical'
-        })
-        return { threads: [], pagination: { total: 0, has_more: false } }
-      })
-    : null
+  const rawRows = live.rawRows ?? safeArray(live.threads as unknown as AnyRecord[])
+  if (DEV) console.log('[Inbox] live inbox success', { threads: rawRows.length, counts: live.counts })
 
-  const diagnostics = fallbackLive ? ((fallbackLive as unknown) as AnyRecord) : {}
-  const fallbackThreads = safeArray((diagnostics.threads ?? []) as AnyRecord[])
-  const rowsRaw = result.ok ? safeArray(threadsRaw) : fallbackThreads
+  const normalizedRows = rawRows.map((row, index) => normalizeInboxThread(row, offset, index))
+  const finalCounts = (live.counts as AnyRecord) || null
+  const finalPagination = (live.pagination as unknown as AnyRecord) || {}
+  const backendCount = asNumber(live.pagination?.total, normalizedRows.length)
+  const nextCursor = asString(finalPagination.next_cursor ?? finalPagination.nextCursor, '') || null
 
-  const rows = rowsRaw.map((row, index) => normalizeInboxThread(row as AnyRecord, offset, index))
-  const pagination = (diagnostics.pagination ?? {}) as AnyRecord
-  const backendCount = result.ok ? asNumber(countRaw, rows.length) : asNumber(pagination.total, rows.length)
-  const nextCursor = result.ok ? null : asString(pagination.next_cursor ?? pagination.nextCursor, '') || null
-
-  if (DEV && result.ok) {
-    console.log('[Inbox] threads normalized', {
-      bucket: view,
-      rawCount: threadsRaw.length,
-      normalizedCount: rows.length,
-      totalCount: backendCount,
-      sampleRaw: threadsRaw[0],
-      sampleNormalized: rows[0]
+  if (DEV) {
+    console.log('[Inbox] source endpoint', endpoint)
+    console.log('[Inbox] raw sample', rawRows[0])
+    console.log('[Inbox] normalized sample', normalizedRows[0])
+    const sample = normalizedRows[0] as unknown as AnyRecord | undefined
+    console.log('[Inbox] visible fields', {
+      ownerName: sample?.ownerName,
+      propertyAddress: sample?.propertyAddress,
+      latestMessageBody: sample?.latestMessageBody,
+      status: sample?.universalStatus ?? sample?.statusText ?? sample?.universal_status ?? sample?.status,
+      stage: sample?.universalStage ?? sample?.stage ?? sample?.universal_stage,
+      bucket: sample?.inboxBucket ?? sample?.bucket ?? sample?.inbox_bucket,
+      cashOffer: sample?.cashOffer ?? sample?.cash_offer,
+      estimatedValue: sample?.estimatedValue ?? sample?.estimated_value,
+      equityPercent: sample?.equityPercent ?? sample?.equity_percent,
     })
   }
 
   return {
     view_key: view,
     backend_count: backendCount,
-    rows,
-    rendered_count: rows.length,
-    has_more: asBoolean(pagination.has_more ?? pagination.hasMore, Boolean(nextCursor)),
+    rows: normalizedRows,
+    rendered_count: normalizedRows.length,
+    has_more: asBoolean(finalPagination.has_more ?? finalPagination.hasMore, Boolean(nextCursor)),
     next_cursor: nextCursor,
+    counts: finalCounts,
   }
 }
 
@@ -2537,10 +2483,29 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const lastLiveFetchAt = new Date().toISOString()
   const filterState = options.filters || {}
   
-  const [viewResult, mapPins] = await Promise.all([
-    getInboxRowsForView((filterState.view || 'priority') as InboxViewSelectValue, options),
-    fetchInboxMapPins(filterState),
-  ])
+  let viewResult: any = null
+  let mapPins: any[] = []
+
+  try {
+    const results = await Promise.allSettled([
+      getInboxRowsForView((filterState.view || 'priority') as InboxViewSelectValue, options),
+      fetchInboxMapPins(filterState),
+    ])
+    
+    if (results[0].status === 'fulfilled') {
+      viewResult = results[0].value
+    } else {
+      console.warn('[Inbox] view fetch failed - will attempt model construction with empty threads', results[0].reason)
+      throw results[0].reason // Propagate to loadInbox for fallback/cache logic
+    }
+
+    if (results[1].status === 'fulfilled') {
+      mapPins = results[1].value
+    }
+  } catch (err) {
+    if (DEV) console.warn('[Inbox] fetchInboxModel core failure', err)
+    throw err
+  }
 
   let allInboundCount = 0
   try {
@@ -2553,7 +2518,10 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     if (DEV) console.warn('[fetchInboxModel] allInboundCount fetch failed', err)
   }
 
-  const { rows: threads, backend_count: totalAvailable } = viewResult
+  const threads = viewResult?.rows ?? []
+  const totalAvailable = viewResult?.backend_count ?? 0
+  const viewCounts = viewResult?.counts ?? null
+  
   let categoryCounts = {
     hot_leads: 0,
     needs_review: 0,
@@ -2561,34 +2529,96 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     automated: 0,
     outbound_active: 0,
     cold_no_response: 0,
+    dead: 0,
     all: 0,
     dnc_opt_out: 0,
-    all_inbound: 0
+    all_inbound: allInboundCount
+  }
+
+  // Pre-fill with viewCounts if available (e.g. from /live fallback)
+  if (viewCounts) {
+    categoryCounts = {
+      hot_leads: Number(viewCounts.priority ?? viewCounts.hot_leads ?? 0),
+      needs_review: Number(viewCounts.needs_review ?? 0),
+      new_inbound: Number(viewCounts.new_replies ?? viewCounts.new_inbound ?? 0),
+      automated: Number(viewCounts.automated ?? 0),
+      outbound_active: Number(viewCounts.follow_up ?? viewCounts.outbound_active ?? 0),
+      cold_no_response: Number(viewCounts.cold ?? viewCounts.cold_no_response ?? 0),
+      dead: Number(viewCounts.dead ?? 0),
+      all: Number(viewCounts.all_messages ?? viewCounts.all ?? viewCounts.total ?? 0),
+      dnc_opt_out: Number(viewCounts.suppressed ?? viewCounts.dnc_opt_out ?? 0),
+      all_inbound: allInboundCount
+    }
   }
 
   try {
-    const res = await backendClient.fetchInboxCounts(options.signal)
+    // Attempt to fetch from deal-context/counts which is often more reliable
+    const res = await backendClient.fetchDealContextCounts('', options.signal)
+    
     if (res.ok) {
       const payloadRecord = res.data as AnyRecord
       const dataRecord = (payloadRecord?.data as AnyRecord) || {}
-      const rawCounts = (dataRecord.counts ?? payloadRecord.counts ?? payloadRecord.data ?? {}) as AnyRecord
+      const diagnosticRecord = (payloadRecord?.diagnostics as AnyRecord) || {}
+      
+      const rawCounts = (
+        dataRecord.counts ?? 
+        payloadRecord?.counts ?? 
+        diagnosticRecord.counts ??
+        dataRecord.data ??
+        payloadRecord?.data ?? 
+        (dataRecord.total != null ? dataRecord : null) ??
+        (payloadRecord.total != null ? payloadRecord : null) ??
+        {}
+      ) as AnyRecord
+      
+      const byInboxBucket = (rawCounts.by_inbox_bucket as AnyRecord) || {}
       
       categoryCounts = {
-        hot_leads: Number(rawCounts.priority) || 0,
-        needs_review: Number(rawCounts.needs_review) || 0,
-        new_inbound: Number(rawCounts.new_replies) || 0,
-        automated: 0,
-        outbound_active: Number(rawCounts.follow_up) || 0,
-        cold_no_response: Number(rawCounts.cold) || 0,
-        all: Number(rawCounts.all_messages) || 0,
-        dnc_opt_out: Number(rawCounts.suppressed) || 0,
+        hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? byInboxBucket.priority ?? categoryCounts.hot_leads),
+        needs_review: Number(rawCounts.needs_review ?? byInboxBucket.needs_review ?? categoryCounts.needs_review),
+        new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? byInboxBucket.new_replies ?? categoryCounts.new_inbound),
+        automated: Number(rawCounts.automated ?? byInboxBucket.automated ?? categoryCounts.automated),
+        outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? byInboxBucket.follow_up ?? categoryCounts.outbound_active),
+        cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? byInboxBucket.cold ?? categoryCounts.cold_no_response),
+        dead: Number(rawCounts.dead ?? byInboxBucket.dead ?? categoryCounts.dead),
+        all: Number(rawCounts.all_messages ?? rawCounts.all ?? rawCounts.total ?? categoryCounts.all),
+        dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
         all_inbound: allInboundCount
       }
+
+      if (DEV) {
+        console.log('[fetchInboxModel] counts normalized from deal-context', { categoryCounts })
+      }
     } else {
-      if (DEV) console.warn('[fetchInboxModel] counts fetch failed', res.error || res.message)
+      console.warn('[fetchInboxModel] deal-context counts fetch returned ok:false', {
+        status: res.status,
+        error: res.error,
+        message: res.message
+      })
+      
+      // Fallback to inbox/counts if deal-context failed
+      const inboxRes = await backendClient.fetchInboxCounts(options.signal)
+      if (inboxRes.ok) {
+        const pRec = inboxRes.data as AnyRecord
+        const dRec = (pRec?.data as AnyRecord) || {}
+        const rCounts = (dRec.counts ?? pRec?.counts ?? dRec.data ?? pRec?.data ?? {}) as AnyRecord
+        
+        categoryCounts = {
+          hot_leads: Number(rCounts.priority ?? rCounts.hot_leads ?? categoryCounts.hot_leads),
+          needs_review: Number(rCounts.needs_review ?? categoryCounts.needs_review),
+          new_inbound: Number(rCounts.new_replies ?? rCounts.new_inbound ?? categoryCounts.new_inbound),
+          automated: Number(rCounts.automated ?? categoryCounts.automated),
+          outbound_active: Number(rCounts.follow_up ?? rCounts.outbound_active ?? categoryCounts.outbound_active),
+          cold_no_response: Number(rCounts.cold ?? rCounts.cold_no_response ?? categoryCounts.cold_no_response),
+          dead: Number(rCounts.dead ?? categoryCounts.dead),
+          all: Number(rCounts.all_messages ?? rCounts.all ?? rCounts.total ?? categoryCounts.all),
+          dnc_opt_out: Number(rCounts.suppressed ?? rCounts.dnc_opt_out ?? categoryCounts.dnc_opt_out),
+          all_inbound: allInboundCount
+        }
+      }
     }
   } catch (err) {
-    if (DEV) console.warn('[fetchInboxModel] counts fetch failed', err)
+    console.error('[fetchInboxModel] counts fetch failed with exception', err)
   }
 
   const priorityInboxCount = categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound
@@ -2598,6 +2628,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   
   const unreadThreadsCount = categoryCounts.new_inbound
   const suppressedThreadsCount = categoryCounts.dnc_opt_out
+  const deadThreadsCount = categoryCounts.dead
   const loadedCount = threads.length
   
   const fullyHydratedCount = threads.filter((t) => t.propertyId).length
@@ -2631,9 +2662,14 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     archivedThreadsCount: 0,
     hiddenThreadsCount: 0,
     suppressedThreadsCount,
+    deadThreadsCount,
     lastLiveFetchAt,
     counts: {
       ...categoryCounts,
+      all_messages: allInboxCount,
+      new_replies: categoryCounts.new_inbound,
+      follow_up: categoryCounts.outbound_active,
+      cold: categoryCounts.cold_no_response,
       positive_hot: categoryCounts.hot_leads,
       manual_review: categoryCounts.needs_review,
       needs_reply: categoryCounts.new_inbound,
@@ -2641,6 +2677,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
       outbound_only: categoryCounts.outbound_active,
       missing_context: categoryCounts.cold_no_response,
       suppressed: categoryCounts.dnc_opt_out,
+      dead: categoryCounts.dead,
       priority: priorityInboxCount,
       active: activeInboxCount,
       waiting: waitingInboxCount,
@@ -3166,6 +3203,7 @@ export const getThreadMessages = async (threadIdOrKey: string): Promise<ThreadMe
 export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promise<ThreadIntelligenceRecord | null> => {
   const threadKey = asString(thread.threadKey, '') || asString(thread.id, '')
   if (!threadKey) return null
+  const baseRecord = thread as unknown as ThreadIntelligenceRecord
 
   try {
     const params = new URLSearchParams()
@@ -3174,44 +3212,132 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promis
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
       const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
-      if (diagnostics?.selected_thread) return diagnostics as ThreadIntelligenceRecord
+      if (diagnostics?.selected_thread) {
+        return {
+          ...baseRecord,
+          ...(diagnostics as ThreadIntelligenceRecord),
+          ...((diagnostics.selected_thread as AnyRecord) ?? {}),
+        }
+      }
     }
   } catch (err) {
     if (DEV) console.warn('[getThreadIntelligence] cockpit thread-dossier failed; falling back', err)
   }
-  const supabase = getSupabaseClient()
 
-  // 1. Try preferred RPC
   try {
-    const { data: rpcData, error: rpcError } = await supabase.rpc('get_inbox_thread_dossier', { thread_key_param: threadKey })
-    if (!rpcError && rpcData) {
-      if (DEV) console.log('[getThreadIntelligence] RPC success', { threadKey })
-      return rpcData as ThreadIntelligenceRecord
+    const result = await backendClient.fetchDealContextByThread(threadKey)
+    if (result.ok) {
+      const payload = (result.data ?? {}) as AnyRecord
+      const record = (payload.data ?? payload) as AnyRecord
+      const dc = normalizeDealContext(record)
+      return {
+        ...baseRecord,
+        ...dc.raw,
+        ...dc,
+        property_data: dc.property,
+        master_owner_data: dc.masterOwner,
+        prospect_data: dc.prospect,
+        phone_data: dc.phoneData,
+        email_data: dc.email,
+        thread_state_data: dc.threadState,
+        queue_data: dc.queue,
+        campaign_data: dc.campaign,
+        suppression_data: dc.suppression,
+        valuation_data: dc.valuation,
+        buyer_match_data: dc.buyerMatch,
+        latest_message_event_data: dc.latestMessageEvent,
+      } as ThreadIntelligenceRecord
     }
-  } catch (rpcErr) {
-    // Ignore RPC failure, move to view
+  } catch (err) {
+    if (DEV) console.warn('[getThreadIntelligence] deal-context/thread failed; using selected thread', err)
   }
 
-  // 2. Try dossier view
-  const { data, error } = await supabase
-    .from('inbox_threads_hydrated')
-    .select('*')
-    .eq('thread_key', threadKey)
-    .limit(1)
-
-  if (!error && data && data.length > 0) {
-    const row = data[0] as ThreadIntelligenceRecord
-    if (DEV) console.log('[getThreadIntelligence] View success', { threadKey })
-    return row
-  }
-
-  // 3. Fallback to thread row
   if (DEV) console.log('[getThreadIntelligence] Falling back to thread row', { threadKey })
-  return thread as unknown as ThreadIntelligenceRecord
+  return baseRecord
 }
 
 
 export const getThreadContext = async (thread: InboxThread): Promise<ThreadContext> => {
+  const propertyData = thread.property_data && typeof thread.property_data === 'object' ? thread.property_data as AnyRecord : {}
+  const ownerData = thread.master_owner_data && typeof thread.master_owner_data === 'object' ? thread.master_owner_data as AnyRecord : {}
+  const prospectData = thread.prospect_data && typeof thread.prospect_data === 'object' ? thread.prospect_data as AnyRecord : {}
+  const phoneData = thread.phone_data && typeof thread.phone_data === 'object' ? thread.phone_data as AnyRecord : {}
+  const emailData = thread.email_data && typeof thread.email_data === 'object' ? thread.email_data as AnyRecord : {}
+  const queueData = thread.queue_data && typeof thread.queue_data === 'object' ? thread.queue_data as AnyRecord : {}
+  const hasDealContextBasics =
+    Object.keys(propertyData).length > 0 ||
+    Object.keys(ownerData).length > 0 ||
+    Object.keys(prospectData).length > 0 ||
+    Object.keys(phoneData).length > 0 ||
+    Object.keys(emailData).length > 0 ||
+    Object.keys(queueData).length > 0
+
+  if (hasDealContextBasics) {
+    return {
+      seller: thread.ownerId || thread.ownerName
+        ? {
+            id: asString(thread.ownerId || ownerData.id || ownerData.master_owner_id, ''),
+            name: asString(thread.ownerName || thread.ownerDisplayName || ownerData.display_name || ownerData.full_name, 'Unknown Owner'),
+            market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
+          }
+        : null,
+      property: thread.propertyId || thread.propertyAddress
+        ? {
+            id: asString(thread.propertyId || propertyData.id || propertyData.property_id, ''),
+            address: asString(thread.propertyAddress || thread.subject || propertyData.property_address_full, 'Unknown Address'),
+            market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
+          }
+        : null,
+      phone: asString(thread.phoneNumber || thread.sellerPhone || phoneData.phone_number || thread.canonicalE164, '') || null,
+      contactStack: [
+        asString(phoneData.phone_number || thread.phoneNumber || thread.sellerPhone, '')
+          ? { type: 'phone', value: asString(phoneData.phone_number || thread.phoneNumber || thread.sellerPhone, ''), status: 'known' }
+          : null,
+        asString(emailData.email || emailData.email_address, '')
+          ? { type: 'email', value: asString(emailData.email || emailData.email_address, ''), status: 'known' }
+          : null,
+      ].filter(Boolean) as { type: string; value: string; status: string }[],
+      dealContext: {
+        stage: asString(
+          (thread as unknown as AnyRecord).stage ||
+          (thread as unknown as AnyRecord).universalStage ||
+          (thread as unknown as { conversationStage?: string }).conversationStage,
+          'unknown',
+        ),
+        nextAction: asString((thread as unknown as AnyRecord).nextSystemAction, ''),
+      },
+      aiContext: null,
+      queueContext: Object.keys(queueData).length > 0
+        ? {
+            items: [{
+              id: asString(queueData.id, ''),
+              status: asString(queueData.queue_status || queueData.status, ''),
+              scheduleAt: asIso(queueData.scheduled_for_utc ?? queueData.created_at),
+            }],
+          }
+        : null,
+      contextMatchQuality: 'high',
+      contextDebug: {
+        resolvedPhoneTable: null,
+        resolvedMasterOwnerTable: null,
+        resolvedOwnerTable: null,
+        resolvedPropertyTable: null,
+        resolvedProspectTable: null,
+        matchedOwnerBy: 'deal_context',
+        matchedProspectBy: 'deal_context',
+        matchedPropertyBy: 'deal_context',
+        matchedPhoneBy: 'deal_context',
+        matchedPhoneRowId: asString(phoneData.id, '') || null,
+        matchedEmailBy: Object.keys(emailData).length > 0 ? 'deal_context' : null,
+        matchedAiBrainBy: null,
+        matchedQueueBy: Object.keys(queueData).length > 0 ? 'deal_context' : null,
+        bridgedMasterOwnerId: asString(thread.ownerId || ownerData.id || ownerData.master_owner_id, '') || null,
+        bridgedProspectId: asString(thread.prospectId || prospectData.id || prospectData.prospect_id, '') || null,
+        bridgedPropertyId: asString(thread.propertyId || propertyData.id || propertyData.property_id, '') || null,
+      },
+    }
+  }
+
   const supabase = getSupabaseClient()
 
   let ownerId = asString(thread.ownerId, '')
@@ -4039,23 +4165,98 @@ export const sendInboxMessageNow = async (
   }
 
   // ── Resolve from number (STRICT RULE) ──────────────────────────────────────
-  // 1. Identify seller phone (normalized to E.164)
-  const toE164 = (v: unknown): string => {
-    const raw = String(v ?? '').trim()
-    if (!raw) return ''
-    const digits = raw.replace(/\D/g, '')
-    if (!digits) return ''
-    if (digits.length === 10) return `+1${digits}`
-    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
-    return raw.startsWith('+') ? raw : digits ? `+${digits}` : ''
+  const sellerPhone = toE164(thread.sellerPhone || thread.canonicalE164 || thread.phoneNumber || toPhone)
+  const threadRecord = thread as unknown as AnyRecord
+  const threadStateData = (threadRecord.thread_state_data as AnyRecord) || {}
+  const latestMessageEventData = (threadRecord.latest_message_event_data as AnyRecord) || {}
+  const queueContextData = (threadRecord.queue_data as AnyRecord) || {}
+
+  const preferredFromPhoneCandidate = toE164(
+    options?.fromPhoneNumber ||
+    thread.ourNumber ||
+    thread.sender_phone ||
+    threadRecord.our_number ||
+    threadRecord.sender_phone ||
+    threadStateData.our_number ||
+    threadStateData.sender_phone ||
+    queueContextData.from_phone_number ||
+    null
+  )
+
+  let preferredFromPhone = isTextGridNumber(preferredFromPhoneCandidate) ? preferredFromPhoneCandidate : null
+  
+  if (!preferredFromPhone) {
+     const inboundTo = toE164(latestMessageEventData.to_phone_number)
+     const outboundFrom = toE164(latestMessageEventData.from_phone_number)
+     if (isTextGridNumber(inboundTo)) preferredFromPhone = inboundTo
+     else if (isTextGridNumber(outboundFrom)) preferredFromPhone = outboundFrom
   }
 
-  const sellerPhone = toE164(thread.canonicalE164 || thread.phoneNumber || thread.sellerPhone || toPhone)
-  
-  let fromPhone = options?.fromPhoneNumber || thread.ourNumber || null
-  if (fromPhone) fromPhone = toE164(fromPhone)
+  const preferredTextgridNumberIdCandidate = asString(
+    thread.textgridNumberId ||
+    threadRecord.textgrid_number_id ||
+    threadStateData.textgrid_number_id ||
+    queueContextData.textgrid_number_id ||
+    latestMessageEventData.textgrid_number_id,
+    '',
+  )
+  const preferredTextgridNumberId = isValidUUID(preferredTextgridNumberIdCandidate)
+    ? preferredTextgridNumberIdCandidate
+    : null
 
-  let textgridNumberId = thread.textgridNumberId || null
+  const resolveSendNowRoute = async (preferFreshRoute = false) => {
+    return resolveOutboundTextgridNumber({
+      marketId: thread.marketId,
+      market: thread.market || thread.marketName,
+      ourNumber: preferFreshRoute ? undefined : (preferredFromPhone || undefined),
+      phoneNumber: sellerPhone,
+      textgridNumberId: preferredTextgridNumberId || undefined,
+      property_address_state: thread.property_address_state,
+      propertyId: thread.propertyId,
+      threadKey: thread.threadKey,
+    }, false)
+  }
+
+  let routingResult = await resolveSendNowRoute(false)
+  
+  // If routing returned a number that equals the seller, we MUST reroute
+  if (routingResult.ok && toE164(routingResult.from_phone_number) === sellerPhone) {
+    routingResult = await resolveSendNowRoute(true)
+  }
+
+  let fromPhone = routingResult.ok ? toE164(routingResult.from_phone_number) : (preferredFromPhone || null)
+  let textgridNumberId = routingResult.ok
+    ? (routingResult.textgrid_number_id || null)
+    : preferredTextgridNumberId
+
+  let routingResolutionSource = routingResult.ok
+    ? 'resolved_thread_context'
+    : (fromPhone ? 'thread_context_fallback' : 'backend_thread_history_fallback')
+  
+  // Final safety guard: fromPhone cannot be sellerPhone
+  if (fromPhone === sellerPhone) {
+    fromPhone = null
+    routingResolutionSource = 'backend_thread_history_fallback'
+  }
+
+  if (!fromPhone && !thread.threadKey) {
+    return {
+      ok: false,
+      clientSendId: options?.clientSendId ?? null,
+      queueId: null,
+      messageEventId: null,
+      providerMessageSid: null,
+      deliveryStatus: null,
+      errorMessage: 'No reply route was resolved for this thread.',
+      guardReason: 'missing_routing',
+      backendReason: null,
+      insertPayloadKeys: [],
+      suppressionBlocked: false,
+      sendRouteUsed: 'none',
+      queueProcessorEligible: false,
+      proof: null,
+    }
+  }
 
   const now = new Date().toISOString()
   const queueKey = `inbox:send_now:${thread.threadKey ?? thread.id}:${Date.now()}`
@@ -4105,8 +4306,10 @@ export const sendInboxMessageNow = async (
       resolution: {
         sellerPhone,
         resolvedFromPhone: fromPhone,
-        resolutionSource: 'strict_thread_context',
+        resolutionSource: routingResolutionSource,
         fromEqualsTo: fromPhone === sellerPhone,
+        routingReason: routingResult.routing_reason || routingResult.error || null,
+        routingTier: routingResult.routing_tier ?? null,
       },
     },
     created_at: now,

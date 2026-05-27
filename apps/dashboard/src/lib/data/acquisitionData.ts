@@ -266,7 +266,7 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         canonical_e164: context.canonicalE164,
         phone: context.phoneDisplay,
         phone_number: context.phoneDisplay,
-        type: asString(context.phone.phone_type || context.phone.type, 'mobile'),
+        type: asString(context.phoneData.phone_type || context.phoneData.type, 'mobile'),
         status: asString(context.queue.queue_status || 'active'),
         sms_status: context.status,
         suppressed: asBoolean(context.raw.opt_out),

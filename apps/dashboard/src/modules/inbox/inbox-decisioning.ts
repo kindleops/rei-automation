@@ -15,6 +15,7 @@ export type InboxBucket =
   // canonical names (used by classifyInboxBucket and new sidebar)
   | 'follow_up'
   | 'cold'
+  | 'dead'
   | 'suppressed'
   | 'all'
 

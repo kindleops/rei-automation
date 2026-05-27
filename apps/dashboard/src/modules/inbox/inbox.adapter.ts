@@ -56,6 +56,7 @@ const emptyLiveErrorModel = (liveFetchError: string): InboxModel => {
     archivedThreadsCount: null,
     hiddenThreadsCount: null,
     suppressedThreadsCount: null,
+    deadThreadsCount: null,
     lastLiveFetchAt: new Date().toISOString(),
   }
 }
@@ -149,7 +150,6 @@ export interface InboxThread {
   threadIsArchived?: boolean
   threadIsRead?: boolean
   latestMessage?: string
-  inbox_category?: string
   display_phone?: string
   bestPhone?: string
   isRead?: boolean
@@ -160,10 +160,25 @@ export interface InboxThread {
   yearBuilt?: string | number
   equityAmount?: number
   equityPercent?: number
+  equity_percent?: number
   motivationScore?: number
   estimatedRepairCost?: number
   estimatedValue?: number | null
   contactLanguage?: string
+  
+  // DealContext nested objects
+  property_data?: any
+  master_owner_data?: any
+  prospect_data?: any
+  phone_data?: any
+  email_data?: any
+  thread_state_data?: any
+  campaign_data?: any
+  queue_data?: any
+  suppression_data?: any
+  valuation_data?: any
+  buyer_match_data?: any
+  contact_stack_json?: any
 
   // UNIVERSAL SELLER WORK ITEM FIELDS
   is_uncontacted?: boolean
@@ -197,6 +212,35 @@ export interface InboxThread {
   prospect_best_email?: string
   sms_eligible?: boolean
   email_eligible?: boolean
+
+  // DealContext flat fields
+  deal_context_id?: string
+  context_type?: string
+  seller_phone?: string
+  sender_phone?: string
+  owner_name?: string
+  display_name?: string
+  property_address_full?: string
+  market_name?: string
+  universal_status?: string
+  universal_stage?: string
+  inbox_bucket?: string
+  reply_intent?: string
+  lead_temperature?: string
+  prospect_name?: string
+  full_name?: string
+  first_name?: string
+  latitude?: number
+  longitude?: number
+  property_type?: string
+  property_class?: string
+  estimated_value?: number
+  estimated_arv?: number
+  cash_offer?: number
+  final_acquisition_score?: number
+  priority_score?: number
+  campaign_name?: string
+  queue_status?: string
 
   // OWNER
   primary_owner_address?: string
@@ -236,12 +280,10 @@ export interface InboxThread {
   property_address_zip?: string
   property_county_name?: string
   market_region?: string
-  property_class?: string
   estimated_repair_cost?: number
   estimated_repair_cost_per_sqft?: number
   deal_strength_score?: number
   equity_amount?: number
-  equity_percent?: number
   total_loan_amt?: number
   total_loan_balance?: number
   total_loan_payment?: number
@@ -356,7 +398,9 @@ export interface InboxModel {
   archivedThreadsCount: number | null
   hiddenThreadsCount: number | null
   suppressedThreadsCount: number | null
+  deadThreadsCount?: number | null
   lastLiveFetchAt: string | null
+
   counts?: Record<string, number | null | undefined>
   mapPins?: LiveInboxMapPin[]
   pagination?: LiveInboxPagination | null
@@ -395,6 +439,7 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
   const archivedThreads = threads.filter((t) => t.status === 'archived').length
   const hiddenThreads = threads.filter((t) => t.priorityBucket === 'hidden').length
   const suppressedThreads = threads.filter((t) => t.priorityBucket === 'suppressed').length
+  const deadThreads = threads.filter((t) => t.priorityBucket === 'dead' || t.inboxCategory === 'dead').length
 
   return {
     threads,
@@ -417,6 +462,7 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
     archivedThreadsCount: archivedThreads,
     hiddenThreadsCount: hiddenThreads,
     suppressedThreadsCount: suppressedThreads,
+    deadThreadsCount: deadThreads,
     lastLiveFetchAt: null,
   }
 }
@@ -484,7 +530,12 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     const cached = localStorage.getItem(CACHE_KEY)
     if (cached) {
       try {
-        return { ...JSON.parse(cached), dataMode: 'fallback_error', liveFetchError }
+        return { 
+          ...JSON.parse(cached), 
+          dataMode: 'fallback_error', 
+          liveFetchStatus: 'fallback_error',
+          liveFetchError 
+        }
       } catch (e) {
         return emptyLiveErrorModel(liveFetchError)
       }
@@ -571,15 +622,28 @@ const threadIdentity = (thread: Pick<InboxThread, 'id' | 'threadKey'>): string =
 
 // selectedThreadPreserved: merge refreshes into existing rows instead of replacing the list.
 const mergeInboxModels = (prev: InboxModel, next: InboxModel, mode: 'refresh' | 'append'): InboxModel => {
-  // Prevent wiping out the inbox if a background refresh encounters an error
-  if (next.liveFetchStatus === 'fallback_error' && prev.threads.length > 0) {
-    if (isDev) console.warn('[mergeInboxModels] Ignoring fallback_error to prevent wiping existing threads', next.liveFetchError)
+  // Prevent wiping out the inbox if a refresh encounters an error
+  const isFallbackError = next.liveFetchStatus === 'fallback_error' || next.dataMode === 'fallback_error'
+  
+  if (isFallbackError && prev.threads.length > 0) {
+    if (isDev) console.warn('[Inbox] live inbox failed - preserving previous data', {
+      prevThreads: prev.threads.length,
+      error: next.liveFetchError
+    })
     return {
       ...prev,
       liveFetchStatus: 'fallback_error',
-      liveFetchError: next.liveFetchError,
-      dataMode: next.dataMode,
+      liveFetchError: next.liveFetchError || prev.liveFetchError,
+      dataMode: 'fallback_error',
     }
+  }
+
+  if (isDev && next.threads.length > 0) {
+    console.log('[Inbox] live inbox success', { 
+      threads: next.threads.length, 
+      total: next.totalCount,
+      mode 
+    })
   }
 
   const prevByKey = new Map(prev.threads.map((thread) => [threadIdentity(thread), thread]))
@@ -879,8 +943,12 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
 
   const setMode = useCallback((mode: InboxSourceMode) => {
     setSourceMode(mode)
-    setData(EMPTY_MODEL) // Clear existing data when switching modes
-  }, [])
+    void runLoad({
+      ...lastFetchRef.current,
+      sourceMode: mode,
+      cursor: null,
+    }, 'refresh')
+  }, [runLoad])
 
   return { data, loading, error, refresh, loadMore, recentlyUpdatedThreadIds, sourceMode, setSourceMode: setMode }
 }

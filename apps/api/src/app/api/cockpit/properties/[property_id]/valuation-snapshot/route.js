@@ -38,11 +38,8 @@ export async function OPTIONS(request) {
 export async function POST(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors },
-    )
+  if (auth && auth.status >= 400) {
+    return auth
   }
 
   const { property_id } = params
@@ -99,11 +96,8 @@ export async function POST(request, { params }) {
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors },
-    )
+  if (auth && auth.status >= 400) {
+    return auth
   }
 
   const { property_id } = params
@@ -118,6 +112,14 @@ export async function GET(request, { params }) {
       .maybeSingle()
 
     if (error) throw error
+
+    if (!data) {
+      return NextResponse.json({
+        ok: true,
+        data: null,
+        warnings: ["valuation_snapshot_missing"]
+      }, { status: 200, headers: cors })
+    }
 
     return NextResponse.json({ ok: true, data }, { status: 200, headers: cors })
   } catch (error) {

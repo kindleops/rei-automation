@@ -86,6 +86,7 @@ const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
   { id: 'executive', label: 'Executive' },
   { id: 'night_vision', label: 'Night Vision' },
   { id: 'monochrome', label: 'Monochrome' },
+  { id: 'light', label: 'Light' },
 ]
 
 const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [

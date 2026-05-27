@@ -6,6 +6,7 @@ import {
   SELLER_FLOW_STAGES,
 } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { routeSellerConversation } from "@/lib/domain/seller-flow/route-seller-conversation.js";
+import { resolveThreadFlagsFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import APP_IDS from "@/lib/config/app-ids.js";
 import { info as _info, warn as _warn } from "@/lib/logging/logger.js";
 
@@ -218,6 +219,12 @@ export async function maybeQueueSellerStageReply({
         selected_tone: explicit_tone ?? base_plan?.selected_tone ?? null,
       }
     : base_plan;
+
+  // Implement safety checks based directly on classification flags instead of inbox_bucket
+  const safetyFlags = resolveThreadFlagsFromClassification(classification);
+  if (safetyFlags.opt_out || safetyFlags.wrong_number || safetyFlags.not_interested) {
+    plan.should_queue_reply = false;
+  }
 
   if (!plan?.handled) {
     logDeps.info("seller_queue.skip", {

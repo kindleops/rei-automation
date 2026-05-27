@@ -10,6 +10,7 @@ export type NexusGlobalThemeId =
   | 'executive'
   | 'night_vision'
   | 'monochrome'
+  | 'light'
 
 export type AnimationLevel = 'full' | 'reduced' | 'minimal'
 
@@ -25,6 +26,16 @@ export interface NexusGlobalThemeDefinition {
 }
 
 export const nexusGlobalThemes: Record<NexusGlobalThemeId, NexusGlobalThemeDefinition> = {
+  light: {
+    id: 'light',
+    label: 'Light',
+    description: 'Clean bright layout — maximized legibility for day ops',
+    accent: '#0a84ff',
+    personality: 'clean',
+    mapThemeId: 'light_street',
+    defaultAnimationLevel: 'full',
+    isHighContrast: false,
+  },
   dark: {
     id: 'dark',
     label: 'Dark',

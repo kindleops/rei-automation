@@ -50,28 +50,29 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
 function rowMatchesFilter(row = {}, filter = "all") {
   const f = lower(filter) || "all";
   const bucket = lower(row.inbox_bucket || 'all');
-  if (bucket === f) return true; // Direct match on real Supabase operator_thread_state
+  const status = lower(row.universal_status || '');
+
+  if (f === "dead") return bucket === "dead" || status === "dead";
+  if (f === "cold") return bucket === "cold" && status !== "dead";
+
+  if (bucket === f) return true; // Direct match on real Supabase deal_thread_state / operator_thread_state
   if (f === "all") return true;
 
   const dir = normalizeDirection(row.direction);
-  const flags = row.flags || classifyInboxMessage(row);
-  const ar = lower(row.auto_reply_status || object(row.metadata).auto_reply_status);
 
-  // Fallback mappings if inbox_bucket isn't set yet
+  // Strict aliases mapped to canonical inbox buckets
   if (f === "inbound_only") return dir === "inbound";
   if (f === "outbound_only") return dir === "outbound";
-  if (f === "needs_reply" || f === "new_replies") return dir === "inbound" && !["queued", "sent", "suppressed"].includes(ar);
-  if (f === "auto_replied" || f === "automated") return ["queued", "sent", "delivered"].includes(ar);
-  if (f === "auto_reply_failed") return ["failed", "error"].includes(ar);
-  if (f === "positive_hot" || f === "priority") return flags.positive_hot || bucket === "priority";
-  if (f === "offer_requested") return flags.offer_requested;
-  if (f === "wrong_number") return flags.wrong_number;
-  if (f === "opt_out" || f === "suppressed" || f === "dnc_opt_out") return flags.opt_out || bucket === "suppressed";
+  if (f === "needs_reply") return bucket === "new_replies";
+  if (f === "positive_hot") return bucket === "priority";
+  if (f === "wrong_number") return bucket === "dead" || status === "dead";
+  if (f === "opt_out" || f === "dnc_opt_out") return bucket === "suppressed";
   if (f === "missing_context") return !row.property_id && !row.master_owner_id && !object(row.metadata)?.enrichment?.property_id;
-  if (f === "manual_review" || f === "needs_review") return flags.manual_review || ar === "manual_review" || bucket === "needs_review";
-  if (f === "waiting_on_seller" || f === "waiting" || f === "outbound_active") return bucket === "waiting_on_seller" || (dir === "outbound" && !flags.opt_out);
-  if (f === "follow_up" || f === "follow_up_due") return bucket === "follow_up";
-  return true;
+  if (f === "manual_review") return bucket === "needs_review";
+  if (f === "waiting" || f === "outbound_active") return bucket === "waiting_on_seller" || (dir === "outbound" && bucket !== "suppressed" && bucket !== "dead" && status !== "dead");
+  if (f === "follow_up_due") return bucket === "follow_up";
+  
+  return false;
 }
 
 function buildThreads(messages = []) {
@@ -131,7 +132,7 @@ export async function getLiveInbox(params = {}, deps = {}) {
   if (!deps.supabase && !hasSupabaseConfig()) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   const limit = int(params.limit, DEFAULT_LIMIT);
   const wantsMap = bool(params.map);
-  const filter = lower(params.filter || "all");
+  const filter = lower(params.inbox_bucket || params.filter || "all");
   const offset = int(params.offset, 0);
 
   const dealContextParams = {
@@ -141,7 +142,8 @@ export async function getLiveInbox(params = {}, deps = {}) {
     order_by: 'latest_message_at',
   };
 
-  if (filter === "new_replies" || filter === "priority" || filter === "needs_review" || filter === "follow_up" || filter === "cold" || filter === "suppressed") {
+  const canonicalBuckets = ["new_replies", "priority", "needs_review", "follow_up", "cold", "dead", "suppressed"];
+  if (canonicalBuckets.includes(filter)) {
     dealContextParams.inbox_bucket = filter;
   }
   if (filter === "dnc_opt_out") {
@@ -149,6 +151,9 @@ export async function getLiveInbox(params = {}, deps = {}) {
   }
   if (filter === "unlinked") {
     dealContextParams.context_type = "unlinked_thread";
+  }
+  if (filter === "all" || filter === "all_messages") {
+    delete dealContextParams.inbox_bucket;
   }
   if (lower(params.direction) === "inbound") {
     dealContextParams.latest_message_direction = "inbound";
@@ -168,12 +173,18 @@ export async function getLiveInbox(params = {}, deps = {}) {
     latest_activity_at: row.latest_message_at || row.updated_at || row.created_at || null,
     latest_direction: row.latest_message_direction || null,
     direction: row.latest_message_direction || null,
-    phone: row.canonical_e164 || null,
-    best_phone: row.canonical_e164 || null,
-    seller_phone: row.canonical_e164 || null,
+    
+    // Use the resolved phones from listDealContexts if available, or row values
+    seller_phone: row.seller_phone || null,
+    sender_phone: row.sender_phone || null,
+    
+    phone: row.seller_phone || null,
+    best_phone: row.seller_phone || null,
+    our_number: row.sender_phone || null,
+    
     owner_name: row.owner_name || null,
-    prospect_full_name: object(row.prospect_data).full_name || null,
-    prospect_name: object(row.prospect_data).full_name || null,
+    prospect_full_name: row.full_name || row.prospect_name || object(row.prospect_data).full_name || null,
+    prospect_name: row.full_name || row.prospect_name || object(row.prospect_data).full_name || null,
     property_address: row.property_address_full || null,
     market_name: row.market || null,
     conversation_stage: row.universal_stage || null,
@@ -183,7 +194,7 @@ export async function getLiveInbox(params = {}, deps = {}) {
     review_status: row.universal_status || null,
     auto_reply_status: row.queue_status || null,
     failure_reason: object(row.queue_data).failed_reason || null,
-    latest_intent: object(row.thread_state_data).reply_intent || null,
+    latest_intent: row.reply_intent || object(row.thread_state_data).reply_intent || null,
     final_acquisition_score: row.final_acquisition_score || row.priority_score || null,
     priority_score: row.priority_score || null,
     lat: row.latitude || null,
@@ -220,11 +231,13 @@ export async function getLiveInbox(params = {}, deps = {}) {
     messages: [],
     counts: {
       all: counts.total || 0,
+      all_messages: counts.total || 0,
       priority: counts.by_inbox_bucket?.priority || 0,
       new_replies: counts.by_inbox_bucket?.new_replies || 0,
       needs_review: counts.by_inbox_bucket?.needs_review || 0,
       follow_up: counts.by_inbox_bucket?.follow_up || 0,
       cold: counts.by_inbox_bucket?.cold || 0,
+      dead: counts.by_inbox_bucket?.dead || 0,
       suppressed: counts.by_inbox_bucket?.suppressed || 0,
       unlinked: counts.by_context_type?.unlinked_thread || 0,
     },

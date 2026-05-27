@@ -9,6 +9,10 @@ function clean(value) {
   return String(value ?? '').trim()
 }
 
+function lower(value) {
+  return clean(value).toLowerCase()
+}
+
 function int(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(parsed)) return fallback
@@ -44,7 +48,6 @@ function applyScalarFilters(query, params = {}) {
     ['property_county_name', params.property_county_name],
     ['universal_status', params.universal_status],
     ['universal_stage', params.universal_stage],
-    ['inbox_bucket', params.inbox_bucket],
     ['campaign_status', params.campaign_status],
     ['campaign_name', params.campaign_name],
     ['campaign_target_status', params.campaign_target_status],
@@ -57,6 +60,21 @@ function applyScalarFilters(query, params = {}) {
     const value = clean(rawValue)
     if (!value) continue
     nextQuery = nextQuery.eq(column, value)
+  }
+
+  const inboxBucket = lower(params.inbox_bucket)
+  if (inboxBucket === 'dead') {
+    nextQuery = nextQuery.or('inbox_bucket.eq.dead,universal_status.eq.dead')
+  } else if (inboxBucket === 'cold') {
+    nextQuery = nextQuery
+      .eq('inbox_bucket', 'cold')
+      .not('universal_status', 'eq', 'dead')
+      .not('universal_status', 'eq', 'suppressed')
+      .eq('opt_out', false)
+      .eq('wrong_number', false)
+      .eq('not_interested', false)
+  } else if (inboxBucket && inboxBucket !== 'all' && inboxBucket !== 'all_messages') {
+    nextQuery = nextQuery.eq('inbox_bucket', inboxBucket)
   }
 
   if (clean(params.has_thread)) {
@@ -104,6 +122,147 @@ function applyOrdering(query, params = {}) {
   return orderedQuery
 }
 
+function object(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function normalizePhone(v) {
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  const d = s.replace(/\D/g, '')
+  if (d.length === 10) return `+1${d}`
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`
+  return s.startsWith('+') ? s : (d ? `+${d}` : null)
+}
+
+function firstPhone(...values) {
+  for (const value of values) {
+    const normalized = normalizePhone(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+const TEXTGRID_NUMBERS = new Set([
+  '+16128060495', '+13235589881', '+17866052999', '+19804589889', 
+  '+13234104544', '+14704920588', '+14693131600', '+12818458577', 
+  '+19048774448', '+17042405818'
+])
+
+function isTextGridNumber(phone) {
+  if (!phone) return false
+  const normalized = normalizePhone(phone)
+  return normalized && TEXTGRID_NUMBERS.has(normalized)
+}
+
+function resolvePhones(row) {
+  const event = object(row.latest_message_event_data)
+  const threadState = object(row.thread_state_data)
+  const direction = lower(row.latest_message_direction || event.direction || row.direction)
+  
+  const toNum = normalizePhone(event.to_phone_number)
+  const fromNum = normalizePhone(event.from_phone_number)
+  const canonical = normalizePhone(row.canonical_e164 || threadState.canonical_e164)
+  const threadKey = normalizePhone(row.thread_key)
+  const rowOur = normalizePhone(row.our_number || threadState.our_number)
+
+  let seller_phone = null
+  let sender_phone = null
+
+  // 1. Identify our number (sender_phone)
+  if (isTextGridNumber(rowOur)) sender_phone = rowOur
+  else if (isTextGridNumber(fromNum)) sender_phone = fromNum
+  else if (isTextGridNumber(toNum)) sender_phone = toNum
+  else if (direction === 'inbound') sender_phone = toNum
+  else if (direction === 'outbound') sender_phone = fromNum
+
+  // 2. Identify seller number (seller_phone)
+  // Must NOT be a TextGrid number
+  if (direction === 'inbound') {
+    if (fromNum && !isTextGridNumber(fromNum)) seller_phone = fromNum
+  } else if (direction === 'outbound') {
+    if (toNum && !isTextGridNumber(toNum)) seller_phone = toNum
+  }
+
+  // Fallback chain for seller_phone
+  if (!seller_phone) {
+    if (threadKey && !isTextGridNumber(threadKey)) seller_phone = threadKey
+    else if (canonical && !isTextGridNumber(canonical)) seller_phone = canonical
+    else if (fromNum && !isTextGridNumber(fromNum)) seller_phone = fromNum
+    else if (toNum && !isTextGridNumber(toNum)) seller_phone = toNum
+  }
+
+  // 3. Final safety check: if they are still the same, we have a problem
+  if (seller_phone === sender_phone && seller_phone !== null) {
+    if (isTextGridNumber(seller_phone)) {
+      seller_phone = null // Should never be seller
+    } else {
+      sender_phone = null // Should not be sender if it's the seller
+    }
+  }
+
+  return {
+    seller_phone: normalizePhone(seller_phone),
+    sender_phone: normalizePhone(sender_phone)
+  }
+}
+
+function hydrateDealContextRow(row) {
+  const { seller_phone, sender_phone } = resolvePhones(row)
+  const property = object(row.property_data)
+  const valuation = object(row.valuation_data)
+  const buyerMatch = object(row.buyer_match_data)
+  const threadState = object(row.thread_state_data)
+  const prospect = object(row.prospect_data)
+  
+  // Strict seller phone: must not be a TextGrid number
+  const bestSeller = seller_phone || 
+    (!isTextGridNumber(row.canonical_e164) ? normalizePhone(row.canonical_e164) : null) ||
+    (!isTextGridNumber(row.best_phone) ? normalizePhone(row.best_phone) : null) ||
+    (!isTextGridNumber(row.thread_key) ? normalizePhone(row.thread_key) : null)
+
+  // Strict sender phone: must be a TextGrid number if possible
+  const bestSender = isTextGridNumber(sender_phone) ? sender_phone : (
+    isTextGridNumber(row.our_number) ? normalizePhone(row.our_number) : (
+      isTextGridNumber(row.sender_phone) ? normalizePhone(row.sender_phone) : null
+    )
+  )
+
+  return {
+    ...row,
+    seller_phone: bestSeller,
+    sender_phone: bestSender,
+    our_number: bestSender,
+    canonical_e164: bestSeller || normalizePhone(row.canonical_e164) || null,
+    best_phone: bestSeller || normalizePhone(row.best_phone) || null,
+    phone: bestSeller || normalizePhone(row.phone) || null,
+    
+    // Hydrate missing top-levels from JSON if needed, or ensure they exist
+    display_name: row.owner_name || property.seller_name || null,
+    first_name: row.seller_first_name || prospect.first_name || null,
+    full_name: row.owner_name || prospect.full_name || null,
+    
+    // Valuations
+    estimated_arv: row.estimated_arv || valuation.estimated_arv || null,
+    suggested_offer: valuation.target_offer || valuation.conservative_offer || null,
+    max_allowable_offer: valuation.max_allowable_offer || null,
+    repair_estimate: valuation.repair_estimate || null,
+    
+    // Scores
+    deal_strength_score: valuation.deal_strength_score || null,
+    buyer_demand_score: row.buyer_demand_score || valuation.buyer_demand_score || null,
+    comp_confidence_score: valuation.comp_confidence_score || null,
+    
+    // Buyer Match
+    matched_buyer_count: row.buyer_match_count || buyerMatch.buyer_count || 0,
+    high_fit_buyer_count: buyerMatch.high_fit_count || 0,
+    
+    // Status/Stage
+    reply_intent: threadState.reply_intent || null,
+    lead_temperature: threadState.lead_temperature || null,
+  }
+}
+
 export async function listDealContexts(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const limit = int(params.limit, DEFAULT_LIMIT, MAX_LIMIT)
@@ -120,7 +279,9 @@ export async function listDealContexts(params = {}, deps = {}) {
   const { data, error, count } = await query
   if (error) throw error
 
-  const rows = Array.isArray(data) ? data : []
+  const rawRows = Array.isArray(data) ? data : []
+  const rows = rawRows.map(hydrateDealContextRow)
+
   const total = Number.isFinite(Number(count)) ? Number(count) : rows.length
   const nextOffset = offset + rows.length
 
@@ -150,7 +311,7 @@ export async function getDealContextByProperty(propertyId, deps = {}) {
     .maybeSingle()
 
   if (error) throw error
-  return data || null
+  return data ? hydrateDealContextRow(data) : null
 }
 
 export async function getDealContextByThread(threadKey, deps = {}) {
@@ -168,7 +329,7 @@ export async function getDealContextByThread(threadKey, deps = {}) {
     .maybeSingle()
 
   if (error) throw error
-  return data || null
+  return data ? hydrateDealContextRow(data) : null
 }
 
 function incrementCount(bucket, key) {
@@ -178,75 +339,51 @@ function incrementCount(bucket, key) {
 
 export async function getDealContextCounts(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const limit = COUNT_SCAN_CHUNK
-  let offset = 0
-  let rowsRead = 0
+  const source = 'deal_thread_state'
 
-  const summary = {
-    total: 0,
-    with_property_id: 0,
-    with_thread_key: 0,
-    with_latest_message_body: 0,
-    with_owner_name: 0,
-    with_property_address_full: 0,
-    with_canonical_e164: 0,
-    by_inbox_bucket: {},
-    by_universal_status: {},
-    by_universal_stage: {},
-    by_market: {},
-  }
+  const [
+    allRes,
+    priorityRes,
+    newRepliesRes,
+    needsReviewRes,
+    followUpRes,
+    coldRes,
+    deadRes,
+    suppressedRes,
+  ] = await Promise.all([
+    supabase.from(source).select('*', { count: 'exact', head: true }),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'priority'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'new_replies'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'needs_review'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'follow_up'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'cold'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'dead'),
+    supabase.from(source).select('*', { count: 'exact', head: true }).eq('inbox_bucket', 'suppressed'),
+  ])
 
-  while (true) {
-    let query = supabase
-      .from(DEAL_CONTEXT_SOURCE)
-      .select([
-        'deal_context_id',
-        'property_id',
-        'thread_key',
-        'latest_message_body',
-        'owner_name',
-        'property_address_full',
-        'canonical_e164',
-        'inbox_bucket',
-        'universal_status',
-        'universal_stage',
-        'market',
-      ].join(','))
-
-    query = applyScalarFilters(query, params)
-    query = query.order('deal_context_id', { ascending: true })
-    query = query.range(offset, offset + limit - 1)
-
-    const { data, error } = await query
-    if (error) throw error
-
-    const rows = Array.isArray(data) ? data : []
-    if (rows.length === 0) break
-
-    for (const row of rows) {
-      summary.total += 1
-      if (clean(row.property_id)) summary.with_property_id += 1
-      if (clean(row.thread_key)) summary.with_thread_key += 1
-      if (clean(row.latest_message_body)) summary.with_latest_message_body += 1
-      if (clean(row.owner_name)) summary.with_owner_name += 1
-      if (clean(row.property_address_full)) summary.with_property_address_full += 1
-      if (clean(row.canonical_e164)) summary.with_canonical_e164 += 1
-      incrementCount(summary.by_inbox_bucket, row.inbox_bucket)
-      incrementCount(summary.by_universal_status, row.universal_status)
-      incrementCount(summary.by_universal_stage, row.universal_stage)
-      incrementCount(summary.by_market, row.market)
-    }
-
-    rowsRead += rows.length
-    offset += rows.length
-    if (rows.length < limit) break
-  }
+  // unlinked is not easily tracked in deal_thread_state if it's missing property_id
+  // but for the sake of specific requirements, we'll try to find it in the index
+  const { count: unlinkedCount } = await supabase
+    .from('deal_context_index')
+    .select('*', { count: 'exact', head: true })
+    .eq('context_type', 'unlinked_thread')
 
   return {
-    ...summary,
-    scan: {
-      chunk_size: limit,
-      rows_read: rowsRead,
+    total: allRes.count || 0,
+    all: allRes.count || 0,
+    all_messages: allRes.count || 0,
+    by_inbox_bucket: {
+      priority: priorityRes.count || 0,
+      new_replies: newRepliesRes.count || 0,
+      needs_review: needsReviewRes.count || 0,
+      follow_up: followUpRes.count || 0,
+      cold: coldRes.count || 0,
+      dead: deadRes.count || 0,
+      suppressed: suppressedRes.count || 0,
+      all_messages: allRes.count || 0,
     },
+    by_context_type: {
+      unlinked_thread: unlinkedCount || 0,
+    }
   }
 }

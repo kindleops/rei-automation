@@ -20,7 +20,7 @@ export type CopilotReasoningDepth = 'minimal' | 'standard' | 'deep'
 export type CopilotVoiceMode = 'off' | 'text' | 'full'
 export type NexusTheme =
   // System-wide themes (aligned with map/global theme engine)
-  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome'
+  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
 export type AccentPalette = 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'ice'
@@ -304,6 +304,7 @@ export interface ThemeTokens {
 
 export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
   // ── New system-wide themes ─────────────────────────────────────────────
+
   dark: {
     id: 'dark', label: 'Dark',
     bg: '#07101a', surface: '#0c1828', elevated: '#111f34',
@@ -357,6 +358,12 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
     bg: '#060708', surface: '#0c0d0f', elevated: '#141618',
     border: 'rgba(148,163,184,0.10)', accent: '#d3dde8', accentGlow: 'rgba(148,163,184,0.16)',
     textPrimary: '#f8fafc', textSecondary: 'rgba(171,184,199,0.65)', textMuted: 'rgba(171,184,199,0.40)',
+  },
+  light: {
+    id: 'light', label: 'Light',
+    bg: '#f8fafc', surface: '#f1f5f9', elevated: '#e2e8f0',
+    border: 'rgba(15,23,42,0.10)', accent: '#0a84ff', accentGlow: 'rgba(10,132,255,0.18)',
+    textPrimary: '#0f172a', textSecondary: '#64748b', textMuted: '#94a3b8',
   },
   // ── Legacy themes (preserved for localStorage backward compat) ─────────
   'dark-matter': {

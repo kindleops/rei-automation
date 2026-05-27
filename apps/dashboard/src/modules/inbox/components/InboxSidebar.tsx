@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
-import { formatInboxThreadTimestamp } from '../../../shared/formatters'
+import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone } from '../../../shared/formatters'
 import {
   resolveThreadAddressLine,
   resolveThreadMarketBadge,
@@ -71,7 +71,8 @@ const BUCKETS: BucketConfig[] = [
   { bucket: 'needs_review', view: 'needs_review', label: 'NEEDS REVIEW', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
   { bucket: 'follow_up', view: 'follow_up', label: 'FOLLOW UP', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
   { bucket: 'cold', view: 'cold', label: 'COLD', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
-  { bucket: 'suppressed', view: 'suppressed', label: 'SUPPRESSED', icon: '🚫', description: 'Opt-out / DNC / wrong number', accentClass: 'is-dnc', countKey: 'suppressed' },
+  { bucket: 'dead', view: 'dead', label: 'DEAD', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
+  { bucket: 'suppressed', view: 'suppressed', label: 'SUPPRESSED', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
   { bucket: 'all', view: 'all_conversations', label: 'ALL MESSAGES', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all' },
 ]
 
@@ -111,6 +112,60 @@ const readString = (thread: InboxWorkflowThread, ...keys: string[]) => {
   return ''
 }
 
+const readNumber = (thread: InboxWorkflowThread, ...keys: string[]) => {
+  const row = thread as unknown as Record<string, unknown>
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = Number(value.replace(/[,$%\s]/g, ''))
+      if (Number.isFinite(normalized)) return normalized
+    }
+  }
+  return null
+}
+
+const readBoolean = (thread: InboxWorkflowThread, ...keys: string[]) => {
+  const row = thread as unknown as Record<string, unknown>
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') return value !== 0
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase()
+      if (['true', '1', 'yes', 'y'].includes(normalized)) return true
+      if (['false', '0', 'no', 'n'].includes(normalized)) return false
+    }
+  }
+  return false
+}
+
+const readStringList = (thread: InboxWorkflowThread, ...keys: string[]) => {
+  const row = thread as unknown as Record<string, unknown>
+  for (const key of keys) {
+    const value = row[key]
+    if (Array.isArray(value)) {
+      const items = value.map((item) => String(item ?? '').trim()).filter(Boolean)
+      if (items.length > 0) return items
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const items = value.split(',').map((item) => item.trim()).filter(Boolean)
+      if (items.length > 0) return items
+    }
+  }
+  return []
+}
+
+const normalizeLabel = (value: string) => value.replace(/_/g, ' ').trim()
+
+const formatMoneyCompact = (value: number | null) => (value && value > 0 ? formatCurrency(value) : '—')
+
+const formatPercentCompact = (value: number | null) => (value && value > 0 ? formatPercent(value) : '—')
+
+const renderBadge = (label: string, key: string) => (
+  <span key={key} className="nx-ops75-badge">{label}</span>
+)
+
 const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
   const search = query.trim().toLowerCase()
   if (!search) return true
@@ -139,6 +194,7 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
   if (raw.includes('needs_review') || raw.includes('manual_review')) return 'needs_review'
   if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated')) return 'follow_up'
+  if (raw.includes('dead') || raw.includes('wrong_number')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
   if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
   if (raw.includes('all')) return 'all'
@@ -150,29 +206,28 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   const address = resolveThreadAddressLine(thread) || readString(thread, 'property_address_full', 'propertyAddressFull') || 'Property Unknown'
   const market = resolveThreadMarketBadge(thread) || 'Unknown Market'
   const propertyType = readString(thread, 'propertyType', 'property_type') || 'Unknown Type'
-  
-  let rawPreview = readString(thread, 'latest_message_body', 'latestMessageBody', 'lastMessageBody', 'preview') || 'No recent message'
-  let preview = rawPreview
-  
-  // Semantic Preview Rendering
-  const uiIntent = String((decision as any).ui_intent || (thread as any).uiIntent || '').toLowerCase()
-  if (uiIntent === 'not_interested' || uiIntent === 'no') {
-    preview = `[Negative Reply] "${rawPreview}"`
-  } else if (uiIntent === 'yes' || uiIntent === 'interested' || uiIntent === 'positive') {
-    preview = `[Positive Reply] "${rawPreview}"`
-  } else if (uiIntent === 'question') {
-    preview = `[Seller Question] "${rawPreview}"`
-  } else if (uiIntent === 'price_discussion' || uiIntent === 'offer_discussion') {
-    preview = `[Price Discussion] "${rawPreview}"`
-  } else if (uiIntent === 'wrong_number') {
-    preview = `[Wrong Number] "${rawPreview}"`
-  } else if (uiIntent === 'dnc' || uiIntent === 'opt_out') {
-    preview = `[Opt-Out] "${rawPreview}"`
-  } else if (uiIntent === 'uncertain' || uiIntent === 'maybe') {
-    preview = `[Unclear Reply] "${rawPreview}"`
-  } else if (['none', 'unknown', ''].includes(rawPreview.toLowerCase())) {
-    preview = '[Unclear Seller Reply]'
-  }
+  const sellerPhone = readString(thread, 'sellerPhone', 'seller_phone', 'displayPhone', 'best_phone', 'canonical_e164', 'phone')
+  const latestMessageBody = readString(thread, 'latestMessageBody', 'latest_message_body', 'lastMessageBody', 'preview') || 'No latest message'
+  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase() || 'unknown'
+  const statusLabel = normalizeLabel(readString(thread, 'universalStatus', 'universal_status', 'workflowStatus', 'inboxStatus', 'statusText', 'status') || 'unknown')
+  const stageLabel = normalizeLabel(readString(thread, 'universalStage', 'universal_stage', 'stage', 'conversationStage', 'workflowStage') || 'unknown')
+  const bucketLabel = normalizeLabel(readString(thread, 'inboxBucket', 'inbox_bucket', 'priorityBucket', 'priority_bucket', 'inboxCategory', 'inbox_category') || 'all_messages')
+  const latestActivityAt = readString(thread, 'latestActivityAt', 'latest_activity_at', 'latestMessageAt', 'lastMessageAt', 'lastMessageIso')
+  const cashOffer = readNumber(thread, 'cashOffer', 'cash_offer')
+  const estimatedValue = readNumber(thread, 'estimatedValue', 'estimated_value')
+  const equityAmount = readNumber(thread, 'equityAmount', 'equity_amount')
+  const equityPercent = readNumber(thread, 'equityPercent', 'equity_percent')
+  const estimatedRepairCost = readNumber(thread, 'estimatedRepairCost', 'estimated_repair_cost')
+  const finalAcquisitionScore = readNumber(thread, 'finalAcquisitionScore', 'final_acquisition_score')
+  const propertyTags = readStringList(thread, 'propertyTags', 'podio_tags')
+  const sellerTags = readStringList(thread, 'sellerTags', 'seller_tags_text')
+  const contactFlags = [
+    readBoolean(thread, 'optOut', 'isOptOut') && 'Opt Out',
+    readBoolean(thread, 'wrongNumber', 'wrong_number') && 'Wrong Number',
+    readBoolean(thread, 'notInterested', 'not_interested') && 'Not Interested',
+  ].filter(Boolean) as string[]
+  const contactStatus = contactFlags[0]
+    || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : 'Active')
 
   const timestamp = formatInboxThreadTimestamp(thread.lastMessageAt || (thread as any).lastMessageIso || thread.updatedAt)
   const isHot = (
@@ -194,7 +249,6 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
 
   // 1. Delivery Status Logic (Outbound ONLY)
   let deliveryStatus: 'sent' | 'delivered' | 'failed' | null = null
-  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase()
 
   if (latestDirection === 'outbound') {
     const latestDeliveredAt = (thread as any).latestDeliveredAt || (thread as any).lastDeliveredAt
@@ -227,7 +281,37 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     }
   }
 
-  return { name, address, market, propertyType, pTypeShort, preview, timestamp, isHot, stage, stageNum, intelTags, deliveryStatus, visualCategory }
+  return {
+    name,
+    address,
+    market,
+    propertyType,
+    pTypeShort,
+    sellerPhone,
+    latestMessageBody,
+    latestDirection,
+    statusLabel,
+    stageLabel,
+    bucketLabel,
+    latestActivityAt,
+    cashOffer,
+    estimatedValue,
+    equityAmount,
+    equityPercent,
+    estimatedRepairCost,
+    finalAcquisitionScore,
+    propertyTags,
+    sellerTags,
+    contactStatus,
+    contactFlags,
+    timestamp,
+    isHot,
+    stage,
+    stageNum,
+    intelTags,
+    deliveryStatus,
+    visualCategory,
+  }
 }
 
 const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
@@ -242,10 +326,43 @@ const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
 )
 
 const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
-  const { name, address, market, pTypeShort, preview, timestamp, isHot, stageNum, intelTags, deliveryStatus, visualCategory } = getThreadVars(thread, decision)
-  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase()
+  const {
+    name,
+    address,
+    market,
+    pTypeShort,
+    sellerPhone,
+    latestMessageBody,
+    latestDirection,
+    statusLabel,
+    stageLabel,
+    bucketLabel,
+    cashOffer,
+    estimatedValue,
+    equityAmount,
+    equityPercent,
+    estimatedRepairCost,
+    finalAcquisitionScore,
+    propertyTags,
+    sellerTags,
+    contactStatus,
+    contactFlags,
+    timestamp,
+    isHot,
+    stageNum,
+    intelTags,
+    deliveryStatus,
+    visualCategory,
+  } = getThreadVars(thread, decision)
   const isInbound = latestDirection === 'inbound'
   const isOutbound = latestDirection === 'outbound'
+  const badges = [
+    renderBadge(latestDirection || 'unknown', 'direction'),
+    renderBadge(statusLabel, 'status'),
+    renderBadge(stageLabel, 'stage'),
+    renderBadge(bucketLabel, 'bucket'),
+  ]
+  const tagSummary = [...propertyTags, ...sellerTags].slice(0, 3)
 
   return (
     <div role="button" tabIndex={0}
@@ -278,10 +395,34 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
           {stageNum && <><span>{stageNum}</span><span className="nx-thread-card-rebuilt__dot">•</span></>}
           <span>{market}</span><span className="nx-thread-card-rebuilt__dot">•</span>
           <span>{pTypeShort}</span>
+          {sellerPhone && <><span className="nx-thread-card-rebuilt__dot">•</span><span>{formatPhone(sellerPhone)}</span></>}
           {isHot && <><span className="nx-thread-card-rebuilt__dot">•</span><span>⚡ Fast</span></>}
           {intelTags.length > 0 && <><span className="nx-thread-card-rebuilt__dot">•</span><span style={{color: '#a1a1aa'}}>{intelTags[0]}</span></>}
         </div>
-        <div className="nx-thread-card-rebuilt__preview">{preview}</div>
+        <div className="nx-thread-card-rebuilt__preview">{latestMessageBody}</div>
+        <div className="nx-thread-card-rebuilt__metadata">{badges}</div>
+        <div className="nx-thread-card-rebuilt__metadata">
+          <span>Offer {formatMoneyCompact(cashOffer)}</span>
+          <span className="nx-thread-card-rebuilt__dot">•</span>
+          <span>Value {formatMoneyCompact(estimatedValue)}</span>
+          <span className="nx-thread-card-rebuilt__dot">•</span>
+          <span>Equity {formatMoneyCompact(equityAmount)} / {formatPercentCompact(equityPercent)}</span>
+        </div>
+        <div className="nx-thread-card-rebuilt__metadata">
+          <span>Repairs {formatMoneyCompact(estimatedRepairCost)}</span>
+          <span className="nx-thread-card-rebuilt__dot">•</span>
+          <span>Score {finalAcquisitionScore ?? '—'}</span>
+          <span className="nx-thread-card-rebuilt__dot">•</span>
+          <span>Contact {contactStatus}</span>
+        </div>
+        <div className="nx-thread-card-rebuilt__metadata">
+          <span>Tags {tagSummary.length > 0 ? tagSummary.join(', ') : '—'}</span>
+        </div>
+        {contactFlags.length > 0 && (
+          <div className="nx-thread-card-rebuilt__metadata">
+            {contactFlags.map((flag) => renderBadge(flag, `flag-${flag}`))}
+          </div>
+        )}
 
         {/* Delivery Status Icon */}
         {deliveryStatus && (
@@ -298,7 +439,32 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
 ConversationRow.displayName = 'ConversationRow'
 
 const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
-  const { name, address, market, pTypeShort, preview, timestamp, isHot, stageNum, intelTags } = getThreadVars(thread, decision)
+  const {
+    name,
+    address,
+    market,
+    pTypeShort,
+    sellerPhone,
+    latestMessageBody,
+    latestDirection,
+    statusLabel,
+    stageLabel,
+    bucketLabel,
+    cashOffer,
+    estimatedValue,
+    equityAmount,
+    equityPercent,
+    finalAcquisitionScore,
+    propertyTags,
+    sellerTags,
+    contactStatus,
+    contactFlags,
+    timestamp,
+    isHot,
+    stageNum,
+    intelTags,
+  } = getThreadVars(thread, decision)
+  const tagSummary = [...propertyTags, ...sellerTags].slice(0, 3)
   return (
     <div role="button" tabIndex={0}
       className={cls('nx-thread-table-row-ops75', selected && 'is-selected', decision.unread && 'is-unread')}
@@ -310,10 +476,12 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
       <div className="nx-ops75-col nx-ops75-col--seller">
         <span className="nx-ops75-name">{name}</span>
         <span className="nx-ops75-address">{address}</span>
+        <span className="nx-ops75-address">{market}{sellerPhone ? ` • ${formatPhone(sellerPhone)}` : ''}</span>
       </div>
       <div className="nx-ops75-col nx-ops75-col--msg">
-        <span className="nx-ops75-preview">{preview}</span>
+        <span className="nx-ops75-preview">{latestMessageBody}</span>
         <time className="nx-ops75-time">{timestamp.timeLabel}</time>
+        <span className="nx-ops75-time">{normalizeLabel(latestDirection || 'unknown')}</span>
       </div>
       <div className="nx-ops75-col nx-ops75-col--meta">
         {stageNum && <span className="nx-ops75-badge">{stageNum}</span>}
@@ -321,9 +489,18 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
         <span className="nx-ops75-badge">{pTypeShort}</span>
         {isHot && <span className="nx-ops75-badge nx-ops75-badge--hot">🔥</span>}
         {intelTags.map(t => <span key={t} className="nx-ops75-badge">{t}</span>)}
+        <span className="nx-ops75-badge">Offer {formatMoneyCompact(cashOffer)}</span>
+        <span className="nx-ops75-badge">Value {formatMoneyCompact(estimatedValue)}</span>
+        <span className="nx-ops75-badge">Equity {formatMoneyCompact(equityAmount)} / {formatPercentCompact(equityPercent)}</span>
+        <span className="nx-ops75-badge">Score {finalAcquisitionScore ?? '—'}</span>
+        {tagSummary.map((tag) => <span key={tag} className="nx-ops75-badge">{tag}</span>)}
       </div>
       <div className="nx-ops75-col nx-ops75-col--status">
-        <span className={cls("nx-ops75-status", decision.unread && "is-unread")}>{decision.unread ? "Unread" : "Reviewed"}</span>
+        <span className={cls("nx-ops75-status", decision.unread && "is-unread")}>{statusLabel}</span>
+        <span className="nx-ops75-badge">{stageLabel}</span>
+        <span className="nx-ops75-badge">{bucketLabel}</span>
+        <span className="nx-ops75-badge">{contactStatus}</span>
+        {contactFlags.map((flag) => <span key={flag} className="nx-ops75-badge">{flag}</span>)}
       </div>
       <div className="nx-ops75-col nx-ops75-col--actions">
         <button type="button" className="nx-ops75-action-btn"><Icon name="message" /></button>
@@ -335,7 +512,7 @@ ConversationRowOps75.displayName = 'ConversationRowOps75'
 
 const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   if (!thread) return <div className="nx-deal-snapshot-empty">Select a thread to view details</div>
-  const { name, address, market, preview } = getThreadVars(thread, decision)
+  const { name, address, market, latestMessageBody } = getThreadVars(thread, decision)
   return (
     <div className="nx-deal-snapshot">
       <div className="nx-deal-snapshot__header">
@@ -346,7 +523,7 @@ const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
       <div className="nx-deal-snapshot__body">
         <h4>Latest Activity</h4>
         <div className="nx-deal-snapshot__card">
-          <p>{preview}</p>
+          <p>{latestMessageBody}</p>
         </div>
       </div>
     </div>
@@ -613,6 +790,7 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
   if (view === 'needs_review') return 'review_required'
   if (view === 'follow_up' || view === 'follow_up_due') return 'offer_needed'
   if (view === 'cold' || view === 'cold_no_response' || view === 'not_contacted') return 'missing_context'
+  if (view === 'dead' || view === 'wrong_number') return 'wrong_numbers'
   if (view === 'suppressed' || view === 'dnc_opt_out') return 'suppressed'
   return 'all_messages'
 }
