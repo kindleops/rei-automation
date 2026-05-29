@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../../lib/data/commandMapData'
 import { buildStreetViewUrl } from '../inbox-normalization'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { DealContext } from '../../../lib/data/dealContext'
 import '../comp-intelligence.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -341,23 +342,25 @@ function computeArvStats(comps: CompCandidate[], subject: Partial<CompCandidate>
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThread | null }) {
+export function CompIntelligenceWorkspace({ thread, dealContext = null, paused = false }: { thread: InboxWorkflowThread | null, dealContext?: DealContext | null, paused?: boolean }) {
   const t = thread as unknown as Record<string, unknown>
+  const dp = dealContext?.property as Record<string, unknown> | undefined
 
   const subject: Partial<CompCandidate> = useMemo(() => ({
-    propertyId: String(t?.propertyId || t?.property_id || ''),
-    address: String(t?.propertyAddress || t?.property_address || t?.subject || 'Subject Property'),
-    lat: Number(t?.latitude || t?.lat || 0),
-    lng: Number(t?.longitude || t?.lng || 0),
-    assetClass: (t?.normalized_asset_class as any) || (t?.property_type === 'Multi-Family' ? 'multifamily' : 'single_family'),
-    propertyType: String(t?.property_type || ''),
-    beds: Number(t?.total_bedrooms || t?.beds || 0),
-    baths: Number(t?.total_baths || t?.baths || 0),
-    sqft: Number(t?.building_square_feet || t?.sqft || 0),
-    units: Number(t?.units_count || 0),
-    yearBuilt: Number(t?.year_built || 0),
-    condition: String(t?.building_condition || 'Unknown'),
-  }), [t])
+    propertyId: String(dealContext?.propertyId || t?.propertyId || t?.property_id || ''),
+    address: String(dealContext?.propertyAddress || t?.propertyAddress || t?.property_address || t?.subject || 'Subject Property'),
+    lat: Number(dealContext?.latitude || dealContext?.lat || t?.latitude || t?.lat || 0),
+    lng: Number(dealContext?.longitude || dealContext?.lng || t?.longitude || t?.lng || 0),
+    assetClass: (dp?.normalized_asset_class as any) || (t?.normalized_asset_class as any) || ((dealContext?.property_type || t?.property_type) === 'Multi-Family' ? 'multifamily' : 'single_family'),
+    propertyType: String(dealContext?.property_type || t?.property_type || ''),
+    beds: Number(dp?.total_bedrooms || t?.total_bedrooms || t?.beds || 0),
+    baths: Number(dp?.total_baths || t?.total_baths || t?.baths || 0),
+    sqft: Number(dp?.building_square_feet || t?.building_square_feet || t?.sqft || 0),
+    units: Number(dp?.units_count || t?.units_count || 0),
+    yearBuilt: Number(dp?.year_built || t?.year_built || 0),
+    condition: String(dp?.building_condition || t?.building_condition || 'Unknown'),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [t, dp, dealContext?.propertyId, dealContext?.propertyAddress, dealContext?.latitude, dealContext?.longitude, dealContext?.property_type])
 
   const hasCoords = Math.abs(subject.lat || 0) > 0.001 && Math.abs(subject.lng || 0) > 0.001
 
@@ -384,8 +387,13 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
     const market = String(t?.market || '')
     const zip = String(t?.zip || t?.property_zip || '')
 
+    if (paused) {
+       console.log('[HeavyPanelLoadSkipped] CompIntelligenceWorkspace is paused (inbox or messages loading)')
+       return
+    }
+
     if (!propertyId) {
-      console.log('[CompIntelligenceWorkspace] No propertyId, returning early.', { subject, t });
+      console.log('[HeavyPanelLoadSkipped] CompIntelligenceWorkspace: No propertyId', { subject, t });
       setComps([])
       return
     }
@@ -462,7 +470,7 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
     })
     
     return () => { cancelled = true }
-  }, [subject.propertyId, subject.lat, subject.lng, radius, monthsBack, assetClass, hasCoords, t?.market, t?.zip, t?.property_zip])
+  }, [subject.propertyId, subject.lat, subject.lng, radius, monthsBack, assetClass, hasCoords, t?.market, t?.zip, t?.property_zip, paused])
 
   const arvStats = useMemo(() => computeArvStats(comps, subject), [comps, subject])
 

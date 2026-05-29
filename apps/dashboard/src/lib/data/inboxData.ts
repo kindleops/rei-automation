@@ -96,6 +96,7 @@ export interface InboxFetchOptions {
   sourceMode?: InboxSourceMode
   /** @internal */
   _automatic?: boolean
+  paused?: boolean
 }
 
 export interface LiveInboxFetchParams {
@@ -1349,30 +1350,6 @@ const KNOWN_OUR_NUMBERS: Set<string> = new Set(
     .filter(Boolean),
 )
 
-// Nested paths for inbound sender phone
-const NESTED_INBOUND_FROM = [
-  'payload.from', 'payload.from_number', 'payload.sender', 'payload.caller_id',
-  'raw_payload.from', 'raw_payload.from_number', 'raw_payload.sender',
-  'raw_payload.data.from', 'raw_payload.data.from_number',
-  'event.from', 'event.from_number', 'event.sender',
-  'data.from', 'data.from_number', 'data.sender',
-  'textgrid_payload.from', 'textgrid_payload.from_number',
-  'webhook_payload.from', 'webhook_payload.from_number',
-  'details.from', 'details.from_number',
-] as const
-
-// Nested paths for outbound recipient phone
-const NESTED_OUTBOUND_TO = [
-  'payload.to', 'payload.to_number', 'payload.recipient', 'payload.destination',
-  'raw_payload.to', 'raw_payload.to_number', 'raw_payload.recipient',
-  'raw_payload.data.to', 'raw_payload.data.to_number',
-  'event.to', 'event.to_number', 'event.recipient',
-  'data.to', 'data.to_number', 'data.recipient',
-  'textgrid_payload.to', 'textgrid_payload.to_number',
-  'webhook_payload.to', 'webhook_payload.to_number',
-  'details.to', 'details.to_number',
-] as const
-
 // Nested paths for canonical/generic phone fields (kept for reference; not
 // actively used since actual schema has from_phone_number / to_phone_number)
 
@@ -1448,49 +1425,35 @@ export const getSellerPhoneFromMessage = (row: AnyRecord): SellerPhoneResult => 
       sellerPhone = fromPhone; sellerPhoneSourceField = 'from_phone_number'
     } else if (toPhone) {
       sellerPhone = toPhone; sellerPhoneSourceField = 'to_phone_number'
-    } else {
-      // No actual columns — full nested scan as last resort
-      for (const path of NESTED_INBOUND_FROM) {
-        const val = normalizePhone(getNestedValue(row, path))
-        if (val && !KNOWN_OUR_NUMBERS.has(val)) { sellerPhone = val; sellerPhoneSourceField = path; break }
-      }
-      if (!sellerPhone) {
-        for (const path of NESTED_OUTBOUND_TO) {
-          const val = normalizePhone(getNestedValue(row, path))
-          if (val && !KNOWN_OUR_NUMBERS.has(val)) { sellerPhone = val; sellerPhoneSourceField = path; break }
-        }
-      }
     }
+    // Removed expensive nested scan for unknown direction to prevent blocking commit
   }
 
-  // ── DEV warnings ──────────────────────────────────────────────────────────
+  // ── DEV warnings (Non-blocking / rate-limited equivalent) ────────────────
   if (DEV && !sellerPhone) {
     const fromPhone = normalizePhone(row['from_phone_number'])
     const toPhone = normalizePhone(row['to_phone_number'])
+    
+    // Identity falls back to threadKey or id safely, don't crash
+    const threadKey = asString(row['thread_key'] ?? row['threadKey'] ?? row['id'], '')
+
     if (direction !== 'unknown' && (fromPhone || toPhone)) {
-      // Direction IS known but phone extraction still failed — inspect why
-      console.warn('[Inbox Seller Phone Mapping Failed]', {
-        direction,
-        from_phone_number: fromPhone,
-        to_phone_number: toPhone,
-        id: row['id'],
-        message_event_key: row['message_event_key'],
-      })
-    } else if (!fromPhone && !toPhone) {
-      // Both phone columns are empty — record not viable for phone-based grouping
-      const nestedKeyMap: Record<string, string[]> = {}
-      for (const blobKey of NESTED_BLOB_KEYS) {
-        const blob = row[blobKey]
-        if (blob && typeof blob === 'object' && !Array.isArray(blob)) {
-          nestedKeyMap[blobKey] = Object.keys(blob as AnyRecord)
-        }
+      if (!threadKey || Math.random() < 0.05) {
+        console.warn('[Inbox Seller Phone Mapping Failed]', {
+          direction,
+          from_phone_number: fromPhone,
+          to_phone_number: toPhone,
+          id: row['id']
+        })
       }
-      console.warn('[Inbox Thread Identity Missing] from_phone_number and to_phone_number are both empty.', {
-        id: row['id'],
-        direction,
-        nestedKeyMap,
-        recommendation: 'message_events rows need from_phone_number / to_phone_number populated.',
-      })
+    } else if (!fromPhone && !toPhone) {
+      if (!threadKey || Math.random() < 0.05) {
+        console.warn('[Inbox Thread Identity Missing] from_phone_number and to_phone_number are both empty.', {
+          id: row['id'],
+          direction,
+          recommendation: 'message_events rows need from_phone_number / to_phone_number populated.'
+        })
+      }
     }
   }
 
@@ -1744,6 +1707,11 @@ export const fetchLiveInbox = async ({
     throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
   }
   const payload = result.data as AnyRecord
+  if (payload['degraded']) {
+    // Backend hit its internal timeout — throw so the adapter falls back to cache
+    // rather than overwriting good cached rows with an empty degraded response.
+    throw new Error(`Live inbox API degraded (backend timeout)`)
+  }
   const normalizedPayload = asBoolean(payload['ok'], false)
     ? ((payload['diagnostics'] as AnyRecord) ?? payload)
     : payload
@@ -1754,11 +1722,13 @@ const runFilteredQuery = async (
   tableOrAlias: string,
   filters: Array<{ key: string; value: string }>,
   limit = 20,
+  signal?: AbortSignal,
 ): Promise<AnyRecord[]> => {
   const table = await resolveTable(tableOrAlias)
   if (!table) return []
   const supabase = getSupabaseClient()
   let query = supabase.from(table).select('*').limit(limit)
+  if (signal) query = query.abortSignal(signal)
   const allowedColumns = FILTER_COLUMNS_BY_ALIAS[tableOrAlias]
   const valid = filters.filter((f) => f.value && (!allowedColumns || allowedColumns.includes(f.key)))
   if (valid.length > 0) {
@@ -1769,10 +1739,29 @@ const runFilteredQuery = async (
   }
   const { data, error } = await query
   if (error) {
+    if (signal?.aborted) return []
     if (DEV) console.warn(`[NEXUS] ${table} lookup failed`, error.message)
     return []
   }
   return safeArray(data as AnyRecord[])
+}
+
+/**
+ * Merges source into target, but only for fields that are missing or empty in target.
+ * Prevents "Unknown" or empty enrichment from overwriting valid live data.
+ */
+const fillEmptyFields = (target: AnyRecord, source: AnyRecord): AnyRecord => {
+  const result = { ...target }
+  for (const [key, value] of Object.entries(source)) {
+    const existing = result[key]
+    const hasValue = value !== null && value !== undefined && value !== '' && value !== 'unknown' && value !== 'Unknown'
+    const targetIsEmpty = existing === null || existing === undefined || existing === '' || existing === 'unknown' || existing === 'Unknown'
+    
+    if (hasValue && targetIsEmpty) {
+      result[key] = value
+    }
+  }
+  return result
 }
 
 export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): InboxThread => {
@@ -1812,9 +1801,11 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   }
   const category = (PRIORITY_BUCKET_MAP[inboxBucket] ?? 'cold_no_response') as HydratedInboxCategory
 
+  // Merge row and dc carefully: row (live) takes precedence for existing fields.
+  const merged = fillEmptyFields(row, dc as unknown as AnyRecord)
+
   return {
-    ...row,
-    ...dc,
+    ...merged,
     id: threadKey,
     leadId: dc.property_id || dc.master_owner_id || threadKey,
     ownerId: dc.masterOwnerId || dc.master_owner_id || (row.ownerId as string | undefined) || null,
@@ -1823,11 +1814,11 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     phoneNumberId: dc.phoneId || dc.phone_id || null,
     textgridNumberId: dc.textgridNumberId || dc.textgrid_number_id || asString(row.textgridNumberId || row.textgrid_number_id, '') || undefined,
     queueId: dc.queueRowId || dc.queue_row_id || null,
-    marketId: dc.market || 'unknown',
-    ownerName: dc.ownerName,
-    sellerName: dc.sellerDisplayName || dc.ownerName,
-    subject: dc.propertyAddress,
-    preview: dc.latestMessageBody,
+    marketId: dc.market || '',
+    ownerName: dc.ownerName || asString(row.ownerName || row.owner_name),
+    sellerName: dc.sellerDisplayName || dc.ownerName || asString(row.sellerName || row.seller_name),
+    subject: dc.propertyAddress || asString(row.propertyAddress || row.property_address || row.subject),
+    preview: dc.latestMessageBody || asString(row.latestMessageBody || row.latest_message_body || row.preview),
     status: (row.isArchived || row.is_archived) ? 'archived' : (needsReply ? 'unread' : 'read'),
     priority: (category === 'hot_leads' || category === 'new_inbound') ? 'urgent' : 'normal',
     sentiment: (dc.reply_intent === 'potential_interest' || dc.reply_intent === 'price_anchor') ? 'hot' : 'neutral',
@@ -1926,9 +1917,9 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     contact_stack_json: dc.contactStack,
     
     unread: needsReply,
-    priorityBucket: category,
-    inboxCategory: category,
-    inbox_category: category,
+    priorityBucket: inboxBucket,
+    inboxCategory: inboxBucket,
+    inbox_category: inboxBucket,
     workflowStatus: dc.universalStatus,
     workflowStage: dc.universalStage,
   } as unknown as InboxThread
@@ -1951,34 +1942,53 @@ export const getInboxRowsForView = async (
   counts?: AnyRecord | null;
 }> => {
   const page_size = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
-  const offset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
-  
+  const rawCursor = options.cursor ?? null
+  const numericOffset = options.offset ?? 0
+
+  // Normalize aliases before mapping to live filter
+  const VIEW_ALIAS_MAP: Record<string, string> = {
+    all: 'all_messages', all_conversations: 'all_messages',
+    new_inbounds: 'new_replies', needs_reply: 'new_replies', new_inbound: 'new_replies',
+    my_priority: 'priority',
+    follow_up_due: 'follow_up',
+    waiting: 'cold', waiting_on_seller: 'cold', cold_no_response: 'cold',
+    wrong_number: 'dead',
+    manual_review: 'needs_review',
+    dnc_opt_out: 'suppressed', opt_out: 'suppressed',
+  }
+  const normalizedView: string = VIEW_ALIAS_MAP[view as string] ?? view
   let inbox_bucket = 'all_messages'
-  if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply') inbox_bucket = 'new_replies'
-  else if (view === 'priority' || view === 'negotiating') inbox_bucket = 'priority'
-  else if (view === 'follow_up' || view === 'follow_up_due') inbox_bucket = 'follow_up'
-  else if (view === 'cold' || view === 'cold_no_response' || view === 'waiting_on_seller') inbox_bucket = 'cold'
-  else if (view === 'dead' || view === 'wrong_number') inbox_bucket = 'dead'
-  else if (view === 'needs_review' || view === 'manual_review') inbox_bucket = 'needs_review'
-  else if (view === 'suppressed' || view === 'dnc_opt_out' || view === 'opt_out') inbox_bucket = 'suppressed'
-  else if (view === 'all_messages' || view === 'all') inbox_bucket = 'all_messages'
+  if (normalizedView === 'new_replies') inbox_bucket = 'new_replies'
+  else if (normalizedView === 'priority' || normalizedView === 'negotiating') inbox_bucket = 'priority'
+  else if (normalizedView === 'follow_up') inbox_bucket = 'follow_up'
+  else if (normalizedView === 'cold') inbox_bucket = 'cold'
+  else if (normalizedView === 'dead') inbox_bucket = 'dead'
+  else if (normalizedView === 'needs_review') inbox_bucket = 'needs_review'
+  else if (normalizedView === 'suppressed') inbox_bucket = 'suppressed'
+  else if (normalizedView === 'active') inbox_bucket = 'active'
   const endpoint = '/api/cockpit/inbox/live'
   const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
 
   const live = await fetchLiveInbox({
     filter: liveFilter,
     q: options.filters?.query || '',
-    cursor: String(offset),
+    cursor: rawCursor ?? String(numericOffset),
     limit: page_size,
     map: false,
     signal: options.signal,
   }).catch((err) => {
-    if (DEV) console.warn('[Inbox] live inbox failed - preserving previous data', err)
-    emitNotification({
-      title: 'Live Inbox Error',
-      detail: 'Failed to fetch live inbox data. Visibility maintained via cache/local state.',
-      severity: 'warning',
-    })
+    if (DEV) console.warn('[Inbox] /api/cockpit/inbox/live failed - preserving previous data', err)
+    const isAbort = err?.name === 'AbortError' || options.signal?.aborted === true
+    if (!isAbort) {
+      // This notification fires ONLY when /api/cockpit/inbox/live itself fails.
+      // Enrichment endpoint failures (deal-context, valuation-snapshot) are isolated
+      // at the call site and must never reach this path.
+      emitNotification({
+        title: 'Inbox Connection Error',
+        detail: '/api/cockpit/inbox/live failed. Thread list preserved from last successful load.',
+        severity: 'warning',
+      })
+    }
     throw err
   })
 
@@ -1986,10 +1996,11 @@ export const getInboxRowsForView = async (
     throw new Error(`Live inbox source unavailable for view "${view}"`)
   }
 
+  // Use the already normalized threads from the live fetch, avoiding a duplicate normalization pass
+  const normalizedRows = live.threads
   const rawRows = live.rawRows ?? safeArray(live.threads as unknown as AnyRecord[])
-  if (DEV) console.log('[Inbox] live inbox success', { threads: rawRows.length, counts: live.counts })
+  if (DEV) console.log('[Inbox] live inbox success', { threads: normalizedRows.length, counts: live.counts })
 
-  const normalizedRows = rawRows.map((row, index) => normalizeInboxThread(row, offset, index))
   const finalCounts = (live.counts as AnyRecord) || null
   const finalPagination = (live.pagination as unknown as AnyRecord) || {}
   const backendCount = asNumber(live.pagination?.total, normalizedRows.length)
@@ -2227,22 +2238,21 @@ export const getInboxThreads = async (
       row.prospect_name ??
       row.owner_display_name,
       ''
-    ) || 'Unknown Seller'
+    ) || ''
 
     // Fallback address order:
     // 1. property_address_full
     // 2. property_address
     // 3. latest property_address from message_events (already rolled into property_address_full in views)
-    // 4. "Unknown Property"
     const address = [
       asString(row.property_address_full, ''),
       asString(row.property_address, ''),
-    ].find(v => v && v.trim()) || 'Unknown Property'
+    ].find(v => v && v.trim()) || ''
     
     // filter_market comes from v_inbox_enriched (properties.market); fall back to
     // the view's own market field which comes from message_events and is usually 'unknown'.
     const market = asString(row.filter_market ?? (row.market !== 'unknown' ? row.market : null), '') || asString(row.market, '')
-    const marketLabel = (market && market !== 'unknown' && market !== 'Unknown') ? market : 'Unknown Market'
+    const marketLabel = (market && market !== 'unknown' && market !== 'Unknown') ? market : ''
     
     const latestBody = asString(row.latest_message_body, '') || 'No recent message'
     const propertyType = asString(row.property_type, '')
@@ -2354,7 +2364,9 @@ export const getInboxThreads = async (
       needsReply: category === 'new_inbound' || unreadCount > 0,
       needs_reply: category === 'new_inbound' || unreadCount > 0,
       autoReplyStatus: automationState || queueStatus || undefined,
-      
+      lastInboundAt: asString(row.last_inbound_at ?? row.lastInboundAt, '') || null,
+      lastOutboundAt: asString(row.last_outbound_at ?? row.lastOutboundAt, '') || null,
+
       // Dossier Expansion
       displayName: asString(row.display_name, ownerDisplayName),
       displayAddress: asString(row.display_address, address),
@@ -2480,145 +2492,84 @@ export const fetchInboxMapPins = async (
 }
 
 export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
+  const tStart = Date.now()
   const lastLiveFetchAt = new Date().toISOString()
   const filterState = options.filters || {}
-  
-  let viewResult: any = null
-  let mapPins: any[] = []
+  const mapPins: any[] = []
 
+  // Fire the background counts fetch IN PARALLEL with the live row fetch.
+  // Cap at 3s so a slow/timing-out Supabase query never blocks row commit.
+  // The /live response already embeds getLiveCounts data — this is enrichment only.
+  const COUNTS_TIMEOUT_MS = 3000
+  const countsRace = Promise.race([
+    backendClient.fetchDealContextCounts('', options.signal).catch(() => null),
+    new Promise<null>(resolve => setTimeout(() => resolve(null), COUNTS_TIMEOUT_MS)),
+  ])
+
+  let viewResult: any
   try {
-    const results = await Promise.allSettled([
-      getInboxRowsForView((filterState.view || 'priority') as InboxViewSelectValue, options),
-      fetchInboxMapPins(filterState),
-    ])
-    
-    if (results[0].status === 'fulfilled') {
-      viewResult = results[0].value
-    } else {
-      console.warn('[Inbox] view fetch failed - will attempt model construction with empty threads', results[0].reason)
-      throw results[0].reason // Propagate to loadInbox for fallback/cache logic
-    }
-
-    if (results[1].status === 'fulfilled') {
-      mapPins = results[1].value
+    const tLiveFetchStart = Date.now()
+    viewResult = await getInboxRowsForView((filterState.view || 'all_messages') as InboxViewSelectValue, options)
+    if (DEV) {
+      const liveFetchMs = Date.now() - tLiveFetchStart
+      console.log(`[InboxTiming] live_fetch_ms: ${liveFetchMs}ms`)
+      console.log(`[InboxTiming] lightweight_normalize_ms: 0ms (built-in)`)
     }
   } catch (err) {
     if (DEV) console.warn('[Inbox] fetchInboxModel core failure', err)
     throw err
   }
 
-  let allInboundCount = 0
-  try {
-    const { count: allInboundRaw, error: allInboundError } = await getSupabaseClient()
-      .from(HYDRATED_INBOX_THREADS_VIEW)
-      .select('thread_key', { count: 'estimated', head: true })
-      .gt('inbound_count', 0)
-    if (!allInboundError) allInboundCount = allInboundRaw ?? 0
-  } catch (err) {
-    if (DEV) console.warn('[fetchInboxModel] allInboundCount fetch failed', err)
-  }
-
+  // Rows are committed. Now resolve counts (may already be done if backend was fast).
+  const allInboundCount = 0
   const threads = viewResult?.rows ?? []
-  const totalAvailable = viewResult?.backend_count ?? 0
-  const viewCounts = viewResult?.counts ?? null
-  
+  const totalAvailable = viewResult?.backend_count ?? threads.length
+  const viewCounts = (viewResult?.counts as AnyRecord) ?? null
+
+  // Seed from the counts already embedded in the /live response — always available.
   let categoryCounts = {
-    hot_leads: 0,
-    needs_review: 0,
-    new_inbound: 0,
-    automated: 0,
-    outbound_active: 0,
-    cold_no_response: 0,
-    dead: 0,
-    all: 0,
-    dnc_opt_out: 0,
-    all_inbound: allInboundCount
+    hot_leads: Number(viewCounts?.priority ?? viewCounts?.hot_leads ?? 0),
+    needs_review: Number(viewCounts?.needs_review ?? 0),
+    new_inbound: Number(viewCounts?.new_replies ?? viewCounts?.new_inbound ?? 0),
+    automated: Number(viewCounts?.automated ?? 0),
+    outbound_active: Number(viewCounts?.follow_up ?? viewCounts?.outbound_active ?? 0),
+    cold_no_response: Number(viewCounts?.cold ?? viewCounts?.cold_no_response ?? 0),
+    dead: Number(viewCounts?.dead ?? 0),
+    all: Number(viewCounts?.all_messages ?? viewCounts?.all ?? viewCounts?.total ?? 0),
+    dnc_opt_out: Number(viewCounts?.suppressed ?? viewCounts?.dnc_opt_out ?? 0),
+    all_inbound: allInboundCount,
   }
 
-  // Pre-fill with viewCounts if available (e.g. from /live fallback)
-  if (viewCounts) {
+  // Resolve the background counts fetch (already in-flight, may return immediately).
+  const tCountsStart = Date.now()
+  const countsRes = await countsRace
+  if (DEV) console.log(`[InboxTiming] counts_ms: ${Date.now() - tCountsStart}ms`)
+  if (countsRes && countsRes.ok) {
+    const payloadRecord = countsRes.data as AnyRecord
+    const dataRecord = (payloadRecord?.data as AnyRecord) || {}
+    const diagnosticRecord = (payloadRecord?.diagnostics as AnyRecord) || {}
+    const rawCounts = (
+      dataRecord.counts ?? payloadRecord?.counts ?? diagnosticRecord.counts ??
+      dataRecord.data ?? payloadRecord?.data ??
+      (dataRecord.total != null ? dataRecord : null) ??
+      (payloadRecord.total != null ? payloadRecord : null) ?? {}
+    ) as AnyRecord
+    const byInboxBucket = (rawCounts.by_inbox_bucket as AnyRecord) || {}
     categoryCounts = {
-      hot_leads: Number(viewCounts.priority ?? viewCounts.hot_leads ?? 0),
-      needs_review: Number(viewCounts.needs_review ?? 0),
-      new_inbound: Number(viewCounts.new_replies ?? viewCounts.new_inbound ?? 0),
-      automated: Number(viewCounts.automated ?? 0),
-      outbound_active: Number(viewCounts.follow_up ?? viewCounts.outbound_active ?? 0),
-      cold_no_response: Number(viewCounts.cold ?? viewCounts.cold_no_response ?? 0),
-      dead: Number(viewCounts.dead ?? 0),
-      all: Number(viewCounts.all_messages ?? viewCounts.all ?? viewCounts.total ?? 0),
-      dnc_opt_out: Number(viewCounts.suppressed ?? viewCounts.dnc_opt_out ?? 0),
-      all_inbound: allInboundCount
+      hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? byInboxBucket.priority ?? categoryCounts.hot_leads),
+      needs_review: Number(rawCounts.needs_review ?? byInboxBucket.needs_review ?? categoryCounts.needs_review),
+      new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? byInboxBucket.new_replies ?? categoryCounts.new_inbound),
+      automated: Number(rawCounts.automated ?? byInboxBucket.automated ?? categoryCounts.automated),
+      outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? byInboxBucket.follow_up ?? categoryCounts.outbound_active),
+      cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? byInboxBucket.cold ?? categoryCounts.cold_no_response),
+      dead: Number(rawCounts.dead ?? byInboxBucket.dead ?? categoryCounts.dead),
+      all: Number(rawCounts.all_messages ?? rawCounts.all ?? rawCounts.total ?? categoryCounts.all),
+      dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
+      all_inbound: allInboundCount,
     }
-  }
-
-  try {
-    // Attempt to fetch from deal-context/counts which is often more reliable
-    const res = await backendClient.fetchDealContextCounts('', options.signal)
-    
-    if (res.ok) {
-      const payloadRecord = res.data as AnyRecord
-      const dataRecord = (payloadRecord?.data as AnyRecord) || {}
-      const diagnosticRecord = (payloadRecord?.diagnostics as AnyRecord) || {}
-      
-      const rawCounts = (
-        dataRecord.counts ?? 
-        payloadRecord?.counts ?? 
-        diagnosticRecord.counts ??
-        dataRecord.data ??
-        payloadRecord?.data ?? 
-        (dataRecord.total != null ? dataRecord : null) ??
-        (payloadRecord.total != null ? payloadRecord : null) ??
-        {}
-      ) as AnyRecord
-      
-      const byInboxBucket = (rawCounts.by_inbox_bucket as AnyRecord) || {}
-      
-      categoryCounts = {
-        hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? byInboxBucket.priority ?? categoryCounts.hot_leads),
-        needs_review: Number(rawCounts.needs_review ?? byInboxBucket.needs_review ?? categoryCounts.needs_review),
-        new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? byInboxBucket.new_replies ?? categoryCounts.new_inbound),
-        automated: Number(rawCounts.automated ?? byInboxBucket.automated ?? categoryCounts.automated),
-        outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? byInboxBucket.follow_up ?? categoryCounts.outbound_active),
-        cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? byInboxBucket.cold ?? categoryCounts.cold_no_response),
-        dead: Number(rawCounts.dead ?? byInboxBucket.dead ?? categoryCounts.dead),
-        all: Number(rawCounts.all_messages ?? rawCounts.all ?? rawCounts.total ?? categoryCounts.all),
-        dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
-        all_inbound: allInboundCount
-      }
-
-      if (DEV) {
-        console.log('[fetchInboxModel] counts normalized from deal-context', { categoryCounts })
-      }
-    } else {
-      console.warn('[fetchInboxModel] deal-context counts fetch returned ok:false', {
-        status: res.status,
-        error: res.error,
-        message: res.message
-      })
-      
-      // Fallback to inbox/counts if deal-context failed
-      const inboxRes = await backendClient.fetchInboxCounts(options.signal)
-      if (inboxRes.ok) {
-        const pRec = inboxRes.data as AnyRecord
-        const dRec = (pRec?.data as AnyRecord) || {}
-        const rCounts = (dRec.counts ?? pRec?.counts ?? dRec.data ?? pRec?.data ?? {}) as AnyRecord
-        
-        categoryCounts = {
-          hot_leads: Number(rCounts.priority ?? rCounts.hot_leads ?? categoryCounts.hot_leads),
-          needs_review: Number(rCounts.needs_review ?? categoryCounts.needs_review),
-          new_inbound: Number(rCounts.new_replies ?? rCounts.new_inbound ?? categoryCounts.new_inbound),
-          automated: Number(rCounts.automated ?? categoryCounts.automated),
-          outbound_active: Number(rCounts.follow_up ?? rCounts.outbound_active ?? categoryCounts.outbound_active),
-          cold_no_response: Number(rCounts.cold ?? rCounts.cold_no_response ?? categoryCounts.cold_no_response),
-          dead: Number(rCounts.dead ?? categoryCounts.dead),
-          all: Number(rCounts.all_messages ?? rCounts.all ?? rCounts.total ?? categoryCounts.all),
-          dnc_opt_out: Number(rCounts.suppressed ?? rCounts.dnc_opt_out ?? categoryCounts.dnc_opt_out),
-          all_inbound: allInboundCount
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[fetchInboxModel] counts fetch failed with exception', err)
+    if (DEV) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
+  } else if (countsRes === null) {
+    if (DEV) console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
   }
 
   const priorityInboxCount = categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound
@@ -2631,28 +2582,43 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const deadThreadsCount = categoryCounts.dead
   const loadedCount = threads.length
   
-  const fullyHydratedCount = threads.filter((t) => t.propertyId).length
-  const partiallyHydratedCount = threads.filter((t) => !t.propertyId).length
-  const orphanCount = threads.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
-  const latestFetchMs = 0
+  const threadList = threads as InboxThread[]
+  const fullyHydratedCount = threadList.filter((t) => t.propertyId).length
+  const partiallyHydratedCount = threadList.filter((t) => !t.propertyId).length
+  const orphanCount = threadList.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
+  const latestFetchMs = Date.now() - tStart
+  if (DEV) console.log(`[InboxTiming] total_fetch_model_ms: ${latestFetchMs}ms`)
 
   const pageSize = options.limit ?? options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
-  const cursorOffset = Number.parseInt(options.cursor ?? '0', 10) || (options.offset ?? 0)
-  const nextOffset = cursorOffset + threads.length
-  const hasMoreActual = nextOffset < totalAvailable
+  // Use the backend-provided cursor and has_more — never recalculate with parseInt
+  // so base64 keyset cursors pass through intact for Load More.
+  const nextCursorRaw = viewResult?.next_cursor ?? null
+  const hasMoreActual = viewResult?.has_more ?? (nextCursorRaw != null)
+
+  // Task: totalCount must be bucket-aware.
+  const view = filterState.view || 'all_messages'
+  let bucketTotal = allInboxCount
+  if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply') bucketTotal = unreadThreadsCount
+  else if (view === 'priority') bucketTotal = priorityInboxCount
+  else if (view === 'needs_review') bucketTotal = categoryCounts.needs_review
+  else if (view === 'automated') bucketTotal = categoryCounts.automated
+  else if (view === 'outbound_active' || view === 'follow_up') bucketTotal = categoryCounts.outbound_active
+  else if (view === 'cold_no_response' || view === 'cold') bucketTotal = categoryCounts.cold_no_response
+  else if (view === 'dead') bucketTotal = categoryCounts.dead
+  else if (view === 'dnc_opt_out' || view === 'suppressed') bucketTotal = categoryCounts.dnc_opt_out
 
   return {
     threads,
     unreadCount: unreadThreadsCount,
     urgentCount: categoryCounts.hot_leads,
-    totalCount: totalAvailable,
-    aiDraftCount: threads.filter((thread) => thread.aiDraft !== null).length,
+    totalCount: bucketTotal || totalAvailable,
+    aiDraftCount: threadList.filter((thread) => thread.aiDraft !== null).length,
     dataMode: 'live',
     liveFetchStatus: 'active',
     liveFetchError: null,
-    messageEventsCount: totalAvailable,
-    messageEventsRawCount: allInboxCount,
-    groupedThreadCount: totalAvailable,
+    messageEventsCount: bucketTotal || totalAvailable,
+    messageEventsRawCount: bucketTotal,
+    groupedThreadCount: bucketTotal || totalAvailable,
     priorityInboxCount,
     activeInboxCount,
     waitingInboxCount,
@@ -2684,11 +2650,11 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
       all: allInboxCount,
     },
     pagination: {
-      cursor: String(cursorOffset),
-      nextCursor: hasMoreActual ? String(nextOffset) : null,
+      cursor: options.cursor ?? null,
+      nextCursor: nextCursorRaw,
       hasMore: hasMoreActual,
       limit: pageSize,
-      total: totalAvailable,
+      total: allInboxCount || totalAvailable,
     },
     loadedCount,
     fullyHydratedCount,
@@ -2919,6 +2885,7 @@ const getThreadMessagesFromMessageEvents = async (
 export interface ThreadMessageFetchOptions {
   maxPages?: number
   maxMessages?: number
+  signal?: AbortSignal
 }
 
 const getCanonicalThreadKey = (thread: Pick<InboxThread, 'threadKey' | 'id'>): string =>
@@ -3116,8 +3083,9 @@ export const getThreadMessagesForThread = async (
     const result = await backendClient.fetchInboxThreadMessages(threadKey, params.toString())
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
-      const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
-      const apiMessages = safeArray((diagnostics.messages ?? []) as AnyRecord[]).map(toThreadMessage)
+      // Prefer root messages (flat response); fall back to diagnostics wrapper for compat
+      const rawMessages = (payload.messages ?? (payload.diagnostics as AnyRecord)?.messages ?? []) as AnyRecord[]
+      const apiMessages = safeArray(rawMessages).map(toThreadMessage)
       if (apiMessages.length > 0) return applyDeliveryStatusDisplay(dedupeMessages(apiMessages))
     }
   } catch (err) {
@@ -3200,7 +3168,7 @@ export const getThreadMessages = async (threadIdOrKey: string): Promise<ThreadMe
   })
 }
 
-export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promise<ThreadIntelligenceRecord | null> => {
+export const getThreadIntelligence = async (thread: InboxWorkflowThread, signal?: AbortSignal): Promise<ThreadIntelligenceRecord | null> => {
   const threadKey = asString(thread.threadKey, '') || asString(thread.id, '')
   if (!threadKey) return null
   const baseRecord = thread as unknown as ThreadIntelligenceRecord
@@ -3208,7 +3176,7 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promis
   try {
     const params = new URLSearchParams()
     params.set('thread_key', threadKey)
-    const result = await backendClient.fetchInboxThreadDossier(params.toString())
+    const result = await backendClient.fetchInboxThreadDossier(params.toString(), signal)
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
       const diagnostics = (payload.diagnostics ?? payload) as AnyRecord
@@ -3221,19 +3189,23 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promis
       }
     }
   } catch (err) {
+    if (signal?.aborted) return null
     if (DEV) console.warn('[getThreadIntelligence] cockpit thread-dossier failed; falling back', err)
   }
 
   try {
-    const result = await backendClient.fetchDealContextByThread(threadKey)
+    const result = await backendClient.fetchDealContextByThread(threadKey, signal)
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
       const record = (payload.data ?? payload) as AnyRecord
       const dc = normalizeDealContext(record)
+      
+      // Use fillEmptyFields to ensure valid thread fields aren't overwritten by "Unknown" or empty enrichment.
+      const baseWithDc = fillEmptyFields(baseRecord as unknown as AnyRecord, dc as unknown as AnyRecord)
+      
       return {
-        ...baseRecord,
+        ...baseWithDc,
         ...dc.raw,
-        ...dc,
         property_data: dc.property,
         master_owner_data: dc.masterOwner,
         prospect_data: dc.prospect,
@@ -3249,6 +3221,7 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promis
       } as ThreadIntelligenceRecord
     }
   } catch (err) {
+    if (signal?.aborted) return null
     if (DEV) console.warn('[getThreadIntelligence] deal-context/thread failed; using selected thread', err)
   }
 
@@ -3257,7 +3230,7 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread): Promis
 }
 
 
-export const getThreadContext = async (thread: InboxThread): Promise<ThreadContext> => {
+export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal): Promise<ThreadContext> => {
   const propertyData = thread.property_data && typeof thread.property_data === 'object' ? thread.property_data as AnyRecord : {}
   const ownerData = thread.master_owner_data && typeof thread.master_owner_data === 'object' ? thread.master_owner_data as AnyRecord : {}
   const prospectData = thread.prospect_data && typeof thread.prospect_data === 'object' ? thread.prospect_data as AnyRecord : {}
@@ -3377,7 +3350,7 @@ export const getThreadContext = async (thread: InboxThread): Promise<ThreadConte
       return true
     })
 
-    phoneRows = await runFilteredQuery('phones', uniquePhoneFilters, 8)
+    phoneRows = await runFilteredQuery('phones', uniquePhoneFilters, 8, signal)
 
     // ── Phase 1b: client-side broad scan if server returned nothing ──────
     if (phoneRows.length === 0 && searchPhone) {
@@ -3387,7 +3360,9 @@ export const getThreadContext = async (thread: InboxThread): Promise<ThreadConte
       let broadData: any = null
       let broadFailed = true
       if (phonesTable) {
-        const broadResult = await supabase.from(phonesTable).select('*').limit(5000)
+        let query = supabase.from(phonesTable).select('*').limit(5000)
+        if (signal) query = query.abortSignal(signal)
+        const broadResult = await query
         if (!broadResult.error) { broadData = broadResult.data; broadFailed = false }
       }
       if (!broadFailed && broadData) {
@@ -3469,30 +3444,30 @@ export const getThreadContext = async (thread: InboxThread): Promise<ThreadConte
       { key: 'master_owner_id', value: ownerId },
       { key: 'owner_id', value: ownerId },
       { key: 'normalized_owner_key', value: ownerId },
-    ], 5),
+    ], 5, signal),
     runFilteredQuery('owners', [
       { key: 'owner_id', value: ownerId },
       { key: 'master_owner_id', value: ownerId },
       { key: 'normalized_owner_key', value: ownerId },
       { key: 'podio_item_id', value: ownerId },
-    ], 5),
+    ], 5, signal),
     runFilteredQuery('prospects', [
       { key: 'prospect_id', value: prospectId },
       { key: 'master_owner_id', value: ownerId },
       { key: 'property_id', value: propertyId },
       { key: 'phone_number', value: searchPhone },
-    ], 5),
+    ], 5, signal),
     runFilteredQuery('properties', [
       { key: 'property_id', value: propertyId },
       { key: 'owner_id', value: ownerId },
       { key: 'master_owner_id', value: ownerId },
       { key: 'property_address', value: propertyAddress },
-    ], 5),
+    ], 5, signal),
     runFilteredQuery('emails', [
       { key: 'owner_id', value: ownerId },
       { key: 'prospect_id', value: prospectId },
       { key: 'property_id', value: propertyId },
-    ], 8),
+    ], 8, signal),
     runFilteredQuery('aiBrain', [
       { key: 'master_owner_id', value: ownerId },
       { key: 'prospect_id', value: prospectId },
@@ -3500,7 +3475,7 @@ export const getThreadContext = async (thread: InboxThread): Promise<ThreadConte
       { key: 'phone_number', value: searchPhone },
       { key: 'canonical_e164', value: canonical },
       { key: 'conversation_brain_id', value: asString(thread.queueId, '') },
-    ], 5),
+    ], 5, signal),
     runFilteredQuery('send_queue', [
       { key: 'id', value: queueId },
       { key: 'master_owner_id', value: ownerId },
@@ -3508,14 +3483,14 @@ export const getThreadContext = async (thread: InboxThread): Promise<ThreadConte
       { key: 'property_id', value: propertyId },
       { key: 'phone_number', value: searchPhone },
       { key: 'to_phone_number', value: searchPhone },
-    ], 12),
+    ], 12, signal),
     runFilteredQuery('offers', [
       { key: 'master_owner_id', value: ownerId },
       { key: 'owner_id', value: ownerId },
       { key: 'prospect_id', value: prospectId },
       { key: 'property_id', value: propertyId },
       { key: 'property_address', value: propertyAddress },
-    ], 8),
+    ], 8, signal),
   ])
 
   // ── Phase 3: build debug + contextMatchQuality ────────────────────────────

@@ -331,7 +331,6 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     property.owner_1_name,
     prospect.full_name,
     phoneData.owner_display_name,
-    'Unknown Owner',
   )
   const displayName = firstString(
     row.display_name,
@@ -356,7 +355,6 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     row.property_address_full,
     property.property_address_full,
     propertyRaw.property_address_full,
-    'Unknown Address',
   )
   const market = firstString(
     row.market,
@@ -508,8 +506,8 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     // Property fields
     latitude: firstNumber(row.latitude, property.latitude, 0),
     longitude: firstNumber(row.longitude, property.longitude, 0),
-    property_type: firstString(row.property_type, property.property_type, 'Single Family'),
-    property_class: firstString(row.property_class, property.property_class, 'Residential'),
+    property_type: firstString(row.property_type, property.property_type),
+    property_class: firstString(row.property_class, property.property_class),
     propertyState,
     propertyZip,
     propertyCounty,
@@ -589,12 +587,18 @@ export async function getDealContextByThread(
   threadKey: string,
   signal?: AbortSignal,
 ): Promise<DealContext | null> {
-  const result = await fetchDealContextByThread(threadKey, signal)
-  if (!result.ok) return null
-  const data = asRecord(result.data)
-  const row = (Array.isArray(data.rows) ? data.rows[0] : data.row || data.data) as AnyRecord
-  if (!row) return null
-  return normalizeDealContext(row)
+  try {
+    const result = await fetchDealContextByThread(threadKey, signal)
+    // Route always returns 200 now (even on failure) — extract body regardless of ok flag
+    const data = result.ok ? asRecord(result.data) : {}
+    const row = (Array.isArray(data.rows) ? data.rows[0] : data.row || data.data) as AnyRecord
+    if (!row || typeof row !== 'object' || Object.keys(row).length === 0) return null
+    return normalizeDealContext(row)
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') return null
+    console.warn('[getDealContextByThread] failed for', threadKey, err)
+    return null
+  }
 }
 
 export async function getDealContextCounts(

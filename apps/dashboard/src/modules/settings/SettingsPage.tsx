@@ -82,7 +82,7 @@ const LAYER_TOGGLES: { key: keyof NexusSettings; label: string }[] = [
   { key: 'layerContracts', label: 'Contracts' },
 ]
 
-const NEXUS_GLOBAL_THEME_IDS: NexusTheme[] = ['dark', 'satellite', 'terrain', 'red_ops', 'matrix', 'blueprint', 'executive', 'night_vision', 'monochrome']
+const NEXUS_GLOBAL_THEME_IDS: NexusTheme[] = ['light', 'dark', 'satellite', 'terrain', 'red_ops', 'matrix', 'blueprint', 'executive', 'night_vision', 'monochrome']
 const NEXUS_THEMES: { value: NexusTheme; label: string }[] = NEXUS_GLOBAL_THEME_IDS.map(id => ({ value: id, label: THEME_PRESETS[id].label }))
 const ACCENT_OPTIONS: { value: AccentPalette; label: string; color: string }[] = (Object.entries(ACCENT_PALETTES) as [AccentPalette, { primary: string; glow: string }][]).map(([k, v]) => ({ value: k, label: k.charAt(0).toUpperCase() + k.slice(1), color: v.primary }))
 const GREETING_STYLES: { value: GreetingStyle; label: string }[] = [

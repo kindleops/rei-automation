@@ -136,7 +136,7 @@ export const MAP_THEME_TO_NEXUS_GLOBAL: Partial<Record<CommandMapThemeId, NexusG
   red_ops: 'red_ops',
   midnight: 'executive',
   blueprint: 'blueprint',
-  light_street: 'dark',
+  light_street: 'light',
   terrain: 'terrain',
   minimal_black: 'monochrome',
   acquisition_radar: 'night_vision',

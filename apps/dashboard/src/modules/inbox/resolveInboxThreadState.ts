@@ -139,7 +139,7 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     if (hasAny(statusBucket, ['priority', 'hot_leads', 'hot'])) return 'priority'
     if (hasAny(statusBucket, ['new_reply', 'new_replies', 'new_inbound', 'needs_reply'])) return 'new_replies'
     if (hasAny(statusBucket, ['needs_review', 'manual_review'])) return 'needs_review'
-    if (hasAny(statusBucket, ['follow_up', 'follow_up_due'])) return 'follow_up'
+    if (hasAny(statusBucket, ['follow_up', 'follow_up_due', 'waiting_on_seller', 'waiting'])) return 'follow_up'
     if (hasAny(statusBucket, ['dead', 'wrong_number'])) return 'dead'
     if (hasAny(statusBucket, ['suppressed', 'dnc_opt_out', 'dnc', 'opt_out'])) return 'suppressed'
     if (hasAny(statusBucket, ['cold', 'cold_no_response', 'not_contacted'])) return 'cold'

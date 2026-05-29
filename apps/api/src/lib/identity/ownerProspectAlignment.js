@@ -87,7 +87,15 @@ export function calculateOwnerProspectAlignment(input = {}) {
     bestPhoneScore,
     contactScoreFinal,
     linkedPropertyIdsText,
-    joinedPropertySource
+    joinedPropertySource,
+    smsEligible,
+    canonicalProspectId,
+    primaryProspectId,
+    normalizedPhoneId,
+    bestPhoneId,
+    phoneId,
+    sellerFullName,
+    sellerFirstName
   } = input;
 
   const resolvedOwnerName = clean(masterOwnerName || ownerDisplayName || ownerName);
@@ -103,58 +111,96 @@ export function calculateOwnerProspectAlignment(input = {}) {
     return { status: "unknown", score: 0, hardBlock: false, reasons, contactMode: "neutral" };
   }
 
-  if (!resolvedProspectName) {
-    reasons.push("missing_prospect_name");
-    return { status: "unknown", score: 0, hardBlock: false, reasons, contactMode: "neutral" };
-  }
-
   const ownerNorm = normalizePersonName(resolvedOwnerName);
-  const prospectNorm = normalizePersonName(resolvedProspectName);
-
   const ownerSplit = splitPersonName(resolvedOwnerName);
-  const prospectSplit = splitPersonName(resolvedProspectName);
-
   const isCorporate = isLikelyCorporateName(resolvedOwnerName);
+  const ownerTokens = new Set(ownerSplit.tokens.filter(t => !["and", "or", "the", "for", "with"].includes(t)));
 
-  // 1. Exact Match
-  if (ownerNorm === prospectNorm && ownerNorm.length > 0) {
-    score = 100;
-    status = "verified";
-    reasons.push("exact_name_match");
-    return { status, score, hardBlock, reasons, contactMode: "owner_verified" };
+  // Rule 2: If seller_full_name strongly matches owner_name/display_name, classify identity_verified.
+  const resolvedSellerFullName = clean(sellerFullName);
+  if (resolvedSellerFullName) {
+    const sellerFullNorm = normalizePersonName(resolvedSellerFullName);
+    if (ownerNorm === sellerFullNorm && ownerNorm.length > 0) {
+      score = 100;
+      status = "verified";
+      reasons.push("seller_full_name_exact_match");
+      return { status, score, hardBlock, reasons, contactMode: "owner_verified" };
+    }
   }
 
-  // 2. Multi-Token / Intersection Match
-  const commonWords = new Set(["and", "or", "the", "for", "with"]);
-  const ownerTokens = new Set(ownerSplit.tokens.filter(t => !commonWords.has(t)));
-  const prospectTokens = prospectSplit.tokens.filter(t => !commonWords.has(t));
-  
-  const intersectingTokens = prospectTokens.filter(t => ownerTokens.has(t));
-  const hasFirstMatch = prospectSplit.first && ownerTokens.has(prospectSplit.first);
-  const hasLastMatch = prospectSplit.last && ownerTokens.has(prospectSplit.last);
+  // Rule 3: If seller_first_name matches owner/display name and matched_prospect_id exists, classify identity_probable.
+  const resolvedSellerFirstName = clean(sellerFirstName);
+  const hasMatchedProspectId = Boolean(canonicalProspectId || primaryProspectId);
+  if (resolvedSellerFirstName && hasMatchedProspectId) {
+    const sellerFirstNorm = normalizePersonName(resolvedSellerFirstName);
+    if (sellerFirstNorm && ownerTokens.has(sellerFirstNorm)) {
+      score = Math.max(score, 80);
+      status = "probable";
+      reasons.push("seller_first_name_match_with_prospect_id");
+    }
+  }
 
-  if (hasFirstMatch && hasLastMatch) {
-    score = 95;
-    status = "verified";
-    reasons.push("prospect_first_and_last_name_found_in_owner_tokens");
-  } else if (hasLastMatch) {
-    score = 80;
-    status = "probable";
-    reasons.push("prospect_last_name_found_in_owner_tokens");
-  } else if (hasFirstMatch) {
-    score = 65;
-    status = "weak";
-    reasons.push("prospect_first_name_found_in_owner_tokens");
-  } else if (intersectingTokens.length > 0) {
-    score = 60;
-    status = "weak";
-    reasons.push("partial_token_intersection_with_owner");
-  } else if (!isCorporate) {
-    // Full mismatch for individual owner
-    score = 20;
-    status = "mismatch";
-    hardBlock = true;
-    reasons.push("owner_prospect_full_name_mismatch");
+  // Rule 1: If likely_owner === true, sms_eligible === true, canonical_prospect_id or primary_prospect_id exists, and normalized_phone_id equals best_phone_id or phone_id equals best_phone_id, classify at least identity_probable.
+  const phoneMatchesBest = Boolean(bestPhoneId && ((normalizedPhoneId && normalizedPhoneId === bestPhoneId) || (phoneId && phoneId === bestPhoneId)));
+  if (likelyOwner === true && smsEligible === true && hasMatchedProspectId && phoneMatchesBest) {
+    if (score < 75) score = 75;
+    if (status === "unknown" || status === "weak" || status === "mismatch") {
+       status = "probable";
+       hardBlock = false;
+       reasons.push("system_verified_likely_owner_with_best_phone");
+    }
+  }
+
+  // Fallback to prospect name if available
+  if (!resolvedProspectName && status === "unknown") {
+    // We don't have prospect name, and no other rules bumped us out of unknown.
+    // Do not classify as identity_unknown just because phone_first_name and phone_full_name are null.
+    // Actually, if we have no other proof, we stay in whatever status we're in, but let's let the rest run.
+  }
+
+  if (resolvedProspectName) {
+    const prospectNorm = normalizePersonName(resolvedProspectName);
+    const prospectSplit = splitPersonName(resolvedProspectName);
+
+    // Exact Match
+    if (ownerNorm === prospectNorm && ownerNorm.length > 0) {
+      score = 100;
+      status = "verified";
+      reasons.push("exact_name_match");
+      return { status, score, hardBlock, reasons, contactMode: "owner_verified" };
+    }
+
+    // Multi-Token / Intersection Match
+    const commonWords = new Set(["and", "or", "the", "for", "with"]);
+    const prospectTokens = prospectSplit.tokens.filter(t => !commonWords.has(t));
+    
+    const intersectingTokens = prospectTokens.filter(t => ownerTokens.has(t));
+    const hasFirstMatch = prospectSplit.first && ownerTokens.has(prospectSplit.first);
+    const hasLastMatch = prospectSplit.last && ownerTokens.has(prospectSplit.last);
+
+    if (hasFirstMatch && hasLastMatch) {
+      score = Math.max(score, 95);
+      status = "verified";
+      reasons.push("prospect_first_and_last_name_found_in_owner_tokens");
+    } else if (hasLastMatch) {
+      score = Math.max(score, 80);
+      if (status !== "verified") status = "probable";
+      reasons.push("prospect_last_name_found_in_owner_tokens");
+    } else if (hasFirstMatch) {
+      score = Math.max(score, 65);
+      if (status === "unknown") status = "weak";
+      reasons.push("prospect_first_name_found_in_owner_tokens");
+    } else if (intersectingTokens.length > 0) {
+      score = Math.max(score, 60);
+      if (status === "unknown") status = "weak";
+      reasons.push("partial_token_intersection_with_owner");
+    } else if (!isCorporate && status === "unknown") {
+      // Full mismatch for individual owner
+      score = 20;
+      status = "mismatch";
+      hardBlock = true;
+      reasons.push("owner_prospect_full_name_mismatch");
+    }
   }
 
   // 3. Corporate Flexibility
@@ -168,6 +214,7 @@ export function calculateOwnerProspectAlignment(input = {}) {
     if (likelyOwner === true) {
       score += 20;
       reasons.push("flagged_as_likely_owner");
+      if (status === "unknown") status = "probable";
     }
   }
 
@@ -180,16 +227,25 @@ export function calculateOwnerProspectAlignment(input = {}) {
     if (phoneNorm === ownerNorm) {
       score += 15;
       reasons.push("phone_identity_matches_owner");
+      if (status === "unknown") status = "verified";
+      else if (status === "weak") status = "probable";
     } else if (phoneSplit.last && ownerTokens.has(phoneSplit.last)) {
       score += 10;
       reasons.push("phone_last_name_found_in_owner_tokens");
+      if (status === "unknown") status = "weak";
     }
 
-    if (phoneNorm === prospectNorm) {
+    const prospectNorm = clean(prospectFullName) ? normalizePersonName(prospectFullName) : null;
+    if (prospectNorm && phoneNorm === prospectNorm) {
       score += 10;
       reasons.push("phone_identity_matches_prospect");
     }
   }
+
+  // If status is still unknown, check if we have any other evidence to keep it from being unknown purely because of missing phone names.
+  // The rule: "Do not classify as identity_unknown just because phone_first_name and phone_full_name are null."
+  // If we reached here, and status is still unknown, we didn't find *any* positive correlation.
+  // But if it was a corporate property or had a matched prospect, we might have upgraded it above.
 
   // 5. Household / Association Logic (Intermediate Layer)
   const mFlags = lower(clean(matchingFlags));
@@ -256,11 +312,11 @@ export function calculateOwnerProspectAlignment(input = {}) {
   score = Math.max(0, Math.min(100, score));
 
   // Final status adjustment based on score (if not already set to a priority status)
-  if (status !== "household_associated") {
+  if (status !== "household_associated" && status !== "verified" && status !== "probable" && status !== "mismatch") {
     if (score >= 90) status = "verified";
     else if (score >= 70) status = "probable";
     else if (score >= 40) status = "weak";
-    else status = "mismatch";
+    else if (score < 40 && hardBlock) status = "mismatch";
   }
 
   // Determine Contact Mode

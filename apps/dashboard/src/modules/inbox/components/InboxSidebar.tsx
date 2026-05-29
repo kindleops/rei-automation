@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone } from '../../../shared/formatters'
@@ -183,6 +183,8 @@ const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
 const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
   const raw = readString(
     thread,
+    'inbox_bucket',
+    'inboxBucket',
     'status_bucket',
     'inbox_category',
     'inboxCategory',
@@ -193,11 +195,11 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
   if (raw.includes('needs_review') || raw.includes('manual_review')) return 'needs_review'
-  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated')) return 'follow_up'
-  if (raw.includes('dead') || raw.includes('wrong_number')) return 'dead'
+  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated') || raw.includes('waiting_on_seller') || raw.includes('waiting')) return 'follow_up'
+  if (raw.includes('dead') || raw.includes('wrong_number') || raw.includes('not_interested')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
   if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
-  if (raw.includes('all')) return 'all'
+  if (raw === 'all' || raw === 'all_messages' || raw === 'all_conversations') return 'all'
   return null
 }
 
@@ -537,11 +539,17 @@ export const InboxSidebar = ({
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25'
 }: InboxSidebarProps) => {
   const groupsRef = useRef<HTMLDivElement | null>(null)
+  // Stores scroll position before a Load More so it can be restored after new rows paint.
+  const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
+  const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [loadMoreLoading, setLoadMoreLoading] = useState(false)
+  const prevThreadsLengthRef = useRef(threads.length)
   const loadingErrorMessage = formatLoadingError(loadingError)
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
-    if (activeViewFilter === 'follow_up_due') return 'follow_up'
-    if (activeViewFilter === 'dnc_opt_out') return 'suppressed'
-    if (activeViewFilter === 'cold_no_response') return 'cold'
+    if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'follow_up'
+    if (activeViewFilter === 'dnc_opt_out' || activeViewFilter === 'opt_out') return 'suppressed'
+    if (activeViewFilter === 'cold_no_response' || activeViewFilter === 'not_contacted') return 'cold'
+    if (activeViewFilter === 'wrong_number' || (activeViewFilter as string) === 'not_interested') return 'dead'
     if (activeViewFilter === 'all' || activeViewFilter === 'all_messages') return 'all_conversations'
     return activeViewFilter
   }, [activeViewFilter])
@@ -553,6 +561,8 @@ export const InboxSidebar = ({
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
   const [savedFilters, setSavedFilters] = useState<LocalSavedFilter[]>([])
   const [showManageLists, setShowManageLists] = useState(false)
+  // Cold follow-up stale-age sub-filter (null = all cold, number = min days since last outbound)
+  const [coldStaleDays, setColdStaleDays] = useState<number | null>(null)
 
   useEffect(() => {
     try {
@@ -565,39 +575,59 @@ export const InboxSidebar = ({
     try { window.localStorage.setItem(LOCAL_SAVED_FILTERS_KEY, JSON.stringify(next)) } catch {}
   }
 
-  const searchableThreads = useMemo(() => threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery)), [threads, recentlyUpdatedThreadIds, searchQuery])
+  const searchableThreads = useMemo(() => {
+    return threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery))
+  }, [threads, recentlyUpdatedThreadIds, searchQuery])
+
   const decisionMap = useMemo(() => {
     const map = new Map<string, ConversationDecision>()
     searchableThreads.forEach((thread) => map.set(thread.id, buildConversationDecision(thread)))
     return map
   }, [searchableThreads])
 
-  const bucketedThreads = useMemo(() => {
-    const grouped = Object.fromEntries(BUCKETS.map((b) => [b.bucket, [] as InboxWorkflowThread[]])) as Record<CanonicalBucket, InboxWorkflowThread[]>
+  // Single source of visible threads.
+  // `threads` prop is already bucket-scoped by the store (useInboxData fetches by view filter).
+  // We only apply: search, sort, a safety hard-reject for any wrong-bucket backend rows, and
+  // the cold stale-age sub-filter. No in-component re-bucketing, no fallback to other buckets.
+  const displayedActiveThreads = useMemo(() => {
+    const activeBucket = activeBucketConfig.bucket
     const now = new Date()
-    searchableThreads.forEach((thread) => {
-      const stateBucket = resolveBucketFromThreadState(thread)
-      const { bucket } = stateBucket
-        ? { bucket: stateBucket }
-        : classifyInboxBucket(thread, now)
-      grouped[bucket].push(thread)
-      grouped.all.push(thread)
-    })
-    Object.keys(grouped).forEach((bucket) => {
-      grouped[bucket as CanonicalBucket] = sortThreadsByDecision(grouped[bucket as CanonicalBucket], decisionMap).slice(0, visibleThreadCount)
-    })
-    return grouped
-  }, [decisionMap, searchableThreads, visibleThreadCount])
 
-  const activeGroupThreads = bucketedThreads[activeBucketConfig.bucket as CanonicalBucket] || []
-  const fallbackActiveThreads = useMemo(() => {
-    if (activeGroupThreads.length > 0) return activeGroupThreads
-    if (canonicalActiveView === 'all_conversations') return activeGroupThreads
-    if (searchQuery.trim().length > 0) return activeGroupThreads
-    // If backend already returned rows for a tab slice but local bucket mapping is sparse,
-    // never render a blank tab: show loaded rows.
-    return sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
-  }, [activeGroupThreads, canonicalActiveView, decisionMap, searchQuery, searchableThreads, visibleThreadCount])
+    // Safety hard-filter: reject any rows the backend returned with a mismatched bucket.
+    // In normal operation this is a no-op; it protects against backend classification drift.
+    let filtered = activeBucket === 'all'
+      ? searchableThreads
+      : searchableThreads.filter((thread) => {
+          const stateBucket = resolveBucketFromThreadState(thread)
+          const resolvedBucket = stateBucket || classifyInboxBucket(thread, now).bucket
+          if (resolvedBucket !== activeBucket) {
+            console.log(
+              '[VISIBLE_THREAD_REJECT]',
+              thread.threadKey || thread.id,
+              activeBucket,
+              readString(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory'),
+            )
+            return false
+          }
+          return true
+        })
+
+    const sorted = sortThreadsByDecision(filtered, decisionMap).slice(0, visibleThreadCount)
+
+    console.log('[VISIBLE_THREADS_SOURCE]', activeBucket, threads.length, sorted.length, 'store')
+
+    if (activeBucket !== 'cold' || coldStaleDays === null) return sorted
+    const cutoff = Date.now() - coldStaleDays * 24 * 60 * 60 * 1000
+    return sorted.filter((thread) => {
+      const ts = thread.lastOutboundAt
+        || (thread as any).last_outbound_at
+        || (thread as any).latestMessageAt
+        || thread.lastMessageAt
+      if (!ts) return true
+      return new Date(ts).getTime() <= cutoff
+    })
+  }, [searchableThreads, decisionMap, visibleThreadCount, activeBucketConfig.bucket, coldStaleDays, threads.length])
+
   const handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
@@ -612,13 +642,79 @@ export const InboxSidebar = ({
     console.warn('BACKEND_ENDPOINT_NOT_READY', { action, selected: Array.from(bulkSelectedIds) })
   }
 
+  // Clear load-more spinner when new threads arrive; timeout is a fallback for empty loads.
+  useEffect(() => {
+    if (threads.length !== prevThreadsLengthRef.current) {
+      prevThreadsLengthRef.current = threads.length
+      setLoadMoreLoading(false)
+      if (loadMoreTimeoutRef.current) { clearTimeout(loadMoreTimeoutRef.current); loadMoreTimeoutRef.current = null }
+    }
+  }, [threads.length])
+
+  // Captures scroll before Load More fires, so it can be restored after new rows append.
+  const handleLoadMorePreservingScroll = useCallback(() => {
+    const el = groupsRef.current
+    const previousScrollTop = el?.scrollTop ?? 0
+    const previousScrollHeight = el?.scrollHeight ?? 0
+    console.log('[InboxUX] load more start', { activeFilter: activeViewFilter, cursor: null, previousScrollTop, previousScrollHeight })
+    scrollPreserveRef.current = { top: previousScrollTop, height: previousScrollHeight }
+    setLoadMoreLoading(true)
+    if (loadMoreTimeoutRef.current) clearTimeout(loadMoreTimeoutRef.current)
+    loadMoreTimeoutRef.current = setTimeout(() => setLoadMoreLoading(false), 8000)
+    onLoadMore()
+  }, [onLoadMore, activeViewFilter])
+
+  // Only scroll to the selected thread when it is outside the visible area.
+  // Unconditional scrollIntoView was the primary cause of the list jumping on every click.
   useEffect(() => {
     if (!selectedId) return
     const root = groupsRef.current
     if (!root) return
     const selectedNode = root.querySelector<HTMLElement>(`[data-thread-id="${selectedId}"]`)
-    selectedNode?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    if (!selectedNode) return
+    const rootRect = root.getBoundingClientRect()
+    const nodeRect = selectedNode.getBoundingClientRect()
+    const isAlreadyVisible = nodeRect.top >= rootRect.top && nodeRect.bottom <= rootRect.bottom
+    if (!isAlreadyVisible) {
+      selectedNode.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
   }, [selectedId, activeBucketConfig, visibleThreadCount])
+
+  // After new rows are appended by Load More, restore the scroll position that was
+  // captured in scrollPreserveRef so the viewport doesn't jump to the top.
+  useEffect(() => {
+    if (scrollPreserveRef.current === null) return
+    const saved = scrollPreserveRef.current
+    scrollPreserveRef.current = null
+    requestAnimationFrame(() => {
+      const el = groupsRef.current
+      if (!el) return
+      const newScrollHeight = el.scrollHeight
+      el.scrollTop = saved.top + (newScrollHeight - saved.height)
+      console.log('[InboxUX] restored scroll', { scrollTop: el.scrollTop })
+    })
+  }, [displayedActiveThreads.length])
+
+  // Reset scroll to top on every bucket/category switch.
+  // scrollPreserveRef is only set by Load More, so this never conflicts with it.
+  useEffect(() => {
+    const el = groupsRef.current
+    if (!el) return
+    console.log('[BUCKET_SWITCH_RESET_SCROLL]', { bucket: activeBucketConfig.bucket })
+    el.scrollTop = 0
+  }, [activeBucketConfig.bucket])
+
+  // Log the row state for the active bucket each time it changes.
+  useEffect(() => {
+    if (displayedActiveThreads.length === 0) return
+    const first = displayedActiveThreads[0] as any
+    console.log('[INBOX_BUCKET_ROWS]', {
+      bucket: activeBucketConfig.bucket,
+      count: displayedActiveThreads.length,
+      firstThreadKey: first?.threadKey ?? first?.id ?? null,
+      firstLatestAt: first?.lastMessageAt ?? first?.latestMessageAt ?? first?.latest_activity_at ?? null,
+    })
+  }, [activeBucketConfig.bucket, displayedActiveThreads.length])
 
   const renderTopActions = () => (
     <div className={cls('nx-sidebar-rebuilt__top-glow', `is-${activeBucketConfig.accentClass.replace('is-', '')}`)}>
@@ -650,10 +746,33 @@ export const InboxSidebar = ({
           )
         })}
       </div>
+      {activeBucketConfig.bucket === 'cold' && (
+        <div className="nx-cold-stale-chips" role="group" aria-label="Cold follow-up age filter">
+          {([
+            { label: 'All Cold', days: null as number | null },
+            { label: '24h+', days: 1 },
+            { label: '3d+', days: 3 },
+            { label: '7d+', days: 7 },
+            { label: '14d+', days: 14 },
+            { label: '30d+', days: 30 },
+          ] as Array<{ label: string; days: number | null }>).map(({ label, days }) => (
+            <button
+              key={label}
+              type="button"
+              className={cls('nx-cold-stale-chip', coldStaleDays === days && 'is-active')}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setColdStaleDays(days) }}
+            >{label}</button>
+          ))}
+        </div>
+      )}
     </div>
   )
 
-  const renderSecondaryControls = () => (
+  const renderSecondaryControls = () => {
+    if (loadingErrorMessage) {
+      console.warn('[TELEMETRY_DEGRADED_BANNER]', { error: loadingErrorMessage, endpoint: '/api/cockpit/inbox/live' })
+    }
+    return (
     <>
       <div className="nx-sidebar-rebuilt__secondary-controls">
         {loadingErrorMessage && (
@@ -674,9 +793,9 @@ export const InboxSidebar = ({
           {savedFilters.length === 0 ? <div className="nx-sidebar-rebuilt__empty">Saved filters not ready.</div> : savedFilters.map((item) => (
             <div key={item.id} className="nx-sidebar-rebuilt__saved-list-row">
               <button type="button" onClick={(e) => {
-                e.preventDefault(); e.stopPropagation(); 
-                onSearchQueryChange?.(item.query); 
-                onApplySavedPreset(viewToPreset(item.view)) 
+                e.preventDefault(); e.stopPropagation();
+                onSearchQueryChange?.(item.query);
+                onApplySavedPreset(viewToPreset(item.view))
               }}>{item.name}</button>
               <button type="button" onClick={() => persistSavedFilters(savedFilters.filter((f) => f.id !== item.id))}>Remove</button>
             </div>
@@ -684,7 +803,8 @@ export const InboxSidebar = ({
         </div>
       )}
     </>
-  )
+    )
+  }
 
   const renderMultiSelectBar = () => (
     bulkSelectedIds.size > 0 && (
@@ -701,12 +821,18 @@ export const InboxSidebar = ({
 
   const renderListContent = (RowComp: any) => (
     <div className="nx-sidebar-rebuilt__threads">
-      {fallbackActiveThreads.length > 0 ? fallbackActiveThreads.map((thread) => {
+      {displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
         const decision = decisionMap.get(thread.id)
         if (!decision) return null
-        return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={onSelect} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
+        return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
       }) : <div className="nx-sidebar-rebuilt__empty">No conversations match this filter.</div>}
-      {canLoadMore && <div className="nx-sidebar-rebuilt__load-more"><button type="button" className="nx-load-more-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLoadMore(); }}>Loading more...</button></div>}
+      {canLoadMore && (
+        <div className="nx-sidebar-rebuilt__load-more">
+          <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
+            {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
+          </button>
+        </div>
+      )}
     </div>
   )
 

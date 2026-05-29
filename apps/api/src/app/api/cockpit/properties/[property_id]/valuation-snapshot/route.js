@@ -38,11 +38,9 @@ export async function OPTIONS(request) {
 export async function POST(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (auth && auth.status >= 400) {
-    return auth
-  }
+  if (!auth.ok) return auth.response
 
-  const { property_id } = params
+  const { property_id } = await params
   const snapshot = await parseJsonSafe(request)
 
   try {
@@ -95,14 +93,13 @@ export async function POST(request, { params }) {
 
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
-  const auth = ensureMutationAuth(request)
-  if (auth && auth.status >= 400) {
-    return auth
-  }
-
-  const { property_id } = params
 
   try {
+    const auth = ensureMutationAuth(request)
+    if (!auth.ok) return auth.response
+
+    const { property_id } = await params
+
     const { data, error } = await supabase
       .from('property_valuation_snapshots')
       .select('*')
@@ -111,21 +108,28 @@ export async function GET(request, { params }) {
       .limit(1)
       .maybeSingle()
 
-    if (error) throw error
+    if (error) {
+      console.error('[VALUATION_SNAPSHOT_FETCH_ERROR]', { property_id, error: error.message })
+      return NextResponse.json(
+        { ok: false, fallback: true, error: 'snapshot_fetch_failed', message: error.message },
+        { status: 200, headers: cors },
+      )
+    }
 
     if (!data) {
-      return NextResponse.json({
-        ok: true,
-        data: null,
-        warnings: ["valuation_snapshot_missing"]
-      }, { status: 200, headers: cors })
+      return NextResponse.json(
+        { ok: true, data: null, fallback: true, warnings: ['valuation_snapshot_missing'] },
+        { status: 200, headers: cors },
+      )
     }
 
     return NextResponse.json({ ok: true, data }, { status: 200, headers: cors })
-  } catch (error) {
+  } catch (fatal) {
+    const errMsg = fatal?.message || 'snapshot_route_fatal'
+    console.error('[VALUATION_SNAPSHOT_ROUTE_FATAL]', { error: errMsg })
     return NextResponse.json(
-      { ok: false, error: 'snapshot_fetch_failed', message: error?.message },
-      { status: 500, headers: cors }
+      { ok: false, fallback: true, error: errMsg },
+      { status: 200, headers: cors },
     )
   }
 }

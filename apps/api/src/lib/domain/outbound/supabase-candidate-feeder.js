@@ -118,8 +118,9 @@ function asNumber(value, fallback = null) {
 
 function toTimestamp(value) {
   if (!value) return null;
-  const ts = new Date(value).getTime();
-  return Number.isNaN(ts) ? null : ts;
+  const date = value instanceof Date ? value : new Date(value);
+  const time = date.getTime();
+  return Number.isFinite(time) ? time : null;
 }
 
 function asPositiveInteger(value, fallback = null) {
@@ -269,8 +270,43 @@ function titleCaseNameToken(value) {
 /**
  * Determine the canonical property group for template matching.
  */
-export function getCanonicalPropertyGroup(property_type) {
-  const pt = lower(property_type);
+export function getCanonicalPropertyGroup(hints = {}) {
+  let pt = lower(typeof hints === "string" ? hints : hints.property_type);
+  if (!pt && typeof hints === "object" && hints !== null) {
+    const raw_pt = lower(hints.raw_payload_json?.property_type || hints.raw?.raw_payload_json?.property_type);
+    const p_class = lower(hints.property_class || hints.raw?.property_class);
+    const options = lower(hints.options || hints.raw?.options);
+    const podio_tags = lower(hints.podio_tags || hints.raw?.podio_tags);
+    const units = asNumber(hints.units_count || hints.raw?.units_count, null);
+
+    pt = pick(pt, raw_pt, p_class);
+
+    if (!pt) {
+       if (units === 1) pt = "sfr";
+       else if (units === 2) pt = "duplex";
+       else if (units === 3) pt = "triplex";
+       else if (units === 4) pt = "fourplex";
+       else if (units > 4 && units <= 10) pt = "small_multifamily";
+       else if (units > 10) pt = "multifamily_5_plus";
+    }
+
+    if (!pt && options) {
+      if (options.includes("sfr") || options.includes("single family")) pt = "sfr";
+      else if (options.includes("duplex")) pt = "duplex";
+      else if (options.includes("triplex")) pt = "triplex";
+      else if (options.includes("fourplex")) pt = "fourplex";
+      else if (options.includes("multifamily")) pt = "multifamily_5_plus";
+    }
+
+    if (!pt && podio_tags) {
+       if (podio_tags.includes("sfr")) pt = "sfr";
+       else if (podio_tags.includes("duplex")) pt = "duplex";
+       else if (podio_tags.includes("triplex")) pt = "triplex";
+       else if (podio_tags.includes("fourplex")) pt = "fourplex";
+       else if (podio_tags.includes("multifamily")) pt = "multifamily_5_plus";
+    }
+  }
+
   if (!pt) return "other_commercial";
 
   if (pt === "single family" || pt === "sfr" || pt === "residential" || pt === "single-family") return "sfr";
@@ -476,18 +512,19 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
 
   // Accept any non-empty string for IDs (mo_..., prop_..., ph_..., numeric, etc.)
   const master_owner_id =
-    pick(row.master_owner_id, row.owner_id, row.owner_podio_item_id) || null;
+    pick(row.normalized_master_owner_id, row.master_owner_id, row.owner_id, row.owner_podio_item_id) || null;
   const property_id =
-    pick(row.property_id, row.property_export_id, row.property_item_id) || null;
+    pick(row.normalized_property_id, row.property_id, row.property_export_id, row.property_item_id) || null;
   const property_export_id = pick(row.property_export_id) || null;
   const best_phone_id = pick(row.best_phone_id) || null;
-  const phone_id = pick(row.best_phone_id, row.phone_id, row.phone_item_id) || null;
+  const phone_id = pick(row.normalized_phone_id, row.phone_id, row.best_phone_id, row.phone_item_id) || null;
   const primary_prospect_id = pick(row.primary_prospect_id) || null;
   const canonical_prospect_id = pick(row.canonical_prospect_id) || null;
 
   const canonical_e164 =
     normalizePhone(
       pick(
+        row.normalized_phone_e164,
         row.canonical_e164,
         row.best_phone_e164,
         row.phone,
@@ -499,10 +536,10 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     ) || "";
 
   const market = clean(
-    pick(row.market, row.market_name, row.seller_market, row.canonical_market_slug, row.market_label, defaults.market)
+    pick(row.market, row.normalized_market, row.market_name, row.seller_market, row.canonical_market_slug, row.market_label, defaults.market)
   );
   const state = clean(
-    pick(row.state_code, row.property_address_state, row.property_state, row.seller_state, row.state, defaults.state)
+    pick(row.state_code, row.property_address_state, row.normalized_state, row.property_state, row.seller_state, row.state, defaults.state)
   );
   const owner_display_name = clean(pick(row.owner_display_name, row.display_name, row.owner_name));
   const phone_full_name = clean(pick(row.phone_full_name, row.seller_full_name));
@@ -515,7 +552,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   );
   const seller_first_name = clean(pick(row.seller_first_name, row.phone_first_name, phone_first_name));
   const seller_full_name = clean(pick(row.seller_full_name, row.phone_full_name, phone_full_name));
-  const prospect_matching_flags = clean(pick(row.prospect_matching_flags, row.matching_flags));
+  const prospect_matching_flags = clean(pick(row.prospect_matching_flags, row.matching_flags, row.person_flags_text));
 
   const candidate = {
     raw: row,
@@ -613,7 +650,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     never_contacted: asBoolean(row.never_contacted, null),
     freshness_score: asNumber(row.freshness_score, null),
     last_sms_at: row.last_sms_at || null,
-    canonical_property_group: getCanonicalPropertyGroup(row.property_type),
+    canonical_property_group: getCanonicalPropertyGroup(row),
     // Identity alignment fields
     likely_owner: asBoolean(pick(row.likely_owner), null),
     likely_renting: asBoolean(pick(row.likely_renting), null),
@@ -644,7 +681,15 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     bestPhoneScore: candidate.best_phone_score,
     contactScoreFinal: candidate.contact_score_final,
     linkedPropertyIdsText: candidate.linked_property_ids_text,
-    joinedPropertySource: candidate.joined_property_source
+    joinedPropertySource: candidate.joined_property_source,
+    smsEligible: candidate.sms_eligible,
+    canonicalProspectId: candidate.canonical_prospect_id,
+    primaryProspectId: candidate.primary_prospect_id,
+    normalizedPhoneId: pick(row.normalized_phone_id, row.phone_id),
+    bestPhoneId: candidate.best_phone_id,
+    phoneId: candidate.phone_id,
+    sellerFullName: candidate.seller_full_name,
+    sellerFirstName: candidate.seller_first_name
   });
   candidate.identity_alignment = identity_alignment;
   // ─────────────────────────────────────────────────────────────────────────
@@ -3309,6 +3354,138 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   };
 }
 
+// ── Property Hydration: resolve property_id for v_sms_ready_contacts rows ────────
+// When a candidate row is missing property_id but has master_owner_id, attempt a
+// deterministic lookup against the properties table before marking as ineligible.
+
+function buildPropertyHydrationPayload(prop, source) {
+  const property_id = clean(
+    pick(prop.property_id, prop.property_export_id, String(prop.id ?? ""))
+  );
+  if (!property_id) return { ok: false, reason: "property_row_missing_id" };
+
+  return {
+    ok: true,
+    strategy: source,
+    hydration_source: source,
+    property_id,
+    property_address_full: clean(pick(prop.property_address_full, prop.address_full)),
+    property_address_city: clean(pick(prop.property_address_city, prop.address_city, prop.city)),
+    property_address_state: clean(pick(prop.property_address_state, prop.address_state, prop.state)),
+    property_address_zip: clean(pick(prop.property_address_zip, prop.address_zip, prop.zip)),
+    market: clean(pick(prop.market, prop.market_name, prop.seller_market)),
+    property_type: clean(prop.property_type),
+    property_class: clean(prop.property_class),
+    units_count: asNumber(prop.units_count, null),
+    options: clean(prop.options),
+    podio_tags: clean(prop.podio_tags),
+    estimated_value: asNumber(prop.estimated_value, null),
+    cash_offer: asNumber(prop.cash_offer, null),
+    final_acquisition_score: asNumber(prop.final_acquisition_score, null),
+  };
+}
+
+export async function hydratePropertyForCandidate(candidate = {}, deps = {}) {
+  const master_owner_id = clean(candidate.master_owner_id || candidate.normalized_master_owner_id);
+  const property_id = clean(candidate.property_id || candidate.normalized_property_id);
+  const property_export_id = clean(candidate.property_export_id);
+  const address = clean(candidate.property_address_full || candidate.property_address);
+
+  let supabase;
+  try { supabase = getSupabase(deps); } catch { return { ok: false, reason: "supabase_unavailable" }; }
+
+  // Strategy 0.1: exact property_id match
+  if (property_id) {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("id", property_id)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "property_id_match");
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 0.2: exact property_export_id match
+  if (property_export_id) {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("property_export_id", property_export_id)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "property_export_id_match");
+    } catch { /* fall through */ }
+  }
+
+  if (!master_owner_id && !address) {
+    return { ok: false, reason: "insufficient_identifiers" };
+  }
+
+  if (master_owner_id) {
+    // Strategy 1: properties WHERE master_owner_id = candidate.master_owner_id
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("master_owner_id", master_owner_id)
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("structured_motivation_score", { ascending: false, nullsFirst: false })
+        .order("estimated_value", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "master_owner_id_match");
+    } catch { /* fall through */ }
+
+    // Strategy 2: joined_property_ids_json on master_owners row
+    try {
+      const { data: moData, error: moError } = await supabase
+        .from("master_owners")
+        .select("joined_property_ids_json")
+        .eq("id", master_owner_id)
+        .maybeSingle();
+
+      if (!moError && moData?.joined_property_ids_json) {
+        const ids = Array.isArray(moData.joined_property_ids_json)
+          ? moData.joined_property_ids_json.map(String).filter(Boolean)
+          : [];
+        if (ids.length > 0) {
+          const { data: propData, error: propError } = await supabase
+            .from("properties")
+            .select("*")
+            .in("id", ids.slice(0, 20))
+            .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+            .order("estimated_value", { ascending: false, nullsFirst: false })
+            .order("updated_at", { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+          if (!propError && propData) return buildPropertyHydrationPayload(propData, "joined_property_ids_json");
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 3: property_address match
+  if (address) {
+    try {
+      const normalizedAddress = address.replace(/\s+/g, " ").trim().toLowerCase();
+      // Match on title
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .ilike("title", `${normalizedAddress}%`)
+        .order("updated_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "address_match");
+    } catch { /* fall through */ }
+  }
+
+  return { ok: false, reason: "no_property_found" };
+}
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export async function createSendQueueItem(candidate = {}, options = {}, deps = {}) {
   const effective_phone_id = candidate.best_phone_id || candidate.phone_id;
   const idempotency_key = buildIdempotencyKey({
@@ -3584,6 +3761,10 @@ export function buildFeederDiagnostics(summary = {}) {
     no_template_count: Number(summary.no_template_count || 0),
     template_render_failed_count: Number(summary.template_render_failed_count || 0),
     hydration_failure_count: Number(summary.hydration_failure_count || 0),
+    property_hydration_attempt_count: Number(summary.property_hydration_attempt_count || 0),
+    property_hydration_success_count: Number(summary.property_hydration_success_count || 0),
+    property_hydration_failed_count: Number(summary.property_hydration_failed_count || 0),
+    missing_property_id_after_hydration_count: Number(summary.missing_property_id_after_hydration_count || 0),
     identity_mismatch_count: Number(summary.identity_mismatch_count || 0),
     identity_verified_count: Number(summary.identity_verified_count || 0),
     identity_probable_count: Number(summary.identity_probable_count || 0),
@@ -3622,6 +3803,29 @@ export function buildFeederDiagnostics(summary = {}) {
   };
 
   return diagnostics;
+}
+
+function getSkipDiagnostics(candidate, options) {
+  return {
+    normalized_master_owner_id: candidate.master_owner_id,
+    normalized_property_id: candidate.property_id,
+    normalized_phone_id: candidate.phone_id || candidate.best_phone_id,
+    normalized_phone_e164: candidate.canonical_e164,
+    hydration_lookup_strategy: candidate.hydration_lookup_strategy || null,
+    hydration_error: candidate.hydration_error || null,
+    identity_inputs_used: candidate.identity_alignment ? {
+      prospect_full_name: candidate.prospect_full_name,
+      phone_full_name: candidate.phone_full_name,
+      owner_display_name: candidate.owner_display_name,
+      matching_flags: candidate.matching_flags,
+      person_flags_text: candidate.person_flags_text
+    } : null,
+    identity_resolution: candidate.identity_alignment?.status || null,
+    identity_reason: candidate.identity_alignment?.reasons || null,
+    property_type_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
+    canonical_property_group_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
+    ...(options.dry_run ? { candidate_preview: buildCandidateNormalizedPreview(candidate.raw, candidate) } : {})
+  };
 }
 
 export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
@@ -3767,6 +3971,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     no_template_count: 0,
     template_render_failed_count: 0,
     hydration_failure_count: 0,
+    property_hydration_attempt_count: 0,
+    property_hydration_success_count: 0,
+    property_hydration_failed_count: 0,
+    missing_property_id_after_hydration_count: 0,
     identity_mismatch_count: 0,
     identity_verified_count: 0,
     identity_probable_count: 0,
@@ -3833,6 +4041,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
            reason: "first_touch_cooldown",
            master_owner_id: candidate.master_owner_id,
            property_id: candidate.property_id,
+           ...getSkipDiagnostics(candidate, options)
          });
          continue;
        }
@@ -3849,6 +4058,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         reason_code: REASON_CODES.CAMPAIGN_LIMIT_REACHED,
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        ...getSkipDiagnostics(candidate, options)
       });
       continue;
     }
@@ -3857,9 +4067,38 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     candidate.template_use_case = options.template_use_case;
     candidate.campaign_session_id = options.campaign_session_id;
 
-    const _preview = options.dry_run
-      ? { candidate_preview: buildCandidateNormalizedPreview(candidate.raw, candidate) }
-      : {};
+    // Property hydration: resolve property_id for candidates from views that omit it (e.g. v_sms_ready_contacts)
+    if (!candidate.property_id && candidate.master_owner_id) {
+      summary.property_hydration_attempt_count += 1;
+      const hydration = await hydratePropertyForCandidate(candidate, deps);
+      if (hydration.ok) {
+        summary.property_hydration_success_count += 1;
+        candidate._property_hydrated = true;
+        candidate.hydration_lookup_strategy = hydration.hydration_source;
+        candidate.property_id = hydration.property_id;
+        if (hydration.property_address_full) candidate.property_address_full = hydration.property_address_full;
+        if (hydration.property_address_full) candidate.property_address = hydration.property_address_full;
+        if (hydration.property_address_city) candidate.property_address_city = hydration.property_address_city;
+        if (hydration.property_address_state) candidate.property_address_state = hydration.property_address_state;
+        if (hydration.property_address_zip) candidate.property_address_zip = hydration.property_address_zip;
+        if (hydration.market) { candidate.market = hydration.market; candidate.routing_market = hydration.market; candidate.seller_market = hydration.market; }
+        if (hydration.property_type) candidate.property_type = hydration.property_type;
+        if (hydration.estimated_value != null) candidate.estimated_value = hydration.estimated_value;
+        if (hydration.cash_offer != null) candidate.cash_offer = hydration.cash_offer;
+        if (hydration.final_acquisition_score != null) candidate.final_acquisition_score = hydration.final_acquisition_score;
+        
+        const newGroup = getCanonicalPropertyGroup(hydration.property_type);
+        if (!candidate.canonical_property_group || candidate.canonical_property_group === "other_commercial") {
+           candidate.canonical_property_group = newGroup;
+        }
+      } else {
+        summary.property_hydration_failed_count += 1;
+        candidate._property_hydrated = false;
+        candidate.hydration_error = hydration.reason;
+      }
+    }
+
+    const _preview = getSkipDiagnostics(candidate, options);
 
     const eligibility = await evaluateCandidateEligibility(candidate, options, deps);
 
@@ -3896,6 +4135,9 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       summary.skipped_count += 1;
       const counter = mapReasonToDiagnosticCounter(eligibility.reason_code);
       if (counter) summary[counter] += 1;
+      if (eligibility.reason_code === REASON_CODES.NO_PROPERTY && candidate._property_hydrated === false) {
+        summary.missing_property_id_after_hydration_count += 1;
+      }
       summary.sample_skips.push({
         reason_code: eligibility.reason_code,
         reason: eligibility.reason,
@@ -4045,6 +4287,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
           reason: spread_result.reason_code,
           master_owner_id: candidate.master_owner_id,
           property_id: candidate.property_id,
+          ..._preview
         });
         continue;
       }
@@ -4088,6 +4331,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         property_address: candidate.property_address,
         market: candidate.market,
         never_contacted: candidate.never_contacted,
+        ..._preview
       });
       continue;
     }

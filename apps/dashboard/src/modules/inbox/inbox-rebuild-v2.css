@@ -230,6 +230,39 @@
   box-shadow: 0 0 12px rgba(255, 149, 0, 0.2);
 }
 
+/* Cold follow-up stale-age sub-filter chips */
+.nx-cold-stale-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid rgba(10, 132, 255, 0.12);
+}
+.nx-cold-stale-chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.nx-cold-stale-chip:hover {
+  background: rgba(10, 132, 255, 0.1);
+  border-color: rgba(10, 132, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
+}
+.nx-cold-stale-chip.is-active {
+  background: rgba(10, 132, 255, 0.2);
+  border-color: rgba(10, 132, 255, 0.45);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(10, 132, 255, 0.15);
+}
+
 /* 3. Secondary Controls */
 .nx-sidebar-rebuilt__secondary-controls {
   display: flex;
@@ -1462,4 +1495,55 @@
 .nx-deal-intel-btn svg {
   width: 14px;
   height: 14px;
+}
+
+/* Load More button with inline spinner */
+.nx-sidebar-rebuilt__load-more {
+  padding: 8px 10px 12px;
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(to bottom, transparent, rgba(9,11,18,0.95) 40%);
+}
+
+.nx-load-more-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: rgba(200,210,230,0.7);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nx-load-more-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.08);
+  color: rgba(200,210,230,1);
+}
+
+.nx-load-more-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+@keyframes nx-spin {
+  to { transform: rotate(360deg); }
+}
+
+.nx-load-more-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.12);
+  border-top-color: rgba(10,132,255,0.9);
+  border-radius: 50%;
+  animation: nx-spin 0.7s linear infinite;
+  flex-shrink: 0;
 }

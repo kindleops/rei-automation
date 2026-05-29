@@ -109,18 +109,32 @@ export const buildPropertyExternalLinks = (address: string | null): ExternalLink
 }
 
 /**
- * Build Google Street View API URL for an address.
+ * Build Google Street View API URL. Prefers lat/lng coordinates over address string.
  */
-export const buildStreetViewUrl = (address: string | null): string | null => {
-  if (!address) return null
+export const buildStreetViewUrl = (
+  address: string | null,
+  lat?: number | null,
+  lng?: number | null,
+): string | null => {
   const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
-  return `https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${encodeURIComponent(address)}&fov=70&key=${apiKey}`
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
+  const location = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
+  if (!location) return null
+  console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
+  return `https://maps.googleapis.com/maps/api/streetview?size=600x300&location=${location}&fov=70&key=${apiKey}`
 }
 
-export const buildAerialViewUrl = (address: string | null): string | null => {
-  if (!address) return null
+export const buildAerialViewUrl = (
+  address: string | null,
+  lat?: number | null,
+  lng?: number | null,
+): string | null => {
   const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
-  return `https://maps.googleapis.com/maps/api/staticmap?size=600x300&maptype=satellite&scale=2&zoom=19&center=${encodeURIComponent(address)}&key=${apiKey}`
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
+  const center = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
+  if (!center) return null
+  console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
+  return `https://maps.googleapis.com/maps/api/staticmap?size=600x300&maptype=satellite&scale=2&zoom=19&center=${center}&key=${apiKey}`
 }
 
 /**

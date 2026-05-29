@@ -319,17 +319,89 @@ export async function getDealContextByThread(threadKey, deps = {}) {
   if (!thread_key) return null
 
   const supabase = deps.supabase || defaultSupabase
-  const { data, error } = await supabase
-    .from(DEAL_CONTEXT_SOURCE)
-    .select('*')
-    .eq('thread_key', thread_key)
-    .order('context_type', { ascending: true })
-    .order('property_id', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
 
-  if (error) throw error
-  return data ? hydrateDealContextRow(data) : null
+  // Primary: query the enriched view
+  try {
+    const { data, error } = await supabase
+      .from(DEAL_CONTEXT_SOURCE)
+      .select('*')
+      .eq('thread_key', thread_key)
+      .order('context_type', { ascending: true })
+      .order('property_id', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) throw error
+    if (data) return hydrateDealContextRow(data)
+  } catch (viewErr) {
+    // v_deal_context_cards missing/failed — fall through to fallback
+    console.warn('[deal-context] primary view failed, using fallback for', thread_key, viewErr?.message)
+  }
+
+  // Fallback: build partial context from deal_thread_state + message_events
+  return _getDealContextFallback(thread_key, supabase)
+}
+
+async function _getDealContextFallback(thread_key, supabase) {
+  try {
+    const [stateRes, msgRes] = await Promise.all([
+      supabase
+        .from('deal_thread_state')
+        .select('*')
+        .eq('thread_key', thread_key)
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('message_events')
+        .select('id,thread_key,master_owner_id,property_id,prospect_id,from_phone_number,to_phone_number,direction,created_at,market_id')
+        .eq('thread_key', thread_key)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+
+    const state = stateRes.data || {}
+    const msg = msgRes.data || {}
+
+    if (!state.thread_key && !msg.id) return null
+
+    // Build a synthetic partial row matching the shape normalizeDealContext expects
+    const partialRow = {
+      deal_context_id: state.id || msg.id || thread_key,
+      context_type: state.property_id ? 'property' : 'unlinked_thread',
+      thread_key,
+      property_id: state.property_id || msg.property_id || null,
+      master_owner_id: state.master_owner_id || msg.master_owner_id || null,
+      prospect_id: state.prospect_id || msg.prospect_id || null,
+      canonical_e164: state.canonical_e164 || state.best_phone || null,
+      // Status/Stage from deal_thread_state
+      universal_status: state.universal_status || state.status || 'unknown',
+      universal_stage: state.universal_stage || state.stage || 'unknown',
+      inbox_bucket: state.inbox_bucket || 'all_messages',
+      // Display fields
+      owner_name: state.seller_display_name || state.owner_name || null,
+      property_address_full: state.property_address_full || state.property_address || null,
+      market: state.market || null,
+      latest_message_body: state.latest_message_body || null,
+      latest_message_direction: state.latest_message_direction || msg.direction || null,
+      latest_activity_at: state.latest_activity_at || state.latest_message_at || msg.created_at || null,
+      latest_message_at: state.latest_message_at || msg.created_at || null,
+      latitude: state.latitude || null,
+      longitude: state.longitude || null,
+      // Nested data blobs (empty — will degrade gracefully)
+      property_data: null,
+      master_owner_data: null,
+      prospect_data: null,
+      phone_data: null,
+      thread_state_data: state,
+      _partial: true,
+    }
+
+    return hydrateDealContextRow(partialRow)
+  } catch (fallbackErr) {
+    console.error('[deal-context] fallback also failed for', thread_key, fallbackErr?.message)
+    return null
+  }
 }
 
 function incrementCount(bucket, key) {

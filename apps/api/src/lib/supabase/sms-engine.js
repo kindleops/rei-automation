@@ -2575,12 +2575,21 @@ export async function syncDeliveryEvent(payload, options = {}) {
   }
   const provider_status = lower(payload?.status || payload?.provider_delivery_status);
   const raw_carrier_status = clean(payload?.error_status || payload?.status || "");
+  // Normalize provider status to the three canonical delivery states.
+  // Intermediate TextGrid states (queued, pending, awaiting_response, etc.) are
+  // accepted-but-not-yet-delivered and must not overwrite delivery_status with
+  // non-final values — they map to "sent" (in-flight).
+  const FINAL_FAILED_STATUSES = new Set(["failed", "undelivered", "error", "delivery_failed"]);
+  const INTERMEDIATE_PROVIDER_STATUSES = new Set([
+    "queued", "accepted", "pending", "sending", "sending_to_carrier",
+    "pending_delivered_to_carrier", "awaiting_response",
+  ]);
   const incoming_delivery_status =
     provider_status === "delivered"
       ? "delivered"
-      : ["failed", "undelivered", "error"].includes(provider_status)
+      : FINAL_FAILED_STATUSES.has(provider_status)
         ? "failed"
-        : provider_status || "sent";
+        : "sent";
   const incoming_sent_at = toIsoOrNull(payload?.sent_at) || now;
   const incoming_delivered_at = toIsoOrNull(payload?.delivered_at) || now;
 
@@ -2618,14 +2627,12 @@ export async function syncDeliveryEvent(payload, options = {}) {
     const status = lower(row?.delivery_status);
     return status === "sent" || status === "delivered" || Boolean(row?.sent_at);
   });
+  // Never downgrade an already-delivered event. Failed/undelivered callbacks
+  // always win over "sent" — they represent a carrier-confirmed final state.
   final_delivery_status =
     incoming_delivery_status === "delivered" || any_delivered_already
       ? "delivered"
-      : (
-        (incoming_delivery_status === "failed" && any_sent_already)
-          ? "sent"
-          : incoming_delivery_status
-      );
+      : incoming_delivery_status;
   const message_events_data = [];
   for (const existing of existing_events || []) {
     const existing_sent_at = toIsoOrNull(existing.sent_at);

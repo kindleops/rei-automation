@@ -28,6 +28,7 @@ interface ChatThreadProps {
   sellerLanguageLabel?: string
   isTranslatingThread?: boolean
   onTranslateThread?: () => void
+  backgroundLoading?: boolean
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -223,6 +224,7 @@ export const ChatThread = ({
   sellerLanguageLabel,
   isTranslatingThread = false,
   onTranslateThread,
+  backgroundLoading = false,
 }: ChatThreadProps) => {
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -309,6 +311,7 @@ export const ChatThread = ({
           <div className="nx-chat-header-v2__chips">
             {market && <span className="nx-chat-chip nx-chat-chip--market">{market}</span>}
             {isSuppressed && <span className="nx-chat-chip nx-chat-chip--danger"><Icon name="slash" />Suppressed</span>}
+            {backgroundLoading && <span className="nx-chat-chip nx-chat-chip--info"><Icon name="activity" style={{ width: 10, height: 10 }} />Syncing…</span>}
           </div>
         </div>
 

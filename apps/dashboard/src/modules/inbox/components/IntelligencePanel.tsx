@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { DealContext } from '../../../lib/data/dealContext'
+import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { PanelMode } from '../inbox-layout-state'
 import {
   normalizePropertySnapshot,
@@ -544,20 +546,43 @@ const ScoreRing = ({
   )
 }
 
-function DealIntelligenceCard({ thread, onOpenComps }: { thread: WorkflowThread; onOpenComps: () => void }) {
+function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: WorkflowThread; dealContext?: DealContext | null; onOpenComps: () => void }) {
   const [snapshot, setSnapshot] = useState<any>(null)
+  const [snapshotUnavailable, setSnapshotUnavailable] = useState(false)
 
   useEffect(() => {
     if (!thread.propertyId) return
-    fetch(`/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`)
+    let cancelled = false
+    setSnapshotUnavailable(false)
+    const base = getBackendBaseUrl()
+    const secret = getBackendSecret()
+    fetch(`${base}/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ops-dashboard-secret': secret,
+      },
+    })
       .then(res => res.json())
       .then(res => {
-        if (res.ok) setSnapshot(res.data)
+        if (cancelled) return
+        if (res.ok && res.data) {
+          setSnapshot(res.data)
+        } else {
+          console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: res.error || 'no_data' })
+          setSnapshotUnavailable(true)
+        }
       })
+      .catch(err => {
+        if (cancelled) return
+        console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: err?.message || 'fetch_failed' })
+        setSnapshotUnavailable(true)
+      })
+    return () => { cancelled = true }
   }, [thread.propertyId])
 
-  const arv = snapshot?.estimated_arv || thread.estimatedValue || thread.arv
-  const offer = snapshot?.target_offer || thread.cashOffer
+  // Fallback chain: snapshot → dealContext → thread row
+  const arv = snapshot?.estimated_arv || dealContext?.estimated_arv || (thread as any).estimatedValue || (thread as any).arv
+  const offer = snapshot?.target_offer || dealContext?.cashOffer || (thread as any).cashOffer
   const spread = snapshot ? (snapshot.expected_assignment_low + ' – ' + snapshot.expected_assignment_high) : 'Unknown'
   const confidence = snapshot?.arv_confidence_score || 0
 
@@ -578,6 +603,9 @@ function DealIntelligenceCard({ thread, onOpenComps }: { thread: WorkflowThread;
         <Icon name="radar" />
         <strong>Deal Intelligence</strong>
         {snapshot && <span className="nx-deal-intel-card__date">Snapshot: {formatDate(snapshot.created_at)}</span>}
+        {snapshotUnavailable && !snapshot && (
+          <span className="nx-deal-intel-card__fallback-label" title="Valuation snapshot unavailable — showing thread row estimates">Valuation unavailable</span>
+        )}
       </div>
       
       <div className="nx-deal-intel-card__grid">
@@ -1643,7 +1671,7 @@ export const DossierTabNav = ({ active, onChange }: { active: IntelligenceTabId;
   </nav>
 )
 
-export const OverviewPanel = ({ thread, messages, onOpenComps }: { thread: WorkflowThread; messages: ThreadMessage[]; onOpenComps: () => void }) => {
+export const OverviewPanel = ({ thread, messages, onOpenComps, dealContext }: { thread: WorkflowThread; messages: ThreadMessage[]; onOpenComps: () => void; dealContext?: DealContext | null }) => {
   const action = getNextBestAction(thread)
   const latestInbound = messages.find((message) => message.direction === 'inbound')?.body || thread.latestMessageBody || thread.lastMessageBody
   return (
@@ -1660,7 +1688,7 @@ export const OverviewPanel = ({ thread, messages, onOpenComps }: { thread: Workf
       </PanelSection>
 
       {/* Deal Intelligence Card */}
-      <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps} />
+      <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps} />
 
       <PanelSection title="AI Recommendation" icon="spark">
         <div className="nx-intel-copy-card">
@@ -6005,6 +6033,7 @@ const DealCommandDossier = ({
   onOpenComps,
   onOpenDossier,
   onOpenAi,
+  dealContext,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
@@ -6016,6 +6045,7 @@ const DealCommandDossier = ({
   onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
+  dealContext?: DealContext | null
 }) => (
   <div className={cls('nx-deal-command-dossier', `is-layout-${layoutMode}`, layoutMode === 'full' && 'is-full')}>
     <DealCommandHeader thread={thread} snapshot={snapshot} phase3={phase3} />
@@ -6032,7 +6062,7 @@ const DealCommandDossier = ({
         <DealDecisionStrip thread={thread} />
       </div>
       <div className="nx-deal-command-dossier__comp">
-        <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps || (() => undefined)} />
+        <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps || (() => undefined)} />
         <CompIntelligenceModule thread={thread} snapshot={snapshot} />
       </div>
       <div className="nx-deal-command-dossier__buyer">
@@ -6056,6 +6086,7 @@ export interface IntelligencePanelProps {
   thread: WorkflowThread | null
   threadContext?: ThreadContext | null
   intelligence?: ThreadIntelligenceRecord | null
+  dealContext?: DealContext | null
   panelMode?: Exclude<PanelMode, 'hidden'>
   layoutMode?: ViewLayoutMode
   isSuppressed?: boolean
@@ -6073,6 +6104,7 @@ export const IntelligencePanel = ({
   thread,
   threadContext,
   intelligence = null,
+  dealContext = null,
   isSuppressed = false,
   panelMode = 'default',
   layoutMode = 'full',
@@ -6131,6 +6163,7 @@ export const IntelligencePanel = ({
             messages={messages}
             phase3={phase3}
             intelligence={intelligence}
+            dealContext={dealContext}
             layoutMode={layoutMode}
             onOpenMap={onOpenMap}
             onOpenComps={onOpenComps}

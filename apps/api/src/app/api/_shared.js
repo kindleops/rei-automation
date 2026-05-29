@@ -9,21 +9,27 @@ export async function parseJsonSafe(request, fallback = {}) {
   }
 }
 
+/**
+ * Returns { ok: true } when auth passes.
+ * Returns { ok: false, response: NextResponse } when auth fails.
+ * Callers: if (!auth.ok) return auth.response
+ */
 export function ensureMutationAuth(request) {
   const secret =
+    process.env.OPS_DASHBOARD_SECRET ||
     process.env.COCKPIT_MUTATION_SECRET ||
     process.env.BUYER_MATCH_MUTATION_SECRET ||
     process.env.API_MUTATION_SECRET ||
     '';
 
-  // Local/dev safety: if no explicit mutation secret is configured, do not block.
-  if (!secret) return null;
+  if (!secret) return { ok: true };
 
   const headers = request?.headers;
   const authHeader = headers?.get?.('authorization') || '';
   const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
 
   const provided =
+    headers?.get?.('x-ops-dashboard-secret') ||
     headers?.get?.('x-cockpit-mutation-secret') ||
     headers?.get?.('x-buyer-match-secret') ||
     headers?.get?.('x-api-mutation-secret') ||
@@ -31,16 +37,19 @@ export function ensureMutationAuth(request) {
     bearer ||
     '';
 
-  if (provided === secret) return null;
+  if (provided === secret) return { ok: true };
 
-  return NextResponse.json(
-    {
-      ok: false,
-      error: 'unauthorized',
-      message: 'Missing or invalid mutation auth secret.'
-    },
-    { status: 401 }
-  );
+  return {
+    ok: false,
+    response: NextResponse.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+        message: 'Missing or invalid auth secret.',
+      },
+      { status: 401 }
+    ),
+  };
 }
 
 export function jsonOk(payload = {}, init = {}) {
@@ -57,8 +66,14 @@ export function jsonError(error, status = 500, extra = {}) {
     {
       ok: false,
       error: message,
-      ...extra
+      ...extra,
     },
     { status }
   );
 }
+
+export const corsHeaders = (request) => ({
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
+});

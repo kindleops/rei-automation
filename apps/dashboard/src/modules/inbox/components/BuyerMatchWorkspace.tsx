@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
+import type { DealContext } from '../../../lib/data/dealContext'
 import '../buyer-match-v2.css'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -90,11 +91,13 @@ type TypeFilter  = 'all' | 'corporate' | 'repeat' | 'institutional'
 
 export interface BuyerMatchWorkspaceProps {
   propertySnapshot: PropertySnapshot
+  dealContext?: DealContext | null
   isOutsideFilter?: boolean
   onClearFilters?: () => void
   onPinSelected?: () => void
   paneWidth?: '25' | '50' | '75' | '100'
   apiBase?: string
+  paused?: boolean
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
@@ -479,10 +482,12 @@ function DetailPanel({ candidate: c, purchases, onSendPackage, onSelectBuyer, on
 
 export function BuyerMatchWorkspace({
   propertySnapshot,
+  dealContext = null,
   isOutsideFilter = false,
   onClearFilters,
   onPinSelected,
   paneWidth = '100',
+  paused = false,
 }: BuyerMatchWorkspaceProps) {
   const [candidates, setCandidates] = useState<BuyerMatchCandidate[]>([])
   const [purchases, setPurchases] = useState<PurchaseEvent[]>([])
@@ -499,18 +504,30 @@ export function BuyerMatchWorkspace({
   // Load initial data (demand summary)
   useEffect(() => {
     if (!property_id) return
+    if (paused) {
+      if (import.meta.env.DEV) console.log('[HeavyPanelLoadSkipped] BuyerMatchWorkspace: paused')
+      return
+    }
     let active = true
 
     const load = async () => {
       try {
         const supabase = getSupabaseClient()
-        const { data: property } = await supabase.from('properties').select('market').eq('property_id', property_id).maybeSingle()
+        // Use market from canonical dealContext if available — avoids a redundant property table fetch
+        const resolvedMarket = dealContext?.market || market
         const { data: latest_run } = await supabase.from('buyer_match_runs').select('*').eq('property_id', property_id).order('created_at', { ascending: false }).limit(1).maybeSingle()
-        
+
         let entity_count = 0
-        if (property?.market) {
-          const { count } = await supabase.from('buyer_entities_v2').select('*', { count: 'exact', head: true }).contains('markets_active', [property.market])
+        if (resolvedMarket) {
+          const { count } = await supabase.from('buyer_entities_v2').select('*', { count: 'exact', head: true }).contains('markets_active', [resolvedMarket])
           entity_count = count ?? 0
+        } else {
+          // Fallback: fetch market from properties table only when not available from context
+          const { data: propertyRow } = await supabase.from('properties').select('market').eq('property_id', property_id).maybeSingle()
+          if (propertyRow?.market) {
+            const { count } = await supabase.from('buyer_entities_v2').select('*', { count: 'exact', head: true }).contains('markets_active', [propertyRow.market])
+            entity_count = count ?? 0
+          }
         }
 
         if (!active) return
@@ -523,11 +540,11 @@ export function BuyerMatchWorkspace({
 
     void load()
     return () => { active = false }
-  }, [property_id])
+  }, [property_id, paused, dealContext?.market, market])
 
   // Load candidates from last run
   useEffect(() => {
-    if (!latestRun?.buyer_match_run_id) return
+    if (!latestRun?.buyer_match_run_id || paused) return
     let active = true
     const load = async () => {
       try {
@@ -549,13 +566,13 @@ export function BuyerMatchWorkspace({
     }
     void load()
     return () => { active = false }
-  }, [latestRun?.buyer_match_run_id, property_id])
+  }, [latestRun?.buyer_match_run_id, property_id, paused])
 
   // Load purchase trail for selected buyer
   useEffect(() => {
     setPurchases([])
     const sel = candidates.find(c => c.buyer_key === selectedKey)
-    if (!sel?.buyer_entity_id) return
+    if (!sel?.buyer_entity_id || paused) return
     let active = true
     const load = async () => {
       try {
@@ -573,7 +590,7 @@ export function BuyerMatchWorkspace({
     }
     void load()
     return () => { active = false }
-  }, [selectedKey, candidates])
+  }, [selectedKey, candidates, paused])
 
   const runMatch = useCallback(async () => {
     if (!property_id || running) return

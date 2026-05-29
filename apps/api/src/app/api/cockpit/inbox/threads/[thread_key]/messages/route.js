@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../../../../_shared.js'
-import { supabase } from '@/lib/supabase/client.js'
+import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,11 +20,9 @@ export async function OPTIONS(request) {
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (auth && auth.status >= 400) {
-    return auth
-  }
+  if (!auth.ok) return auth.response
 
-  const { thread_key } = params
+  const { thread_key } = await params
   const { searchParams } = new URL(request.url)
   const offset = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
   const limit = Math.min(500, Math.max(1, Number.parseInt(searchParams.get('limit') || '200', 10) || 200))
@@ -34,49 +32,27 @@ export async function GET(request, { params }) {
   }
 
   try {
-    const { data, error, count } = await supabase
-      .from('inbox_messages_hydrated')
-      .select('*', { count: 'exact' })
-      .eq('thread_key', thread_key)
-      .order('message_created_at', { ascending: true })
-      .range(offset, offset + limit - 1)
+    const { rows, total } = await getThreadMessages(thread_key, { offset, limit })
 
-    if (error) throw error
-
-    if (!data) {
-      return NextResponse.json(
-        {
-          ok: true,
-          data: {
-            messages: [],
-            count: 0,
-            thread_key
-          },
-          warnings: ["messages_service_returned_null"]
-        },
-        { status: 200, headers: cors }
-      )
-    }
-
-    const rows = Array.isArray(data) ? data : []
-    const total = Number.isFinite(Number(count)) ? Number(count) : rows.length
     const nextOffset = offset + rows.length
+
+    const pagination = {
+      offset,
+      limit,
+      total,
+      has_more: nextOffset < total,
+      next_offset: nextOffset < total ? nextOffset : null,
+    }
 
     return NextResponse.json(
       {
         ok: true,
         action: 'thread-messages',
-        diagnostics: {
-          thread_key,
-          messages: rows,
-          pagination: {
-            offset,
-            limit,
-            total,
-            has_more: nextOffset < total,
-            next_offset: nextOffset < total ? nextOffset : null,
-          },
-        },
+        thread_key,
+        messages: rows,
+        pagination,
+        // Keep diagnostics wrapper for backward compatibility
+        diagnostics: { thread_key, messages: rows, pagination },
       },
       { status: 200, headers: cors },
     )
@@ -92,3 +68,4 @@ export async function GET(request, { params }) {
     )
   }
 }
+

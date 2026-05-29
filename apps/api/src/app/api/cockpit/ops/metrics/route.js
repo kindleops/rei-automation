@@ -6,30 +6,13 @@ import { getSystemFlags } from '@/lib/system-control.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_ORIGINS = new Set([
-  'https://ops.leadcommand.ai',
-  'https://nexus-dashboard.vercel.app',
-  'http://localhost:5173',
-])
-
-function resolveAllowedOrigin(origin) {
-  if (!origin) return null
-  if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
-  return null
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get('origin')
-  const allowedOrigin = resolveAllowedOrigin(origin)
-  const headers = {
+function corsHeaders(_request) {
+  return {
+    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
     'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
   }
-  if (allowedOrigin) headers['Access-Control-Allow-Origin'] = allowedOrigin
-  return headers
 }
 
 function clean(value) {
@@ -421,12 +404,9 @@ export async function GET(request) {
   const startIso = start.toISOString()
   const endIso = end.toISOString()
 
-  const [
-    flags,
-    messageRes,
-    queueRes,
-    activeQueueRes,
-  ] = await Promise.all([
+  let flags, messageRes, queueRes, activeQueueRes
+  try {
+  ;[flags, messageRes, queueRes, activeQueueRes] = await Promise.all([
     getSystemFlags(['queue_runner_enabled']),
     supabase
       .from('message_events')
@@ -444,9 +424,26 @@ export async function GET(request) {
       .in('queue_status', ['queued', 'pending', 'scheduled', 'processing', 'sending', 'approval']),
   ])
 
-  if (messageRes.error) throw messageRes.error
-  if (queueRes.error) throw queueRes.error
-  if (activeQueueRes.error) throw activeQueueRes.error
+  } catch (fetchErr) {
+    console.error('[ops-metrics] query failure', fetchErr)
+    return NextResponse.json(
+      { ok: false, error: 'METRICS_QUERY_FAILED', message: String(fetchErr?.message ?? fetchErr) },
+      { status: 500, headers: cors },
+    )
+  }
+
+  if (messageRes.error) {
+    console.error('[ops-metrics] message_events error', messageRes.error)
+    return NextResponse.json({ ok: false, error: 'MESSAGE_EVENTS_ERROR', message: String(messageRes.error.message) }, { status: 500, headers: cors })
+  }
+  if (queueRes.error) {
+    console.error('[ops-metrics] send_queue error', queueRes.error)
+    return NextResponse.json({ ok: false, error: 'QUEUE_ERROR', message: String(queueRes.error.message) }, { status: 500, headers: cors })
+  }
+  if (activeQueueRes.error) {
+    console.error('[ops-metrics] active_queue error', activeQueueRes.error)
+    return NextResponse.json({ ok: false, error: 'ACTIVE_QUEUE_ERROR', message: String(activeQueueRes.error.message) }, { status: 500, headers: cors })
+  }
 
   const messageRows = messageRes.data || []
   const queueRows = queueRes.data || []
