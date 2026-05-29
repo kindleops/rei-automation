@@ -2887,7 +2887,7 @@ export default function InboxPage() {
             latestMessageBody: text.trim(),
             latestMessageAt: timestamp,
             latestDirection: 'outbound',
-            inboxCategory: 'outbound_active'
+            inboxCategory: 'follow_up'
           }
         }))
 
@@ -2911,6 +2911,15 @@ export default function InboxPage() {
                 }
           ))),
         }))
+
+        void refreshInbox({
+          filters: currentInboxQuery,
+          cursor: null,
+          limit: 100,
+          _force: true,
+          _timeoutMode: 'manual_bucket_switch',
+          _refreshReason: 'send_success',
+        })
       }
 
       setDraftText('')
@@ -2918,7 +2927,7 @@ export default function InboxPage() {
       inFlightSendMapRef.current.delete(clientSendId)
       setIsSending(false)
     }
-  }, [isSending, selected, selectedSuppressed, threadContext])
+  }, [currentInboxQuery, isSending, refreshInbox, selected, selectedSuppressed, threadContext])
 
   const handleSendTemplate = useCallback(async (payload: TemplateActionPayload) => {
     await handleSend(payload.text, payload.template)

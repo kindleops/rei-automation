@@ -1,67 +1,181 @@
-/**
- * inbox-compact-row-regression.test.mjs
- *
- * Regression protection for the inbox visual regression fix.
- * Tests:
- *   1. getLiveInbox source ordering — uses ORDER BY latest_message_at DESC in source
- *   2. getThreadMessages ascending order via stub
- *   3. Message sort function (normalizeThreadMessageRows) puts oldest first
- *   4. Optimistic send patch contract
- *   5. Source-level canonical thread identity (thread_key not property_id)
- */
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
-import {
-  getThreadMessages,
-} from "../../src/lib/domain/inbox/live-inbox-service.js";
+import { getThreadMessages } from "../../src/lib/domain/inbox/live-inbox-service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVICE_SRC = readFileSync(
   resolve(__dirname, "../../src/lib/domain/inbox/live-inbox-service.js"),
   "utf8",
 );
+const DASHBOARD_INBOX_DATA_SRC = readFileSync(
+  resolve(__dirname, "../../../dashboard/src/lib/data/inboxData.ts"),
+  "utf8",
+);
+const LIVE_V2_MIGRATION_SRC = readFileSync(
+  resolve(__dirname, "../../supabase/migrations/20260529181259_inbox_live_v2_canonical_threads.sql"),
+  "utf8",
+);
+const INBOX_PAGE_SRC = readFileSync(
+  resolve(__dirname, "../../../dashboard/src/modules/inbox/InboxPage.tsx"),
+  "utf8",
+);
 
-// ── 1. Source code asserts ORDER BY latest_message_at DESC ───────────────────
+function clean(value) {
+  return String(value ?? "").trim();
+}
 
-test("live-inbox-service orders by latest_message_at DESC", () => {
-  // The service must contain both ORDER BY calls in the right sequence.
-  assert.ok(
-    SERVICE_SRC.includes("order('latest_message_at', { ascending: false"),
-    "getLiveInbox must ORDER BY latest_message_at ascending:false (DESC)",
+function splitOrClauses(clause = "") {
+  const parts = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (const char of clause) {
+    if (char === "\"") inQuotes = !inQuotes;
+    if (char === "," && !inQuotes) {
+      if (current) parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) parts.push(current);
+  return parts;
+}
+
+function decodeSupabaseValue(value = "") {
+  const trimmed = clean(value);
+  if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1).replaceAll("\"\"", "\"");
+  }
+  return trimmed;
+}
+
+function makeMessageEventSupabaseStub(rows = []) {
+  return {
+    from(table) {
+      const state = {
+        table,
+        rows: table === "message_events" ? [...rows] : [],
+        filters: [],
+        orClauses: [],
+        orders: [],
+        range: null,
+        limit: null,
+      };
+
+      const api = {
+        select() { return api; },
+        eq(column, value) {
+          state.filters.push((row) => clean(row?.[column]) === clean(value));
+          return api;
+        },
+        or(clause) {
+          state.orClauses = splitOrClauses(clause);
+          return api;
+        },
+        order(column, options = {}) {
+          state.orders.push({
+            column,
+            ascending: options.ascending !== false,
+          });
+          return api;
+        },
+        range(start, end) {
+          state.range = [start, end];
+          return api;
+        },
+        limit(value) {
+          state.limit = value;
+          return api;
+        },
+        then(resolve, reject) {
+          return Promise.resolve().then(() => {
+            let data = [...state.rows];
+
+            for (const filter of state.filters) {
+              data = data.filter((row) => filter(row));
+            }
+
+            if (state.orClauses.length > 0) {
+              data = data.filter((row) => state.orClauses.some((clause) => {
+                const [column, operator, ...rest] = clause.split(".");
+                const rawValue = rest.join(".");
+                if (operator !== "eq") return false;
+                return clean(row?.[column]) === decodeSupabaseValue(rawValue);
+              }));
+            }
+
+            data.sort((left, right) => {
+              for (const order of state.orders) {
+                const leftValue = clean(left?.[order.column]);
+                const rightValue = clean(right?.[order.column]);
+                if (leftValue === rightValue) continue;
+                if (order.ascending) return leftValue.localeCompare(rightValue);
+                return rightValue.localeCompare(leftValue);
+              }
+              return 0;
+            });
+
+            const count = data.length;
+            if (state.range) {
+              data = data.slice(state.range[0], state.range[1] + 1);
+            } else if (typeof state.limit === "number") {
+              data = data.slice(0, state.limit);
+            }
+
+            return { data, count, error: null };
+          }).then(resolve, reject);
+        },
+      };
+
+      return api;
+    },
+  };
+}
+
+test("live inbox service reads canonical v2 sources", () => {
+  assert.match(SERVICE_SRC, /const THREAD_SOURCE = "v_inbox_threads_live_v2";/);
+  assert.match(SERVICE_SRC, /const COUNT_SOURCE = "v_inbox_thread_counts_live_v2";/);
+});
+
+test("canonical inbox migration partitions by canonical_thread_key and keeps one latest row per thread", () => {
+  assert.match(
+    LIVE_V2_MIGRATION_SRC,
+    /ROW_NUMBER\(\) OVER \(\s*PARTITION BY be\.canonical_thread_key/s,
+    "migration must rank rows per canonical thread",
   );
-  assert.ok(
-    SERVICE_SRC.includes("order('thread_key', { ascending: false"),
-    "getLiveInbox must ORDER BY thread_key ascending:false as tiebreaker",
+  assert.match(
+    LIVE_V2_MIGRATION_SRC,
+    /WHERE re\.thread_row_number = 1/,
+    "migration must keep only the latest ranked row per thread",
+  );
+  assert.match(
+    LIVE_V2_MIGRATION_SRC,
+    /COALESCE\(\s*NULLIF\(me\.thread_key, ''\),\s*NULLIF\(me\.to_phone_number, ''\),\s*NULLIF\(me\.from_phone_number, ''\),\s*NULLIF\(me\.canonical_e164, ''\)\s*\) AS canonical_thread_key/s,
+    "migration must derive canonical_thread_key from message_events",
   );
 });
 
-// ── 2. Source asserts thread_key is canonical identity, not property_id ───────
-
-test("live-inbox-service queries by thread_key, not property_id alone", () => {
-  // The inbox query must use thread_key as primary lookup identity.
-  // This ensures one row per phone/thread, not one per property.
-  assert.ok(
-    SERVICE_SRC.includes("'thread_key'") || SERVICE_SRC.includes('"thread_key"'),
-    "live-inbox-service must reference thread_key as a canonical identity field",
+test("live inbox service orders threads by latest_message_at DESC with thread_key tie breaker", () => {
+  assert.match(
+    SERVICE_SRC,
+    /order\("latest_message_at", \{ ascending: false, nullsFirst: false \}\)/,
+    "getLiveInbox must order newest thread activity first",
   );
-  // It must NOT use property_id as the primary ORDER or GROUP key.
-  const orderByPropertyId = /order\s*\(\s*['"]property_id['"]/i.test(SERVICE_SRC);
-  assert.ok(
-    !orderByPropertyId,
-    "live-inbox-service must not ORDER BY property_id (would produce per-property rows)",
+  assert.match(
+    SERVICE_SRC,
+    /order\("thread_key", \{ ascending: false \}\)/,
+    "getLiveInbox must use thread_key as deterministic tie breaker",
   );
 });
 
-// ── 3. getThreadMessages returns events ASC by event_timestamp ───────────────
-
-test("getThreadMessages returns events in ascending chronological order", async () => {
+test("getThreadMessages returns canonical message_events in ascending chronological order", async () => {
   const threadKey = "tk-chrono-asc";
-
   const events = [
     {
       id: "ev-3",
@@ -70,8 +184,9 @@ test("getThreadMessages returns events in ascending chronological order", async 
       to_phone_number: "+15559876543",
       message_body: "Third",
       direction: "inbound",
-      event_timestamp: "2025-06-01T12:30:00Z",
-      created_at: "2025-06-01T12:30:00Z",
+      event_timestamp: "2026-05-01T12:30:00.000Z",
+      created_at: "2026-05-01T12:30:00.000Z",
+      canonical_e164: "+15559876543",
     },
     {
       id: "ev-1",
@@ -80,8 +195,9 @@ test("getThreadMessages returns events in ascending chronological order", async 
       to_phone_number: "+15550001111",
       message_body: "First",
       direction: "outbound",
-      event_timestamp: "2025-06-01T10:00:00Z",
-      created_at: "2025-06-01T10:00:00Z",
+      event_timestamp: "2026-05-01T10:00:00.000Z",
+      created_at: "2026-05-01T10:00:00.000Z",
+      canonical_e164: "+15559876543",
     },
     {
       id: "ev-2",
@@ -90,91 +206,64 @@ test("getThreadMessages returns events in ascending chronological order", async 
       to_phone_number: "+15559876543",
       message_body: "Second",
       direction: "inbound",
-      event_timestamp: "2025-06-01T11:00:00Z",
-      created_at: "2025-06-01T11:00:00Z",
+      event_timestamp: "2026-05-01T11:00:00.000Z",
+      created_at: "2026-05-01T11:00:00.000Z",
+      canonical_e164: "+15559876543",
     },
   ];
 
-  const mockSupabase = {
-    from(table) {
-      const self = {
-        _rows: table === "message_events" ? [...events] : [],
-        select() { return self; },
-        eq(col, val) {
-          self._rows = self._rows.filter(r => String(r[col] ?? "") === String(val));
-          return Promise.resolve({ data: self._rows, error: null });
-        },
-      };
-      return self;
-    },
-  };
+  const result = await getThreadMessages(
+    { selected_thread_key: threadKey, canonical_e164: "+15559876543" },
+    { limit: 50 },
+    { supabase: makeMessageEventSupabaseStub(events) },
+  );
 
-  const result = await getThreadMessages(threadKey, { limit: 50 }, { supabase: mockSupabase });
-  const messages = result.rows ?? result;
-
-  assert.ok(Array.isArray(messages), "getThreadMessages must return an array in result.rows");
-  assert.ok(messages.length >= 2, "must return at least 2 messages from stub");
-
-  for (let i = 0; i < messages.length - 1; i++) {
-    const a = new Date(messages[i].event_timestamp || messages[i].message_created_at || 0).getTime();
-    const b = new Date(messages[i + 1].event_timestamp || messages[i + 1].message_created_at || 0).getTime();
-    assert.ok(a <= b, `Message[${i}] (${a}) must be <= Message[${i + 1}] (${b}) for ASC order`);
-  }
-
-  // Verify first message is the oldest
-  assert.strictEqual(messages[0].message_body, "First", "first message must be oldest");
-  assert.strictEqual(messages[messages.length - 1].message_body, "Third", "last message must be newest");
+  assert.equal(result.rows.length, 3);
+  assert.deepEqual(
+    result.rows.map((row) => row.message_body),
+    ["First", "Second", "Third"],
+  );
+  assert.equal(result.rows[0].source_table, "message_events");
+  assert.equal(result.rows.at(-1)?.canonical_thread_key, threadKey);
 });
 
-// ── 4. Message sort is ascending (unit test on the internal sort) ─────────────
-
-test("normalised messages sort ascending by event_timestamp", () => {
-  const unsorted = [
-    { event_timestamp: "2025-06-01T12:00:00Z", id: "c" },
-    { event_timestamp: "2025-06-01T08:00:00Z", id: "a" },
-    { event_timestamp: "2025-06-01T10:00:00Z", id: "b" },
-  ];
-
-  // Replicate the sort used in live-inbox-service.js line 788
-  const asTime = (v) => { const t = new Date(v || 0).getTime(); return Number.isFinite(t) ? t : 0; };
-  const sorted = [...unsorted].sort((a, b) => asTime(a.event_timestamp) - asTime(b.event_timestamp));
-
-  assert.strictEqual(sorted[0].id, "a");
-  assert.strictEqual(sorted[1].id, "b");
-  assert.strictEqual(sorted[2].id, "c");
+test("optimistic send patch marks replied threads as follow_up and refreshes live inbox", () => {
+  assert.match(
+    INBOX_PAGE_SRC,
+    /latestDirection:\s*'outbound'/,
+    "send success must patch latestDirection to outbound",
+  );
+  assert.match(
+    INBOX_PAGE_SRC,
+    /inboxCategory:\s*'follow_up'/,
+    "send success must move the thread out of new_replies immediately",
+  );
+  assert.match(
+    INBOX_PAGE_SRC,
+    /_force:\s*true/,
+    "send success must force an immediate live inbox refresh",
+  );
+  assert.match(
+    INBOX_PAGE_SRC,
+    /_timeoutMode:\s*'manual_bucket_switch'/,
+    "send success refresh must use the fast manual bucket timeout mode",
+  );
 });
 
-// ── 5. Optimistic send patch covers all required inbox row fields ─────────────
-
-test("optimistic send patch covers latestMessageBody, latestDirection, latestMessageAt", () => {
-  const mockText = "Hello seller";
-  const mockTimestamp = new Date().toISOString();
-
-  // Mirror the exact patch from InboxPage.tsx handleSend success branch
-  const patch = {
-    isRead: true,
-    unread: false,
-    unreadCount: 0,
-    status: "replied",
-    inboxStatus: "waiting",
-    latestMessageBody: mockText,
-    latestMessageAt: mockTimestamp,
-    latestDirection: "outbound",
-    inboxCategory: "outbound_active",
-  };
-
-  assert.strictEqual(patch.latestDirection, "outbound", "patch.latestDirection must be outbound");
-  assert.strictEqual(patch.latestMessageBody, mockText, "patch.latestMessageBody must match sent text");
-  assert.ok(typeof patch.latestMessageAt === "string" && patch.latestMessageAt.length > 0, "patch.latestMessageAt must be set");
-  assert.strictEqual(patch.unread, false, "patch.unread must be cleared");
-  assert.strictEqual(patch.isRead, true, "patch.isRead must be true");
-});
-
-// ── 6. Source asserts messages are sorted ASC ────────────────────────────────
-
-test("live-inbox-service sorts messages ascending (oldest first)", () => {
-  assert.ok(
-    SERVICE_SRC.includes("asTime(a.event_timestamp) - asTime(b.event_timestamp)"),
-    "getThreadMessages must sort with asTime(a) - asTime(b) (ascending, oldest first)",
+test("delivery status UI maps outbound receipts to Sent, Delivered, or Failed only", () => {
+  assert.match(
+    DASHBOARD_INBOX_DATA_SRC,
+    /if \(validDelivered\) return 'delivered'/,
+    "outbound receipts must surface Delivered when delivery is confirmed",
+  );
+  assert.match(
+    DASHBOARD_INBOX_DATA_SRC,
+    /if \(terminalFailure && !providerSidExists && !outboundEventExists && !hasLaterInboundReply\) return 'failed'/,
+    "outbound receipts must surface Failed for terminal failures without success evidence",
+  );
+  assert.match(
+    DASHBOARD_INBOX_DATA_SRC,
+    /return 'sent'/,
+    "outbound receipts must fall back to Sent rather than exposing raw carrier states",
   );
 });

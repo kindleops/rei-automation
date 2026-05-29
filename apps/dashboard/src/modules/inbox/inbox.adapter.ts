@@ -616,8 +616,8 @@ const extractViewCounts = (model: InboxModel): Record<string, number> => {
   const counts: Record<string, number> = {}
   if (model.counts) Object.assign(counts, model.counts)
   if (model.priorityInboxCount != null) counts.priority = model.priorityInboxCount
-  if (model.activeInboxCount != null) counts.automated = model.activeInboxCount
-  if (model.waitingInboxCount != null) counts.cold = model.waitingInboxCount
+  if (model.activeInboxCount != null) counts.active = model.activeInboxCount
+  if (model.waitingInboxCount != null) counts.waiting = model.waitingInboxCount
   if (model.allInboxCount != null) counts.all = model.allInboxCount
   if (model.unreadThreadsCount != null) counts.new_replies = model.unreadThreadsCount
   if (model.suppressedThreadsCount != null) counts.suppressed = model.suppressedThreadsCount
@@ -820,7 +820,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     const rawBucketKey = (options.filters?.view ?? stateRef.current.activeBucketKey) as string
     const bucketKey = normalizeBucketKey(rawBucketKey)
 
-    if (options._automatic) {
+    if (options._automatic && !options._force) {
       if (document.hidden) {
         if (isDev) console.log('[InboxRefreshSkip] document hidden')
         return null
@@ -895,7 +895,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   useEffect(() => {
     let cancelled = false
-    void refresh()
+    void refresh({ _timeoutMode: 'initial_boot', _force: true })
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null
@@ -994,7 +994,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
               })
             }
             realtimeBatchRef.current = { tables: new Set(), threadKeys: new Set(), eventCount: 0 }
-            void refresh({ _automatic: true })
+            void refresh({ _automatic: true, _force: true, _refreshReason: 'realtime' })
           }
         }, 5000)
       }
@@ -1048,8 +1048,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     counts: storeState.viewCounts,
     allInboxCount: (storeState.viewCounts.all ?? null) as number | null,
     priorityInboxCount: (storeState.viewCounts.priority ?? null) as number | null,
-    activeInboxCount: (storeState.viewCounts.automated ?? null) as number | null,
-    waitingInboxCount: (storeState.viewCounts.cold ?? null) as number | null,
+    activeInboxCount: (storeState.viewCounts.active ?? null) as number | null,
+    waitingInboxCount: (storeState.viewCounts.waiting ?? null) as number | null,
     unreadThreadsCount: (storeState.viewCounts.new_replies ?? null) as number | null,
     suppressedThreadsCount: (storeState.viewCounts.suppressed ?? null) as number | null,
     deadThreadsCount: (storeState.viewCounts.dead ?? null) as number | null,

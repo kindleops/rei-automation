@@ -96,6 +96,7 @@ export interface InboxFetchOptions {
   sourceMode?: InboxSourceMode
   /** @internal */
   _automatic?: boolean
+  _force?: boolean
   _timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
   _refreshReason?: string
   paused?: boolean
@@ -109,6 +110,8 @@ export interface LiveInboxFetchParams {
   cursor?: string | null
   limit?: number
   map?: boolean
+  timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
+  refreshReason?: string
   signal?: AbortSignal
 }
 
@@ -1696,10 +1699,22 @@ export const fetchLiveInbox = async ({
   cursor = null,
   limit = 200,
   map = true,
+  timeoutMode,
+  refreshReason,
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
   const params = new URLSearchParams()
-  const entries: Record<string, unknown> = { filter, direction, q, keywordGroup, cursor, limit, map: map ? '1' : '0' }
+  const entries: Record<string, unknown> = {
+    filter,
+    direction,
+    q,
+    keywordGroup,
+    cursor,
+    limit,
+    map: map ? '1' : '0',
+    timeout_mode: timeoutMode,
+    refresh_reason: refreshReason,
+  }
   Object.entries(entries).forEach(([key, value]) => {
     const param = toQueryParam(value)
     if (param) params.set(key, param)
@@ -1955,7 +1970,7 @@ export const getInboxRowsForView = async (
     new_inbounds: 'new_replies', needs_reply: 'new_replies', new_inbound: 'new_replies',
     my_priority: 'priority',
     follow_up_due: 'follow_up',
-    waiting: 'cold', waiting_on_seller: 'cold', cold_no_response: 'cold',
+    waiting: 'waiting', waiting_on_seller: 'waiting', cold_no_response: 'cold',
     wrong_number: 'dead',
     manual_review: 'needs_review',
     dnc_opt_out: 'suppressed', opt_out: 'suppressed',
@@ -1970,6 +1985,8 @@ export const getInboxRowsForView = async (
   else if (normalizedView === 'needs_review') inbox_bucket = 'needs_review'
   else if (normalizedView === 'suppressed') inbox_bucket = 'suppressed'
   else if (normalizedView === 'active') inbox_bucket = 'active'
+  else if (normalizedView === 'waiting') inbox_bucket = 'waiting'
+  else if (normalizedView === 'unlinked') inbox_bucket = 'unlinked'
   const endpoint = '/api/cockpit/inbox/live'
   const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
 
@@ -1979,6 +1996,8 @@ export const getInboxRowsForView = async (
     cursor: rawCursor ?? String(numericOffset),
     limit: page_size,
     map: false,
+    timeoutMode: options._timeoutMode,
+    refreshReason: options._refreshReason,
     signal: options.signal,
   }).catch((err) => {
     if (DEV) console.warn('[Inbox] /api/cockpit/inbox/live failed - preserving previous data', err)
@@ -2206,14 +2225,21 @@ export const getInboxThreads = async (
       needs_review: 'needs_review',
       review: 'needs_review',
       new_inbound: 'new_inbound',
+      new_replies: 'new_inbound',
       unread: 'new_inbound',
       automated: 'automated',
       auto: 'automated',
       outbound_active: 'outbound_active',
       outbound: 'outbound_active',
+      follow_up: 'outbound_active',
+      active: 'outbound_active',
+      waiting: 'outbound_active',
+      waiting_on_seller: 'outbound_active',
       cold_no_response: 'cold_no_response',
       cold: 'cold_no_response',
+      unlinked: 'cold_no_response',
       normal: 'cold_no_response',
+      dead: 'dead',
       dnc_opt_out: 'dnc_opt_out',
       suppressed: 'dnc_opt_out',
       dnc: 'dnc_opt_out',
@@ -2580,9 +2606,9 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     console.log('[fetchInboxModel] using counts embedded in live response')
   }
 
-  const priorityInboxCount = categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound
-  const activeInboxCount = categoryCounts.automated + categoryCounts.outbound_active
-  const waitingInboxCount = categoryCounts.cold_no_response
+  const priorityInboxCount = Number(viewCounts?.priority ?? (categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound))
+  const activeInboxCount = Number(viewCounts?.active ?? (categoryCounts.automated + categoryCounts.outbound_active))
+  const waitingInboxCount = Number(viewCounts?.waiting ?? viewCounts?.waiting_on_seller ?? categoryCounts.cold_no_response)
   const allInboxCount = categoryCounts.all || totalAvailable
   
   const unreadThreadsCount = categoryCounts.new_inbound
@@ -2609,11 +2635,14 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply') bucketTotal = unreadThreadsCount
   else if (view === 'priority') bucketTotal = priorityInboxCount
   else if (view === 'needs_review') bucketTotal = categoryCounts.needs_review
+  else if (view === 'active') bucketTotal = activeInboxCount
+  else if (view === 'waiting' || view === 'waiting_on_seller') bucketTotal = waitingInboxCount
   else if (view === 'automated') bucketTotal = categoryCounts.automated
   else if (view === 'outbound_active' || view === 'follow_up') bucketTotal = categoryCounts.outbound_active
   else if (view === 'cold_no_response' || view === 'cold') bucketTotal = categoryCounts.cold_no_response
   else if (view === 'dead') bucketTotal = categoryCounts.dead
   else if (view === 'dnc_opt_out' || view === 'suppressed') bucketTotal = categoryCounts.dnc_opt_out
+  else if (view === 'unlinked') bucketTotal = Number(viewCounts?.unlinked ?? 0)
 
   return {
     threads,
@@ -2655,6 +2684,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
       priority: priorityInboxCount,
       active: activeInboxCount,
       waiting: waitingInboxCount,
+      waiting_on_seller: waitingInboxCount,
       all: allInboxCount,
     },
     pagination: {
@@ -3158,62 +3188,13 @@ export const getThreadMessagesForThread = async (
     if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages failed; falling back', err)
   }
 
-  const maxPages = Math.max(1, options.maxPages ?? 50)
-  const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : null
-  const supabase = getSupabaseClient()
-
-  const rows: AnyRecord[] = []
-  let viewErrorMessage: string | null = null
-
-  // 1. Fetch from hydrated view or message_events
-  try {
-    for (let page = 0; page < maxPages; page += 1) {
-      if (options.signal?.aborted) {
-        const abortErr = new Error('Aborted')
-        abortErr.name = 'AbortError'
-        throw abortErr
-      }
-      let query = supabase
-        .from('inbox_messages_hydrated')
-        .select('*')
-        .eq('thread_key', threadKey)
-        .order('message_created_at', { ascending: true })
-        .range(page * pageSize, page * pageSize + pageSize - 1)
-      if (options.signal) query = query.abortSignal(options.signal)
-
-      const { data, error } = await query
-
-      if (error) throw new Error(mapErrorMessage(error))
-
-      const batch = safeArray(data as AnyRecord[])
-      rows.push(...batch)
-      if (maxMessages !== null && rows.length >= maxMessages) break
-      if (batch.length < pageSize) break
-    }
-  } catch (error) {
-    if (options.signal?.aborted || (error as { name?: string })?.name === 'AbortError') throw error
-    viewErrorMessage = mapErrorMessage(error)
-    if (DEV) {
-      console.warn('[ThreadMessageHydration] inbox_messages_hydrated failed, falling back to message_events', {
-        threadKey,
-        error: viewErrorMessage,
-      })
-    }
-  }
-
-  const viewMessages = rows.map(toThreadMessage)
-  
-  if (viewMessages.length === 0) {
-    const fallbackMessages = await getThreadMessagesFromMessageEvents(thread, options)
-    viewMessages.push(...fallbackMessages)
-  }
-
-  const mapped = applyDeliveryStatusDisplay(dedupeMessages(viewMessages))
+  const fallbackMessages = await getThreadMessagesFromMessageEvents(thread, options)
+  const mapped = applyDeliveryStatusDisplay(dedupeMessages(fallbackMessages))
 
   if (DEV) {
     console.log('[ThreadMessageHydration]', {
       threadKey,
-      viewRows: viewMessages.length,
+      viewRows: 0,
       mergedRows: mapped.length,
     })
   }

@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server.js'
-import { parseJsonSafe, ensureMutationAuth, corsHeaders } from '../../_shared.js'
+import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { getLiveInbox } from '@/lib/domain/inbox/live-inbox-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const TIMEOUT_MS = 8000
+const TIMEOUT_MS_BY_MODE = {
+  initial_boot: 20_000,
+  manual_bucket_switch: 15_000,
+  auto_refresh: 10_000,
+}
 
 export async function GET(request) {
   const cors = corsHeaders(request)
@@ -16,14 +20,37 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
 
+    const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
+      ? params.timeout_mode
+      : 'manual_bucket_switch'
+    const timeoutMs = TIMEOUT_MS_BY_MODE[timeoutMode]
+    const requestedFilter = params.filter || params.bucket || 'all'
+    const requestedLimit = Number(params.limit || 100)
+    const useInitialBootSafeSelect =
+      timeoutMode === 'initial_boot' &&
+      (requestedFilter === 'all' || requestedFilter === 'all_messages') &&
+      Number.isFinite(requestedLimit) &&
+      requestedLimit <= 100
+
+    console.log('[INBOX_LIVE_TIMEOUT_MODE]', {
+      timeoutMode,
+      timeoutMs,
+      filter: requestedFilter,
+      limit: requestedLimit,
+      selectMode: useInitialBootSafeSelect ? 'initial_boot_safe' : 'default',
+    })
+
     let data
     try {
       data = await Promise.race([
-        getLiveInbox(params),
+        getLiveInbox(
+          params,
+          useInitialBootSafeSelect ? { selectMode: 'initial_boot_safe' } : undefined,
+        ),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(Object.assign(new Error('live_inbox_timeout'), { isTimeout: true })),
-            TIMEOUT_MS
+            timeoutMs
           )
         ),
       ])
@@ -34,6 +61,8 @@ export async function GET(request) {
           {
             ok: true,
             degraded: true,
+            dataMode: 'timeout_preserved',
+            timeoutMode,
             error: 'live_inbox_timeout',
             threads: [],
             messages: [],

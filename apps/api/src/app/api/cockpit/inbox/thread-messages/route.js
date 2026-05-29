@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../_shared.js'
-import { supabase } from '@/lib/supabase/client.js'
+import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,12 +42,14 @@ export async function OPTIONS(request) {
 export async function GET(request) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (auth && auth.status >= 400) {
-    return auth
-  }
+  if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(request.url)
   const thread_key = clean(searchParams.get('thread_key'))
+  const canonical_e164 = clean(searchParams.get('canonical_e164'))
+  const phone = clean(searchParams.get('phone'))
+  const best_phone = clean(searchParams.get('best_phone'))
+  const seller_phone = clean(searchParams.get('seller_phone'))
   const offset = Math.max(0, Number.parseInt(clean(searchParams.get('offset')) || '0', 10) || 0)
   const limit = Math.min(500, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '200', 10) || 200))
 
@@ -56,25 +58,33 @@ export async function GET(request) {
   }
 
   try {
-    const { data, error, count } = await supabase
-      .from('inbox_messages_hydrated')
-      .select('*', { count: 'exact' })
-      .eq('thread_key', thread_key)
-      .order('message_created_at', { ascending: true })
-      .range(offset, offset + limit - 1)
-
-    if (error) throw error
-
-    const rows = Array.isArray(data) ? data : []
-    const total = Number.isFinite(Number(count)) ? Number(count) : rows.length
+    const { rows, total, diagnostics } = await getThreadMessages({
+      selected_thread_key: thread_key,
+      canonical_e164,
+      phone,
+      best_phone,
+      seller_phone,
+    }, { offset, limit })
     const nextOffset = offset + rows.length
 
     return NextResponse.json(
       {
         ok: true,
         action: 'thread-messages',
+        thread_key,
+        messages: rows,
+        pagination: {
+          offset,
+          limit,
+          total,
+          has_more: nextOffset < total,
+          next_offset: nextOffset < total ? nextOffset : null,
+        },
         diagnostics: {
+          ...diagnostics,
           thread_key,
+          canonical_e164: canonical_e164 || diagnostics?.canonical_e164 || null,
+          canonical_thread_key: diagnostics?.canonical_thread_key || thread_key,
           messages: rows,
           pagination: {
             offset,

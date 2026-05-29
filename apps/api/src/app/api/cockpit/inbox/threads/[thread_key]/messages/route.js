@@ -24,6 +24,10 @@ export async function GET(request, { params }) {
 
   const { thread_key } = await params
   const { searchParams } = new URL(request.url)
+  const canonical_e164 = searchParams.get('canonical_e164')
+  const phone = searchParams.get('phone')
+  const best_phone = searchParams.get('best_phone')
+  const seller_phone = searchParams.get('seller_phone')
   const offset = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
   const limit = Math.min(500, Math.max(1, Number.parseInt(searchParams.get('limit') || '200', 10) || 200))
 
@@ -32,7 +36,13 @@ export async function GET(request, { params }) {
   }
 
   try {
-    const { rows, total } = await getThreadMessages(thread_key, { offset, limit })
+    const { rows, total, diagnostics } = await getThreadMessages({
+      selected_thread_key: thread_key,
+      canonical_e164,
+      phone,
+      best_phone,
+      seller_phone,
+    }, { offset, limit })
 
     const nextOffset = offset + rows.length
 
@@ -52,7 +62,14 @@ export async function GET(request, { params }) {
         messages: rows,
         pagination,
         // Keep diagnostics wrapper for backward compatibility
-        diagnostics: { thread_key, messages: rows, pagination },
+        diagnostics: {
+          ...diagnostics,
+          thread_key,
+          canonical_e164: canonical_e164 || diagnostics?.canonical_e164 || null,
+          canonical_thread_key: diagnostics?.canonical_thread_key || thread_key,
+          messages: rows,
+          pagination,
+        },
       },
       { status: 200, headers: cors },
     )
@@ -68,4 +85,3 @@ export async function GET(request, { params }) {
     )
   }
 }
-

@@ -3,8 +3,127 @@ import assert from "node:assert/strict";
 
 import { getOpsFeederSnapshot, parseOpsFilters } from "@/lib/dashboard/ops-service.js";
 
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
+function asTime(value) {
+  const ts = new Date(value || 0).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 function passthroughCache(_key, _ttl, loader) {
   return loader();
+}
+
+function buildLiveInboxCountRow(rows = []) {
+  const byBucket = (bucket) => rows.filter((row) => row.inbox_bucket === bucket).length;
+  return {
+    all: rows.length,
+    priority: byBucket("priority"),
+    new_replies: byBucket("new_replies"),
+    needs_review: byBucket("needs_review"),
+    follow_up: byBucket("follow_up"),
+    cold: byBucket("cold"),
+    dead: byBucket("dead"),
+    suppressed: byBucket("suppressed"),
+    active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up"].includes(row.inbox_bucket)).length,
+    waiting: rows.filter((row) => row.latest_message_direction === "outbound" && !["dead", "suppressed"].includes(row.inbox_bucket)).length,
+    unlinked: rows.filter((row) => row.property_id == null).length,
+  };
+}
+
+function makeLiveInboxSupabaseStub(rows = []) {
+  return {
+    from(table) {
+      const state = {
+        table,
+        filters: [],
+        searchClause: null,
+        orders: [],
+        limit: null,
+        range: null,
+      };
+
+      const api = {
+        select() { return api; },
+        eq(column, value) {
+          state.filters.push((row) => clean(row?.[column]) === clean(value));
+          return api;
+        },
+        or(clause) {
+          state.searchClause = clause;
+          return api;
+        },
+        order(column, options = {}) {
+          state.orders.push({ column, ascending: options.ascending !== false });
+          return api;
+        },
+        range(start, end) {
+          state.range = [start, end];
+          return api;
+        },
+        limit(value) {
+          state.limit = value;
+          return api;
+        },
+        then(resolve, reject) {
+          return Promise.resolve().then(() => {
+            let data = table === "v_inbox_thread_counts_live_v2"
+              ? [buildLiveInboxCountRow(rows)]
+              : [...rows];
+
+            for (const filter of state.filters) {
+              data = data.filter((row) => filter(row));
+            }
+
+            if (state.searchClause) {
+              const needle = state.searchClause
+                .split(",")
+                .map((entry) => entry.split(".").slice(2).join("."))
+                .map((entry) => clean(entry).replaceAll("%", "").toLowerCase())
+                .find(Boolean);
+              if (needle) {
+                data = data.filter((row) => [
+                  row.thread_key,
+                  row.canonical_e164,
+                  row.seller_phone,
+                  row.owner_name,
+                  row.property_address_full,
+                  row.latest_message_body,
+                ].some((value) => clean(value).toLowerCase().includes(needle)));
+              }
+            }
+
+            data.sort((left, right) => {
+              for (const order of state.orders) {
+                const leftValue = order.column.includes("_at") ? asTime(left?.[order.column]) : clean(left?.[order.column]);
+                const rightValue = order.column.includes("_at") ? asTime(right?.[order.column]) : clean(right?.[order.column]);
+                if (leftValue === rightValue) continue;
+                if (typeof leftValue === "number" && typeof rightValue === "number") {
+                  return order.ascending ? leftValue - rightValue : rightValue - leftValue;
+                }
+                return order.ascending
+                  ? String(leftValue).localeCompare(String(rightValue))
+                  : String(rightValue).localeCompare(String(leftValue));
+              }
+              return 0;
+            });
+
+            const count = data.length;
+            if (state.range) {
+              data = data.slice(state.range[0], state.range[1] + 1);
+            } else if (typeof state.limit === "number") {
+              data = data.slice(0, state.limit);
+            }
+
+            return { data, count, error: null };
+          }).then(resolve, reject);
+        },
+      };
+      return api;
+    },
+  };
 }
 
 test("parseOpsFilters defaults dashboard feeder to v_sms_ready_contacts with safe routing", () => {
@@ -108,41 +227,23 @@ test("getOpsFeederSnapshot rejects legacy feeder requests unless env flag is tru
 test('live inbox exposes cursor pagination, filters, keyword matches, and map pins', async () => {
   const { getLiveInbox } = await import('@/lib/domain/inbox/live-inbox-service.js');
   const rows = Array.from({ length: 260 }, (_, idx) => ({
-    id: idx + 1,
-    created_at: new Date(Date.UTC(2026, 4, 6, 12, 0, 0) - idx * 1000).toISOString(),
-    direction: idx % 3 === 0 ? 'inbound' : 'outbound',
-    message_body: idx === 0 ? 'yes I am interested, make offer' : idx === 3 ? 'how much is your offer' : `message ${idx}`,
-    from_phone_number: '+15550000001',
-    to_phone_number: '+15550000002',
-    property_id: idx < 10 ? 101 : null,
-    master_owner_id: 201,
-    seller_display_name: 'Test Seller',
-    property_address: '123 Main St',
+    thread_key: `thread-${String(idx + 1).padStart(3, '0')}`,
+    canonical_thread_key: `thread-${String(idx + 1).padStart(3, '0')}`,
+    canonical_e164: `+1555${String(idx + 1).padStart(7, '0')}`,
+    seller_phone: `+1555${String(idx + 1).padStart(7, '0')}`,
+    owner_name: 'Test Seller',
+    property_address_full: '123 Main St',
+    latest_message_at: new Date(Date.UTC(2026, 4, 6, 12, 0, 0) - idx * 1000).toISOString(),
+    latest_message_body: idx === 0 ? 'yes I am interested, make offer' : idx === 3 ? 'how much is your offer' : `message ${idx}`,
+    latest_message_direction: idx % 3 === 0 ? 'inbound' : 'outbound',
+    inbox_bucket: idx === 0 ? 'priority' : idx % 3 === 0 ? 'new_replies' : 'follow_up',
+    property_id: idx < 10 ? `prop-${idx + 1}` : null,
+    master_owner_id: `owner-${idx + 1}`,
+    latitude: idx === 0 ? 34.1 : null,
+    longitude: idx === 0 ? -118.2 : null,
     market: 'Test Market',
-    metadata: {},
   }));
-  const supabase = {
-    from(table) {
-      const state = { table, limit: 1000, direction: null, q: null };
-      const api = {
-        select() { return api; },
-        order() { return api; },
-        limit(n) { state.limit = n; return api; },
-        eq(col, val) { if (col === 'direction') state.direction = val; return api; },
-        lt() { return api; },
-        ilike(_col, val) { state.q = String(val).replaceAll('%', '').toLowerCase(); return api; },
-        not() { return api; },
-        then(resolve) {
-          if (state.table === 'properties') return resolve({ data: [{ id: 101, latitude: 34.1, longitude: -118.2, address: '123 Main St', market: 'Test Market', seller_name: 'Test Seller', stage: 'new' }], error: null });
-          let data = rows;
-          if (state.direction) data = data.filter((r) => r.direction === state.direction);
-          if (state.q) data = data.filter((r) => r.message_body.toLowerCase().includes(state.q));
-          return resolve({ data: data.slice(0, state.limit), error: null });
-        },
-      };
-      return api;
-    },
-  };
+  const supabase = makeLiveInboxSupabaseStub(rows);
   const page = await getLiveInbox({ limit: '100', direction: 'all', map: 'true' }, { supabase });
   assert.strictEqual(page.messages.length, 100);
   assert.ok(page.pagination.has_more);
