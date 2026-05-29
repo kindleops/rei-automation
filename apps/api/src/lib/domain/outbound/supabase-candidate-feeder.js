@@ -3908,6 +3908,7 @@ export function buildFeederDiagnostics(summary = {}) {
 }
 
 function getSkipDiagnostics(candidate, options) {
+  const alignment = candidate.identity_alignment || {};
   return {
     normalized_master_owner_id: candidate.master_owner_id,
     normalized_property_id: candidate.property_id,
@@ -3915,15 +3916,21 @@ function getSkipDiagnostics(candidate, options) {
     normalized_phone_e164: candidate.canonical_e164,
     hydration_lookup_strategy: candidate.hydration_lookup_strategy || null,
     hydration_error: candidate.hydration_error || null,
-    identity_inputs_used: candidate.identity_alignment ? {
-      prospect_full_name: candidate.prospect_full_name,
-      phone_full_name: candidate.phone_full_name,
-      owner_display_name: candidate.owner_display_name,
-      matching_flags: candidate.matching_flags,
-      person_flags_text: candidate.person_flags_text
-    } : null,
-    identity_resolution: candidate.identity_alignment?.status || null,
-    identity_reason: candidate.identity_alignment?.reasons || null,
+    // Entity / linkage diagnostics
+    owner_is_entity: alignment.ownerIsEntity ?? null,
+    raw_matching_flags: candidate.matching_flags || null,
+    normalized_linkage: alignment.normalizedLinkage ?? null,
+    linkage_source: candidate.matching_flags ? "prospects.matching_flags" : null,
+    identity_resolution: alignment.status || null,
+    identity_reason: alignment.reasons || null,
+    identity_inputs_used: {
+      prospect_full_name: candidate.prospect_full_name || null,
+      phone_full_name: candidate.phone_full_name || null,
+      owner_display_name: candidate.owner_display_name || null,
+      matching_flags: candidate.matching_flags || null,
+      person_flags_text: candidate.person_flags_text || null,
+      likely_owner: candidate.likely_owner ?? null,
+    },
     property_type_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
     canonical_property_group_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
     ...(options.dry_run ? { candidate_preview: buildCandidateNormalizedPreview(candidate.raw, candidate) } : {})

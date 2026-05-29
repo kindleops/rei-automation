@@ -1,75 +1,231 @@
 import { clean, lower, collapseWhitespace } from "@/lib/utils/strings.js";
 
+// ── Entity detection ───────────────────────────────────────────────────────
+
+const ENTITY_TOKENS = new Set([
+  "llc", "l.l.c", "l.l.c.", "inc", "incorporated", "corp", "corporation",
+  "co.", "company", "holdings", "properties", "property", "assets",
+  "apartments", "church", "ministries", "ministry", "trust", "estate",
+  "lp", "llp", "partners", "partnership", "ventures", "capital",
+  "investments", "investment", "group", "fund", "bank", "lender",
+  "realty", "management", "enterprises", "international", "associates",
+  "assoc", "ltd", "limited", "services", "systems", "foundation",
+  "university", "college", "school", "board", "authority", "department",
+  "agency", "network", "solutions", "development", "resources",
+]);
+
 /**
- * Normalizes a person's name for comparison.
- * - Lowercase
- * - Strip punctuation
- * - Collapse whitespace
- * - Remove common suffixes (jr, sr, ii, etc.)
+ * Returns true if the name contains entity/corporate indicator tokens.
+ * Used to route entity owners into the entity identity path.
  */
+export function detectEntityOwner(name) {
+  if (!name) return false;
+  const words = lower(clean(name))
+    .replace(/[.,\/#!$%^&*;:{}=`~()]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  return words.some((w) => ENTITY_TOKENS.has(w));
+}
+
+// Kept as alias for backward-compat usage across the codebase.
+export const isLikelyCorporateName = detectEntityOwner;
+
+// ── Matching-flags normalization ───────────────────────────────────────────
+
+/**
+ * Maps the raw `prospects.matching_flags` text to a canonical linkage type.
+ * Scans the full flags string (can be comma-separated) and returns the
+ * highest-priority linkage found.
+ *
+ * Priority (first match wins):
+ *   linked_to_company > likely_linked_to_company > potentially_linked_to_company >
+ *   unrelated > tenant > likely_owner > potential_owner > related_party > unknown
+ */
+export function normalizeMatchingFlags(rawText) {
+  if (!rawText) return "unknown";
+  const f = lower(clean(rawText));
+  if (!f) return "unknown";
+
+  // Company linkage signals — most-specific first to avoid substring collisions.
+  // "Potentially Linked To Company" contains "linked" so check it before "linked".
+  if (f.includes("potentially linked") || f.includes("potentially_linked"))
+    return "potentially_linked_to_company";
+  // "Likely Linked To Company" contains "linked" so check it before bare "linked".
+  if (f.includes("likely linked") || f.includes("likely_linked"))
+    return "likely_linked_to_company";
+  if (f.includes("linked to company") || f.includes("linked_to_company"))
+    return "linked_to_company";
+
+  // Wrong-party hard blocks
+  if (f.includes("wrong party") || f.includes("wrong person") ||
+      f.includes("unrelated") || f.includes("not owner"))
+    return "unrelated";
+
+  // Tenant / renter signals
+  if (f.includes("likely renting") || f.includes("likely_renting") ||
+      f.includes("tenant") || f.includes("renter"))
+    return "tenant";
+
+  // Owner signals (individual)
+  if (f.includes("likely owner") || f.includes("likely_owner"))
+    return "likely_owner";
+  if (f.includes("potential owner") || f.includes("potential_owner"))
+    return "potential_owner";
+
+  // Related / household (not the direct owner)
+  if (f.includes("family") || f.includes("relative") ||
+      f.includes("household") || f.includes("resident") ||
+      f.includes("related"))
+    return "related_party";
+
+  return "unknown";
+}
+
+// ── Name utilities ─────────────────────────────────────────────────────────
+
 export function normalizePersonName(name) {
   let normalized = lower(clean(name))
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ") // Replace punctuation with space to separate tokens
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
-  // Remove common suffixes and titles
-  const suffixes = /\b(jr|sr|ii|iii|iv|v|md|phd|esq|tr|trs|trustee|trustees|revocable|living|trust)\b$/g;
-  normalized = normalized.replace(suffixes, "").trim();
-
-  return normalized;
+  const suffixes =
+    /\b(jr|sr|ii|iii|iv|v|md|phd|esq|tr|trs|trustee|trustees|revocable|living|trust)\b$/g;
+  return normalized.replace(suffixes, "").trim();
 }
 
-/**
- * Splits a normalized name into first, last, and tokens.
- */
 export function splitPersonName(name) {
   const normalized = normalizePersonName(name);
-  const tokens = normalized.split(" ").filter(token => token.length > 1); // Ignore single char tokens like middle initials
-  
-  if (tokens.length === 0) {
-    return { first: "", last: "", tokens: [] };
-  }
-
-  if (tokens.length === 1) {
-    return { first: tokens[0], last: "", tokens };
-  }
-
-  return {
-    first: tokens[0],
-    last: tokens[tokens.length - 1],
-    tokens
-  };
+  const tokens = normalized.split(" ").filter((t) => t.length > 1);
+  if (tokens.length === 0) return { first: "", last: "", tokens: [] };
+  if (tokens.length === 1) return { first: tokens[0], last: "", tokens };
+  return { first: tokens[0], last: tokens[tokens.length - 1], tokens };
 }
 
-/**
- * Extracts all significant name tokens.
- */
 export function extractNameTokens(name) {
   return splitPersonName(name).tokens;
 }
 
-/**
- * Determines if a name likely belongs to a corporate entity.
- */
-export function isLikelyCorporateName(name) {
-  const normalized = lower(clean(name));
-  const entityTokens = [
-    "llc", "l.l.c", "inc", "corp", "corporation", "company", "co.", "trust", 
-    "estate", "holdings", "properties", "property", "partners", "investments", 
-    "capital", "group", "fund", "bank", "lender", "realty", "management", 
-    "enterprises", "international", "associates", "assoc", "ltd", "limited", 
-    "services", "systems", "church", "foundation", "university", "college",
-    "school", "board", "authority", "department", "agency"
-  ];
-  return entityTokens.some(token => normalized.includes(token));
+// ── Entity owner alignment ─────────────────────────────────────────────────
+
+function resolveEntityAlignment({
+  matchingFlags,
+  personFlagsText,
+  likelyOwner,
+  prospectFullName,
+  bestPhoneScore,
+  reasons: baseReasons,
+}) {
+  const reasons = [...baseReasons, "entity_owner_detected"];
+  const normalized_linkage = normalizeMatchingFlags(matchingFlags || personFlagsText);
+
+  // Strong company linkage → eligible
+  if (
+    normalized_linkage === "linked_to_company" ||
+    normalized_linkage === "likely_linked_to_company"
+  ) {
+    return {
+      status: "entity_company_linked",
+      score: 75,
+      hardBlock: false,
+      reasons: [...reasons, "entity_company_linkage_confirmed", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "entity_safe",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // Softer company linkage → entity_associated (eligible, slightly lower confidence)
+  if (normalized_linkage === "potentially_linked_to_company") {
+    const has_prospect = Boolean(clean(prospectFullName));
+    const phone_ok = !bestPhoneScore || Number(bestPhoneScore) >= 50;
+    if (has_prospect && phone_ok) {
+      return {
+        status: "entity_company_linked",
+        score: 65,
+        hardBlock: false,
+        reasons: [...reasons, "entity_soft_company_linkage", `normalized_linkage:${normalized_linkage}`],
+        contactMode: "entity_safe",
+        ownerIsEntity: true,
+        normalizedLinkage: normalized_linkage,
+      };
+    }
+    // No prospect — hold
+    return {
+      status: "weak",
+      score: 40,
+      hardBlock: false,
+      reasons: [...reasons, "entity_potentially_linked_no_prospect", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "neutral",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // Wrong-party hard block
+  if (normalized_linkage === "unrelated") {
+    return {
+      status: "mismatch",
+      score: 10,
+      hardBlock: true,
+      reasons: [...reasons, "entity_wrong_party_detected", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "blocked",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // Tenant/renter hard block
+  if (normalized_linkage === "tenant") {
+    return {
+      status: "mismatch",
+      score: 10,
+      hardBlock: true,
+      reasons: [...reasons, "entity_tenant_detected", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "blocked",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // likely_owner / potential_owner for entity → hold (may be a managed entity)
+  if (normalized_linkage === "likely_owner" || normalized_linkage === "potential_owner") {
+    return {
+      status: "weak",
+      score: 50,
+      hardBlock: false,
+      reasons: [...reasons, "entity_individual_ownership_signal_hold", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "neutral",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // related_party / unknown → hold
+  return {
+    status: "weak",
+    score: 40,
+    hardBlock: false,
+    reasons: [...reasons, "entity_unknown_linkage_hold", `normalized_linkage:${normalized_linkage}`],
+    contactMode: "neutral",
+    ownerIsEntity: true,
+    normalizedLinkage: normalized_linkage,
+  };
 }
 
+// ── Main alignment function ────────────────────────────────────────────────
+
 /**
- * Calculates the alignment between an owner name and a prospect name.
- * 
- * @param {Object} input 
- * @returns {Object} { status, score, hardBlock, reasons, contactMode }
+ * Calculates identity alignment between a property owner and the prospect/phone
+ * on the candidate record.
+ *
+ * Entity owners are routed immediately into the entity branch which uses
+ * `prospects.matching_flags` as the authority (never attempts name matching
+ * between an entity name and a person name).
+ *
+ * Individual owners use name-comparison + `likely_owner` + phone signals.
+ *
+ * Returns { status, score, hardBlock, reasons, contactMode, ownerIsEntity?, normalizedLinkage? }
  */
 export function calculateOwnerProspectAlignment(input = {}) {
   const {
@@ -95,40 +251,59 @@ export function calculateOwnerProspectAlignment(input = {}) {
     bestPhoneId,
     phoneId,
     sellerFullName,
-    sellerFirstName
+    sellerFirstName,
   } = input;
 
   const resolvedOwnerName = clean(masterOwnerName || ownerDisplayName || ownerName);
-  const resolvedProspectName = clean(prospectFullName);
-  
   const reasons = [];
-  let score = 50; // Starting neutral score
-  let status = "unknown";
-  let hardBlock = false;
 
   if (!resolvedOwnerName) {
     reasons.push("missing_owner_name");
     return { status: "unknown", score: 0, hardBlock: false, reasons, contactMode: "neutral" };
   }
 
+  const isEntity = detectEntityOwner(resolvedOwnerName);
+
+  // ── Entity owner branch ─────────────────────────────────────────────────
+  // Skip name-matching entirely; use matching_flags as the authority.
+  if (isEntity) {
+    return resolveEntityAlignment({
+      matchingFlags,
+      personFlagsText,
+      likelyOwner,
+      prospectFullName,
+      bestPhoneScore,
+      reasons,
+    });
+  }
+
+  // ── Individual owner branch ─────────────────────────────────────────────
   const ownerNorm = normalizePersonName(resolvedOwnerName);
   const ownerSplit = splitPersonName(resolvedOwnerName);
-  const isCorporate = isLikelyCorporateName(resolvedOwnerName);
-  const ownerTokens = new Set(ownerSplit.tokens.filter(t => !["and", "or", "the", "for", "with"].includes(t)));
+  const ownerTokens = new Set(
+    ownerSplit.tokens.filter((t) => !["and", "or", "the", "for", "with"].includes(t))
+  );
 
-  // Rule 2: If seller_full_name strongly matches owner_name/display_name, classify identity_verified.
+  let score = 50;
+  let status = "unknown";
+  let hardBlock = false;
+
+  // Rule: exact seller_full_name match → verified
   const resolvedSellerFullName = clean(sellerFullName);
   if (resolvedSellerFullName) {
     const sellerFullNorm = normalizePersonName(resolvedSellerFullName);
     if (ownerNorm === sellerFullNorm && ownerNorm.length > 0) {
-      score = 100;
-      status = "verified";
-      reasons.push("seller_full_name_exact_match");
-      return { status, score, hardBlock, reasons, contactMode: "owner_verified" };
+      return {
+        status: "verified",
+        score: 100,
+        hardBlock: false,
+        reasons: [...reasons, "seller_full_name_exact_match"],
+        contactMode: "owner_verified",
+      };
     }
   }
 
-  // Rule 3: If seller_first_name matches owner/display name and matched_prospect_id exists, classify identity_probable.
+  // Rule: seller_first_name + prospect_id match → probable
   const resolvedSellerFirstName = clean(sellerFirstName);
   const hasMatchedProspectId = Boolean(canonicalProspectId || primaryProspectId);
   if (resolvedSellerFirstName && hasMatchedProspectId) {
@@ -140,41 +315,53 @@ export function calculateOwnerProspectAlignment(input = {}) {
     }
   }
 
-  // Rule 1: If likely_owner === true, sms_eligible === true, canonical_prospect_id or primary_prospect_id exists, and normalized_phone_id equals best_phone_id or phone_id equals best_phone_id, classify at least identity_probable.
-  const phoneMatchesBest = Boolean(bestPhoneId && ((normalizedPhoneId && normalizedPhoneId === bestPhoneId) || (phoneId && phoneId === bestPhoneId)));
+  // Rule: likely_owner + sms_eligible + prospect_id + best_phone → probable
+  const phoneMatchesBest = Boolean(
+    bestPhoneId &&
+      ((normalizedPhoneId && normalizedPhoneId === bestPhoneId) ||
+        (phoneId && phoneId === bestPhoneId))
+  );
   if (likelyOwner === true && smsEligible === true && hasMatchedProspectId && phoneMatchesBest) {
     if (score < 75) score = 75;
     if (status === "unknown" || status === "weak" || status === "mismatch") {
-       status = "probable";
-       hardBlock = false;
-       reasons.push("system_verified_likely_owner_with_best_phone");
+      status = "probable";
+      hardBlock = false;
+      reasons.push("system_verified_likely_owner_with_best_phone");
     }
   }
 
-  // Fallback to prospect name if available
-  if (!resolvedProspectName && status === "unknown") {
-    // We don't have prospect name, and no other rules bumped us out of unknown.
-    // Do not classify as identity_unknown just because phone_first_name and phone_full_name are null.
-    // Actually, if we have no other proof, we stay in whatever status we're in, but let's let the rest run.
+  // Rule: likely_owner flag in matching_flags → boost even without full phone match
+  const normalizedLinkage = normalizeMatchingFlags(matchingFlags || personFlagsText);
+  if (normalizedLinkage === "likely_owner" && status === "unknown") {
+    score = Math.max(score, 65);
+    status = "probable";
+    reasons.push("matching_flags_likely_owner");
+  }
+  if (normalizedLinkage === "potential_owner" && status === "unknown") {
+    score = Math.max(score, 55);
+    status = "weak";
+    reasons.push("matching_flags_potential_owner");
   }
 
+  // Prospect name matching
+  const resolvedProspectName = clean(prospectFullName);
   if (resolvedProspectName) {
     const prospectNorm = normalizePersonName(resolvedProspectName);
     const prospectSplit = splitPersonName(resolvedProspectName);
 
-    // Exact Match
     if (ownerNorm === prospectNorm && ownerNorm.length > 0) {
-      score = 100;
-      status = "verified";
-      reasons.push("exact_name_match");
-      return { status, score, hardBlock, reasons, contactMode: "owner_verified" };
+      return {
+        status: "verified",
+        score: 100,
+        hardBlock: false,
+        reasons: [...reasons, "exact_name_match"],
+        contactMode: "owner_verified",
+      };
     }
 
-    // Multi-Token / Intersection Match
     const commonWords = new Set(["and", "or", "the", "for", "with"]);
-    const prospectTokens = prospectSplit.tokens.filter(t => !commonWords.has(t));
-    
-    const intersectingTokens = prospectTokens.filter(t => ownerTokens.has(t));
+    const prospectTokens = prospectSplit.tokens.filter((t) => !commonWords.has(t));
+    const intersectingTokens = prospectTokens.filter((t) => ownerTokens.has(t));
     const hasFirstMatch = prospectSplit.first && ownerTokens.has(prospectSplit.first);
     const hasLastMatch = prospectSplit.last && ownerTokens.has(prospectSplit.last);
 
@@ -194,8 +381,8 @@ export function calculateOwnerProspectAlignment(input = {}) {
       score = Math.max(score, 60);
       if (status === "unknown") status = "weak";
       reasons.push("partial_token_intersection_with_owner");
-    } else if (!isCorporate && status === "unknown") {
-      // Full mismatch for individual owner
+    } else if (status === "unknown") {
+      // Full mismatch for individual owner — hard block
       score = 20;
       status = "mismatch";
       hardBlock = true;
@@ -203,27 +390,11 @@ export function calculateOwnerProspectAlignment(input = {}) {
     }
   }
 
-  // 3. Corporate Flexibility
-  if (isCorporate) {
-    reasons.push("corporate_owner_flexibility_applied");
-    if (status === "mismatch") {
-      score = 50;
-      status = "weak";
-      hardBlock = false;
-    }
-    if (likelyOwner === true) {
-      score += 20;
-      reasons.push("flagged_as_likely_owner");
-      if (status === "unknown") status = "probable";
-    }
-  }
-
-  // 4. Phone Name Confirmation (Cross-check with CNAM/Phone Owner)
+  // Phone name confirmation
   const phoneIdentity = clean(phoneFullName || phoneOwner || cnam);
   if (phoneIdentity) {
     const phoneNorm = normalizePersonName(phoneIdentity);
     const phoneSplit = splitPersonName(phoneIdentity);
-
     if (phoneNorm === ownerNorm) {
       score += 15;
       reasons.push("phone_identity_matches_owner");
@@ -234,54 +405,51 @@ export function calculateOwnerProspectAlignment(input = {}) {
       reasons.push("phone_last_name_found_in_owner_tokens");
       if (status === "unknown") status = "weak";
     }
-
-    const prospectNorm = clean(prospectFullName) ? normalizePersonName(prospectFullName) : null;
+    const prospectNorm = resolvedProspectName
+      ? normalizePersonName(resolvedProspectName)
+      : null;
     if (prospectNorm && phoneNorm === prospectNorm) {
       score += 10;
       reasons.push("phone_identity_matches_prospect");
     }
   }
 
-  // If status is still unknown, check if we have any other evidence to keep it from being unknown purely because of missing phone names.
-  // The rule: "Do not classify as identity_unknown just because phone_first_name and phone_full_name are null."
-  // If we reached here, and status is still unknown, we didn't find *any* positive correlation.
-  // But if it was a corporate property or had a matched prospect, we might have upgraded it above.
-
-  // 5. Household / Association Logic (Intermediate Layer)
+  // Household / association logic
   const mFlags = lower(clean(matchingFlags));
   const pFlags = lower(clean(personFlagsText));
-  
   const isPotentialOwner = mFlags.includes("potential owner");
-  const hasHouseholdEvidence = mFlags.includes("household") || 
-                               pFlags.includes("household") || 
-                               pFlags.includes("relative") || 
-                               pFlags.includes("spouse") || 
-                               pFlags.includes("family") || 
-                               pFlags.includes("heir") ||
-                               pFlags.includes("associate") ||
-                               pFlags.includes("occupant");
-  
-  const hasStrongLinkage = clean(linkedPropertyIdsText).length > 0 || 
-                           joinedPropertySource === "properties.master_owner_id";
+  const hasHouseholdEvidence =
+    mFlags.includes("household") ||
+    pFlags.includes("household") ||
+    pFlags.includes("relative") ||
+    pFlags.includes("spouse") ||
+    pFlags.includes("family") ||
+    pFlags.includes("heir") ||
+    pFlags.includes("associate") ||
+    pFlags.includes("occupant");
+  const hasStrongLinkage =
+    clean(linkedPropertyIdsText).length > 0 ||
+    joinedPropertySource === "properties.master_owner_id";
 
   if ((isPotentialOwner || hasHouseholdEvidence) && hasStrongLinkage) {
     if (status !== "verified") {
       status = "household_associated";
       score = Math.max(score, 65);
-      hardBlock = false; // Allow contact but with restricted mode
+      hardBlock = false;
       if (!reasons.includes("household_or_occupant_association_detected")) {
         reasons.push("household_or_occupant_association_detected");
       }
     }
   }
 
-  // 6. Renter / Wrong Party Flags (Can override household association if severe)
-  const isRenter = likelyRenting === true || 
-                   mFlags.includes("renter") || 
-                   pFlags.includes("renter") ||
-                   mFlags.includes("tenant") || 
-                   pFlags.includes("tenant");
-  
+  // Renter / wrong-party downgrade
+  const isRenter =
+    likelyRenting === true ||
+    mFlags.includes("renter") ||
+    pFlags.includes("renter") ||
+    mFlags.includes("tenant") ||
+    pFlags.includes("tenant");
+
   if (isRenter) {
     if (status === "household_associated") {
       reasons.push("renter_flag_with_association_downgrade");
@@ -296,11 +464,12 @@ export function calculateOwnerProspectAlignment(input = {}) {
     }
   }
 
-  const isWrongParty = mFlags.includes("wrong party") || 
-                       pFlags.includes("wrong party") ||
-                       mFlags.includes("wrong person") || 
-                       pFlags.includes("possible wrong party");
-  
+  const isWrongParty =
+    mFlags.includes("wrong party") ||
+    pFlags.includes("wrong party") ||
+    mFlags.includes("wrong person") ||
+    pFlags.includes("possible wrong party");
+
   if (isWrongParty) {
     score -= 50;
     reasons.push("wrong_party_flag_detected");
@@ -308,49 +477,47 @@ export function calculateOwnerProspectAlignment(input = {}) {
     status = "mismatch";
   }
 
-  // Cap score
   score = Math.max(0, Math.min(100, score));
 
-  // Final status adjustment based on score (if not already set to a priority status)
-  if (status !== "household_associated" && status !== "verified" && status !== "probable" && status !== "mismatch") {
+  if (
+    status !== "household_associated" &&
+    status !== "verified" &&
+    status !== "probable" &&
+    status !== "mismatch"
+  ) {
     if (score >= 90) status = "verified";
     else if (score >= 70) status = "probable";
     else if (score >= 40) status = "weak";
     else if (score < 40 && hardBlock) status = "mismatch";
   }
 
-  // Determine Contact Mode
   let contactMode = "neutral";
   if (status === "verified") contactMode = "owner_verified";
   else if (status === "probable") contactMode = "owner_safe";
   else if (status === "household_associated") contactMode = "household_safe";
 
-  return {
-    status,
-    score,
-    hardBlock,
-    reasons,
-    contactMode
-  };
+  return { status, score, hardBlock, reasons, contactMode };
 }
 
+// ── Live outbound eligibility gate ─────────────────────────────────────────
+
 /**
- * Determines if a candidate's identity is safe for live outbound contact.
- * Default policy: verified, probable, and household_associated only.
- * 
- * @param {Object} alignment Result from calculateOwnerProspectAlignment
- * @param {Object} options { allow_weak_identity_outbound: boolean }
- * @returns {Object} { eligible, reason }
+ * Determines if an aligned identity is eligible for live cold outbound.
+ *
+ * Eligible statuses:
+ *   verified, probable, household_associated  — individual owner path
+ *   entity_company_linked                     — entity owner with confirmed company link
+ *
+ * Blocked:  mismatch (hardBlock=true)
+ * Held:     weak, unknown (unless explicitly allowed via options)
  */
 export function isIdentityEligibleForLiveOutbound(alignment = {}, options = {}) {
   const { status, hardBlock } = alignment;
   const identity_gate_mode = lower(clean(options.identity_gate_mode || "strict"));
   const allowWeak =
-    options.allow_weak_identity_outbound === true ||
-    identity_gate_mode === "relaxed";
+    options.allow_weak_identity_outbound === true || identity_gate_mode === "relaxed";
   const allowUnknown =
-    options.allow_identity_unknown === true ||
-    identity_gate_mode === "relaxed";
+    options.allow_identity_unknown === true || identity_gate_mode === "relaxed";
 
   if (hardBlock || status === "mismatch") {
     return { eligible: false, reason: "identity_mismatch" };
@@ -364,11 +531,15 @@ export function isIdentityEligibleForLiveOutbound(alignment = {}, options = {}) 
     return { eligible: true, reason: "household_association_allowed" };
   }
 
+  // Entity path
+  if (status === "entity_company_linked") {
+    return { eligible: true, reason: "entity_company_linkage_confirmed" };
+  }
+
   if (status === "weak") {
-    if (allowWeak) {
-      return { eligible: true, reason: "identity_weak_allowed" };
-    }
-    return { eligible: false, reason: "identity_not_verified" };
+    return allowWeak
+      ? { eligible: true, reason: "identity_weak_allowed" }
+      : { eligible: false, reason: "identity_not_verified" };
   }
 
   if (status === "unknown") {
