@@ -1,8 +1,9 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 
-const THREAD_SOURCE = "v_inbox_threads_live_v2";
-const COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
+const PRIMARY_THREAD_SOURCE = "v_inbox_threads_live_v2";
+const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
+const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
@@ -30,6 +31,68 @@ const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "created_at",
   "updated_at",
 ].join(",");
+const PRIMARY_COUNT_FALLBACK_FIELDS = [
+  "thread_key",
+  "inbox_bucket",
+  "latest_message_direction",
+  "property_id",
+  "wrong_number",
+  "not_interested",
+  "opt_out",
+  "suppression_status",
+  "needs_review",
+].join(",");
+const ENRICHED_COUNT_FALLBACK_FIELDS = [
+  "thread_key",
+  "inbox_category",
+  "latest_direction",
+  "property_id",
+  "is_suppressed",
+  "show_in_priority_inbox",
+  "stage",
+  "detected_intent",
+].join(",");
+const THREAD_SOURCE_CONFIGS = [
+  {
+    key: "primary",
+    name: PRIMARY_THREAD_SOURCE,
+    countSource: PRIMARY_COUNT_SOURCE,
+    directionColumn: "latest_message_direction",
+    countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
+    getSelectColumns(selectMode) {
+      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+    },
+    searchColumns: [
+      "thread_key",
+      "canonical_e164",
+      "seller_phone",
+      "owner_name",
+      "property_address_full",
+      "latest_message_body",
+    ],
+  },
+  {
+    key: "enriched",
+    name: FALLBACK_THREAD_SOURCE,
+    countSource: null,
+    directionColumn: "latest_direction",
+    countFallbackFields: ENRICHED_COUNT_FALLBACK_FIELDS,
+    getSelectColumns() {
+      return "*";
+    },
+    searchColumns: [
+      "thread_key",
+      "best_phone",
+      "seller_phone",
+      "owner_display_name",
+      "event_seller_display_name",
+      "display_name",
+      "property_address_full",
+      "display_address",
+      "latest_message_body",
+    ],
+  },
+];
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -61,6 +124,7 @@ function asTime(value) {
 function latestAt(row = {}) {
   return (
     row.latest_message_at ||
+    row.last_message_iso ||
     row.latest_activity_at ||
     row.last_message_at ||
     row.event_timestamp ||
@@ -89,6 +153,9 @@ function displayName(row = {}) {
   return (
     row.seller_display_name ||
     row.owner_name ||
+    row.owner_display_name ||
+    row.display_name ||
+    row.event_seller_display_name ||
     row.seller_first_name ||
     metadata.seller_display_name ||
     metadata.owner_name ||
@@ -350,42 +417,118 @@ function normalizeCanonicalThreadKey(row = {}) {
     clean(row.to_phone_number) ||
     clean(row.from_phone_number) ||
     clean(row.canonical_e164) ||
+    clean(row.best_phone) ||
+    clean(row.seller_phone) ||
+    clean(row.display_phone) ||
     null
   );
 }
 
+function isMissingSourceError(error) {
+  const message = lower(error?.message || error);
+  return (
+    message.includes("could not find the table") ||
+    message.includes("schema cache") ||
+    message.includes("does not exist")
+  );
+}
+
+function getThreadSourceConfig(name) {
+  return THREAD_SOURCE_CONFIGS.find((config) => config.name === name) || THREAD_SOURCE_CONFIGS[0];
+}
+
+function getThreadSourceCandidates(preferredName = null) {
+  if (!preferredName) return THREAD_SOURCE_CONFIGS;
+  const preferred = getThreadSourceConfig(preferredName);
+  return [
+    preferred,
+    ...THREAD_SOURCE_CONFIGS.filter((config) => config.name !== preferred.name),
+  ];
+}
+
+function bucketFromEnrichedRow(row = {}) {
+  const category = lower(row.inbox_category);
+  const stage = lower(row.stage || row.queue_stage);
+  const detectedIntent = lower(row.detected_intent);
+
+  if (row.is_suppressed === true || category === "dnc_opt_out") return "suppressed";
+  if (category === "hot_leads" || row.show_in_priority_inbox === true) return "priority";
+  if (category === "new_inbound") return "new_replies";
+  if (category === "automated") return "needs_review";
+  if (category === "outbound_active") return "follow_up";
+  if (category === "cold_no_response") return "cold";
+  if (stage === "dead" || ["wrong_number", "not_interested"].includes(detectedIntent)) return "dead";
+  return "cold";
+}
+
 function normalizeThreadRow(row = {}, query = {}) {
-  const normalizedDirection = normalizeDirection(row.latest_message_direction || row.direction);
+  const normalizedDirection = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);
   const latestMessageAt = latestAt(row);
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
+  const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
+  const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
+  const ownerName =
+    row.owner_name ||
+    row.owner_display_name ||
+    row.event_seller_display_name ||
+    displayName(row);
+  const propertyAddress =
+    row.property_address ||
+    row.property_address_full ||
+    row.display_address ||
+    row.event_property_address ||
+    null;
   const normalized = {
     ...row,
     id: msgId(row) || canonicalThreadKey,
     thread_key: row.thread_key || canonicalThreadKey,
     canonical_thread_key: canonicalThreadKey,
+    canonical_e164: row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
     latest_message_at: latestMessageAt,
     latest_activity_at: latestMessageAt,
     last_message_at: row.last_message_at || latestMessageAt,
-    latest_message_body: row.latest_message_body ?? row.message_body ?? null,
-    message_body: row.latest_message_body ?? row.message_body ?? null,
+    latest_message_body: row.latest_message_body ?? row.preview ?? row.message_body ?? null,
+    message_body: row.latest_message_body ?? row.preview ?? row.message_body ?? null,
     latest_message_direction: normalizedDirection,
     direction: normalizedDirection,
-    inbox_bucket: lower(row.inbox_bucket) || "cold",
-    inbox_category: row.inbox_category || lower(row.inbox_bucket) || "cold",
-    inbox_status: row.inbox_status || row.universal_status || lower(row.inbox_bucket) || "cold",
-    conversation_stage: row.conversation_stage || row.current_stage || row.universal_stage || null,
-    current_stage: row.current_stage || row.conversation_stage || row.universal_stage || null,
-    detected_intent: row.detected_intent || row.reply_intent || null,
-    reply_intent: row.reply_intent || row.detected_intent || null,
-    best_phone: row.best_phone || row.canonical_e164 || row.seller_phone || null,
-    phone: row.phone || row.canonical_e164 || row.seller_phone || null,
-    seller_phone: row.seller_phone || row.canonical_e164 || row.best_phone || null,
+    inbox_bucket: computedBucket || "cold",
+    inbox_category: row.inbox_category || computedBucket || "cold",
+    inbox_status: row.inbox_status || row.universal_status || row.display_status || row.status || computedBucket || "cold",
+    conversation_stage: row.conversation_stage || row.current_stage || row.universal_stage || row.stage || row.queue_stage || null,
+    current_stage: row.current_stage || row.conversation_stage || row.universal_stage || row.stage || row.queue_stage || null,
+    universal_status: row.universal_status || row.display_status || row.status || null,
+    universal_stage: row.universal_stage || row.stage || row.queue_stage || null,
+    detected_intent: row.detected_intent || row.reply_intent || row.ui_intent || null,
+    reply_intent: row.reply_intent || row.detected_intent || row.ui_intent || null,
+    best_phone: row.best_phone || row.canonical_e164 || row.seller_phone || row.display_phone || null,
+    phone: row.phone || row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
+    seller_phone: row.seller_phone || row.canonical_e164 || row.best_phone || row.display_phone || null,
     display_phone: row.display_phone || row.canonical_e164 || row.seller_phone || row.best_phone || null,
-    seller_display_name: row.seller_display_name || displayName(row),
-    unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : normalizedDirection === "inbound" ? 1 : 0,
+    seller_display_name: row.seller_display_name || row.owner_display_name || row.event_seller_display_name || displayName(row),
+    owner_name: ownerName,
+    owner_display_name: row.owner_display_name || ownerName,
+    property_address: propertyAddress,
+    property_address_full: row.property_address_full || row.display_address || row.event_property_address || null,
+    market: row.market || row.display_market || row.market_region || null,
+    property_type: row.property_type || row.filter_property_type || null,
+    suppression_status: row.suppression_status || (row.is_suppressed === true ? "suppressed" : null),
+    wrong_number: row.wrong_number ?? (detectedIntent === "wrong_number"),
+    not_interested: row.not_interested ?? (detectedIntent === "not_interested"),
+    opt_out: row.opt_out ?? (detectedIntent === "opt_out" || row.is_suppressed === true),
+    needs_review: row.needs_review ?? (lower(row.inbox_category) === "automated"),
+    unread_count: Number.isFinite(Number(row.unread_count))
+      ? Number(row.unread_count)
+      : row.is_read === false || normalizedDirection === "inbound"
+        ? 1
+        : 0,
     thread_row_number: Number(row.thread_row_number ?? 1),
     latest_message_source: row.latest_message_source || "message_events",
     duplicate_property_count: Number(row.duplicate_property_count ?? 0),
+    master_owner_id: row.master_owner_id || row.final_master_owner_id || null,
+    prospect_id: row.prospect_id || row.final_prospect_id || null,
+    property_id: row.property_id || row.final_property_id || null,
+    latitude: row.latitude,
+    longitude: row.longitude,
   };
   return applyInboxRowComputedFields(normalized, query);
 }
@@ -460,7 +603,42 @@ function toSupabaseBoolean(value) {
   return value ? "true" : "false";
 }
 
-function applyQueryFilter(query, filter) {
+function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]) {
+  if (sourceConfig.key === "enriched") {
+    switch (filter) {
+      case "priority":
+        return typeof query.or === "function"
+          ? query.or("inbox_category.eq.hot_leads,show_in_priority_inbox.eq.true")
+          : query.eq("inbox_category", "hot_leads");
+      case "new_replies":
+        return query.eq("inbox_category", "new_inbound");
+      case "needs_review":
+        return query.eq("inbox_category", "automated");
+      case "follow_up":
+        return query.eq("inbox_category", "outbound_active");
+      case "cold":
+        return query.eq("inbox_category", "cold_no_response");
+      case "dead":
+        return typeof query.or === "function"
+          ? query.or("stage.eq.dead,detected_intent.eq.wrong_number,detected_intent.eq.not_interested")
+          : query.eq("stage", "dead");
+      case "suppressed":
+        return typeof query.or === "function"
+          ? query.or("inbox_category.eq.dnc_opt_out,is_suppressed.eq.true")
+          : query.eq("inbox_category", "dnc_opt_out");
+      case "active":
+        return typeof query.in === "function"
+          ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
+          : query;
+      case "waiting":
+        return query.eq("latest_direction", "outbound");
+      case "unlinked":
+        return typeof query.is === "function" ? query.is("property_id", null) : query;
+      default:
+        return query;
+    }
+  }
+
   switch (filter) {
     case "priority":
       return query.eq("inbox_bucket", "priority");
@@ -512,8 +690,8 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
     direction: normalizeDirection(row.direction || row.latest_message_direction),
     latest_activity_at: latestAt(row),
     seller_display_name: displayName(row),
-    property_address: row.property_address || row.property_address_full || object(row.metadata)?.enrichment?.property_address || null,
-    market: row.market || object(row.metadata)?.enrichment?.market || null,
+    property_address: row.property_address || row.property_address_full || row.display_address || row.event_property_address || object(row.metadata)?.enrichment?.property_address || null,
+    market: row.market || row.display_market || row.market_region || object(row.metadata)?.enrichment?.market || null,
     flags,
     matched_keywords: [...new Set([
       ...flags.matched_keywords,
@@ -524,36 +702,105 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
   };
 }
 
+async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
+  const sourceCandidates = getThreadSourceCandidates(preferredThreadSource);
+  let lastError = null;
+
+  for (const sourceConfig of sourceCandidates) {
+    let query = supabase
+      .from(sourceConfig.name)
+      .select(sourceConfig.getSelectColumns(selectMode), { count: "exact" });
+
+    if (params.direction && params.direction !== "all") {
+      query = query.eq(sourceConfig.directionColumn, normalizeDirection(params.direction));
+    }
+
+    query = applyQueryFilter(query, filter, sourceConfig);
+
+    if (params.q && typeof query.or === "function") {
+      const qStr = `%${clean(params.q)}%`;
+      query = query.or(
+        sourceConfig.searchColumns
+          .map((column) => `${column}.ilike.${qStr}`)
+          .join(",")
+      );
+    }
+
+    if (typeof query.order === "function") {
+      query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
+      query = query.order("thread_key", { ascending: false });
+    }
+
+    if (cursorKeyset && typeof query.or === "function") {
+      query = query.or(
+        `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`
+      );
+      if (typeof query.limit === "function") {
+        query = query.limit(limit + 1);
+      }
+    } else if (offset > 0 && typeof query.range === "function") {
+      query = query.range(offset, offset + limit);
+    } else if (typeof query.range === "function") {
+      query = query.range(0, limit);
+    } else if (typeof query.limit === "function") {
+      query = query.limit(limit + 1);
+    }
+
+    const result = await query;
+    if (!result.error) return { ...result, sourceConfig };
+    if (!isMissingSourceError(result.error)) throw result.error;
+
+    lastError = result.error;
+    console.warn("[INBOX_SOURCE_FALLBACK]", {
+      missing_source: sourceConfig.name,
+      message: result.error.message,
+    });
+  }
+
+  throw lastError || new Error("live_inbox_source_unavailable");
+}
+
 export async function getLiveCounts(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
 
-  try {
-    const { data, error } = await supabase
-      .from(COUNT_SOURCE)
-      .select("*")
-      .limit(1);
+  for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
+    if (sourceConfig.countSource) {
+      try {
+        const { data, error } = await supabase
+          .from(sourceConfig.countSource)
+          .select("*")
+          .limit(1);
 
-    if (error) throw error;
+        if (error) throw error;
 
-    const row = Array.isArray(data) ? data[0] : null;
-    if (row && hasConcreteCountRow(row)) {
-      const counts = countFromRow(row);
-      console.log("[INBOX_COUNTS_UPDATED]", counts);
-      return counts;
+        const row = Array.isArray(data) ? data[0] : null;
+        if (row && hasConcreteCountRow(row)) {
+          const counts = countFromRow(row);
+          console.log("[INBOX_COUNTS_UPDATED]", counts);
+          return counts;
+        }
+      } catch (error) {
+        if (!isMissingSourceError(error)) {
+          console.warn("[INBOX_COUNTS_FALLBACK]", error?.message || error);
+        }
+      }
     }
-  } catch (error) {
-    console.warn("[INBOX_COUNTS_FALLBACK]", error?.message || error);
+
+    const { data: fallbackRows, error: fallbackError } = await supabase
+      .from(sourceConfig.name)
+      .select(sourceConfig.countFallbackFields);
+
+    if (fallbackError) {
+      if (isMissingSourceError(fallbackError)) continue;
+      throw fallbackError;
+    }
+
+    const counts = computeCountsFromThreads((fallbackRows || []).map((row) => normalizeThreadRow(row, params)));
+    console.log("[INBOX_COUNTS_UPDATED]", counts);
+    return counts;
   }
 
-  const { data: fallbackRows, error: fallbackError } = await supabase
-    .from(THREAD_SOURCE)
-    .select("thread_key,inbox_bucket,latest_message_direction,property_id");
-
-  if (fallbackError) throw fallbackError;
-
-  const counts = computeCountsFromThreads((fallbackRows || []).map((row) => normalizeThreadRow(row, params)));
-  console.log("[INBOX_COUNTS_UPDATED]", counts);
-  return counts;
+  throw new Error("live_inbox_counts_unavailable");
 }
 
 export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = {}) {
@@ -563,7 +810,6 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
-  const selectColumns = options.selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -584,49 +830,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
-  let query = supabase.from(THREAD_SOURCE).select(selectColumns, { count: "exact" });
-
-  if (params.direction && params.direction !== "all") {
-    query = query.eq("latest_message_direction", normalizeDirection(params.direction));
-  }
-
-  query = applyQueryFilter(query, filter);
-
-  if (params.q && typeof query.or === "function") {
-    const qStr = `%${clean(params.q)}%`;
-    query = query.or([
-      `thread_key.ilike.${qStr}`,
-      `canonical_e164.ilike.${qStr}`,
-      `seller_phone.ilike.${qStr}`,
-      `owner_name.ilike.${qStr}`,
-      `property_address_full.ilike.${qStr}`,
-      `latest_message_body.ilike.${qStr}`,
-    ].join(","));
-  }
-
-  if (typeof query.order === "function") {
-    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
-    query = query.order("thread_key", { ascending: false });
-  }
-
-  if (cursorKeyset && typeof query.or === "function") {
-    query = query.or(
-      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`
-    );
-    if (typeof query.limit === "function") {
-      query = query.limit(limit + 1);
-    }
-  } else if (offset > 0 && typeof query.range === "function") {
-    query = query.range(offset, offset + limit);
-  } else if (typeof query.range === "function") {
-    query = query.range(0, limit);
-  } else if (typeof query.limit === "function") {
-    query = query.limit(limit + 1);
-  }
-
-  const countsPromise = skipCounts ? Promise.resolve(buildEmptyCounts()) : getLiveCounts({}, deps);
-  const { data: rawRows, error: threadsError, count } = await query;
-  if (threadsError) throw threadsError;
+  const { data: rawRows, count, sourceConfig } = await queryThreadSource(params, {
+    supabase,
+    limit,
+    filter,
+    selectMode: options.selectMode,
+    cursorKeyset,
+    offset,
+    preferredThreadSource: deps.preferredThreadSource,
+  });
 
   const rows = (rawRows || []).map((row) => normalizeThreadRow(row, params));
   const postFiltered = sortThreads(rows)
@@ -635,9 +847,12 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const hasMore = postFiltered.length > limit;
   const finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
-  const liveCounts = await countsPromise;
+  const liveCounts = skipCounts
+    ? buildEmptyCounts()
+    : await getLiveCounts({}, { ...deps, preferredThreadSource: sourceConfig.name });
 
   console.log("[INBOX_BUCKET_ROWS]", {
+    source: sourceConfig.name,
     bucket: filter,
     count: finalRows.length,
     firstThreadKey: finalRows[0]?.thread_key || null,
