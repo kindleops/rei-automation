@@ -12,8 +12,12 @@ import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
 const IDENTITY_QUARANTINE_TABLE = "outbound_identity_quarantine";
-const DEFAULT_CANDIDATE_SOURCE = "v_outbound_discovery_fresh";
+// v_feeder_candidates_fast is the default: wraps v_sms_campaign_queue_candidates +
+// LEFT JOINs contact_outreach_state, pre-filters suppressed/paused rows, and orders
+// never-contacted fresh candidates first. v_outbound_discovery_fresh times out at scale.
+const DEFAULT_CANDIDATE_SOURCE = "v_feeder_candidates_fast";
 const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
+  "v_feeder_candidates_fast",
   "v_outbound_discovery_open_now",
   "v_outbound_discovery_fresh",
   "v_outbound_candidate_freshness",
@@ -25,12 +29,21 @@ const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_launch_sms_tier1",
 ]);
 const CANDIDATE_SOURCE_AVAILABLE_HINT = [
-  "v_outbound_discovery_fresh",
+  "v_feeder_candidates_fast",
   "v_sms_campaign_queue_candidates",
+  "v_outbound_discovery_fresh",
   "v_sms_ready_contacts",
-  "v_sms_ready_contacts_expanded",
   "v_launch_sms_tier1",
 ];
+
+// Sources that carry outreach-state enrichment columns (never_contacted, touch_count, suppression_until).
+// For these we push ordering down to the DB and can apply pre-filters in the query.
+const ENRICHED_SOURCES = new Set([
+  "v_feeder_candidates_fast",
+  "v_outbound_discovery_fresh",
+  "v_outbound_candidate_freshness",
+  "v_outbound_discovery_open_now",
+]);
 
 const REASON_CODES = Object.freeze({
   NO_MASTER_OWNER: "NO_MASTER_OWNER",
@@ -2042,12 +2055,20 @@ export async function getSupabaseFeederCandidates(
   const effective_offset = Math.max(0, Math.trunc(Number(candidate_offset) || 0));
 
   let query = supabase.from(source_name).select("*");
-  
-  // Ensure we prioritize fresh/high-value candidates even if the view ordering is missing
-  if (source_name.includes("fresh") || source_name.includes("discovery")) {
-    query = query.order("never_contacted", { ascending: false });
-    query = query.order("final_acquisition_score", { ascending: false, nullsFirst: false });
-    query = query.order("best_phone_score", { ascending: false, nullsFirst: false });
+
+  if (ENRICHED_SOURCES.has(source_name)) {
+    // Enriched views carry outreach-state columns — order fresh/high-value candidates first.
+    // The REST layer does not guarantee VIEW ORDER BY, so we push ordering explicitly.
+    query = query
+      .order("never_contacted", { ascending: false, nullsFirst: false })
+      .order("touch_count",     { ascending: true,  nullsFirst: true  })
+      .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+      .order("best_phone_score",        { ascending: false, nullsFirst: false });
+  } else if (source_name === "v_sms_campaign_queue_candidates") {
+    // Base candidate view has no outreach state — order by score only.
+    query = query
+      .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+      .order("best_phone_score",        { ascending: false, nullsFirst: false });
   }
 
   query = query.range(effective_offset, effective_offset + effective_fetch_limit - 1);
