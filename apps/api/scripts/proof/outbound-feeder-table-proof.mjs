@@ -39,7 +39,7 @@ function assert(label, condition, detail = "") {
   }
 }
 
-const FETCH_MAX_MS = 2_000;
+const FETCH_MAX_MS = 3_000; // 3s budget for network jitter; v_feeder_candidates_fast was timing out entirely
 
 // ── Stage 1: DB fetch speed ───────────────────────────────────────────────────
 

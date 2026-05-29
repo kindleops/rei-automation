@@ -94,7 +94,7 @@ test("LLC + Linked To Company flag → entity_company_linked, eligible", () => {
   assert.equal(gate.reason, "entity_company_linkage_confirmed");
 });
 
-test("LLC + Likely Linked To Company flag → entity_company_linked, eligible", () => {
+test("LLC + Likely Linked To Company flag → entity_company_probable, eligible", () => {
   const result = calculateOwnerProspectAlignment({
     masterOwnerName: "ACME Holdings Inc",
     prospectFullName: "Jane Doe",
@@ -102,9 +102,12 @@ test("LLC + Likely Linked To Company flag → entity_company_linked, eligible", 
     smsEligible: true,
     canonicalProspectId: "pr_002",
   });
-  assert.equal(result.status, "entity_company_linked");
+  assert.equal(result.status, "entity_company_probable");
   assert.equal(result.ownerIsEntity, true);
-  assert.equal(isIdentityEligibleForLiveOutbound(result, {}).eligible, true);
+  assert.equal(result.normalizedLinkage, "likely_linked_to_company");
+  const gate = isIdentityEligibleForLiveOutbound(result, {});
+  assert.equal(gate.eligible, true);
+  assert.equal(gate.reason, "entity_company_probable_eligible");
 });
 
 test("Church + Linked To Company prospect → entity_company_linked, eligible", () => {
@@ -245,4 +248,88 @@ test("entity_company_linked alignment does not bypass suppression gate (separate
   const gate = isIdentityEligibleForLiveOutbound(alignment, {});
   assert.equal(gate.eligible, true);
   // Note: suppression_until guard and internal phone guard are separate and run first.
+});
+
+// ── entity_operator_probable (new) ──────────────────────────────────────────
+
+test("LLC + Likely Owner + Business Owner in person_flags_text → entity_operator_probable, eligible", () => {
+  const result = calculateOwnerProspectAlignment({
+    masterOwnerName: "Green Valley Properties LLC",
+    prospectFullName: "Steve Johnson",
+    matchingFlags: "Likely Owner",
+    personFlagsText: "Business Owner, Primary Decision Maker",
+    smsEligible: true,
+    canonicalProspectId: "pr_030",
+  });
+  assert.equal(result.status, "entity_operator_probable");
+  assert.equal(result.ownerIsEntity, true);
+  assert.equal(result.hardBlock, false);
+  assert.equal(result.normalizedLinkage, "likely_owner");
+  const gate = isIdentityEligibleForLiveOutbound(result, {});
+  assert.equal(gate.eligible, true);
+  assert.equal(gate.reason, "entity_operator_probable_eligible");
+});
+
+test("LLC + Likely Owner + Property Owner in person_flags_text → entity_operator_probable, eligible", () => {
+  const result = calculateOwnerProspectAlignment({
+    masterOwnerName: "Sunrise Apartments LLC",
+    prospectFullName: "Maria Garcia",
+    matchingFlags: "Likely Owner, Family",
+    personFlagsText: "Property Owner",
+    smsEligible: true,
+  });
+  assert.equal(result.status, "entity_operator_probable");
+  assert.equal(result.ownerIsEntity, true);
+  assert.equal(isIdentityEligibleForLiveOutbound(result, {}).eligible, true);
+});
+
+test("LLC + Likely Owner only (no operator flags) → weak, held", () => {
+  const result = calculateOwnerProspectAlignment({
+    masterOwnerName: "Blue Sky Holdings LLC",
+    prospectFullName: "Tom Williams",
+    matchingFlags: "Likely Owner",
+    personFlagsText: "",
+    smsEligible: true,
+  });
+  assert.equal(result.status, "weak");
+  assert.equal(result.ownerIsEntity, true);
+  assert.equal(isIdentityEligibleForLiveOutbound(result, {}).eligible, false);
+});
+
+// ── Individual owner renter-signal handling ──────────────────────────────────
+
+test("individual + person_flags_text Renter only + likely_owner=true → NOT hard-blocked", () => {
+  const result = calculateOwnerProspectAlignment({
+    masterOwnerName: "John Smith",
+    prospectFullName: "John Smith",
+    matchingFlags: "Likely Owner",
+    personFlagsText: "Renter",
+    likelyOwner: true,
+    smsEligible: true,
+    canonicalProspectId: "pr_040",
+    bestPhoneId: "ph_040",
+    phoneId: "ph_040",
+    normalizedPhoneId: "ph_040",
+  });
+  // The prospect matches the owner name → verified. Soft renter signal should not hard-block.
+  assert.notEqual(result.status, "mismatch");
+  assert.equal(result.hardBlock, false);
+  assert.ok(result.reasons.some((r) => r.includes("renter_flag_suppressed") || r.includes("seller_full") || r.includes("exact_name")));
+  assert.equal(isIdentityEligibleForLiveOutbound(result, {}).eligible, true);
+});
+
+test("individual + matching_flags Likely Renting → hard-blocked regardless of likely_owner", () => {
+  // Use a prospect name that does NOT match the owner to avoid the early exact-name-match path.
+  // The matching_flags "Likely Renting" is a hard renter signal that should always block.
+  const result = calculateOwnerProspectAlignment({
+    masterOwnerName: "Robert Davis",
+    prospectFullName: "Tim Current",
+    matchingFlags: "Likely Renting",
+    likelyOwner: true,
+    smsEligible: true,
+    canonicalProspectId: "pr_041",
+  });
+  assert.equal(result.status, "mismatch");
+  assert.equal(result.hardBlock, true);
+  assert.equal(isIdentityEligibleForLiveOutbound(result, {}).eligible, false);
 });

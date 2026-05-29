@@ -108,6 +108,19 @@ export function extractNameTokens(name) {
 
 // ── Entity owner alignment ─────────────────────────────────────────────────
 
+// Operator-role signals in person_flags_text that indicate the prospect is
+// acting on behalf of or managing the entity — eligible for outreach.
+const OPERATOR_PERSON_FLAG_PATTERNS = [
+  "business owner",
+  "property owner",
+  "primary decision maker",
+];
+
+function hasOperatorPersonFlag(personFlagsText) {
+  const p = lower(clean(personFlagsText || ""));
+  return OPERATOR_PERSON_FLAG_PATTERNS.some((pattern) => p.includes(pattern));
+}
+
 function resolveEntityAlignment({
   matchingFlags,
   personFlagsText,
@@ -119,11 +132,8 @@ function resolveEntityAlignment({
   const reasons = [...baseReasons, "entity_owner_detected"];
   const normalized_linkage = normalizeMatchingFlags(matchingFlags || personFlagsText);
 
-  // Strong company linkage → eligible
-  if (
-    normalized_linkage === "linked_to_company" ||
-    normalized_linkage === "likely_linked_to_company"
-  ) {
+  // Confirmed company linkage → strongly eligible
+  if (normalized_linkage === "linked_to_company") {
     return {
       status: "entity_company_linked",
       score: 75,
@@ -135,7 +145,20 @@ function resolveEntityAlignment({
     };
   }
 
-  // Softer company linkage → entity_associated (eligible, slightly lower confidence)
+  // Probable company linkage → eligible at lower confidence
+  if (normalized_linkage === "likely_linked_to_company") {
+    return {
+      status: "entity_company_probable",
+      score: 70,
+      hardBlock: false,
+      reasons: [...reasons, "entity_probable_company_linkage", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "entity_safe",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // Softer company linkage → eligible if prospect present, else hold
   if (normalized_linkage === "potentially_linked_to_company") {
     const has_prospect = Boolean(clean(prospectFullName));
     const phone_ok = !bestPhoneScore || Number(bestPhoneScore) >= 50;
@@ -150,7 +173,6 @@ function resolveEntityAlignment({
         normalizedLinkage: normalized_linkage,
       };
     }
-    // No prospect — hold
     return {
       status: "weak",
       score: 40,
@@ -188,8 +210,33 @@ function resolveEntityAlignment({
     };
   }
 
-  // likely_owner / potential_owner for entity → hold (may be a managed entity)
-  if (normalized_linkage === "likely_owner" || normalized_linkage === "potential_owner") {
+  // likely_owner for entity: check for operator person flags before holding
+  if (normalized_linkage === "likely_owner") {
+    if (hasOperatorPersonFlag(personFlagsText)) {
+      return {
+        status: "entity_operator_probable",
+        score: 65,
+        hardBlock: false,
+        reasons: [...reasons, "entity_operator_person_flag_confirmed", `normalized_linkage:${normalized_linkage}`],
+        contactMode: "entity_safe",
+        ownerIsEntity: true,
+        normalizedLinkage: normalized_linkage,
+      };
+    }
+    // likely_owner alone for entity → hold (may be a managed entity, no operator confirmed)
+    return {
+      status: "weak",
+      score: 50,
+      hardBlock: false,
+      reasons: [...reasons, "entity_individual_ownership_signal_hold", `normalized_linkage:${normalized_linkage}`],
+      contactMode: "neutral",
+      ownerIsEntity: true,
+      normalizedLinkage: normalized_linkage,
+    };
+  }
+
+  // potential_owner for entity → hold
+  if (normalized_linkage === "potential_owner") {
     return {
       status: "weak",
       score: 50,
@@ -443,15 +490,30 @@ export function calculateOwnerProspectAlignment(input = {}) {
   }
 
   // Renter / wrong-party downgrade
-  const isRenter =
+  // Hard renter: signal from matching_flags or likelyRenting boolean → always block
+  const isRenterHard =
     likelyRenting === true ||
-    mFlags.includes("renter") ||
-    pFlags.includes("renter") ||
+    mFlags.includes("likely renting") ||
     mFlags.includes("tenant") ||
-    pFlags.includes("tenant");
+    mFlags.includes("renter");
 
-  if (isRenter) {
-    if (status === "household_associated") {
+  // Soft renter: signal only from person_flags_text, not matching_flags
+  // If likely_owner=true AND matching_flags has an ownership signal, suppress hard-block.
+  const isRenterSoft =
+    !isRenterHard && (pFlags.includes("renter") || pFlags.includes("tenant"));
+  const hasOwnershipCounterSignal =
+    likelyOwner === true ||
+    normalizedLinkage === "likely_owner" ||
+    normalizedLinkage === "linked_to_company" ||
+    normalizedLinkage === "likely_linked_to_company";
+  const renterShouldBlock = isRenterHard || (isRenterSoft && !hasOwnershipCounterSignal);
+
+  if (isRenterHard || isRenterSoft) {
+    if (!renterShouldBlock) {
+      // Soft renter overridden by ownership signal — surface as warning only
+      reasons.push("renter_flag_suppressed_by_ownership_signal");
+      score -= 5;
+    } else if (status === "household_associated") {
       reasons.push("renter_flag_with_association_downgrade");
       score -= 10;
     } else {
@@ -531,9 +593,15 @@ export function isIdentityEligibleForLiveOutbound(alignment = {}, options = {}) 
     return { eligible: true, reason: "household_association_allowed" };
   }
 
-  // Entity path
+  // Entity path — company linkage (confirmed and probable) + operator probable
   if (status === "entity_company_linked") {
     return { eligible: true, reason: "entity_company_linkage_confirmed" };
+  }
+  if (status === "entity_company_probable") {
+    return { eligible: true, reason: "entity_company_probable_eligible" };
+  }
+  if (status === "entity_operator_probable") {
+    return { eligible: true, reason: "entity_operator_probable_eligible" };
   }
 
   if (status === "weak") {

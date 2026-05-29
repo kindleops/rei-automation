@@ -2935,6 +2935,9 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     }
   }
 
+  // Save all fetched templates before language filter for English universal fallback
+  const all_fetched_templates = templates.slice();
+
   const language_filtered = filterTemplatesByPreferredLanguage(templates, selector);
   fetch_diagnostics.template_count_after_language_filter = language_filtered.templates.length;
   templates = language_filtered.templates;
@@ -2959,78 +2962,107 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       missing_variables: [],
       variable_payload_preview: buildTemplateVariablePayload(candidate),
       selected_template_preview: null,
+      template_fallback_level: 0,
       ...template_routing_details,
     };
   }
 
-  templates = prospect_template_routing.templates;
-
-  // ── Phase B: Strict Property Template Matching ──────────────────────────
+  // ── Phase B: Property group filtering with 5-level fallback cascade ─────────
   const candidate_group = candidate.canonical_property_group || "other_commercial";
   const property_type = clean(
     pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
   );
-  const property_matched_templates = templates.filter((t) => {
+
+  // Reusable property group filter (same logic for all levels)
+  const filterByPropertyGroup = (tmplList) => tmplList.filter((t) => {
     const allowed = Array.isArray(t.allowed_property_groups) ? t.allowed_property_groups : [];
     const prohibited = Array.isArray(t.prohibited_property_groups) ? t.prohibited_property_groups : [];
-    
-    // 1. Hard block if group is explicitly prohibited
     if (prohibited.includes(candidate_group)) return false;
-    
-    // 2. If allowed list exists, group MUST be in it unless this is a
-    // generic ownership-check template and property_type is simply absent.
     if (allowed.length > 0 && !allowed.includes(candidate_group)) {
       if (!canRenderOwnershipTemplateWithoutPropertyType(t, candidate, selector)) return false;
     }
-    
-    // 3. Fallback check: No duplex/triplex wording for SFR
-    if (candidate_group === 'sfr') {
-      if (!isGenericOwnershipTemplateBody(t)) return false;
-    }
-    
+    if (candidate_group === "sfr" && !isGenericOwnershipTemplateBody(t)) return false;
     return true;
   });
 
-  if (!property_matched_templates.length && templates.length > 0) {
-    logTemplateRenderFailure(candidate, "property_template_mismatch", {
+  // Standard (non-relationship-probe) templates from the language-filtered set
+  const use_case_lower = lower(selector.use_case);
+  const all_standard_templates = language_filtered.templates.filter(
+    (t) => lower(t.use_case || "") === use_case_lower && !isRelationshipProbeTemplate(t)
+  );
+
+  // Prospect-routed templates (the specific subset returned by prospect flag routing)
+  const prospect_routed_templates = prospect_template_routing.templates;
+
+  // Build fallback levels — stop at the first non-empty set
+  let template_fallback_level = 0;
+  let fallback_routing_reason = template_routing_details.template_routing_reason;
+
+  // Level 1: exact prospect route + property group filter
+  const lvl1 = filterByPropertyGroup(prospect_routed_templates);
+  if (lvl1.length) {
+    templates = lvl1;
+    template_fallback_level = 1;
+  } else if (prospect_routed_templates.length) {
+    // Level 2: exact prospect route, relax property group filter
+    templates = prospect_routed_templates;
+    template_fallback_level = 2;
+    fallback_routing_reason = fallback_routing_reason + "_property_relaxed";
+  } else {
+    // Level 3: standard ownership + property group filter (drop prospect specificity)
+    const lvl3 = filterByPropertyGroup(all_standard_templates);
+    if (lvl3.length) {
+      templates = lvl3;
+      template_fallback_level = 3;
+      fallback_routing_reason = "standard_ownership_property_fallback";
+    } else if (all_standard_templates.length) {
+      // Level 4: standard ownership, relax property group filter
+      templates = all_standard_templates;
+      template_fallback_level = 4;
+      fallback_routing_reason = "standard_ownership_fallback";
+    } else {
+      // Level 5: universal English ownership fallback (language-agnostic)
+      const english_standard = all_fetched_templates.filter(
+        (t) => lower(t.use_case || "") === use_case_lower &&
+               !isRelationshipProbeTemplate(t) &&
+               lower(t.language || "") === "english"
+      );
+      const lvl5 = filterByPropertyGroup(english_standard);
+      templates = lvl5.length ? lvl5 : english_standard;
+      template_fallback_level = 5;
+      fallback_routing_reason = "universal_english_fallback";
+    }
+  }
+
+  template_routing_details.template_routing_reason = fallback_routing_reason;
+  template_routing_details.template_fallback_level = template_fallback_level;
+
+  if (!templates.length) {
+    logTemplateRenderFailure(candidate, "no_template_after_fallback", {
       selected_template_id: null,
       missing_variables: [],
-      template_routing_reason: template_routing_details.template_routing_reason,
+      template_routing_reason: fallback_routing_reason,
       candidate_group,
       property_type,
     });
-    return {
-      ok: false,
-      reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
-      reason: "property_template_mismatch",
-      template: null,
-      rendered_message_body: null,
-      missing_variables: [],
-      variable_payload_preview: buildTemplateVariablePayload(candidate),
-      selected_template_preview: null,
-      ...template_routing_details,
-    };
-  }
-  
-  templates = property_matched_templates;
-
-  if (!templates.length) {
     logger.info("feeder.template_routing_no_template", {
       master_owner_id: candidate.master_owner_id,
       property_id: candidate.property_id,
       prospect_matching_flags: template_routing_details.prospect_matching_flags,
       selected_template_id: null,
-      template_routing_reason: template_routing_details.template_routing_reason,
+      template_routing_reason: fallback_routing_reason,
+      template_fallback_level,
     });
     return {
       ok: false,
       reason_code: REASON_CODES.NO_TEMPLATE,
-      reason: "no_template_for_preferred_language",
+      reason: "no_template_after_fallback",
       template: null,
       rendered_message_body: null,
       missing_variables: [],
       variable_payload_preview: buildTemplateVariablePayload(candidate),
       selected_template_preview: null,
+      template_fallback_level,
       template_rotation: {
         enabled: false,
         preferred_language: language_filtered.preferred_language,
@@ -3038,7 +3070,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         selected_template_language: null,
         rotation_candidate_languages: [],
         rotation_language_mismatch_detected: false,
-        rotation_strategy: "no_template_for_preferred_language",
+        rotation_strategy: "no_template_after_fallback",
         rotation_best_score: null,
         rotation_min_score: null,
         eligible_template_count: 0,
@@ -3437,6 +3469,8 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     reason_code: "OK",
     template: selected_template_with_source,
     template_use_case: selector.use_case,
+    selected_template_use_case: selected_template?.use_case || selector.use_case,
+    selected_template_stage: selected_template?.stage_code || selector.stage_code,
     rendered_message_body: normalized_rendered,
     missing_variables: rendered.missing_variables,
     variable_payload_preview: variable_payload,
@@ -3450,6 +3484,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       stage_code: selected_template?.stage_code || null,
       stage_label: selected_template?.stage_label || null,
     },
+    template_fallback_level,
     template_rotation,
     stage_code: selected_template?.stage_code || selector.stage_code,
     stage_label: selected_template?.stage_label || selector.stage_label,
