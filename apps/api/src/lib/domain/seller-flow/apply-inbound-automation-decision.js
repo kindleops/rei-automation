@@ -1,0 +1,1462 @@
+import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import {
+  buildSendQueueDedupeKey,
+  insertSupabaseSendQueueRow,
+} from "@/lib/supabase/sms-engine.js";
+import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
+import {
+  normalizeUsPhoneToE164,
+  prepareRenderedSmsForQueue,
+} from "@/lib/sms/sanitize.js";
+import { info, warn } from "@/lib/logging/logger.js";
+
+const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
+const ACTIVE_AUTO_REPLY_STATUSES = new Set(["queued", "pending", "processing", "sending"]);
+const HIGH_RISK_OBJECTIONS = new Set(["financial_distress", "probate", "divorce"]);
+const REVIEW_ONLY_OBJECTIONS = new Set(["wants_proof_of_funds", "property_correction"]);
+
+const ROUTE_PROFILES = Object.freeze({
+  ownership_confirmed: {
+    route_hint: "consider_selling",
+    allowed_template_stages: ["consider_selling", "stage_2_consider_selling"],
+    template_use_case_candidates: ["consider_selling"],
+    next_action: "queue_auto_reply",
+  },
+  seller_interested: {
+    route_hint: "seller_asking_price",
+    allowed_template_stages: ["seller_asking_price", "stage_3_seller_asking_price"],
+    template_use_case_candidates: ["seller_asking_price", "asking_price"],
+    next_action: "queue_auto_reply",
+  },
+  latent_interest: {
+    route_hint: "seller_asking_price",
+    allowed_template_stages: ["seller_asking_price", "stage_3_seller_asking_price"],
+    template_use_case_candidates: ["seller_asking_price", "asking_price"],
+    next_action: "queue_auto_reply",
+  },
+  asks_offer: {
+    route_hint: "ask_seller_price_or_basic_condition",
+    allowed_template_stages: ["seller_asking_price", "condition_probe", "price_discovery"],
+    template_use_case_candidates: [
+      "seller_asking_price",
+      "price_high_condition_probe",
+      "ask_condition_clarifier",
+      "creative_probe",
+    ],
+    next_action: "queue_auto_reply",
+  },
+  asking_price_provided: {
+    route_hint: "price_response",
+    allowed_template_stages: [
+      "price_works_confirm_basics",
+      "price_high_condition_probe",
+      "creative_probe",
+    ],
+    template_use_case_candidates: [
+      "price_works_confirm_basics",
+      "price_high_condition_probe",
+      "creative_probe",
+    ],
+    next_action: "queue_auto_reply",
+  },
+  tenant_occupied: {
+    route_hint: "rental_underwriting",
+    allowed_template_stages: [
+      "rental_underwriting_units",
+      "rental_underwriting_rents",
+      "tenant_probe",
+    ],
+    template_use_case_candidates: [
+      "tenant_probe",
+      "mf_confirm_units",
+      "mf_occupancy",
+      "mf_rents",
+      "ask_condition_clarifier",
+    ],
+    next_action: "queue_auto_reply",
+  },
+  condition_disclosed: {
+    route_hint: "condition_followup",
+    allowed_template_stages: ["condition_probe", "repairs_followup"],
+    template_use_case_candidates: [
+      "price_high_condition_probe",
+      "ask_condition_clarifier",
+      "creative_probe",
+    ],
+    next_action: "queue_auto_reply",
+  },
+  need_time: {
+    route_hint: "soft_followup",
+    allowed_template_stages: ["soft_followup", "future_followup"],
+    template_use_case_candidates: [
+      "consider_selling_follow_up",
+      "asking_price_follow_up",
+      "reengagement",
+    ],
+    next_action: "schedule_later_followup",
+  },
+  who_is_this: {
+    route_hint: "identity_response",
+    allowed_template_stages: ["identity_response", "who_is_this"],
+    template_use_case_candidates: ["who_is_this", "how_got_number"],
+    next_action: "queue_auto_reply",
+  },
+  callback_requested: {
+    route_hint: "text_only_redirect",
+    allowed_template_stages: ["text_only_redirect", "sms_only_response"],
+    template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  needs_call: {
+    route_hint: "text_only_redirect",
+    allowed_template_stages: ["text_only_redirect", "sms_only_response"],
+    template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  needs_email: {
+    route_hint: "text_only_redirect",
+    allowed_template_stages: ["text_only_redirect", "sms_only_response"],
+    template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  not_interested: {
+    route_hint: "soft_close_or_suppress",
+    allowed_template_stages: ["not_interested_soft_close"],
+    template_use_case_candidates: ["not_interested_soft_close"],
+    next_action: "do_not_reply",
+  },
+});
+
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
+function lower(value) {
+  return clean(value).toLowerCase();
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  return [value];
+}
+
+function uniq(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeList(value) {
+  return asArray(value)
+    .map((entry) => lower(entry))
+    .filter(Boolean);
+}
+
+function toTimestamp(value) {
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function buildAuditReason(reason = "unknown") {
+  return clean(reason) || "unknown";
+}
+
+function canUseSupabase(explicitClient = null) {
+  return Boolean(explicitClient) || hasSupabaseConfig();
+}
+
+function hasUsableContext({
+  threadKey,
+  propertyId,
+  prospectId,
+  ownerId,
+  phoneId,
+  conversationBrain,
+  latestThreadContext,
+} = {}) {
+  if (!clean(threadKey)) return false;
+
+  return Boolean(
+    clean(propertyId) ||
+      clean(prospectId) ||
+      clean(ownerId) ||
+      clean(phoneId) ||
+      clean(conversationBrain?.item_id) ||
+      clean(latestThreadContext?.ids?.property_id) ||
+      clean(latestThreadContext?.ids?.master_owner_id) ||
+      clean(latestThreadContext?.ids?.phone_item_id)
+  );
+}
+
+function resolveRouteProfile(classification = {}) {
+  const primary_intent = clean(classification.primary_intent) || "unclear";
+  const objection = clean(classification.objection) || null;
+
+  if (primary_intent === "callback_requested") return ROUTE_PROFILES.callback_requested;
+  if (objection === "needs_call") return ROUTE_PROFILES.needs_call;
+  if (objection === "needs_email") return ROUTE_PROFILES.needs_email;
+
+  return ROUTE_PROFILES[primary_intent] || null;
+}
+
+function buildDecisionResult({
+  should_queue_reply = false,
+  should_suppress_contact = false,
+  should_mark_human_review = false,
+  reply_mode = "none",
+  suppression_reason = null,
+  human_review_reason = null,
+  route_hint = null,
+  stage_hint = null,
+  allowed_template_stages = [],
+  next_action = "none",
+  audit_reason = "none",
+} = {}) {
+  return {
+    should_queue_reply: Boolean(should_queue_reply),
+    should_suppress_contact: Boolean(should_suppress_contact),
+    should_mark_human_review: Boolean(should_mark_human_review),
+    reply_mode,
+    suppression_reason: suppression_reason || null,
+    human_review_reason: human_review_reason || null,
+    route_hint: route_hint || null,
+    stage_hint: stage_hint || null,
+    allowed_template_stages: uniq(allowed_template_stages),
+    next_action,
+    audit_reason: buildAuditReason(audit_reason),
+  };
+}
+
+export function applyInboundAutomationDecision({
+  message,
+  threadKey,
+  propertyId,
+  prospectId,
+  ownerId,
+  phoneId,
+  classification,
+  conversationBrain,
+  latestThreadContext,
+} = {}) {
+  const primary_intent = clean(classification?.primary_intent) || "unclear";
+  const objection = clean(classification?.objection) || null;
+  const compliance_flag = clean(classification?.compliance_flag) || null;
+  const confidence =
+    typeof classification?.confidence === "number" ? classification.confidence : 0;
+  const automation_decision = classification?.automation_decision || {};
+  const route_profile = resolveRouteProfile(classification);
+  const route_hint = route_profile?.route_hint || null;
+  const allowed_template_stages = route_profile?.allowed_template_stages || [];
+  const stage_hint = clean(classification?.stage_hint) || null;
+  const usable_context = hasUsableContext({
+    threadKey,
+    propertyId,
+    prospectId,
+    ownerId,
+    phoneId,
+    conversationBrain,
+    latestThreadContext,
+  });
+
+  if (!classification || typeof classification !== "object") {
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: "missing_classification",
+      stage_hint,
+      next_action: "mark_human_review",
+      audit_reason: "missing_classification",
+    });
+  }
+
+  if (!usable_context) {
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: "missing_context",
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: "missing_context",
+    });
+  }
+
+  if (
+    compliance_flag === "stop_texting" ||
+    primary_intent === "opt_out" ||
+    automation_decision?.should_suppress_contact === true ||
+    automation_decision?.suppression_action === "opt_out"
+  ) {
+    return buildDecisionResult({
+      should_suppress_contact: true,
+      reply_mode: "none",
+      suppression_reason: "opt_out",
+      next_action: "suppress_contact",
+      audit_reason: "opt_out",
+    });
+  }
+
+  if (primary_intent === "wrong_number") {
+    return buildDecisionResult({
+      should_suppress_contact: true,
+      reply_mode: "none",
+      suppression_reason: "wrong_number",
+      next_action: "archive_wrong_number",
+      audit_reason: "wrong_number",
+    });
+  }
+
+  if (
+    primary_intent === "hostile_or_legal" ||
+    (automation_decision?.human_review_required === true &&
+      automation_decision?.auto_reply_allowed !== true)
+  ) {
+    const human_review_reason =
+      primary_intent === "hostile_or_legal"
+        ? "hostile_or_legal"
+        : primary_intent === "unclear" && confidence < 0.82
+          ? "unclear_low_confidence"
+          : "automation_review_required";
+
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason,
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: human_review_reason,
+    });
+  }
+
+  if (
+    primary_intent === "reaction_only" ||
+    primary_intent === "property_correction" ||
+    primary_intent === "unclear" ||
+    primary_intent === "acknowledgement"
+  ) {
+    const human_review_reason =
+      primary_intent === "property_correction"
+        ? "property_correction"
+        : primary_intent === "unclear" && confidence < 0.82
+          ? "unclear_low_confidence"
+          : "ambiguous_intent";
+
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason,
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: human_review_reason,
+    });
+  }
+
+  if (REVIEW_ONLY_OBJECTIONS.has(objection)) {
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: objection,
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: objection,
+    });
+  }
+
+  if (HIGH_RISK_OBJECTIONS.has(objection) && confidence < 0.9) {
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: `${objection}_low_confidence`,
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: `${objection}_low_confidence`,
+    });
+  }
+
+  if (primary_intent === "not_interested") {
+    return buildDecisionResult({
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "do_not_reply",
+      audit_reason: "not_interested",
+    });
+  }
+
+  if (primary_intent === "need_time") {
+    const auto_reply_allowed = confidence >= 0.85;
+    return buildDecisionResult({
+      should_queue_reply: auto_reply_allowed,
+      should_mark_human_review: !auto_reply_allowed,
+      reply_mode: auto_reply_allowed ? "auto" : "manual_review",
+      human_review_reason: auto_reply_allowed ? null : "need_time_low_confidence",
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: auto_reply_allowed ? "schedule_later_followup" : "mark_human_review",
+      audit_reason: auto_reply_allowed ? "need_time" : "need_time_low_confidence",
+    });
+  }
+
+  if (primary_intent === "who_is_this") {
+    const auto_reply_allowed = confidence >= 0.75;
+    return buildDecisionResult({
+      should_queue_reply: auto_reply_allowed,
+      should_mark_human_review: !auto_reply_allowed,
+      reply_mode: auto_reply_allowed ? "auto" : "manual_review",
+      human_review_reason: auto_reply_allowed ? null : "who_is_this_low_confidence",
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: auto_reply_allowed ? "queue_auto_reply" : "mark_human_review",
+      audit_reason: auto_reply_allowed ? "who_is_this" : "who_is_this_low_confidence",
+    });
+  }
+
+  if (
+    [
+      "ownership_confirmed",
+      "seller_interested",
+      "latent_interest",
+      "asks_offer",
+      "asking_price_provided",
+      "tenant_occupied",
+      "condition_disclosed",
+      "callback_requested",
+    ].includes(primary_intent) ||
+    objection === "needs_call" ||
+    objection === "needs_email"
+  ) {
+    const auto_reply_allowed =
+      automation_decision?.auto_reply_allowed === true &&
+      compliance_flag !== "stop_texting" &&
+      primary_intent !== "hostile_or_legal";
+
+    const resolved_profile =
+      primary_intent === "callback_requested" ? ROUTE_PROFILES.callback_requested :
+      objection === "needs_call" ? ROUTE_PROFILES.needs_call :
+      objection === "needs_email" ? ROUTE_PROFILES.needs_email :
+      route_profile;
+
+    return buildDecisionResult({
+      should_queue_reply: auto_reply_allowed,
+      should_mark_human_review: !auto_reply_allowed,
+      reply_mode: auto_reply_allowed ? "auto" : "manual_review",
+      human_review_reason: auto_reply_allowed ? null : "confidence_or_policy_block",
+      route_hint: resolved_profile?.route_hint || route_hint,
+      stage_hint,
+      allowed_template_stages: resolved_profile?.allowed_template_stages || allowed_template_stages,
+      next_action: auto_reply_allowed ? resolved_profile?.next_action || "queue_auto_reply" : "mark_human_review",
+      audit_reason: auto_reply_allowed ? primary_intent : "confidence_or_policy_block",
+    });
+  }
+
+  return buildDecisionResult({
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    human_review_reason: "unhandled_classification",
+    route_hint,
+    stage_hint,
+    allowed_template_stages,
+    next_action: "mark_human_review",
+    audit_reason: "unhandled_classification",
+  });
+}
+
+function templateCandidateSet(decision = {}, classification = {}) {
+  const primary_intent = clean(classification.primary_intent) || "unclear";
+  const objection = clean(classification.objection) || null;
+
+  if (primary_intent === "callback_requested") {
+    return ROUTE_PROFILES.callback_requested.template_use_case_candidates;
+  }
+  if (objection === "needs_call") {
+    return ROUTE_PROFILES.needs_call.template_use_case_candidates;
+  }
+  if (objection === "needs_email") {
+    return ROUTE_PROFILES.needs_email.template_use_case_candidates;
+  }
+
+  return routeProfileCandidates(decision.route_hint, primary_intent);
+}
+
+function routeProfileCandidates(route_hint = null, primary_intent = null) {
+  if (primary_intent && ROUTE_PROFILES[primary_intent]?.template_use_case_candidates) {
+    return ROUTE_PROFILES[primary_intent].template_use_case_candidates;
+  }
+
+  const profile = Object.values(ROUTE_PROFILES).find((candidate) => candidate.route_hint === route_hint);
+  return profile?.template_use_case_candidates || [];
+}
+
+function normalizeTemplateMatchValues(row = {}) {
+  return uniq([
+    lower(row.use_case),
+    lower(row.stage_code),
+    lower(row.stage_label),
+    lower(row.template_name),
+  ]);
+}
+
+function derivePropertyTypeScope(context = null) {
+  return clean(
+    context?.summary?.property_type ||
+      context?.summary?.property_type_scope ||
+      context?.property_type ||
+      context?.property_type_scope ||
+      context?.items?.property_item?.property_type_scope
+  ) || null;
+}
+
+function derivePropertyGroup(property_type_scope = null) {
+  const normalized = lower(property_type_scope);
+  if (!normalized) return null;
+  if (
+    normalized.includes("duplex") ||
+    normalized.includes("triplex") ||
+    normalized.includes("quad") ||
+    normalized.includes("multi") ||
+    normalized.includes("apartment")
+  ) {
+    return "multifamily";
+  }
+  if (normalized.includes("vacant") || normalized.includes("land")) return "land";
+  return "residential";
+}
+
+function isTemplatePropertyCompatible(row = {}, property_type_scope = null) {
+  const requested_scope = lower(property_type_scope);
+  const template_scope = lower(row.property_type_scope);
+
+  if (requested_scope && template_scope && template_scope !== requested_scope) {
+    return false;
+  }
+
+  const property_group = derivePropertyGroup(property_type_scope);
+  const allowed = normalizeList(row.allowed_property_groups);
+  const prohibited = normalizeList(row.prohibited_property_groups);
+
+  if (property_group && allowed.length > 0 && !allowed.includes(property_group)) {
+    return false;
+  }
+
+  if (property_group && prohibited.includes(property_group)) {
+    return false;
+  }
+
+  return true;
+}
+
+function compareTemplateRank(left = {}, right = {}) {
+  const left_success = Number.isFinite(Number(left.success_rate)) ? Number(left.success_rate) : -1;
+  const right_success = Number.isFinite(Number(right.success_rate)) ? Number(right.success_rate) : -1;
+  if (left_success !== right_success) return right_success - left_success;
+
+  const left_usage = Number.isFinite(Number(left.usage_count)) ? Number(left.usage_count) : -1;
+  const right_usage = Number.isFinite(Number(right.usage_count)) ? Number(right.usage_count) : -1;
+  if (left_usage !== right_usage) return right_usage - left_usage;
+
+  const left_updated = toTimestamp(left.updated_at) ?? -1;
+  const right_updated = toTimestamp(right.updated_at) ?? -1;
+  return right_updated - left_updated;
+}
+
+export async function selectSafeAutoReplyTemplate({
+  supabaseClient = null,
+  classification = null,
+  decision = null,
+  context = null,
+} = {}) {
+  if (!canUseSupabase(supabaseClient)) {
+    return { ok: false, reason: "missing_supabase", template: null };
+  }
+
+  const supabase = supabaseClient || getDefaultSupabaseClient();
+  const language = clean(classification?.language) || "English";
+  const languages = language === "English" ? ["English"] : [language, "English"];
+  const allowed_matches = uniq([
+    ...asArray(decision?.allowed_template_stages).map(lower),
+    lower(decision?.route_hint),
+    ...templateCandidateSet(decision, classification).map(lower),
+  ]);
+  const property_type_scope = derivePropertyTypeScope(context);
+
+  if (!supabase || allowed_matches.length === 0) {
+    return {
+      ok: false,
+      reason: allowed_matches.length === 0 ? "no_template_route_candidates" : "missing_supabase",
+      template: null,
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("sms_templates")
+      .select("*")
+      .eq("is_active", true)
+      .eq("safe_for_auto_reply", true)
+      .in("language", languages)
+      .limit(100);
+
+    if (error) throw error;
+
+    const candidates = (Array.isArray(data) ? data : [])
+      .filter((row) => {
+        const matches = normalizeTemplateMatchValues(row);
+        return matches.some((value) => allowed_matches.includes(value));
+      })
+      .filter((row) => {
+        const reply_mode = lower(row.reply_mode);
+        return !reply_mode || reply_mode === "auto" || reply_mode === "auto_reply";
+      })
+      .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
+      .sort(compareTemplateRank);
+
+    const selected =
+      candidates.find((row) => lower(row.language) === lower(language)) ||
+      candidates.find((row) => lower(row.language) === "english") ||
+      candidates[0] ||
+      null;
+
+    if (!selected) {
+      return { ok: false, reason: "no_safe_template", template: null };
+    }
+
+    info("[AUTO_REPLY_TEMPLATE_SELECTED]", {
+      route_hint: decision?.route_hint || null,
+      primary_intent: classification?.primary_intent || null,
+      template_id: selected.template_id || selected.id || null,
+      use_case: selected.use_case || null,
+      stage_code: selected.stage_code || null,
+      language: selected.language || null,
+    });
+
+    return {
+      ok: true,
+      reason: "template_selected",
+      template: selected,
+    };
+  } catch (error) {
+    warn("[AUTO_REPLY_NO_SAFE_TEMPLATE]", {
+      route_hint: decision?.route_hint || null,
+      primary_intent: classification?.primary_intent || null,
+      error: error?.message || "template_lookup_failed",
+    });
+    return {
+      ok: false,
+      reason: "template_lookup_failed",
+      error: error?.message || "template_lookup_failed",
+      template: null,
+    };
+  }
+}
+
+function buildPersonalizationContext({
+  message = "",
+  inboundFrom = "",
+  inboundTo = "",
+  classification = null,
+  context = null,
+} = {}) {
+  const price_mentioned = classification?.seller_state?.price_mentioned ?? null;
+  const formatted_price =
+    Number.isFinite(Number(price_mentioned))
+      ? `$${Number(price_mentioned).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+      : null;
+
+  return {
+    message_body: clean(message) || null,
+    phone_e164: clean(inboundFrom) || null,
+    to_phone_e164: clean(inboundTo) || null,
+    first_name:
+      clean(context?.summary?.seller_first_name) ||
+      clean(context?.summary?.owner_first_name) ||
+      null,
+    seller_first_name:
+      clean(context?.summary?.seller_first_name) ||
+      clean(context?.summary?.owner_first_name) ||
+      null,
+    owner_name: clean(context?.summary?.owner_name) || null,
+    seller_display_name: clean(context?.summary?.owner_name) || null,
+    agent_name: clean(context?.summary?.agent_name) || null,
+    property_address: clean(context?.summary?.property_address) || null,
+    property_city: clean(context?.summary?.property_city) || null,
+    city: clean(context?.summary?.property_city) || null,
+    market_name: clean(context?.summary?.market_name || context?.summary?.market) || null,
+    property_type:
+      clean(context?.summary?.property_type_scope || context?.summary?.property_type) || null,
+    asking_price: formatted_price,
+    offer_price: formatted_price,
+    smart_cash_offer_display: formatted_price,
+  };
+}
+
+function renderSafeTemplate({
+  template = null,
+  message = "",
+  inboundFrom = "",
+  inboundTo = "",
+  classification = null,
+  context = null,
+} = {}) {
+  if (!clean(template?.template_body)) {
+    return { ok: false, reason: "template_body_missing", rendered_message_text: null };
+  }
+
+  const rendered = personalizeTemplate(
+    template.template_body,
+    buildPersonalizationContext({
+      message,
+      inboundFrom,
+      inboundTo,
+      classification,
+      context,
+    })
+  );
+
+  if (!rendered.ok) {
+    return {
+      ok: false,
+      reason: rendered.reason || "template_render_failed",
+      missing: rendered.missing || [],
+      rendered_message_text: null,
+    };
+  }
+
+  const prepared = prepareRenderedSmsForQueue({
+    rendered_message_text: rendered.text,
+    template_id: template.template_id || template.id || null,
+    template_source: "sms_templates",
+  });
+
+  if (!prepared.ok || !clean(prepared.text)) {
+    return {
+      ok: false,
+      reason: prepared.reason || "rendered_sms_invalid",
+      diagnostics: prepared.diagnostics || null,
+      rendered_message_text: null,
+    };
+  }
+
+  return {
+    ok: true,
+    rendered_message_text: prepared.text,
+    placeholders_used: rendered.placeholders_used || [],
+  };
+}
+
+export async function findRecentInboundAutoReplyDuplicate({
+  supabaseClient = null,
+  threadKey = "",
+  sourceEventId = null,
+  windowMinutes = DEFAULT_DUPLICATE_WINDOW_MINUTES,
+} = {}) {
+  if (!canUseSupabase(supabaseClient)) {
+    return { duplicate: false, reason: "missing_supabase" };
+  }
+
+  const supabase = supabaseClient || getDefaultSupabaseClient();
+  if (!supabase || !clean(threadKey)) {
+    return { duplicate: false, reason: "missing_supabase_or_thread" };
+  }
+
+  const since = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+
+  try {
+    if (clean(sourceEventId)) {
+      const { data: source_duplicate, error: source_error } = await supabase
+        .from("send_queue")
+        .select("id, queue_status, created_at")
+        .eq("source_event_id", sourceEventId)
+        .in("queue_status", [...ACTIVE_AUTO_REPLY_STATUSES])
+        .limit(1);
+
+      if (source_error) throw source_error;
+      if (Array.isArray(source_duplicate) && source_duplicate.length > 0) {
+        return {
+          duplicate: true,
+          reason: "duplicate_source_event",
+          row: source_duplicate[0],
+        };
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("send_queue")
+      .select("id, queue_status, created_at, type")
+      .eq("thread_key", threadKey)
+      .eq("type", "auto_reply")
+      .in("queue_status", [...ACTIVE_AUTO_REPLY_STATUSES])
+      .gte("created_at", since)
+      .limit(5);
+
+    if (error) throw error;
+
+    const duplicate_row = (Array.isArray(data) ? data : [])[0] || null;
+    if (!duplicate_row) {
+      return { duplicate: false, reason: "no_recent_duplicate" };
+    }
+
+    return {
+      duplicate: true,
+      reason: "recent_thread_duplicate",
+      row: duplicate_row,
+    };
+  } catch (error) {
+    warn("[AUTO_REPLY_DUPLICATE_SUPPRESSED]", {
+      thread_key: threadKey,
+      source_event_id: sourceEventId || null,
+      error: error?.message || "duplicate_lookup_failed",
+    });
+    return {
+      duplicate: false,
+      reason: "duplicate_lookup_failed",
+      error: error?.message || "duplicate_lookup_failed",
+    };
+  }
+}
+
+export async function applyInboundSuppression({
+  supabaseClient = null,
+  phoneNumber = "",
+  phoneId = null,
+  reason = "opt_out",
+  threadKey = "",
+  dryRun = false,
+} = {}) {
+  if (!canUseSupabase(supabaseClient)) {
+    return { ok: false, reason: "missing_supabase_or_phone" };
+  }
+
+  const supabase = supabaseClient || getDefaultSupabaseClient();
+  const normalized_phone = normalizeUsPhoneToE164(phoneNumber) || clean(phoneNumber);
+
+  if (!supabase || !normalized_phone) {
+    return { ok: false, reason: "missing_supabase_or_phone" };
+  }
+
+  if (dryRun) {
+    return { ok: true, dry_run: true, reason, phone_number: normalized_phone };
+  }
+
+  try {
+    if (reason === "wrong_number") {
+      let query = supabase.from("phones").update({
+        phone_contact_status: "wrong_number",
+        wrong_number_at: new Date().toISOString(),
+        wrong_number_source_thread_key: clean(threadKey) || normalized_phone,
+      });
+
+      if (clean(phoneId)) {
+        query = query.eq("id", phoneId);
+      } else {
+        query = query.eq("canonical_e164", normalized_phone);
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("sms_suppression_list").insert({
+        phone_number: normalized_phone,
+        suppression_reason: reason,
+        is_active: true,
+        suppressed_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+    }
+
+    info("[AUTO_REPLY_SUPPRESSION_APPLIED]", {
+      phone_number: normalized_phone,
+      phone_id: phoneId || null,
+      suppression_reason: reason,
+    });
+
+    return { ok: true, reason, phone_number: normalized_phone };
+  } catch (error) {
+    warn("[AUTO_REPLY_SUPPRESSION_APPLIED]", {
+      phone_number: normalized_phone,
+      phone_id: phoneId || null,
+      suppression_reason: reason,
+      error: error?.message || "suppression_failed",
+    });
+    return {
+      ok: false,
+      reason: "suppression_failed",
+      error: error?.message || "suppression_failed",
+    };
+  }
+}
+
+function automationDecisionToLegacyPlan({
+  decision,
+  classification,
+  selectedTemplate = null,
+  renderedMessageText = null,
+  queueResult = null,
+} = {}) {
+  const primary_intent = clean(classification?.primary_intent) || "unclear";
+  const suppression_reason = decision?.suppression_reason || null;
+  const should_queue_reply = Boolean(decision?.should_queue_reply);
+  const safety_tier = decision?.should_suppress_contact
+    ? "suppress"
+    : should_queue_reply
+      ? "auto_send"
+      : "review";
+
+  return {
+    ok: true,
+    inbound_intent: primary_intent,
+    detected_intent: primary_intent,
+    next_stage: decision?.route_hint || null,
+    selected_use_case:
+      clean(selectedTemplate?.use_case) ||
+      routeProfileCandidates(decision?.route_hint, primary_intent)[0] ||
+      null,
+    selected_stage_code: clean(selectedTemplate?.stage_code) || null,
+    selected_language: clean(selectedTemplate?.language) || clean(classification?.language) || "English",
+    selected_template_id: clean(selectedTemplate?.template_id || selectedTemplate?.id) || null,
+    fallback_reply: renderedMessageText || clean(selectedTemplate?.template_body) || null,
+    should_queue_reply,
+    suppression_reason,
+    reply_mode: decision?.reply_mode || "none",
+    reason: decision?.audit_reason || "automation_decision",
+    route_hint: decision?.route_hint || null,
+    stage_hint: decision?.stage_hint || null,
+    allowed_template_stages: asArray(decision?.allowed_template_stages),
+    queue_item_id: queueResult?.queue_item_id || null,
+    queue_row_id: queueResult?.queue_row_id || null,
+    routing_allowed: should_queue_reply,
+    safety: {
+      opt_out: suppression_reason === "opt_out",
+      wrong_number: suppression_reason === "wrong_number",
+      hostile_or_legal: primary_intent === "hostile_or_legal",
+      not_interested: primary_intent === "not_interested",
+      missing_context: decision?.audit_reason === "missing_context",
+    },
+    safety_tier,
+    auto_send_eligible: should_queue_reply,
+    automation_decision: decision,
+  };
+}
+
+export async function executeInboundAutomationDecision({
+  message,
+  threadKey,
+  propertyId,
+  prospectId,
+  ownerId,
+  phoneId,
+  classification,
+  conversationBrain = null,
+  latestThreadContext = null,
+  context = null,
+  inboundFrom = "",
+  inboundTo = "",
+  inboundEventId = null,
+  enableQueueInsert = false,
+  applySuppression = true,
+  dryRun = true,
+  scheduleDelaySeconds = 0,
+  now = new Date().toISOString(),
+  supabaseClient = null,
+} = {}) {
+  const supabase = supabaseClient || getDefaultSupabaseClient();
+  const base_decision = applyInboundAutomationDecision({
+    message,
+    threadKey,
+    propertyId,
+    prospectId,
+    ownerId,
+    phoneId,
+    classification,
+    conversationBrain,
+    latestThreadContext,
+  });
+
+  info("[AUTO_REPLY_DECISION]", {
+    thread_key: threadKey || null,
+    primary_intent: classification?.primary_intent || null,
+    objection: classification?.objection || null,
+    confidence: classification?.confidence ?? null,
+    route_hint: base_decision.route_hint || null,
+    should_queue_reply: base_decision.should_queue_reply,
+    should_suppress_contact: base_decision.should_suppress_contact,
+    should_mark_human_review: base_decision.should_mark_human_review,
+    audit_reason: base_decision.audit_reason,
+  });
+
+  if (base_decision.should_suppress_contact) {
+    const suppression_result = applySuppression
+      ? await applyInboundSuppression({
+          supabaseClient: supabase,
+          phoneNumber: inboundFrom || threadKey,
+          phoneId,
+          reason: base_decision.suppression_reason || "opt_out",
+          threadKey,
+          dryRun,
+        })
+      : { ok: false, skipped: true, reason: "suppression_disabled" };
+
+    return {
+      ok: true,
+      automation_decision: base_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: Boolean(suppression_result?.ok),
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      audit_reason: base_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: base_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: base_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
+
+  if (!base_decision.should_queue_reply) {
+    warn("[AUTO_REPLY_BLOCKED]", {
+      thread_key: threadKey || null,
+      primary_intent: classification?.primary_intent || null,
+      audit_reason: base_decision.audit_reason,
+      human_review_reason: base_decision.human_review_reason || null,
+    });
+
+    return {
+      ok: true,
+      automation_decision: base_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      audit_reason: base_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: base_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: base_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
+
+  const duplicate = await findRecentInboundAutoReplyDuplicate({
+    supabaseClient: supabase,
+    threadKey: clean(threadKey) || clean(inboundFrom),
+    sourceEventId: inboundEventId,
+  });
+
+  if (duplicate.duplicate) {
+    const duplicate_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: false,
+      reply_mode: "none",
+      audit_reason: duplicate.reason,
+    };
+
+    warn("[AUTO_REPLY_DUPLICATE_SUPPRESSED]", {
+      thread_key: threadKey || null,
+      primary_intent: classification?.primary_intent || null,
+      duplicate_reason: duplicate.reason,
+      duplicate_row_id: duplicate?.row?.id || null,
+    });
+
+    return {
+      ok: true,
+      automation_decision: duplicate_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: duplicate?.row?.id || null,
+      queue_row_id: duplicate?.row?.id || null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: true,
+      dry_run: Boolean(dryRun),
+      audit_reason: duplicate.reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: duplicate.reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: duplicate_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
+
+  const template_result = await selectSafeAutoReplyTemplate({
+    supabaseClient: supabase,
+    classification,
+    decision: base_decision,
+    context: context || latestThreadContext,
+  });
+
+  if (!template_result.ok || !template_result.template) {
+    const no_template_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: "no_safe_template",
+      audit_reason: "no_safe_template",
+    };
+
+    warn("[AUTO_REPLY_NO_SAFE_TEMPLATE]", {
+      thread_key: threadKey || null,
+      primary_intent: classification?.primary_intent || null,
+      route_hint: base_decision.route_hint || null,
+      reason: template_result.reason,
+    });
+
+    return {
+      ok: true,
+      automation_decision: no_template_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      audit_reason: "no_safe_template",
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: "no_safe_template",
+        plan: automationDecisionToLegacyPlan({
+          decision: no_template_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
+
+  const render_result = renderSafeTemplate({
+    template: template_result.template,
+    message,
+    inboundFrom,
+    inboundTo,
+    classification,
+    context: context || latestThreadContext,
+  });
+
+  if (!render_result.ok) {
+    const render_failed_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: "template_render_failed",
+      audit_reason: "template_render_failed",
+    };
+
+    warn("[AUTO_REPLY_BLOCKED]", {
+      thread_key: threadKey || null,
+      primary_intent: classification?.primary_intent || null,
+      reason: render_result.reason,
+      missing: render_result.missing || [],
+    });
+
+    return {
+      ok: true,
+      automation_decision: render_failed_decision,
+      selected_template: template_result.template,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      audit_reason: "template_render_failed",
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: "template_render_failed",
+        plan: automationDecisionToLegacyPlan({
+          decision: render_failed_decision,
+          classification,
+          selectedTemplate: template_result.template,
+        }),
+        brain_stage: clean(template_result.template.use_case) || null,
+      },
+    };
+  }
+
+  const selected_template = template_result.template;
+  const rendered_message_text = render_result.rendered_message_text;
+  const selected_use_case =
+    clean(selected_template.use_case) ||
+    routeProfileCandidates(base_decision.route_hint, classification?.primary_intent)[0] ||
+    null;
+  const scheduled_for = new Date(
+    new Date(now).getTime() + Math.max(Number(scheduleDelaySeconds) || 0, 0) * 1000
+  ).toISOString();
+
+  const legacy_plan = automationDecisionToLegacyPlan({
+    decision: base_decision,
+    classification,
+    selectedTemplate: selected_template,
+    renderedMessageText: rendered_message_text,
+  });
+
+  if (!enableQueueInsert || dryRun) {
+    return {
+      ok: true,
+      automation_decision: base_decision,
+      selected_template,
+      rendered_message_text,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: true,
+      audit_reason: base_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: "dry_run_preview",
+        plan: legacy_plan,
+        brain_stage: selected_use_case,
+        rendered_text: rendered_message_text,
+        template_id: clean(selected_template.template_id || selected_template.id) || null,
+        preview_result: {
+          rendered_message_text,
+          template_id: clean(selected_template.template_id || selected_template.id) || null,
+          selected_template_source: "sms_templates",
+        },
+      },
+    };
+  }
+
+  const normalized_to_phone = normalizeUsPhoneToE164(inboundFrom) || clean(inboundFrom);
+  const normalized_from_phone = normalizeUsPhoneToE164(inboundTo) || clean(inboundTo);
+  const queue_key = [
+    "inbound_auto_reply",
+    clean(inboundEventId) || String(Date.now()),
+    clean(selected_template.template_id || selected_template.id) || "no-template",
+    clean(threadKey) || normalized_to_phone,
+  ].join(":");
+
+  const queue_result = await insertSupabaseSendQueueRow({
+    queue_key,
+    queue_id: queue_key,
+    dedupe_key: buildSendQueueDedupeKey({
+      master_owner_id: ownerId,
+      property_id: propertyId,
+      to_phone_number: normalized_to_phone,
+      template_use_case: selected_use_case,
+      touch_number: 0,
+      campaign_session_id: clean(inboundEventId) || clean(threadKey) || "inbound_auto_reply",
+    }),
+    queue_status: "queued",
+    scheduled_for,
+    scheduled_for_utc: scheduled_for,
+    scheduled_for_local: scheduled_for,
+    timezone:
+      clean(context?.summary?.market_timezone) ||
+      clean(context?.summary?.timezone) ||
+      "America/Chicago",
+    contact_window:
+      clean(context?.summary?.contact_window) ||
+      "12AM-11:59PM CT",
+    send_priority: 5,
+    retry_count: 0,
+    max_retries: 3,
+    message_body: rendered_message_text,
+    message_text: rendered_message_text,
+    to_phone_number: normalized_to_phone,
+    from_phone_number: normalized_from_phone,
+    master_owner_id: ownerId || null,
+    prospect_id: prospectId || null,
+    property_id: propertyId || null,
+    phone_number_id: phoneId || null,
+    textgrid_number_id: context?.ids?.textgrid_number_id || null,
+    template_id: clean(selected_template.template_id || selected_template.id) || null,
+    selected_template_id: clean(selected_template.template_id || selected_template.id) || null,
+    current_stage: clean(selected_template.stage_code) || null,
+    message_type: "Follow-Up",
+    use_case_template: selected_use_case,
+    character_count: rendered_message_text.length,
+    thread_key: clean(threadKey) || normalized_to_phone,
+    template_source: "sms_templates",
+    rendered_message: rendered_message_text,
+    priority: base_decision.route_hint === "soft_followup" ? "medium" : "normal",
+    risk: classification?.automation_decision?.risk_level || "low",
+    sms_eligible: true,
+    routing_allowed: true,
+    safety_status: "allowed",
+    type: "auto_reply",
+    source_event_id: inboundEventId || null,
+    inbound_message_id: clean(inboundEventId) || null,
+    detected_intent: classification?.primary_intent || null,
+    stage_before: clean(classification?.stage_hint) || null,
+    stage_after: clean(selected_template.stage_code || selected_use_case) || null,
+    template_selected: selected_use_case,
+    market:
+      clean(context?.summary?.market) ||
+      clean(context?.summary?.market_name) ||
+      null,
+    language: clean(selected_template.language) || clean(classification?.language) || "English",
+    property_address: clean(context?.summary?.property_address) || null,
+    property_type:
+      clean(context?.summary?.property_type_scope || context?.summary?.property_type) || null,
+    metadata: {
+      source: "auto_reply",
+      action_type: "autopilot_inbound_reply",
+      classification_snapshot: classification,
+      automation_decision_snapshot: base_decision,
+      selected_template_snapshot: {
+        id: selected_template.id || null,
+        template_id: selected_template.template_id || null,
+        use_case: selected_template.use_case || null,
+        stage_code: selected_template.stage_code || null,
+        language: selected_template.language || null,
+      },
+      route_hint: base_decision.route_hint || null,
+      allowed_template_stages: base_decision.allowed_template_stages || [],
+      property_id: propertyId || null,
+      owner_id: ownerId || null,
+      prospect_id: prospectId || null,
+      phone_id: phoneId || null,
+      thread_key: clean(threadKey) || normalized_to_phone,
+      inbound_message_event_id: inboundEventId || null,
+    },
+  }, {
+    supabase,
+  });
+
+  if (!queue_result?.ok) {
+    const blocked_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: queue_result?.reason !== "duplicate_blocked",
+      reply_mode: queue_result?.reason === "duplicate_blocked" ? "none" : "manual_review",
+      human_review_reason:
+        queue_result?.reason === "duplicate_blocked" ? null : "queue_insert_failed",
+      audit_reason: queue_result?.reason || "queue_insert_failed",
+    };
+
+    warn("[AUTO_REPLY_BLOCKED]", {
+      thread_key: threadKey || null,
+      queue_reason: queue_result?.reason || "queue_insert_failed",
+      queue_row_id: queue_result?.queue_row_id || null,
+    });
+
+    return {
+      ok: true,
+      automation_decision: blocked_decision,
+      selected_template,
+      rendered_message_text,
+      queued: false,
+      queue_item_id: queue_result?.queue_item_id || null,
+      queue_row_id: queue_result?.queue_row_id || null,
+      queue_result,
+      suppression_applied: false,
+      duplicate_suppressed: queue_result?.reason === "duplicate_blocked",
+      dry_run: false,
+      audit_reason: blocked_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: blocked_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: blocked_decision,
+          classification,
+          selectedTemplate: selected_template,
+          renderedMessageText: rendered_message_text,
+          queueResult: queue_result,
+        }),
+        brain_stage: selected_use_case,
+        rendered_text: rendered_message_text,
+        template_id: clean(selected_template.template_id || selected_template.id) || null,
+        queue_result,
+      },
+    };
+  }
+
+  info("[AUTO_REPLY_QUEUED]", {
+    thread_key: threadKey || null,
+    primary_intent: classification?.primary_intent || null,
+    template_id: clean(selected_template.template_id || selected_template.id) || null,
+    queue_item_id: queue_result.queue_item_id || null,
+  });
+
+  return {
+    ok: true,
+    automation_decision: base_decision,
+    selected_template,
+    rendered_message_text,
+    queued: true,
+    queue_item_id: queue_result.queue_item_id || null,
+    queue_row_id: queue_result.queue_row_id || null,
+    queue_result,
+    suppression_applied: false,
+    duplicate_suppressed: false,
+    dry_run: false,
+    audit_reason: base_decision.audit_reason,
+    seller_stage_reply: {
+      ok: true,
+      queued: true,
+      handled: true,
+      reason: "auto_reply_queued",
+      plan: automationDecisionToLegacyPlan({
+        decision: base_decision,
+        classification,
+        selectedTemplate: selected_template,
+        renderedMessageText: rendered_message_text,
+        queueResult: queue_result,
+      }),
+      brain_stage: selected_use_case,
+      rendered_text: rendered_message_text,
+      template_id: clean(selected_template.template_id || selected_template.id) || null,
+      queue_row_id: queue_result.queue_row_id || null,
+      queue_result,
+    },
+  };
+}
+
+export default applyInboundAutomationDecision;

@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const TIMEOUT_MS_BY_MODE = {
-  initial_boot: 20_000,
+  initial_boot: 30_000,
   manual_bucket_switch: 15_000,
   auto_refresh: 10_000,
 }

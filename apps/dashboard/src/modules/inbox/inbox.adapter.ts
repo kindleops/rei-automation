@@ -8,8 +8,25 @@ import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } f
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 
-const LIVE_INBOX_TIMEOUT_MS = 10000 // 10s timeout guard
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
+type InboxTimeoutMode = NonNullable<InboxFetchOptions['_timeoutMode']>
+
+const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
+  initial_boot: 30_000,
+  manual_bucket_switch: 15_000,
+  auto_refresh: 10_000,
+}
+
+const DEFAULT_LIVE_INBOX_TIMEOUT_MODE: InboxTimeoutMode = 'manual_bucket_switch'
+
+const resolveLiveInboxTimeoutMode = (options: InboxFetchOptions): InboxTimeoutMode => {
+  if (options._timeoutMode) return options._timeoutMode
+  if (options._automatic) return 'auto_refresh'
+  return DEFAULT_LIVE_INBOX_TIMEOUT_MODE
+}
+
+const resolveLiveInboxTimeoutMs = (timeoutMode: InboxTimeoutMode): number =>
+  LIVE_INBOX_TIMEOUT_MS_BY_MODE[timeoutMode] ?? LIVE_INBOX_TIMEOUT_MS_BY_MODE[DEFAULT_LIVE_INBOX_TIMEOUT_MODE]
 
 const withTimeout = async <T,>(
   run: (signal: AbortSignal) => Promise<T>,
@@ -22,7 +39,7 @@ const withTimeout = async <T,>(
   let timedOut = false
 
   // Forward external abort immediately so the network request is actually cancelled,
-  // not kept alive until the 10s timer fires.
+  // not kept alive until the timeout timer fires.
   const forwardAbort = () => controller.abort()
   if (externalSignal) {
     if (externalSignal.aborted) {
@@ -487,9 +504,22 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
 export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
   const filterKey = options.filters?.view ?? 'all_messages'
   const scopedCacheKey = `${CACHE_KEY}:${filterKey}`
+  const timeoutMode = resolveLiveInboxTimeoutMode(options)
+  const timeoutMs = resolveLiveInboxTimeoutMs(timeoutMode)
+  const fetchOptions: InboxFetchOptions = options._timeoutMode === timeoutMode
+    ? options
+    : { ...options, _timeoutMode: timeoutMode }
+
+  console.info('[INBOX_TIMEOUT_CONFIG]', {
+    filterKey,
+    timeoutMode,
+    timeoutMs,
+    automatic: options._automatic === true,
+    refreshReason: options._refreshReason ?? null,
+  })
 
   if (isDev) {
-    console.log('[dashboard boot] live inbox fetch started', { options, filterKey })
+    console.log('[dashboard boot] live inbox fetch started', { options, filterKey, timeoutMode, timeoutMs })
   }
 
   if (!hasSupabaseEnv) {
@@ -499,9 +529,9 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
 
   try {
     const result = await withTimeout(
-      (signal) => fetchInboxModel({ ...options, signal }),
-      LIVE_INBOX_TIMEOUT_MS,
-      `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
+      (signal) => fetchInboxModel({ ...fetchOptions, signal }),
+      timeoutMs,
+      `Live Inbox request timed out after ${timeoutMs}ms (${timeoutMode})`,
       options.signal,
     )
 
@@ -544,6 +574,9 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     if (options.signal?.aborted) throw error
 
     const liveFetchError = error instanceof Error ? error.message : String(error)
+    if (liveFetchError.includes('timed out')) {
+      console.warn('[INBOX_TIMEOUT_HIT]', { filterKey, timeoutMode, timeoutMs, liveFetchError })
+    }
     if (isDev) {
       console.error('[NEXUS] Inbox live load failed.', { filterKey, error })
     }
