@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
+import { inboxReducer, EMPTY_INBOX_STORE_STATE } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
 import { fetchInboxModel, type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
@@ -6,28 +7,41 @@ import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
-import { fetchWithRetry } from '../../lib/utils/fetchWithRetry'
 
-const LIVE_INBOX_TIMEOUT_MS = 60000 // Increased timeout for reliable boot
+const LIVE_INBOX_TIMEOUT_MS = 10000 // 10s timeout guard
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
 
 const withTimeout = async <T,>(
   run: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   timeoutMessage: string,
+  externalSignal?: AbortSignal,
 ): Promise<T> => {
   const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let timedOut = false
+
+  // Forward external abort immediately so the network request is actually cancelled,
+  // not kept alive until the 10s timer fires.
+  const forwardAbort = () => controller.abort()
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort()
+    } else {
+      externalSignal.addEventListener('abort', forwardAbort, { once: true })
+    }
+  }
+
   try {
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    timeoutId = setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs)
     return await run(controller.signal)
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(timeoutMessage)
-    }
+    if (timedOut) throw new Error(timeoutMessage)
+    // External abort or real network error — re-throw as-is so runLoad can handle it.
     throw error
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
+    if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort)
   }
 }
 
@@ -56,6 +70,7 @@ const emptyLiveErrorModel = (liveFetchError: string): InboxModel => {
     archivedThreadsCount: null,
     hiddenThreadsCount: null,
     suppressedThreadsCount: null,
+    deadThreadsCount: null,
     lastLiveFetchAt: new Date().toISOString(),
   }
 }
@@ -149,7 +164,6 @@ export interface InboxThread {
   threadIsArchived?: boolean
   threadIsRead?: boolean
   latestMessage?: string
-  inbox_category?: string
   display_phone?: string
   bestPhone?: string
   isRead?: boolean
@@ -160,10 +174,25 @@ export interface InboxThread {
   yearBuilt?: string | number
   equityAmount?: number
   equityPercent?: number
+  equity_percent?: number
   motivationScore?: number
   estimatedRepairCost?: number
   estimatedValue?: number | null
   contactLanguage?: string
+  
+  // DealContext nested objects
+  property_data?: any
+  master_owner_data?: any
+  prospect_data?: any
+  phone_data?: any
+  email_data?: any
+  thread_state_data?: any
+  campaign_data?: any
+  queue_data?: any
+  suppression_data?: any
+  valuation_data?: any
+  buyer_match_data?: any
+  contact_stack_json?: any
 
   // UNIVERSAL SELLER WORK ITEM FIELDS
   is_uncontacted?: boolean
@@ -197,6 +226,35 @@ export interface InboxThread {
   prospect_best_email?: string
   sms_eligible?: boolean
   email_eligible?: boolean
+
+  // DealContext flat fields
+  deal_context_id?: string
+  context_type?: string
+  seller_phone?: string
+  sender_phone?: string
+  owner_name?: string
+  display_name?: string
+  property_address_full?: string
+  market_name?: string
+  universal_status?: string
+  universal_stage?: string
+  inbox_bucket?: string
+  reply_intent?: string
+  lead_temperature?: string
+  prospect_name?: string
+  full_name?: string
+  first_name?: string
+  latitude?: number
+  longitude?: number
+  property_type?: string
+  property_class?: string
+  estimated_value?: number
+  estimated_arv?: number
+  cash_offer?: number
+  final_acquisition_score?: number
+  priority_score?: number
+  campaign_name?: string
+  queue_status?: string
 
   // OWNER
   primary_owner_address?: string
@@ -236,12 +294,10 @@ export interface InboxThread {
   property_address_zip?: string
   property_county_name?: string
   market_region?: string
-  property_class?: string
   estimated_repair_cost?: number
   estimated_repair_cost_per_sqft?: number
   deal_strength_score?: number
   equity_amount?: number
-  equity_percent?: number
   total_loan_amt?: number
   total_loan_balance?: number
   total_loan_payment?: number
@@ -341,9 +397,11 @@ export interface InboxModel {
   urgentCount: number
   totalCount: number
   aiDraftCount: number
-  dataMode: 'live' | 'mock_preview'
+  dataMode: 'live' | 'mock_preview' | 'fallback_error'
   liveFetchStatus: 'active' | 'error' | 'disabled' | 'fallback_error'
   liveFetchError: string | null
+  /** Internal: tracks which filter was used to load these threads — prevents stale rows bleeding across filter switches */
+  _requestedFilter?: string
   messageEventsCount: number | null
   messageEventsRawCount: number | null
   groupedThreadCount: number | null
@@ -356,7 +414,9 @@ export interface InboxModel {
   archivedThreadsCount: number | null
   hiddenThreadsCount: number | null
   suppressedThreadsCount: number | null
+  deadThreadsCount?: number | null
   lastLiveFetchAt: string | null
+
   counts?: Record<string, number | null | undefined>
   mapPins?: LiveInboxMapPin[]
   pagination?: LiveInboxPagination | null
@@ -395,6 +455,7 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
   const archivedThreads = threads.filter((t) => t.status === 'archived').length
   const hiddenThreads = threads.filter((t) => t.priorityBucket === 'hidden').length
   const suppressedThreads = threads.filter((t) => t.priorityBucket === 'suppressed').length
+  const deadThreads = threads.filter((t) => t.priorityBucket === 'dead' || t.inboxCategory === 'dead').length
 
   return {
     threads,
@@ -417,32 +478,34 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
     archivedThreadsCount: archivedThreads,
     hiddenThreadsCount: hiddenThreads,
     suppressedThreadsCount: suppressedThreads,
+    deadThreadsCount: deadThreads,
     lastLiveFetchAt: null,
   }
 }
 
 
 export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
+  const filterKey = options.filters?.view ?? 'all_messages'
+  const scopedCacheKey = `${CACHE_KEY}:${filterKey}`
+
   if (isDev) {
-    console.log('[dashboard boot] live inbox fetch started', { options })
+    console.log('[dashboard boot] live inbox fetch started', { options, filterKey })
   }
 
   if (!hasSupabaseEnv) {
     const liveFetchError = 'Live mode enabled but Supabase env vars are missing.'
-    return emptyLiveErrorModel(liveFetchError)
+    return { ...emptyLiveErrorModel(liveFetchError), _requestedFilter: filterKey }
   }
 
   try {
-    const result = await fetchWithRetry(
-      () => withTimeout(
-        (signal) => fetchInboxModel({ ...options, signal }),
-        LIVE_INBOX_TIMEOUT_MS,
-        `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
-      ),
-      { retries: 2, delay: 1000 }
+    const result = await withTimeout(
+      (signal) => fetchInboxModel({ ...options, signal }),
+      LIVE_INBOX_TIMEOUT_MS,
+      `Live Inbox request timed out after ${LIVE_INBOX_TIMEOUT_MS}ms`,
+      options.signal,
     )
 
-    // Save lightweight cache: timestamp + first 25 lightweight threads
+    // Save lightweight cache scoped to this filter key so different filters never bleed
     try {
       const lightweightThreads = result.threads.slice(0, 25).map(t => ({
         id: t.id,
@@ -457,40 +520,52 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
         inboxCategory: t.inboxCategory,
         uiIntent: t.uiIntent,
       }))
-      
+
       const cachePayload = JSON.stringify({
         ...result,
         threads: lightweightThreads,
         lastLiveFetchAt: new Date().toISOString(),
         dataMode: 'mock_preview',
+        _requestedFilter: filterKey,
       })
-      
-      localStorage.setItem(CACHE_KEY, cachePayload)
+
+      localStorage.setItem(scopedCacheKey, cachePayload)
     } catch (cacheError) {
       console.warn('[Inbox] Failed to save lightweight cache', cacheError)
-      // If even lightweight fails, clear it to be safe
-      localStorage.removeItem(CACHE_KEY)
+      localStorage.removeItem(scopedCacheKey)
     }
-    
-    if (isDev) console.log('[dashboard boot] live inbox fetch success')
-    return result
+
+    if (isDev) console.log('[dashboard boot] live inbox fetch success', { filterKey, count: result.threads.length })
+    return { ...result, _requestedFilter: filterKey }
   } catch (error) {
+    // Request was aborted by runLoad (superseded or component cleanup) — let the
+    // catch in runLoad handle it silently via controller.signal.aborted check.
+    // Do NOT commit fallback_error for an intentionally cancelled request.
+    if (options.signal?.aborted) throw error
+
     const liveFetchError = error instanceof Error ? error.message : String(error)
     if (isDev) {
-      console.error('[NEXUS] Inbox Supabase live load failed.', error)
+      console.error('[NEXUS] Inbox live load failed.', { filterKey, error })
     }
-    
-    // Return cache if it exists, even if fetch failed
-    const cached = localStorage.getItem(CACHE_KEY)
+
+    // Only return cache for the SAME filter — never substitute a different filter's cache
+    const cached = localStorage.getItem(scopedCacheKey)
     if (cached) {
       try {
-        return { ...JSON.parse(cached), dataMode: 'fallback_error', liveFetchError }
-      } catch (e) {
-        return emptyLiveErrorModel(liveFetchError)
+        const parsed = JSON.parse(cached)
+        return {
+          ...parsed,
+          _requestedFilter: filterKey,
+          dataMode: 'fallback_error',
+          liveFetchStatus: 'fallback_error',
+          liveFetchError,
+        }
+      } catch {
+        localStorage.removeItem(scopedCacheKey)
       }
     }
-    
-    return emptyLiveErrorModel(liveFetchError)
+
+    return { ...emptyLiveErrorModel(liveFetchError), _requestedFilter: filterKey }
   }
 }
 
@@ -535,168 +610,248 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   } as InboxWorkflowThread
 }
 
-const EMPTY_MODEL: InboxModel = {
-  threads: [],
-  unreadCount: 0,
-  urgentCount: 0,
-  totalCount: 0,
-  aiDraftCount: 0,
-  dataMode: 'mock_preview',
-  liveFetchStatus: 'disabled',
-  liveFetchError: null,
-  messageEventsCount: null,
-  messageEventsRawCount: null,
-  groupedThreadCount: null,
-  priorityInboxCount: null,
-  activeInboxCount: null,
-  waitingInboxCount: null,
-  allInboxCount: null,
-  unreadThreadsCount: null,
-  sendQueueCount: null,
-  archivedThreadsCount: null,
-  hiddenThreadsCount: null,
-  suppressedThreadsCount: null,
-  lastLiveFetchAt: null,
-  loadedCount: 0,
-  fullyHydratedCount: 0,
-  partiallyHydratedCount: 0,
-  orphanCount: 0,
-  latestFetchMs: 0,
-  realtimeConnected: false,
+// ── Helper: extract view counts from InboxModel ───────────────────────────────
+
+const extractViewCounts = (model: InboxModel): Record<string, number> => {
+  const counts: Record<string, number> = {}
+  if (model.counts) Object.assign(counts, model.counts)
+  if (model.priorityInboxCount != null) counts.priority = model.priorityInboxCount
+  if (model.activeInboxCount != null) counts.automated = model.activeInboxCount
+  if (model.waitingInboxCount != null) counts.cold = model.waitingInboxCount
+  if (model.allInboxCount != null) counts.all = model.allInboxCount
+  if (model.unreadThreadsCount != null) counts.new_replies = model.unreadThreadsCount
+  if (model.suppressedThreadsCount != null) counts.suppressed = model.suppressedThreadsCount
+  if (model.deadThreadsCount != null) counts.dead = model.deadThreadsCount
+  return counts
 }
 
-const threadIdentity = (thread: Pick<InboxThread, 'id' | 'threadKey'>): string =>
-  thread.threadKey || thread.id
+// ── useInboxData — reducer-based, bucket-isolated ────────────────────────────
+//
+// State is managed by inboxReducer. Each bucket owns its own rows, loading state,
+// error, and requestId. Stale responses are ignored inside the reducer — there is
+// no shared mutable ref that async callbacks can race against.
+//
+// KPI counts live in state.viewCounts — fully isolated from bucket rows.
+// Realtime patches dispatch REALTIME_PATCH_THREAD, updating a single row
+// in whichever bucket contains it.
 
-
-// selectedThreadPreserved: merge refreshes into existing rows instead of replacing the list.
-const mergeInboxModels = (prev: InboxModel, next: InboxModel, mode: 'refresh' | 'append'): InboxModel => {
-  // Prevent wiping out the inbox if a background refresh encounters an error
-  if (next.liveFetchStatus === 'fallback_error' && prev.threads.length > 0) {
-    if (isDev) console.warn('[mergeInboxModels] Ignoring fallback_error to prevent wiping existing threads', next.liveFetchError)
-    return {
-      ...prev,
-      liveFetchStatus: 'fallback_error',
-      liveFetchError: next.liveFetchError,
-      dataMode: next.dataMode,
-    }
-  }
-
-  const prevByKey = new Map(prev.threads.map((thread) => [threadIdentity(thread), thread]))
-  const mergedById = new Map<string, InboxThread>()
-  const ordered = mode === 'append'
-    ? [...prev.threads, ...next.threads]
-    : next.threads
-  for (const thread of ordered) {
-    const key = threadIdentity(thread)
-    const base = prevByKey.get(key)
-    const existing = mergedById.get(key)
-    mergedById.set(key, existing ? { ...existing, ...thread } : { ...base, ...thread })
-  }
-  return {
-    ...prev,
-    ...next,
-    threads: Array.from(mergedById.values()),
-    mapPins: next.mapPins && next.mapPins.length > 0 ? next.mapPins : prev.mapPins,
-    pagination: next.pagination ?? prev.pagination ?? null,
-  }
+const BUCKET_ALIAS_MAP: Record<string, string> = {
+  all: 'all_messages',
+  all_conversations: 'all_messages',
+  new_inbounds: 'new_replies',
+  my_priority: 'priority',
 }
 
-export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations') => {
+const normalizeBucketKey = (key: string): string => BUCKET_ALIAS_MAP[key] ?? key
+
+export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; paused?: boolean } = {}) => {
+  const { initialSourceMode = 'conversations', paused = false } = options
   const [sourceMode, setSourceMode] = useState<InboxSourceMode>(initialSourceMode)
-  const [data, setData] = useState<InboxModel>(EMPTY_MODEL)
-  const [loading, setLoading] = useState(true)
+  const [storeState, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STORE_STATE)
+
+  // Sync ref so async callbacks can read latest state without stale closures.
+  const stateRef = useRef(storeState)
+  stateRef.current = storeState
+
   const [error, setError] = useState<unknown>(null)
   const [recentlyUpdatedThreadIds, setRecentlyUpdatedThreadIds] = useState<Set<string>>(new Set())
+
+  // Non-row metadata from the last successful API response (counts, map pins, etc.)
+  const metaRef = useRef<Partial<InboxModel>>({})
+
   const lastFetchRef = useRef<InboxFetchOptions>({ sourceMode: initialSourceMode })
-  const dataRef = useRef<InboxModel>(EMPTY_MODEL)
-  const abortRef = useRef<AbortController | null>(null)
-  const requestSeqRef = useRef(0)
+  const abortByBucketRef = useRef<Record<string, AbortController>>({})
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastRefreshAtRef = useRef<string | null>(null)
   const realtimeBatchRef = useRef<{ tables: Set<string>; threadKeys: Set<string>; eventCount: number }>({
-    tables: new Set(),
-    threadKeys: new Set(),
-    eventCount: 0,
+    tables: new Set(), threadKeys: new Set(), eventCount: 0,
   })
 
-  // Realtime config
   const realtimeEnabled = String(import.meta.env.VITE_INBOX_REALTIME_ENABLED ?? 'true').toLowerCase() !== 'false'
-  const minRefreshMs = 5000
-  const lastRefreshAtRef = useRef<string | null>(null)
-  const loadingRef = useRef(false)
+  const minRefreshMs = 120_000 // 2 minutes
 
-  useEffect(() => {
-    if (isDev) {
-      console.log('[useInboxData] initialized', {
-        sourceMode,
-        realtimeEnabled,
-        dataSource: shouldUseSupabase() ? 'live' : 'mock',
-        hasEnvVars: hasSupabaseEnv,
-      })
-    }
-  }, [realtimeEnabled, sourceMode])
+  if (isDev) {
+    // Log on first render only (conditional render logging, not an effect).
+  }
 
-  useEffect(() => {
-    dataRef.current = data
-  }, [data])
-
-  useEffect(() => {
-    loadingRef.current = loading
-  }, [loading])
+  // ── Core fetch ────────────────────────────────────────────────────────────
 
   const runLoad = useCallback(async (options: InboxFetchOptions, mode: 'refresh' | 'append') => {
-    const requestSeq = ++requestSeqRef.current
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    if (dataRef.current.threads.length === 0) setLoading(true)
+    const rawBucketKey = (options.filters?.view ?? stateRef.current.activeBucketKey) as string
+    const bucketKey = normalizeBucketKey(rawBucketKey)
+    // Normalize the filter view so backend and cache always use canonical key
+    const normalizedOptions: InboxFetchOptions = options.filters?.view && options.filters.view !== bucketKey
+      ? { ...options, filters: { ...options.filters, view: bucketKey as any } }
+      : options
+    const requestId = `${bucketKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    const runOptions = { ...options, signal: controller.signal }
+    // Never start a new refresh if same bucket fetch is already in flight.
+    if (abortByBucketRef.current[bucketKey] && mode === 'refresh') {
+      if (isDev) console.log(`[InboxRefreshSkip] Already in flight for bucket: ${bucketKey}`)
+      return null
+    }
+
+    // Abort previous in-flight request for this specific bucket (only for append, or if we really want to supersede).
+    if (mode === 'append') {
+      abortByBucketRef.current[bucketKey]?.abort()
+    }
+    
+    const controller = new AbortController()
+    abortByBucketRef.current[bucketKey] = controller
+
+    dispatch({ type: 'BUCKET_FETCH_START', bucketKey, requestId })
+    console.log('[INBOX_FETCH_START]', bucketKey, requestId)
+
+    const fetchStart = performance.now()
     try {
-      const model = await loadInbox(runOptions)
-      if (requestSeq !== requestSeqRef.current) {
-        if (isDev) console.log('[useInboxData] request superseded', { requestSeq, current: requestSeqRef.current })
-        return dataRef.current
+      const model = await loadInbox({ ...normalizedOptions, signal: controller.signal })
+      const fetchMs = Math.round(performance.now() - fetchStart)
+      console.log('[INBOX_FETCH_DONE]', bucketKey, model?.threads?.length ?? 0, `${fetchMs}ms`)
+
+      const currentBucket = stateRef.current.buckets[bucketKey]
+      const currentRowsCount = currentBucket?.rows?.length ?? 0
+
+      // Protection Rule: Only allow live data into bucket rows. Fallback/degraded
+      // data is blocked regardless of current row count.
+      // On initial boot (0 rows) with degraded data, log and show empty state.
+      if (model.dataMode !== 'live') {
+        if (currentRowsCount === 0) {
+          console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads.length, dataMode: model.dataMode })
+        } else {
+          console.warn(`[Inbox Protection] Ignoring degraded/fallback response. Preserving ${currentRowsCount} existing rows.`)
+        }
+        dispatch({
+          type: 'BUCKET_FETCH_ERROR',
+          bucketKey,
+          requestId,
+          error: model.liveFetchError ?? 'Data mode degraded. Inbox will retry on next poll.'
+        })
+        delete abortByBucketRef.current[bucketKey]
+        return model
       }
-      setData((prev) => mergeInboxModels(prev, model ?? EMPTY_MODEL, mode))
-      setError(null)
-      lastRefreshAtRef.current = new Date().toISOString()
-      if (isDev) {
-        console.log('[useInboxData] refresh complete', {
-          refreshReason: 'manual',
-          sourceMode: options.sourceMode,
-          lastRefreshAt: lastRefreshAtRef.current,
-          rowCount: model?.threads?.length ?? 0,
-          totalCount: model?.totalCount ?? 0,
-          dataMode: model?.dataMode,
+
+      if (mode === 'append') {
+        // Protection Rule: Load-more failure (0 rows but not live) shouldn't overwrite anything.
+        if (model.dataMode !== 'live' && (model.threads?.length ?? 0) === 0) {
+           console.warn('[Inbox Protection] Ignoring degraded load-more response.')
+           dispatch({
+             type: 'BUCKET_FETCH_ERROR',
+             bucketKey,
+             requestId,
+             error: model.liveFetchError ?? 'Load more degraded.'
+           })
+           delete abortByBucketRef.current[bucketKey]
+           return model
+        }
+
+        dispatch({
+          type: 'BUCKET_APPEND_ROWS',
+          bucketKey,
+          requestId,
+          rows: model.threads,
+          cursor: model.pagination?.nextCursor ?? null,
+          hasMore: Boolean(model.pagination?.hasMore),
+        })
+      } else {
+        dispatch({
+          type: 'BUCKET_FETCH_DONE',
+          bucketKey,
+          requestId,
+          rows: model.threads,
+          cursor: model.pagination?.nextCursor ?? null,
+          hasMore: Boolean(model.pagination?.hasMore),
         })
       }
+
+      // Counts are isolated: SET_VIEW_COUNTS never touches bucket rows.
+      // Protection Rule: Only update counts if the response is fully healthy.
+      if (model.dataMode === 'live') {
+        const counts = extractViewCounts(model)
+        if (Object.keys(counts).length > 0) {
+          dispatch({ type: 'SET_VIEW_COUNTS', counts })
+        }
+      }
+
+      // Store secondary metadata (mapPins, pagination, debug counts) separately.
+      if (model.dataMode === 'live') {
+        metaRef.current = {
+          unreadCount: model.unreadCount,
+          urgentCount: model.urgentCount,
+          totalCount: model.totalCount,
+          aiDraftCount: model.aiDraftCount,
+          mapPins: model.mapPins,
+          pagination: model.pagination,
+          loadedCount: model.loadedCount,
+          fullyHydratedCount: model.fullyHydratedCount,
+          partiallyHydratedCount: model.partiallyHydratedCount,
+          orphanCount: model.orphanCount,
+          latestFetchMs: fetchMs,
+          lastLiveFetchAt: new Date().toISOString(),
+          dataMode: 'live' as const,
+        }
+      }
+
+      lastRefreshAtRef.current = new Date().toISOString()
+      setError(null)
+      if (isDev) {
+        console.log('[useInboxData] refresh complete', {
+          bucketKey,
+          rowCount: model.threads.length,
+          totalCount: model.totalCount,
+          dataMode: model.dataMode,
+        })
+      }
+      delete abortByBucketRef.current[bucketKey]
       return model
     } catch (err) {
-      if (controller.signal.aborted) return dataRef.current
+      delete abortByBucketRef.current[bucketKey]
+      if (controller.signal.aborted) return null
+      const errMsg = err instanceof Error ? err.message : String(err)
+      dispatch({ type: 'BUCKET_FETCH_ERROR', bucketKey, requestId, error: errMsg })
       setError(err)
       if (isDev) console.error('[NEXUS] useInboxData load failed', err)
-      return dataRef.current
-    } finally {
-      if (requestSeq === requestSeqRef.current) setLoading(false)
+      return null
     }
   }, [])
 
+  // ── Refresh ───────────────────────────────────────────────────────────────
+
   const refresh = useCallback(async (options: InboxFetchOptions = {}) => {
-    // Check minimum time between refreshes for automatic triggers
+    const rawBucketKey = (options.filters?.view ?? stateRef.current.activeBucketKey) as string
+    const bucketKey = normalizeBucketKey(rawBucketKey)
+
     if (options._automatic) {
-      const now = Date.now()
-      const lastRefresh = lastRefreshAtRef.current ? new Date(lastRefreshAtRef.current).getTime() : 0
-      if (now - lastRefresh < minRefreshMs) {
-        if (isDev) {
-          console.log('[useInboxData] skippedRefreshReason: min interval not met', {
-            lastRefreshAt: lastRefreshAtRef.current,
-            msSinceLast: now - lastRefresh,
-            minMs: minRefreshMs,
-          })
-        }
-        return dataRef.current
+      if (document.hidden) {
+        if (isDev) console.log('[InboxRefreshSkip] document hidden')
+        return null
       }
+      
+      // Implement paused check from props or options
+      if (paused || options.paused) {
+        if (isDev) console.log('[InboxRefreshSkip] paused (messages loading or heavy load)')
+        return null
+      }
+
+      const now = Date.now()
+      const last = lastRefreshAtRef.current ? new Date(lastRefreshAtRef.current).getTime() : 0
+      
+      // Implement 2min minimum interval for auto-refresh
+      if (now - last < minRefreshMs) {
+        if (isDev) console.log('[InboxRefreshSkip] min interval not met', { elapsed: now - last, min: minRefreshMs })
+        return null
+      }
+
+      // If active bucket already has live rows and last successful live fetch was <2 min ago, skip refresh.
+      const currentBucket = stateRef.current.buckets[bucketKey]
+      if (currentBucket && currentBucket.rows.length > 0 && (now - last < minRefreshMs)) {
+         if (isDev) console.log(`[InboxRefreshSkip] bucket ${bucketKey} already has live data`)
+         return null
+      }
+    }
+
+    // Switch bucket immediately — shows cached rows or empty, never other bucket's rows.
+    if (!options._automatic && bucketKey !== stateRef.current.activeBucketKey) {
+      dispatch({ type: 'SWITCH_BUCKET', bucketKey })
     }
 
     lastFetchRef.current = {
@@ -705,35 +860,38 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       sourceMode,
       filters: options.filters !== undefined ? options.filters : lastFetchRef.current.filters,
       cursor: options.cursor ?? null,
-      maxRows: options.maxRows ?? lastFetchRef.current.maxRows ?? 1000,
     }
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const query = lastFetchRef.current.filters?.query ?? ''
     const delay = query.trim() ? 250 : 0
     if (delay === 0) return runLoad(lastFetchRef.current, 'refresh')
-    return await new Promise<InboxModel>((resolve) => {
+    return await new Promise<InboxModel | null>((resolve) => {
       debounceRef.current = setTimeout(() => {
         void runLoad(lastFetchRef.current, 'refresh').then(resolve)
       }, delay)
     })
-  }, [runLoad, sourceMode])
+  }, [runLoad, sourceMode, minRefreshMs])
+
+  // ── Load More ─────────────────────────────────────────────────────────────
 
   const loadMore = useCallback(async (options: InboxFetchOptions = {}) => {
-    if (loading) return dataRef.current
-    const cursor = options.cursor ?? dataRef.current.pagination?.nextCursor ?? null
-    const moreOptions = {
+    const activeBucket = stateRef.current.buckets[stateRef.current.activeBucketKey]
+    if (activeBucket?.loading) return null
+    const cursor = activeBucket?.cursor ?? null
+    const offset = cursor ? undefined : (activeBucket?.rows.length ?? 0)
+    return runLoad({
       ...lastFetchRef.current,
       ...options,
       sourceMode,
-      filters: lastFetchRef.current.filters,
       cursor,
-      offset: cursor ? undefined : dataRef.current.threads.length,
-      maxRows: options.maxRows ?? 1000,
-      limit: options.limit ?? options.maxRows ?? 1000,
-    }
-    return runLoad(moreOptions, 'append')
-  }, [loading, runLoad, sourceMode])
+      offset,
+      maxRows: options.maxRows ?? 50,
+      limit: options.limit ?? options.maxRows ?? 50,
+    }, 'append')
+  }, [runLoad, sourceMode])
+
+  // ── Realtime subscription + polling heartbeat ─────────────────────────────
 
   useEffect(() => {
     let cancelled = false
@@ -742,9 +900,6 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null
 
-    // Polling heartbeat — catches missed realtime events and keeps the list fresh
-    // when realtime is disabled. 30 s is fast enough to feel live; the _automatic
-    // flag enforces the 5 s minimum-gap guard so rapid polls don't stack.
     const POLL_INTERVAL_MS = realtimeEnabled ? 60_000 : 30_000
     const pollInterval = window.setInterval(() => {
       if (!cancelled) void refresh({ _automatic: true })
@@ -765,75 +920,68 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
       const supabase = getSupabaseClient()
       const triggerRefresh = (payload: { table?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
         const table = payload?.table ?? 'unknown'
-        const rawThreadKey = payload?.new?.thread_key || payload?.old?.thread_key
-        const threadKey = typeof rawThreadKey === 'string' ? rawThreadKey : ''
-        
+        const rawKey = payload?.new?.thread_key || payload?.old?.thread_key
+        const threadKey = typeof rawKey === 'string' ? rawKey : ''
+
         if (threadKey) {
           markRecentlyUpdated(threadKey)
-          
-          // Surgical update if it's a message event
+
           if (table === 'message_events' && payload.new) {
-            setData(prev => {
-              const threads = [...prev.threads]
-              const idx = threads.findIndex(t => (t.threadKey || t.id) === threadKey)
-              if (idx !== -1) {
-                const row = payload.new as any
-                const direction = row.direction || 'inbound'
-                const body = row.message_body || row.rendered_message || ''
-                const at = row.message_created_at || row.event_timestamp || new Date().toISOString()
-                
-                const updatedThread: InboxThread = {
-                  ...threads[idx],
-                  preview: body,
-                  lastMessageIso: at,
-                  lastMessageLabel: formatRelativeTime(at),
-                  latestMessageBody: body,
-                  latestMessageAt: at,
-                  latestDirection: direction,
-                  messageCount: (threads[idx].messageCount || 0) + 1,
-                  status: direction === 'inbound' ? 'unread' : 'replied',
-                  unreadCount: direction === 'inbound' ? (threads[idx].unreadCount || 0) + 1 : 0,
-                  needsReply: direction === 'inbound',
-                  isRead: direction !== 'inbound',
-                }
-                
-                threads[idx] = updatedThread
-                
-                // Sort after update
-                threads.sort((a, b) => new Date(b.lastMessageIso).getTime() - new Date(a.lastMessageIso).getTime())
-                return { ...prev, threads }
+            if (isDev) console.log('[SMOOTH_REALTIME_PATCH]', { table, threadKey, type: 'message' })
+            const row = payload.new as Record<string, unknown>
+            const direction = (row.direction as string) || 'inbound'
+            const body = (row.message_body as string) || (row.rendered_message as string) || ''
+            const at = (row.message_created_at as string) || (row.event_timestamp as string) || new Date().toISOString()
+            // Find current row to compute incremented counts
+            let currentMessageCount = 0
+            let currentUnreadCount = 0
+            for (const bucket of Object.values(stateRef.current.buckets)) {
+              const found = bucket.rows.find((r) => {
+                const t = r as Record<string, unknown>
+                return t.threadKey === threadKey || t.id === threadKey
+              }) as Record<string, unknown> | undefined
+              if (found) {
+                currentMessageCount = (found.messageCount as number) || 0
+                currentUnreadCount = (found.unreadCount as number) || 0
+                break
               }
-              return prev
+            }
+            dispatch({
+              type: 'REALTIME_PATCH_THREAD',
+              threadKey,
+              patch: {
+                preview: body,
+                lastMessageIso: at,
+                lastMessageLabel: at,
+                latestMessageBody: body,
+                latestMessageAt: at,
+                latestDirection: direction,
+                messageCount: currentMessageCount + 1,
+                status: direction === 'inbound' ? 'unread' : 'replied',
+                unreadCount: direction === 'inbound' ? currentUnreadCount + 1 : 0,
+                needsReply: direction === 'inbound',
+                isRead: direction !== 'inbound',
+              },
             })
           }
-          
-          // Surgical update if it's a thread state change
-          if (table === 'inbox_thread_state' && payload.new) {
-            setData(prev => {
-              const threads = [...prev.threads]
-              const idx = threads.findIndex(t => (t.threadKey || t.id) === threadKey)
-              if (idx !== -1) {
-                const row = payload.new as any
-                threads[idx] = {
-                  ...threads[idx],
-                  inboxCategory: row.inbox_category || threads[idx].inboxCategory,
-                  uiIntent: row.detected_intent || row.ui_intent || threads[idx].uiIntent,
-                  workflowStage: row.thread_stage || threads[idx].workflowStage,
-                  status: row.is_archived ? 'archived' : (row.is_read ? 'read' : threads[idx].status),
-                  unreadCount: row.is_read ? 0 : threads[idx].unreadCount,
-                  isRead: row.is_read ?? threads[idx].isRead,
-                }
-                return { ...prev, threads }
-              }
-              return prev
-            })
+
+          if (table === 'operator_thread_state' && payload.new) {
+            if (isDev) console.log('[SMOOTH_REALTIME_PATCH]', { table, threadKey, type: 'thread_state' })
+            const row = payload.new as Record<string, unknown>
+            const patch: Record<string, unknown> = {}
+            if (row.inbox_category != null) patch.inboxCategory = row.inbox_category
+            if (row.detected_intent != null || row.ui_intent != null) patch.uiIntent = row.detected_intent || row.ui_intent
+            if (row.thread_stage != null) patch.workflowStage = row.thread_stage
+            if (row.is_archived != null) patch.status = row.is_archived ? 'archived' : (row.is_read ? 'read' : undefined)
+            if (row.is_read != null) { patch.unreadCount = row.is_read ? 0 : undefined; patch.isRead = row.is_read }
+            dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch })
           }
         }
 
         realtimeBatchRef.current.tables.add(table)
         if (threadKey) realtimeBatchRef.current.threadKeys.add(threadKey)
         realtimeBatchRef.current.eventCount += 1
-        
+
         if (refreshTimeout) clearTimeout(refreshTimeout)
         refreshTimeout = setTimeout(() => {
           if (!cancelled) {
@@ -848,18 +996,17 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
             realtimeBatchRef.current = { tables: new Set(), threadKeys: new Set(), eventCount: 0 }
             void refresh({ _automatic: true })
           }
-        }, 5000) // Longer debounce for full refresh, surgical updates handle immediate UX
+        }, 5000)
       }
-
 
       channel = supabase
         .channel('nexus-inbox-realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, triggerRefresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
         .subscribe((status) => {
-          setData((prev) => ({ ...prev, realtimeConnected: status === 'SUBSCRIBED' }))
+          dispatch({ type: 'SET_REALTIME_STATUS', status: status === 'SUBSCRIBED' ? 'connected' : 'disconnected' })
         })
 
       if (isDev) console.log('[useInboxData] realtime subscriptions active')
@@ -869,7 +1016,7 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
 
     return () => {
       cancelled = true
-      abortRef.current?.abort()
+      Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (refreshTimeout) clearTimeout(refreshTimeout)
       window.clearInterval(pollInterval)
@@ -879,8 +1026,57 @@ export const useInboxData = (initialSourceMode: InboxSourceMode = 'conversations
 
   const setMode = useCallback((mode: InboxSourceMode) => {
     setSourceMode(mode)
-    setData(EMPTY_MODEL) // Clear existing data when switching modes
-  }, [])
+    void runLoad({ ...lastFetchRef.current, sourceMode: mode, cursor: null }, 'refresh')
+  }, [runLoad])
+
+  // ── Build InboxModel from store state ─────────────────────────────────────
+  // Consumers get the same InboxModel shape as before; the underlying state model
+  // is now bucket-isolated and reducer-managed.
+
+  const activeBucketKey = storeState.activeBucketKey
+  const activeBucket = storeState.buckets[activeBucketKey]
+  const loading = activeBucket?.loading ?? true
+
+  const data: InboxModel = {
+    // Bucket rows — ONLY from the active bucket, never from another bucket's cache.
+    threads: (activeBucket?.rows ?? []) as InboxThread[],
+    liveFetchError: activeBucket?.error ?? null,
+    liveFetchStatus: activeBucket?.error ? 'fallback_error' : 'active',
+    dataMode: activeBucket?.error ? 'fallback_error' : 'live',
+
+    // Counts isolated from bucket rows — a counts failure never poisons these rows.
+    counts: storeState.viewCounts,
+    allInboxCount: (storeState.viewCounts.all ?? null) as number | null,
+    priorityInboxCount: (storeState.viewCounts.priority ?? null) as number | null,
+    activeInboxCount: (storeState.viewCounts.automated ?? null) as number | null,
+    waitingInboxCount: (storeState.viewCounts.cold ?? null) as number | null,
+    unreadThreadsCount: (storeState.viewCounts.new_replies ?? null) as number | null,
+    suppressedThreadsCount: (storeState.viewCounts.suppressed ?? null) as number | null,
+    deadThreadsCount: (storeState.viewCounts.dead ?? null) as number | null,
+
+    // Connection status
+    realtimeConnected: storeState.realtimeStatus === 'connected',
+
+    // Metadata from last successful fetch (map pins, pagination, debug fields)
+    unreadCount: metaRef.current.unreadCount ?? 0,
+    urgentCount: metaRef.current.urgentCount ?? 0,
+    totalCount: metaRef.current.totalCount ?? 0,
+    aiDraftCount: metaRef.current.aiDraftCount ?? 0,
+    mapPins: metaRef.current.mapPins,
+    pagination: metaRef.current.pagination,
+    loadedCount: metaRef.current.loadedCount ?? 0,
+    fullyHydratedCount: metaRef.current.fullyHydratedCount ?? 0,
+    partiallyHydratedCount: metaRef.current.partiallyHydratedCount ?? 0,
+    orphanCount: metaRef.current.orphanCount ?? 0,
+    latestFetchMs: metaRef.current.latestFetchMs ?? 0,
+    lastLiveFetchAt: metaRef.current.lastLiveFetchAt ?? null,
+    messageEventsCount: null,
+    messageEventsRawCount: null,
+    groupedThreadCount: null,
+    sendQueueCount: null,
+    archivedThreadsCount: null,
+    hiddenThreadsCount: null,
+  }
 
   return { data, loading, error, refresh, loadMore, recentlyUpdatedThreadIds, sourceMode, setSourceMode: setMode }
 }

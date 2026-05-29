@@ -76,6 +76,7 @@ export const MobileRepliesTab = () => {
         {BUCKETS.map(b => (
           <button
             key={b.id}
+            type="button"
             className={`nx-m-bucket-tab ${activeBucket === b.id ? 'is-active' : ''}`}
             onClick={() => setActiveBucket(b.id)}
           >

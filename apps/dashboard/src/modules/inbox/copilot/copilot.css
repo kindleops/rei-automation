@@ -14,7 +14,7 @@
   display: flex;
   flex-direction: column;
   width: 420px;
-  background: rgba(10, 12, 18, 0.85) !important;
+  background: var(--nexus-panel-strong) !important;
   backdrop-filter: blur(40px) saturate(180%) brightness(0.8) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 20px;
@@ -154,7 +154,7 @@
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(8, 10, 16, 0.6);
+  background: var(--nexus-surface-overlay);
   backdrop-filter: blur(12px);
   position: relative;
   z-index: 2;
@@ -216,7 +216,7 @@
 .nx-copilot-header__title-row strong {
   font-size: 15px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
   letter-spacing: -0.01em;
 }
 
@@ -300,7 +300,7 @@
 
 .nx-copilot-close-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-copilot-close-btn svg {
@@ -333,7 +333,7 @@
 
 .nx-copilot-switcher__trigger:hover {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--nexus-muted);
 }
 
 .nx-copilot-switcher__trigger svg {
@@ -352,7 +352,7 @@
   top: 100%;
   left: 14px;
   right: 14px;
-  background: rgba(16, 19, 28, 0.96);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -461,7 +461,7 @@
 .nx-copilot-context__row strong {
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-copilot-context__value {
@@ -517,7 +517,7 @@
   flex-direction: column;
   gap: 12px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  scrollbar-color: var(--nexus-muted) transparent;
 }
 
 /* ── Message Cards ─────────────────────────────────────────────── */
@@ -705,8 +705,8 @@
 
 .nx-copilot-action-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
 }
 
 .nx-copilot-action-btn.is-primary {
@@ -751,8 +751,8 @@
 
 .nx-copilot-chip:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
   transform: translateY(-1px);
 }
 
@@ -850,8 +850,8 @@
 
 .nx-copilot-suggestion:hover {
   background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
   transform: translateX(3px);
 }
 
@@ -860,7 +860,7 @@
 .nx-copilot-input-area {
   padding: 8px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(8, 10, 16, 0.5);
+  background: var(--nexus-surface-overlay);
   position: relative;
 }
 
@@ -914,7 +914,7 @@
 
 .nx-copilot-send-btn:hover:not(:disabled) {
   background: rgba(100, 140, 200, 0.25);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-copilot-send-btn:disabled {
@@ -933,7 +933,7 @@
   bottom: 100%;
   left: 14px;
   right: 14px;
-  background: rgba(16, 19, 28, 0.96);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
@@ -984,7 +984,7 @@
   gap: 4px;
   padding: 8px 14px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.03);
-  background: rgba(6, 8, 14, 0.4);
+  background: var(--nexus-surface-overlay);
 }
 
 .nx-copilot-quick-btn {
@@ -1007,8 +1007,8 @@
 
 .nx-copilot-quick-btn:hover {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
   transform: translateY(-1px);
 }
 
@@ -1328,7 +1328,7 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--nexus-muted);
   font-size: 10px;
   font-weight: 800;
   transition: all 0.3s ease;
@@ -1394,14 +1394,14 @@
 .nx-copilot-voice-grid__header span {
   font-size: 11px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .nx-copilot-voice-grid__header small {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
 }
 
 .nx-copilot-voice-list {
@@ -1420,7 +1420,7 @@
   padding: 12px 14px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--nexus-muted);
   text-align: left;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -1428,7 +1428,7 @@
 
 .nx-copilot-voice-item:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-copilot-voice-item i {
@@ -1444,12 +1444,12 @@
 .nx-copilot-voice-info strong {
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-copilot-voice-info small {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
 }
 
 /* Scrollbar for voice list */
@@ -1496,7 +1496,7 @@
 .nx-copilot-typing.nx-liquid-panel {
   padding: 8px 12px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--nexus-muted);
   font-style: italic;
   margin: 10px 0;
   border-radius: 8px;
@@ -1522,7 +1522,7 @@
   gap: 10px;
   font-size: 11px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
   transition: all 0.3s ease;
 }
 
@@ -1532,7 +1532,7 @@
 }
 
 .nx-copilot-step.is-done {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--nexus-muted);
 }
 
 .nx-step-icon {
@@ -1556,7 +1556,7 @@
 
 .nx-copilot-underwrite-card {
   margin-top: 12px;
-  background: rgba(10, 15, 25, 0.6);
+  background: var(--nexus-surface-overlay);
   border: 1px solid rgba(104, 217, 196, 0.15);
   border-radius: 16px;
   overflow: hidden;
@@ -1609,21 +1609,21 @@
   flex-direction: column;
   align-items: center;
   padding: 12px 8px;
-  background: rgba(10, 15, 25, 0.4);
+  background: var(--nexus-surface-overlay);
 }
 
 .nx-underwrite-stat label {
   font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
   margin-bottom: 4px;
 }
 
 .nx-underwrite-stat strong {
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-underwrite-comps {
@@ -1633,7 +1633,7 @@
 .nx-comps-label {
   font-size: 10px;
   font-weight: 800;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
   margin-bottom: 8px;
   text-transform: uppercase;
 }
@@ -1648,12 +1648,12 @@
   margin-bottom: 4px;
   font-size: 11px;
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--nexus-muted);
   transition: all 0.2s ease;
 }
 
 .nx-comp-row:hover {
   background: rgba(104, 217, 196, 0.1);
-  color: #fff;
+  color: var(--nexus-text);
   transform: translateX(4px);
 }

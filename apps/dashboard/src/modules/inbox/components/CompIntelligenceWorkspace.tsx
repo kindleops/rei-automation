@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../../lib/data/commandMapData'
 import { buildStreetViewUrl } from '../inbox-normalization'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { DealContext } from '../../../lib/data/dealContext'
 import '../comp-intelligence.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -63,6 +64,19 @@ interface CompCandidate {
   arvWeight: number
   lat: number
   lng: number
+
+  reasoning: {
+    distanceScore: number
+    assetTypeScore: number
+    propertyTypeScore: number
+    sqftUnitsScore: number
+    bedsBathsScore: number
+    yearBuiltScore: number
+    saleRecencyScore: number
+    conditionScore: number
+    isOutlier: boolean
+    outlierReason: string | null
+  }
 }
 
 interface ArvStats {
@@ -75,8 +89,19 @@ interface ArvStats {
   arvPpu: number
   confidence: number
   count: number
+
+  // ── Offer Engine Fields ────────────────────────────────────────────────
+  conservativeOffer: number
+  targetOffer: number
+  maxAllowableOffer: number
+  repairEstimate: number
+  expectedAssignmentLow: number
+  expectedAssignmentHigh: number
+  buyerExitPrice: number
+  buyerDemandScore: number
 }
 
+type ValuationMode = 'residential_arv' | 'multifamily_comp' | 'land' | 'commercial'
 type MapMode = 'sold_comps' | 'heat_map' | 'hybrid'
 type RadiusMiles = 0.25 | 0.5 | 1 | 1.5 | 3 | 5
 
@@ -89,85 +114,112 @@ const DARK_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/st
 
 // ── Comp Scoring ────────────────────────────────────────────────────────────
 
-function calculateCompMatchScore(comp: Partial<CompCandidate>, subject: Partial<CompCandidate>): { score: number; label: string } {
+function calculateCompMatchScore(comp: Partial<CompCandidate>, subject: Partial<CompCandidate>): { score: number; label: string; reasoning: CompCandidate['reasoning'] } {
   let score = 0
   
   // 1. Distance Score — 20 pts
+  let distanceScore = 0
   const dist = comp.distanceMiles ?? 99
-  if (dist <= 0.25) score += 20
-  else if (dist <= 0.5) score += 18
-  else if (dist <= 1.0) score += 15
-  else if (dist <= 1.5) score += 12
-  else if (dist <= 3.0) score += 8
-  else score += 4
+  if (dist <= 0.25) distanceScore = 20
+  else if (dist <= 0.5) distanceScore = 18
+  else if (dist <= 1.0) distanceScore = 15
+  else if (dist <= 1.5) distanceScore = 12
+  else if (dist <= 3.0) distanceScore = 8
+  else distanceScore = 4
+  score += distanceScore
 
   // 2. Asset Type Match — 20 pts
-  if (comp.assetClass === subject.assetClass) score += 20
-  else if (['single_family', 'multifamily'].includes(comp.assetClass!) && ['single_family', 'multifamily'].includes(subject.assetClass!)) score += 12
+  let assetTypeScore = 0
+  if (comp.assetClass === subject.assetClass) assetTypeScore = 20
+  else if (['single_family', 'multifamily'].includes(comp.assetClass!) && ['single_family', 'multifamily'].includes(subject.assetClass!)) assetTypeScore = 12
+  score += assetTypeScore
 
   // 3. Property Type Match — 10 pts
-  if (comp.propertyType === subject.propertyType) score += 10
-  else if (comp.propertyType && subject.propertyType && comp.propertyType.includes(subject.propertyType)) score += 6
-  else if (!comp.propertyType || !subject.propertyType) score += 3
+  let propertyTypeScore = 0
+  if (comp.propertyType === subject.propertyType) propertyTypeScore = 10
+  else if (comp.propertyType && subject.propertyType && comp.propertyType.includes(subject.propertyType)) propertyTypeScore = 6
+  else if (!comp.propertyType || !subject.propertyType) propertyTypeScore = 3
+  score += propertyTypeScore
 
   // 4. Sqft / Units Similarity — 15 pts
+  let sqftUnitsScore = 0
   if (subject.assetClass === 'multifamily') {
     const sUnits = subject.units ?? 1
     const cUnits = comp.units ?? 1
     const diff = Math.abs(sUnits - cUnits)
-    if (diff === 0) score += 15
-    else if (diff <= 1) score += 12
-    else if (diff <= 4) score += 8
-    else score += 3
+    if (diff === 0) sqftUnitsScore = 15
+    else if (diff <= 1) sqftUnitsScore = 12
+    else if (diff <= 4) sqftUnitsScore = 8
+    else sqftUnitsScore = 3
   } else {
     const sSqft = subject.sqft ?? 0
     const cSqft = comp.sqft ?? 0
     if (sSqft > 0 && cSqft > 0) {
       const diffPct = Math.abs(sSqft - cSqft) / sSqft
-      if (diffPct <= 0.1) score += 15
-      else if (diffPct <= 0.2) score += 12
-      else if (diffPct <= 0.3) score += 8
-      else score += 3
-    } else score += 3
+      if (diffPct <= 0.1) sqftUnitsScore = 15
+      else if (diffPct <= 0.2) sqftUnitsScore = 12
+      else if (diffPct <= 0.3) sqftUnitsScore = 8
+      else sqftUnitsScore = 3
+    } else sqftUnitsScore = 3
   }
+  score += sqftUnitsScore
 
   // 5. Beds/Baths Similarity — 10 pts
+  let bedsBathsScore = 0
   const sBeds = subject.beds ?? 0
   const cBeds = comp.beds ?? 0
   const sBaths = subject.baths ?? 0
   const cBaths = comp.baths ?? 0
   if (sBeds > 0 && cBeds > 0) {
-    if (sBeds === cBeds && sBaths === cBaths) score += 10
-    else if (Math.abs(sBeds - cBeds) <= 1 && Math.abs(sBaths - cBaths) <= 0.5) score += 6
-    else score += 0
-  } else score += 3
+    if (sBeds === cBeds && sBaths === cBaths) bedsBathsScore = 10
+    else if (Math.abs(sBeds - cBeds) <= 1 && Math.abs(sBaths - cBaths) <= 0.5) bedsBathsScore = 6
+    else bedsBathsScore = 0
+  } else bedsBathsScore = 3
+  score += bedsBathsScore
 
   // 6. Year Built Similarity — 10 pts
+  let yearBuiltScore = 0
   const sYear = subject.yearBuilt ?? 0
   const cYear = comp.yearBuilt ?? 0
   if (sYear > 0 && cYear > 0) {
     const diff = Math.abs(sYear - cYear)
-    if (diff <= 5) score += 10
-    else if (diff <= 10) score += 8
-    else if (diff <= 20) score += 5
-    else score += 2
-  } else score += 3
+    if (diff <= 5) yearBuiltScore = 10
+    else if (diff <= 10) yearBuiltScore = 8
+    else if (diff <= 20) yearBuiltScore = 5
+    else yearBuiltScore = 2
+  } else yearBuiltScore = 3
+  score += yearBuiltScore
 
   // 7. Sale Recency — 10 pts
+  let saleRecencyScore = 0
   const soldDate = comp.soldDate ? new Date(comp.soldDate) : null
   if (soldDate) {
     const daysAgo = (Date.now() - soldDate.getTime()) / 86400000
-    if (daysAgo <= 30) score += 10
-    else if (daysAgo <= 90) score += 8
-    else if (daysAgo <= 180) score += 6
-    else if (daysAgo <= 365) score += 4
-    else score += 1
-  } else score += 1
+    if (daysAgo <= 30) saleRecencyScore = 10
+    else if (daysAgo <= 90) saleRecencyScore = 8
+    else if (daysAgo <= 180) saleRecencyScore = 6
+    else if (daysAgo <= 365) saleRecencyScore = 4
+    else saleRecencyScore = 1
+  } else saleRecencyScore = 1
+  score += saleRecencyScore
 
   // 8. Condition Match — 5 pts
-  if (comp.condition === subject.condition && comp.condition !== 'Unknown') score += 5
-  else if (comp.condition === 'Unknown' || subject.condition === 'Unknown') score += 2
-  else score += 1
+  let conditionScore = 0
+  if (comp.condition === subject.condition && comp.condition !== 'Unknown') conditionScore = 5
+  else if (comp.condition === 'Unknown' || subject.condition === 'Unknown') conditionScore = 2
+  else conditionScore = 1
+  score += conditionScore
+
+  // 9. Outlier Detection
+  let isOutlier = false
+  let outlierReason = null
+  if (comp.soldPrice && subject.estimatedValue) {
+    const diff = Math.abs(comp.soldPrice - subject.estimatedValue) / subject.estimatedValue
+    if (diff > 0.5) {
+      isOutlier = true
+      outlierReason = 'Price varies >50% from estimate'
+    }
+  }
 
   let label = 'Exclude / Review'
   if (score >= 90) label = 'Elite Match'
@@ -175,7 +227,22 @@ function calculateCompMatchScore(comp: Partial<CompCandidate>, subject: Partial<
   else if (score >= 70) label = 'Usable Match'
   else if (score >= 55) label = 'Weak Match'
 
-  return { score, label }
+  return { 
+    score, 
+    label, 
+    reasoning: {
+      distanceScore,
+      assetTypeScore,
+      propertyTypeScore,
+      sqftUnitsScore,
+      bedsBathsScore,
+      yearBuiltScore,
+      saleRecencyScore,
+      conditionScore,
+      isOutlier,
+      outlierReason
+    } 
+  }
 }
 
 // ── Pure utilities ─────────────────────────────────────────────────────────
@@ -204,6 +271,10 @@ function makeStreetviewUrl(lat: number, lng: number, size: string): string {
 }
 
 // ── ARV computation ────────────────────────────────────────────────────────
+
+import { calculateWholesaleDeal } from '../../../lib/underwriting/calculator'
+
+// ... existing code ...
 
 function computeArvStats(comps: CompCandidate[], subject: Partial<CompCandidate>): ArvStats | null {
   const active = comps.filter(c => c.selected && !c.excluded)
@@ -236,6 +307,16 @@ function computeArvStats(comps: CompCandidate[], subject: Partial<CompCandidate>
 
   const confidence = Math.round(Math.min(98, (totalScore / (active.length * 100)) * 100))
 
+  // ── Offer Engine Calculation ───────────────────────────────────────────
+  const repairEstimate = Number((subject as any).estimated_repair_cost) || 
+                         (subject.sqft ? subject.sqft * (subject.condition === 'Poor' ? 45 : subject.condition === 'Fair' ? 25 : 15) : 0);
+  
+  const uwResult = calculateWholesaleDeal({
+    propertyType: subject.assetClass === 'multifamily' ? (subject.units && subject.units >= 5 ? 'multifamily_large' : 'multifamily_small') : 'sfh',
+    arv,
+    repairs: repairEstimate
+  });
+
   return {
     arv,
     low: prices[0] || 0,
@@ -246,28 +327,40 @@ function computeArvStats(comps: CompCandidate[], subject: Partial<CompCandidate>
     arvPpu: Math.round(weightedPpu),
     confidence,
     count: active.length,
+
+    // New Deal Intelligence fields
+    conservativeOffer: Math.round(arv * 0.65) - repairEstimate - uwResult.assignmentFee,
+    targetOffer: uwResult.mao,
+    maxAllowableOffer: uwResult.maoCeiling,
+    repairEstimate,
+    expectedAssignmentLow: uwResult.assignmentFee,
+    expectedAssignmentHigh: uwResult.assignmentFee * 1.5,
+    buyerExitPrice: Math.round(arv * 0.85),
+    buyerDemandScore: Math.round(confidence * 0.9) // Placeholder logic for demand
   }
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThread | null }) {
+export function CompIntelligenceWorkspace({ thread, dealContext = null, paused = false }: { thread: InboxWorkflowThread | null, dealContext?: DealContext | null, paused?: boolean }) {
   const t = thread as unknown as Record<string, unknown>
+  const dp = dealContext?.property as Record<string, unknown> | undefined
 
   const subject: Partial<CompCandidate> = useMemo(() => ({
-    propertyId: String(t?.propertyId || t?.property_id || ''),
-    address: String(t?.propertyAddress || t?.property_address || t?.subject || 'Subject Property'),
-    lat: Number(t?.latitude || t?.lat || 0),
-    lng: Number(t?.longitude || t?.lng || 0),
-    assetClass: (t?.normalized_asset_class as any) || (t?.property_type === 'Multi-Family' ? 'multifamily' : 'single_family'),
-    propertyType: String(t?.property_type || ''),
-    beds: Number(t?.total_bedrooms || t?.beds || 0),
-    baths: Number(t?.total_baths || t?.baths || 0),
-    sqft: Number(t?.building_square_feet || t?.sqft || 0),
-    units: Number(t?.units_count || 0),
-    yearBuilt: Number(t?.year_built || 0),
-    condition: String(t?.building_condition || 'Unknown'),
-  }), [t])
+    propertyId: String(dealContext?.propertyId || t?.propertyId || t?.property_id || ''),
+    address: String(dealContext?.propertyAddress || t?.propertyAddress || t?.property_address || t?.subject || 'Subject Property'),
+    lat: Number(dealContext?.latitude || dealContext?.lat || t?.latitude || t?.lat || 0),
+    lng: Number(dealContext?.longitude || dealContext?.lng || t?.longitude || t?.lng || 0),
+    assetClass: (dp?.normalized_asset_class as any) || (t?.normalized_asset_class as any) || ((dealContext?.property_type || t?.property_type) === 'Multi-Family' ? 'multifamily' : 'single_family'),
+    propertyType: String(dealContext?.property_type || t?.property_type || ''),
+    beds: Number(dp?.total_bedrooms || t?.total_bedrooms || t?.beds || 0),
+    baths: Number(dp?.total_baths || t?.total_baths || t?.baths || 0),
+    sqft: Number(dp?.building_square_feet || t?.building_square_feet || t?.sqft || 0),
+    units: Number(dp?.units_count || t?.units_count || 0),
+    yearBuilt: Number(dp?.year_built || t?.year_built || 0),
+    condition: String(dp?.building_condition || t?.building_condition || 'Unknown'),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [t, dp, dealContext?.propertyId, dealContext?.propertyAddress, dealContext?.latitude, dealContext?.longitude, dealContext?.property_type])
 
   const hasCoords = Math.abs(subject.lat || 0) > 0.001 && Math.abs(subject.lng || 0) > 0.001
 
@@ -294,8 +387,13 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
     const market = String(t?.market || '')
     const zip = String(t?.zip || t?.property_zip || '')
 
+    if (paused) {
+       console.log('[HeavyPanelLoadSkipped] CompIntelligenceWorkspace is paused (inbox or messages loading)')
+       return
+    }
+
     if (!propertyId) {
-      console.log('[CompIntelligenceWorkspace] No propertyId, returning early.', { subject, t });
+      console.log('[HeavyPanelLoadSkipped] CompIntelligenceWorkspace: No propertyId', { subject, t });
       setComps([])
       return
     }
@@ -360,6 +458,7 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
           ...c,
           compScore: scoring.score,
           compMatchLabel: scoring.label,
+          reasoning: scoring.reasoning,
           selected: scoring.score >= 70 && !!c.soldPrice,
         } as CompCandidate
       })
@@ -371,7 +470,7 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
     })
     
     return () => { cancelled = true }
-  }, [subject.propertyId, subject.lat, subject.lng, radius, monthsBack, assetClass, hasCoords, t?.market, t?.zip, t?.property_zip])
+  }, [subject.propertyId, subject.lat, subject.lng, radius, monthsBack, assetClass, hasCoords, t?.market, t?.zip, t?.property_zip, paused])
 
   const arvStats = useMemo(() => computeArvStats(comps, subject), [comps, subject])
 
@@ -409,6 +508,71 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
   const toggleExcluded = useCallback((id: string) => {
     setComps(prev => prev.map(c => c.id === id ? { ...c, excluded: !c.excluded, selected: c.excluded ? true : false } : c))
   }, [])
+
+  const [valuationMode, setValuationMode] = useState<ValuationMode>(subject.assetClass === 'multifamily' ? 'multifamily_comp' : 'residential_arv')
+
+  const handleAction = async (action: string) => {
+    if (!subject.propertyId) return
+    
+    console.log('[CompIntelligenceWorkspace] Action triggered:', action);
+    
+    try {
+      if (action === 'save_snapshot') {
+        if (!arvStats) return
+        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/valuation-snapshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            master_owner_id: String(t?.master_owner_id || ''),
+            valuation_type: valuationMode,
+            estimated_arv: arvStats.arv,
+            estimated_value: arvStats.arv,
+            arv_confidence_score: arvStats.confidence,
+            comp_confidence_score: arvStats.confidence,
+            median_sale_price: computeMedian(finalComps.filter(c => c.selected && !c.excluded).map(c => c.soldPrice || 0)),
+            median_ppsf: computeMedian(finalComps.filter(c => c.selected && !c.excluded).map(c => c.ppsf || 0)),
+            median_ppu: computeMedian(finalComps.filter(c => c.selected && !c.excluded).map(c => c.ppu || 0)),
+            low_value: arvStats.low,
+            high_value: arvStats.high,
+            repair_estimate: arvStats.repairEstimate,
+            conservative_offer: arvStats.conservativeOffer,
+            target_offer: arvStats.targetOffer,
+            max_allowable_offer: arvStats.maxAllowableOffer,
+            expected_assignment_low: arvStats.expectedAssignmentLow,
+            expected_assignment_high: arvStats.expectedAssignmentHigh,
+            buyer_exit_price: arvStats.buyerExitPrice,
+            buyer_demand_score: arvStats.buyerDemandScore,
+            included_comp_count: finalComps.filter(c => c.selected && !c.excluded).length,
+            excluded_comp_count: finalComps.filter(c => c.excluded).length,
+            radius_miles: radius,
+            lookback_months: monthsBack,
+            asset_class: assetClass,
+            included_comps: finalComps.filter(c => c.selected && !c.excluded).map(c => ({ id: c.id, score: c.compScore })),
+            excluded_comps: finalComps.filter(c => c.excluded).map(c => ({ id: c.id, reason: c.excludeReason }))
+          })
+        })
+        const result = await response.json()
+        if (result.ok) alert('Valuation snapshot saved successfully!')
+      } else if (action === 'push_underwriting') {
+        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/push-to-underwriting`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread_key: String(t?.thread_key || '') })
+        })
+        const result = await response.json()
+        if (result.ok) alert('Property pushed to Underwriting.')
+      } else if (action === 'buyer_match') {
+        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/run-buyer-match`, { method: 'POST' })
+        const result = await response.json()
+        if (result.ok) alert('Buyer match engine completed.')
+      } else {
+        console.warn('Action not implemented:', action)
+      }
+    } catch (err) {
+      console.error('Action failed:', err)
+      alert('Operation failed. Check console for details.')
+    }
+  }
 
   // ── Map init ────────────────────────────────────────────────────────────
 
@@ -538,22 +702,31 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
         {/* Global Filters */}
         <div className="ci-filters-bar">
           <div className="ci-filter-group">
+            <label>Valuation Mode</label>
+            <select value={valuationMode} onChange={e => setValuationMode(e.target.value as any)}>
+              <option value="residential_arv">Residential ARV</option>
+              <option value="multifamily_comp">Multifamily Comp</option>
+              <option value="land">Land Mode</option>
+              <option value="commercial">Commercial Mode</option>
+            </select>
+          </div>
+          <div className="ci-filter-group">
             <label>Sort By</label>
             <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
               <option value="match">Best Match</option>
+              <option value="dist">Closest</option>
               <option value="date">Newest Sale</option>
               <option value="price">Highest Price</option>
-              <option value="dist">Closest</option>
               <option value="ppsf">PPSF</option>
             </select>
           </div>
           <div className="ci-filter-group">
             <label>Lookback</label>
             <select value={monthsBack} onChange={e => setMonthsBack(Number(e.target.value))}>
-              <option value={3}>Last 3 Months</option>
-              <option value={6}>Last 6 Months</option>
-              <option value={12}>Last 12 Months</option>
-              <option value={24}>Last 24 Months</option>
+              <option value={3}>3 Months</option>
+              <option value={6}>6 Months</option>
+              <option value={12}>12 Months</option>
+              <option value={24}>24 Months</option>
             </select>
           </div>
           <div className="ci-filter-group">
@@ -567,7 +740,13 @@ export function CompIntelligenceWorkspace({ thread }: { thread: InboxWorkflowThr
         </div>
 
         {/* ARV engine panel */}
-        <ArvEnginePanel comps={finalComps} arvStats={arvStats} subject={subject} lastCalcTime={lastCalcTime} />
+        <ArvEnginePanel 
+          comps={finalComps} 
+          arvStats={arvStats} 
+          subject={subject} 
+          lastCalcTime={lastCalcTime} 
+          onAction={handleAction}
+        />
 
         {/* Comp list */}
         <div className="ci-list-section">
@@ -733,6 +912,21 @@ function SoldCompRow({ comp, isHovered, isOpen, onEnter, onLeave, onClick, onTog
         {comp.isInstitutionalBuyer && <span className="ci-intel-badge is-institutional">Inst. Buyer: {comp.institutionalMatchName || comp.buyerType}</span>}
       </div>
 
+      <div className="ci-comp-row__reasoning">
+        <div className="ci-reasoning-grid">
+          <div className="ci-reason">Dist: <strong>{comp.reasoning.distanceScore}/20</strong></div>
+          <div className="ci-reason">Asset: <strong>{comp.reasoning.assetTypeScore}/20</strong></div>
+          <div className="ci-reason">Size: <strong>{comp.reasoning.sqftUnitsScore}/15</strong></div>
+          <div className="ci-reason">Beds: <strong>{comp.reasoning.bedsBathsScore}/10</strong></div>
+          <div className="ci-reason">Built: <strong>{comp.reasoning.yearBuiltScore}/10</strong></div>
+          <div className="ci-reason">Date: <strong>{comp.reasoning.saleRecencyScore}/10</strong></div>
+          <div className="ci-reason">Cond: <strong>{comp.reasoning.conditionScore}/5</strong></div>
+        </div>
+        {comp.reasoning.isOutlier && (
+          <div className="ci-outlier-warn">⚠ Outlier: {comp.reasoning.outlierReason}</div>
+        )}
+      </div>
+
       <div className="ci-comp-row__actions" onClick={e => e.stopPropagation()}>
         <button type="button" className={`ci-action-btn ${isActive ? 'is-active' : ''}`} onClick={() => onToggleSelected()}>
           {isActive ? 'Remove from ARV' : 'Include in ARV'}
@@ -747,11 +941,12 @@ function SoldCompRow({ comp, isHovered, isOpen, onEnter, onLeave, onClick, onTog
   )
 }
 
-function ArvEnginePanel({ comps, arvStats, subject, lastCalcTime }: {
+function ArvEnginePanel({ comps, arvStats, subject, lastCalcTime, onAction }: {
   comps: CompCandidate[]
   arvStats: ArvStats | null
   subject: Partial<CompCandidate>
   lastCalcTime: Date | null
+  onAction: (action: string) => void
 }) {
   const active = comps.filter(c => c.selected && !c.excluded)
   const isMF = subject.assetClass === 'multifamily'
@@ -781,13 +976,77 @@ function ArvEnginePanel({ comps, arvStats, subject, lastCalcTime }: {
         <MetricCard label="Med PPSF" value={fmtPpsf(computeMedian(active.map(c => c.ppsf || 0)))} />
         {isMF && <MetricCard label="Med PPU" value={fmtK(computeMedian(active.map(c => c.ppu || 0)))} />}
       </div>
+
+      <OfferEnginePanel arvStats={arvStats} />
       
+      <DealActions onAction={onAction} />
+
       {!subject.sqft && !isMF && (
         <div className="ci-engine-warning">⚠ Subject sqft missing. ARV confidence reduced.</div>
       )}
       {isMF && !subject.units && (
         <div className="ci-engine-warning">⚠ Subject units missing. ARV confidence reduced.</div>
       )}
+    </div>
+  )
+}
+
+function OfferEnginePanel({ arvStats }: { arvStats: ArvStats | null }) {
+  if (!arvStats) return null
+  
+  return (
+    <div className="ci-offer-engine">
+      <div className="ci-eyebrow">OFFER ENGINE</div>
+      <div className="ci-offer-grid">
+        <div className="ci-offer-item">
+          <span>Conservative</span>
+          <strong>{fmt(arvStats.conservativeOffer)}</strong>
+        </div>
+        <div className="ci-offer-item is-target">
+          <span>Target Offer</span>
+          <strong>{fmt(arvStats.targetOffer)}</strong>
+        </div>
+        <div className="ci-offer-item is-mao">
+          <span>Max Allowable</span>
+          <strong>{fmt(arvStats.maxAllowableOffer)}</strong>
+        </div>
+        <div className="ci-offer-item">
+          <span>Repairs</span>
+          <strong>{fmt(arvStats.repairEstimate)}</strong>
+        </div>
+        <div className="ci-offer-item">
+          <span>Expected Spread</span>
+          <strong>{fmtK(arvStats.expectedAssignmentLow)} – {fmtK(arvStats.expectedAssignmentHigh)}</strong>
+        </div>
+        <div className="ci-offer-item">
+          <span>Buyer Exit</span>
+          <strong>{fmt(arvStats.buyerExitPrice)}</strong>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DealActions({ onAction }: { onAction: (action: string) => void }) {
+  return (
+    <div className="ci-deal-actions">
+      <button type="button" className="ci-deal-btn is-primary" onClick={() => onAction('save_snapshot')}>
+        Save Valuation Snapshot
+      </button>
+      <div className="ci-deal-btn-grid">
+        <button type="button" className="ci-deal-btn" onClick={() => onAction('push_underwriting')}>
+          Push to Underwriting
+        </button>
+        <button type="button" className="ci-deal-btn" onClick={() => onAction('buyer_match')}>
+          Run Buyer Match
+        </button>
+        <button type="button" className="ci-deal-btn" onClick={() => onAction('seller_reply')}>
+          Gen Seller Reply
+        </button>
+        <button type="button" className="ci-deal-btn" onClick={() => onAction('mark_hot')}>
+          Mark Hot Deal
+        </button>
+      </div>
     </div>
   )
 }

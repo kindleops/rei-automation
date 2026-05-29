@@ -33,7 +33,7 @@ import {
   checkBlacklistPriorFailure,
   shouldSuppressDeliveryFailedRecipient,
 } from "../../src/lib/supabase/sms-engine.js";
-import { createInboxSendNowQueueRow } from "../../src/lib/domain/inbox/send-now-service.js";
+import { createInboxSendNowQueueRow, resolveFromPhoneNumber } from "../../src/lib/domain/inbox/send-now-service.js";
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -447,4 +447,190 @@ test("createInboxSendNowQueueRow: insert exception returns explicit queue_insert
   assert.equal(result.error, "queue_insert_failure");
   assert.equal(result.reason, "queue_insert_failure");
   assert.equal(result.queue_inserted, false);
+});
+
+test("createInboxSendNowQueueRow blocks if to and from numbers are the same", async () => {
+  let auditRow = null;
+  const deps = {
+    insertImpl: async (row) => {
+      auditRow = row;
+      return { queue_row_id: 999 };
+    },
+    resolveFromImpl: async () => "+13235589881",
+    hardComplianceCheckImpl: async () => ({ blocked: false }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false }),
+  };
+
+  const result = await createInboxSendNowQueueRow({
+    to_phone_number: "+13235589881",
+    from_phone_number: "+13235589881",
+    message_body: "Testing to myself",
+    thread_key: "+13235589881",
+  }, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "SAME_FROM_TO_NUMBER");
+  assert.equal(auditRow.queue_status, "paused_invalid_queue_row");
+  assert.equal(auditRow.metadata.validation_error, "SAME_FROM_TO_NUMBER");
+});
+
+test("createInboxSendNowQueueRow reroutes stale same-number payloads before validation", async () => {
+  let insertedRow = null;
+  let resolveCalls = 0;
+  const supabase = makeDuplicateGuardSupabase(0);
+
+  const result = await createInboxSendNowQueueRow({
+    ...VALID_PAYLOAD,
+    to_phone_number: "+13235589881",
+    from_phone_number: "+13235589881",
+  }, {
+    insertImpl: async (row) => {
+      insertedRow = row;
+      return { ok: true, queue_row_id: "rerouted-row", queue_id: "rerouted-row" };
+    },
+    resolveFromImpl: async () => {
+      resolveCalls += 1;
+      return "+18885551212";
+    },
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
+    supabase,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queue_created, true);
+  assert.equal(resolveCalls, 1);
+  assert.equal(insertedRow.from_phone_number, "+18885551212");
+});
+
+test("createInboxSendNowQueueRow passes recipient phone into resolver repair", async () => {
+  let resolverArgs = null;
+  const supabase = makeDuplicateGuardSupabase(0);
+
+  const result = await createInboxSendNowQueueRow({
+    ...VALID_PAYLOAD,
+    to_phone_number: "+13235589881",
+    from_phone_number: "+13235589881",
+  }, {
+    insertImpl: async (row) => ({ ok: true, queue_row_id: "resolver-args-row", queue_id: row.queue_key }),
+    resolveFromImpl: async (args) => {
+      resolverArgs = args;
+      return "+18885551212";
+    },
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
+    supabase,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(resolverArgs.to_phone_number, "+13235589881");
+});
+
+test("resolveFromPhoneNumber uses inbound event recipient as our number fallback", async () => {
+  const supabase = {
+    from(table) {
+      const state = { table, filters: [], selected: "" };
+      const api = {
+        select(cols) { state.selected = cols; return api; },
+        eq(col, val) { state.filters.push({ col, val }); return api; },
+        not() { return api; },
+        order() { return api; },
+        limit() { return api; },
+        maybeSingle: async () => {
+          if (table === "deal_thread_state") return { data: null };
+          if (table === "send_queue") return { data: null };
+          if (table === "message_events" && state.filters.some((f) => f.col === "direction" && f.val === "outbound")) {
+            return { data: null };
+          }
+          if (table === "textgrid_numbers") return { data: null };
+          return { data: null };
+        },
+        then(resolve) {
+          if (table === "message_events" && !state.filters.some((f) => f.col === "direction")) {
+            return resolve({
+              data: [{ direction: "inbound", from_phone_number: "+13235589881", to_phone_number: "+18885551212" }],
+              error: null,
+            });
+          }
+          return resolve({ data: [], error: null });
+        },
+      };
+      return api;
+    },
+  };
+
+  const result = await resolveFromPhoneNumber({
+    thread_key: "+13235589881",
+    to_phone_number: "+13235589881",
+    supabase,
+  });
+
+  assert.equal(result, "+18885551212");
+});
+
+test("resolveFromPhoneNumber uses textgrid_number_id hint when thread history is missing", async () => {
+  const supabase = {
+    from(table) {
+      const api = {
+        select() { return api; },
+        eq() { return api; },
+        not() { return api; },
+        order() { return api; },
+        limit() { return api; },
+        maybeSingle: async () => {
+          if (table === "textgrid_numbers") return { data: { phone_number: "+18885551212" } };
+          return { data: null };
+        },
+        then(resolve) {
+          return resolve({ data: [], error: null });
+        },
+      };
+      return api;
+    },
+  };
+
+  const result = await resolveFromPhoneNumber({
+    thread_key: "+13235589881",
+    to_phone_number: "+13235589881",
+    textgrid_number_id: "11111111-1111-4111-8111-111111111111",
+    supabase,
+  });
+
+  assert.equal(result, "+18885551212");
+});
+
+test("resolveFromPhoneNumber falls back to send_queue by recipient phone when thread key lookup misses", async () => {
+  const supabase = {
+    from(table) {
+      const state = { table, filters: [] };
+      const api = {
+        select() { return api; },
+        eq(col, val) { state.filters.push({ col, val }); return api; },
+        not() { return api; },
+        order() { return api; },
+        limit() { return api; },
+        maybeSingle: async () => {
+          if (table === "send_queue" && state.filters.some((f) => f.col === "to_phone_number" && f.val === "+13235589881")) {
+            return { data: { from_phone_number: "+18885551212" } };
+          }
+          return { data: null };
+        },
+        then(resolve) {
+          return resolve({ data: [], error: null });
+        },
+      };
+      return api;
+    },
+  };
+
+  const result = await resolveFromPhoneNumber({
+    thread_key: "missing-thread-key",
+    to_phone_number: "+13235589881",
+    supabase,
+  });
+
+  assert.equal(result, "+18885551212");
 });

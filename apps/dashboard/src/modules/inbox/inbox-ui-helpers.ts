@@ -58,6 +58,7 @@ export type InboxViewSelectValue =
   // canonical bucket views
   | 'follow_up'
   | 'cold'
+  | 'dead'
   | 'all_messages'
 
 
@@ -237,6 +238,15 @@ export interface InboxAdvancedFilters {
   tagsInclude?: string[]
   tagsExclude?: string[]
   
+  // L) DEAL INTELLIGENCE (NEW)
+  arvConfidenceMin?: number
+  estimatedSpreadMin?: number
+  buyerDemandScoreMin?: number
+  ppuBelowMarket?: boolean
+  ppsfBelowMarket?: boolean
+  largeApartmentPriorityScoreMin?: number
+  valuationSnapshotExists?: 'yes' | 'no'
+
   // Legacy
   householdIncomeMin?: number
   householdIncomeMax?: number
@@ -359,6 +369,7 @@ export const viewOptions: Array<{ value: InboxViewSelectValue; label: string }> 
   { value: 'automated', label: 'Auto-Eligible' },
   { value: 'needs_review', label: 'Needs Review' },
   { value: 'cold_no_response', label: 'Cold / No Response' },
+  { value: 'dead', label: 'Dead / Terminal' },
   { value: 'dnc_opt_out', label: 'DNC / Suppressed' },
   { value: 'all_conversations', label: 'All Conversations' },
   { value: 'all_inbound', label: 'All Inbound History' },
@@ -492,10 +503,11 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
   if (view === 'negotiating' || view === 'offer_requested') return 'negotiating'
   if (view === 'follow_up' || view === 'follow_up_due') return 'follow_up'
   if (view === 'cold' || view === 'cold_no_response' || view === 'missing_context' || view === 'not_contacted') return 'cold'
+  if (view === 'dead' || view === 'wrong_number') return 'dead'
   if (view === 'waiting_on_seller' || view === 'waiting' || view === 'outbound_only' || view === 'outbound_active') return 'waiting_on_seller'
   if (view === 'automated' || view === 'auto_replied' || view === 'queued') return 'automated'
   if (view === 'needs_review' || view === 'manual_review') return 'needs_review'
-  if (view === 'dnc_opt_out' || view === 'suppressed' || view === 'opt_out' || view === 'wrong_number') return 'suppressed'
+  if (view === 'dnc_opt_out' || view === 'suppressed' || view === 'opt_out') return 'suppressed'
   if (view === 'all_conversations' || view === 'all' || view === 'all_messages') return 'all_conversations'
   return null
 }
@@ -693,6 +705,7 @@ export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<strin
   // canonical
   follow_up: threads.filter((thread) => matchesViewSelection(thread, 'follow_up')).length,
   cold: threads.filter((thread) => matchesViewSelection(thread, 'cold')).length,
+  dead: threads.filter((thread) => matchesViewSelection(thread, 'dead')).length,
   waiting_on_seller: threads.filter((thread) => matchesViewSelection(thread, 'waiting_on_seller')).length,
   automated: threads.filter((thread) => matchesViewSelection(thread, 'automated')).length,
   active: threads.filter((thread) => matchesViewSelection(thread, 'active')).length,

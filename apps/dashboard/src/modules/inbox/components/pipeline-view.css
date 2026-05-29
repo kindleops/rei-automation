@@ -11,7 +11,7 @@
   width: 100%;
   flex: 1 1 0;
   min-height: 0;
-  background: #040912;
+  background: var(--nexus-panel);
   color: rgba(210, 228, 255, 0.88);
   font-size: 13px;
   overflow: hidden;
@@ -193,7 +193,7 @@
   padding-right: 22px;
 }
 .plv-filters__sort:hover { border-color: rgba(72, 138, 236, 0.3); }
-.plv-filters__sort option { background: #0a0f1e; color: rgba(210, 228, 255, 0.88); }
+.plv-filters__sort option { background: var(--nexus-panel); color: rgba(210, 228, 255, 0.88); }
 
 .plv-filter-chip {
   display: inline-flex;
@@ -340,7 +340,7 @@
   max-width: 320px;
   flex: 1;
   border-right: 1px solid rgba(255, 255, 255, 0.04);
-  background: rgba(8, 14, 26, 0.5);
+  background: var(--nexus-surface-overlay);
   transition: background 0.15s;
   overflow: hidden;
 }
@@ -487,7 +487,7 @@
   position: relative;
   display: flex;
   flex-shrink: 0;
-  background: rgba(8, 14, 26, 0.88);
+  background: var(--nexus-panel-strong);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   overflow: hidden;
@@ -500,7 +500,7 @@
 
 .plv-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.11);
+  border-color: var(--nexus-muted);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
@@ -510,7 +510,7 @@
 
 .plv-card.is-selected {
   border-color: rgba(72, 138, 236, 0.45);
-  background: rgba(10, 18, 36, 0.94);
+  background: var(--nexus-panel-strong);
   box-shadow: 0 0 0 1px rgba(72, 138, 236, 0.25), 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
@@ -748,7 +748,7 @@
   min-width: 240px;
   max-width: 420px;
   border-left: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(5, 9, 18, 0.96);
+  background: var(--nexus-panel-strong);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -1005,7 +1005,7 @@
   left: 0;
   right: 0;
   height: 62%;
-  background: rgba(5, 9, 20, 0.98);
+  background: var(--nexus-panel-strong);
   border-top: 1px solid rgba(72, 138, 236, 0.28);
   z-index: 20;
   display: flex;
@@ -1136,7 +1136,7 @@
 /* 25% Rail */
 .plv--rail {
   overflow: hidden;
-  background: #040912;
+  background: var(--nexus-panel);
 }
 
 .plv--rail .plv-filters {
@@ -1168,7 +1168,7 @@
 .plv--focused {
   position: relative;   /* needed for absolute drawer */
   overflow: hidden;
-  background: #040912;
+  background: var(--nexus-panel);
 }
 
 /* 75% Ops */

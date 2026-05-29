@@ -11,7 +11,7 @@
 
 .nx-inbox.is-operator-rebuild .nx-inbox__hdr {
   padding: 10px 14px;
-  background: rgba(6, 11, 20, 0.88);
+  background: var(--nexus-panel-strong);
   border-bottom: 1px solid var(--op-border);
   backdrop-filter: blur(10px);
 }
@@ -35,7 +35,7 @@
 .nx-inbox.is-operator-rebuild .nx-inbox__hdr-search {
   max-width: 560px;
   border-radius: 999px;
-  background: rgba(15, 23, 41, 0.95);
+  background: var(--nexus-panel-strong);
   border: 1px solid var(--op-border);
 }
 
@@ -54,7 +54,7 @@
   letter-spacing: 0.09em;
   padding: 5px 10px;
   border: 1px solid var(--op-border);
-  background: rgba(10, 17, 29, 0.82);
+  background: var(--nexus-panel-strong);
   color: var(--op-muted);
 }
 
@@ -151,7 +151,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #fff;
+  color: var(--nexus-text);
   display: block;
 }
 
@@ -199,15 +199,15 @@
   font-weight: 700;
   color: var(--op-muted);
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--nexus-muted);
   flex: 1;
   justify-content: center;
 }
 
 .nx-inbox.is-operator-rebuild .nx-sidebar__filter-button:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--nexus-text);
+  border-color: var(--nexus-muted);
 }
 
 .nx-inbox.is-operator-rebuild .nx-mode-tab:hover {
@@ -229,7 +229,7 @@
 }
 
 .nx-inbox.is-operator-rebuild .nx-mode-tab.is-active .nx-mode-tab__label {
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox.is-operator-rebuild .nx-mode-tab__count {
@@ -249,7 +249,7 @@
   padding: 11px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(13, 19, 33, 0.64);
+  background: var(--nexus-surface-overlay);
   margin-bottom: 4px;
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
   overflow: hidden;
@@ -258,7 +258,7 @@
 
 .nx-inbox.is-operator-rebuild .nx-conversation-row:hover {
   background: rgba(20, 30, 50, 0.82);
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--nexus-muted);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   transform: translateY(-1px);
 }
@@ -286,7 +286,7 @@
 .nx-inbox.is-operator-rebuild .nx-conversation-row__name {
   font-size: 13.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -294,7 +294,7 @@
 
 .nx-inbox.is-operator-rebuild .nx-sidebar__top {
   padding: 14px 14px 12px;
-  background: rgba(8, 11, 18, 0.4);
+  background: var(--nexus-surface-overlay);
   border-bottom: 1px solid var(--op-border);
 }
 
@@ -400,8 +400,8 @@
 
 .nx-inbox.is-operator-rebuild .nx-hover-action-btn:hover {
   background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
 }
 
 .nx-inbox.is-operator-rebuild .nx-hover-action-btn.is-active {
@@ -454,8 +454,8 @@
 
 .nx-utility-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
 }
 
 .nx-utility-btn.is-active,
@@ -490,7 +490,7 @@
   background: transparent;
   border: 0;
   outline: 0;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 14px;
   line-height: 1.5;
   padding: 4px 0;
@@ -508,7 +508,7 @@
   width: auto;
   min-width: 440px;
   max-width: 720px;
-  background: rgba(18, 23, 34, 0.82);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(48px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 16px;
@@ -540,7 +540,7 @@
 }
 
 .nx-translation-strip__lang-label { color: var(--op-muted); font-weight: 800; }
-.nx-translation-strip__lang-value { color: #fff; font-weight: 700; }
+.nx-translation-strip__lang-value { color: var(--nexus-text); font-weight: 700; }
 
 .nx-translation-toggle-seg {
   display: flex;
@@ -563,7 +563,7 @@
 
 .nx-translation-toggle-seg button.is-active {
   background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  color: var(--nexus-text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -579,7 +579,7 @@
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 11px;
   font-weight: 700;
   display: inline-flex;
@@ -589,7 +589,7 @@
 
 .nx-translation-strip__btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--nexus-muted);
 }
 
 .nx-translation-draft-preview {
@@ -615,7 +615,7 @@
 .nx-translation-draft-preview__header button {
   font-size: 11px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
   background: var(--op-accent-soft);
   border: 0;
   padding: 2px 8px;
@@ -625,7 +625,7 @@
 .nx-translation-draft-preview p {
   margin: 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--nexus-muted);
   line-height: 1.4;
 }
 
@@ -685,7 +685,7 @@
   right: 0;
   width: max-content;
   max-width: 240px;
-  background: rgba(18, 23, 34, 0.92);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
@@ -710,11 +710,11 @@
   justify-content: space-between;
   gap: 16px;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--nexus-muted);
 }
 
 .nx-dev-tooltip b {
-  color: #fff;
+  color: var(--nexus-text);
   font-weight: 700;
 }
 
@@ -792,7 +792,7 @@
 
 .nx-voice-transcription__text {
   font-size: 13.5px;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--nexus-text);
   line-height: 1.5;
 }
 
@@ -812,7 +812,7 @@
   width: 100%;
   max-width: 1100px;
   height: 80vh;
-  background: rgba(22, 28, 42, 0.75);
+  background: var(--nexus-surface-overlay);
   backdrop-filter: blur(60px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 28px;
@@ -830,7 +830,7 @@
   align-items: center;
 }
 
-.nx-tpl-header__title { font-size: 20px; font-weight: 800; color: #fff; }
+.nx-tpl-header__title { font-size: 20px; font-weight: 800; color: var(--nexus-text); }
 .nx-tpl-header__sub { font-size: 13px; color: var(--op-muted); margin-top: 2px; }
 
 .nx-tpl-search-row {
@@ -857,7 +857,7 @@
   background: transparent;
   border: 0;
   outline: 0;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 14px;
 }
 
@@ -878,7 +878,7 @@
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--nexus-muted);
   font-size: 11px;
   font-weight: 600;
   transition: all 0.2s ease;
@@ -887,7 +887,7 @@
 .nx-tpl-chip.is-active {
   background: rgba(10, 132, 255, 0.15);
   border-color: rgba(10, 132, 255, 0.4);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-tpl-list {
@@ -912,12 +912,12 @@
 
 .nx-tpl-card:hover {
   background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--nexus-muted);
   transform: translateY(-2px);
 }
 
-.nx-tpl-card__title { font-size: 14px; font-weight: 700; color: #fff; }
-.nx-tpl-card__preview { font-size: 12px; color: rgba(255, 255, 255, 0.6); line-height: 1.5; margin: 0; }
+.nx-tpl-card__title { font-size: 14px; font-weight: 700; color: var(--nexus-text); }
+.nx-tpl-card__preview { font-size: 12px; color: var(--nexus-muted); line-height: 1.5; margin: 0; }
 
 .nx-tpl-card__actions {
   margin-top: auto;
@@ -938,7 +938,7 @@
   gap: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-tpl-action:hover { background: rgba(255, 255, 255, 0.1); }
@@ -966,7 +966,7 @@
 
 .nx-dossier-tabs-mini button.is-active {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-dossier-card {
@@ -1053,7 +1053,7 @@
 .nx-dossier-metric__value {
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-dossier-metric__suffix {
@@ -1085,7 +1085,7 @@
 .nx-dossier-address-block strong {
   display: block;
   font-size: 14px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-dossier-address-block span {
@@ -1117,7 +1117,7 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.4;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--nexus-text);
 }
 
 
@@ -1162,8 +1162,8 @@
 
 .nx-rail-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  border-color: var(--nexus-muted);
+  color: var(--nexus-text);
 }
 
 .nx-rail-btn svg {
@@ -1248,7 +1248,7 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--op-border);
   border-radius: 8px;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 12px;
   text-decoration: none;
   transition: all 0.2s;
@@ -1257,7 +1257,7 @@
 
 .nx-app-link:hover {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--nexus-muted);
 }
 
 .nx-app-link.podio {

@@ -551,7 +551,7 @@ export const loadCommandMapSellerPinDetail = async (
   options: { signal?: AbortSignal } = {},
 ): Promise<Partial<CommandMapSellerPin> | null> => {
   const supabase = getSupabaseClient()
-  const readSingle = async (view: 'v_command_map_seller_pin_feed' | 'v_inbox_enriched') => {
+  const readSingle = async (view: 'v_command_map_seller_pin_feed' | 'v_operator_inbox_threads') => {
     let query: {
       abortSignal?: (signal: AbortSignal) => unknown
       then: PromiseLike<{
@@ -575,7 +575,7 @@ export const loadCommandMapSellerPinDetail = async (
 
   const [sellerWorkItem, inboxEnriched] = await Promise.all([
     readSingle('v_command_map_seller_pin_feed'),
-    readSingle('v_inbox_enriched'),
+    readSingle('v_operator_inbox_threads'),
   ])
 
   if (!sellerWorkItem && !inboxEnriched) return null

@@ -10,6 +10,7 @@
  */
 
 import type { AnyRecord } from '../data/shared'
+import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 
 export const getBackendBaseUrl = (): string => {
   const isBrowser = typeof window !== 'undefined'
@@ -184,10 +185,11 @@ export async function callBackend<T = unknown>(
 
   // Attach Supabase session JWT for future API-side JWT validation.
   try {
-    const { getAuthClient } = await import('../auth/supabaseAuth')
-    const { data } = await getAuthClient().auth.getSession()
-    if (data.session?.access_token) {
-      headers['Authorization'] = `Bearer ${data.session.access_token}`
+    if (hasSupabaseEnv) {
+      const { data } = await getSupabaseClient().auth.getSession()
+      if (data.session?.access_token) {
+        headers['Authorization'] = `Bearer ${data.session.access_token}`
+      }
     }
   } catch {
     // Auth client not available — ops secret alone is used.
@@ -215,11 +217,13 @@ export async function callBackend<T = unknown>(
 
   let body: unknown
   let bodyText = ''
+  let parseError = false
   try {
     bodyText = await response.text()
     body = JSON.parse(bodyText)
   } catch {
     body = null
+    parseError = true
   }
 
   if (!response.ok) {
@@ -234,6 +238,17 @@ export async function callBackend<T = unknown>(
       error: String(canonical ?? response.statusText ?? 'BACKEND_ERROR'),
       message: `[${response.status}] ${String(canonical ?? response.statusText ?? 'BACKEND_ERROR')} — ${url}${bodyText ? ` (body: ${bodyText.slice(0, 200)})` : ''}`,
       upstream: body,
+    }
+  }
+
+  // HTTP 200 but non-JSON body (e.g. HTML error page from CDN/proxy) — treat as error
+  // rather than returning { ok: true, data: null } which silently poisons state.
+  if (parseError || body === null) {
+    return {
+      ok: false,
+      status: response.status,
+      error: 'INVALID_JSON_RESPONSE',
+      message: `[${response.status}] ${url} returned non-JSON body: ${bodyText.slice(0, 200)}`,
     }
   }
 
@@ -542,18 +557,25 @@ export function fetchLiveInbox(
   return callBackend(`/api/cockpit/inbox/live?${queryString}`, { signal })
 }
 
+export function fetchInboxCounts(
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/counts`, { signal })
+}
+
 export function fetchInboxThreads(
   queryString: string,
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
-  return callBackend(`/api/cockpit/inbox/threads?${queryString}`, { signal })
+  return callBackend(`/api/cockpit/threads?${queryString}`, { signal })
 }
 
 export function fetchInboxThreadMessages(
+  threadKey: string,
   queryString: string,
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
-  return callBackend(`/api/cockpit/inbox/thread-messages?${queryString}`, { signal })
+  return callBackend(`/api/cockpit/inbox/thread-messages?thread_key=${encodeURIComponent(threadKey)}&${queryString}`, { signal })
 }
 
 export function fetchInboxThreadDossier(
@@ -561,6 +583,34 @@ export function fetchInboxThreadDossier(
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
   return callBackend(`/api/cockpit/inbox/thread-dossier?${queryString}`, { signal })
+}
+
+export function fetchDealContextList(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context${queryString ? `?${queryString}` : ''}`, { signal })
+}
+
+export function fetchDealContextByProperty(
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/property/${encodeURIComponent(propertyId)}`, { signal })
+}
+
+export function fetchDealContextByThread(
+  threadKey: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/thread/${encodeURIComponent(threadKey)}`, { signal })
+}
+
+export function fetchDealContextCounts(
+  queryString = '',
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/deal-context/counts${queryString ? `?${queryString}` : ''}`, { signal })
 }
 
 // GET /api/internal/dashboard/nexus — live dashboard model.
@@ -753,9 +803,9 @@ export function updateThreadState(
   threadKey: string,
   patch: Record<string, unknown>,
 ): Promise<BackendResult<ThreadStateResult>> {
-  return callBackend<ThreadStateResult>('/api/cockpit/inbox/thread-state', {
+  return callBackend<ThreadStateResult>(`/api/cockpit/inbox/threads/${threadKey}`, {
     method: 'PATCH',
-    body: JSON.stringify({ thread_key: threadKey, ...patch }),
+    body: JSON.stringify(patch),
   })
 }
 

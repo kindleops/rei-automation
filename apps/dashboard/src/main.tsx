@@ -1,4 +1,3 @@
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './modules/theme/nexus-theme.css'
@@ -7,10 +6,14 @@ import './home-v2.css'
 import './command-store.css'
 import './acquisition.css'
 import './styles/mobile-responsive.css'
+import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 
+// Apply persisted theme+accent to <html> before React renders (prevents FOUC)
+applyThemeToDOM()
+
+// StrictMode intentionally double-mounts in dev, which aborts inbox fetches on
+// the first mount and causes remount churn. Disabled during inbox stabilization.
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <App />
 )

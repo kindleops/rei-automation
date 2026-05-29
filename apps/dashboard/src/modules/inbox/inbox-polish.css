@@ -40,7 +40,7 @@
 .nx-command-viewbar__chip:hover {
   border-color: rgba(112, 171, 244, 0.28);
   background: rgba(82, 138, 236, 0.12);
-  color: #fff;
+  color: var(--nexus-text);
 }
 .nx-inbox-utility-row {
   display: flex;
@@ -220,7 +220,7 @@
 .nx-topbar-width-pill.is-active {
   background: rgba(84, 138, 231, 0.14);
   border-color: rgba(104, 171, 255, 0.22);
-  color: #fff;
+  color: var(--nexus-text);
 }
 .nx-topbar-view-widths {
   display: flex;
@@ -426,7 +426,7 @@
   padding: 0 12px;
   border-radius: 14px;
   border: 1px solid rgba(155, 177, 208, 0.12);
-  background: rgba(8, 12, 20, 0.88);
+  background: var(--nexus-panel-strong);
   color: #eef4ff;
 }
 .nx-workspace-surface--kanban {
@@ -1020,13 +1020,13 @@
 .nx-orb-dashboard__title {
   font-size: 17px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
   letter-spacing: -0.01em;
 }
 .nx-orb-dashboard__subtitle {
   font-size: 10px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
@@ -1102,7 +1102,7 @@
   font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--nexus-muted);
   margin-bottom: 14px;
   letter-spacing: 0.15em;
 }
@@ -1150,14 +1150,14 @@
   z-index: 1;
 }
 .nx-orb-dashboard__flow-label {
-  color: rgba(255, 255, 255, 0.54);
+  color: var(--nexus-muted);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 .nx-orb-dashboard__flow-value {
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 28px;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -1201,7 +1201,7 @@
   pointer-events: none;
 }
 .nx-orb-dashboard__card:hover {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--nexus-muted);
   transform: translateY(-2px);
   box-shadow:
     0 16px 30px rgba(0, 0, 0, 0.22),
@@ -1361,7 +1361,7 @@
   line-height: 0.95;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: #fff;
+  color: var(--nexus-text);
 }
 .nx-orb-dashboard__card-trend {
   display: inline-flex;
@@ -1410,7 +1410,7 @@
 }
 .nx-orb-dashboard__rec-item {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--nexus-text);
   line-height: 1.4;
   padding-left: 12px;
   position: relative;
@@ -1431,7 +1431,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(4, 8, 16, 0.52);
+  background: var(--nexus-surface-overlay);
 }
 .nx-orb-dashboard__status {
   display: flex;
@@ -1439,7 +1439,7 @@
   gap: 8px;
   font-size: 11px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--nexus-muted);
 }
 .nx-orb-dashboard__status-indicator {
   width: 8px;
@@ -1453,7 +1453,7 @@
 .nx-orb-dashboard__last-updated {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
 }
 .nx-orb-dashboard__hint {
   color: #0a84ff;
@@ -1625,7 +1625,7 @@
 .nx-queue-cc__health.is-healthy { color: #30d158; background: rgba(48, 209, 88, 0.1); }
 .nx-queue-cc__health.is-warning { color: #ffd60a; background: rgba(255, 214, 10, 0.12); }
 .nx-queue-cc__health.is-critical { color: #ff6b63; background: rgba(255, 107, 99, 0.12); }
-.nx-queue-cc__health.is-unknown { color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.06); }
+.nx-queue-cc__health.is-unknown { color: var(--nexus-muted); background: rgba(255,255,255,0.06); }
 
 .nx-queue-cc__summary {
   display: grid;
@@ -1732,7 +1732,7 @@
   font-size: 34px;
   line-height: 1;
   font-weight: 900;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-queue-cc__hero-card small {
@@ -1786,7 +1786,7 @@
 .nx-queue-cc__chip.is-active {
   background: rgba(91, 182, 255, 0.14);
   border-color: rgba(91, 182, 255, 0.34);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-queue-cc__actions button:disabled,
@@ -1831,8 +1831,8 @@
   min-height: 34px;
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(5, 8, 14, 0.7);
-  color: #fff;
+  background: var(--nexus-surface-overlay);
+  color: var(--nexus-text);
   padding: 0 10px;
 }
 
@@ -1841,7 +1841,7 @@
   display: block;
   font-size: 17px;
   font-weight: 900;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-queue-cc__metric.is-good {
@@ -2131,7 +2131,7 @@
 
 .qcc-btn.is-secondary {
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.09);
+  border-color: var(--nexus-muted);
   color: rgba(200, 218, 242, 0.60);
 }
 
@@ -2139,7 +2139,7 @@
 
 .qcc-btn.is-ghost {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--nexus-muted);
   color: rgba(172, 198, 232, 0.46);
   font-size: 10px;
 }
@@ -2189,7 +2189,7 @@
   min-height: 30px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(5, 8, 14, 0.75);
+  background: var(--nexus-surface-overlay);
   color: rgba(240, 246, 252, 0.88);
   padding: 0 10px;
   font-size: 12px;
@@ -2334,7 +2334,7 @@
 
 .qcc-attention-row.is-actionable:hover {
   background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.10);
+  border-color: var(--nexus-muted);
 }
 
 .qcc-attention-row.is-actionable:hover .qcc-attention-row__action-hint {
@@ -2528,7 +2528,7 @@
   font-size: 10px;
   letter-spacing: 0.02em;
   color: rgba(152, 180, 226, 0.40);
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--nexus-muted);
 }
 
 .ncc-tab.is-more.is-active {
@@ -2565,7 +2565,7 @@
 }
 
 .ncc-card:hover {
-  border-color: rgba(255, 255, 255, 0.11);
+  border-color: var(--nexus-muted);
   background: rgba(255, 255, 255, 0.042);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.20);
 }
@@ -2784,7 +2784,7 @@
 
 .nx-sidebar-stat-pill b {
   font-size: 13px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-sidebar-stat-pill small {
@@ -2819,7 +2819,7 @@
 .nx-sidebar-kpi-tile strong {
   font-size: 16px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-thread-card--deterministic.is-good {
@@ -2959,7 +2959,7 @@
 
 .nx-inbox-stat-strip__item strong {
   font-size: 14px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox-table-view__header {
@@ -2979,7 +2979,7 @@
 .nx-inbox-table-view__header h2 {
   margin: 4px 0 0;
   font-size: 20px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox-table-view__header select {
@@ -2987,8 +2987,8 @@
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid rgba(163, 186, 221, 0.14);
-  background: rgba(12, 18, 29, 0.9);
-  color: #fff;
+  background: var(--nexus-panel-strong);
+  color: var(--nexus-text);
 }
 
 .nx-inbox-table-wrap {
@@ -3022,8 +3022,8 @@
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid rgba(163, 186, 221, 0.14);
-  background: rgba(12, 18, 29, 0.9);
-  color: #fff;
+  background: var(--nexus-panel-strong);
+  color: var(--nexus-text);
 }
 
 .nx-inbox-list-toolbar__search {
@@ -3057,7 +3057,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: rgba(9, 14, 23, 0.96);
+  background: var(--nexus-panel-strong);
   color: rgba(187, 199, 220, 0.64);
   font-size: 10px;
   font-weight: 900;
@@ -3082,7 +3082,7 @@
 
 .nx-inbox-table__primary {
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox-table__secondary {
@@ -3116,7 +3116,7 @@
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid rgba(163, 186, 221, 0.14);
-  background: rgba(12, 18, 29, 0.9);
+  background: var(--nexus-panel-strong);
   color: rgba(219, 228, 241, 0.7);
   font-size: 10px;
   font-weight: 800;
@@ -3127,7 +3127,7 @@
 .nx-inbox-density-switch__btn.is-active {
   border-color: rgba(91, 182, 255, 0.28);
   background: rgba(91, 182, 255, 0.12);
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-inbox-table-view.is-compact .nx-inbox-table th,
@@ -3222,7 +3222,7 @@
 
 .nx-thread-card__title {
   display: block;
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 14px;
   font-weight: 800;
   overflow: hidden;
@@ -3277,7 +3277,7 @@
 }
 
 .nx-thread-card__meta-grid strong {
-  color: #fff;
+  color: var(--nexus-text);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3350,7 +3350,7 @@
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 214, 10, 0.2);
-  background: rgba(8, 10, 15, 0.45);
+  background: var(--nexus-surface-overlay);
   color: #fff0b3;
   font-size: 10px;
   font-weight: 800;
@@ -3403,7 +3403,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
 }
 .nx-outlier-card.is-winner { border-color: rgba(48, 209, 88, 0.3); background: rgba(48, 209, 88, 0.03); }
 .nx-outlier-card.is-winner .nx-outlier-card__header { color: #30d158; }
@@ -3417,21 +3417,21 @@
 .nx-outlier-card__key {
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--nexus-text);
 }
 .nx-outlier-card__stats {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--nexus-muted);
 }
 .nx-outlier-card__value {
   font-size: 18px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
 }
 .nx-outlier-card__rec {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
   margin-top: 2px;
 }
 
@@ -3442,7 +3442,7 @@
   flex-direction: column;
   gap: 20px;
   padding: 24px !important;
-  background: rgba(15, 23, 42, 0.6) !important;
+  background: var(--nexus-surface-overlay) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   backdrop-filter: blur(20px);
   border-radius: 20px !important;
@@ -3478,7 +3478,7 @@
 
 .nx-segmented-control__btn.is-active {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: var(--nexus-text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -3526,7 +3526,7 @@
   place-items: center;
   font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
 }
 
@@ -3542,7 +3542,7 @@
   display: grid;
   place-items: center;
   font-size: 12px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-contact-intel-v2__identity-copy {
@@ -3560,7 +3560,7 @@
 .nx-contact-intel-v2__headline-row strong {
   font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: var(--nexus-text);
   letter-spacing: -0.01em;
 }
 
@@ -3607,7 +3607,7 @@
 .nx-intel-field-v2__label {
   font-size: 9px;
   font-weight: 900;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -3643,7 +3643,7 @@
 /* ── Elite Intelligence Refinements ──────────────────────────────────────── */
 
 .nx-glass-card {
-  background: rgba(15, 23, 42, 0.45) !important;
+  background: var(--nexus-surface-overlay) !important;
   backdrop-filter: blur(24px) saturate(160%);
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   box-shadow: 
@@ -3694,7 +3694,7 @@
   border-radius: 11px;
   font-size: 10px;
   font-weight: 800;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
@@ -3707,13 +3707,13 @@
 }
 
 .nx-segmented-control__btn:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--nexus-muted);
   background: rgba(255, 255, 255, 0.04);
 }
 
 .nx-segmented-control__btn.is-active {
   background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  color: var(--nexus-text);
   box-shadow: 
     0 4px 12px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(255, 255, 255, 0.1) inset;
@@ -3766,7 +3766,7 @@
 
 .nx-chat-header {
   padding: 24px 32px !important;
-  background: rgba(15, 23, 42, 0.6) !important;
+  background: var(--nexus-surface-overlay) !important;
   backdrop-filter: blur(20px) saturate(140%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
   z-index: 100;
@@ -3792,7 +3792,7 @@
   border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--nexus-muted);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3801,14 +3801,14 @@
 .nx-chat-header__address {
   font-size: 14px !important;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   margin-top: 4px;
   display: block;
 }
 
 .nx-operator-rail {
   padding: 12px 24px !important;
-  background: rgba(8, 12, 21, 0.4) !important;
+  background: var(--nexus-surface-overlay) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
   display: flex;
   align-items: center;
@@ -3830,14 +3830,14 @@
   letter-spacing: 0.05em;
   background: rgba(255, 255, 255, 0.03) !important;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: var(--nexus-muted) !important;
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .nx-rail-btn:hover {
   background: rgba(255, 255, 255, 0.08) !important;
-  color: #fff !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: var(--nexus-text) !important;
+  border-color: var(--nexus-muted) !important;
   transform: translateY(-1px);
 }
 
@@ -3873,14 +3873,14 @@
   place-items: center !important;
   background: rgba(255, 255, 255, 0.04) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) !important;
 }
 
 .nx-chat-action:hover {
   background: rgba(255, 255, 255, 0.08) !important;
-  color: #fff !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--nexus-text) !important;
+  border-color: var(--nexus-muted) !important;
   transform: translateY(-1px);
 }
 
@@ -3972,7 +3972,7 @@
 .nx-bubble-wrap.is-inbound .nx-chat-bubble {
   background: rgba(255, 255, 255, 0.07) !important;
   border: 1px solid rgba(255, 255, 255, 0.10) !important;
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: var(--nexus-text) !important;
   border-radius: 14px 14px 14px 4px !important;
   backdrop-filter: blur(12px);
   overflow: visible !important;
@@ -3993,7 +3993,7 @@
 .nx-bubble-footer {
   font-size: 10px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--nexus-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 2px 4px 0;
@@ -4013,7 +4013,7 @@
   width: 280px;
   max-height: 420px;
   overflow-y: auto;
-  background: rgba(8, 18, 44, 0.97);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(40px) saturate(150%);
   border: 1px solid rgba(47, 157, 255, 0.22);
   border-radius: 14px;
@@ -4021,7 +4021,7 @@
   z-index: 90;
   padding: 6px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.08) transparent;
+  scrollbar-color: var(--nexus-muted) transparent;
 }
 
 .nx-quick-actions-popover::-webkit-scrollbar {
@@ -4272,7 +4272,7 @@
 }
 
 .nx-sticky-composer:focus-within {
-  background: rgba(10, 20, 44, 0.75) !important;
+  background: var(--nexus-surface-overlay) !important;
   border-color: var(--nx-composer-focus-border, rgba(45, 155, 255, 0.78)) !important;
   box-shadow:
     0 32px 80px rgba(0, 0, 0, 0.6),
@@ -4370,7 +4370,7 @@
 .nx-utility-btn {
   background: transparent !important;
   border: 1px solid transparent !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   font-size: 11px !important;
   font-weight: 700 !important;
   white-space: nowrap;
@@ -4378,9 +4378,9 @@
 }
 
 .nx-utility-btn:hover {
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--nexus-muted) !important;
 }
 
 .is-layout-compact .nx-utility-btn {
@@ -4408,13 +4408,13 @@
   height: 44px !important;
   border-radius: 14px !important;
   background: rgba(255, 255, 255, 0.03) !important;
-  color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--nexus-muted) !important;
   transition: all 0.3s ease !important;
 }
 
 .nx-send-button.is-ready {
   background: linear-gradient(135deg, #1a7fff, #0a5fd4) !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   box-shadow:
     0 4px 12px rgba(10, 132, 255, 0.45),
     0 0 0 1px rgba(80, 180, 255, 0.22) inset !important;
@@ -4455,7 +4455,7 @@
 .nx-composer-ai-chip:hover {
   background: rgba(17, 102, 218, 0.42) !important;
   border-color: rgba(47, 157, 255, 0.70) !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   transform: translateY(-1px);
 }
 
@@ -4497,7 +4497,7 @@
 
 /* ── Inline Translate Popover ─────────────────────────────────────────── */
 .nx-translate-popover {
-  background: rgba(6, 12, 32, 0.97) !important;
+  background: var(--nexus-panel-strong) !important;
   border: 1px solid rgba(47, 157, 255, 0.30) !important;
   border-radius: 14px !important;
   padding: 12px 14px !important;
@@ -4560,14 +4560,14 @@
   height: 22px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--nexus-muted);
   cursor: pointer;
   border-radius: 5px;
   transition: color 0.15s, background 0.15s;
 }
 
 .nx-translate-popover__close:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--nexus-muted);
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -4601,7 +4601,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.30);
+  color: var(--nexus-muted);
 }
 
 .nx-translate-popover__section-sublabel {
@@ -4613,7 +4613,7 @@
 
 .nx-translate-popover__hint {
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--nexus-muted);
   font-style: italic;
   margin: 0;
   padding: 0;
@@ -4632,7 +4632,7 @@
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--nexus-muted);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -4764,7 +4764,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 7px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--nexus-muted);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -4773,7 +4773,7 @@
 
 .nx-translate-preview__revert:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--nexus-muted);
 }
 
 /* Error */
@@ -4809,7 +4809,7 @@
 /* ── Elite Sidebar & Thread Cards ───────────────────────────────────────── */
 
 .nx-sidebar--premium {
-  background: #070910 !important;
+  background: var(--nexus-panel) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
@@ -4840,7 +4840,7 @@
   border-radius: 16px !important;
   overflow: hidden !important;
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
-  background: rgba(15, 23, 42, 0.3) !important;
+  background: var(--nexus-surface-overlay) !important;
   backdrop-filter: blur(16px) saturate(140%) !important;
   margin: 12px !important;
   padding: 12px 14px !important;
@@ -4881,7 +4881,7 @@
   font-size: 10px !important;
   font-weight: 900 !important;
   letter-spacing: 0.15em !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   text-transform: uppercase !important;
   margin-bottom: 2px !important;
 }
@@ -4896,7 +4896,7 @@
 .nx-sidebar__hero__count {
   font-size: 32px !important;
   font-weight: 800 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   letter-spacing: -0.04em !important;
   line-height: 1 !important;
   text-shadow: 0 0 20px rgba(255, 255, 255, 0.1) !important;
@@ -4933,13 +4933,13 @@
   font-size: 8px !important;
   font-weight: 800 !important;
   letter-spacing: 0.05em !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-hero-mode-tab__count {
   font-size: 12px !important;
   font-weight: 700 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
 }
 
 /* ── Glass Command Pills ────────────────────────────────────────────────── */
@@ -4958,14 +4958,14 @@
 
 .nx-inbox-badge:hover {
   background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: var(--nexus-muted) !important;
 }
 
 .nx-property-hero--elite {
   padding: 0 !important;
   overflow: hidden !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  background: rgba(15, 23, 42, 0.4) !important;
+  background: var(--nexus-surface-overlay) !important;
 }
 
 .nx-property-split-console {
@@ -4973,7 +4973,7 @@
   height: 280px !important;
   position: relative !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-  background: #000 !important;
+  background: var(--nexus-panel) !important;
 }
 
 .nx-property-split-console--full {
@@ -5034,7 +5034,7 @@
   height: 100% !important;
   border: none !important;
   display: block !important;
-  background: #05070c !important;
+  background: var(--nexus-panel) !important;
 }
 
 /* 50% focused mode: single dominant street view, no stacked dual-iframe */
@@ -5044,7 +5044,7 @@
   overflow: hidden;
   border-radius: 18px 18px 0 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #05070c;
+  background: var(--nexus-panel);
 }
 
 .nx-property-hero--focused-mode .nx-property-focused-media .nx-property-panel {
@@ -5074,7 +5074,7 @@
   border-radius: 6px !important;
   font-size: 9px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: var(--nexus-muted) !important;
   letter-spacing: 0.1em !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
@@ -5085,7 +5085,7 @@
   padding: 6px 12px !important;
   border-radius: 999px !important;
   color: rgba(255, 248, 248, 0.82) !important;
-  background: rgba(10, 12, 20, 0.55) !important;
+  background: var(--nexus-surface-overlay) !important;
   border-color: rgba(255, 104, 104, 0.22) !important;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
 }
@@ -5107,7 +5107,7 @@
 .nx-property-address-bar strong {
   font-size: 20px !important;
   font-weight: 800 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   letter-spacing: -0.02em !important;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5) !important;
 }
@@ -5158,8 +5158,8 @@
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: #0f172a !important;
-  color: rgba(255, 255, 255, 0.1) !important;
+  background: var(--nexus-panel) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-panel-fallback .nx-icon {
@@ -5216,12 +5216,12 @@
   font-size: 10px !important;
   font-weight: 800 !important;
   letter-spacing: 0.16em !important;
-  color: rgba(255, 255, 255, 0.46) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-property-panel__meta-block span {
   display: block !important;
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: var(--nexus-text) !important;
   font-size: 13px !important;
   font-weight: 700 !important;
   line-height: 1.35 !important;
@@ -5245,13 +5245,13 @@
   min-height: 42px !important;
   border-radius: 14px !important;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035)) !important;
-  border-color: rgba(255, 255, 255, 0.09) !important;
+  border-color: var(--nexus-muted) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 28px rgba(0, 0, 0, 0.18) !important;
 }
 
 .nx-property-hero--full .nx-property-intel-links .nx-linked-record-btn {
   background: rgba(255, 255, 255, 0.09) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: var(--nexus-muted) !important;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22) !important;
 }
 
@@ -5278,19 +5278,19 @@
 
 .nx-inbox-badge.is-selected {
   background: rgba(255, 255, 255, 0.12) !important;
-  border-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: var(--nexus-muted) !important;
 }
 
 .nx-inbox-badge strong {
   font-size: 13px !important;
   font-weight: 800 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
 }
 
 .nx-sidebar__total-count {
   font-size: 11px !important;
   font-weight: 800 !important;
-  color: rgba(255, 255, 255, 0.3) !important;
+  color: var(--nexus-muted) !important;
   letter-spacing: 0.05em !important;
 }
 
@@ -5305,7 +5305,7 @@
 
 .nx-thread-card:hover {
   background: rgba(255, 255, 255, 0.03) !important;
-  border-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: var(--nexus-muted) !important;
   transform: translateX(4px);
 }
 
@@ -5320,7 +5320,7 @@
   height: 36px !important;
   border-radius: 10px !important;
   background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: var(--nexus-muted) !important;
   font-size: 11px !important;
   font-weight: 800 !important;
   display: grid !important;
@@ -5331,13 +5331,13 @@
 
 .nx-thread-card.is-hot .nx-thread-card__avatar-lite {
   background: linear-gradient(135deg, #ff453a 0%, #bf5af2 100%) !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
 }
 
 .nx-thread-card__name {
   font-size: 14px !important;
   font-weight: 700 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   letter-spacing: -0.01em !important;
 }
 
@@ -5382,7 +5382,7 @@
 .nx-thread-card__address {
   font-size: 11px !important;
   font-weight: 600 !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
@@ -5391,7 +5391,7 @@
 .nx-thread-card__preview {
   font-size: 12px !important;
   line-height: 1.4 !important;
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: var(--nexus-muted) !important;
   display: -webkit-box !important;
   -webkit-line-clamp: 2 !important;
   -webkit-box-orient: vertical !important;
@@ -5424,7 +5424,7 @@
   width: 900px !important;
   max-width: 95vw !important;
   height: 85vh !important;
-  background: rgba(15, 23, 42, 0.8) !important;
+  background: var(--nexus-panel-strong) !important;
   backdrop-filter: blur(40px) saturate(180%) !important;
   border-radius: 32px !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -5453,7 +5453,7 @@
 .nx-filter-modal__header span {
   font-size: 10px !important;
   font-weight: 800 !important;
-  color: rgba(255, 255, 255, 0.3) !important;
+  color: var(--nexus-muted) !important;
   text-transform: uppercase !important;
   letter-spacing: 0.1em !important;
   display: block !important;
@@ -5485,7 +5485,7 @@
 .nx-filter-group header {
   font-size: 11px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   text-transform: uppercase !important;
   letter-spacing: 0.08em !important;
   margin-bottom: 20px !important;
@@ -5518,7 +5518,7 @@
 .nx-filter-group label span {
   font-size: 11px !important;
   font-weight: 700 !important;
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-filter-group input,
@@ -5527,7 +5527,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   font-size: 13px !important;
   font-weight: 600 !important;
   transition: all 0.2s ease !important;
@@ -5553,7 +5553,7 @@
 .nx-filter-modal__footer button:not(.nx-primary-action) {
   background: transparent !important;
   border: none !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   font-size: 13px !important;
   font-weight: 700 !important;
   padding: 10px 20px !important;
@@ -5562,13 +5562,13 @@
 }
 
 .nx-filter-modal__footer button:not(.nx-primary-action):hover:not(:disabled) {
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   background: rgba(255, 255, 255, 0.05) !important;
 }
 
 .nx-primary-action {
   background: #0a84ff !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   border: none !important;
   border-radius: 14px !important;
   padding: 12px 28px !important;
@@ -5607,7 +5607,7 @@
 
 .nx-seller-command-card {
   padding: 24px !important;
-  background: rgba(15, 23, 42, 0.4) !important;
+  background: var(--nexus-surface-overlay) !important;
   border-radius: 20px !important;
   display: flex;
   flex-direction: column;
@@ -5631,13 +5631,13 @@
 
 .nx-seller-command-card__info strong {
   font-size: 18px;
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-seller-sub-telemetry {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--nexus-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -5678,7 +5678,7 @@
 /* ── Offer Underwriting Console (Elite) ──────────────────────────────── */
 .nx-offer-console--elite {
   padding: 18px !important;
-  background: rgba(15, 23, 42, 0.4) !important;
+  background: var(--nexus-surface-overlay) !important;
 }
 
 .nx-offer-metrics-grid {
@@ -5701,7 +5701,7 @@
 
 .nx-offer-metric-card:hover {
   background: rgba(255, 255, 255, 0.05) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--nexus-muted) !important;
   transform: translateY(-2px) !important;
 }
 
@@ -5713,14 +5713,14 @@
 .nx-offer-metric-card label {
   font-size: 9px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--nexus-muted) !important;
   letter-spacing: 0.1em !important;
 }
 
 .nx-metric-value {
   font-size: 18px !important;
   font-weight: 800 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   font-family: 'JetBrains Mono', 'Roboto Mono', monospace !important;
   letter-spacing: -0.02em !important;
 }
@@ -5728,7 +5728,7 @@
 .nx-metric-sentiment {
   font-size: 11px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-metric-sentiment.is-safe {
@@ -5750,7 +5750,7 @@
 .nx-snapshot-header {
   font-size: 10px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: var(--nexus-muted) !important;
   margin-bottom: 12px !important;
   letter-spacing: 0.05em !important;
 }
@@ -5765,13 +5765,13 @@
   display: block !important;
   font-size: 8px !important;
   font-weight: 900 !important;
-  color: rgba(255, 255, 255, 0.3) !important;
+  color: var(--nexus-muted) !important;
 }
 
 .nx-snapshot-item strong {
   font-size: 14px !important;
   font-weight: 700 !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
 }
 
 .nx-snapshot-comps {
@@ -5788,7 +5788,7 @@
   border-radius: 6px !important;
   font-size: 9px !important;
   font-weight: 700 !important;
-  color: rgba(255, 255, 255, 0.7) !important;
+  color: var(--nexus-muted) !important;
   display: flex !important;
   align-items: center !important;
   gap: 4px !important;
@@ -5797,7 +5797,7 @@
 
 .nx-comp-tag:hover {
   background: rgba(255, 255, 255, 0.1) !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
 }
 
 .nx-offer-actions {
@@ -5822,7 +5822,7 @@
 
 .nx-command-button.is-primary {
   background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%) !important;
-  color: #fff !important;
+  color: var(--nexus-text) !important;
   box-shadow: 0 4px 15px rgba(30, 64, 175, 0.3) !important;
 }
 
@@ -5865,7 +5865,7 @@
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background: #040912;
+  background: var(--nexus-panel);
 }
 
 .nx-command-surface.is-fullscreen {
@@ -5907,7 +5907,7 @@
   height: 40px;
   border: 0;
   border-radius: 999px;
-  background: rgba(8, 13, 23, 0.64);
+  background: var(--nexus-surface-overlay);
   color: #edf4ff;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(24px);
@@ -5928,7 +5928,7 @@
   padding: 10px;
   border-radius: 18px;
   border: 0;
-  background: rgba(7, 12, 21, 0.78);
+  background: var(--nexus-surface-overlay);
   box-shadow: 0 24px 72px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(28px);
 }
@@ -6066,7 +6066,7 @@
   overflow: hidden;
   border-radius: 24px;
   border: 0;
-  background: rgba(7, 12, 21, 0.62);
+  background: var(--nexus-surface-overlay);
   box-shadow: 0 24px 72px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(24px);
 }
@@ -6097,7 +6097,7 @@
 .nx-command-surface__map-stage .nx-icm {
   border: 0;
   border-radius: 0;
-  background: #030812;
+  background: var(--nexus-panel);
 }
 
 .nx-command-thread-card {
@@ -6253,7 +6253,7 @@
   max-width: min(680px, calc(100vw - 36px));
   padding: 10px 14px;
   border-radius: 999px;
-  background: rgba(7, 12, 21, 0.78);
+  background: var(--nexus-surface-overlay);
   color: #eef4ff;
   text-align: center;
   box-shadow: 0 18px 56px rgba(0, 0, 0, 0.28);
@@ -6279,7 +6279,7 @@
   z-index: 18;
   overflow: hidden;
   border-top: 1px solid rgba(144, 168, 205, 0.12);
-  background: rgba(4, 8, 16, 0.92);
+  background: var(--nexus-panel-strong);
   backdrop-filter: blur(18px);
 }
 
@@ -6305,7 +6305,7 @@
 }
 
 .nx-command-strip__item strong {
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-command-feed {
@@ -6420,7 +6420,7 @@
 
 /* --- Individual card --- */
 .nx-prop-intel-card {
-  background: rgba(8, 10, 17, 0.94) !important;
+  background: var(--nexus-panel-strong) !important;
   padding: 16px 18px 18px !important;
   display: flex !important;
   flex-direction: column !important;
@@ -6492,7 +6492,7 @@
   font-weight: 600 !important;
   letter-spacing: 0.1em !important;
   text-transform: uppercase !important;
-  color: rgba(255, 255, 255, 0.33) !important;
+  color: var(--nexus-muted) !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
 }
@@ -6532,7 +6532,7 @@
 /* Empty state placeholder */
 .nx-prop-intel-empty {
   font-size: 11px !important;
-  color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--nexus-muted) !important;
   font-style: italic !important;
   padding: 8px 0 !important;
 }
@@ -6606,7 +6606,7 @@
   flex-shrink: 0;
   gap: 2px;
   padding: 8px 12px 0;
-  background: rgba(9, 14, 23, 0.6);
+  background: var(--nexus-surface-overlay);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -6642,7 +6642,7 @@
   flex-shrink: 0;
   min-height: 460px;
   overflow: hidden;
-  background: #070c16;
+  background: var(--nexus-panel);
 }
 
 /* Full / expanded: true 50/50 side-by-side */
@@ -6691,7 +6691,7 @@
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: rgba(226, 234, 247, 0.6);
-  background: rgba(7, 12, 22, 0.7);
+  background: var(--nexus-surface-overlay);
   padding: 3px 7px;
   border-radius: 4px;
   pointer-events: none;
@@ -6731,7 +6731,7 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 16px;
-  background: rgba(9, 14, 23, 0.5);
+  background: var(--nexus-surface-overlay);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -6783,7 +6783,7 @@
 .nx-pic-exec-card.is-rehab { border-color: rgba(251, 191, 36, 0.18); background: rgba(251, 191, 36, 0.05); }
 .nx-pic-exec-card.is-rehab span { color: #fbbf24; }
 
-.nx-pic-exec-card.is-condition { border-color: rgba(255, 255, 255, 0.08); }
+.nx-pic-exec-card.is-condition { border-color: var(--nexus-muted); }
 
 /* B–G Sections grid */
 .nx-pic-sections {
@@ -6890,7 +6890,7 @@
   gap: 8px;
   padding: 10px 14px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(9, 14, 23, 0.4);
+  background: var(--nexus-surface-overlay);
 }
 
 /* ── WatchBell ──────────────────────────────────────────────────────────── */
@@ -6965,7 +6965,7 @@
 /* Override panel width to match notification center */
 .nx-activity-panel {
   width: 460px !important;
-  background: rgba(9, 13, 22, 0.99) !important;
+  background: var(--nexus-panel-strong) !important;
   backdrop-filter: blur(48px) saturate(220%) !important;
   border: 1px solid rgba(255, 255, 255, 0.10) !important;
   box-shadow: 0 32px 80px rgba(0, 0, 0, 0.80), 0 0 0 1px rgba(255, 255, 255, 0.04) inset !important;
@@ -7288,7 +7288,7 @@
 .nx-pic-exec-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.30);
-  border-color: rgba(255, 255, 255, 0.13);
+  border-color: var(--nexus-muted);
 }
 .nx-pic-exec-card label {
   font-size: 9px;
@@ -7407,7 +7407,7 @@
 .nx-pic-links-bar {
   padding: 12px 18px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(7, 11, 20, 0.50);
+  background: var(--nexus-surface-overlay);
   gap: 10px;
 }
 
@@ -7635,7 +7635,7 @@
 }
 .nx-pic-chip.is-muted {
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--nexus-muted);
   color: rgba(172, 196, 230, 0.50);
 }
 
@@ -7727,7 +7727,7 @@
   overflow: hidden;
   border: 1px solid var(--nx-border, rgba(99, 215, 255, 0.10));
   border-radius: 12px;
-  background: rgba(6, 12, 24, 0.55);
+  background: var(--nexus-surface-overlay);
 }
 
 .nx-workspace-menu-item,
@@ -7885,7 +7885,7 @@
   position: fixed;
   inset: 0;
   z-index: 12130;
-  background: rgba(2, 7, 16, 0.6);
+  background: var(--nexus-surface-overlay);
 }
 
 .nx-workspace-drawer {
@@ -7896,7 +7896,7 @@
   width: min(440px, 98vw);
   z-index: 12140;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(4, 10, 20, 0.98);
+  background: var(--nexus-panel-strong);
   display: grid;
   grid-template-rows: auto 1fr;
   overflow: hidden;
@@ -8376,7 +8376,7 @@
 .nx-sidebar-quick-filter-chip.is-active {
   border-color: var(--nx-accent, #63d7ff);
   background: var(--nx-accent-soft, rgba(99, 215, 255, 0.14));
-  color: #fff;
+  color: var(--nexus-text);
 }
 
 .nx-sidebar-saved-list-actions {
@@ -8427,7 +8427,7 @@
   margin-bottom: 8px;
   border: 1px solid rgba(99, 215, 255, 0.2);
   border-radius: 10px;
-  background: rgba(8, 14, 24, 0.92);
+  background: var(--nexus-panel-strong);
   display: flex;
   gap: 6px;
   flex-wrap: wrap;

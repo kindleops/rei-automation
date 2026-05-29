@@ -3,6 +3,7 @@ import { loadContext } from "@/lib/domain/context/load-context.js";
 import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
 import { createBrain } from "@/lib/domain/context/resolve-brain.js";
 import { classify } from "@/lib/domain/classification/classify.js";
+import { buildThreadStatePatchFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import { resolveRoute } from "@/lib/domain/routing/resolve-route.js";
 import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
 import { getPodioRetryAfterSeconds, isPodioRateLimitError } from "@/lib/providers/podio.js";
@@ -1030,6 +1031,26 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       deterministic_state, offer_routing;
     try {
       classification = await runtimeDeps.classify(message_body, brain_item);
+
+      // Generate the canonical thread state from the new single source of truth
+      try {
+        const patch = buildThreadStatePatchFromClassification({
+          messageEvent: extracted,
+          classification,
+        });
+        const thread_key = inbound_from;
+        
+        const supabase = runtimeDeps.getSupabaseClient?.();
+        if (supabase) {
+          await supabase.from("deal_thread_state").upsert({
+            thread_key,
+            ...patch,
+          }, { onConflict: "thread_key" });
+        }
+      } catch (patchErr) {
+        safeWarn("deal_thread_state_upsert_failed", { error: patchErr?.message || "unknown" });
+      }
+
       signals = runtimeDeps.extractUnderwritingSignals({
         message: message_body,
         classification,
@@ -1835,6 +1856,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
              risk: second_pass_supabase_payload.risk,
              routing_allowed: second_pass_supabase_payload.routing_allowed,
              safety_status: second_pass_supabase_payload.safety_status,
+             // Unified classification metadata for thread_state mapping
+             classification,
              // Legacy fields
              classification_source: classification?.source || null,
              classification_result:

@@ -2134,7 +2134,7 @@ const buildSoldCompPresentation = (
   }
   const { buyerName, buyerType, buyerTone, entityLabel } = classifySoldCompBuyer(comp, variant)
   const buyerInitials = initialsFromName(buyerName)
-  const imageUrl = text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || buildStreetViewUrl(comp.property_address_full) || ''
+  const imageUrl = text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
   const imageLabel = text(anyComp.streetview_image) ? 'Street View' : 'Property Preview'
   const propertyLabel = text(comp.property_type) || (variant === 'multifamily' ? 'Apartment' : 'Residential')
   const subtypeLabel = text(comp.normalized_asset_class || comp.property_class) || null
@@ -2352,7 +2352,7 @@ const SoldCompSelectionCard = ({
   onClose: () => void
 }) => {
   if (!comp) return null
-  const imageUrl = comp.streetview_image || comp.satellite_image || buildStreetViewUrl(comp.property_address_full) || ''
+  const imageUrl = comp.streetview_image || comp.satellite_image || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
   
   const price = comp.mls_sold_price ?? comp.sale_price ?? 0
   const priceLabel = formatCurrency(price)
@@ -3130,6 +3130,7 @@ interface Props {
     filters: MapFilterState
     mapOverlays: MapOverlayToggles
   }) => void
+  paused?: boolean
 }
 
 const defaultFilters: MapFilterState = {
@@ -3180,6 +3181,7 @@ export function InboxCommandMap({
   initialFilters,
   initialMapOverlays,
   onStateChange,
+  paused = false,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -6554,6 +6556,11 @@ export function InboxCommandMap({
       return
     }
 
+    if (paused) {
+      if (import.meta.env.DEV) console.log('[HeavyPanelLoadSkipped] InboxCommandMap: paused (inbox or messages loading)')
+      return
+    }
+
     const scheduleLoad = (stage: MapLoadStage = 'stage_2', delayMs = 320) => {
       if (sellerPinsFetchTimerRef.current) clearTimeout(sellerPinsFetchTimerRef.current)
       sellerPinsFetchTimerRef.current = setTimeout(() => {
@@ -6666,7 +6673,7 @@ export function InboxCommandMap({
       clearTimeout(stage2Timer)
       map?.off('moveend', onMoveEnd)
     }
-  }, [performanceSettings.markerDensity, performanceSettings.performanceMode, sellerPinLayers.sellerPins])
+  }, [performanceSettings.markerDensity, performanceSettings.performanceMode, sellerPinLayers.sellerPins, paused])
 
   useEffect(() => {
     if (!sellerPinLayers.sellerPins) return

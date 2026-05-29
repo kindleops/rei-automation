@@ -89,22 +89,64 @@ function isTransportFailureReason(reason = "") {
  */
 export async function resolveFromPhoneNumber({
   thread_key,
+  to_phone_number = null,
+  textgrid_number_id = null,
   market = null,
   supabase = defaultSupabase,
 } = {}) {
   if (!thread_key) return null;
+  const normalized_to = normalizePhone(to_phone_number);
+  const isRecipientPhone = (value) => {
+    const normalized = normalizePhone(value);
+    return Boolean(normalized && normalized_to && normalized === normalized_to);
+  };
 
-  // Priority 1: inbox_thread_state metadata.our_number
+  // Priority 0: direct textgrid number assignment
+  if (textgrid_number_id) {
+    try {
+      const { data: textgridRow } = await supabase
+        .from("textgrid_numbers")
+        .select("phone_number")
+        .eq("id", textgrid_number_id)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (textgridRow?.phone_number) {
+        const normalized = normalizePhone(textgridRow.phone_number);
+        if (normalized && !isRecipientPhone(normalized)) return normalized;
+      }
+    } catch {
+      // Non-fatal, continue to next priority
+    }
+  }
+
+  // Priority 1: inbox_thread_state.our_number
   try {
     const { data: threadState } = await supabase
       .from("inbox_thread_state")
-      .select("thread_key, metadata")
+      .select("thread_key, our_number")
       .eq("thread_key", thread_key)
       .maybeSingle();
 
-    if (threadState?.metadata?.our_number) {
-      const normalized = normalizePhone(threadState.metadata.our_number);
-      if (normalized) return normalized;
+    if (threadState?.our_number) {
+      const normalized = normalizePhone(threadState.our_number);
+      if (normalized && !isRecipientPhone(normalized)) return normalized;
+    }
+  } catch {
+    // Non-fatal, continue to next priority
+  }
+
+  // Priority 1b: legacy deal_thread_state.our_number
+  try {
+    const { data: legacyThreadState } = await supabase
+      .from("deal_thread_state")
+      .select("thread_key, our_number")
+      .eq("thread_key", thread_key)
+      .maybeSingle();
+
+    if (legacyThreadState?.our_number) {
+      const normalized = normalizePhone(legacyThreadState.our_number);
+      if (normalized && !isRecipientPhone(normalized)) return normalized;
     }
   } catch {
     // Non-fatal, continue to next priority
@@ -124,10 +166,32 @@ export async function resolveFromPhoneNumber({
 
     if (latestOutbound?.from_phone_number) {
       const normalized = normalizePhone(latestOutbound.from_phone_number);
-      if (normalized) return normalized;
+      if (normalized && !isRecipientPhone(normalized)) return normalized;
     }
   } catch {
     // Non-fatal
+  }
+
+  // Priority 2b: Latest outbound in send_queue for same recipient phone
+  if (normalized_to) {
+    try {
+      const { data: latestOutboundByPhone } = await supabase
+        .from("send_queue")
+        .select("from_phone_number")
+        .eq("to_phone_number", normalized_to)
+        .eq("type", "outbound")
+        .not("from_phone_number", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestOutboundByPhone?.from_phone_number) {
+        const normalized = normalizePhone(latestOutboundByPhone.from_phone_number);
+        if (normalized && !isRecipientPhone(normalized)) return normalized;
+      }
+    } catch {
+      // Non-fatal
+    }
   }
 
   // Priority 3: Latest outbound in message_events for same thread
@@ -144,7 +208,73 @@ export async function resolveFromPhoneNumber({
 
     if (latestEvent?.from_phone_number) {
       const normalized = normalizePhone(latestEvent.from_phone_number);
-      if (normalized) return normalized;
+      if (normalized && !isRecipientPhone(normalized)) return normalized;
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // Priority 3a: latest message_events row by recipient phone
+  if (normalized_to) {
+    try {
+      const { data: outboundEventByPhone } = await supabase
+        .from("message_events")
+        .select("from_phone_number")
+        .eq("to_phone_number", normalized_to)
+        .eq("direction", "outbound")
+        .not("from_phone_number", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (outboundEventByPhone?.from_phone_number) {
+        const normalized = normalizePhone(outboundEventByPhone.from_phone_number);
+        if (normalized && !isRecipientPhone(normalized)) return normalized;
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    try {
+      const { data: inboundEventByPhone } = await supabase
+        .from("message_events")
+        .select("to_phone_number")
+        .eq("from_phone_number", normalized_to)
+        .eq("direction", "inbound")
+        .not("to_phone_number", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (inboundEventByPhone?.to_phone_number) {
+        const normalized = normalizePhone(inboundEventByPhone.to_phone_number);
+        if (normalized && !isRecipientPhone(normalized)) return normalized;
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // Priority 3b: latest message_events row of any direction for same thread
+  try {
+    const { data: recentEvents } = await supabase
+      .from("message_events")
+      .select("direction,from_phone_number,to_phone_number")
+      .eq("thread_key", thread_key)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    const rows = Array.isArray(recentEvents) ? recentEvents : [];
+    for (const event of rows) {
+      const direction = clean(event?.direction).toLowerCase();
+      const candidate =
+        direction === "inbound"
+          ? normalizePhone(event?.to_phone_number)
+          : direction === "outbound"
+            ? normalizePhone(event?.from_phone_number)
+            : normalizePhone(event?.from_phone_number) || normalizePhone(event?.to_phone_number);
+
+      if (candidate && !isRecipientPhone(candidate)) return candidate;
     }
   } catch {
     // Non-fatal
@@ -164,7 +294,7 @@ export async function resolveFromPhoneNumber({
         const firstNumber = numbers[0];
         if (firstNumber?.phone_number) {
           const normalized = normalizePhone(firstNumber.phone_number);
-          if (normalized) return normalized;
+          if (normalized && !isRecipientPhone(normalized)) return normalized;
         }
       }
     } catch {
@@ -216,6 +346,9 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
   }
   if (!from_phone_number) {
     return { ok: false, status: 400, error: "missing_from_phone_number" };
+  }
+  if (to_phone_number === from_phone_number) {
+    return { ok: false, status: 400, error: "SAME_FROM_TO_NUMBER" };
   }
   if (!message_body) {
     return { ok: false, status: 400, error: "missing_message_body" };
@@ -312,16 +445,18 @@ async function isHardComplianceBlocked({
 
   try {
     const { data: thread_state } = await supabase
-      .from("inbox_thread_state")
-      .select("thread_key,is_suppressed,status_bucket,detected_intent,current_stage")
+      .from("deal_thread_state")
+      .select("thread_key,universal_status,inbox_bucket,primary_intent,universal_stage,opt_out")
       .eq("thread_key", thread_key)
       .maybeSingle();
 
-    const thread_intent = clean(thread_state?.detected_intent).toLowerCase();
-    const status_bucket = clean(thread_state?.status_bucket).toLowerCase();
-    const stage = clean(thread_state?.current_stage).toLowerCase();
+    const thread_intent = clean(thread_state?.primary_intent).toLowerCase();
+    const status_bucket = clean(thread_state?.inbox_bucket).toLowerCase();
+    const stage = clean(thread_state?.universal_stage).toLowerCase();
+    
     if (
-      thread_state?.is_suppressed === true ||
+      thread_state?.opt_out === true ||
+      thread_state?.universal_status === "suppressed" ||
       status_bucket === "suppressed" ||
       blocked_intents.has(thread_intent) ||
       blocked_intents.has(stage)
@@ -521,10 +656,13 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   } = deps;
 
   // ── Step 1: Resolve from_phone_number ──────────────────────────────
+  const normalized_to = normalizePhone(clean(input.to_phone_number));
   let resolved_from = normalizePhone(clean(input.from_phone_number));
-  if (!resolved_from) {
+  if (!resolved_from || (normalized_to && resolved_from === normalized_to)) {
     resolved_from = await resolveFromImpl({
       thread_key: clean(input.thread_key),
+      to_phone_number: normalized_to,
+      textgrid_number_id: clean(input.textgrid_number_id) || null,
       market: clean(input.market) || null,
       supabase,
     });
@@ -577,19 +715,24 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       audit_insert?.item_id ||
       null;
     const queue_inserted = Boolean(queue_row_id);
-    const reason = mapValidationErrorToReason(validation.error);
+    const validation_error = clean(validation.error) || "invalid_payload";
+    const validation_reason =
+      validation_error === "SAME_FROM_TO_NUMBER"
+        ? "SAME_FROM_TO_NUMBER"
+        : mapValidationErrorToReason(validation_error);
+
     const proof = buildManualSendProof({
       input,
       queue_inserted,
       queue_row_id,
       queue_status: queue_inserted ? "paused_invalid_queue_row" : null,
-      detail_reason: validation.error,
+      detail_reason: validation_error,
     });
 
     logger.warn("inbox_send_now.early_exit", {
       ...request_log,
-      reason,
-      detail_reason: validation.error,
+      reason: validation_reason,
+      detail_reason: validation_error,
       queue_inserted,
       queue_row_id,
       queue_status: queue_inserted ? "paused_invalid_queue_row" : null,
@@ -598,9 +741,9 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     return {
       ok: false,
       status: 400,
-      error: reason,
-      reason,
-      detail_reason: validation.error,
+      error: validation_reason,
+      reason: validation_reason,
+      detail_reason: validation_error,
       queue_created: false,
       queue_inserted,
       queue_row_id,

@@ -1070,7 +1070,7 @@ function WrBuyerDemand({ metrics, loading }: { metrics: BuyerDemandMetrics | nul
 
 // ── useMetricsData hook ───────────────────────────────────────────────────────
 
-function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode) {
+function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode, paused = false) {
   const [summary,      setSummary]      = useState<KpiSummary | null>(null)
   const [timeSeries,   setTimeSeries]   = useState<TimeSeriesPoint[]>([])
   const [statePerf,    setStatePerf]    = useState<StatePerformance[]>([])
@@ -1091,6 +1091,10 @@ function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode) {
 
   // mode is passed as an argument so the callback stays stable (no dep re-creation).
   const load = useCallback(async (f: KpiFilters, mode: ViewLayoutMode) => {
+    if (paused) {
+       if (import.meta.env.DEV) console.log('[HeavyPanelLoadSkipped] MetricsWarRoom: paused')
+       return
+    }
     setLoading(true)
     try {
       if (mode === 'compact') {
@@ -1159,7 +1163,7 @@ function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode) {
     debounceRef.current = setTimeout(() => load(filters, layoutMode), 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.timeRange, filters.state, filters.market, layoutMode])
+  }, [filters.timeRange, filters.state, filters.market, layoutMode, paused])
 
   const stateLbRows: LbRow[] = statePerf.map(s => ({
     key: s.state,
@@ -1511,9 +1515,10 @@ export function MetricsWarRoom100({
 interface MetricsWarRoomProps {
   layoutMode: ViewLayoutMode
   paneWidth: ViewWidthPercent
+  paused?: boolean
 }
 
-export function MetricsWarRoom({ layoutMode }: MetricsWarRoomProps) {
+export function MetricsWarRoom({ layoutMode, paused = false }: MetricsWarRoomProps) {
   const [filters, setFilters] = useState<KpiFilters>({ timeRange: 'last_7_days', channel: 'all' })
   const [selectedState, setSelectedState] = useState<string | null>(null)
 
@@ -1522,7 +1527,7 @@ export function MetricsWarRoom({ layoutMode }: MetricsWarRoomProps) {
     [filters, selectedState]
   )
 
-  const data = useMetricsData(activeFilters, layoutMode)
+  const data = useMetricsData(activeFilters, layoutMode, paused)
 
   const handleFilterChange = useCallback((patch: Partial<KpiFilters>) => {
     setFilters(prev => ({ ...prev, ...patch }))

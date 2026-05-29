@@ -110,8 +110,8 @@
   height: 32px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  background: rgba(7, 12, 22, 0.72);
-  color: #fff;
+  background: var(--nexus-surface-overlay);
+  color: var(--nexus-text);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
@@ -226,7 +226,7 @@
 
 .nx-seller-card__financial-item.is-primary strong {
   font-size: 19px;
-  color: #ffffff;
+  color: var(--nexus-text);
 }
 
 .nx-seller-card__intel-strip,
@@ -395,7 +395,7 @@
   padding: 0 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(4, 10, 20, 0.84);
+  background: var(--nexus-panel-strong);
   color: var(--seller-text);
 }
 

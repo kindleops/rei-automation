@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { DealContext } from '../../../lib/data/dealContext'
+import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { PanelMode } from '../inbox-layout-state'
 import {
   normalizePropertySnapshot,
@@ -473,6 +475,48 @@ const SectionEmptyState = ({ text }: { text: string }) => (
   </div>
 )
 
+const DealContextPayloadCard = ({
+  thread,
+  intelligence,
+}: {
+  thread: WorkflowThread
+  intelligence: ThreadIntelligenceRecord | null
+}) => {
+  const records = [
+    ['property_data', (intelligence as any)?.property_data ?? (thread as any).property_data],
+    ['master_owner_data', (intelligence as any)?.master_owner_data ?? (thread as any).master_owner_data],
+    ['prospect_data', (intelligence as any)?.prospect_data ?? (thread as any).prospect_data],
+    ['phone_data', (intelligence as any)?.phone_data ?? (thread as any).phone_data],
+    ['email_data', (intelligence as any)?.email_data ?? (thread as any).email_data],
+    ['thread_state_data', (intelligence as any)?.thread_state_data ?? (thread as any).thread_state_data],
+    ['queue_data', (intelligence as any)?.queue_data ?? (thread as any).queue_data],
+    ['latest_message_event_data', (intelligence as any)?.latest_message_event_data ?? (thread as any).latest_message_event_data],
+    ['valuation_data', (intelligence as any)?.valuation_data ?? (thread as any).valuation_data],
+    ['buyer_match_data', (intelligence as any)?.buyer_match_data ?? (thread as any).buyer_match_data],
+  ].filter(([, value]) => value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0)
+
+  if (records.length === 0) return null
+
+  return (
+    <DossierCard className="nx-deal-context-payload">
+      <div className="nx-dossier-section__title">
+        <Icon name="database" />
+        <span>DEALCONTEXT PAYLOAD</span>
+      </div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {records.map(([label, value]) => (
+          <details key={label} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{label}</summary>
+            <pre style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: 12, lineHeight: 1.45 }}>
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </DossierCard>
+  )
+}
+
 const ScoreRing = ({
   label,
   value,
@@ -497,6 +541,101 @@ const ScoreRing = ({
       <div className="nx-score-ring__copy">
         <label>{label}</label>
         <p>{sublabel || 'Signal calibrated from live thread context.'}</p>
+      </div>
+    </div>
+  )
+}
+
+function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: WorkflowThread; dealContext?: DealContext | null; onOpenComps: () => void }) {
+  const [snapshot, setSnapshot] = useState<any>(null)
+  const [snapshotUnavailable, setSnapshotUnavailable] = useState(false)
+
+  useEffect(() => {
+    if (!thread.propertyId) return
+    let cancelled = false
+    setSnapshotUnavailable(false)
+    const base = getBackendBaseUrl()
+    const secret = getBackendSecret()
+    fetch(`${base}/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ops-dashboard-secret': secret,
+      },
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (cancelled) return
+        if (res.ok && res.data) {
+          setSnapshot(res.data)
+        } else {
+          console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: res.error || 'no_data' })
+          setSnapshotUnavailable(true)
+        }
+      })
+      .catch(err => {
+        if (cancelled) return
+        console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: err?.message || 'fetch_failed' })
+        setSnapshotUnavailable(true)
+      })
+    return () => { cancelled = true }
+  }, [thread.propertyId])
+
+  // Fallback chain: snapshot → dealContext → thread row
+  const arv = snapshot?.estimated_arv || dealContext?.estimated_arv || (thread as any).estimatedValue || (thread as any).arv
+  const offer = snapshot?.target_offer || dealContext?.cashOffer || (thread as any).cashOffer
+  const spread = snapshot ? (snapshot.expected_assignment_low + ' – ' + snapshot.expected_assignment_high) : 'Unknown'
+  const confidence = snapshot?.arv_confidence_score || 0
+
+  const handlePushUnderwriting = async () => {
+    if (!thread.propertyId) return
+    const res = await fetch(`/api/cockpit/properties/${thread.propertyId}/push-to-underwriting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_key: thread.threadKey })
+    })
+    const result = await res.json()
+    if (result.ok) alert('Deal pushed to underwriting workflow.')
+  }
+
+  return (
+    <div className="nx-deal-intel-card">
+      <div className="nx-deal-intel-card__head">
+        <Icon name="radar" />
+        <strong>Deal Intelligence</strong>
+        {snapshot && <span className="nx-deal-intel-card__date">Snapshot: {formatDate(snapshot.created_at)}</span>}
+        {snapshotUnavailable && !snapshot && (
+          <span className="nx-deal-intel-card__fallback-label" title="Valuation snapshot unavailable — showing thread row estimates">Valuation unavailable</span>
+        )}
+      </div>
+      
+      <div className="nx-deal-intel-card__grid">
+        <div className="nx-deal-intel-item">
+          <label>Estimated ARV</label>
+          <strong>{arv ? formatMoney(Number(arv)) : '—'}</strong>
+        </div>
+        <div className="nx-deal-intel-item">
+          <label>Confidence</label>
+          <strong>{confidence ? confidence + '%' : 'Low'}</strong>
+        </div>
+        <div className="nx-deal-intel-item is-highlight">
+          <label>Suggested Offer</label>
+          <strong>{offer ? formatMoney(Number(offer)) : '—'}</strong>
+        </div>
+        <div className="nx-deal-intel-item">
+          <label>Exp. Spread</label>
+          <strong>{spread !== 'Unknown' ? '$' + spread : '—'}</strong>
+        </div>
+      </div>
+
+      <div className="nx-deal-intel-card__footer">
+        <button type="button" className="nx-deal-intel-btn" onClick={onOpenComps}>
+          <Icon name="layers" />
+          <span>Open Comps</span>
+        </button>
+        <button type="button" className="nx-deal-intel-btn is-primary" onClick={handlePushUnderwriting}>
+          <Icon name="briefcase" />
+          <span>Push to Underwriting</span>
+        </button>
       </div>
     </div>
   )
@@ -1092,9 +1231,10 @@ const PropertyIntelFields = ({
     ['BEDS', thread.total_bedrooms || thread.beds],
     ['BATHS', thread.total_baths || thread.baths],
     ['SQFT', thread.building_square_feet || thread.sqft],
-    ['UNITS', thread.units_count],
+    ['UNITS', thread.units_count || (thread as any).number_of_units],
     ['YEAR BUILT', thread.year_built],
     ['EFFECTIVE YEAR BUILT', thread.effective_year_built],
+    ['PPU', (thread.units_count || (thread as any).number_of_units) ? formatMoney(Math.round(Number(thread.estimatedValue || 0) / (thread.units_count || (thread as any).number_of_units))) : null],
     ['ESTIMATED VALUE', formatMoney(Number(thread.estimatedValue || 0))],
     ['LAST SALE PRICE', formatMoney(Number(thread.sale_price || 0))],
     ['LAST SALE DATE', formatDate(thread.sale_date)],
@@ -1531,7 +1671,7 @@ export const DossierTabNav = ({ active, onChange }: { active: IntelligenceTabId;
   </nav>
 )
 
-export const OverviewPanel = ({ thread, messages }: { thread: WorkflowThread; messages: ThreadMessage[] }) => {
+export const OverviewPanel = ({ thread, messages, onOpenComps, dealContext }: { thread: WorkflowThread; messages: ThreadMessage[]; onOpenComps: () => void; dealContext?: DealContext | null }) => {
   const action = getNextBestAction(thread)
   const latestInbound = messages.find((message) => message.direction === 'inbound')?.body || thread.latestMessageBody || thread.lastMessageBody
   return (
@@ -1546,6 +1686,10 @@ export const OverviewPanel = ({ thread, messages }: { thread: WorkflowThread; me
           <FieldTile label="Responsiveness" value={thread.lastInboundAt ? 'Responsive' : 'N/A'} />
         </FieldGrid>
       </PanelSection>
+
+      {/* Deal Intelligence Card */}
+      <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps} />
+
       <PanelSection title="AI Recommendation" icon="spark">
         <div className="nx-intel-copy-card">
           <strong>{action.title}</strong>
@@ -2525,7 +2669,9 @@ const ContactIntelligenceCard = ({
     { label: 'EDUCATION', value: thread.education_model },
     { label: 'HOUSEHOLD INCOME', value: snapshot.householdIncome || thread.est_household_income, tone: 'success' },
     { label: 'NET ASSET VALUE', value: snapshot.netAssetValue || thread.net_asset_value, tone: 'success' },
-    { label: 'BUYING POWER', value: (thread as any).buying_power, tone: 'accent' },
+    { label: 'BUYING POWER', value: (thread as any).buying_power, tone: 'success' },
+    { label: 'MULTIFAMILY FIT', value: (thread as any).multifamilyFit || (thread as any).multifamily_fit },
+    { label: 'SFR FIT', value: (thread as any).sfrFit || (thread as any).sfr_fit },
     { label: 'OCCUPATION', value: thread.occupation },
     { label: 'OCCUPATION GROUP', value: snapshot.occupationGroup || thread.occupation_group },
     { 
@@ -3357,11 +3503,13 @@ const ConversationBrainModule = ({
 
 const CommandActionDock = ({
   onOpenMap,
+  onOpenComps,
   onOpenDossier,
   onOpenAi,
   layoutMode = 'full',
 }: {
   onOpenMap: () => void
+  onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
   layoutMode?: ViewLayoutMode
@@ -3379,7 +3527,7 @@ const CommandActionDock = ({
       <span>Analysis</span>
       <div>
         <button type="button">Run Underwriting</button>
-        <button type="button">Open Comp Workspace</button>
+        <button type="button" onClick={onOpenComps}>Open Comp Workspace</button>
         <button type="button">Show Buyer Matches</button>
       </div>
     </div>
@@ -3550,10 +3698,12 @@ const CompactDealIntelligenceCapsule = ({
   thread,
   snapshot,
   messages,
+  onOpenComps,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
   messages: ThreadMessage[]
+  onOpenComps?: () => void
 }) => {
   const [addrCopied, setAddrCopied] = useState(false)
   const handleCopyAddr = () => {
@@ -3854,6 +4004,9 @@ const CompactDealIntelligenceCapsule = ({
           )}
         </div>
 
+        {/* Deal Intelligence Card */}
+        <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps || (() => undefined)} />
+
         <div className="nx-capsule-section">
           <span className="nx-capsule-section__title">BUYER SIGNAL</span>
           <div className="nx-buyer-signal-v2">
@@ -4134,12 +4287,15 @@ const MediumDealWorkspace = ({
   snapshot,
   messages,
   phase3,
+  onOpenComps,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
   messages: ThreadMessage[]
-  phase3: Phase3Intelligence | null
+  phase3?: Phase3Intelligence | null
+  onOpenComps?: () => void
 }) => {
+
   // ── ACCORDION STATE ───────────────────────────────────────
   const [openProspect, setOpenProspect] = useState<Set<string>>(() => new Set(['identity', 'motivation']))
   const toggleProspect = (key: string) => setOpenProspect(prev => {
@@ -4593,12 +4749,16 @@ const MediumDealWorkspace = ({
               />
             </svg>
             <div className="nx-mh-score-inner">
-              <strong>{Math.round(score)}</strong>
+              <strong>{acqScore}</strong>
               <span>SCORE</span>
+              <small>{acqGrade}</small>
             </div>
           </div>
         </div>
       </div>
+
+      {/* ── DEAL INTELLIGENCE (NEW) ────────────────────── */}
+      <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps || (() => undefined)} />
 
       {/* ── 2. STREET VIEW — CINEMATIC INTELLIGENCE VIEWPORT ── */}
       <div className="nx-medium-map-frame">
@@ -5870,8 +6030,10 @@ const DealCommandDossier = ({
   intelligence,
   layoutMode,
   onOpenMap,
+  onOpenComps,
   onOpenDossier,
   onOpenAi,
+  dealContext,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
@@ -5880,8 +6042,10 @@ const DealCommandDossier = ({
   intelligence: ThreadIntelligenceRecord | null
   layoutMode: ViewLayoutMode
   onOpenMap: () => void
+  onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
+  dealContext?: DealContext | null
 }) => (
   <div className={cls('nx-deal-command-dossier', `is-layout-${layoutMode}`, layoutMode === 'full' && 'is-full')}>
     <DealCommandHeader thread={thread} snapshot={snapshot} phase3={phase3} />
@@ -5898,6 +6062,7 @@ const DealCommandDossier = ({
         <DealDecisionStrip thread={thread} />
       </div>
       <div className="nx-deal-command-dossier__comp">
+        <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps || (() => undefined)} />
         <CompIntelligenceModule thread={thread} snapshot={snapshot} />
       </div>
       <div className="nx-deal-command-dossier__buyer">
@@ -5912,7 +6077,8 @@ const DealCommandDossier = ({
         <LinkedRecordsCard thread={thread} />
       </div>
     </div>
-    <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
+    <DealContextPayloadCard thread={thread} intelligence={intelligence} />
+    <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenComps={onOpenComps} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
   </div>
 )
 
@@ -5920,11 +6086,13 @@ export interface IntelligencePanelProps {
   thread: WorkflowThread | null
   threadContext?: ThreadContext | null
   intelligence?: ThreadIntelligenceRecord | null
+  dealContext?: DealContext | null
   panelMode?: Exclude<PanelMode, 'hidden'>
   layoutMode?: ViewLayoutMode
   isSuppressed?: boolean
   onCollapse?: () => void
   onOpenMap?: () => void
+  onOpenComps?: () => void
   onOpenDossier?: () => void
   onOpenAi?: () => void
   onStatusChange: (status: InboxStatus | 'sent_message') => void
@@ -5936,11 +6104,13 @@ export const IntelligencePanel = ({
   thread,
   threadContext,
   intelligence = null,
+  dealContext = null,
   isSuppressed = false,
   panelMode = 'default',
   layoutMode = 'full',
   onCollapse,
   onOpenMap = () => undefined,
+  onOpenComps = () => undefined,
   onOpenDossier = () => undefined,
   onOpenAi = () => undefined,
   onStatusChange,
@@ -5983,9 +6153,9 @@ export const IntelligencePanel = ({
 
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
-          <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} />
+          <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} onOpenComps={onOpenComps} />
         ) : layoutMode === 'medium' ? (
-          <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} />
+          <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} onOpenComps={onOpenComps} />
         ) : (
           <DealCommandDossier
             thread={thread}
@@ -5993,8 +6163,10 @@ export const IntelligencePanel = ({
             messages={messages}
             phase3={phase3}
             intelligence={intelligence}
+            dealContext={dealContext}
             layoutMode={layoutMode}
             onOpenMap={onOpenMap}
+            onOpenComps={onOpenComps}
             onOpenDossier={onOpenDossier}
             onOpenAi={onOpenAi}
           />

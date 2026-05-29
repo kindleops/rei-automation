@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server.js'
-import { parseJsonSafe, ensureMutationAuth } from '../../_shared.js'
+import { parseJsonSafe, ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { runInboxAction } from '@/lib/cockpit/cockpit-service.js'
 import { child } from '@/lib/logging/logger.js'
 
@@ -7,38 +7,6 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const logger = child({ module: 'api.cockpit.inbox.send_now' })
-
-// ── CORS ──────────────────────────────────────────────────────────────────────
-
-const ALLOWED_ORIGINS = new Set([
-  'https://ops.leadcommand.ai',
-  'https://nexus-dashboard.vercel.app',
-  'http://localhost:5173',
-  'https://staging.dashboard.kindleops.com',
-  'https://dashboard.kindleops.com'
-])
-
-function resolveAllowedOrigin(origin) {
-  if (!origin) return null
-  if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
-  return null
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get('origin')
-  const allowedOrigin = resolveAllowedOrigin(origin)
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  }
-  if (allowedOrigin) {
-    headers['Access-Control-Allow-Origin'] = allowedOrigin
-  }
-  return headers
-}
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -49,13 +17,10 @@ export async function OPTIONS(request) {
 export async function POST(request) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors }
-    )
-  }
+  if (!auth.ok) return auth.response
+
   const payload = await parseJsonSafe(request)
+
 
   logger.info('cockpit_send_now.route_request', {
     thread_key: String(payload?.thread_key ?? payload?.metadata?.thread_key ?? payload?.to_phone_number ?? '').trim() || null,

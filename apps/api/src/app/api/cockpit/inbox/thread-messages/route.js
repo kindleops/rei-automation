@@ -42,11 +42,8 @@ export async function OPTIONS(request) {
 export async function GET(request) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors },
-    )
+  if (auth && auth.status >= 400) {
+    return auth
   }
 
   const { searchParams } = new URL(request.url)

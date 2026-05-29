@@ -1,5 +1,6 @@
 import type { LiveDashboardModel } from '../../modules/dashboard/live/live-dashboard.adapter'
 import { getSupabaseClient } from '../supabaseClient'
+import { getDealContextList } from './dealContext'
 import {
   asNumber,
   asString,
@@ -41,9 +42,123 @@ const toneForHeat = (hotLeads: number): 'hot' | 'warm' | 'steady' => {
   return 'steady'
 }
 
+async function hydrateFromDealContext(
+  baseModel: LiveDashboardModel,
+): Promise<LiveDashboardModel | null> {
+  const result = await getDealContextList({
+    limit: 4000,
+    order_by: 'priority_score',
+  })
+
+  if (result.rows.length === 0) return null
+
+  const propertiesByMarket = new Map<string, number>()
+  const hotByMarket = new Map<string, number>()
+  const outboundByMarket = new Map<string, number>()
+  const failuresByMarket = new Map<string, number>()
+  const repliesByMarket = new Map<string, number>()
+  const positiveByMarket = new Map<string, number>()
+
+  for (const row of result.rows) {
+    const key = marketKey(row.market || 'unknown')
+    propertiesByMarket.set(key, (propertiesByMarket.get(key) ?? 0) + (row.propertyId ? 1 : 0))
+    if (asNumber(row.raw.priority_score, 0) >= 70) {
+      hotByMarket.set(key, (hotByMarket.get(key) ?? 0) + 1)
+    }
+    if (row.queueRowId) {
+      outboundByMarket.set(key, (outboundByMarket.get(key) ?? 0) + 1)
+    }
+    const queueStatus = normalizeStatus(row.raw.queue_status)
+    if (queueStatus === 'failed' || queueStatus === 'retry' || queueStatus === 'held') {
+      failuresByMarket.set(key, (failuresByMarket.get(key) ?? 0) + 1)
+    }
+    if (normalizeStatus(row.latestMessageDirection) === 'inbound') {
+      repliesByMarket.set(key, (repliesByMarket.get(key) ?? 0) + 1)
+    }
+    if (normalizeStatus(row.status) === 'seller_replied') {
+      positiveByMarket.set(key, (positiveByMarket.get(key) ?? 0) + 1)
+    }
+  }
+
+  const markets = baseModel.markets.map((market) => {
+    const idKey = marketKey(market.id)
+    const fallbackKey = marketKey(market.name)
+    const marketProps =
+      propertiesByMarket.get(idKey) ??
+      propertiesByMarket.get(fallbackKey) ??
+      market.activeProperties
+    const outbound =
+      outboundByMarket.get(idKey) ??
+      outboundByMarket.get(fallbackKey) ??
+      market.outboundToday
+    const replies =
+      repliesByMarket.get(idKey) ??
+      repliesByMarket.get(fallbackKey) ??
+      market.repliesToday
+    const hotLeads =
+      hotByMarket.get(idKey) ??
+      hotByMarket.get(fallbackKey) ??
+      market.hotLeads
+    const failures =
+      failuresByMarket.get(idKey) ??
+      failuresByMarket.get(fallbackKey) ??
+      0
+
+    const deliverability = outbound > 0 ? Math.max(70, ((outbound - failures) / outbound) * 100) : market.deliverability
+    const replyRate = outbound > 0 ? (replies / outbound) * 100 : market.replyRate
+    const positive = positiveByMarket.get(idKey) ?? positiveByMarket.get(fallbackKey) ?? 0
+    const positiveRate = replies > 0 ? (positive / replies) * 100 : market.positiveRate
+
+    return {
+      ...market,
+      activeProperties: marketProps,
+      outboundToday: outbound,
+      repliesToday: replies,
+      hotLeads,
+      heat: toneForHeat(hotLeads),
+      deliverability,
+      replyRate,
+      positiveRate,
+      healthScore: Math.round((deliverability + replyRate + positiveRate) / 3),
+    }
+  })
+
+  const totalOutbound = markets.reduce((sum, market) => sum + market.outboundToday, 0)
+  const totalReplies = markets.reduce((sum, market) => sum + market.repliesToday, 0)
+  const totalHot = markets.reduce((sum, market) => sum + market.hotLeads, 0)
+
+  return {
+    ...baseModel,
+    generatedAtIso: new Date().toISOString(),
+    dataSource: 'live',
+    markets,
+    summaryMetrics: baseModel.summaryMetrics.map((metric) => {
+      if (metric.id === 'total-outbound') {
+        return { ...metric, value: new Intl.NumberFormat('en-US').format(totalOutbound), detail: 'from DealContext queue links' }
+      }
+      if (metric.id === 'replies-today') {
+        return { ...metric, value: new Intl.NumberFormat('en-US').format(totalReplies), detail: `${totalHot} hot leads` }
+      }
+      if (metric.id === 'active-markets') {
+        return { ...metric, value: `${markets.length}`, detail: `${markets.filter((m) => m.campaignStatus === 'live').length} live` }
+      }
+      return metric
+    }),
+  }
+}
+
 export const hydrateLiveDashboardFromSupabase = async (
   baseModel: LiveDashboardModel,
 ): Promise<LiveDashboardModel> => {
+  try {
+    const fromDealContext = await hydrateFromDealContext(baseModel)
+    if (fromDealContext) return fromDealContext
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('[NEXUS] mapData: deal-context fallback', error)
+    }
+  }
+
   const supabase = getSupabaseClient()
 
   const [marketResult, propertyResult, queueResult, eventResult] = await Promise.all([

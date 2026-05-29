@@ -10,6 +10,7 @@ export type NexusGlobalThemeId =
   | 'executive'
   | 'night_vision'
   | 'monochrome'
+  | 'light'
 
 export type AnimationLevel = 'full' | 'reduced' | 'minimal'
 
@@ -25,6 +26,16 @@ export interface NexusGlobalThemeDefinition {
 }
 
 export const nexusGlobalThemes: Record<NexusGlobalThemeId, NexusGlobalThemeDefinition> = {
+  light: {
+    id: 'light',
+    label: 'Light',
+    description: 'Clean bright layout — maximized legibility for day ops',
+    accent: '#0a84ff',
+    personality: 'clean',
+    mapThemeId: 'light_street',
+    defaultAnimationLevel: 'full',
+    isHighContrast: false,
+  },
   dark: {
     id: 'dark',
     label: 'Dark',
@@ -125,7 +136,7 @@ export const MAP_THEME_TO_NEXUS_GLOBAL: Partial<Record<CommandMapThemeId, NexusG
   red_ops: 'red_ops',
   midnight: 'executive',
   blueprint: 'blueprint',
-  light_street: 'dark',
+  light_street: 'light',
   terrain: 'terrain',
   minimal_black: 'monochrome',
   acquisition_radar: 'night_vision',

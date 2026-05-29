@@ -23,6 +23,7 @@ export const getCanonicalBucketCounts = (
     new_replies: 0,
     follow_up: 0,
     cold: 0,
+    dead: 0,
     all: threads.length,
     negotiating: 0,
     waiting_on_seller: 0,

@@ -14,7 +14,8 @@ import type {
   CreateCampaignPayload,
 } from './campaigns.types'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
-import { isDev } from '../../lib/data/shared'
+import { getDealContextList } from '../../lib/data/dealContext'
+import { asNumber, asString, isDev } from '../../lib/data/shared'
 
 // ── Supabase loaders ────────────────────────────────────────────────────────────
 
@@ -95,6 +96,49 @@ export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
 }
 
 export const fetchCampaignTargets = async (campaignId: string): Promise<CampaignTarget[]> => {
+  try {
+    const { rows } = await getDealContextList({
+      campaign_id: campaignId,
+      limit: 200,
+      order_by: 'queue_scheduled_for',
+    })
+
+    if (rows.length > 0) {
+      return rows.map((row) => ({
+        id: row.campaignTargetId || row.id,
+        campaign_id: campaignId,
+        target_status: asString(row.raw.campaign_target_status, 'ready'),
+        master_owner_id: row.masterOwnerId,
+        property_id: row.propertyId,
+        phone_id: row.phoneId,
+        canonical_e164: row.canonicalE164,
+        seller_first_name: row.ownerName.split(' ')[0] || null,
+        seller_full_name: row.ownerName || null,
+        property_address_full: row.propertyAddress || null,
+        property_address_city: asString(row.raw.property_address_city) || null,
+        property_address_state: asString(row.raw.property_state) || null,
+        property_address_zip: asString(row.raw.property_zip) || null,
+        market: row.market || null,
+        language: asString(row.prospect.language) || null,
+        final_acquisition_score: Number.isFinite(Number(row.raw.final_acquisition_score))
+          ? asNumber(row.raw.final_acquisition_score)
+          : null,
+        last_contact_at: asString(row.raw.latest_message_at) || null,
+        suppression_status: asString(row.raw.suppression_status) || null,
+        suppression_reason: asString(row.raw.suppression_type) || null,
+        template_id: (row.queue.template_id as string | null) || null,
+        template_name: ((row.campaign.campaign as Record<string, unknown> | undefined)?.template_name as string | null) || null,
+        scheduled_for: asString(row.raw.queue_scheduled_for) || null,
+        sent_at: asString(row.queue.sent_at) || null,
+        delivered_at: asString(row.queue.delivered_at) || null,
+        failed_at: asString(row.queue.failed_at) || null,
+        replied_at: asString(row.raw.last_inbound_at) || null,
+      }))
+    }
+  } catch (error) {
+    if (isDev) console.warn('[campaigns.adapter] deal-context target fallback', error)
+  }
+
   const client = getSupabaseClient()
   const { data, error } = await client
     .from('sms_campaign_targets')
@@ -134,6 +178,39 @@ export const fetchCampaignTargets = async (campaignId: string): Promise<Campaign
 }
 
 export const fetchCampaignQueue = async (campaignId: string): Promise<CampaignQueueRow[]> => {
+  try {
+    const { rows } = await getDealContextList({
+      campaign_id: campaignId,
+      limit: 100,
+      order_by: 'queue_scheduled_for',
+    })
+
+    const queuedRows = rows.filter((row) => row.queueRowId || row.raw.queue_status)
+    if (queuedRows.length > 0) {
+      return queuedRows.map((row) => ({
+        id: row.queueRowId || `q-${row.id}`,
+        campaign_id: campaignId,
+        campaign_target_id: row.campaignTargetId,
+        queue_row_id: row.queueRowId,
+        seller_full_name: row.ownerName,
+        property_address_full: row.propertyAddress,
+        market: row.market,
+        template_id: row.queue.template_id as string || null,
+        template_name: ((row.campaign.campaign as Record<string, unknown> | undefined)?.template_name as string | null) || null,
+        from_phone_number: row.queue.from_phone_number as string || null,
+        to_phone_number: row.canonicalE164,
+        scheduled_for: asString(row.raw.queue_scheduled_for) || null,
+        queue_status: (row.raw.queue_status as CampaignQueueRow['queue_status']) || 'queued',
+        delivery_status: row.queue.delivery_status as string || null,
+        failure_category: row.queue.failed_reason as string || null,
+        failed_reason: row.queue.failed_reason as string || null,
+        last_event_at: asString(row.raw.latest_message_at) || null,
+      }))
+    }
+  } catch (error) {
+    if (isDev) console.warn('[campaigns.adapter] deal-context queue fallback', error)
+  }
+
   const client = getSupabaseClient()
   // Try to query a view or join. For now assuming we just query sms_campaign_targets with scheduled/queued status.
   const { data, error } = await client
@@ -170,6 +247,33 @@ export const fetchCampaignQueue = async (campaignId: string): Promise<CampaignQu
 }
 
 export const fetchCampaignReplies = async (campaignId: string): Promise<CampaignReply[]> => {
+  try {
+    const { rows } = await getDealContextList({
+      campaign_id: campaignId,
+      limit: 100,
+      order_by: 'latest_message_at',
+    })
+
+    const replies = rows.filter((row) => row.latestMessageDirection === 'inbound')
+    if (replies.length > 0) {
+      return replies.map((row, index) => ({
+        id: `reply-${row.id}-${index}`,
+        campaign_id: campaignId,
+        campaign_target_id: row.campaignTargetId || row.id,
+        seller_full_name: row.ownerName,
+        property_address_full: row.propertyAddress,
+        inbound_message: row.latestMessageBody,
+        detected_intent: asString(row.threadState.reply_intent) || row.status,
+        sentiment: row.threadState.lead_temperature as CampaignReply['sentiment'] || 'warm',
+        reply_type: row.status === 'seller_replied' ? 'positive' : 'neutral',
+        next_action: row.bucket === 'needs_review' ? 'Review' : 'Reply',
+        created_at: asString(row.raw.latest_message_at || row.raw.updated_at),
+      }))
+    }
+  } catch (error) {
+    if (isDev) console.warn('[campaigns.adapter] deal-context replies fallback', error)
+  }
+
   const client = getSupabaseClient()
   const { data, error } = await client
     .from('sms_campaign_targets')
@@ -196,6 +300,45 @@ export const fetchCampaignReplies = async (campaignId: string): Promise<Campaign
 }
 
 export const fetchCampaignFailures = async (campaignId: string): Promise<CampaignFailureGroup[]> => {
+  try {
+    const { rows } = await getDealContextList({
+      campaign_id: campaignId,
+      limit: 200,
+      order_by: 'queue_scheduled_for',
+    })
+
+    const groups: Record<string, CampaignFailureGroup> = {}
+    for (const row of rows) {
+      const failureReason = (row.queue.failed_reason as string) || (row.raw.suppression_type as string) || ''
+      const queueStatus = String(row.raw.queue_status || '')
+      if (!failureReason && queueStatus !== 'failed') continue
+      const reason = failureReason || 'Unknown Error'
+      if (!groups[reason]) {
+        groups[reason] = {
+          campaign_id: campaignId,
+          failure_category: reason,
+          count: 0,
+          severity: 'warning',
+          sample_numbers: [],
+          sample_reasons: [],
+        }
+      }
+      groups[reason].count += 1
+      if (row.canonicalE164) groups[reason].sample_numbers.push(row.canonicalE164)
+      groups[reason].sample_reasons.push(reason)
+    }
+
+    if (Object.keys(groups).length > 0) {
+      return Object.values(groups).map((group) => ({
+        ...group,
+        sample_numbers: group.sample_numbers.slice(0, 5),
+        sample_reasons: group.sample_reasons.slice(0, 5),
+      }))
+    }
+  } catch (error) {
+    if (isDev) console.warn('[campaigns.adapter] deal-context failures fallback', error)
+  }
+
   // Aggregate from targets
   const client = getSupabaseClient()
   const { data, error } = await client

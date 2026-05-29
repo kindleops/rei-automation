@@ -3304,7 +3304,7 @@ function resolveIntents(
     includesAny(text, [
       "wrong number", "wrong #", "wrong person", "incorrect number",
       "not the owner", "not the property owner", "not the homeowner",
-      "not this person", "wrong person", "who is",
+      "not this person", "wrong person",
       // Spanish / Portuguese
       "número equivocado", "equivocado", "no soy el dueño",
       "no soy el propietario", "no soy la propietaria",
@@ -3884,7 +3884,7 @@ function computeSellerState({
   if (primary_intent === "callback_requested") next_best_action = "schedule_call";
 
   return {
-    ownership_confirmed: primary_intent === "ownership_confirmed" || secondary_intent === "ownership_confirmed" || !!objection,
+    ownership_confirmed: primary_intent === "ownership_confirmed" || secondary_intent === "ownership_confirmed",
     seller_interest,
     motivation_level,
     emotional_state: emotion,

@@ -60,7 +60,7 @@
   gap: 14px;
   padding: 9px 16px 7px;
   border-bottom: 1px solid var(--wr-border);
-  background: rgba(4,8,22,0.98);
+  background: var(--nexus-panel-strong);
   position: relative;
 }
 .wr-header__brand {
@@ -150,7 +150,7 @@
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
-  background: rgba(4,10,24,0.95);
+  background: var(--nexus-panel-strong);
 }
 .wr-kpi-strip::-webkit-scrollbar { display: none; }
 
@@ -240,7 +240,7 @@
   padding: 7px 11px 5px;
   border-bottom: 1px solid var(--wr-border);
   flex-shrink: 0;
-  background: rgba(4,10,26,0.6);
+  background: var(--nexus-surface-overlay);
 }
 .wr-panel__title {
   font-size: 9px;
@@ -303,7 +303,7 @@
   min-height: 0;
 }
 .wr-map__svg-wrap {
-  background: #020814;
+  background: var(--nexus-panel);
   border-radius: 4px;
   border: 1px solid rgba(14,207,206,0.15);
   overflow: hidden;
@@ -333,7 +333,7 @@
 }
 .wr-map__tooltip {
   position: absolute;
-  background: rgba(4,8,22,0.97);
+  background: var(--nexus-panel-strong);
   border: 1px solid rgba(14,207,206,0.35);
   border-radius: 5px;
   padding: 8px 10px;
@@ -795,7 +795,7 @@
   gap: 8px;
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--wr-border);
-  background: rgba(4,8,22,0.98);
+  background: var(--nexus-panel-strong);
 }
 .wr-rail__title {
   font-size: 9px;

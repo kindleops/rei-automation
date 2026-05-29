@@ -160,12 +160,18 @@ export function buildTextgridSendPayload({
   body = "",
   from = "",
   to = "",
+  statusCallback = null,
 } = {}) {
-  return {
+  const payload = {
     body: String(body ?? ""),
     from: clean(from),
     to: clean(to),
   };
+  const resolved_callback = clean(statusCallback);
+  if (resolved_callback) {
+    payload.StatusCallback = resolved_callback;
+  }
+  return payload;
 }
 
 function buildTextgridWebhookDigests(raw_body, webhook_secret) {
@@ -297,6 +303,7 @@ export async function sendTextgridSMS({
   bypass_system_control = false,
   bypass_content_guards = false,
   bypass_reason = null,
+  statusCallback = null,
 }) {
   // ── System control gate ────────────────────────────────────────────────
   const sms_enabled = await getSystemFlag("outbound_sms_enabled", { failClosedOnError: false });
@@ -391,10 +398,14 @@ export async function sendTextgridSMS({
     }
 
     const send_endpoint = getTextgridSendEndpoint(credentials.account_sid);
+    const status_callback_enabled =
+      (ENV.TEXTGRID_STATUS_CALLBACK_ENABLED === true) ||
+      ["1", "true", "yes", "on"].includes(lower(process.env.TEXTGRID_STATUS_CALLBACK_ENABLED || ""));
     const payload = buildTextgridSendPayload({
       body: trimmed_body,
       from: normalized_from,
       to: normalized_to,
+      statusCallback: status_callback_enabled ? clean(statusCallback) : null,
     });
 
     const response = await fetch(send_endpoint, {

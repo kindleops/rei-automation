@@ -67,6 +67,7 @@ const navItems: NavItem[] = [
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
   // New global themes
+  light: 'light',
   dark: 'dark',
   satellite: 'satellite',
   terrain: 'terrain',

@@ -29,6 +29,48 @@
   --nx-bubble-outbound: rgba(63, 172, 255, 0.85);
   --nx-badge-bg:        rgba(99, 215, 255, 0.10);
   --nx-badge-border:    rgba(99, 215, 255, 0.22);
+
+  /* ── --nexus-* aliases: cascade from --nx-* overrides automatically ─── */
+  /* Backgrounds */
+  --nexus-bg:            var(--nx-bg);
+  --nexus-bg-elevated:   var(--nx-bg-soft);
+  --nexus-panel:         var(--nx-panel-bg);
+  --nexus-panel-strong:  var(--nx-command-bg);
+  --nexus-card:          var(--nx-card-bg);
+  --nexus-card-hover:    color-mix(in srgb, var(--nx-card-bg) 85%, white 15%);
+  /* Borders */
+  --nexus-border:        var(--nx-border);
+  --nexus-border-strong: var(--nx-border-strong);
+  /* Text */
+  --nexus-text:          var(--nx-text);
+  --nexus-muted:         var(--nx-text-muted);
+  --nexus-faint:         var(--nx-grid);
+  /* Accent (overridden by [data-nexus-accent] blocks below) */
+  --nexus-accent:        var(--nx-accent);
+  --nexus-accent-rgb:    99, 215, 255;
+  --nexus-accent-soft:   var(--nx-accent-soft);
+  --nexus-accent-glow:   var(--nx-accent-glow);
+  --nexus-accent-border: var(--nx-badge-border);
+  /* Semantic */
+  --nexus-success:       var(--nx-success);
+  --nexus-warning:       var(--nx-warning);
+  --nexus-danger:        var(--nx-danger);
+  --nexus-info:          var(--nx-info);
+  --nexus-shadow:        var(--nx-shadow);
+  --nexus-map-pin:       var(--nx-accent);
+  /* Dynamic Surface Overlays (derived from text color to flip correctly in light/dark mode) */
+  --nexus-surface-faint:   color-mix(in srgb, var(--nx-text) 3%, transparent);
+  --nexus-surface-overlay: color-mix(in srgb, var(--nx-text) 5%, transparent);
+  --nexus-surface-hover:   color-mix(in srgb, var(--nx-text) 8%, transparent);
+  --nexus-surface-active:  color-mix(in srgb, var(--nx-text) 12%, transparent);
+  --nexus-surface-border:  color-mix(in srgb, var(--nx-text) 12%, transparent);
+  --nexus-surface-border-strong: color-mix(in srgb, var(--nx-text) 24%, transparent);
+  /* Stage semantic colors — preserved across all themes */
+  --nexus-stage-new:       #4d8fff;
+  --nexus-stage-waiting:   #f59e0b;
+  --nexus-stage-priority:  #f97316;
+  --nexus-stage-dead:      #ef4444;
+  --nexus-stage-suppressed:#94a3b8;
 }
 
 /* ── dark ───────────────────────────────────────────────────────────────── */
@@ -275,6 +317,33 @@
   --nx-badge-border:    rgba(211, 221, 232, 0.22);
 }
 
+/* ── light ──────────────────────────────────────────────────────────────── */
+:root[data-nexus-theme="light"] {
+  --nx-bg:              #f8fafc;
+  --nx-bg-soft:         #f1f5f9;
+  --nx-panel-bg:        rgba(255, 255, 255, 0.98);
+  --nx-card-bg:         #ffffff;
+  --nx-card-border:     rgba(15, 23, 42, 0.08);
+  --nx-border:          rgba(15, 23, 42, 0.10);
+  --nx-border-strong:   rgba(15, 23, 42, 0.18);
+  --nx-accent:          #0a84ff;
+  --nx-accent-soft:     rgba(10, 132, 255, 0.10);
+  --nx-accent-glow:     rgba(10, 132, 255, 0.18);
+  --nx-text:            #0f172a;
+  --nx-text-muted:      #64748b;
+  --nx-danger:          #ef4444;
+  --nx-success:         #10b981;
+  --nx-warning:         #f59e0b;
+  --nx-info:            #0ea5e9;
+  --nx-shadow:          rgba(15, 23, 42, 0.06);
+  --nx-grid:            rgba(15, 23, 42, 0.04);
+  --nx-command-bg:      rgba(255, 255, 255, 0.96);
+  --nx-bubble-inbound:  rgba(15, 23, 42, 0.05);
+  --nx-bubble-outbound: rgba(10, 132, 255, 0.15);
+  --nx-badge-bg:        rgba(15, 23, 42, 0.06);
+  --nx-badge-border:    rgba(15, 23, 42, 0.12);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    THEME PERSONALITY EFFECTS
    Special effects for overlay themes — applied via CSS class hooks
@@ -412,34 +481,46 @@
 
 /* Accent palette overrides */
 :root[data-nexus-accent="cyan"] {
-  --nx-accent: #38d0f0;
-  --nx-accent-glow: rgba(56, 208, 240, 0.25);
-  --nx-accent-soft: rgba(56, 208, 240, 0.14);
+  --nx-accent:          #38d0f0;
+  --nx-accent-glow:     rgba(56, 208, 240, 0.25);
+  --nx-accent-soft:     rgba(56, 208, 240, 0.14);
+  --nx-badge-border:    rgba(56, 208, 240, 0.28);
+  --nexus-accent-rgb:   56, 208, 240;
 }
 :root[data-nexus-accent="emerald"] {
-  --nx-accent: #2cb87a;
-  --nx-accent-glow: rgba(44, 184, 122, 0.25);
-  --nx-accent-soft: rgba(44, 184, 122, 0.14);
+  --nx-accent:          #2cb87a;
+  --nx-accent-glow:     rgba(44, 184, 122, 0.25);
+  --nx-accent-soft:     rgba(44, 184, 122, 0.14);
+  --nx-badge-border:    rgba(44, 184, 122, 0.28);
+  --nexus-accent-rgb:   44, 184, 122;
 }
 :root[data-nexus-accent="amber"] {
-  --nx-accent: #d89530;
-  --nx-accent-glow: rgba(216, 149, 48, 0.25);
-  --nx-accent-soft: rgba(216, 149, 48, 0.14);
+  --nx-accent:          #d89530;
+  --nx-accent-glow:     rgba(216, 149, 48, 0.25);
+  --nx-accent-soft:     rgba(216, 149, 48, 0.14);
+  --nx-badge-border:    rgba(216, 149, 48, 0.28);
+  --nexus-accent-rgb:   216, 149, 48;
 }
 :root[data-nexus-accent="violet"] {
-  --nx-accent: #9966ff;
-  --nx-accent-glow: rgba(153, 102, 255, 0.25);
-  --nx-accent-soft: rgba(153, 102, 255, 0.14);
+  --nx-accent:          #9966ff;
+  --nx-accent-glow:     rgba(153, 102, 255, 0.25);
+  --nx-accent-soft:     rgba(153, 102, 255, 0.14);
+  --nx-badge-border:    rgba(153, 102, 255, 0.28);
+  --nexus-accent-rgb:   153, 102, 255;
 }
 :root[data-nexus-accent="rose"] {
-  --nx-accent: #e85080;
-  --nx-accent-glow: rgba(232, 80, 128, 0.25);
-  --nx-accent-soft: rgba(232, 80, 128, 0.14);
+  --nx-accent:          #e85080;
+  --nx-accent-glow:     rgba(232, 80, 128, 0.25);
+  --nx-accent-soft:     rgba(232, 80, 128, 0.14);
+  --nx-badge-border:    rgba(232, 80, 128, 0.28);
+  --nexus-accent-rgb:   232, 80, 128;
 }
 :root[data-nexus-accent="ice"] {
-  --nx-accent: #a0d8f0;
-  --nx-accent-glow: rgba(160, 216, 240, 0.22);
-  --nx-accent-soft: rgba(160, 216, 240, 0.12);
+  --nx-accent:          #a0d8f0;
+  --nx-accent-glow:     rgba(160, 216, 240, 0.22);
+  --nx-accent-soft:     rgba(160, 216, 240, 0.12);
+  --nx-badge-border:    rgba(160, 216, 240, 0.24);
+  --nexus-accent-rgb:   160, 216, 240;
 }
 
 /* Map chrome responds to Nexus theme + accent */

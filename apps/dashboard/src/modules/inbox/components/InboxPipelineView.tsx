@@ -190,7 +190,7 @@ const buildCard = (thread: InboxWorkflowThread): DealCard => {
       thread.nextSystemAction, dec.next_action) || 'Review conversation',
     snippet: first(thread.lastMessageBody, thread.latestMessageBody, thread.preview) || 'No recent context.',
     value: num(thread.estimatedValue ?? (thread as any).estimated_value),
-    equityPct: num(thread.equityPercent ?? (thread as any).equity_percent),
+    equityPct: num(thread.equity_percent ?? (thread as any).equityPercent),
     repairs: num(thread.estimatedRepairCost ?? (thread as any).estimated_repair_cost),
     lastContact: thread.lastInboundAt || thread.lastOutboundAt || thread.lastMessageAt || thread.updatedAt || null,
     unread: dec.unread,

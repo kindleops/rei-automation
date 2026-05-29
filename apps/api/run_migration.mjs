@@ -17,7 +17,8 @@ const client = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: 
 async function runMigration() {
     try {
         await client.connect();
-        const sql = fs.readFileSync('./supabase/migrations/20260525165900_add_wrong_number_and_expanded_view.sql', 'utf8');
+        const filePath = process.argv[2] || './supabase/migrations/20260525165900_add_wrong_number_and_expanded_view.sql';
+        const sql = fs.readFileSync(filePath, 'utf8');
         await client.query(sql);
         console.log("Migration applied successfully!");
     } catch (e) {

@@ -1,449 +1,945 @@
+/**
+ * BuyerMatchWorkspace v2 — Dispo War Room
+ * Property-first buyer intelligence. Sourced from real sold data.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { formatRelativeTime } from '../../../shared/formatters'
-import type {
-  BuyerCommandData,
-  BuyerMapFilters,
-  BuyerProfileSummary,
-  BuyerRecentPurchase,
-} from '../../buyer/buyerCommandData'
+import { getSupabaseClient } from '../../../lib/supabaseClient'
+import type { DealContext } from '../../../lib/data/dealContext'
+import '../buyer-match-v2.css'
 
-const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-type BuyerMatchWorkspaceProps = {
-  buyerCommandData: BuyerCommandData
-  buyerFilters: BuyerMapFilters
-  onBuyerFiltersChange: (updater: (current: BuyerMapFilters) => BuyerMapFilters) => void
-  selectedBuyerKey: string | null
-  onSelectBuyerKey: (value: string | null) => void
-  paneMode: 'single' | 'multi'
-  paneWidth: '25' | '50' | '75' | '100'
-  selectedPropertyLabel: string
-  selectedMarket: string
-  selectedZip: string
-  selectedPropertyType: string
+interface BuyerMatchCandidate {
+  buyer_entity_id: string | null
+  buyer_key: string
+  buyer_name: string
+  buyer_type: 'individual' | 'corporate' | 'trust' | 'institutional' | string
+  is_corporate_buyer: boolean
+  is_repeat_buyer: boolean
+  mailing_city: string | null
+  mailing_state: string | null
+  mailing_zip: string | null
+  markets_active: string[]
+  zips_active: string[]
+  counties_active: string[]
+  preferred_asset_classes: string[]
+  purchase_count: number
+  purchase_count_180d: number
+  purchase_count_365d: number
+  first_purchase_date: string | null
+  last_purchase_date: string | null
+  avg_purchase_price: number | null
+  median_purchase_price: number | null
+  preferred_price_min: number | null
+  preferred_price_max: number | null
+  avg_ppsf: number | null
+  velocity_score: number | null
+  dispo_priority_score: number | null
+  investor_score: number | null
+  avg_potential_spread: number | null
+  market_match_score: number
+  asset_match_score: number
+  price_match_score: number
+  recency_score: number
+  repeat_buyer_score: number
+  spread_fit_score: number
+  total_match_score: number
+  match_grade: 'A+' | 'A' | 'B' | 'C' | 'D'
+  reason_for_match: string
+  // status fields from buyer_match_candidates if available
+  buyer_match_candidate_id?: string
+  buyer_response_status?: string
+  package_sent_at?: string | null
+  selected?: boolean
+  notes?: string
 }
 
-const formatMoney = (value: number | null | undefined): string => {
-  if (!Number.isFinite(value ?? NaN)) return '—'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value as number)
+interface MatchRun {
+  buyer_match_run_id: string
+  property_id: string
+  run_status: string
+  buyer_count: number
+  high_fit_count: number
+  demand_score: number | null
+  best_buyer_grade: string | null
+  created_at: string
 }
 
-const formatCompactMoney = (value: number | null | undefined): string => {
-  if (!Number.isFinite(value ?? NaN)) return '—'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(value as number)
+interface PropertySnapshot {
+  property_id?: string
+  address: string
+  market: string
+  zip: string
+  state?: string
+  county?: string
+  property_type: string
+  asset_class?: string
+  beds?: number | null
+  baths?: number | null
+  sqft?: number | null
+  units?: number | null
+  estimated_value?: number | null
+  arv?: number | null
+  purchase_price?: number | null
+  potential_spread?: number | null
+  dispo_strategy?: string
 }
 
-const formatNumber = (value: number | null | undefined): string => {
-  if (!Number.isFinite(value ?? NaN)) return '—'
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value as number)
+type GradeFilter = 'all' | 'A+' | 'A' | 'B' | 'C'
+type TypeFilter  = 'all' | 'corporate' | 'repeat' | 'institutional'
+
+export interface BuyerMatchWorkspaceProps {
+  propertySnapshot: PropertySnapshot
+  dealContext?: DealContext | null
+  isOutsideFilter?: boolean
+  onClearFilters?: () => void
+  onPinSelected?: () => void
+  paneWidth?: '25' | '50' | '75' | '100'
+  apiBase?: string
+  paused?: boolean
 }
 
-const matchTierFor = (score: number | null | undefined): string => {
-  const safe = Number(score ?? 0)
-  if (safe >= 90) return 'Elite Match'
-  if (safe >= 75) return 'Strong Match'
-  if (safe >= 60) return 'Possible Match'
-  if (safe >= 40) return 'Weak Match'
-  return 'Noise / Low Fit'
+// ─── Formatters ──────────────────────────────────────────────────────────────
+
+const fmt$ = (v: number | null | undefined) => {
+  if (!Number.isFinite(v ?? NaN)) return '—'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v as number)
+}
+const fmt$k = (v: number | null | undefined) => {
+  if (!Number.isFinite(v ?? NaN)) return '—'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(v as number)
+}
+const fmtNum = (v: number | null | undefined) => {
+  if (!Number.isFinite(v ?? NaN)) return '—'
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v as number)
+}
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+const fmtDaysAgo = (d: string | null | undefined) => {
+  if (!d) return '—'
+  const days = Math.round((Date.now() - new Date(d).getTime()) / 86_400_000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 30) return `${days}d ago`
+  if (days < 365) return `${Math.round(days / 30)}mo ago`
+  return `${Math.round(days / 365)}yr ago`
 }
 
-const toneForBuyer = (buyer: BuyerProfileSummary): 'gold' | 'cyan' | 'purple' | 'slate' => {
-  if (buyer.buyerGrade === 'A+' || buyer.buyerGrade === 'A') return 'gold'
-  if (buyer.category === 'institutional') return 'purple'
-  if (buyer.isCorporateBuyer || buyer.isRepeatBuyer) return 'cyan'
-  return 'slate'
+const initials = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || 'BY'
+
+const gradeClass = (grade: string) => {
+  if (grade === 'A+') return 'grade-aplus'
+  if (grade === 'A')  return 'grade-a'
+  if (grade === 'B')  return 'grade-b'
+  if (grade === 'C')  return 'grade-c'
+  return 'grade-d'
 }
 
-const initialsFor = (name: string): string =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('') || 'BY'
-
-const summarizeBuyer = (buyer: BuyerProfileSummary, purchases: BuyerRecentPurchase[]) => {
-  const totalSpend = purchases.reduce((sum, purchase) => sum + (purchase.salePrice ?? 0), 0) || buyer.avgPurchasePrice || 0
-  const avgPpsfValues = purchases.map((purchase) => purchase.pricePerSqft).filter((value): value is number => Number.isFinite(value ?? NaN))
-  const avgPpsf = avgPpsfValues.length > 0 ? avgPpsfValues.reduce((sum, value) => sum + value, 0) / avgPpsfValues.length : null
-  const sortedPpsf = [...avgPpsfValues].sort((left, right) => left - right)
-  const medianPpsf = sortedPpsf.length > 0 ? sortedPpsf[Math.floor(sortedPpsf.length / 2)] : null
-  const priceValues = purchases
-    .map((purchase) => purchase.salePrice)
-    .filter((value): value is number => Number.isFinite(value ?? NaN))
-  const latestPurchase = purchases
-    .slice()
-    .sort((left, right) => new Date(right.saleDate || 0).getTime() - new Date(left.saleDate || 0).getTime())[0] ?? null
-  const daysSinceLastPurchase = latestPurchase?.saleDate
-    ? Math.max(0, Math.round((Date.now() - new Date(latestPurchase.saleDate).getTime()) / 86_400_000))
-    : null
-  return {
-    totalSpend,
-    avgPpsf,
-    medianPpsf,
-    minPrice: priceValues.length > 0 ? Math.min(...priceValues) : null,
-    maxPrice: priceValues.length > 0 ? Math.max(...priceValues) : null,
-    daysSinceLastPurchase,
-  }
+const cardGradeClass = (grade: string) => {
+  if (grade === 'A+') return 'is-grade-aplus'
+  if (grade === 'A')  return 'is-grade-a'
+  if (grade === 'B')  return 'is-grade-b'
+  return ''
 }
 
-const temporaryMatchScoreFor = (
-  buyer: BuyerProfileSummary,
-  purchases: BuyerRecentPurchase[],
-  propertyType: string,
-  market: string,
-  zip: string,
-) => {
-  let score = buyer.confidenceScore ?? 0
-  const nearestDistance = purchases
-    .map((purchase) => purchase.distanceMiles)
-    .filter((value): value is number => Number.isFinite(value ?? NaN))
-    .sort((left, right) => left - right)[0] ?? null
-  if (nearestDistance != null) {
-    if (nearestDistance <= 3) score += 25
-    else if (nearestDistance <= 5) score += 20
-    else if (nearestDistance <= 10) score += 12
-  }
-  if (market && buyer.topMarkets.some((value) => value.toLowerCase() === market.toLowerCase())) score += 15
-  if (zip && buyer.topZips.includes(zip)) score += 15
-  if (propertyType && buyer.propertyTypeFocus.some((value) => value.toLowerCase() === propertyType.toLowerCase())) score += 20
-  if ((buyer.purchaseCount6mo ?? 0) >= 5) score += 15
-  else if ((buyer.purchaseCount12mo ?? 0) >= 2) score += 8
-  if (buyer.isOffMarketBuyer) score += 5
-  if ((summarizeBuyer(buyer, purchases).daysSinceLastPurchase ?? 9999) <= 90) score += 15
-  if (buyer.isRetailOrNoise && !buyer.isRepeatBuyer) score = Math.min(score, 55)
-  return Math.max(0, Math.min(100, Math.round(score)))
+const heroVariant = (c: BuyerMatchCandidate) => {
+  if (c.match_grade === 'A+') return 'is-aplus'
+  if (c.buyer_type === 'institutional') return 'is-institutional'
+  if (c.is_corporate_buyer) return 'is-corporate'
+  return ''
 }
 
-const buildBuyerCardBadges = (buyer: BuyerProfileSummary, score: number | null) => {
-  const badges: string[] = []
-  badges.push(`${buyer.buyerGrade}-Tier Buyer`)
-  if (buyer.isRepeatBuyer) badges.push('Repeat Buyer')
-  if (buyer.isCorporateBuyer) badges.push('Corporate Buyer')
-  if (buyer.category === 'institutional') badges.push('Institutional')
-  if (buyer.category === 'builder') badges.push('Builder / Developer')
-  if (buyer.category === 'landlord') badges.push('Local Operator')
-  if (buyer.category === 'flipper') badges.push('Value-Add Buyer')
-  if (buyer.isLocalBuyer) badges.push('Local Investor')
-  if (buyer.isOffMarketBuyer) badges.push('Off-Market Buyer')
-  if (buyer.isRetailOrNoise) badges.push('Retail / Noise')
-  if ((buyer.purchaseCount6mo ?? 0) >= 5) badges.push('High Velocity')
-  if ((score ?? 0) >= 90) badges.push('Elite Match')
-  return badges
-}
+// ─── Skeleton ────────────────────────────────────────────────────────────────
 
-const safeCopy = async (value: string) => {
-  try {
-    await navigator.clipboard.writeText(value)
-  } catch {
-    // Best-effort only.
-  }
-}
-
-export const BuyerMatchWorkspace = ({
-  buyerCommandData,
-  buyerFilters,
-  onBuyerFiltersChange,
-  selectedBuyerKey,
-  onSelectBuyerKey,
-  paneMode,
-  paneWidth,
-  selectedPropertyLabel,
-  selectedMarket,
-  selectedZip,
-  selectedPropertyType,
-}: BuyerMatchWorkspaceProps) => {
-  const selectedBuyer = buyerCommandData.profiles.find((profile) => profile.buyerKey === selectedBuyerKey) ?? buyerCommandData.profiles[0] ?? null
-  const matchesByBuyer = new Map(buyerCommandData.matches.map((match) => [match.buyerKey, match]))
-  const purchasesByBuyer = new Map<string, BuyerRecentPurchase[]>()
-  buyerCommandData.recentPurchases.forEach((purchase) => {
-    const bucket = purchasesByBuyer.get(purchase.buyerKey) ?? []
-    bucket.push(purchase)
-    purchasesByBuyer.set(purchase.buyerKey, bucket)
-  })
-
-  const realBuyers = buyerCommandData.profiles.filter((profile) => profile.isRealBuyer && !profile.isRetailOrNoise)
-  const repeatBuyers = buyerCommandData.profiles.filter((profile) => profile.isRepeatBuyer && !profile.isRetailOrNoise)
-  const corporateBuyers = buyerCommandData.profiles.filter((profile) => profile.isCorporateBuyer && !profile.isRetailOrNoise)
-  const localBuyers = buyerCommandData.profiles.filter((profile) => profile.isLocalBuyer && !profile.isRetailOrNoise)
-  const offMarketBuyers = buyerCommandData.profiles.filter((profile) => profile.isOffMarketBuyer && !profile.isRetailOrNoise)
-  const noiseBuyers = buyerCommandData.profiles.filter((profile) => profile.isRetailOrNoise)
-
-  const sections: Array<{ title: string; buyers: BuyerProfileSummary[]; accent: string }> = [
-    { title: 'Real Buyers', buyers: realBuyers.length > 0 ? realBuyers : buyerCommandData.profiles, accent: 'gold' },
-    { title: 'Repeat Buyers', buyers: repeatBuyers, accent: 'cyan' },
-    { title: 'Corporate Buyers', buyers: corporateBuyers, accent: 'purple' },
-    { title: 'Local Buyers', buyers: localBuyers, accent: 'cyan' },
-    { title: 'Off-Market Buyers', buyers: offMarketBuyers, accent: 'gold' },
-    { title: 'Retail / Noise', buyers: noiseBuyers, accent: 'slate' },
-  ]
-
-  const widthClass = `is-pane-${paneWidth}`
-  const detailPurchases = selectedBuyer ? (purchasesByBuyer.get(selectedBuyer.buyerKey) ?? []).slice().sort((left, right) => new Date(right.saleDate || 0).getTime() - new Date(left.saleDate || 0).getTime()) : []
-  const selectedMatch = selectedBuyer ? matchesByBuyer.get(selectedBuyer.buyerKey) ?? null : null
-  const detailSummary = selectedBuyer ? summarizeBuyer(selectedBuyer, detailPurchases) : null
-
-  const renderCard = (buyer: BuyerProfileSummary, accent: string) => {
-    const match = matchesByBuyer.get(buyer.buyerKey) ?? null
-    const purchases = (purchasesByBuyer.get(buyer.buyerKey) ?? []).slice().sort((left, right) => new Date(right.saleDate || 0).getTime() - new Date(left.saleDate || 0).getTime())
-    const summary = summarizeBuyer(buyer, purchases)
-    const score = match?.matchScore ?? temporaryMatchScoreFor(buyer, purchases, selectedPropertyType, selectedMarket, selectedZip)
-    const tier = matchTierFor(score)
-    const tone = toneForBuyer(buyer)
-    const badges = buildBuyerCardBadges(buyer, score)
-    const topMarkets = buyer.topMarkets.slice(0, paneWidth === '25' ? 1 : 3)
-    const assetFocus = buyer.assetClassesBought.length > 0 ? buyer.assetClassesBought : buyer.propertyTypeFocus
-    const distanceLabel =
-      purchases.find((purchase) => Number.isFinite(purchase.distanceMiles ?? NaN))?.distanceMiles != null
-        ? `${(purchases.find((purchase) => Number.isFinite(purchase.distanceMiles ?? NaN))?.distanceMiles ?? 0).toFixed(1)} mi`
-        : '—'
-
-    return (
-      <article
-        key={buyer.buyerKey}
-        className={cls('nx-buyer-entity-card', `is-${tone}`, selectedBuyerKey === buyer.buyerKey && 'is-selected')}
-        onClick={() => onSelectBuyerKey(buyer.buyerKey)}
-      >
-        <header className="nx-buyer-entity-card__header">
-          <div className="nx-buyer-entity-card__identity">
-            <div className="nx-buyer-entity-card__avatar">{initialsFor(buyer.buyerName)}</div>
-            <div>
-              <span className="nx-buyer-entity-card__eyebrow">{buyer.buyerType}</span>
-              <strong>{buyer.buyerName}</strong>
-              <small>{buyer.buyerKey}</small>
+function SkeletonCards() {
+  return (
+    <>
+      {[1, 2, 3, 4, 5].map(i => (
+        <div key={i} className="bm2-skeleton-card">
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div className="bm2-skel" style={{ width: 42, height: 42, borderRadius: 13 }} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="bm2-skel" style={{ height: 14, width: '60%' }} />
+              <div className="bm2-skel" style={{ height: 10, width: '40%' }} />
             </div>
           </div>
-          <div className="nx-buyer-entity-card__header-badges">
-            <span className={cls('nx-buyer-entity-card__badge', `is-${accent}`)}>{buyer.buyerGrade}</span>
-            <span className="nx-buyer-entity-card__badge is-dark">{tier}</span>
+          <div className="bm2-skel" style={{ height: 6 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
+            <div className="bm2-skel" style={{ height: 48, borderRadius: 10 }} />
+            <div className="bm2-skel" style={{ height: 48, borderRadius: 10 }} />
+            <div className="bm2-skel" style={{ height: 48, borderRadius: 10 }} />
           </div>
-        </header>
-
-        <div className="nx-buyer-entity-card__badge-row">
-          {badges.slice(0, paneWidth === '25' ? 3 : 6).map((badge) => (
-            <span key={badge} className="nx-buyer-entity-card__pill">{badge}</span>
-          ))}
         </div>
+      ))}
+    </>
+  )
+}
 
-        <div className="nx-buyer-entity-card__metric-grid is-primary">
-          <div><span>Purchases</span><strong>{formatNumber(buyer.purchaseCount12mo)}</strong></div>
-          <div><span>Total Spend</span><strong>{formatCompactMoney(summary.totalSpend)}</strong></div>
-          <div><span>Avg Price</span><strong>{formatCompactMoney(buyer.avgPurchasePrice)}</strong></div>
-          <div><span>Last Buy</span><strong>{buyer.lastPurchaseDate ? formatRelativeTime(buyer.lastPurchaseDate) : '—'}</strong></div>
-        </div>
+// ─── Buyer Card ───────────────────────────────────────────────────────────────
 
-        <div className="nx-buyer-entity-card__metric-grid">
-          <div><span>Avg PPSF</span><strong>{summary.avgPpsf ? formatNumber(summary.avgPpsf) : '—'}</strong></div>
-          <div><span>Markets / ZIPs</span><strong>{[...topMarkets, ...buyer.topZips.slice(0, paneWidth === '25' ? 0 : 2)].join(' • ') || '—'}</strong></div>
-          <div><span>Asset Focus</span><strong>{assetFocus.slice(0, 2).join(', ') || '—'}</strong></div>
-          <div><span>Distance</span><strong>{distanceLabel}</strong></div>
-        </div>
+interface BuyerCardProps {
+  candidate: BuyerMatchCandidate
+  isSelected: boolean
+  onSelect: () => void
+  onSendPackage: () => void
+  onMarkInterested: () => void
+  onMarkPassed: () => void
+}
 
-        <div className="nx-buyer-entity-card__score">
-          <div className="nx-buyer-entity-card__score-head">
-            <span>Buyer Match Score</span>
-            <strong>{Math.round(score)}/100</strong>
+function BuyerCard({ candidate: c, isSelected, onSelect, onSendPackage, onMarkInterested, onMarkPassed }: BuyerCardProps) {
+  const pct = Math.round(Math.min(100, Math.max(0, c.total_match_score)))
+  const packageSent = Boolean(c.package_sent_at)
+  const isInterested = c.buyer_response_status === 'interested'
+  const isPassed = c.buyer_response_status === 'passed'
+
+  return (
+    <div
+      className={`bm2-buyer-card ${isSelected ? 'is-selected' : ''} ${cardGradeClass(c.match_grade)}`}
+      onClick={onSelect}
+    >
+      {/* Header */}
+      <div className="bm2-card-header">
+        <div className="bm2-card-avatar">{initials(c.buyer_name)}</div>
+        <div className="bm2-card-id">
+          <div className="bm2-card-name" title={c.buyer_name}>{c.buyer_name}</div>
+          <div className="bm2-card-meta">
+            {c.mailing_city && c.mailing_state ? `${c.mailing_city}, ${c.mailing_state}` : (c.markets_active?.[0] ?? 'Unknown Market')}
+            {c.last_purchase_date ? ` · Last: ${fmtDaysAgo(c.last_purchase_date)}` : ''}
           </div>
-          <div className="nx-buyer-entity-card__score-bar">
-            <div className="nx-buyer-entity-card__score-fill" style={{ width: `${Math.max(10, Math.min(100, score))}%` }} />
-          </div>
-          <small>{match?.reasonForMatch || buyer.buyerSummary}</small>
         </div>
+        <div className={`bm2-card-grade ${gradeClass(c.match_grade)}`}>{c.match_grade}</div>
+      </div>
 
-        {paneWidth !== '25' && (
-          <div className="nx-buyer-entity-card__footer">
-            <button type="button" onClick={(event) => { event.stopPropagation(); onSelectBuyerKey(buyer.buyerKey) }}>View Purchase Trail</button>
-            <button type="button" onClick={(event) => { event.stopPropagation(); onSelectBuyerKey(buyer.buyerKey) }}>Center Buyer Activity</button>
-            <button type="button" onClick={(event) => { event.stopPropagation(); void safeCopy(`${buyer.buyerName} • ${buyer.buyerSummary}`) }}>Copy Buyer Summary</button>
-            {paneWidth === '100' && <button type="button" onClick={(event) => { event.stopPropagation() }}>Find Similar Buyers</button>}
-          </div>
+      {/* Badges */}
+      <div className="bm2-card-badges">
+        {c.is_repeat_buyer && <span className="bm2-card-badge is-repeat">↩ Repeat</span>}
+        {c.buyer_type === 'corporate' && <span className="bm2-card-badge is-corp">🏢 Corporate</span>}
+        {c.buyer_type === 'institutional' && <span className="bm2-card-badge is-inst">⚡ Institutional</span>}
+        {c.purchase_count_180d > 0 && <span className="bm2-card-badge">🔥 Active 6mo</span>}
+        {c.markets_active?.slice(0, 1).map(m => (
+          <span key={m} className="bm2-card-badge">{m}</span>
+        ))}
+      </div>
+
+      {/* Score bar */}
+      <div className="bm2-score-row">
+        <span className="bm2-score-label">Match</span>
+        <div className="bm2-score-track">
+          <div className="bm2-score-fill" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="bm2-score-val">{pct}</span>
+      </div>
+
+      {/* Metrics */}
+      <div className="bm2-card-metrics">
+        <div className="bm2-card-metric">
+          <span className="bm2-card-metric__label">Purchases</span>
+          <span className="bm2-card-metric__value">{fmtNum(c.purchase_count)}</span>
+        </div>
+        <div className="bm2-card-metric">
+          <span className="bm2-card-metric__label">Avg Price</span>
+          <span className="bm2-card-metric__value">{fmt$k(c.avg_purchase_price)}</span>
+        </div>
+        <div className="bm2-card-metric">
+          <span className="bm2-card-metric__label">Spread Fit</span>
+          <span className="bm2-card-metric__value">{fmt$k(c.avg_potential_spread)}</span>
+        </div>
+      </div>
+
+      {/* Reason */}
+      {c.reason_for_match && (
+        <div className="bm2-card-reason" title={c.reason_for_match}>
+          ✦ {c.reason_for_match}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="bm2-card-actions" onClick={e => e.stopPropagation()}>
+        {packageSent ? (
+          <button className="bm2-card-action is-sent" disabled>✓ Package Sent</button>
+        ) : (
+          <button className="bm2-card-action is-primary" onClick={onSendPackage}>📤 Send Package</button>
         )}
-
-        {paneWidth === '100' && (
-          <div className="nx-buyer-entity-card__trail-preview">
-            {purchases.slice(0, buyer.buyerKey === selectedBuyerKey ? 3 : 2).map((purchase) => (
-              <div key={`${purchase.buyerKey}-${purchase.propertyId}`} className="nx-buyer-entity-card__trail-row">
-                <span>{purchase.saleDate ? formatRelativeTime(purchase.saleDate) : 'Unknown'}</span>
-                <strong>{purchase.propertyAddressFull}</strong>
-                <small>{formatMoney(purchase.salePrice)} • {purchase.propertyType}</small>
-              </div>
-            ))}
-          </div>
+        {!isPassed && !isInterested && (
+          <button className="bm2-card-action is-success" onClick={onMarkInterested}>✓ Interested</button>
         )}
-      </article>
+        {isInterested && <span className="bm2-card-action is-sent">🟢 Interested</span>}
+        {!isPassed && (
+          <button className="bm2-card-action is-danger" onClick={onMarkPassed}>✗ Pass</button>
+        )}
+        {isPassed && <span className="bm2-card-action" style={{ opacity: 0.5 }}>Passed</span>}
+      </div>
+    </div>
+  )
+}
+
+// ─── Detail Panel ─────────────────────────────────────────────────────────────
+
+interface DetailPanelProps {
+  candidate: BuyerMatchCandidate | null
+  purchases: PurchaseEvent[]
+  onSendPackage: () => void
+  onSelectBuyer: () => void
+  onMarkInterested: () => void
+  onMarkPassed: () => void
+}
+
+interface PurchaseEvent {
+  property_address_full: string
+  property_city: string
+  property_state: string
+  market: string
+  purchase_date: string | null
+  purchase_price: number | null
+  sqft: number | null
+  property_type: string
+}
+
+function DetailPanel({ candidate: c, purchases, onSendPackage, onSelectBuyer, onMarkInterested, onMarkPassed }: DetailPanelProps) {
+  if (!c) {
+    return (
+      <div className="bm2-detail-empty">
+        <div className="bm2-detail-empty__icon">🎯</div>
+        <div className="bm2-detail-empty__text">Select a buyer to see full profile, purchase trail, and match explanation.</div>
+      </div>
     )
   }
 
+  const scoreComponents = [
+    { name: 'Market Match', score: c.market_match_score, weight: 25 },
+    { name: 'Asset Match',  score: c.asset_match_score,  weight: 20 },
+    { name: 'Price Match',  score: c.price_match_score,  weight: 20 },
+    { name: 'Recency',      score: c.recency_score,      weight: 15 },
+    { name: 'Repeat Buyer', score: c.repeat_buyer_score, weight: 10 },
+    { name: 'Spread Fit',   score: c.spread_fit_score,   weight: 10 },
+  ]
+
+  const packageSent = Boolean(c.package_sent_at)
+  const isInterested = c.buyer_response_status === 'interested'
+  const isPassed = c.buyer_response_status === 'passed'
+  const isSelected = c.selected
+
   return (
-    <section className={cls('nx-buyer-intel-workspace', widthClass, paneMode === 'multi' && 'is-multi-pane')}>
-      <header className="nx-buyer-intel-hero">
-        <div>
-          <span className="nx-buyer-intel-hero__eyebrow">Buyer Match</span>
-          <h2>Grouped buyer entities, live dispo fit, and purchase trail intelligence.</h2>
-          <p>{selectedPropertyLabel || 'Property Unknown'} • {selectedMarket || 'Market Unknown'} • {selectedPropertyType || 'Property Unknown'} • ZIP {selectedZip || '—'}</p>
-        </div>
-        <div className="nx-buyer-intel-hero__stats">
-          <div><span>Demand</span><strong>{buyerCommandData.summary?.demandLabel || 'Limited'}</strong></div>
-          <div><span>Real Buyers</span><strong>{buyerCommandData.summary?.realBuyerCount ?? 0}</strong></div>
-          <div><span>Repeat</span><strong>{buyerCommandData.summary?.repeatBuyerCount ?? 0}</strong></div>
-          <div><span>Off-Market</span><strong>{buyerCommandData.summary?.offMarketBuyerCount ?? 0}</strong></div>
-        </div>
-      </header>
-
-      <div className="nx-buyer-intel-toolbar">
-        <div className="nx-buyer-intel-toolbar__group">
-          {['', 'Corporate Buyer', 'Individual Buyer'].map((value) => (
-            <button
-              key={value || 'all-type'}
-              type="button"
-              className={cls('nx-buyer-intel-filter', buyerFilters.buyerType === value && 'is-active')}
-              onClick={() => onBuyerFiltersChange((current) => ({ ...current, buyerType: value }))}
-            >
-              {value || 'All Buyer Types'}
-            </button>
-          ))}
-        </div>
-        <div className="nx-buyer-intel-toolbar__group">
-          {['', 'A+', 'A', 'B', 'Watchlist', 'Noise'].map((value) => (
-            <button
-              key={value || 'all-tier'}
-              type="button"
-              className={cls('nx-buyer-intel-filter', buyerFilters.buyerTier === value && 'is-active')}
-              onClick={() => onBuyerFiltersChange((current) => ({ ...current, buyerTier: value }))}
-            >
-              {value || 'All Grades'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="nx-buyer-intel-grid">
-        <div className="nx-buyer-intel-grid__stack">
-          {sections.map((section) => (
-            <section key={section.title} className="nx-buyer-intel-section">
-              <div className="nx-buyer-intel-section__header">
-                <strong>{section.title}</strong>
-                <span>{section.buyers.length} buyers</span>
-              </div>
-              <div className="nx-buyer-intel-card-grid">
-                {section.buyers.slice(0, paneWidth === '25' ? 2 : paneWidth === '50' ? 4 : 6).map((buyer) => renderCard(buyer, section.accent))}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <aside className="nx-buyer-intel-detail">
-          {selectedBuyer ? (
-            <>
-              <header className={cls('nx-buyer-intel-detail__hero', `is-${toneForBuyer(selectedBuyer)}`)}>
-                <div className="nx-buyer-intel-detail__identity">
-                  <div className="nx-buyer-intel-detail__avatar">{initialsFor(selectedBuyer.buyerName)}</div>
-                  <div>
-                    <span>{selectedBuyer.buyerType}</span>
-                    <h3>{selectedBuyer.buyerName}</h3>
-                    <p>{selectedBuyer.buyerKey}</p>
-                  </div>
-                </div>
-                <div className="nx-buyer-intel-detail__badge-stack">
-                  {buildBuyerCardBadges(selectedBuyer, selectedMatch?.matchScore ?? selectedBuyer.confidenceScore).slice(0, 6).map((badge) => (
-                    <span key={badge}>{badge}</span>
-                  ))}
-                </div>
-              </header>
-
-              <section className="nx-buyer-intel-detail__section">
-                <div className="nx-buyer-intel-detail__section-head">
-                  <strong>Buyer Stats</strong>
-                  <span>{selectedBuyer.lastPurchaseDate ? `Last buy ${formatRelativeTime(selectedBuyer.lastPurchaseDate)}` : 'No recent buy date'}</span>
-                </div>
-                <div className="nx-buyer-intel-detail__metrics">
-                  <div><span>Purchase Count</span><strong>{formatNumber(selectedBuyer.purchaseCount12mo)}</strong></div>
-                  <div><span>Recent Purchases</span><strong>{formatNumber(selectedBuyer.purchaseCount6mo)}</strong></div>
-                  <div><span>Total Spend</span><strong>{formatCompactMoney(detailSummary?.totalSpend)}</strong></div>
-                  <div><span>Avg Price</span><strong>{formatCompactMoney(selectedBuyer.avgPurchasePrice)}</strong></div>
-                  <div><span>Median Price</span><strong>{formatCompactMoney(selectedBuyer.medianPurchasePrice)}</strong></div>
-                  <div><span>Avg PPSF</span><strong>{detailSummary?.avgPpsf ? formatNumber(detailSummary.avgPpsf) : '—'}</strong></div>
-                  <div><span>Markets Active</span><strong>{selectedBuyer.topMarkets.slice(0, 3).join(' • ') || '—'}</strong></div>
-                  <div><span>Asset Classes</span><strong>{selectedBuyer.assetClassesBought.slice(0, 3).join(', ') || '—'}</strong></div>
-                </div>
-              </section>
-
-              <section className="nx-buyer-intel-detail__section">
-                <div className="nx-buyer-intel-detail__section-head">
-                  <strong>Purchase Trail</strong>
-                  <span>{detailPurchases.length} recent purchases</span>
-                </div>
-                <div className="nx-buyer-intel-detail__trail">
-                  {detailPurchases.slice(0, paneWidth === '25' ? 4 : 8).map((purchase) => (
-                    <article key={`${purchase.buyerKey}-${purchase.propertyId}`} className="nx-buyer-intel-trail-card">
-                      <div className="nx-buyer-intel-trail-card__top">
-                        <strong>{purchase.propertyAddressFull}</strong>
-                        <span>{purchase.saleDate ? formatRelativeTime(purchase.saleDate) : 'Unknown date'}</span>
-                      </div>
-                      <div className="nx-buyer-intel-trail-card__meta">
-                        <span>{formatMoney(purchase.salePrice)}</span>
-                        <span>{purchase.propertyType}</span>
-                        <span>{purchase.buyerBuyBoxSignal || 'General buy box'}</span>
-                      </div>
-                      <div className="nx-buyer-intel-trail-card__meta">
-                        <span>{purchase.pricePerSqft ? `${formatMoney(purchase.pricePerSqft)} ppsf` : '—'}</span>
-                        <span>{purchase.isOffMarketPurchase ? 'Off-Market / Public Record' : 'MLS'}</span>
-                        <span>{purchase.distanceMiles != null ? `${purchase.distanceMiles.toFixed(1)} mi away` : 'Distance unavailable'}</span>
-                      </div>
-                    </article>
-                  ))}
-                  {detailPurchases.length === 0 && (
-                    <p className="nx-workspace-card__body">No live purchase trail rows are available for the selected buyer in the current market window.</p>
-                  )}
-                </div>
-              </section>
-
-              <section className="nx-buyer-intel-detail__section">
-                <div className="nx-buyer-intel-detail__section-head">
-                  <strong>Market Footprint</strong>
-                  <span>{selectedBuyer.topStates.slice(0, 3).join(' • ') || 'Single-state activity'}</span>
-                </div>
-                <div className="nx-buyer-intel-detail__footprint">
-                  <div><span>Top Markets</span><strong>{selectedBuyer.topMarkets.join(' • ') || '—'}</strong></div>
-                  <div><span>Top ZIPs</span><strong>{selectedBuyer.topZips.join(' • ') || '—'}</strong></div>
-                  <div><span>States Active</span><strong>{selectedBuyer.topStates.join(' • ') || '—'}</strong></div>
-                  <div><span>Market Density</span><strong>{selectedBuyer.marketsActive.join(' • ') || 'Focused buy box'}</strong></div>
-                </div>
-              </section>
-
-              <section className="nx-buyer-intel-detail__section">
-                <div className="nx-buyer-intel-detail__section-head">
-                  <strong>Match Explanation</strong>
-                  <span>{selectedMatch ? `${matchTierFor(selectedMatch.matchScore)} • ${selectedMatch.matchScore}/100` : 'Confidence fallback'}</span>
-                </div>
-                <div className="nx-buyer-intel-detail__explanation">
-                  <div><span>Why Matched</span><strong>{selectedMatch?.reasonForMatch || selectedBuyer.buyerSummary}</strong></div>
-                  <div><span>Distance</span><strong>{detailPurchases.find((purchase) => purchase.distanceMiles != null)?.distanceMiles != null ? `${(detailPurchases.find((purchase) => purchase.distanceMiles != null)?.distanceMiles ?? 0).toFixed(1)} mi` : '—'}</strong></div>
-                  <div><span>Asset Fit</span><strong>{selectedBuyer.assetClassesBought.slice(0, 2).join(', ') || selectedPropertyType || '—'}</strong></div>
-                  <div><span>Price Fit</span><strong>{formatCompactMoney(selectedMatch?.medianPurchasePrice ?? selectedBuyer.medianPurchasePrice)}</strong></div>
-                  <div><span>Recency</span><strong>{detailSummary?.daysSinceLastPurchase != null ? `${detailSummary.daysSinceLastPurchase}d` : '—'}</strong></div>
-                  <div><span>Risk Note</span><strong>{selectedBuyer.isRetailOrNoise ? 'Noise separated from active pool.' : 'Real buyer entity with recent activity.'}</strong></div>
-                </div>
-              </section>
-
-              <section className="nx-buyer-intel-detail__section">
-                <div className="nx-buyer-intel-detail__actions">
-                  <button type="button" onClick={() => onSelectBuyerKey(selectedBuyer.buyerKey)}>Center Trail on Map</button>
-                  <button type="button" onClick={() => onSelectBuyerKey(selectedBuyer.buyerKey)}>Show Only This Buyer</button>
-                  <button type="button">Open Buyer Match</button>
-                  <button type="button">Add to Dispo List</button>
-                  <button type="button" onClick={() => void safeCopy(`${selectedBuyer.buyerName}\n${selectedBuyer.buyerSummary}`)}>Export Buyer Summary</button>
-                </div>
-              </section>
-            </>
-          ) : (
-            <div className="nx-workspace-card">
-              <div className="nx-workspace-card__title"><Icon name="users" /><span>Buyer Detail</span></div>
-              <p className="nx-workspace-card__body">Select a buyer card to open the live buyer identity, purchase trail, footprint, and match explanation panel.</p>
+    <div className="bm2-detail">
+      {/* Hero */}
+      <div className={`bm2-detail-hero ${heroVariant(c)}`}>
+        <div className="bm2-detail-avatar">{initials(c.buyer_name)}</div>
+        <div className="bm2-detail-info">
+          <div className="bm2-detail-name">{c.buyer_name}</div>
+          <div className="bm2-detail-type">
+            {c.buyer_type.charAt(0).toUpperCase() + c.buyer_type.slice(1)} Buyer
+            {c.is_repeat_buyer ? ' · Repeat Purchaser' : ''}
+          </div>
+          {(c.mailing_city || c.mailing_state) && (
+            <div style={{ fontSize: '0.68rem', color: 'rgba(219,229,255,0.42)', marginTop: 4 }}>
+              📍 {[c.mailing_city, c.mailing_state, c.mailing_zip].filter(Boolean).join(', ')}
             </div>
           )}
-        </aside>
+        </div>
+        <div className={`bm2-detail-grade-badge ${gradeClass(c.match_grade)}`}>{c.match_grade}</div>
       </div>
-    </section>
+
+      {/* Score Breakdown */}
+      <div className="bm2-detail-section">
+        <div className="bm2-detail-section__head">Match Score Breakdown</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: '2rem', fontWeight: 900, color: '#e8f0ff' }}>{Math.round(c.total_match_score)}</span>
+          <span style={{ fontSize: '0.80rem', color: 'rgba(219,229,255,0.45)', alignSelf: 'flex-end', marginBottom: 4 }}>/100</span>
+        </div>
+        <div className="bm2-score-breakdown">
+          {scoreComponents.map(sc => (
+            <div key={sc.name} className="bm2-score-component">
+              <span className="bm2-score-component__name">{sc.name} <span style={{ opacity: 0.45 }}>({sc.weight}%)</span></span>
+              <div className="bm2-score-component__bar">
+                <div className="bm2-score-component__fill" style={{ width: `${sc.score}%` }} />
+              </div>
+              <span className="bm2-score-component__val">{Math.round(sc.score)}</span>
+            </div>
+          ))}
+        </div>
+        {c.reason_for_match && (
+          <div style={{ fontSize: '0.72rem', color: 'rgba(219,229,255,0.50)', fontStyle: 'italic', marginTop: 4 }}>
+            ✦ {c.reason_for_match}
+          </div>
+        )}
+      </div>
+
+      {/* Buy Box */}
+      <div className="bm2-detail-section">
+        <div className="bm2-detail-section__head">Buy Box Profile</div>
+        <div className="bm2-detail-kv-grid">
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Purchases</span>
+            <span className="bm2-detail-kv__val is-cyan">{fmtNum(c.purchase_count)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Last Active</span>
+            <span className="bm2-detail-kv__val">{fmtDaysAgo(c.last_purchase_date)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Avg Price</span>
+            <span className="bm2-detail-kv__val">{fmt$(c.avg_purchase_price)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Median Price</span>
+            <span className="bm2-detail-kv__val">{fmt$(c.median_purchase_price)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Price Range</span>
+            <span className="bm2-detail-kv__val" style={{ fontSize: '0.72rem' }}>
+              {c.preferred_price_min || c.preferred_price_max
+                ? `${fmt$k(c.preferred_price_min)} – ${fmt$k(c.preferred_price_max)}`
+                : '—'}
+            </span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Avg Spread</span>
+            <span className="bm2-detail-kv__val is-green">{fmt$(c.avg_potential_spread)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">6mo Purchases</span>
+            <span className="bm2-detail-kv__val">{fmtNum(c.purchase_count_180d)}</span>
+          </div>
+          <div className="bm2-detail-kv">
+            <span className="bm2-detail-kv__key">Avg $/sqft</span>
+            <span className="bm2-detail-kv__val">{c.avg_ppsf ? `$${Math.round(c.avg_ppsf)}/sf` : '—'}</span>
+          </div>
+        </div>
+        {c.markets_active?.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div className="bm2-detail-kv__key" style={{ marginBottom: 5 }}>Active Markets</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {c.markets_active.slice(0, 6).map(m => (
+                <span key={m} className="bm2-card-badge is-corp">{m}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {c.preferred_asset_classes?.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div className="bm2-detail-kv__key" style={{ marginBottom: 5 }}>Asset Classes</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {c.preferred_asset_classes.slice(0, 5).map(a => (
+                <span key={a} className="bm2-card-badge">{a}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Purchase Trail */}
+      {purchases.length > 0 && (
+        <div className="bm2-detail-section">
+          <div className="bm2-detail-section__head">Purchase Trail</div>
+          <div className="bm2-trail">
+            {purchases.slice(0, 8).map((p, i) => (
+              <div key={i} className="bm2-trail-item">
+                <div className="bm2-trail-item__head">
+                  <span className="bm2-trail-item__addr">{p.property_address_full || 'Unknown Address'}</span>
+                  {p.purchase_price && <span className="bm2-trail-item__price">{fmt$(p.purchase_price)}</span>}
+                </div>
+                <div className="bm2-trail-item__meta">
+                  <span>{fmtDate(p.purchase_date)}</span>
+                  {p.market && <span>{p.market}</span>}
+                  {p.property_type && <span>{p.property_type}</span>}
+                  {p.sqft && <span>{fmtNum(p.sqft)} sqft</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="bm2-detail-actions">
+        {!packageSent ? (
+          <button className="bm2-detail-action is-primary" onClick={onSendPackage}>📤 Send Package</button>
+        ) : (
+          <button className="bm2-detail-action is-sent" disabled style={{ opacity: 0.7 }}>✓ Package Sent {fmtDate(c.package_sent_at)}</button>
+        )}
+        {!isInterested && !isPassed && (
+          <button className="bm2-detail-action is-success" onClick={onMarkInterested}>✓ Mark Interested</button>
+        )}
+        {isInterested && <span className="bm2-detail-action is-success" style={{ textAlign: 'center' }}>🟢 Interested</span>}
+        {!isSelected ? (
+          <button className="bm2-detail-action is-primary" onClick={onSelectBuyer} style={{ flex: '1 1 100%' }}>⭐ Select as Buyer</button>
+        ) : (
+          <span className="bm2-detail-action is-success" style={{ textAlign: 'center', flex: '1 1 100%' }}>✓ Selected Buyer</span>
+        )}
+        {!isPassed && (
+          <button className="bm2-detail-action is-danger" onClick={onMarkPassed}>✗ Pass</button>
+        )}
+      </div>
+    </div>
   )
 }
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function BuyerMatchWorkspace({
+  propertySnapshot,
+  dealContext = null,
+  isOutsideFilter = false,
+  onClearFilters,
+  onPinSelected,
+  paneWidth = '100',
+  paused = false,
+}: BuyerMatchWorkspaceProps) {
+  const [candidates, setCandidates] = useState<BuyerMatchCandidate[]>([])
+  const [purchases, setPurchases] = useState<PurchaseEvent[]>([])
+  const [latestRun, setLatestRun] = useState<MatchRun | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [gradeFilter, setGradeFilter] = useState<GradeFilter>('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [loading, setLoading] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [demandStats, setDemandStats] = useState<{ entity_count: number; match_count: number } | null>(null)
+
+  const { property_id, address, market, zip, state, county, property_type, asset_class, estimated_value } = propertySnapshot
+
+  // Load initial data (demand summary)
+  useEffect(() => {
+    if (!property_id) return
+    if (paused) {
+      if (import.meta.env.DEV) console.log('[HeavyPanelLoadSkipped] BuyerMatchWorkspace: paused')
+      return
+    }
+    let active = true
+
+    const load = async () => {
+      try {
+        const supabase = getSupabaseClient()
+        // Use market from canonical dealContext if available — avoids a redundant property table fetch
+        const resolvedMarket = dealContext?.market || market
+        const { data: latest_run } = await supabase.from('buyer_match_runs').select('*').eq('property_id', property_id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+        let entity_count = 0
+        if (resolvedMarket) {
+          const { count } = await supabase.from('buyer_entities_v2').select('*', { count: 'exact', head: true }).contains('markets_active', [resolvedMarket])
+          entity_count = count ?? 0
+        } else {
+          // Fallback: fetch market from properties table only when not available from context
+          const { data: propertyRow } = await supabase.from('properties').select('market').eq('property_id', property_id).maybeSingle()
+          if (propertyRow?.market) {
+            const { count } = await supabase.from('buyer_entities_v2').select('*', { count: 'exact', head: true }).contains('markets_active', [propertyRow.market])
+            entity_count = count ?? 0
+          }
+        }
+
+        if (!active) return
+        setLatestRun(latest_run ?? null)
+        setDemandStats({ entity_count, match_count: latest_run?.candidate_count ?? 0 })
+      } catch (err) {
+        console.warn(err)
+      }
+    }
+
+    void load()
+    return () => { active = false }
+  }, [property_id, paused, dealContext?.market, market])
+
+  // Load candidates from last run
+  useEffect(() => {
+    if (!latestRun?.buyer_match_run_id || paused) return
+    let active = true
+    const load = async () => {
+      try {
+        const supabase = getSupabaseClient()
+        const { data } = await supabase.from('buyer_match_candidates')
+          .select('*, buyer_entities_v2!buyer_match_candidates_buyer_entity_id_fkey(*)')
+          .eq('buyer_match_run_id', latestRun.buyer_match_run_id)
+          .limit(150)
+        
+        if (!active || !data) return
+        const mapped = data.map((c: any) => ({
+          ...c,
+          ...c.buyer_entities_v2,
+        }))
+        setCandidates(mapped)
+      } catch (err) {
+        console.warn(err)
+      }
+    }
+    void load()
+    return () => { active = false }
+  }, [latestRun?.buyer_match_run_id, property_id, paused])
+
+  // Load purchase trail for selected buyer
+  useEffect(() => {
+    setPurchases([])
+    const sel = candidates.find(c => c.buyer_key === selectedKey)
+    if (!sel?.buyer_entity_id || paused) return
+    let active = true
+    const load = async () => {
+      try {
+        const supabase = getSupabaseClient()
+        const { data } = await supabase.from('buyer_purchase_events_v2')
+          .select('*')
+          .eq('buyer_entity_id', sel.buyer_entity_id)
+          .order('sale_date', { ascending: false })
+          .limit(20)
+        if (!active || !data) return
+        setPurchases(data)
+      } catch (err) {
+        console.warn(err)
+      }
+    }
+    void load()
+    return () => { active = false }
+  }, [selectedKey, candidates, paused])
+
+  const runMatch = useCallback(async () => {
+    if (!property_id || running) return
+    setRunning(true)
+    setLoading(true)
+    setCandidates([])
+
+    try {
+      const supabase = getSupabaseClient()
+      const { data, error } = await supabase.rpc('get_buyer_match_candidates', {
+        p_market: market,
+        p_zip: zip,
+        p_state: state,
+        p_county: county,
+        p_asset_class: asset_class || property_type,
+        p_property_type: property_type,
+        p_estimated_value: estimated_value,
+        p_limit: 100
+      })
+      
+      if (error) throw error
+
+      const candidatesList = data || []
+      
+      // Store the run
+      const { data: runData } = await supabase.from('buyer_match_runs').insert({
+        property_id,
+        run_status: 'complete',
+        buyer_count: candidatesList.length,
+        high_fit_count: candidatesList.filter((c: any) => c.match_grade === 'A+' || c.match_grade === 'A').length,
+        demand_score: Math.round(candidatesList.slice(0, 20).reduce((s: number, c: any) => s + c.total_match_score, 0) / Math.max(1, Math.min(20, candidatesList.length))),
+      }).select().maybeSingle()
+
+      if (runData) {
+        setLatestRun(runData)
+        // Store candidates
+        const candidateInserts = candidatesList.slice(0, 25).map((c: any) => ({
+          buyer_match_run_id: runData.buyer_match_run_id,
+          property_id,
+          buyer_entity_id: c.buyer_entity_id,
+          buyer_key: c.buyer_key,
+          match_grade: c.match_grade,
+          total_match_score: c.total_match_score,
+          match_reasoning: c.reason_for_match,
+        }))
+        if (candidateInserts.length > 0) {
+          await supabase.from('buyer_match_candidates').insert(candidateInserts)
+        }
+      }
+      
+      setCandidates(candidatesList)
+    } catch (err) {
+      console.warn('Failed to run match:', err)
+    } finally {
+      setRunning(false)
+      setLoading(false)
+    }
+  }, [property_id, market, zip, state, county, asset_class, property_type, estimated_value, running])
+
+  const updateCandidateStatus = useCallback(async (candidateId: string | undefined, updates: Record<string, unknown>) => {
+    if (!candidateId) return
+    const supabase = getSupabaseClient()
+    const { error } = await supabase.from('buyer_match_candidates').update(updates).eq('buyer_match_candidate_id', candidateId)
+    if (!error) {
+      setCandidates(prev => prev.map(c =>
+        c.buyer_match_candidate_id === candidateId ? { ...c, ...updates } : c
+      ))
+    }
+  }, [])
+
+  const sendPackage = useCallback(async (candidateId: string | undefined) => {
+    if (!candidateId) return
+    const supabase = getSupabaseClient()
+    const package_sent_at = new Date().toISOString()
+    const { error } = await supabase.from('buyer_match_candidates').update({ package_sent_at, buyer_response_status: 'package_sent' }).eq('buyer_match_candidate_id', candidateId)
+    if (!error) {
+      setCandidates(prev => prev.map(c =>
+        c.buyer_match_candidate_id === candidateId ? { ...c, package_sent_at, buyer_response_status: 'package_sent' } : c
+      ))
+    }
+  }, [])
+
+  const selectBuyer = useCallback(async (candidateId: string | undefined) => {
+    if (!candidateId) return
+    const supabase = getSupabaseClient()
+    const { error } = await supabase.from('buyer_match_candidates').update({ selected: true }).eq('buyer_match_candidate_id', candidateId)
+    if (!error) {
+      setCandidates(prev => prev.map(c =>
+        c.buyer_match_candidate_id === candidateId ? { ...c, selected: true } : c
+      ))
+    }
+  }, [])
+
+  // Filtered + sorted candidates
+  const filteredCandidates = useMemo(() => {
+    return candidates.filter(c => {
+      if (gradeFilter !== 'all' && c.match_grade !== gradeFilter) return false
+      if (typeFilter === 'corporate' && !c.is_corporate_buyer) return false
+      if (typeFilter === 'repeat' && !c.is_repeat_buyer) return false
+      if (typeFilter === 'institutional' && c.buyer_type !== 'institutional') return false
+      return true
+    })
+  }, [candidates, gradeFilter, typeFilter])
+
+  const selectedCandidate = candidates.find(c => c.buyer_key === selectedKey) ?? null
+
+  // Grade counts
+  const gradeCounts = useMemo(() => ({
+    aplus:  candidates.filter(c => c.match_grade === 'A+').length,
+    a:      candidates.filter(c => c.match_grade === 'A').length,
+    b:      candidates.filter(c => c.match_grade === 'B').length,
+    other:  candidates.filter(c => c.match_grade === 'C' || c.match_grade === 'D').length,
+  }), [candidates])
+
+  const demandScore = latestRun?.demand_score ?? (candidates.length > 0
+    ? Math.round(candidates.slice(0, 20).reduce((s, c) => s + c.total_match_score, 0) / Math.min(20, candidates.length))
+    : null)
+
+  const hasRealData = candidates.length > 0 || (latestRun && latestRun.run_status === 'complete')
+  const hasEntityGraph = (demandStats?.entity_count ?? 0) > 0
+
+  return (
+    <div className={`bm2-workspace is-pane-${paneWidth}`}>
+      {/* Outside-filter banner */}
+      {isOutsideFilter && (
+        <div className="bm2-filter-banner">
+          <span className="bm2-filter-banner__icon">⚠</span>
+          <span>Selected property is outside the current filter — showing deal snapshot below.</span>
+          <div className="bm2-filter-banner__actions">
+            {onClearFilters && (
+              <button className="bm2-filter-banner__btn" onClick={onClearFilters}>Clear Filters</button>
+            )}
+            {onPinSelected && (
+              <button className="bm2-filter-banner__btn is-primary" onClick={onPinSelected}>Pin Selected</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── LEFT: Deal Snapshot ── */}
+      <aside className="bm2-left" style={{ paddingTop: isOutsideFilter ? 44 : 0 }}>
+        <div className="bm2-deal-snapshot">
+          <div className="bm2-deal-eyebrow">Deal Snapshot</div>
+
+          <div>
+            <div className="bm2-deal-address">{address || 'Property Address Unknown'}</div>
+            <div className="bm2-deal-subaddress">
+              {[market, state].filter(Boolean).join(' · ') || 'Market Unknown'}
+            </div>
+          </div>
+
+          <div className="bm2-deal-badge-row">
+            {market && <span className="bm2-deal-badge is-market">{market}</span>}
+            {property_type && <span className="bm2-deal-badge is-type">{property_type}</span>}
+            {propertySnapshot.dispo_strategy && (
+              <span className="bm2-deal-badge is-strategy">{propertySnapshot.dispo_strategy}</span>
+            )}
+          </div>
+
+          <div className="bm2-deal-stats">
+            <div className="bm2-deal-stat">
+              <span className="bm2-deal-stat__label">Est. Value</span>
+              <span className="bm2-deal-stat__value">{fmt$(estimated_value)}</span>
+            </div>
+            <div className="bm2-deal-stat">
+              <span className="bm2-deal-stat__label">Purchase</span>
+              <span className="bm2-deal-stat__value">{fmt$(propertySnapshot.purchase_price)}</span>
+            </div>
+            {propertySnapshot.potential_spread != null && (
+              <div className="bm2-deal-stat">
+                <span className="bm2-deal-stat__label">Spread</span>
+                <span className="bm2-deal-stat__value is-positive">{fmt$(propertySnapshot.potential_spread)}</span>
+              </div>
+            )}
+            {propertySnapshot.arv != null && (
+              <div className="bm2-deal-stat">
+                <span className="bm2-deal-stat__label">ARV</span>
+                <span className="bm2-deal-stat__value is-amber">{fmt$(propertySnapshot.arv)}</span>
+              </div>
+            )}
+            {(propertySnapshot.beds != null || propertySnapshot.sqft != null) && (
+              <div className="bm2-deal-stat">
+                <span className="bm2-deal-stat__label">Property</span>
+                <span className="bm2-deal-stat__value" style={{ fontSize: '0.76rem' }}>
+                  {[
+                    propertySnapshot.beds != null ? `${propertySnapshot.beds}bd` : null,
+                    propertySnapshot.baths != null ? `${propertySnapshot.baths}ba` : null,
+                    propertySnapshot.sqft != null ? `${fmtNum(propertySnapshot.sqft)}sf` : null,
+                    propertySnapshot.units != null && propertySnapshot.units > 1 ? `${propertySnapshot.units}u` : null,
+                  ].filter(Boolean).join(' / ') || '—'}
+                </span>
+              </div>
+            )}
+            <div className="bm2-deal-stat">
+              <span className="bm2-deal-stat__label">ZIP</span>
+              <span className="bm2-deal-stat__value">{zip || '—'}</span>
+            </div>
+          </div>
+
+          {/* Demand bar */}
+          <div className="bm2-demand-bar">
+            <div className="bm2-demand-bar__head">
+              <span>Buyer Demand</span>
+              <span className="bm2-demand-bar__score">
+                {demandScore != null ? demandScore : (hasEntityGraph ? '—' : 'No data')}
+              </span>
+            </div>
+            <div className="bm2-demand-bar__track">
+              <div
+                className="bm2-demand-bar__fill"
+                style={{ width: demandScore != null ? `${demandScore}%` : '0%' }}
+              />
+            </div>
+            <div className="bm2-demand-bar__stats">
+              <span><strong>{fmtNum(demandStats?.entity_count ?? candidates.length)}</strong> entities</span>
+              {gradeCounts.aplus > 0 && <span><strong>{gradeCounts.aplus}</strong> A+</span>}
+              {gradeCounts.a > 0    && <span><strong>{gradeCounts.a}</strong> A</span>}
+              {gradeCounts.b > 0    && <span><strong>{gradeCounts.b}</strong> B</span>}
+            </div>
+          </div>
+
+          {/* Run button */}
+          <button
+            className={`bm2-run-btn ${running ? 'is-running' : ''}`}
+            disabled={running || !property_id}
+            onClick={runMatch}
+          >
+            {running ? (
+              <><span style={{ animation: 'bm2-shimmer 1s linear infinite' }}>⟳</span> Running Match…</>
+            ) : hasRealData ? (
+              <><Icon name="refresh-cw" size={14} /> Rerun Match</>
+            ) : (
+              <><Icon name="zap" size={14} /> Run Buyer Match</>
+            )}
+          </button>
+
+          {latestRun && (
+            <div style={{ fontSize: '0.64rem', color: 'rgba(219,229,255,0.30)', textAlign: 'center', marginTop: -4 }}>
+              Last run: {fmtDaysAgo(latestRun.created_at)}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* ── CENTER: Buyer Card List ── */}
+      <main className="bm2-center">
+        {/* Toolbar */}
+        <div className="bm2-toolbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <span className="bm2-toolbar__title">Buyers</span>
+            {filteredCandidates.length > 0 && (
+              <span className="bm2-toolbar__count">{filteredCandidates.length}</span>
+            )}
+          </div>
+          <div className="bm2-toolbar__filters">
+            <button
+              className={`bm2-filter-pill is-gold ${gradeFilter === 'A+' ? 'is-gold is-active' : ''}`}
+              onClick={() => setGradeFilter(f => f === 'A+' ? 'all' : 'A+')}
+            >
+              A+ {gradeCounts.aplus > 0 ? `(${gradeCounts.aplus})` : ''}
+            </button>
+            <button
+              className={`bm2-filter-pill ${gradeFilter === 'A' ? 'is-active' : ''}`}
+              onClick={() => setGradeFilter(f => f === 'A' ? 'all' : 'A')}
+            >
+              A {gradeCounts.a > 0 ? `(${gradeCounts.a})` : ''}
+            </button>
+            <button
+              className={`bm2-filter-pill ${gradeFilter === 'B' ? 'is-active' : ''}`}
+              onClick={() => setGradeFilter(f => f === 'B' ? 'all' : 'B')}
+            >
+              B {gradeCounts.b > 0 ? `(${gradeCounts.b})` : ''}
+            </button>
+            <button
+              className={`bm2-filter-pill is-purple ${typeFilter === 'corporate' ? 'is-purple is-active' : ''}`}
+              onClick={() => setTypeFilter(f => f === 'corporate' ? 'all' : 'corporate')}
+            >Corp</button>
+            <button
+              className={`bm2-filter-pill ${typeFilter === 'repeat' ? 'is-active' : ''}`}
+              onClick={() => setTypeFilter(f => f === 'repeat' ? 'all' : 'repeat')}
+            >Repeat</button>
+          </div>
+        </div>
+
+        {/* Card list */}
+        <div className="bm2-card-list">
+          {loading && <SkeletonCards />}
+
+          {!loading && !hasEntityGraph && candidates.length === 0 && (
+            <div className="bm2-empty-state">
+              <div className="bm2-empty-icon">🏗</div>
+              <div className="bm2-empty-title">Buyer Entity Graph Not Built</div>
+              <div className="bm2-empty-desc">
+                No buyer entities have been built from sold data yet. Run Buyer Match to generate the graph, or ensure recently_sold_properties has data.
+              </div>
+              <button className="bm2-empty-action" onClick={runMatch} disabled={running}>
+                {running ? 'Building…' : '⚡ Build Buyer Graph'}
+              </button>
+            </div>
+          )}
+
+          {!loading && hasEntityGraph && candidates.length === 0 && !running && (
+            <div className="bm2-empty-state">
+              <div className="bm2-empty-icon">🎯</div>
+              <div className="bm2-empty-title">Run Buyer Match</div>
+              <div className="bm2-empty-desc">
+                Click "Run Buyer Match" to score {fmtNum(demandStats?.entity_count)} buyer entities against this property.
+              </div>
+            </div>
+          )}
+
+          {!loading && filteredCandidates.length === 0 && candidates.length > 0 && (
+            <div className="bm2-empty-state">
+              <div className="bm2-empty-icon">🔍</div>
+              <div className="bm2-empty-title">No Results</div>
+              <div className="bm2-empty-desc">No buyers match the current filters. Try clearing grade or type filters.</div>
+              <button className="bm2-empty-action" onClick={() => { setGradeFilter('all'); setTypeFilter('all') }}>
+                Clear Filters
+              </button>
+            </div>
+          )}
+
+          {filteredCandidates.map(c => (
+            <BuyerCard
+              key={c.buyer_key}
+              candidate={c}
+              isSelected={selectedKey === c.buyer_key}
+              onSelect={() => setSelectedKey(k => k === c.buyer_key ? null : c.buyer_key)}
+              onSendPackage={() => sendPackage(c.buyer_match_candidate_id)}
+              onMarkInterested={() => updateCandidateStatus(c.buyer_match_candidate_id, { buyer_response_status: 'interested' })}
+              onMarkPassed={() => updateCandidateStatus(c.buyer_match_candidate_id, { buyer_response_status: 'passed' })}
+            />
+          ))}
+        </div>
+      </main>
+
+      {/* ── RIGHT: Detail Panel ── */}
+      <aside className="bm2-right">
+        <DetailPanel
+          candidate={selectedCandidate}
+          purchases={purchases}
+          onSendPackage={() => sendPackage(selectedCandidate?.buyer_match_candidate_id)}
+          onSelectBuyer={() => selectBuyer(selectedCandidate?.buyer_match_candidate_id)}
+          onMarkInterested={() => updateCandidateStatus(selectedCandidate?.buyer_match_candidate_id, { buyer_response_status: 'interested' })}
+          onMarkPassed={() => updateCandidateStatus(selectedCandidate?.buyer_match_candidate_id, { buyer_response_status: 'passed' })}
+        />
+      </aside>
+    </div>
+  )
+}
+
+export default BuyerMatchWorkspace
