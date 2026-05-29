@@ -129,6 +129,7 @@ import './inbox-premium.css'
 import './inbox-rebuild.css'
 import './inbox-rebuild-v2.css'
 import './inbox-polish.css'
+import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
 import './buyer-intel-upgrade.css'
 import './copilot/copilot.css'
 import './conversation-redesign.css'

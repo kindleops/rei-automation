@@ -513,6 +513,103 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 })
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
+// Compact three-zone row for rail25 / review50.
+// Uses .nx-row25 CSS from inbox-density-25.css. No checkboxes or large cards.
+function CompactRow25({ thread, selected, decision, onSelect }: { thread: any; selected: boolean; decision: any; onSelect: (id: string) => void }) {
+  const {
+    name, address, market, pTypeShort,
+    latestMessageBody, latestDirection,
+    estimatedValue, equityPercent, finalAcquisitionScore,
+    timestamp, isHot, stage, stageNum, deliveryStatus, visualCategory,
+  } = getThreadVars(thread, decision)
+
+  const stageChipClass = (() => {
+    const s = stage.toLowerCase()
+    if (['offer', 'negotiat', 'under_contract', 'closing', 'stage_3', 'stage_4', 'stage_5'].some(k => s.includes(k))) return 'is-hot'
+    if (['follow_up', 'waiting', 'automated', 'outbound_active', 'stage_2'].some(k => s.includes(k))) return 'is-wait'
+    if (['cold', 'not_contacted', 'stage_1'].some(k => s.includes(k))) return 'is-cold'
+    if (['dead', 'suppressed', 'wrong_number', 'not_interested'].some(k => s.includes(k))) return 'is-dead'
+    return ''
+  })()
+
+  const deliveryInfo = (() => {
+    if (latestDirection === 'inbound') return { cls: 'is-inbound', sym: '↩', lbl: 'Inb' }
+    if (deliveryStatus === 'delivered') return { cls: 'is-delivered', sym: '✓✓', lbl: 'Dlvd' }
+    if (deliveryStatus === 'failed') return { cls: 'is-failed', sym: '✗', lbl: 'Fail' }
+    if (latestDirection === 'outbound' || deliveryStatus === 'sent') return { cls: 'is-sent', sym: '✓', lbl: 'Sent' }
+    return null
+  })()
+
+  const evVal = estimatedValue ? formatCurrency(estimatedValue) : '—'
+  const evCls = (estimatedValue ?? 0) > 250000 ? 'is-green' : (estimatedValue ?? 0) > 100000 ? 'is-amber' : 'is-muted'
+  const eqVal = equityPercent ? formatPercent(equityPercent) : '—'
+  const eqCls = (equityPercent ?? 0) > 30 ? 'is-green' : (equityPercent ?? 0) > 15 ? 'is-amber' : 'is-muted'
+  const scrVal = finalAcquisitionScore != null ? String(finalAcquisitionScore) : '—'
+  const scrCls = (finalAcquisitionScore ?? 0) > 70 ? 'is-green' : (finalAcquisitionScore ?? 0) > 40 ? 'is-amber' : 'is-muted'
+  const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
+  const stageShort = stage.replace(/_/g, ' ').toUpperCase().replace(/\s+STAGE\s*/, '').slice(0, 10)
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={cls(
+        'nx-row25',
+        selected && 'is-selected',
+        decision.unread && 'is-unread',
+        latestDirection === 'inbound' && 'is-inbound',
+        latestDirection === 'outbound' && 'is-outbound',
+        isHot && 'is-hot',
+        `is-category-${visualCategory}`,
+      )}
+      data-thread-id={thread.id}
+      onClick={() => onSelect(thread.id)}
+      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
+    >
+      <div className="nx-row25__left">
+        <div className="nx-row25__name-line">
+          {decision.unread && <span className="nx-row25__pip" />}
+          <span className="nx-row25__name">{name}</span>
+          {stageNum && <span className="nx-row25__stage-num">{stageNum}</span>}
+        </div>
+        <span className="nx-row25__addr">{address}</span>
+        <div className="nx-row25__meta-row">
+          <span className="nx-row25__meta">{market}{pTypeShort ? ` · ${pTypeShort}` : ''}</span>
+          {stageChipClass && <span className={cls('nx-row25__stage-chip', stageChipClass)}>{stageShort}</span>}
+        </div>
+      </div>
+      <div className="nx-row25__center">
+        <span className="nx-row25__preview">{latestMessageBody}</span>
+        <div className="nx-row25__footer">
+          {deliveryInfo && (
+            <span className={cls('nx-row25__delivery', deliveryInfo.cls)}>
+              <span className="nx-row25__delivery-sym">{deliveryInfo.sym}</span>
+              <span className="nx-row25__delivery-lbl">{deliveryInfo.lbl}</span>
+            </span>
+          )}
+          {deliveryInfo && <span className="nx-row25__footer-sep">·</span>}
+          <span className="nx-row25__age">{ageLabel}</span>
+          {isHot && <span className="nx-row25__hot" />}
+        </div>
+      </div>
+      <div className="nx-row25__intel">
+        <div className="nx-row25__kv">
+          <span className="nx-row25__k">EV</span>
+          <span className={cls('nx-row25__v', evCls)}>{evVal}</span>
+        </div>
+        <div className="nx-row25__kv">
+          <span className="nx-row25__k">EQ</span>
+          <span className={cls('nx-row25__v', eqCls)}>{eqVal}</span>
+        </div>
+        <div className="nx-row25__kv nx-row25__kv--score">
+          <span className="nx-row25__k">SCR</span>
+          <span className={cls('nx-row25__v', scrCls)}>{scrVal}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   if (!thread) return <div className="nx-deal-snapshot-empty">Select a thread to view details</div>
   const { name, address, market, latestMessageBody } = getThreadVars(thread, decision)
@@ -859,7 +956,7 @@ export const InboxSidebar = ({
             {renderSecondaryControls()}
             {renderMultiSelectBar()}
             <div className="nx-sidebar-rebuilt__list-container">
-              {renderListContent(ConversationRow)}
+              {renderListContent(CompactRow25)}
             </div>
           </div>
           <div className="nx-review50-right">
@@ -900,7 +997,7 @@ export const InboxSidebar = ({
     )
   }
 
-  const RowComponent = inboxMode === 'ops75' ? ConversationRowOps75 : ConversationRow
+  const RowComponent = inboxMode === 'ops75' ? ConversationRowOps75 : CompactRow25
 
   return (
     <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
