@@ -96,6 +96,8 @@ export interface InboxFetchOptions {
   sourceMode?: InboxSourceMode
   /** @internal */
   _automatic?: boolean
+  _timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
+  _refreshReason?: string
   paused?: boolean
 }
 
@@ -299,6 +301,8 @@ export interface QueueProcessorHealth {
 const QUEUE_PROCESSOR_LAG_MINUTES = 10
 
 const DEV = Boolean(import.meta.env?.DEV)
+const INBOX_DEBUG_VERBOSE = DEV && String(import.meta.env?.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
+export const INBOX_DEBUG_LOOKUPS = INBOX_DEBUG_VERBOSE || (DEV && String(import.meta.env?.VITE_INBOX_DEBUG_LOOKUPS ?? 'false').toLowerCase() === 'true')
 const MESSAGE_EVENTS_THREAD_PAGE_SIZE = 250
 export const HYDRATED_INBOX_PAGE_SIZE = 100
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_universal_inbox_threads'
@@ -2501,11 +2505,6 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   // Cap at 3s so a slow/timing-out Supabase query never blocks row commit.
   // The /live response already embeds getLiveCounts data — this is enrichment only.
   const COUNTS_TIMEOUT_MS = 3000
-  const countsRace = Promise.race([
-    backendClient.fetchDealContextCounts('', options.signal).catch(() => null),
-    new Promise<null>(resolve => setTimeout(() => resolve(null), COUNTS_TIMEOUT_MS)),
-  ])
-
   let viewResult: any
   try {
     const tLiveFetchStart = Date.now()
@@ -2540,36 +2539,45 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     all_inbound: allInboundCount,
   }
 
-  // Resolve the background counts fetch (already in-flight, may return immediately).
-  const tCountsStart = Date.now()
-  const countsRes = await countsRace
-  if (DEV) console.log(`[InboxTiming] counts_ms: ${Date.now() - tCountsStart}ms`)
-  if (countsRes && countsRes.ok) {
-    const payloadRecord = countsRes.data as AnyRecord
-    const dataRecord = (payloadRecord?.data as AnyRecord) || {}
-    const diagnosticRecord = (payloadRecord?.diagnostics as AnyRecord) || {}
-    const rawCounts = (
-      dataRecord.counts ?? payloadRecord?.counts ?? diagnosticRecord.counts ??
-      dataRecord.data ?? payloadRecord?.data ??
-      (dataRecord.total != null ? dataRecord : null) ??
-      (payloadRecord.total != null ? payloadRecord : null) ?? {}
-    ) as AnyRecord
-    const byInboxBucket = (rawCounts.by_inbox_bucket as AnyRecord) || {}
-    categoryCounts = {
-      hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? byInboxBucket.priority ?? categoryCounts.hot_leads),
-      needs_review: Number(rawCounts.needs_review ?? byInboxBucket.needs_review ?? categoryCounts.needs_review),
-      new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? byInboxBucket.new_replies ?? categoryCounts.new_inbound),
-      automated: Number(rawCounts.automated ?? byInboxBucket.automated ?? categoryCounts.automated),
-      outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? byInboxBucket.follow_up ?? categoryCounts.outbound_active),
-      cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? byInboxBucket.cold ?? categoryCounts.cold_no_response),
-      dead: Number(rawCounts.dead ?? byInboxBucket.dead ?? categoryCounts.dead),
-      all: Number(rawCounts.all_messages ?? rawCounts.all ?? rawCounts.total ?? categoryCounts.all),
-      dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
-      all_inbound: allInboundCount,
+  const hasEmbeddedCounts = viewCounts && Object.keys(viewCounts).length > 0
+  if (!hasEmbeddedCounts) {
+    const countsRace = Promise.race([
+      backendClient.fetchDealContextCounts('', options.signal).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), COUNTS_TIMEOUT_MS)),
+    ])
+
+    const tCountsStart = Date.now()
+    const countsRes = await countsRace
+    if (DEV) console.log(`[InboxTiming] counts_ms: ${Date.now() - tCountsStart}ms`)
+    if (countsRes && countsRes.ok) {
+      const payloadRecord = countsRes.data as AnyRecord
+      const dataRecord = (payloadRecord?.data as AnyRecord) || {}
+      const diagnosticRecord = (payloadRecord?.diagnostics as AnyRecord) || {}
+      const rawCounts = (
+        dataRecord.counts ?? payloadRecord?.counts ?? diagnosticRecord.counts ??
+        dataRecord.data ?? payloadRecord?.data ??
+        (dataRecord.total != null ? dataRecord : null) ??
+        (payloadRecord.total != null ? payloadRecord : null) ?? {}
+      ) as AnyRecord
+      const byInboxBucket = (rawCounts.by_inbox_bucket as AnyRecord) || {}
+      categoryCounts = {
+        hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? byInboxBucket.priority ?? categoryCounts.hot_leads),
+        needs_review: Number(rawCounts.needs_review ?? byInboxBucket.needs_review ?? categoryCounts.needs_review),
+        new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? byInboxBucket.new_replies ?? categoryCounts.new_inbound),
+        automated: Number(rawCounts.automated ?? byInboxBucket.automated ?? categoryCounts.automated),
+        outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? byInboxBucket.follow_up ?? categoryCounts.outbound_active),
+        cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? byInboxBucket.cold ?? categoryCounts.cold_no_response),
+        dead: Number(rawCounts.dead ?? byInboxBucket.dead ?? categoryCounts.dead),
+        all: Number(rawCounts.all_messages ?? rawCounts.all ?? rawCounts.total ?? categoryCounts.all),
+        dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
+        all_inbound: allInboundCount,
+      }
+      if (DEV) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
+    } else if (countsRes === null && DEV) {
+      console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
     }
-    if (DEV) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
-  } else if (countsRes === null) {
-    if (DEV) console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
+  } else if (DEV) {
+    console.log('[fetchInboxModel] using counts embedded in live response')
   }
 
   const priorityInboxCount = categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound
@@ -2818,15 +2826,51 @@ const applyDeliveryStatusDisplay = (messages: ThreadMessage[]): ThreadMessage[] 
   })
 
 
+type ThreadLookupIdentity = {
+  selectedThreadKey: string
+  canonicalE164: string
+  phone: string
+  bestPhone: string
+  sellerPhone: string
+  phoneVariants: string[]
+}
 
-const buildMessageEventThreadCandidates = (thread: InboxThread): Array<{ key: string; value: string }> => {
-  const phoneVariants = Array.from(new Set([
-    ...buildPhoneVariants(normalizePhone(thread.phoneNumber)),
-    ...buildPhoneVariants(normalizePhone(thread.canonicalE164)),
-    ...buildPhoneVariants(normalizePhone(thread.sellerPhone)),
-  ]))
+const getThreadLookupIdentity = (
+  thread: InboxThread | InboxWorkflowThread,
+): ThreadLookupIdentity => {
+  const selectedThreadKey = asString(thread.threadKey || thread.id, '')
+  const canonicalE164 = normalizePhone(thread.canonicalE164)
+  const phone = normalizePhone(thread.phoneNumber)
+  const bestPhone = normalizePhone((thread as unknown as AnyRecord).bestPhone ?? (thread as unknown as AnyRecord).best_phone)
+  const sellerPhone = normalizePhone(thread.sellerPhone)
+
+  return {
+    selectedThreadKey,
+    canonicalE164,
+    phone,
+    bestPhone,
+    sellerPhone,
+    phoneVariants: Array.from(new Set([
+      ...buildPhoneVariants(canonicalE164),
+      ...buildPhoneVariants(phone),
+      ...buildPhoneVariants(bestPhone),
+      ...buildPhoneVariants(sellerPhone),
+    ])),
+  }
+}
+
+const buildMessageEventThreadCandidates = (
+  thread: InboxThread | InboxWorkflowThread,
+): Array<{ key: string; value: string }> => {
+  const lookup = getThreadLookupIdentity(thread)
   const filters: Array<{ key: string; value: string }> = []
-  phoneVariants.forEach((value) => {
+  Array.from(new Set([
+    lookup.selectedThreadKey,
+    lookup.canonicalE164,
+  ].filter(Boolean))).forEach((value) => {
+    filters.push({ key: 'thread_key', value })
+  })
+  lookup.phoneVariants.forEach((value) => {
     filters.push({ key: 'from_phone_number', value })
     filters.push({ key: 'to_phone_number', value })
   })
@@ -2835,7 +2879,7 @@ const buildMessageEventThreadCandidates = (thread: InboxThread): Array<{ key: st
     ['prospect_id', asString(thread.prospectId, '')],
     ['property_id', asString(thread.propertyId, '')],
     ['queue_id', asString(thread.queueId, '')],
-    ['message_event_key', asString(thread.threadKey, '')],
+    ['message_event_key', lookup.selectedThreadKey],
   ].forEach(([key, value]) => {
     if (value) filters.push({ key, value })
   })
@@ -2887,6 +2931,8 @@ export interface ThreadMessageFetchOptions {
   maxMessages?: number
   signal?: AbortSignal
 }
+
+// createAbortError helper removed
 
 const getCanonicalThreadKey = (thread: Pick<InboxThread, 'threadKey' | 'id'>): string =>
   asString(thread.threadKey, '') || asString(thread.id, '')
@@ -3071,7 +3117,8 @@ export const getThreadMessagesForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   options: ThreadMessageFetchOptions = {},
 ): Promise<ThreadMessage[]> => {
-  const threadKey = thread.threadKey || thread.id
+  const lookup = getThreadLookupIdentity(thread)
+  const threadKey = lookup.selectedThreadKey
   if (!threadKey) return []
   const pageSize = MESSAGE_EVENTS_THREAD_PAGE_SIZE
   const limit = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : pageSize
@@ -3080,15 +3127,34 @@ export const getThreadMessagesForThread = async (
     const params = new URLSearchParams()
     params.set('offset', '0')
     params.set('limit', String(limit))
-    const result = await backendClient.fetchInboxThreadMessages(threadKey, params.toString())
+    if (lookup.canonicalE164) params.set('canonical_e164', lookup.canonicalE164)
+    if (lookup.phone) params.set('phone', lookup.phone)
+    if (lookup.bestPhone) params.set('best_phone', lookup.bestPhone)
+    if (lookup.sellerPhone) params.set('seller_phone', lookup.sellerPhone)
+    const result = await backendClient.fetchInboxThreadMessages(threadKey, params.toString(), options.signal)
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
-      // Prefer root messages (flat response); fall back to diagnostics wrapper for compat
-      const rawMessages = (payload.messages ?? (payload.diagnostics as AnyRecord)?.messages ?? []) as AnyRecord[]
-      const apiMessages = safeArray(rawMessages).map(toThreadMessage)
-      if (apiMessages.length > 0) return applyDeliveryStatusDisplay(dedupeMessages(apiMessages))
+      const diagnostics = (payload.diagnostics ?? {}) as AnyRecord
+      const rawMessages = (
+        payload.messages ??
+        diagnostics.messages ??
+        ((payload.data as AnyRecord | undefined)?.messages) ??
+        []
+      ) as AnyRecord[]
+      const mappedMessages = applyDeliveryStatusDisplay(dedupeMessages(safeArray(rawMessages).map(toThreadMessage)))
+      if (DEV) {
+        console.log('[THREAD_MESSAGE_LOOKUP]', {
+          selected_thread_key: asString(diagnostics.selected_thread_key ?? threadKey, ''),
+          canonical_e164: asString(diagnostics.canonical_e164 ?? lookup.canonicalE164, ''),
+          lookup_strategy_used: asString(diagnostics.lookup_strategy_used, 'not_reported'),
+          message_count: Number(diagnostics.message_count ?? mappedMessages.length),
+          fallback_used: Boolean(diagnostics.fallback_used),
+        })
+      }
+      return mappedMessages
     }
   } catch (err) {
+    if (options.signal?.aborted || (err as { name?: string })?.name === 'AbortError') throw err
     if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages failed; falling back', err)
   }
 
@@ -3102,12 +3168,20 @@ export const getThreadMessagesForThread = async (
   // 1. Fetch from hydrated view or message_events
   try {
     for (let page = 0; page < maxPages; page += 1) {
-      const { data, error } = await supabase
+      if (options.signal?.aborted) {
+        const abortErr = new Error('Aborted')
+        abortErr.name = 'AbortError'
+        throw abortErr
+      }
+      let query = supabase
         .from('inbox_messages_hydrated')
         .select('*')
         .eq('thread_key', threadKey)
         .order('message_created_at', { ascending: true })
         .range(page * pageSize, page * pageSize + pageSize - 1)
+      if (options.signal) query = query.abortSignal(options.signal)
+
+      const { data, error } = await query
 
       if (error) throw new Error(mapErrorMessage(error))
 
@@ -3117,6 +3191,7 @@ export const getThreadMessagesForThread = async (
       if (batch.length < pageSize) break
     }
   } catch (error) {
+    if (options.signal?.aborted || (error as { name?: string })?.name === 'AbortError') throw error
     viewErrorMessage = mapErrorMessage(error)
     if (DEV) {
       console.warn('[ThreadMessageHydration] inbox_messages_hydrated failed, falling back to message_events', {
@@ -3352,8 +3427,8 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
 
     phoneRows = await runFilteredQuery('phones', uniquePhoneFilters, 8, signal)
 
-    // ── Phase 1b: client-side broad scan if server returned nothing ──────
-    if (phoneRows.length === 0 && searchPhone) {
+    // ── Phase 1b: optional debug-only client-side broad scan ─────────────
+    if (phoneRows.length === 0 && searchPhone && INBOX_DEBUG_LOOKUPS) {
       if (DEV) console.log('[Inbox phones] direct filter returned 0 — attempting broad client-side scan')
       const phonesTable = await resolveTable('phones')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

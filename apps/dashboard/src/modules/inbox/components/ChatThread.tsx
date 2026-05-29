@@ -29,6 +29,7 @@ interface ChatThreadProps {
   isTranslatingThread?: boolean
   onTranslateThread?: () => void
   backgroundLoading?: boolean
+  isRecovered?: boolean
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -225,6 +226,7 @@ export const ChatThread = ({
   isTranslatingThread = false,
   onTranslateThread,
   backgroundLoading = false,
+  isRecovered = false,
 }: ChatThreadProps) => {
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -266,9 +268,12 @@ export const ChatThread = ({
 
   if (loading && messages.length === 0) return (
     <div className="nx-chat-container">
-      <div className="nx-inbox__messages-loading">
-        <Icon name="activity" className="nx-inbox__messages-loading-icon" />
-        <span>Syncing timeline…</span>
+      <div className="nx-chat-skeleton">
+        <div className="nx-chat-skeleton__bubble is-inbound shimmer" />
+        <div className="nx-chat-skeleton__bubble is-outbound shimmer" />
+        <div className="nx-chat-skeleton__bubble is-inbound shimmer" />
+        <div className="nx-chat-skeleton__bubble is-outbound shimmer" />
+        <div className="nx-chat-skeleton__bubble is-inbound shimmer" />
       </div>
     </div>
   )
@@ -290,6 +295,11 @@ export const ChatThread = ({
         <div className="nx-chat-header-v2__left">
           <div className="nx-chat-header-v2__identity">
             <span className="nx-chat-header-v2__name">{ownerName}</span>
+            {isRecovered && import.meta.env.DEV && (
+              <span className="nx-chat-recovered-badge" title="This thread was recovered from local selection history fallback.">
+                Recovered from row
+              </span>
+            )}
             {phoneNumber && (
               <span className="nx-chat-header-v2__phone">
                 <Icon name="phone" />
@@ -460,7 +470,22 @@ export const ChatThread = ({
           })
         })()}
 
-        {messages.length === 0 && !loading && (
+        {messages.length === 0 && thread && ((thread as any).latestMessageBody || (thread as any).latest_message_body) ? (
+          <div className="nx-synthetic-fallback-wrap" style={{ padding: '20px 20px 0' }}>
+            <div className={cls('nx-bubble-wrap', ((thread as any).latestMessageDirection || (thread as any).latest_message_direction) === 'outbound' ? 'is-outbound' : 'is-inbound')}>
+              <div className="nx-chat-bubble">
+                {thread.latestMessageBody || (thread as any).latest_message_body}
+              </div>
+              <div className="nx-bubble-footer">
+                {import.meta.env.DEV && (
+                  <span className="nx-synthetic-label" style={{ fontSize: '10px', color: 'var(--nexus-muted)', fontStyle: 'italic' }}>
+                    Latest Activity (Recovered from row fallback)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : messages.length === 0 && !loading && (
           <div className="nx-inbox__messages-empty">
             <Icon name="message" style={{ opacity: 0.08, width: 36, height: 36, marginBottom: 10 }} />
             <p>No messages in this thread.</p>

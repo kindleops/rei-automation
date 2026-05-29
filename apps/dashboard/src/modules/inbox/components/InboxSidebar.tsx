@@ -53,6 +53,7 @@ interface InboxSidebarProps {
   inboxMode?: 'rail25' | 'review50' | 'ops75' | 'full100'
   sourceMode?: InboxSourceMode
   onSourceModeChange?: (mode: InboxSourceMode) => void
+  loading?: boolean
 }
 
 type BucketConfig = {
@@ -536,7 +537,8 @@ export const InboxSidebar = ({
   threads, selectedId, activeViewFilter, onSelect, savedPreset, onApplySavedPreset,
   viewCounts, onOpenAdvancedFilters, onClearFilters, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
-  visibleThreadCount = 1000, loadingError, inboxMode = 'rail25'
+  visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
+  loading = false
 }: InboxSidebarProps) => {
   const groupsRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
@@ -821,7 +823,19 @@ export const InboxSidebar = ({
 
   const renderListContent = (RowComp: any) => (
     <div className="nx-sidebar-rebuilt__threads">
-      {displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
+      {loading && displayedActiveThreads.length === 0 ? (
+        <div className="nx-sidebar-skeleton">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className={cls("nx-sidebar-skeleton__row", densityMode === 'compact' && 'is-compact')}>
+              <div className="nx-sidebar-skeleton__avatar shimmer" />
+              <div className="nx-sidebar-skeleton__content">
+                <div className="nx-sidebar-skeleton__line nx-sidebar-skeleton__line--title shimmer" style={{ width: '45%' }} />
+                <div className="nx-sidebar-skeleton__line shimmer" style={{ width: '75%' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
         const decision = decisionMap.get(thread.id)
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
