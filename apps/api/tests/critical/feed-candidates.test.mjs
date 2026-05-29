@@ -162,7 +162,7 @@ test("runSupabaseCandidateFeeder dry_run returns diagnostics without queue mutat
       routing_safe_only: true,
     },
     {
-      supabase: makeSupabaseWithCandidates([makeCandidate(1)]),
+      supabase: makeSupabaseWithCandidates([makeCandidate(1)], "outbound_feeder_candidates"),
       hasDuplicateQueueItem: async () => false,
       chooseTextgridNumber: async () => ({
         ok: true,
@@ -191,7 +191,7 @@ test("runSupabaseCandidateFeeder dry_run returns diagnostics without queue mutat
 
   assert.equal(result.ok, true);
   assert.equal(result.dry_run, true);
-  assert.equal(result.candidate_source, "v_sms_campaign_queue_candidates");
+  assert.equal(result.candidate_source, "outbound_feeder_candidates");
   assert.equal(result.requested_limit, 5);
   assert.equal(result.effective_candidate_fetch_limit, 5);
   assert.equal(result.fetched_candidate_count, 1);
@@ -217,7 +217,7 @@ test("runSupabaseCandidateFeeder live mode respects limit=1", async () => {
       routing_safe_only: true,
     },
     {
-      supabase: makeSupabaseWithCandidates([makeCandidate(1), makeCandidate(2)]),
+      supabase: makeSupabaseWithCandidates([makeCandidate(1), makeCandidate(2)], "outbound_feeder_candidates"),
       hasDuplicateQueueItem: async () => false,
       chooseTextgridNumber: async () => ({
         ok: true,
@@ -259,7 +259,7 @@ test("runSupabaseCandidateFeeder reports routing diagnostics for blocked routing
       within_contact_window_now: false,
     },
     {
-      supabase: makeSupabaseWithCandidates([makeCandidate(3)]),
+      supabase: makeSupabaseWithCandidates([makeCandidate(3)], "outbound_feeder_candidates"),
       hasDuplicateQueueItem: async () => false,
       chooseTextgridNumber: async () => ({
         ok: false,
@@ -317,10 +317,12 @@ test("runSupabaseCandidateFeeder returns structured source unavailable error", a
 
   assert.equal(result.ok, false);
   assert.equal(result.error, "CANDIDATE_SOURCE_UNAVAILABLE");
-  assert.equal(result.candidate_source, "v_sms_campaign_queue_candidates");
+  assert.equal(result.candidate_source, "outbound_feeder_candidates");
   assert.ok(String(result.candidate_source_error || "").includes("schema cache"));
   assert.deepEqual(result.available_hint, [
+    "outbound_feeder_candidates",
     "v_sms_campaign_queue_candidates",
+    "v_outbound_discovery_fresh",
     "v_sms_ready_contacts",
     "v_launch_sms_tier1",
   ]);

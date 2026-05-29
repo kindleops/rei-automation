@@ -12,11 +12,12 @@ import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
 const IDENTITY_QUARANTINE_TABLE = "outbound_identity_quarantine";
-// v_feeder_candidates_fast is the default: wraps v_sms_campaign_queue_candidates +
-// LEFT JOINs contact_outreach_state, pre-filters suppressed/paused rows, and orders
-// never-contacted fresh candidates first. v_outbound_discovery_fresh times out at scale.
-const DEFAULT_CANDIDATE_SOURCE = "v_feeder_candidates_fast";
+// outbound_feeder_candidates is the default live feeder source: a materialized table
+// refreshed before campaigns from v_sms_campaign_queue_candidates + prospects join +
+// contact_outreach_state join. Fast, indexed, and safe at scale.
+const DEFAULT_CANDIDATE_SOURCE = "outbound_feeder_candidates";
 const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
+  "outbound_feeder_candidates",
   "v_feeder_candidates_fast",
   "v_outbound_discovery_open_now",
   "v_outbound_discovery_fresh",
@@ -29,7 +30,7 @@ const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_launch_sms_tier1",
 ]);
 const CANDIDATE_SOURCE_AVAILABLE_HINT = [
-  "v_feeder_candidates_fast",
+  "outbound_feeder_candidates",
   "v_sms_campaign_queue_candidates",
   "v_outbound_discovery_fresh",
   "v_sms_ready_contacts",
@@ -39,6 +40,7 @@ const CANDIDATE_SOURCE_AVAILABLE_HINT = [
 // Sources that carry outreach-state enrichment columns (never_contacted, touch_count, suppression_until).
 // For these we push ordering down to the DB and can apply pre-filters in the query.
 const ENRICHED_SOURCES = new Set([
+  "outbound_feeder_candidates",
   "v_feeder_candidates_fast",
   "v_outbound_discovery_fresh",
   "v_outbound_candidate_freshness",
