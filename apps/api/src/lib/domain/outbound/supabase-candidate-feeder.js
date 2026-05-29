@@ -5,8 +5,9 @@ import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
 import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
-import { checkOutreachSuppression } from "@/lib/domain/outreach/outreach-service.js";
+import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -43,6 +44,9 @@ const REASON_CODES = Object.freeze({
   PENDING_PRIOR_TOUCH: "PENDING_PRIOR_TOUCH",
   DUPLICATE_QUEUE_ITEM: "DUPLICATE_QUEUE_ITEM",
   RECENTLY_CONTACTED: "RECENTLY_CONTACTED",
+  INTERNAL_TEST_PHONE: "INTERNAL_TEST_PHONE",
+  COLD_OUTBOUND_TOUCH_CAP: "COLD_OUTBOUND_TOUCH_CAP",
+  PHONE_LEVEL_COOLDOWN: "PHONE_LEVEL_COOLDOWN",
   NO_TEMPLATE: "NO_TEMPLATE",
   TEMPLATE_RENDER_FAILED: "TEMPLATE_RENDER_FAILED",
   NO_VALID_TEXTGRID_NUMBER: "NO_VALID_TEXTGRID_NUMBER",
@@ -2276,12 +2280,31 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     return deps.hasDuplicateQueueItem(candidate, options);
   }
 
+  // Hard guard: null owner means dedup queries would match nothing and let everything through.
+  if (!candidate.master_owner_id || !candidate.property_id) {
+    return {
+      duplicate: true,
+      null_owner_block: true,
+      reason_code: REASON_CODES.DUPLICATE_QUEUE_ITEM,
+      reason: "cold_outbound_requires_owner_and_property",
+    };
+  }
+
   const supabase = getSupabase(deps);
   const active_statuses = ["queued", "scheduled", "pending", "approved", "ready", "sending"];
-  const completed_statuses = ["sent", "delivered"];
-  const all_statuses = [...active_statuses, ...completed_statuses];
+  // All terminal statuses that represent a recent send attempt — include failed/expired/cancelled
+  // so a send that didn't deliver still blocks re-queue within the cooldown window.
+  const terminal_cooldown_statuses = [
+    "sent", "delivered",
+    "expired", "failed", "failed_transport", "blocked", "carrier_blocked",
+    "cancelled", "duplicate_blocked", "invalid_number", "opted_out",
+    "paused_name_missing", "paused_global_lock", "paused_invalid_queue_row",
+    "paused_review", "paused_max_retries", "paused_duplicate",
+  ];
+  const all_statuses = [...active_statuses, ...terminal_cooldown_statuses];
   const phone = normalizePhone(candidate.canonical_e164);
   const duplicate_body_cooldown_hours = asPositiveInteger(options.duplicate_body_cooldown_hours, 24);
+  const cold_outbound_cooldown_days = asPositiveInteger(options.cold_outbound_cooldown_days, 30);
 
   // 1. Check send_queue for active or recently completed rows
   const { data, error, count } = await supabase
@@ -2327,7 +2350,7 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
   const matched_completed_cooldown = rows.find((row) => {
     const row_phone = normalizePhone(row?.to_phone_number);
     const template_use_case = getQueueRowUseCase(row);
-    if (row_phone !== phone || template_use_case !== clean(candidate.template_use_case) || !completed_statuses.includes(row.queue_status)) {
+    if (row_phone !== phone || template_use_case !== clean(candidate.template_use_case) || !terminal_cooldown_statuses.includes(row.queue_status)) {
        return false;
     }
     const timestamp = new Date(row.sent_at || row.updated_at || row.created_at).getTime();
@@ -2347,7 +2370,7 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
           "to_phone_number",
           "template_use_case"
         ],
-        blocking_statuses: completed_statuses,
+        blocking_statuses: terminal_cooldown_statuses,
         cooldown_hours: duplicate_body_cooldown_hours
       },
       matched_row: matched_completed_cooldown,
@@ -2355,37 +2378,40 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     };
   }
 
-  // 2. Check message_events for recent outbound duplicate bodies (72 hours check but bound to cooldown)
-  const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
-  
-  const { data: recentEvents, error: eventError } = await supabase
-    .from("message_events")
-    .select("id, created_at, to_phone_number, master_owner_id, property_id")
-    .eq("direction", "outbound")
-    .gte("created_at", seventyTwoHoursAgo)
-    .eq("to_phone_number", phone)
-    .or(`master_owner_id.eq.${candidate.master_owner_id},property_id.eq.${candidate.property_id}`)
-    .limit(1);
+  // 2. Hard phone+owner cold-outbound cooldown: check message_events for ANY prior
+  // outbound contact within cold_outbound_cooldown_days. This is the backstop for when
+  // contact_outreach_state is missing a row for this owner-phone pair.
+  if (phone) {
+    const cold_cutoff = new Date(Date.now() - cold_outbound_cooldown_days * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      const { data: coldEvents, error: coldError } = await supabase
+        .from("message_events")
+        .select("id, created_at, to_phone_number, master_owner_id, property_id")
+        .eq("direction", "outbound")
+        .gte("created_at", cold_cutoff)
+        .eq("to_phone_number", phone)
+        .eq("master_owner_id", candidate.master_owner_id)
+        .limit(1);
 
-  if (eventError) {
-    // Graceful failure for message_events check
-    console.error("[hasDuplicateQueueItem] message_events check failed:", eventError.message);
-  } else if (recentEvents && recentEvents.length > 0) {
-    const event = recentEvents[0];
-    const timestamp = new Date(event.created_at).getTime();
-    if (Date.now() - timestamp < cooldown_ms) {
-      return {
-        duplicate: true,
-        recently_contacted: true,
-        reason_code: REASON_CODES.RECENTLY_CONTACTED,
-        matched_event: {
-          id: event.id,
-          created_at: event.created_at,
-          phone_masked: maskPhone(event.to_phone_number),
-          master_owner_id: event.master_owner_id,
-          property_id: event.property_id
-        }
-      };
+      if (!coldError && coldEvents?.length > 0) {
+        const event = coldEvents[0];
+        return {
+          duplicate: true,
+          recently_contacted: true,
+          cold_outbound_cooldown_block: true,
+          reason_code: REASON_CODES.RECENTLY_CONTACTED,
+          cold_outbound_cooldown_days,
+          matched_event: {
+            id: event.id,
+            created_at: event.created_at,
+            phone_masked: maskPhone(event.to_phone_number),
+            master_owner_id: event.master_owner_id,
+            property_id: event.property_id
+          }
+        };
+      }
+    } catch {
+      // Best-effort — fall through.
     }
   }
 
@@ -2411,6 +2437,19 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
   if (!candidate.canonical_e164) {
     return { ok: false, reason_code: REASON_CODES.NO_VALID_PHONE, reason: "missing_phone_e164" };
   }
+
+  // ── Internal/test phone hard block ─────────────────────────────────────
+  // Production feeder must never contact internal test numbers as seller candidates.
+  if (isInternalTestPhone(candidate.canonical_e164) && !options.allow_internal_test_phones) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.INTERNAL_TEST_PHONE,
+      reason: "internal_test_phone_blocked_in_production",
+      phone_masked: candidate.canonical_e164?.slice(-4),
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (candidate.true_post_contact_suppression) {
     return { ok: false, reason_code: REASON_CODES.SUPPRESSED, reason: "true_post_contact_suppression" };
   }
@@ -2478,23 +2517,65 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── Long-term outreach state suppression ────────────────────────────────
+  // ── Long-term outreach state suppression + touch cap ───────────────────
+  const outreach_deps = deps.supabase ? { supabase: deps.supabase } : {};
   try {
     const outreach_suppression = await checkOutreachSuppression(
-      candidate.master_owner_id, 
-      candidate.canonical_e164
+      candidate.master_owner_id,
+      candidate.canonical_e164,
+      outreach_deps
     );
     if (outreach_suppression.suppressed) {
-      return { 
-        ok: false, 
-        reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, 
+      return {
+        ok: false,
+        reason_code: REASON_CODES.PENDING_PRIOR_TOUCH,
         reason: outreach_suppression.reason || "outreach_state_suppressed",
-        suppression_until: outreach_suppression.until
+        suppression_until: outreach_suppression.until,
+        touch_count: outreach_suppression.touch_count,
+      };
+    }
+    // Touch cap: cold outbound (touch 1) is blocked after 5 confirmed sends.
+    const cold_outbound_touch_cap = asPositiveInteger(options.cold_outbound_touch_cap, 5);
+    const touch_count = outreach_suppression.touch_count ?? 0;
+    if (Number(candidate.touch_number ?? 1) === 1 && touch_count >= cold_outbound_touch_cap) {
+      return {
+        ok: false,
+        reason_code: REASON_CODES.COLD_OUTBOUND_TOUCH_CAP,
+        reason: "cold_outbound_touch_cap_reached",
+        touch_count,
+        cold_outbound_touch_cap,
       };
     }
   } catch (suppressErr) {
-    warn("outreach.suppression_check_failed", { error: suppressErr.message, master_owner_id: candidate.master_owner_id });
+    warn("outreach.suppression_check_failed", {
+      error: suppressErr?.message,
+      master_owner_id: candidate.master_owner_id,
+    });
   }
+
+  // ── Phone-level cooldown (any owner, same phone, 14 days) ───────────────
+  // Prevents contacting the same phone through multiple owner/property records.
+  try {
+    const phone_cooldown = await checkPhoneLevelCooldown(candidate.canonical_e164, {
+      ...outreach_deps,
+      phone_cooldown_days: asPositiveInteger(options.phone_cooldown_days, 14),
+    });
+    if (phone_cooldown.blocked) {
+      return {
+        ok: false,
+        reason_code: REASON_CODES.PHONE_LEVEL_COOLDOWN,
+        reason: "phone_level_cooldown",
+        last_sms_at: phone_cooldown.last_sms_at,
+        matching_owner_id: phone_cooldown.matching_owner_id,
+      };
+    }
+  } catch (phoneCooldownErr) {
+    warn("outreach.phone_cooldown_check_failed", {
+      error: phoneCooldownErr?.message,
+      canonical_e164: candidate.canonical_e164?.slice(-4),
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const duplicate_check = await hasDuplicateQueueItem(candidate, options, deps);
   if (duplicate_check.duplicate) {
@@ -3884,6 +3965,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     allow_identity_unknown,
     allow_weak_identity_outbound,
     identity_blocked_markets,
+    cold_outbound_cooldown_days: asPositiveInteger(input.cold_outbound_cooldown_days, 30),
+    duplicate_body_cooldown_hours: asPositiveInteger(input.duplicate_body_cooldown_hours, 24),
+    cold_outbound_touch_cap: asPositiveInteger(input.cold_outbound_touch_cap, 5),
+    phone_cooldown_days: asPositiveInteger(input.phone_cooldown_days, 14),
+    allow_internal_test_phones: asBoolean(input.allow_internal_test_phones, false),
     now,
   };
 

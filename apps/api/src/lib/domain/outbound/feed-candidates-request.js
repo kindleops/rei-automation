@@ -65,6 +65,11 @@ export function normalizeFeedCandidatesInput(input = {}) {
     identity_gate_mode: clean(input.identity_gate_mode) || null,
     allow_identity_unknown: asOptionalBoolean(input.allow_identity_unknown),
     allow_weak_identity_outbound: asOptionalBoolean(input.allow_weak_identity_outbound),
+    cold_outbound_cooldown_days: asPositiveInteger(input.cold_outbound_cooldown_days, 30),
+    duplicate_body_cooldown_hours: asPositiveInteger(input.duplicate_body_cooldown_hours, 24),
+    cold_outbound_touch_cap: asPositiveInteger(input.cold_outbound_touch_cap, 5),
+    phone_cooldown_days: asPositiveInteger(input.phone_cooldown_days, 14),
+    allow_internal_test_phones: false,
   };
 }
 
@@ -99,6 +104,8 @@ function mergeBodyAndQuery(request, method, body = {}) {
     "identity_gate_mode",
     "allow_identity_unknown",
     "allow_weak_identity_outbound",
+    "cold_outbound_cooldown_days",
+    "duplicate_body_cooldown_hours",
   ]) {
     const value = search_params.get(key);
     if (value !== null) merged[key] = value;
