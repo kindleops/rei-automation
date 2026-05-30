@@ -422,6 +422,38 @@ test("latest inbound message appears at the top of the inbox when it is the newe
   assert.equal(result.threads[0].inbox_bucket, "new_replies");
 });
 
+test("live inbox rows preserve latest delivery fields", async () => {
+  const supabase = createCanonicalInboxSupabase({
+    threadRows: [
+      makeThread({
+        thread_key: "+15550000019",
+        latest_message_at: "2026-05-29T12:11:00.000Z",
+        latest_message_body: "Delivered outbound",
+        latest_message_direction: "outbound",
+        inbox_bucket: "follow_up",
+        delivery_status: "delivered",
+        latest_delivery_status: "delivered",
+        provider_delivery_status: "delivered",
+        latest_provider_delivery_status: "delivered",
+        latest_delivered_at: "2026-05-29T12:11:30.000Z",
+        latest_failed_at: null,
+        latest_failure_reason: null,
+        queue_status: "delivered",
+      }),
+    ],
+  });
+
+  const result = await getLiveInbox({ filter: "all", limit: 20 }, { supabase });
+  const thread = result.threads[0];
+
+  assert.equal(thread.delivery_status, "delivered");
+  assert.equal(thread.latest_delivery_status, "delivered");
+  assert.equal(thread.provider_delivery_status, "delivered");
+  assert.equal(thread.latest_provider_delivery_status, "delivered");
+  assert.equal(thread.latest_delivered_at, "2026-05-29T12:11:30.000Z");
+  assert.equal(thread.queue_status, "delivered");
+});
+
 test("send event inserted into message_events becomes the latest thread row", async () => {
   const supabase = createCanonicalInboxSupabase({
     threadRows: [

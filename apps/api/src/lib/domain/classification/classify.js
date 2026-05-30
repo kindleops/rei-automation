@@ -3384,6 +3384,24 @@ function resolveIntents(
 
   // 6. SELLER INTERESTED (Explicit)
   // Use regex to ensure "not" or "no" doesn't precede the interest phrase
+  if (
+    includesAny(text, [
+      "what address",
+      "which address",
+      "what property",
+      "which property",
+      "property address",
+      "address is this",
+      "address are you",
+      "where is the property",
+      "where is this property",
+      "what house",
+      "which house",
+    ])
+  ) {
+    intents.push("info_request");
+  }
+
   const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling)\b/i;
   if (positive_interest_regex.test(text)) {
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
@@ -3579,6 +3597,8 @@ function detectStageHint(message, brain_item = null, objection = null) {
     "how does it work", "tell me more", "what's the process",
     "how long", "any fees", "explain", "questions",
     "want to understand", "walk me through",
+    "what address", "which address", "what property", "which property",
+    "property address", "where is the property", "where is this property",
     // Spanish
     "cómo funciona", "explícame", "preguntas", "tarifas",
     // Portuguese
@@ -3644,7 +3664,9 @@ function computeHeuristicConfidence({
     seller_interested:  0.90,
     asking_price_provided: 0.88,
     asks_offer:         0.88,
+    info_request:       0.86,
     who_is_this:        0.85,
+    callback_requested: 0.85,
     need_time:          0.85,
     condition_disclosed: 0.85,
     tenant_occupied:    0.85,
@@ -3897,6 +3919,98 @@ function computeSellerState({
   };
 }
 
+function deriveAutomationDecision({
+  primary_intent,
+  objection = null,
+  compliance_flag = null,
+  confidence = 0,
+} = {}) {
+  const intent = cleanMessage(primary_intent) || "unclear";
+  const normalized_objection = cleanMessage(objection);
+  const confident = Number(confidence) >= 0.82;
+
+  if (compliance_flag === "stop_texting" || intent === "opt_out") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "opt_out",
+      human_review_required: false,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "wrong_number" || normalized_objection === "wrong_number") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "archive_wrong_number",
+      human_review_required: false,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "hostile_or_legal") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "not_interested") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
+  if (intent === "need_time") {
+    return {
+      auto_reply_allowed: confident,
+      queue_action: confident ? "queue_followup" : "none",
+      suppression_action: "none",
+      human_review_required: !confident,
+      risk_level: confident ? "low" : "medium",
+    };
+  }
+
+  if (
+    [
+      "ownership_confirmed",
+      "seller_interested",
+      "latent_interest",
+      "asks_offer",
+      "asking_price_provided",
+      "tenant_occupied",
+      "condition_disclosed",
+      "callback_requested",
+      "who_is_this",
+      "info_request",
+    ].includes(intent)
+  ) {
+    return {
+      auto_reply_allowed: confident,
+      queue_action: confident ? "queue_auto_reply" : "none",
+      suppression_action: "none",
+      human_review_required: !confident,
+      risk_level: confident ? "low" : "medium",
+    };
+  }
+
+  return {
+    auto_reply_allowed: false,
+    queue_action: "none",
+    suppression_action: "none",
+    human_review_required: true,
+    risk_level: "medium",
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // AI ASSIST CLASSIFICATION
 // ══════════════════════════════════════════════════════════════════════════
@@ -3945,7 +4059,7 @@ Return ONLY valid JSON. No markdown. No explanation outside the JSON object.
 
 {
   "language": "English|Spanish|Portuguese|...|Thai",
-  "primary_intent": "opt_out|wrong_number|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|unclear",
+  "primary_intent": "opt_out|wrong_number|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|info_request|unclear",
   "secondary_intent": "opt_out|...|null",
   "objection": "wrong_number|...|null",
   "emotion": "calm|skeptical|guarded|frustrated|curious|motivated|tired_landlord|overwhelmed|grieving",
@@ -4008,6 +4122,10 @@ export async function classify(message, brain_item = null) {
   const text = cleanMessage(message);
 
   if (!text) {
+    const automation_decision = deriveAutomationDecision({
+      primary_intent: "unclear",
+      confidence: 0.50,
+    });
     return {
       language:        "English",
       primary_intent:  "unclear",
@@ -4023,6 +4141,7 @@ export async function classify(message, brain_item = null) {
       source:          "heuristic",
       notes:           "",
       detected_intent: "unclear",
+      automation_decision,
     };
   }
 
@@ -4031,6 +4150,7 @@ export async function classify(message, brain_item = null) {
   // Compliance is absolute
   if (heuristic.compliance_flag === "stop_texting") {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4038,12 +4158,14 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
   // High-confidence heuristic
   if (heuristic.confidence >= AI_CONFIDENCE_THRESHOLD) {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4051,6 +4173,7 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
@@ -4062,6 +4185,7 @@ export async function classify(message, brain_item = null) {
 
   if (!ai_result) {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4069,6 +4193,7 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "ai_assist_failed",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
@@ -4092,6 +4217,7 @@ export async function classify(message, brain_item = null) {
   };
 
   const final_motivation = estimateMotivationScore(merged);
+  const automation_decision = deriveAutomationDecision(merged);
 
   return {
     ...merged,
@@ -4100,6 +4226,7 @@ export async function classify(message, brain_item = null) {
     source: "ai",
     notes:  ai_result.notes ?? "",
     detected_intent: merged.primary_intent,
+    automation_decision,
   };
 }
 
