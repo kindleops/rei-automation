@@ -6,8 +6,11 @@ import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 import {
   asBoolean,
   asPositiveInteger,
+  blockedRuntimeBrakeResult,
   blockedSafetyResult,
   clean,
+  evaluateQueueCreationRuntimeBrakes,
+  evaluateQueueSendRuntimeBrakes,
   normalizeCampaignMode,
   normalizeQueueProcessorMode,
   normalizeSafetyInput,
@@ -70,12 +73,83 @@ const DEFAULTS = {
   queue_market_filter: '',
   queue_state_filter: '',
   queue_all_market_ack: 'false',
-  queue_auto_enqueue_enabled: 'true',
+  queue_auto_enqueue_enabled: 'false',
   queue_auto_send_enabled: 'false',
   queue_last_run_status: 'idle',
   queue_last_run_at: '',
   queue_last_run_diagnostics: '',
   queue_emergency_stop_at: '',
+}
+
+const QUEUE_LIMITED_ACTIVE_STATUSES = ['queued', 'scheduled']
+const DIAGNOSTIC_COUNT_TIMEOUT_MS = 2500
+
+function normalizeComparable(value) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeState(value) {
+  return clean(value).toUpperCase()
+}
+
+function metadataObject(row = {}) {
+  return row?.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+    ? row.metadata
+    : {}
+}
+
+function rowMarketValue(row = {}) {
+  const metadata = metadataObject(row)
+  return clean(
+    row.market ||
+    metadata.seller_market ||
+    metadata.candidate_snapshot?.seller_market ||
+    metadata.market ||
+    ''
+  )
+}
+
+function rowStateValue(row = {}) {
+  const metadata = metadataObject(row)
+  return normalizeState(
+    row.property_address_state ||
+    metadata.seller_state ||
+    metadata.candidate_snapshot?.seller_state ||
+    metadata.state ||
+    ''
+  )
+}
+
+function rowMatchesScope(row = {}, { market = null, state = null } = {}) {
+  const targetMarket = normalizeComparable(market)
+  const targetState = normalizeState(state)
+  const rowMarket = normalizeComparable(rowMarketValue(row))
+  const rowState = rowStateValue(row)
+  if (targetMarket && rowMarket !== targetMarket) return false
+  if (targetState && rowState !== targetState) return false
+  return true
+}
+
+function totalCreatedCount(result = {}) {
+  return Number(result?.queued_count || 0) + Number(result?.scheduled_count || 0)
+}
+
+function capBasisEntry(name, cap, used, scope) {
+  const numericCap = asPositiveInteger(cap, null)
+  if (!numericCap) return null
+  const numericUsed = Math.max(0, Number(used || 0))
+  return {
+    name,
+    cap: numericCap,
+    used: numericUsed,
+    remaining: Math.max(0, numericCap - numericUsed),
+    scope,
+  }
 }
 
 function parseBody(body = {}) {
@@ -98,10 +172,22 @@ function parseBody(body = {}) {
 }
 
 async function loadSettings() {
-  const values = {}
-  for (const key of CONTROL_KEYS) {
-    const value = await getSystemValue(key)
-    values[key] = value ?? DEFAULTS[key] ?? null
+  const values = { ...DEFAULTS }
+  try {
+    const { data, error } = await supabase
+      .from('system_control')
+      .select('key,value')
+      .in('key', CONTROL_KEYS)
+    if (error) throw error
+    for (const row of data || []) {
+      if (!row?.key) continue
+      values[row.key] = row.value ?? DEFAULTS[row.key] ?? null
+    }
+  } catch {
+    for (const key of CONTROL_KEYS) {
+      const value = await getSystemValue(key)
+      values[key] = value ?? DEFAULTS[key] ?? null
+    }
   }
   return values
 }
@@ -115,7 +201,12 @@ function todayStartIso() {
 async function countRows(label, buildQuery, errors) {
   try {
     const query = buildQuery()
-    const { count, error } = await query
+    const { count, error } = await Promise.race([
+      query,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`diagnostic_count_timeout:${label}`)), DIAGNOSTIC_COUNT_TIMEOUT_MS)
+      }),
+    ])
     if (error) throw error
     return Number(count || 0)
   } catch (error) {
@@ -137,39 +228,49 @@ function parseDiagnostics(value) {
 async function loadCampaignDiagnostics(values) {
   const since = todayStartIso()
   const errors = []
-  const queueDepth = await countRows('queue_depth', () => supabase
-    .from('send_queue')
-    .select('id', { count: 'exact', head: true })
-    .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing']), errors)
-  const queuedToday = await countRows('queued_today', () => supabase
-    .from('send_queue')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', since)
-    .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing']), errors)
-  const sentToday = await countRows('sent_today', () => supabase
-    .from('send_queue')
-    .select('id', { count: 'exact', head: true })
-    .gte('sent_at', since), errors)
-  const deliveredToday = await countRows('delivered_today', () => supabase
-    .from('send_queue')
-    .select('id', { count: 'exact', head: true })
-    .gte('delivered_at', since), errors)
-  const failedToday = await countRows('failed_today', () => supabase
-    .from('send_queue')
-    .select('id', { count: 'exact', head: true })
-    .gte('updated_at', since)
-    .eq('queue_status', 'failed'), errors)
-  const optOutsToday = await countRows('opt_outs_today', () => supabase
-    .from('message_events')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', since)
-    .eq('is_opt_out', true), errors)
-  const positiveRepliesToday = await countRows('positive_replies_today', () => supabase
-    .from('message_events')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', since)
-    .eq('direction', 'inbound')
-    .in('detected_intent', ['positive', 'interested', 'seller_positive', 'asks_offer', 'offer_requested', 'appointment_ready']), errors)
+  const [
+    queueDepth,
+    queuedToday,
+    sentToday,
+    deliveredToday,
+    failedToday,
+    optOutsToday,
+    positiveRepliesToday,
+  ] = await Promise.all([
+    countRows('queue_depth', () => supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing']), errors),
+    countRows('queued_today', () => supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', since)
+      .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing']), errors),
+    countRows('sent_today', () => supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .gte('sent_at', since), errors),
+    countRows('delivered_today', () => supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .gte('delivered_at', since), errors),
+    countRows('failed_today', () => supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .gte('updated_at', since)
+      .eq('queue_status', 'failed'), errors),
+    countRows('opt_outs_today', () => supabase
+      .from('message_events')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', since)
+      .eq('is_opt_out', true), errors),
+    countRows('positive_replies_today', () => supabase
+      .from('message_events')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', since)
+      .eq('direction', 'inbound')
+      .in('detected_intent', ['positive', 'interested', 'seller_positive', 'asks_offer', 'offer_requested', 'appointment_ready']), errors),
+  ])
 
   const lastRun = {
     status: clean(values.queue_last_run_status) || 'idle',
@@ -212,6 +313,57 @@ async function recordLastRun(status, diagnostics = {}) {
     queue_last_run_diagnostics: JSON.stringify(diagnostics).slice(0, 6000),
   }
   await setSystemValues(payload)
+}
+
+async function loadQueuedScheduledRowsToday() {
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('id,from_phone_number,market,property_address_state,metadata')
+    .gte('created_at', todayStartIso())
+    .in('queue_status', QUEUE_LIMITED_ACTIVE_STATUSES)
+    .limit(10000)
+  if (error) throw error
+  return Array.isArray(data) ? data : []
+}
+
+async function computeQueueLimitedCap(safety = {}) {
+  const rowsToday = await loadQueuedScheduledRowsToday()
+  const scopedRows = rowsToday.filter((row) => rowMatchesScope(row, safety))
+  const marketRows = safety.market
+    ? rowsToday.filter((row) => normalizeComparable(rowMarketValue(row)) === normalizeComparable(safety.market))
+    : scopedRows
+
+  const senderCounts = new Map()
+  for (const row of scopedRows) {
+    const sender = clean(row.from_phone_number) || 'unknown'
+    senderCounts.set(sender, Number(senderCounts.get(sender) || 0) + 1)
+  }
+  const maxSenderQueuedScheduledToday = Math.max(0, ...senderCounts.values())
+
+  const cap_basis = [
+    capBasisEntry('limit', safety.limit, 0, 'request'),
+    capBasisEntry('hard_cap', safety.hard_cap, scopedRows.length, 'same_day_scope_queued_scheduled'),
+    capBasisEntry('max_batch_size', safety.max_batch_size, 0, 'request'),
+    capBasisEntry('daily_cap', safety.daily_cap, rowsToday.length, 'same_day_queued_scheduled'),
+    capBasisEntry('market_cap', safety.market_cap, marketRows.length, 'same_day_market_queued_scheduled'),
+    capBasisEntry('per_number_cap', safety.per_number_cap, maxSenderQueuedScheduledToday, 'same_day_scope_sender_max_queued_scheduled'),
+  ].filter(Boolean)
+
+  const remainingValues = cap_basis.map((entry) => entry.remaining)
+  const remaining_cap_before_create = remainingValues.length
+    ? Math.max(0, Math.min(...remainingValues))
+    : 0
+
+  return {
+    ok: remaining_cap_before_create > 0,
+    cap_basis,
+    effective_total_cap: remaining_cap_before_create,
+    remaining_cap_before_create,
+    existing_queued_scheduled_today: rowsToday.length,
+    existing_queued_scheduled_for_scope: scopedRows.length,
+    existing_queued_scheduled_for_market: marketRows.length,
+    existing_queued_scheduled_sender_max: maxSenderQueuedScheduledToday,
+  }
 }
 
 function responseWithDiagnostics(payload, values, status = 200) {
@@ -310,6 +462,7 @@ export async function POST(request) {
 
   if (action === 'emergency_stop') {
     const stoppedAt = new Date().toISOString()
+    const reason = clean(body.reason) || 'operator_emergency_stop'
     const result = await setSystemValues({
       queue_processor_mode: 'off',
       campaign_mode: 'paused',
@@ -318,11 +471,11 @@ export async function POST(request) {
       queue_emergency_stop_at: stoppedAt,
       queue_last_run_status: 'emergency_stopped',
       queue_last_run_at: stoppedAt,
-      queue_last_run_diagnostics: JSON.stringify({ action, stopped_at: stoppedAt }),
+      queue_last_run_diagnostics: JSON.stringify({ action, reason, stopped_at: stoppedAt }),
     })
     if (!result.ok) return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
     const updated = await loadSettings()
-    return responseWithDiagnostics({ ok: true, action, stopped_at: stoppedAt }, updated, 200)
+    return responseWithDiagnostics({ ok: true, action, reason, stopped_at: stoppedAt }, updated, 200)
   }
 
   if (action === 'run_dry_run_feeder') {
@@ -350,26 +503,61 @@ export async function POST(request) {
 
   if (action === 'queue_limited_batch') {
     const safety = normalizeSafetyInput(body, values)
+    const runtimeBrake = evaluateQueueCreationRuntimeBrakes(values, {
+      action,
+      requireAutoEnqueue: false,
+      failClosed: true,
+    })
+    if (!runtimeBrake.ok) {
+      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+    }
     const validation = validateLiveLimitedRails(safety, { require_scope: true, require_send_caps: true })
     if (!validation.ok) {
       return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
     }
+    const cap = await computeQueueLimitedCap(safety)
+    if (!cap.ok) {
+      await recordLastRun('queue_limited_cap_exhausted', {
+        action,
+        campaign_mode: safety.campaign_mode,
+        market: safety.market,
+        state: safety.state,
+        cap_basis: cap.cap_basis,
+        effective_total_cap: cap.effective_total_cap,
+        remaining_cap_before_create: cap.remaining_cap_before_create,
+        total_created_count: 0,
+      })
+      const updated = await loadSettings()
+      return responseWithDiagnostics({
+        ok: false,
+        action,
+        error: 'queue_limited_cap_exhausted',
+        reason: 'queue_limited_cap_exhausted',
+        cap_basis: cap.cap_basis,
+        effective_total_cap: cap.effective_total_cap,
+        remaining_cap_before_create: cap.remaining_cap_before_create,
+        total_created_count: 0,
+      }, updated, 423)
+    }
     const { runSupabaseCandidateFeeder } = await import('@/lib/domain/outbound/supabase-candidate-feeder.js')
     const result = await runSupabaseCandidateFeeder({
       candidate_source: clean(body.candidate_source || values.candidate_source || DEFAULTS.candidate_source),
-      limit: validation.effective_limit,
-      scan_limit: Math.max(validation.effective_limit, Math.min(5000, Number(body.scan_limit || values.queue_scan_limit) || 1000)),
+      limit: cap.remaining_cap_before_create,
+      max_created_count: cap.remaining_cap_before_create,
+      scan_limit: Math.max(cap.remaining_cap_before_create, Math.min(5000, Number(body.scan_limit || values.queue_scan_limit) || 1000)),
       market: safety.market,
       state: safety.state,
       dry_run: false,
       within_contact_window_now: asBoolean(body.within_contact_window_now ?? body.respect_contact_window, true),
       routing_safe_only: true,
       campaign_session_id: clean(body.campaign_session_id) || `cockpit-live-limited-${Date.now()}`,
+      batch_name: clean(body.batch_name || body.proof_key) || null,
       schedule_spread: true,
       schedule_interval_seconds_min: 45,
       schedule_interval_seconds_max: 180,
       allow_internal_test_phones: false,
     })
+    const createdTotal = totalCreatedCount(result)
     await recordLastRun(result?.ok === false ? 'queue_limited_failed' : 'queue_limited_complete', {
       action,
       campaign_mode: safety.campaign_mode,
@@ -379,6 +567,10 @@ export async function POST(request) {
       max_batch_size: safety.max_batch_size,
       queued_count: result?.queued_count || 0,
       scheduled_count: result?.scheduled_count || 0,
+      total_created_count: createdTotal,
+      cap_basis: cap.cap_basis,
+      effective_total_cap: cap.effective_total_cap,
+      remaining_cap_before_create: cap.remaining_cap_before_create,
       scanned_count: result?.scanned_count || 0,
       error: result?.error || null,
     })
@@ -388,12 +580,23 @@ export async function POST(request) {
       action,
       rows_created: Number(result?.queued_count || 0),
       rows_scheduled: Number(result?.scheduled_count || 0),
+      total_created_count: createdTotal,
+      cap_basis: cap.cap_basis,
+      effective_total_cap: cap.effective_total_cap,
+      remaining_cap_before_create: cap.remaining_cap_before_create,
       diagnostics_result: result,
     }, updated, result?.ok === false ? Number(result?.status || 500) : 200)
   }
 
   if (action === 'safe_batch' || action === 'run_due_queue' || action === 'run_small_queue_batch') {
     const safety = normalizeSafetyInput(body, values)
+    const runtimeBrake = evaluateQueueSendRuntimeBrakes(values, {
+      action,
+      failClosed: true,
+    })
+    if (!runtimeBrake.ok) {
+      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+    }
     const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true })
     if (!validation.ok) {
       return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
@@ -432,6 +635,13 @@ export async function POST(request) {
     if (!row) return NextResponse.json({ ok: false, action, error: 'missing_queue_row', queue_row_id }, { status: 404 })
 
     const proof = queueRowIsProof(row)
+    const runtimeBrake = evaluateQueueSendRuntimeBrakes(values, {
+      action,
+      failClosed: true,
+    })
+    if (!runtimeBrake.ok) {
+      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+    }
     if (isInternalTestPhone(row.to_phone_number) && !proof) {
       return NextResponse.json({ ok: false, action, error: 'internal_test_phone_requires_proof_mode', queue_row_id }, { status: 423 })
     }

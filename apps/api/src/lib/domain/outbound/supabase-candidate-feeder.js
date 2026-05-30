@@ -151,6 +151,10 @@ function asPositiveInteger(value, fallback = null) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
 }
 
+function totalCreatedCount(summary = {}) {
+  return Number(summary.queued_count || 0) + Number(summary.scheduled_count || 0);
+}
+
 function asArray(value) {
   if (Array.isArray(value)) return value;
   if (!clean(value)) return [];
@@ -3931,6 +3935,7 @@ export function buildFeederDiagnostics(summary = {}) {
     eligible_count: Number(summary.eligible_count || 0),
     queued_count: Number(summary.queued_count || 0),
     scheduled_count: Number(summary.scheduled_count || 0),
+    total_created_count: totalCreatedCount(summary),
     skipped_count: Number(summary.skipped_count || 0),
     routing_block_count: Number(summary.routing_block_count || 0),
     suppression_block_count: Number(summary.suppression_block_count || 0),
@@ -4098,7 +4103,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     }
   }
 
-  const limit = Math.max(1, Math.min(asPositiveInteger(input.limit, 25), 500));
+  const limit = Math.max(1, Math.min(asPositiveInteger(input.max_created_count ?? input.limit, 25), 500));
   const scan_limit = Math.max(limit, Math.min(asPositiveInteger(input.scan_limit ?? input.candidate_fetch_limit, 500), 5000));
   const candidate_offset = Math.max(0, Math.trunc(Number(input.candidate_offset ?? input.scan_offset ?? input.offset) || 0));
 
@@ -4282,7 +4287,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       summary.exhausted_candidate_count += 1;
     }
 
-    if (summary.queued_count >= options.limit) {
+    if (totalCreatedCount(summary) >= options.limit) {
       summary.skipped_count += 1;
       continue;
     }
@@ -4312,7 +4317,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     const ownerKey = clean(candidate.master_owner_id);
     const ownerPhoneTouchKey = `${ownerKey}:${phoneKey}:${options.touch_number}`;
 
-    if (summary.queued_count >= options.limit) {
+    if (totalCreatedCount(summary) >= options.limit) {
       summary.skipped_count += 1;
       summary.sample_skips.push({
         reason_code: REASON_CODES.CAMPAIGN_LIMIT_REACHED,

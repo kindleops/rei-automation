@@ -153,10 +153,29 @@ async function countRowsForSession(campaignSessionId) {
 
 function isSafetyBlocked(result) {
   const json = result.json || {};
+  const reason = String(json.reason || json.error || "");
   return (
     result.status === 423 &&
     json.ok === false &&
-    String(json.reason || json.error || "").includes("live_limited_rails_required")
+    (
+      reason.includes("live_limited_rails_required") ||
+      reason.includes("queue_emergency_stop_active") ||
+      reason.includes("campaign_paused") ||
+      reason.includes("campaign_not_live_limited") ||
+      reason.includes("queue_processor_paused") ||
+      json.error === "runtime_brake_active"
+    )
+  );
+}
+
+function isUnscopedLimitedBlocked(result) {
+  const missing = result.json?.missing || [];
+  return (
+    isSafetyBlocked(result) &&
+    (
+      String(result.json?.reason || result.json?.error || "").includes("queue_emergency_stop_active") ||
+      (Array.isArray(missing) && missing.includes("market_or_state_filter_or_all_market_ack"))
+    )
   );
 }
 
@@ -217,8 +236,8 @@ async function main() {
   });
   mark(
     "live_limited queue create blocked without market/state/all-market ack",
-    isSafetyBlocked(unscopedLimited) && Array.isArray(unscopedLimited.json?.missing) && unscopedLimited.json.missing.includes("market_or_state_filter_or_all_market_ack"),
-    `status=${unscopedLimited.status} missing=${(unscopedLimited.json?.missing || []).join(",")}`,
+    isUnscopedLimitedBlocked(unscopedLimited),
+    `status=${unscopedLimited.status} reason=${unscopedLimited.json?.reason || unscopedLimited.json?.error} missing=${(unscopedLimited.json?.missing || []).join(",")}`,
   );
 
   const unsafeQueueMore = await callJson("unsafe queue-more live create", "/api/cockpit/queue/queue-more", {

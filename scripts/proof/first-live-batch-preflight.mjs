@@ -1142,6 +1142,13 @@ function printPlan({ input, result, samples, selectedSenders, selectedTemplates,
       created_live_queue_rows: false,
       ran_queue: false,
       called_textgrid: false,
+      post_create_verification_required_before_any_send: true,
+      required_post_create_checks: [
+        "queue_limited_batch ok=true",
+        "total_created_count <= max_sellers",
+        "rows_created + rows_scheduled <= max_sellers",
+        "total_created_count <= remaining_cap_before_create",
+      ],
     },
   }, null, 2));
 
@@ -1151,6 +1158,16 @@ function printPlan({ input, result, samples, selectedSenders, selectedTemplates,
   console.log("\nCOMMANDS_AFTER_EXPLICIT_APPROVAL_ONLY");
   console.log(`Open live_limited/manual mode:\n${apiCommand("/api/cockpit/queue/control", openBody)}`);
   console.log(`\nCreate the limited queue rows only; still does not send:\n${apiCommand("/api/cockpit/queue/control", queueRowsBody)}`);
+  console.log("\nPOST_CREATE_VERIFICATION_REQUIRED_BEFORE_ANY_SEND");
+  console.log(
+    [
+      "Do not run any queue send command until the queue_limited_batch response shows:",
+      `total_created_count <= ${input.max_sellers}`,
+      `rows_created + rows_scheduled <= ${input.max_sellers}`,
+      "total_created_count <= remaining_cap_before_create",
+      "and cap_basis confirms the strictest remaining cap allowed the created count.",
+    ].join("\n"),
+  );
   console.log(`\nEmergency stop:\n${apiCommand("/api/cockpit/queue/control", emergencyBody)}`);
   console.log(`\nRollback/pause:\n${apiCommand("/api/cockpit/queue/control", rollbackBody)}`);
 }
