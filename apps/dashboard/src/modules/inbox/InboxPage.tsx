@@ -55,7 +55,7 @@ import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
 import { NexusTopBar } from './components/NexusTopBar'
-import { type QueueCommandCaps, type QueueCommandMode } from './components/QueueCommandCenter'
+import { type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './components/QueueCommandCenter'
 import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
@@ -477,6 +477,14 @@ function mergeSelectedThreadAndDealContext(
   }
 }
 
+const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): QueueCommandMode => {
+  const campaignMode = String(diagnostics?.campaign_mode || '').toLowerCase()
+  const processorMode = String(diagnostics?.queue_processor_mode || '').toLowerCase()
+  if (campaignMode === 'paused' || processorMode === 'off' || processorMode === 'paused') return 'paused'
+  if (campaignMode === 'live_limited' || processorMode === 'live' || processorMode === 'automatic') return 'automatic'
+  return 'assisted'
+}
+
 export default function InboxPage() {
   const [messagesLoading, setMessagesLoading] = useState(false)
   const {
@@ -528,6 +536,7 @@ export default function InboxPage() {
   const [queueCommandMode, setQueueCommandMode] = useState<QueueCommandMode>('paused')
   const [queueCommandCaps, setQueueCommandCaps] = useState<QueueCommandCaps>(DEFAULT_QUEUE_COMMAND_CAPS)
   const [queueCommandActionLoading, setQueueCommandActionLoading] = useState<string | null>(null)
+  const [queueControlDiagnostics, setQueueControlDiagnostics] = useState<CampaignControlDiagnostics | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
   const heavyLoadPaused = _dataLoading || messagesLoading
   const [threadViewMode, setThreadViewMode] = useState<ThreadTranslateViewMode>('original')
@@ -1902,25 +1911,31 @@ export default function InboxPage() {
     } catch {}
   }, [])
 
+  const refreshQueueControl = useCallback(async () => {
+    const res = await getQueueControlSettings()
+    if (!res.ok) return null
+    const d = res.data?.diagnostics as CampaignControlDiagnostics | undefined
+    if (!d) return null
+    setQueueControlDiagnostics(d)
+    setQueueCommandMode(queueModeFromControl(d))
+    setQueueCommandCaps((current) => ({
+      ...current,
+      sends_per_run: Math.max(1, Number(d.queue_run_limit || d.max_batch_size || current.sends_per_run)),
+      max_per_number_per_day: Math.max(1, Number(d.queue_per_number_cap || d.queue_sender_throttle || d.per_number_cap || current.max_per_number_per_day)),
+      max_per_market_per_hour: Math.max(1, Number(d.queue_market_cap || d.queue_market_throttle || d.market_cap || current.max_per_market_per_hour)),
+    }))
+    return d
+  }, [])
+
   useEffect(() => {
     let active = true
     const loadQueueControl = async () => {
-      const res = await getQueueControlSettings()
-      if (!active || !res.ok) return
-      const d = res.data?.diagnostics
-      if (!d) return
-      const mode = String(d.queue_processor_mode || 'paused') as QueueCommandMode
-      if (mode === 'paused' || mode === 'assisted' || mode === 'automatic') setQueueCommandMode(mode)
-      setQueueCommandCaps((current) => ({
-        ...current,
-        sends_per_run: Math.max(1, Number(d.queue_run_limit || current.sends_per_run)),
-        max_per_number_per_day: Math.max(1, Number(d.queue_sender_throttle || current.max_per_number_per_day)),
-        max_per_market_per_hour: Math.max(1, Number(d.queue_market_throttle || current.max_per_market_per_hour)),
-      }))
+      const diagnostics = await refreshQueueControl()
+      if (!active || !diagnostics) return
     }
     void loadQueueControl()
     return () => { active = false }
-  }, [])
+  }, [refreshQueueControl])
 
   useEffect(() => {
     try {
@@ -1988,6 +2003,7 @@ export default function InboxPage() {
         throw new Error(String(payload?.error || 'Queue action failed'))
       }
       await refreshQueueHealth()
+      await refreshQueueControl()
       emitNotification({
         title: options?.successTitle || 'Queue Updated',
         detail: options?.successDetail ? options.successDetail(payload) : 'Queue action completed successfully.',
@@ -2004,7 +2020,7 @@ export default function InboxPage() {
     } finally {
       setQueueCommandActionLoading(null)
     }
-  }, [refreshQueueHealth])
+  }, [refreshQueueControl, refreshQueueHealth])
 
   // Queue health polls send_queue (heavy). Only start once after live inbox has resolved.
   // Cleanup does NOT clear the interval — a separate mount-only effect handles unmount cleanup.
@@ -2030,50 +2046,71 @@ export default function InboxPage() {
 
   const handleQueueCommandModeChange = useCallback((mode: QueueCommandMode) => {
     if (mode === 'automatic') {
-      if (!window.confirm('Enable Automatic Mode? This allows the feeder to run and send rows automatically.')) return
+      if (!window.confirm('Set Live Limited mode? Queue work still requires explicit caps and scope before any live seller rows are created or sent.')) return
     }
     setQueueCommandMode(mode)
-    const backendMode = mode === 'automatic' ? 'live' : mode === 'assisted' ? 'safe' : 'off'
-    void updateQueueControlSettings({ queue_processor_mode: backendMode })
+    const action = mode === 'paused' ? 'pause_queue_processor' : 'resume_queue_processor'
+    const campaignMode = mode === 'automatic' ? 'live_limited' : mode === 'assisted' ? 'dry_run' : 'paused'
+    void callBackend('/api/cockpit/queue/control', {
+      method: 'POST',
+      body: JSON.stringify({ action, campaign_mode: campaignMode }),
+    }).then(() => refreshQueueControl())
     emitNotification({
       title: 'Queue Mode Updated',
-      detail: mode === 'paused' ? 'Automatic queue processing is paused.' : mode === 'assisted' ? 'Assisted Autopilot enabled. Feeder runs but sends require approval.' : 'Automatic Autopilot enabled.',
+      detail: mode === 'paused' ? 'Queue processor is paused.' : mode === 'assisted' ? 'Dry-run preview mode enabled.' : 'Live Limited selected; caps and scope are still required for live work.',
       severity: mode === 'automatic' ? 'warning' : 'success',
     })
-  }, [])
+  }, [refreshQueueControl])
 
   const handleQueueCapsChange = useCallback((patch: Partial<QueueCommandCaps>) => {
     setQueueCommandCaps((current) => {
       const next = { ...current, ...patch }
       void updateQueueControlSettings({
         queue_run_limit: String(next.sends_per_run),
+        queue_hard_cap: String(next.sends_per_run),
+        queue_max_batch_size: String(next.sends_per_run),
         queue_sender_throttle: String(next.max_per_number_per_day),
         queue_market_throttle: String(next.max_per_market_per_hour),
-      })
+        queue_market_cap: String(next.max_per_market_per_hour),
+        queue_per_number_cap: String(next.max_per_number_per_day),
+      }).then(() => refreshQueueControl())
       return next
     })
-  }, [])
+  }, [refreshQueueControl])
+
+  const buildQueueSafetyPayload = useCallback(() => {
+    const campaignMode = String(queueControlDiagnostics?.campaign_mode || (queueCommandMode === 'automatic' ? 'live_limited' : queueCommandMode === 'assisted' ? 'dry_run' : 'paused'))
+    const allMarketAck = queueControlDiagnostics?.all_market_ack ?? queueControlDiagnostics?.queue_all_market_ack
+    return {
+      campaign_mode: campaignMode,
+      hard_cap: queueControlDiagnostics?.hard_cap ?? queueControlDiagnostics?.queue_hard_cap ?? queueCommandCaps.sends_per_run,
+      max_batch_size: queueControlDiagnostics?.max_batch_size ?? queueControlDiagnostics?.queue_max_batch_size ?? queueCommandCaps.sends_per_run,
+      daily_cap: queueControlDiagnostics?.daily_cap ?? queueControlDiagnostics?.queue_daily_send_cap ?? queueCommandCaps.sends_per_run,
+      market_cap: queueControlDiagnostics?.market_cap ?? queueControlDiagnostics?.queue_market_cap ?? queueCommandCaps.max_per_market_per_hour,
+      per_number_cap: queueControlDiagnostics?.per_number_cap ?? queueControlDiagnostics?.queue_per_number_cap ?? queueCommandCaps.max_per_number_per_day,
+      scan_limit: queueControlDiagnostics?.scan_limit ?? queueControlDiagnostics?.queue_scan_limit ?? 1000,
+      market: (queueControlDiagnostics?.market ?? queueControlDiagnostics?.queue_market_filter ?? commandMapMarket) || undefined,
+      state: queueControlDiagnostics?.state ?? queueControlDiagnostics?.queue_state_filter ?? undefined,
+      all_market_ack: allMarketAck === true || String(allMarketAck || '').toLowerCase() === 'true',
+    }
+  }, [commandMapMarket, queueCommandCaps, queueCommandMode, queueControlDiagnostics])
 
   const handleRunSafeBatch = useCallback(() => (
     runQueueCommand('safe_batch', '/api/cockpit/queue/control', {
-      body: { action: 'safe_batch', limit: 10, caps: queueCommandCaps },
-      successTitle: 'Small Batch Sent',
+      body: { action: 'queue_limited_batch', limit: Math.max(1, Math.min(10, queueCommandCaps.sends_per_run)), caps: queueCommandCaps, ...buildQueueSafetyPayload() },
+      successTitle: 'Limited Queue Batch',
       successDetail: (payload) => {
         if (!payload) return 'No response received'
-        const { rows_sent = 0, block_reasons = {}, error } = payload
-        const reasons = Object.entries(block_reasons)
-          .filter(([_, count]) => Number(count) > 0)
-          .map(([reason, count]) => `${count} ${reason}`)
-          .join(', ')
-        return `${rows_sent} rows sent.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
+        const { rows_created = 0, rows_scheduled = 0, error } = payload
+        return `${rows_created} queued, ${rows_scheduled} scheduled.${error ? ` Error: ${error}` : ''}`
       },
     })
-  ), [queueCommandCaps, runQueueCommand])
+  ), [buildQueueSafetyPayload, queueCommandCaps, runQueueCommand])
 
   const handleRunQueueNow = useCallback(() => (
     runQueueCommand('run_now', '/api/cockpit/queue/control', {
-      body: { action: 'run_due_queue', caps: queueCommandCaps, mode: queueCommandMode },
-      successTitle: 'Queue Run Started',
+      body: { action: 'run_small_queue_batch', limit: Math.max(1, Math.min(5, queueCommandCaps.sends_per_run)), caps: queueCommandCaps, mode: queueCommandMode, ...buildQueueSafetyPayload() },
+      successTitle: 'Limited Queue Run',
       successDetail: (payload) => {
         if (!payload) return 'No response received'
         const { rows_sent = 0, block_reasons = {}, error } = payload
@@ -2084,40 +2121,39 @@ export default function InboxPage() {
         return `${rows_sent} rows sent.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
-  ), [queueCommandCaps, queueCommandMode, runQueueCommand])
+  ), [buildQueueSafetyPayload, queueCommandCaps, queueCommandMode, runQueueCommand])
 
   const handleQueueMoreNow = useCallback(() => (
-    runQueueCommand('queue_more', '/api/cockpit/queue/queue-more', {
+    runQueueCommand('queue_more', '/api/cockpit/queue/control', {
       body: {
+        action: 'run_dry_run_feeder',
+        dry_run: true,
         candidate_source: 'v_sms_ready_contacts_expanded',
-        target_count: Math.max(25, queueCommandCaps.sends_per_run * 2),
+        limit: Math.max(5, Math.min(25, queueCommandCaps.sends_per_run * 2)),
         scan_limit: 1000,
         respect_contact_window: true,
         only_first_touch: true,
         mode: queueCommandMode,
       },
-      successTitle: 'Find Sellers Completed',
+      successTitle: 'Dry-Run Preview Completed',
       successDetail: (payload) => {
         if (!payload) return 'No response received'
-        const { rows_created = 0, rows_scheduled = 0, candidates_scanned = 0, block_reasons = {}, error } = payload
-        if (rows_created === 0 && rows_scheduled === 0) {
-          const reasons = Object.entries(block_reasons)
-            .filter(([_, count]) => Number(count) > 0)
-            .map(([reason, count]) => `${count} ${reason}`)
-            .join(', ')
-          return `0 rows queued. ${reasons ? `Top blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
-        }
-        return `${rows_created} queued, ${rows_scheduled} scheduled • ${candidates_scanned} scanned.${error ? ` Error: ${error}` : ''}`
+        const { eligible_count = 0, skipped_count = 0, preview = {}, block_reasons = {}, error } = payload
+        const scanned = preview?.scanned_count ?? preview?.candidates_scanned ?? 0
+        const reasons = Object.entries(block_reasons)
+          .filter(([_, count]) => Number(count) > 0)
+          .map(([reason, count]) => `${count} ${reason}`)
+          .join(', ')
+        return `${eligible_count} eligible, ${skipped_count} skipped, ${scanned} scanned.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
   ), [queueCommandCaps.sends_per_run, queueCommandMode, runQueueCommand])
 
   const handleEmergencyPause = useCallback(async () => {
     setQueueCommandMode('paused')
-    await updateQueueControlSettings({
-      queue_processor_mode: 'off',
-      queue_auto_send_enabled: 'false',
-      queue_auto_enqueue_enabled: 'false',
+    await callBackend('/api/cockpit/queue/control', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'emergency_stop' }),
     })
     emitNotification({
       title: 'Emergency Pause Enabled',
@@ -2125,7 +2161,8 @@ export default function InboxPage() {
       severity: 'warning',
     })
     await refreshQueueHealth()
-  }, [refreshQueueHealth])
+    await refreshQueueControl()
+  }, [refreshQueueControl, refreshQueueHealth])
 
   const handleReprocessPaused = useCallback((ids?: string[]) => (
     runQueueCommand(ids?.length ? `retry_routing:${ids[0]}` : 'reprocess_paused', '/api/cockpit/queue/reprocess-paused', {
@@ -3653,6 +3690,7 @@ export default function InboxPage() {
         isSuppressed={selectedSuppressed}
         notificationCount={data.unreadCount}
         queueProcessorHealth={queueProcessorHealth}
+        queueControlDiagnostics={queueControlDiagnostics}
         queueProcessorHealthLoading={queueProcessorHealthLoading}
         onRefreshQueueHealth={refreshQueueHealth}
         queueCommandMode={queueCommandMode}

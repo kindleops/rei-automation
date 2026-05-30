@@ -10,7 +10,7 @@ import type { ViewWidthPercent } from '../view-layout'
 import { buildInboxNotifications, NexusNotificationCenter, type NexusNotification } from './NexusNotificationCenter'
 import type { AutonomousEngineModel } from '../autonomy-engine'
 import { InboxKpiOrb } from './InboxKpiOrb'
-import { QueueCommandCenter, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
+import { QueueCommandCenter, type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -26,6 +26,7 @@ interface NexusTopBarProps {
   isSuppressed: boolean
   notificationCount: number
   queueProcessorHealth: QueueProcessorHealth | null
+  queueControlDiagnostics?: CampaignControlDiagnostics | null
   queueProcessorHealthLoading: boolean
   onRefreshQueueHealth?: () => void
   queueCommandMode: QueueCommandMode
@@ -105,6 +106,7 @@ export const NexusTopBar = ({
   selectedThread,
   notificationCount,
   queueProcessorHealth,
+  queueControlDiagnostics,
   queueProcessorHealthLoading,
   onRefreshQueueHealth,
   queueCommandMode,
@@ -473,6 +475,7 @@ export const NexusTopBar = ({
             <div className="nx-liquid-popover nx-liquid-popover--processor" role="status" onClick={(e) => e.stopPropagation()}>
               <QueueCommandCenter
                 health={queueProcessorHealth}
+                control={queueControlDiagnostics}
                 loading={queueProcessorHealthLoading}
                 mode={queueCommandMode}
                 caps={queueCommandCaps}

@@ -122,8 +122,12 @@ export function normalizeSellerInboundIntent(input) {
     isMatch([
       "who is this", "who are you", "who's this", "whos this",
       "how did you get my info", "where did you get my number",
+      "what address", "which address", "what property", "which property",
+      "property address", "where is the property",
       "como encontraste mi información", "quién eres", "quien eres",
-    ]) || classification.source === "how_got_number"
+    ]) ||
+    classification.source === "how_got_number" ||
+    classification.primary_intent === "info_request"
   ) {
     return "info_request";
   }

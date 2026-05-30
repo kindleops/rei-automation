@@ -759,19 +759,32 @@ export function cancelStaleFollowups(body: Record<string, unknown> = {}): Promis
 }
 
 export interface QueueControlSettings {
-  queue_processor_mode: 'off' | 'safe' | 'live'
-  queue_daily_send_cap: string
-  queue_run_limit: string
-  queue_spacing_seconds: string
-  queue_contact_window_start: string
-  queue_contact_window_end: string
-  queue_auto_pause_failure_rate: string
-  queue_auto_pause_optout_rate: string
-  queue_market_throttle: string
-  queue_sender_throttle: string
-  queue_auto_enqueue_enabled: string
-  queue_auto_send_enabled: string
-  [key: string]: string
+  queue_processor_mode?: string
+  auto_reply_mode?: string
+  campaign_mode?: string
+  candidate_source?: string
+  queue_daily_send_cap?: string
+  queue_hard_cap?: string
+  queue_max_batch_size?: string
+  queue_run_limit?: string
+  queue_scan_limit?: string
+  queue_spacing_seconds?: string
+  queue_contact_window_start?: string
+  queue_contact_window_end?: string
+  queue_auto_pause_failure_rate?: string
+  queue_auto_pause_optout_rate?: string
+  queue_market_throttle?: string
+  queue_sender_throttle?: string
+  queue_market_cap?: string
+  queue_per_number_cap?: string
+  queue_market_filter?: string
+  queue_state_filter?: string
+  queue_all_market_ack?: string
+  queue_auto_enqueue_enabled?: string
+  queue_auto_send_enabled?: string
+  stats?: Record<string, number>
+  last_run?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export function getQueueControlSettings(): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {

@@ -2,6 +2,11 @@ import { runSupabaseCandidateFeeder } from "@/lib/domain/outbound/supabase-candi
 import { child } from "@/lib/logging/logger.js";
 import { captureRouteException } from "@/lib/monitoring/sentry.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
+import {
+  blockedSafetyResult,
+  normalizeSafetyInput,
+  validateLiveLimitedRails,
+} from "@/lib/domain/queue/queue-control-safety.js";
 
 const logger = child({ module: "domain.outbound.feed_candidates_request" });
 
@@ -55,6 +60,13 @@ export function normalizeFeedCandidatesInput(input = {}) {
     template_use_case: clean(input.template_use_case) || "ownership_check",
     touch_number: asPositiveInteger(input.touch_number, 1),
     campaign_session_id: clean(input.campaign_session_id) || null,
+    campaign_mode: clean(input.campaign_mode) || null,
+    hard_cap: asPositiveInteger(input.hard_cap ?? input.queue_hard_cap, null),
+    max_batch_size: asPositiveInteger(input.max_batch_size ?? input.queue_max_batch_size, null),
+    daily_cap: asPositiveInteger(input.daily_cap ?? input.queue_daily_send_cap, null),
+    market_cap: asPositiveInteger(input.market_cap ?? input.queue_market_cap, null),
+    per_number_cap: asPositiveInteger(input.per_number_cap ?? input.queue_per_number_cap, null),
+    all_market_ack: asBoolean(input.all_market_ack, false),
     debug_templates: asBoolean(input.debug_templates, false),
     schedule_spread: asBoolean(input.schedule_spread, false),
     schedule_start_local: clean(input.schedule_start_local) || "09:00",
@@ -94,6 +106,18 @@ function mergeBodyAndQuery(request, method, body = {}) {
     "template_use_case",
     "touch_number",
     "campaign_session_id",
+    "campaign_mode",
+    "hard_cap",
+    "queue_hard_cap",
+    "max_batch_size",
+    "queue_max_batch_size",
+    "daily_cap",
+    "queue_daily_send_cap",
+    "market_cap",
+    "queue_market_cap",
+    "per_number_cap",
+    "queue_per_number_cap",
+    "all_market_ack",
     "debug_templates",
     "schedule_spread",
     "schedule_start_local",
@@ -173,11 +197,38 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
     const body = method === "POST" ? await request.json().catch(() => ({})) : {};
     const normalized = normalizeFeedCandidatesInput(mergeBodyAndQuery(request, method, body));
     const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
+    const safety_settings = {
+      queue_processor_mode,
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_hard_cap: await get_system_value("queue_hard_cap"),
+      queue_max_batch_size: await get_system_value("queue_max_batch_size"),
+      queue_daily_send_cap: await get_system_value("queue_daily_send_cap"),
+      queue_market_cap: await get_system_value("queue_market_cap"),
+      queue_per_number_cap: await get_system_value("queue_per_number_cap"),
+      queue_market_throttle: await get_system_value("queue_market_throttle"),
+      queue_sender_throttle: await get_system_value("queue_sender_throttle"),
+      queue_scan_limit: await get_system_value("queue_scan_limit"),
+      queue_market_filter: await get_system_value("queue_market_filter"),
+      queue_state_filter: await get_system_value("queue_state_filter"),
+      queue_all_market_ack: await get_system_value("queue_all_market_ack"),
+    };
+    const safety = normalizeSafetyInput(normalized, safety_settings);
+    if (!normalized.dry_run) {
+      const validation = validateLiveLimitedRails(safety, { require_scope: true, require_send_caps: true });
+      if (!validation.ok) {
+        return json_response(blockedSafetyResult(validation, "feed_candidates"), { status: validation.status });
+      }
+      normalized.limit = Math.min(normalized.limit, validation.effective_limit);
+      normalized.allow_internal_test_phones = false;
+      if (safety.market && !normalized.market) normalized.market = safety.market;
+      if (safety.state && !normalized.state) normalized.state = safety.state;
+    }
     feeder_request_meta = {
       route,
       dry_run: normalized.dry_run,
       limit: normalized.limit,
       scan_limit: normalized.scan_limit,
+      campaign_mode: safety.campaign_mode,
     };
 
     await notifyDiscordOps({

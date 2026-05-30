@@ -2199,7 +2199,7 @@
 /* ── SECTION 3: Key Metrics / Live Status Grid ─────────────────────── */
 .qcc-status-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -2225,11 +2225,18 @@
 .qcc-status-item span {
   color: rgba(172, 198, 232, 0.5);
   font-weight: 600;
+  min-width: 0;
 }
 
 .qcc-status-item strong {
   color: rgba(244, 247, 252, 0.9);
   font-weight: 800;
+  min-width: 0;
+  max-width: 62%;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .qcc-text-warning { color: #ffd234 !important; }

@@ -10,9 +10,21 @@ import {
   prepareRenderedSmsForQueue,
 } from "@/lib/sms/sanitize.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import {
+  autoReplyModeAllowsQueue,
+  normalizeAutoReplyMode,
+} from "@/lib/domain/seller-flow/auto-reply-mode.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
-const ACTIVE_AUTO_REPLY_STATUSES = new Set(["queued", "pending", "processing", "sending"]);
+const ACTIVE_AUTO_REPLY_STATUSES = new Set([
+  "queued",
+  "pending",
+  "approved",
+  "ready",
+  "scheduled",
+  "processing",
+  "sending",
+]);
 const HIGH_RISK_OBJECTIONS = new Set(["financial_distress", "probate", "divorce"]);
 const REVIEW_ONLY_OBJECTIONS = new Set(["wants_proof_of_funds", "property_correction"]);
 
@@ -100,6 +112,12 @@ const ROUTE_PROFILES = Object.freeze({
     route_hint: "identity_response",
     allowed_template_stages: ["identity_response", "who_is_this"],
     template_use_case_candidates: ["who_is_this", "how_got_number"],
+    next_action: "queue_auto_reply",
+  },
+  info_request: {
+    route_hint: "info_request",
+    allowed_template_stages: ["info_source_explanation", "identity_response", "who_is_this"],
+    template_use_case_candidates: ["who_is_this", "info_source_explanation", "how_got_number"],
     next_action: "queue_auto_reply",
   },
   callback_requested: {
@@ -407,18 +425,18 @@ export function applyInboundAutomationDecision({
     });
   }
 
-  if (primary_intent === "who_is_this") {
+  if (primary_intent === "who_is_this" || primary_intent === "info_request") {
     const auto_reply_allowed = confidence >= 0.75;
     return buildDecisionResult({
       should_queue_reply: auto_reply_allowed,
       should_mark_human_review: !auto_reply_allowed,
       reply_mode: auto_reply_allowed ? "auto" : "manual_review",
-      human_review_reason: auto_reply_allowed ? null : "who_is_this_low_confidence",
+      human_review_reason: auto_reply_allowed ? null : `${primary_intent}_low_confidence`,
       route_hint,
       stage_hint,
       allowed_template_stages,
       next_action: auto_reply_allowed ? "queue_auto_reply" : "mark_human_review",
-      audit_reason: auto_reply_allowed ? "who_is_this" : "who_is_this_low_confidence",
+      audit_reason: auto_reply_allowed ? primary_intent : `${primary_intent}_low_confidence`,
     });
   }
 
@@ -432,6 +450,7 @@ export function applyInboundAutomationDecision({
       "tenant_occupied",
       "condition_disclosed",
       "callback_requested",
+      "info_request",
     ].includes(primary_intent) ||
     objection === "needs_call" ||
     objection === "needs_email"
@@ -520,32 +539,79 @@ function derivePropertyTypeScope(context = null) {
 function derivePropertyGroup(property_type_scope = null) {
   const normalized = lower(property_type_scope);
   if (!normalized) return null;
-  if (
-    normalized.includes("duplex") ||
-    normalized.includes("triplex") ||
-    normalized.includes("quad") ||
-    normalized.includes("multi") ||
-    normalized.includes("apartment")
-  ) {
-    return "multifamily";
-  }
   if (normalized.includes("vacant") || normalized.includes("land")) return "land";
-  return "residential";
+  if (normalized.includes("duplex")) return "duplex";
+  if (normalized.includes("triplex")) return "triplex";
+  if (normalized.includes("fourplex") || normalized.includes("quad")) return "fourplex";
+  if (
+    normalized.includes("multi") ||
+    normalized.includes("apartment") ||
+    normalized.includes("5+")
+  ) {
+    return "small_multifamily";
+  }
+  if (
+    normalized.includes("single") ||
+    normalized.includes("sfr") ||
+    normalized.includes("house") ||
+    normalized.includes("home")
+  ) {
+    return "sfr";
+  }
+  if (normalized.includes("residential")) return "residential";
+  return null;
+}
+
+function isResidentialPropertyGroup(group = null) {
+  return [
+    "sfr",
+    "duplex",
+    "triplex",
+    "fourplex",
+    "small_multifamily",
+    "residential",
+  ].includes(lower(group));
+}
+
+function isBroadResidentialScope(scope = null) {
+  const normalized = lower(scope);
+  return (
+    normalized === "any" ||
+    normalized === "residential" ||
+    normalized === "any residential" ||
+    normalized.includes("any residential")
+  );
 }
 
 function isTemplatePropertyCompatible(row = {}, property_type_scope = null) {
   const requested_scope = lower(property_type_scope);
   const template_scope = lower(row.property_type_scope);
+  const property_group = derivePropertyGroup(property_type_scope);
 
   if (requested_scope && template_scope && template_scope !== requested_scope) {
-    return false;
+    const template_group = derivePropertyGroup(template_scope);
+    const broad_residential_match =
+      isBroadResidentialScope(template_scope) && isResidentialPropertyGroup(property_group);
+    const precise_group_match =
+      template_group &&
+      property_group &&
+      (template_group === property_group ||
+        (template_group === "residential" && isResidentialPropertyGroup(property_group)));
+
+    if (!broad_residential_match && !precise_group_match) {
+      return false;
+    }
   }
 
-  const property_group = derivePropertyGroup(property_type_scope);
   const allowed = normalizeList(row.allowed_property_groups);
   const prohibited = normalizeList(row.prohibited_property_groups);
 
-  if (property_group && allowed.length > 0 && !allowed.includes(property_group)) {
+  if (
+    property_group &&
+    allowed.length > 0 &&
+    !allowed.includes(property_group) &&
+    !(property_group === "residential" && allowed.some(isResidentialPropertyGroup))
+  ) {
     return false;
   }
 
@@ -896,6 +962,159 @@ export async function applyInboundSuppression({
   }
 }
 
+function contextHasActiveSuppression(context = null) {
+  const summary = context?.summary || {};
+  const suppression_status = lower(summary.suppression_status || summary.suppressionStatus);
+  const suppression_type = lower(summary.suppression_type || summary.suppressionReason);
+  const phone_status = lower(
+    summary.phone_contact_status ||
+      summary.contact_status ||
+      context?.items?.phone_item?.phone_contact_status
+  );
+
+  if (suppression_status === "suppressed") {
+    return { suppressed: true, reason: suppression_type || "context_suppressed" };
+  }
+
+  if (
+    summary.is_dnc === true ||
+    summary.opt_out === true ||
+    summary.do_not_call === true ||
+    summary.dnc === true ||
+    ["opt_out", "opted_out", "dnc", "do_not_call", "suppressed"].includes(phone_status)
+  ) {
+    return { suppressed: true, reason: "context_dnc" };
+  }
+
+  return { suppressed: false, reason: null };
+}
+
+function isMissingColumnError(error = null) {
+  return error?.code === "42703" || /column .* does not exist/i.test(clean(error?.message));
+}
+
+async function findActiveSmsSuppression({ supabase, phoneNumber = "" } = {}) {
+  const normalized_phone = normalizeUsPhoneToE164(phoneNumber) || clean(phoneNumber);
+  if (!supabase || !normalized_phone) return { suppressed: false, reason: null };
+
+  let last_error = null;
+  for (const column of ["phone_e164", "phone_number"]) {
+    try {
+      const { data, error } = await supabase
+        .from("sms_suppression_list")
+        .select("id, suppression_reason, suppression_type, is_active, suppressed_at, created_at")
+        .eq(column, normalized_phone)
+        .eq("is_active", true)
+        .limit(1);
+
+      if (error) {
+        if (isMissingColumnError(error)) {
+          last_error = error;
+          continue;
+        }
+        throw error;
+      }
+
+      const row = Array.isArray(data) ? data[0] : null;
+      if (row) {
+        return {
+          suppressed: true,
+          reason: clean(row.suppression_type || row.suppression_reason) || "sms_suppression_list",
+          row,
+        };
+      }
+    } catch (error) {
+      if (isMissingColumnError(error)) {
+        last_error = error;
+        continue;
+      }
+      return {
+        suppressed: true,
+        reason: "suppression_lookup_failed",
+        error: error?.message || "suppression_lookup_failed",
+      };
+    }
+  }
+
+  if (last_error) {
+    return { suppressed: false, reason: "suppression_columns_unavailable" };
+  }
+
+  return { suppressed: false, reason: null };
+}
+
+async function findActiveOutreachSuppression({
+  supabase,
+  ownerId = null,
+  phoneNumber = "",
+} = {}) {
+  const normalized_phone = normalizeUsPhoneToE164(phoneNumber) || clean(phoneNumber);
+  if (!supabase || !clean(ownerId) || !normalized_phone) {
+    return { suppressed: false, reason: null };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("contact_outreach_state")
+      .select("id, suppression_until, suppression_reason, touch_count, last_sms_at")
+      .eq("podio_master_owner_id", ownerId)
+      .eq("to_phone_number", normalized_phone)
+      .limit(1);
+
+    if (error) {
+      if (isMissingColumnError(error)) return { suppressed: false, reason: null };
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : null;
+    const until = row?.suppression_until ? new Date(row.suppression_until) : null;
+    if (until && !Number.isNaN(until.getTime()) && until > new Date()) {
+      return {
+        suppressed: true,
+        reason: clean(row.suppression_reason) || "contact_outreach_suppression",
+        row,
+      };
+    }
+  } catch (error) {
+    return {
+      suppressed: true,
+      reason: "outreach_suppression_lookup_failed",
+      error: error?.message || "outreach_suppression_lookup_failed",
+    };
+  }
+
+  return { suppressed: false, reason: null };
+}
+
+export async function checkInboundAutoReplySuppression({
+  supabaseClient = null,
+  phoneNumber = "",
+  threadKey = "",
+  ownerId = null,
+  context = null,
+} = {}) {
+  const context_result = contextHasActiveSuppression(context);
+  if (context_result.suppressed) return context_result;
+
+  if (!canUseSupabase(supabaseClient)) {
+    return { suppressed: false, reason: "missing_supabase" };
+  }
+
+  const supabase = supabaseClient || getDefaultSupabaseClient();
+  const phone = clean(phoneNumber) || clean(threadKey);
+  const sms_suppression = await findActiveSmsSuppression({ supabase, phoneNumber: phone });
+  if (sms_suppression.suppressed) return sms_suppression;
+
+  const outreach_suppression = await findActiveOutreachSuppression({
+    supabase,
+    ownerId,
+    phoneNumber: phone,
+  });
+  if (outreach_suppression.suppressed) return outreach_suppression;
+
+  return { suppressed: false, reason: null };
+}
+
 function automationDecisionToLegacyPlan({
   decision,
   classification,
@@ -965,11 +1184,22 @@ export async function executeInboundAutomationDecision({
   enableQueueInsert = false,
   applySuppression = true,
   dryRun = true,
+  autoReplyMode = null,
+  proofRun = false,
   scheduleDelaySeconds = 0,
   now = new Date().toISOString(),
   supabaseClient = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
+  const effective_auto_reply_mode = normalizeAutoReplyMode(
+    autoReplyMode,
+    dryRun ? "dry_run" : enableQueueInsert ? "live_limited" : "disabled"
+  );
+  const queue_permission = autoReplyModeAllowsQueue({
+    mode: effective_auto_reply_mode,
+    inboundFrom,
+    threadKey,
+  });
   const base_decision = applyInboundAutomationDecision({
     message,
     threadKey,
@@ -984,6 +1214,9 @@ export async function executeInboundAutomationDecision({
 
   info("[AUTO_REPLY_DECISION]", {
     thread_key: threadKey || null,
+    auto_reply_mode: effective_auto_reply_mode,
+    auto_reply_mode_queue_allowed: queue_permission.allowed,
+    internal_test_phone: queue_permission.internal_test_phone,
     primary_intent: classification?.primary_intent || null,
     objection: classification?.objection || null,
     confidence: classification?.confidence ?? null,
@@ -993,6 +1226,44 @@ export async function executeInboundAutomationDecision({
     should_mark_human_review: base_decision.should_mark_human_review,
     audit_reason: base_decision.audit_reason,
   });
+
+  if (effective_auto_reply_mode === "disabled") {
+    const disabled_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: false,
+      reply_mode: "none",
+      audit_reason: "auto_reply_disabled",
+    };
+
+    return {
+      ok: true,
+      automation_decision: disabled_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: true,
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
+      audit_reason: disabled_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: disabled_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: disabled_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
 
   if (base_decision.should_suppress_contact) {
     const suppression_result = applySuppression
@@ -1018,6 +1289,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: Boolean(suppression_result?.ok),
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: base_decision.audit_reason,
       seller_stage_reply: {
         ok: true,
@@ -1053,6 +1326,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: base_decision.audit_reason,
       seller_stage_reply: {
         ok: true,
@@ -1061,6 +1336,64 @@ export async function executeInboundAutomationDecision({
         reason: base_decision.audit_reason,
         plan: automationDecisionToLegacyPlan({
           decision: base_decision,
+          classification,
+        }),
+        brain_stage: null,
+      },
+    };
+  }
+
+  const active_suppression =
+    proofRun && queue_permission.internal_test_phone
+      ? { suppressed: false, reason: "proof_internal_test_phone" }
+      : await checkInboundAutoReplySuppression({
+          supabaseClient: supabase,
+          phoneNumber: inboundFrom || threadKey,
+          threadKey,
+          ownerId,
+          context: context || latestThreadContext,
+        });
+
+  if (active_suppression.suppressed) {
+    const suppression_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_suppress_contact: true,
+      should_mark_human_review: false,
+      reply_mode: "none",
+      suppression_reason: active_suppression.reason || "suppressed",
+      audit_reason: active_suppression.reason || "suppressed",
+    };
+
+    warn("[AUTO_REPLY_BLOCKED]", {
+      thread_key: threadKey || null,
+      primary_intent: classification?.primary_intent || null,
+      audit_reason: suppression_decision.audit_reason,
+      suppression_source: active_suppression.reason || null,
+    });
+
+    return {
+      ok: true,
+      automation_decision: suppression_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
+      audit_reason: suppression_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: suppression_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: suppression_decision,
           classification,
         }),
         brain_stage: null,
@@ -1102,6 +1435,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: true,
       dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: duplicate.reason,
       seller_stage_reply: {
         ok: true,
@@ -1153,6 +1488,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: "no_safe_template",
       seller_stage_reply: {
         ok: true,
@@ -1206,6 +1543,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: "template_render_failed",
       seller_stage_reply: {
         ok: true,
@@ -1239,10 +1578,24 @@ export async function executeInboundAutomationDecision({
     renderedMessageText: rendered_message_text,
   });
 
-  if (!enableQueueInsert || dryRun) {
+  if (!enableQueueInsert || dryRun || !queue_permission.allowed) {
+    const preview_reason =
+      !queue_permission.allowed && effective_auto_reply_mode !== "dry_run"
+        ? queue_permission.reason
+        : "dry_run_preview";
+    const preview_decision =
+      preview_reason === "dry_run_preview"
+        ? base_decision
+        : {
+            ...base_decision,
+            should_queue_reply: false,
+            should_mark_human_review: false,
+            reply_mode: "none",
+            audit_reason: preview_reason,
+          };
     return {
       ok: true,
-      automation_decision: base_decision,
+      automation_decision: preview_decision,
       selected_template,
       rendered_message_text,
       queued: false,
@@ -1252,13 +1605,23 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: false,
       dry_run: true,
-      audit_reason: base_decision.audit_reason,
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
+      audit_reason: preview_decision.audit_reason,
       seller_stage_reply: {
         ok: true,
         queued: false,
         handled: true,
-        reason: "dry_run_preview",
-        plan: legacy_plan,
+        reason: preview_reason,
+        plan:
+          preview_decision === base_decision
+            ? legacy_plan
+            : automationDecisionToLegacyPlan({
+                decision: preview_decision,
+                classification,
+                selectedTemplate: selected_template,
+                renderedMessageText: rendered_message_text,
+              }),
         brain_stage: selected_use_case,
         rendered_text: rendered_message_text,
         template_id: clean(selected_template.template_id || selected_template.id) || null,
@@ -1291,7 +1654,7 @@ export async function executeInboundAutomationDecision({
       touch_number: 0,
       campaign_session_id: clean(inboundEventId) || clean(threadKey) || "inbound_auto_reply",
     }),
-    queue_status: "queued",
+    queue_status: proofRun ? "proof" : "queued",
     scheduled_for,
     scheduled_for_utc: scheduled_for,
     scheduled_for_local: scheduled_for,
@@ -1325,9 +1688,9 @@ export async function executeInboundAutomationDecision({
     rendered_message: rendered_message_text,
     priority: base_decision.route_hint === "soft_followup" ? "medium" : "normal",
     risk: classification?.automation_decision?.risk_level || "low",
-    sms_eligible: true,
-    routing_allowed: true,
-    safety_status: "allowed",
+    sms_eligible: proofRun ? false : true,
+    routing_allowed: proofRun ? false : true,
+    safety_status: proofRun ? "proof" : "allowed",
     type: "auto_reply",
     source_event_id: inboundEventId || null,
     inbound_message_id: clean(inboundEventId) || null,
@@ -1346,6 +1709,10 @@ export async function executeInboundAutomationDecision({
     metadata: {
       source: "auto_reply",
       action_type: "autopilot_inbound_reply",
+      auto_reply_mode: effective_auto_reply_mode,
+      internal_test_phone: queue_permission.internal_test_phone,
+      proof: Boolean(proofRun),
+      no_send: Boolean(proofRun),
       classification_snapshot: classification,
       automation_decision_snapshot: base_decision,
       selected_template_snapshot: {
@@ -1397,6 +1764,8 @@ export async function executeInboundAutomationDecision({
       suppression_applied: false,
       duplicate_suppressed: queue_result?.reason === "duplicate_blocked",
       dry_run: false,
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
       audit_reason: blocked_decision.audit_reason,
       seller_stage_reply: {
         ok: true,
@@ -1437,6 +1806,8 @@ export async function executeInboundAutomationDecision({
     suppression_applied: false,
     duplicate_suppressed: false,
     dry_run: false,
+    auto_reply_mode: effective_auto_reply_mode,
+    queue_permission,
     audit_reason: base_decision.audit_reason,
     seller_stage_reply: {
       ok: true,

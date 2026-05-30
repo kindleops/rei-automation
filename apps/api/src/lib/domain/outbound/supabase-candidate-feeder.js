@@ -1235,7 +1235,6 @@ function buildTemplateVariablePayload(candidate = {}) {
       ""
     )
   );
-
   const payload = {
     seller_first_name: seller_identity.seller_first_name || "",
     first_name: seller_identity.seller_first_name || "",
@@ -3677,6 +3676,42 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       agent_name_raw
     )
   );
+  const safety_diagnostics = {
+    status: "passed",
+    evaluated_at: options.now || new Date().toISOString(),
+    campaign_session_id: candidate.campaign_session_id || null,
+    dedupe_key,
+    queue_key,
+    checks: {
+      internal_test_phone_blocked: true,
+      suppression_checked: true,
+      dnc_opt_out_checked: true,
+      duplicate_checked: true,
+      active_queue_checked: true,
+      same_phone_active_queue_checked: true,
+      identity_checked: true,
+      routing_checked: true,
+      template_checked: true,
+    },
+    routing: {
+      allowed: options.routing_allowed !== false,
+      tier: asNumber(options.routing_tier, null),
+      block_reason: options.routing_block_reason || null,
+      selected_textgrid_number_id: options.selected_textgrid_number_id || null,
+      selected_textgrid_market: options.selected_textgrid_market || null,
+    },
+    template: {
+      id: options.template_id || null,
+      source: options.template_source || "supabase",
+      use_case: options.template_use_case || null,
+      language: options.selected_template_language || options.template_language || null,
+    },
+    identity: {
+      status: candidate.identity_alignment?.status || null,
+      hard_block: Boolean(candidate.identity_alignment?.hardBlock),
+      seller_name_missing: Boolean(candidate.seller_name_missing || seller_identity.seller_name_missing),
+    },
+  };
 
   const payload = {
     queue_key,
@@ -3714,9 +3749,11 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     template_key: clean(pick(options.template_id, options.selected_template_id)) || null,
     language: clean(pick(candidate.language, candidate.best_language)) || null,
     routing_tier: asNumber(options.routing_tier, null),
+    safety_status: "passed",
     metadata: {
       idempotency_key,
       campaign_session_id: candidate.campaign_session_id,
+      safety_diagnostics,
       template_use_case: options.template_use_case,
       selected_textgrid_number_id: options.selected_textgrid_number_id,
       selected_textgrid_number: options.selected_textgrid_number,
@@ -3748,6 +3785,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
         canonical_phone_masked: maskPhone(candidate.canonical_e164),
         seller_market: candidate.market,
         seller_state: candidate.state,
+        campaign_session_id: candidate.campaign_session_id,
         touch_number: candidate.touch_number,
         template_use_case: options.template_use_case || null,
         template_key: clean(options.template_id) || null,
@@ -3940,6 +3978,49 @@ export function buildFeederDiagnostics(summary = {}) {
       : [],
     sample_skips: Array.isArray(summary.sample_skips) ? summary.sample_skips.slice(0, 50) : [],
   };
+
+  diagnostics.eligible = diagnostics.eligible_count;
+  diagnostics.skipped = diagnostics.skipped_count;
+  diagnostics.routing_blocked_count = diagnostics.routing_block_count;
+  diagnostics.suppressed_count = diagnostics.suppression_block_count;
+  diagnostics.template_blocked_count = diagnostics.template_block_count;
+  diagnostics.duplicate_blocked_count =
+    diagnostics.duplicate_queue_block_count + diagnostics.batch_duplicate_block_count;
+  diagnostics.active_queue_blocked_count = diagnostics.active_queue_block_count;
+  diagnostics.identity_held_count =
+    diagnostics.identity_hold_count +
+    diagnostics.identity_weak_held_count +
+    diagnostics.identity_unknown_held_count +
+    diagnostics.identity_household_held_count;
+  diagnostics.sample_candidates = diagnostics.sample_created_queue_items.map((item) => {
+    const payload = item?.payload || {};
+    const metadata = payload.metadata || {};
+    return {
+      queue_key: item?.queue_key || payload.queue_key || null,
+      master_owner_id: item?.master_owner_id || payload.master_owner_id || metadata.candidate_snapshot?.master_owner_id || null,
+      property_id: item?.property_id || payload.property_id || metadata.candidate_snapshot?.property_id || null,
+      market: item?.market || item?.seller_market || payload.market || metadata.seller_market || null,
+      state: item?.seller_state || payload.property_address_state || metadata.seller_state || null,
+      template_id: item?.selected_template_id || item?.template_id || payload.template_id || metadata.selected_template_id || null,
+      selected_textgrid_market: item?.selected_textgrid_market || metadata.selected_textgrid_market || null,
+      scheduled_for: item?.scheduled_for || payload.scheduled_for || payload.scheduled_for_utc || null,
+      safety_status: payload.safety_status || (item?.dry_run ? "preview" : null),
+    };
+  });
+  const selectedTemplates = new Map();
+  for (const item of diagnostics.sample_created_queue_items) {
+    const payload = item?.payload || {};
+    const metadata = payload.metadata || {};
+    const template_id = clean(item?.selected_template_id || item?.template_id || payload.template_id || metadata.selected_template_id || metadata.template?.id);
+    if (!template_id || selectedTemplates.has(template_id)) continue;
+    selectedTemplates.set(template_id, {
+      template_id,
+      source: clean(metadata.selected_template_source || metadata.template?.source || "supabase") || "supabase",
+      use_case: clean(item?.template_use_case || metadata.selected_template_use_case || metadata.template?.use_case || payload.use_case_template) || null,
+      language: clean(item?.selected_template_language || item?.language || metadata.selected_template_language) || null,
+    });
+  }
+  diagnostics.selected_templates = Array.from(selectedTemplates.values());
 
   return diagnostics;
 }

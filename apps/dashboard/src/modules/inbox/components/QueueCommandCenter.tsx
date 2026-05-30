@@ -15,8 +15,37 @@ export interface QueueCommandCaps {
   max_per_market_per_hour: number
 }
 
+export interface CampaignControlDiagnostics {
+  queue_processor_mode?: string
+  auto_reply_mode?: string
+  campaign_mode?: string
+  candidate_source?: string
+  daily_cap?: number | string | null
+  hard_cap?: number | string | null
+  max_batch_size?: number | string | null
+  market_cap?: number | string | null
+  per_number_cap?: number | string | null
+  scan_limit?: number | string | null
+  stats?: {
+    queue_depth?: number
+    queued_today?: number
+    sent_today?: number
+    delivered_today?: number
+    failed_today?: number
+    opt_outs_today?: number
+    positive_replies_today?: number
+  }
+  last_run?: {
+    status?: string
+    at?: string | null
+    diagnostics?: unknown
+  }
+  [key: string]: unknown
+}
+
 interface QueueCommandCenterProps {
   health: QueueProcessorHealth | null
+  control?: CampaignControlDiagnostics | null
   loading: boolean
   mode: QueueCommandMode
   caps: QueueCommandCaps
@@ -55,9 +84,29 @@ const healthLabel = (status: string) => {
 }
 
 const modeLabel = (mode: QueueCommandMode) => {
-  if (mode === 'assisted') return 'Assisted Autopilot'
-  if (mode === 'automatic') return 'Automatic'
+  if (mode === 'assisted') return 'Dry Run'
+  if (mode === 'automatic') return 'Live Limited'
   return 'Paused'
+}
+
+const displayValue = (value: unknown, fallback = '—') => {
+  const text = String(value ?? '').trim()
+  return text.length > 0 ? text : fallback
+}
+
+const displayNumber = (value: unknown, fallback = '—') => {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toLocaleString() : fallback
+}
+
+const compactDiagnostics = (value: unknown) => {
+  if (!value) return '—'
+  if (typeof value === 'string') return value.slice(0, 96)
+  try {
+    return JSON.stringify(value).slice(0, 96)
+  } catch {
+    return 'available'
+  }
 }
 
 const heroSentence = (
@@ -121,6 +170,7 @@ function WhyCriticalPanel({ health }: WhyCriticalPanelProps) {
 // ── Main Component ────────────────────────────────────────────────────────
 export function QueueCommandCenter({
   health,
+  control,
   loading,
   mode,
   caps,
@@ -152,6 +202,13 @@ export function QueueCommandCenter({
   const tone = toneFor(health)
   const status = health?.status ?? 'unknown'
   const busy = loading || actionLoading !== null
+  const stats = control?.stats ?? {}
+  const campaignMode = displayValue(control?.campaign_mode, mode === 'automatic' ? 'live_limited' : mode === 'assisted' ? 'dry_run' : 'paused')
+  const queueProcessorMode = displayValue(control?.queue_processor_mode, mode)
+  const autoReplyMode = displayValue(control?.auto_reply_mode, 'guarded')
+  const candidateSource = displayValue(control?.candidate_source, 'v_sms_ready_contacts_expanded')
+  const lastRunStatus = displayValue(control?.last_run?.status, displayValue(control?.queue_last_run_status, 'idle'))
+  const lastRunDiagnostics = compactDiagnostics(control?.last_run?.diagnostics ?? control?.queue_last_run_diagnostics)
 
   // Derive "needs attention" items from health counts
   const attentionItems = [
@@ -227,27 +284,27 @@ export function QueueCommandCenter({
       <div className="qcc-mode-band">
         <div className="qcc-segment">
           <button type="button" className={cls('qcc-chip', mode === 'paused' && 'is-active')} onClick={() => onModeChange('paused')} disabled={busy}>Paused</button>
-          <button type="button" className={cls('qcc-chip', mode === 'assisted' && 'is-active')} onClick={() => onModeChange('assisted')} disabled={busy}>Assisted</button>
+          <button type="button" className={cls('qcc-chip', mode === 'assisted' && 'is-active')} onClick={() => onModeChange('assisted')} disabled={busy}>Dry Run</button>
           <button
             type="button"
             className={cls('qcc-chip', mode === 'automatic' && 'is-active')}
             onClick={() => onModeChange('automatic')}
             disabled={busy}
           >
-            Automatic
+            Limited
           </button>
         </div>
 
         <div className="qcc-primary-actions">
           <button type="button" className="qcc-btn is-primary" onClick={onQueueMore} disabled={busy}>
-            {actionLoading === 'queue_more' ? 'Finding...' : 'Find Sellers'}
+            {actionLoading === 'queue_more' ? 'Previewing...' : 'Dry-Run Preview'}
           </button>
           <button type="button" className="qcc-btn is-primary" onClick={onRunSafeBatch} disabled={busy}>
-            {actionLoading === 'safe_batch' ? 'Sending...' : 'Send Small Batch'}
+            {actionLoading === 'safe_batch' ? 'Queueing...' : 'Queue Limited'}
           </button>
           {mode !== 'automatic' && (
             <button type="button" className="qcc-btn is-primary" onClick={() => onModeChange('automatic')} disabled={busy}>
-              Start Automatic
+              Set Limited
             </button>
           )}
           {mode !== 'paused' && (
@@ -268,7 +325,7 @@ export function QueueCommandCenter({
 
             <div className="qcc-advanced__actions">
               <button type="button" className="qcc-btn is-secondary" onClick={onRunQueueNow} disabled={busy}>
-                {actionLoading === 'run_now' ? 'Start Sending...' : 'Run Queue Once'}
+                {actionLoading === 'run_now' ? 'Running...' : 'Run Limited Batch'}
               </button>
               <button type="button" className="qcc-btn is-secondary" onClick={() => onReprocessPaused()} disabled={busy}>
                 {actionLoading === 'reprocess_paused' ? 'Reprocessing...' : 'Reprocess Paused'}
@@ -311,6 +368,40 @@ export function QueueCommandCenter({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="qcc-status-grid">
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Campaign</p>
+          <div className="qcc-status-item"><span>Processor</span><strong>{queueProcessorMode}</strong></div>
+          <div className="qcc-status-item"><span>Auto Reply</span><strong>{autoReplyMode}</strong></div>
+          <div className="qcc-status-item"><span>Campaign Mode</span><strong>{campaignMode}</strong></div>
+          <div className="qcc-status-item"><span>Candidate Source</span><strong title={candidateSource}>{candidateSource}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Caps</p>
+          <div className="qcc-status-item"><span>Daily Cap</span><strong>{displayNumber(control?.daily_cap ?? control?.queue_daily_send_cap)}</strong></div>
+          <div className="qcc-status-item"><span>Hard Cap</span><strong>{displayNumber(control?.hard_cap ?? control?.queue_hard_cap)}</strong></div>
+          <div className="qcc-status-item"><span>Batch Max</span><strong>{displayNumber(control?.max_batch_size ?? control?.queue_max_batch_size)}</strong></div>
+          <div className="qcc-status-item"><span>Market Cap</span><strong>{displayNumber(control?.market_cap ?? control?.queue_market_cap ?? control?.queue_market_throttle)}</strong></div>
+          <div className="qcc-status-item"><span>Per Number</span><strong>{displayNumber(control?.per_number_cap ?? control?.queue_per_number_cap ?? control?.queue_sender_throttle)}</strong></div>
+          <div className="qcc-status-item"><span>Scan Limit</span><strong>{displayNumber(control?.scan_limit ?? control?.queue_scan_limit)}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Today</p>
+          <div className="qcc-status-item"><span>Queue Depth</span><strong>{displayNumber(stats.queue_depth ?? health?.queuedCount)}</strong></div>
+          <div className="qcc-status-item"><span>Queued</span><strong>{displayNumber(stats.queued_today)}</strong></div>
+          <div className="qcc-status-item"><span>Sent</span><strong>{displayNumber(stats.sent_today ?? health?.sentTodayCount)}</strong></div>
+          <div className="qcc-status-item"><span>Delivered</span><strong>{displayNumber(stats.delivered_today ?? health?.deliveredTodayCount)}</strong></div>
+          <div className="qcc-status-item"><span>Failed</span><strong>{displayNumber(stats.failed_today ?? health?.failedTodayCount)}</strong></div>
+          <div className="qcc-status-item"><span>Opt-Outs</span><strong>{displayNumber(stats.opt_outs_today)}</strong></div>
+          <div className="qcc-status-item"><span>Positive Replies</span><strong>{displayNumber(stats.positive_replies_today)}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Last Run</p>
+          <div className="qcc-status-item"><span>Status</span><strong>{lastRunStatus}</strong></div>
+          <div className="qcc-status-item"><span>Diagnostics</span><strong title={lastRunDiagnostics}>{lastRunDiagnostics}</strong></div>
+        </div>
       </div>
 
       {/* ── SECTION 3: Live Status Display ─────────────────────────── */}

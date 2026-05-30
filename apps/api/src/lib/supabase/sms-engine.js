@@ -1146,6 +1146,7 @@ export async function incrementTextgridNumberUsage(selection, deps = {}) {
 
 function buildSuccessMessageEvent(row, send_result, options = {}) {
   const normalized = normalizeSendQueueRow(row);
+  const row_metadata = ensureObject(normalized.metadata);
   const event_timestamp = options.now || nowIso();
   const queue_key = clean(normalized.queue_key) || clean(normalized.queue_id) || String(normalized.id);
   const thread_key = canonicalThreadKeyForDirection(
@@ -1164,9 +1165,14 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
   return {
     message_event_key: `outbound_${queue_key}`,
     provider_message_sid: sid,
+    message_id: sid,
     direction: "outbound",
     type: "outbound",
     event_type: "outbound_send",
+    source_app: row_metadata.proof ? "internal_test" : "Send Queue",
+    trigger_name: clean(row_metadata.proof_source) || "queue-send",
+    triggered_by: clean(row_metadata.proof_source) || "queue_runner",
+    processed_by: "Queue Runner",
     message_body: normalized.message_body,
     to_phone_number: normalized.to_phone_number,
     from_phone_number: normalized.from_phone_number,
@@ -1217,12 +1223,20 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
         queue_key: normalized.queue_key,
         queue_status: normalized.queue_status,
       },
+      proof: Boolean(row_metadata.proof),
+      proof_key: clean(row_metadata.proof_key) || null,
+      proof_source: clean(row_metadata.proof_source) || null,
+      internal_test: Boolean(row_metadata.internal_test || row_metadata.internal_test_phone),
+      internal_test_phone: Boolean(row_metadata.internal_test_phone),
+      exclude_from_kpis: Boolean(row_metadata.exclude_from_kpis),
+      no_send: Boolean(row_metadata.no_send),
     },
   };
 }
 
 function buildFailureMessageEvent(row, error, options = {}) {
   const normalized = normalizeSendQueueRow(row);
+  const row_metadata = ensureObject(normalized.metadata);
   const event_timestamp = options.now || nowIso();
   const queue_key = clean(normalized.queue_key) || clean(normalized.queue_id) || String(normalized.id);
   const timestamp_key = event_timestamp.replace(/[^0-9]/g, "").slice(0, 14);
@@ -1245,6 +1259,10 @@ function buildFailureMessageEvent(row, error, options = {}) {
     direction: "outbound",
     type: "outbound",
     event_type: "outbound_send_failed",
+    source_app: row_metadata.proof ? "internal_test" : "Send Queue",
+    trigger_name: clean(row_metadata.proof_source) || "queue-send-failed",
+    triggered_by: clean(row_metadata.proof_source) || "queue_runner",
+    processed_by: "Queue Runner",
     message_body: normalized.message_body,
     to_phone_number: normalized.to_phone_number,
     from_phone_number: normalized.from_phone_number,
@@ -1281,6 +1299,13 @@ function buildFailureMessageEvent(row, error, options = {}) {
         status: error?.status || null,
       },
       send_result: options.send_result || null,
+      proof: Boolean(row_metadata.proof),
+      proof_key: clean(row_metadata.proof_key) || null,
+      proof_source: clean(row_metadata.proof_source) || null,
+      internal_test: Boolean(row_metadata.internal_test || row_metadata.internal_test_phone),
+      internal_test_phone: Boolean(row_metadata.internal_test_phone),
+      exclude_from_kpis: Boolean(row_metadata.exclude_from_kpis),
+      no_send: Boolean(row_metadata.no_send),
     },
   };
 }
@@ -2397,6 +2422,25 @@ export async function logInboundMessageEvent(payload, options = {}) {
     payload?.routing_allowed ?? classificationFields?.routing_allowed,
     null
   );
+  const auto_reply_status = clean(
+    payload?.auto_reply_status || classificationFields?.auto_reply_status
+  ) || null;
+  const auto_reply_queue_id = clean(
+    payload?.auto_reply_queue_id || classificationFields?.auto_reply_queue_id
+  ) || null;
+  const automation_decision =
+    ensureObject(payload?.automation_decision).should_queue_reply !== undefined
+      ? payload.automation_decision
+      : ensureObject(classificationFields?.automation_decision).should_queue_reply !== undefined
+        ? classificationFields.automation_decision
+        : null;
+  const human_review_required = asNullableBoolean(
+    payload?.human_review_required ??
+      classificationFields?.human_review_required ??
+      payload?.needs_human_review ??
+      classificationFields?.needs_human_review,
+    null
+  );
 
   let existing_row = null;
   const supabase = getSupabase(options);
@@ -2448,6 +2492,8 @@ export async function logInboundMessageEvent(payload, options = {}) {
       null,
     type: clean(payload?.type || payload?.metadata?.type) || "inbound",
     safety_status: safety_status || "pending",
+    auto_reply_status,
+    auto_reply_queue_id,
     priority: priority || "normal",
     risk: risk || "low",
     routing_allowed: routing_allowed ?? true,
@@ -2478,6 +2524,10 @@ export async function logInboundMessageEvent(payload, options = {}) {
       ...(risk ? { risk } : {}),
       ...(safety_status ? { safety_status } : {}),
       ...(routing_allowed !== null ? { routing_allowed } : {}),
+      ...(auto_reply_status ? { auto_reply_status } : {}),
+      ...(auto_reply_queue_id ? { auto_reply_queue_id } : {}),
+      ...(automation_decision ? { automation_decision } : {}),
+      ...(human_review_required !== null ? { human_review_required } : {}),
       ...(body_missing ? {
         body_missing: true,
         available_payload_keys: raw_body_keys,
@@ -2867,7 +2917,8 @@ const SEND_QUEUE_COLUMNS = [
   "provider_message_id", "local_send_date", "local_send_hour", "paused_reason", 
   "last_guard_checked_at", "dedupe_key", "seller_first_name", "seller_display_name", "thread_key", 
   "template_source", "priority", "risk", "sms_eligible", "routing_allowed", "safety_status", 
-  "type", "detected_intent", "stage_before", "stage_after", "textgrid_message_id", "market",
+  "type", "source_event_id", "inbound_message_id", "detected_intent", "stage_before", "stage_after",
+  "rendered_message", "template_selected", "textgrid_message_id", "market",
   "textgrid_number", "selected_template_id",
   "property_address_state", "language", "routing_tier",
   "property_address_city", "property_address_zip", "seller_status",
