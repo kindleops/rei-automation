@@ -4,7 +4,11 @@ import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
-import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
+import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
+import {
+  blockedRuntimeBrakeResult,
+  evaluateQueueCreationRuntimeBrakes,
+} from "@/lib/domain/queue/queue-control-safety.js";
 import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
@@ -783,6 +787,8 @@ function buildCandidateNormalizedPreview(raw, candidate) {
     joined_property_source: candidate.joined_property_source || null,
     normalized_market: candidate.market || null,
     normalized_state: candidate.state || null,
+    identity_resolution: candidate.identity_alignment?.status || null,
+    identity_alignment_status: candidate.identity_alignment?.status || null,
   };
 }
 
@@ -4060,6 +4066,28 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
 
   // ── System control gate ────────────────────────────────────────────────
   if (!input.dry_run) {
+    const get_system_value =
+      deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+    const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+      {
+        campaign_mode: await get_system_value("campaign_mode"),
+        queue_auto_enqueue_enabled: await get_system_value("queue_auto_enqueue_enabled"),
+        queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+      },
+      {
+        action: "runSupabaseCandidateFeeder",
+        requireAutoEnqueue: false,
+        failClosed: false,
+      }
+    );
+    if (!runtime_brake.ok) {
+      return {
+        status: 423,
+        ...blockedRuntimeBrakeResult(runtime_brake, "runSupabaseCandidateFeeder"),
+        queued_count: 0,
+      };
+    }
+
     const feeder_enabled = await getSystemFlag("feeder_enabled");
     if (!feeder_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("feeder_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
@@ -4693,6 +4721,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       selected_textgrid_market: routing.selected.market,
       seller_market: candidate.market,
       seller_state: candidate.state,
+      identity_resolution: candidate.identity_alignment?.status || null,
+      identity_alignment_status: candidate.identity_alignment?.status || null,
+      identity_status: candidate.identity_alignment?.status || null,
+      candidate_preview: options.dry_run ? buildCandidateNormalizedPreview(candidate.raw, candidate) : undefined,
       routing_tier: routing.routing_tier,
       selection_reason: routing.selection_reason,
       routing_rule_name: routing.routing_rule_name,
