@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import { callProofJson, formatProofHttp401Diagnostic } from "./proof-http-client.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -96,32 +97,20 @@ function headers() {
 }
 
 async function callJson(pathOrUrl, options = {}) {
-  const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${BASE_URL}${pathOrUrl}`;
-  const startedAt = performance.now();
-  let status = 0;
-  let json = null;
-  let raw = "";
-  let error = null;
-  try {
-    const response = await fetch(url, {
-      method: options.method || "GET",
-      headers: options.headers || headers(),
-      body: options.body,
-    });
-    status = response.status;
-    raw = await response.text();
-    json = raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    error = err?.message || String(err);
-  }
-  return {
-    status,
-    json,
-    raw,
-    error,
-    ms: Math.round(performance.now() - startedAt),
-    url,
-  };
+  return callProofJson({
+    root: ROOT,
+    baseUrl: BASE_URL,
+    pathOrUrl,
+    method: options.method || "GET",
+    headers: options.headers || headers(),
+    body: options.body,
+    timeoutSeconds: options.timeout_seconds || 60,
+  });
+}
+
+function routeSummary(result = {}) {
+  const authDiagnostic = formatProofHttp401Diagnostic(result);
+  return `status=${result.status} ms=${result.ms}${authDiagnostic ? ` ${authDiagnostic}` : ""}`;
 }
 
 async function countRowsForSession(campaignSessionId) {
@@ -170,7 +159,7 @@ async function main() {
   const preview = json.preview || {};
   const blockReasons = json.block_reasons || {};
 
-  mark("dry-run route returned 200", result.status === 200, `status=${result.status} ms=${result.ms}`);
+  mark("dry-run route returned 200", result.status === 200, routeSummary(result));
   mark("dry-run response ok", json.ok === true, `ok=${json.ok}`);
   mark("dry-run flag preserved", json.dry_run === true || preview.dry_run === true, `dry_run=${json.dry_run ?? preview.dry_run}`);
   mark("no live rows reported inserted", Number(json.inserted_count || 0) === 0 && Number(json.live_rows_inserted || 0) === 0);

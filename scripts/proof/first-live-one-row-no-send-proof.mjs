@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import { callProofJson, formatProofHttp401Diagnostic } from "./proof-http-client.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const API_ROOT = path.join(ROOT, "apps/api");
@@ -19,7 +20,7 @@ const envFiles = [
 
 const MARKET = process.env.FIRST_LIVE_ONE_ROW_PROOF_MARKET || "Houston, TX";
 const STATE = process.env.FIRST_LIVE_ONE_ROW_PROOF_STATE || "TX";
-const CANDIDATE_SOURCE = process.env.FIRST_LIVE_ONE_ROW_PROOF_SOURCE || "v_feeder_candidates_fast";
+const CANDIDATE_SOURCE = process.env.FIRST_LIVE_ONE_ROW_PROOF_SOURCE || "outbound_feeder_candidates";
 const SCAN_LIMIT = Number(process.env.FIRST_LIVE_ONE_ROW_PROOF_SCAN_LIMIT || 100);
 const CONFIRM = "SEND_ONE_REAL_SELLER_SMS";
 
@@ -106,7 +107,19 @@ function headers() {
 
 function responseSummary(result = {}) {
   const json = result.json || {};
-  return `status=${result.status} ok=${json.ok} reason=${json.reason || json.error || result.error || "none"} queue_row_id=${json.queue_row_id || "n/a"} ms=${result.ms}`;
+  const diagnosticsResult = json.diagnostics_result || {};
+  const reason =
+    json.reason ||
+    json.error ||
+    json.message ||
+    diagnosticsResult.reason ||
+    diagnosticsResult.error ||
+    diagnosticsResult.message ||
+    result.error ||
+    "none";
+  const diagnosticsStatus = diagnosticsResult.status ? ` diagnostics_status=${diagnosticsResult.status}` : "";
+  const authDiagnostic = formatProofHttp401Diagnostic(result);
+  return `status=${result.status} ok=${json.ok} reason=${reason}${diagnosticsStatus} queue_row_id=${json.queue_row_id || "n/a"} ms=${result.ms}${authDiagnostic ? ` ${authDiagnostic}` : ""}`;
 }
 
 function createSupabaseClient() {
@@ -117,40 +130,16 @@ function createSupabaseClient() {
 }
 
 async function callQueueControl(body) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180_000);
-  const startedAt = performance.now();
-  try {
-    const response = await fetch(`${BASE_URL}/api/cockpit/queue/control`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    const raw = await response.text();
-    let json = null;
-    try {
-      json = raw ? JSON.parse(raw) : null;
-    } catch {
-      json = null;
-    }
-    return {
-      status: response.status,
-      json,
-      raw,
-      ms: Math.round(performance.now() - startedAt),
-    };
-  } catch (error) {
-    return {
-      status: 0,
-      json: null,
-      raw: "",
-      error: error?.message || String(error),
-      ms: Math.round(performance.now() - startedAt),
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  return callProofJson({
+    root: ROOT,
+    baseUrl: BASE_URL,
+    pathOrUrl: "/api/cockpit/queue/control",
+    label: `queue/control ${body?.action || "unknown"}`,
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(body),
+    timeoutSeconds: 180,
+  });
 }
 
 async function setSystemValues(supabase, values = {}) {

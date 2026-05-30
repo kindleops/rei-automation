@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { callProofJson, formatProofHttp401Diagnostic } from "./proof-http-client.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const PRIMARY_THREAD_SOURCE = "v_inbox_threads_live_v2";
@@ -68,10 +69,6 @@ function asBool(value) {
   return value === true || String(value).toLowerCase() === "true";
 }
 
-function msSince(startedAt) {
-  return Math.max(0, Math.round(performance.now() - startedAt));
-}
-
 function headers(extra = {}) {
   const h = {
     "content-type": "application/json",
@@ -122,39 +119,17 @@ function countsSourceFromLive(json = {}) {
 }
 
 async function callJson(label, pathOrUrl, options = {}) {
-  const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${BASE_URL}${pathOrUrl}`;
-  const startedAt = performance.now();
-  let status = 0;
-  let json = null;
-  let raw = "";
-  let error = null;
-
-  try {
-    const response = await fetch(url, {
-      method: options.method || "GET",
-      headers: options.headers || headers(),
-      body: options.body,
-    });
-    status = response.status;
-    raw = await response.text();
-    try {
-      json = raw ? JSON.parse(raw) : null;
-    } catch {
-      error = `non_json_response:${raw.slice(0, 120)}`;
-    }
-  } catch (err) {
-    error = err?.message || String(err);
-  }
-
-  const result = {
+  const result = await callProofJson({
+    root: ROOT,
+    baseUrl: BASE_URL,
+    pathOrUrl,
     label,
-    url,
-    status,
-    ms: msSince(startedAt),
-    json,
-    error,
-    degraded: degradedFromJson(json || {}),
-  };
+    method: options.method || "GET",
+    headers: options.headers || headers(),
+    body: options.body,
+    timeoutSeconds: options.timeout_seconds || 60,
+  });
+  result.degraded = degradedFromJson(result.json || {});
   results.push(result);
   return result;
 }
@@ -179,6 +154,8 @@ function mark(label, condition, detail = "", warnOnly = false) {
 function routeDetail(result) {
   const parts = [`status=${result.status || "ERR"}`, `${result.ms}ms`];
   if (result.degraded) parts.push("degraded=true");
+  const authDiagnostic = formatProofHttp401Diagnostic(result);
+  if (authDiagnostic) parts.push(authDiagnostic);
   if (result.error) parts.push(`error=${result.error}`);
   return `[${parts.join(" ")}]`;
 }
