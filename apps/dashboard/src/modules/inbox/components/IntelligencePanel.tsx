@@ -6122,6 +6122,9 @@ export const IntelligencePanel = ({
   void onStatusChange
   void onStageChange
 
+  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
+  const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
+
   if (!thread) {
     return (
       <aside className="nx-intelligence-panel">
@@ -6133,8 +6136,6 @@ export const IntelligencePanel = ({
     )
   }
 
-  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
-  const { data: phase3 } = usePhase3Intelligence(thread.threadKey)
   const panelClassMode = layoutMode === 'compact'
     ? 'compact'
     : layoutMode === 'medium'

@@ -30,6 +30,8 @@ async function main() {
   const api500s = [];
   const apiHits = [];
   const browserErrors = [];
+  const browserWarnings = [];
+  const staticFlagWarnings = [];
 
   page.on("response", (response) => {
     const url = response.url();
@@ -40,7 +42,10 @@ async function main() {
   });
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") browserErrors.push(message.text());
+    const text = message.text();
+    if (/Expected static flag/i.test(text)) staticFlagWarnings.push(text);
+    if (message.type() === "error") browserErrors.push(text);
+    if (message.type() === "warning") browserWarnings.push(text);
   });
 
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -116,6 +121,12 @@ async function main() {
     api500s.slice(0, 3).map((hit) => `${hit.status}:${hit.url}`).join(" "),
     true
   );
+  mark(
+    "no React static flag warning",
+    staticFlagWarnings.length === 0,
+    staticFlagWarnings.slice(0, 2).join(" | ")
+  );
+  mark("no browser warnings", browserWarnings.length === 0, browserWarnings.slice(0, 3).join(" | "), true);
   mark("no uncaught browser errors", browserErrors.length === 0, browserErrors.slice(0, 3).join(" | "), true);
 
   await browser.close();

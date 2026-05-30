@@ -21,6 +21,12 @@ import { isOfferStageTrigger, runOfferStageAI, buildOfferStageMetadata, shouldSk
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
 import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
+import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
+import {
+  autoReplyModeAllowsDiagnostics,
+  autoReplyModeAllowsQueue,
+  resolveGuardedAutoReplyMode,
+} from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import {
   normalizeSellerFlowUseCase,
@@ -48,7 +54,7 @@ import {
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
-import { getSystemFlags } from "@/lib/system-control.js";
+import { getSystemFlags, getSystemValue } from "@/lib/system-control.js";
 
 const defaultDeps = {
   loadContext,
@@ -70,6 +76,7 @@ const defaultDeps = {
   syncPipelineState,
   processAutonomousSellerReply,
   resolveSellerAutoReplyPlan,
+  executeInboundAutomationDecision,
   scheduleFollowUp,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
@@ -88,6 +95,8 @@ const defaultDeps = {
   findInboundAutopilotQueue,
   updateInboundAutopilotQueue,
   getSupabaseClient: getDefaultSupabaseClient,
+  getSystemFlags,
+  getSystemValue,
   info,
   warn,
   isOfferStageTrigger,
@@ -222,6 +231,38 @@ function buildDiscordReviewMetadata({
       (autopilot_enabled && clean(outbound_queue_id) ? "autopilot_pending" : "manual_review_required"),
     discord_available_actions: available_actions,
   };
+}
+
+function extractAutomationDecisionFromSellerStageReply(seller_stage_reply = null) {
+  return (
+    seller_stage_reply?.plan?.automation_decision ||
+    seller_stage_reply?.automation_decision ||
+    seller_stage_reply?.queue_result?.raw?.metadata?.automation_decision_snapshot ||
+    null
+  );
+}
+
+function deriveHumanReviewRequired(seller_stage_reply = null) {
+  const decision = extractAutomationDecisionFromSellerStageReply(seller_stage_reply);
+  if (decision?.should_mark_human_review === true) return true;
+  if (decision?.human_review_reason) return true;
+  return clean(seller_stage_reply?.plan?.safety_tier) === "review";
+}
+
+function deriveAutoReplyStatus({
+  seller_stage_reply = null,
+  auto_reply_mode = "disabled",
+  enabled = false,
+} = {}) {
+  const decision = extractAutomationDecisionFromSellerStageReply(seller_stage_reply);
+  if (!enabled || auto_reply_mode === "disabled") return "disabled";
+  if (seller_stage_reply?.queued || seller_stage_reply?.queue_row_id) return "queued";
+  if (decision?.should_suppress_contact || seller_stage_reply?.plan?.safety_tier === "suppress") {
+    return "suppressed";
+  }
+  if (deriveHumanReviewRequired(seller_stage_reply)) return "human_review_required";
+  if (seller_stage_reply?.preview_result || clean(seller_stage_reply?.rendered_text)) return "dry_run";
+  return seller_stage_reply?.reason || "no_reply";
 }
 
 async function postInboundDiscordReviewCard({
@@ -423,6 +464,20 @@ function buildSecondPassSupabasePayload({
   const priority = deriveSecondPassPriority(auto_reply_plan);
   const risk = deriveSecondPassRisk(auto_reply_plan);
   const routing_allowed = clean(auto_reply_plan?.safety_tier) !== "suppress";
+  const automation_decision = auto_reply_plan?.automation_decision || null;
+  const human_review_required = Boolean(
+    automation_decision?.should_mark_human_review ||
+      auto_reply_plan?.safety_tier === "review" ||
+      (classification_confidence !== null && classification_confidence < 0.90)
+  );
+  const auto_reply_status = auto_reply_plan
+    ? deriveAutoReplyStatus({
+        seller_stage_reply: { plan: auto_reply_plan },
+        auto_reply_mode: auto_reply_plan?.auto_reply_mode || "dry_run",
+        enabled: true,
+      })
+    : null;
+  const auto_reply_queue_id = auto_reply_plan?.queue_row_id || auto_reply_plan?.queue_item_id || null;
 
   return {
     message_id: extracted.message_id || null,
@@ -439,6 +494,10 @@ function buildSecondPassSupabasePayload({
     language,
     classification_confidence,
     safety_status,
+    auto_reply_status,
+    auto_reply_queue_id,
+    human_review_required,
+    needs_human_review: human_review_required,
     priority,
     risk,
     routing_allowed,
@@ -450,11 +509,14 @@ function buildSecondPassSupabasePayload({
       priority,
       risk,
       routing_allowed,
+      auto_reply_status,
+      auto_reply_queue_id,
+      automation_decision,
+      human_review_required,
       sentiment: classification?.emotion || null,
       seller_stage: route?.stage || null,
       conversation_stage: route?.stage || context?.summary?.conversation_stage || null,
-      needs_human_review:
-        classification_confidence !== null ? classification_confidence < 0.90 : true,
+      needs_human_review: human_review_required,
       next_action: route?.use_case || auto_reply_plan?.selected_use_case || null,
     },
   };
@@ -654,6 +716,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     auto_reply_enabled = null,
     auto_reply_live_enabled = null,
     auto_reply_dry_run = null,
+    auto_reply_mode = null,
     auto_post_discord_card = null,
     auto_reply_delay_seconds = null,
     inbound_user_initiated = true,
@@ -677,9 +740,21 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   // auto_reply_enabled must be true in system_control before any auto-reply is queued.
   // followup_enabled must be true in system_control before any follow-up is queued.
   const { auto_reply_enabled: system_auto_reply_enabled, followup_enabled: system_followup_enabled } =
-    await getSystemFlags(["auto_reply_enabled", "followup_enabled"]);
-
-  const inbound_autopilot_enabled = auto_reply_enabled_final && auto_reply_live_enabled_final && system_auto_reply_enabled;
+    await runtimeDeps.getSystemFlags(["auto_reply_enabled", "followup_enabled"]);
+  const system_auto_reply_mode = await runtimeDeps.getSystemValue("auto_reply_mode");
+  const auto_reply_mode_resolution = resolveGuardedAutoReplyMode({
+    requestedMode: auto_reply_mode,
+    systemMode: system_auto_reply_mode,
+    legacyEnabled: Boolean(auto_reply_enabled_final && system_auto_reply_enabled),
+    legacyDryRun: Boolean(auto_reply_dry_run_final),
+    legacyLiveEnabled: Boolean(auto_reply_live_enabled_final),
+  });
+  const auto_reply_mode_final = auto_reply_mode_resolution.mode;
+  const inbound_autopilot_enabled = autoReplyModeAllowsDiagnostics(auto_reply_mode_final);
+  const inbound_auto_reply_queue_enabled = Boolean(
+    system_auto_reply_enabled &&
+      ["internal_only", "live_limited"].includes(auto_reply_mode_final)
+  );
   const inbound_autopilot_post_discord_card = asBoolean(
     auto_post_discord_card,
     asBoolean(process.env.INBOUND_AUTOPILOT_POST_DISCORD_CARD, true)
@@ -1285,8 +1360,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             to: inbound_to,
             message_body,
             detected_intent:
-              seller_stage_reply?.plan?.inbound_intent ||
-              seller_stage_reply?.plan?.detected_intent ||
+              classification?.detected_intent ||
+              classification?.primary_intent ||
               classification?.objection ||
               classification?.source ||
               null,
@@ -1295,16 +1370,13 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
               context?.summary?.language_preference ||
               "English",
             classification_confidence: classification?.confidence || 0,
-            safety_status:
-              seller_stage_reply?.plan?.safety_tier === "auto_send"
-                ? "safe"
-                : "review_required",
-            routing_allowed: Boolean(seller_stage_reply?.should_queue_reply),
+            safety_status: second_pass_supabase_payload.safety_status || "review_required",
+            routing_allowed: second_pass_supabase_payload.routing_allowed,
             metadata: {
               ...(classification || {}),
               route_stage: route?.stage || null,
               use_case: route?.use_case || null,
-              seller_stage_reply_reason: seller_stage_reply?.reason || null,
+              seller_stage_reply_reason: null,
               second_pass_authoritative: true,
             },
           };
@@ -1509,6 +1581,9 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         should_queue_reply: auto_reply_plan.should_queue_reply,
         blocked_reason: auto_reply_plan.suppression_reason || null,
         cap_reached,
+        auto_reply_mode: auto_reply_mode_final,
+        auto_reply_mode_source: auto_reply_mode_resolution.source,
+        auto_reply_queue_enabled: inbound_auto_reply_queue_enabled,
         followup_scheduled: Boolean(seller_followup_result?.followup_created),
         followup_scheduled_for: seller_followup_result?.scheduled_for || null,
         followup_reason: seller_followup_result?.reason || null,
@@ -1574,25 +1649,67 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       }
 
       if (offer_route !== "manual_review") {
-        const should_queue_live = !auto_reply_dry_run_final && inbound_autopilot_enabled && !cap_reached;
+        const queue_permission = autoReplyModeAllowsQueue({
+          mode: auto_reply_mode_final,
+          inboundFrom: inbound_from,
+          threadKey: inbound_from,
+        });
+        const should_queue_live = Boolean(
+          inbound_auto_reply_queue_enabled &&
+            queue_permission.allowed &&
+            !cap_reached &&
+            auto_reply_plan?.should_queue_reply
+        );
 
-        if (!is_preview && should_queue_live && auto_reply_plan?.should_queue_reply) {
-          seller_stage_reply = await runtimeDeps.processAutonomousSellerReply({
-            inbound_from,
-            inbound_to: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number,
+        if (inbound_autopilot_enabled) {
+          const auto_reply_execution = await runtimeDeps.executeInboundAutomationDecision({
+            message: message_body,
+            threadKey: inbound_from,
+            propertyId: property_id,
+            prospectId: prospect_id,
+            ownerId: master_owner_id,
+            phoneId: phone_item_id,
+            classification,
+            conversationBrain: brain_item,
+            latestThreadContext: context,
             context,
-            auto_reply_plan,
-            inbound_event_id: inbound_message_event_id,
-            extra_template_render_overrides,
+            inboundFrom: inbound_from,
+            inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
+            inboundEventId: inbound_message_event_id || extracted.message_id,
+            enableQueueInsert: should_queue_live,
+            applySuppression: true,
+            dryRun: !should_queue_live,
+            autoReplyMode: auto_reply_mode_final,
+            scheduleDelaySeconds: inbound_autopilot_delay_seconds,
+            supabaseClient: runtimeDeps.getSupabaseClient?.(),
           });
 
-          if (seller_stage_reply?.ok && seller_stage_reply?.queue_row_id) {
+          seller_stage_reply = auto_reply_execution?.seller_stage_reply || {
+            ok: true,
+            queued: false,
+            handled: true,
+            reason: auto_reply_execution?.audit_reason || "auto_reply_execution_unavailable",
+            plan: auto_reply_plan,
+            brain_stage: auto_reply_plan?.selected_use_case,
+          };
+
+          extra_queue_context = {
+            ...extra_queue_context,
+            auto_reply_mode: auto_reply_mode_final,
+            auto_reply_mode_source: auto_reply_mode_resolution.source,
+            automation_decision: auto_reply_execution?.automation_decision || null,
+            human_review_required: Boolean(
+              auto_reply_execution?.automation_decision?.should_mark_human_review
+            ),
+          };
+
+          if (auto_reply_execution?.queued && auto_reply_execution?.queue_row_id) {
             autopilot_queue_row = {
-              id: seller_stage_reply.queue_row_id,
-              queue_status: "sent",
-              scheduled_for: new Date().toISOString(),
-              scheduled_for_utc: new Date().toISOString(),
-              scheduled_for_local: new Date().toISOString(),
+              id: auto_reply_execution.queue_row_id,
+              queue_status: "queued",
+              scheduled_for: auto_reply_execution.queue_result?.raw?.scheduled_for || null,
+              scheduled_for_utc: auto_reply_execution.queue_result?.raw?.scheduled_for_utc || null,
+              scheduled_for_local: auto_reply_execution.queue_result?.raw?.scheduled_for_local || null,
               metadata: { ...extra_queue_context, action_type: "autopilot_inbound_reply" },
             };
           }
@@ -1730,8 +1847,18 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       if (inbound_message_event_id) {
         const suggested_reply_preview = seller_stage_reply?.rendered_text || "";
         const selected_template_id = seller_stage_reply?.template_id || null;
-        const selected_template_source = "csv_catalog";
+        const selected_template_source =
+          seller_stage_reply?.preview_result?.selected_template_source ||
+          seller_stage_reply?.queue_result?.raw?.template_source ||
+          "sms_templates";
         const outbound_queue_id = autopilot_queue_row?.id || seller_stage_reply?.queue_row_id || null;
+        const automation_decision = extractAutomationDecisionFromSellerStageReply(seller_stage_reply);
+        const human_review_required = deriveHumanReviewRequired(seller_stage_reply);
+        const auto_reply_status = deriveAutoReplyStatus({
+          seller_stage_reply,
+          auto_reply_mode: auto_reply_mode_final,
+          enabled: inbound_autopilot_enabled,
+        });
         const context_incomplete = Boolean(
           !context?.summary?.property_address || !context?.ids?.master_owner_id || !context?.ids?.property_id
         );
@@ -1826,6 +1953,11 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           priority: classification?.priority || "normal",
           risk: classification?.risk || "low",
           safety_status: classification?.safety_status || "pending",
+          auto_reply_status,
+          auto_reply_queue_id: outbound_queue_id,
+          human_review_required,
+          needs_human_review: human_review_required,
+          automation_decision,
           routing_allowed: seller_stage_reply?.plan?.routing_allowed ?? true,
           language: classification?.language || null,
           classification_confidence: classification?.confidence || 0,
@@ -1856,6 +1988,10 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
              risk: second_pass_supabase_payload.risk,
              routing_allowed: second_pass_supabase_payload.routing_allowed,
              safety_status: second_pass_supabase_payload.safety_status,
+             auto_reply_status,
+             auto_reply_queue_id: outbound_queue_id,
+             automation_decision,
+             human_review_required,
              // Unified classification metadata for thread_state mapping
              classification,
              // Legacy fields
@@ -1908,6 +2044,11 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             risk: classification?.risk || "low",
             safety_status: classification?.safety_status || "pending",
             routing_allowed: seller_stage_reply?.plan?.routing_allowed ?? true,
+            auto_reply_status,
+            auto_reply_queue_id: outbound_queue_id,
+            human_review_required,
+            needs_human_review: human_review_required,
+            automation_decision,
             language: classification?.language || null,
             classification_confidence: classification?.confidence || 0,
             stage_before,
@@ -1925,6 +2066,10 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
               route_stage: route?.stage || null,
               use_case: route?.use_case || null,
               seller_stage_reply_reason: seller_stage_reply?.reason || null,
+              auto_reply_status,
+              auto_reply_queue_id: outbound_queue_id,
+              automation_decision,
+              human_review_required,
               second_pass_authoritative: true,
             },
           };

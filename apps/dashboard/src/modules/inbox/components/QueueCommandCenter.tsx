@@ -205,7 +205,7 @@ export function QueueCommandCenter({
   const stats = control?.stats ?? {}
   const campaignMode = displayValue(control?.campaign_mode, mode === 'automatic' ? 'live_limited' : mode === 'assisted' ? 'dry_run' : 'paused')
   const queueProcessorMode = displayValue(control?.queue_processor_mode, mode)
-  const autoReplyMode = displayValue(control?.auto_reply_mode, 'guarded')
+  const autoReplyMode = displayValue(control?.auto_reply_mode, 'disabled')
   const candidateSource = displayValue(control?.candidate_source, 'v_sms_ready_contacts_expanded')
   const lastRunStatus = displayValue(control?.last_run?.status, displayValue(control?.queue_last_run_status, 'idle'))
   const lastRunDiagnostics = compactDiagnostics(control?.last_run?.diagnostics ?? control?.queue_last_run_diagnostics)

@@ -195,7 +195,9 @@ function requireSecrets() {
 
 async function main() {
   console.log(`Cockpit health proof base=${BASE_URL}`);
+  console.log("Cockpit health proof mode=production-safe-read-only; feeder check uses dry_run=true.");
   requireSecrets();
+  mark("health proof mutating seller sends disabled", true, "no live queue run or seller send endpoints are called");
 
   const live = await callJson(
     "live inbox",

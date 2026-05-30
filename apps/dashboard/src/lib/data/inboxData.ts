@@ -51,6 +51,16 @@ const toE164 = (value: unknown): string => {
   return `+${digits}`
 }
 
+const isAbortLikeError = (err: unknown, signal?: AbortSignal): boolean => {
+  if (signal?.aborted === true) return true
+  if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') return true
+  if (err instanceof Error) {
+    const message = err.message.toLowerCase()
+    return err.name === 'AbortError' || message.includes('abort') || message.includes('signal is aborted')
+  }
+  return false
+}
+
 /**
  * Confirmed message_events schema — direct column references used below:
  *   id, message_event_key, provider_message_sid
@@ -2113,8 +2123,8 @@ export const getInboxRowsForView = async (
     refreshReason: options._refreshReason,
     signal: options.signal,
   }).catch((err) => {
-    if (DEV) console.warn('[Inbox] /api/cockpit/inbox/live failed - preserving previous data', err)
-    const isAbort = err?.name === 'AbortError' || options.signal?.aborted === true
+    const isAbort = isAbortLikeError(err, options.signal)
+    if (DEV && !isAbort) console.warn('[Inbox] /api/cockpit/inbox/live failed - preserving previous data', err)
     if (!isAbort) {
       // This notification fires ONLY when /api/cockpit/inbox/live itself fails.
       // Enrichment endpoint failures (deal-context, valuation-snapshot) are isolated
@@ -2661,7 +2671,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
       console.log(`[InboxTiming] lightweight_normalize_ms: 0ms (built-in)`)
     }
   } catch (err) {
-    if (DEV) console.warn('[Inbox] fetchInboxModel core failure', err)
+    if (DEV && !isAbortLikeError(err, options.signal)) console.warn('[Inbox] fetchInboxModel core failure', err)
     throw err
   }
 

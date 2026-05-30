@@ -1511,7 +1511,7 @@ export default function InboxPage() {
       
       console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, messages.length, `${durationMs}ms`)
       if (durationMs > 1500) {
-        console.warn('[MESSAGES_FETCH_SLOW]', selectedKeyForEffect, {
+        console.log('[MESSAGES_FETCH_SLOW]', selectedKeyForEffect, {
           durationMs,
           endpoint: '/api/cockpit/inbox/thread-messages',
           status: 'completed',

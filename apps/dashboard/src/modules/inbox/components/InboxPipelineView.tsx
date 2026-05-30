@@ -277,33 +277,30 @@ export function InboxPipelineView({
   const allCards = useMemo(() => threads.map(buildCard), [threads])
 
   // DEV-only pipeline proof — remove before prod
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useEffect(() => {
-      if (allCards.length === 0) return
-      const stageDist: Record<string, number> = {}
-      const statusDist: Record<string, number> = {}
-      for (const c of allCards) {
-        const stage = (c.thread as any).pipeline_stage || deriveStageId(c.thread)
-        stageDist[stage] = (stageDist[stage] ?? 0) + 1
-        statusDist[c.status] = (statusDist[c.status] ?? 0) + 1
-      }
-      const sample = allCards.slice(0, 10).map(c => ({
-        sellerName: c.sellerName,
-        snippet: c.snippet?.slice(0, 40),
-        inbound_count: (c.thread as any).inbound_count ?? 0,
-        pipeline_stage: (c.thread as any).pipeline_stage,
-        seller_status: (c.thread as any).seller_status,
-        seller_state: (c.thread as any).seller_state,
-      }))
-      console.group('[InboxPipelineView] DEV proof')
-      console.log('Total cards rendered:', allCards.length)
-      console.log('Stage distribution:', stageDist)
-      console.log('Status distribution:', statusDist)
-      console.table(sample)
-      console.groupEnd()
-    }, [allCards])
-  }
+  useEffect(() => {
+    if (!import.meta.env.DEV || allCards.length === 0) return
+    const stageDist: Record<string, number> = {}
+    const statusDist: Record<string, number> = {}
+    for (const c of allCards) {
+      const stage = (c.thread as any).pipeline_stage || deriveStageId(c.thread)
+      stageDist[stage] = (stageDist[stage] ?? 0) + 1
+      statusDist[c.status] = (statusDist[c.status] ?? 0) + 1
+    }
+    const sample = allCards.slice(0, 10).map(c => ({
+      sellerName: c.sellerName,
+      snippet: c.snippet?.slice(0, 40),
+      inbound_count: (c.thread as any).inbound_count ?? 0,
+      pipeline_stage: (c.thread as any).pipeline_stage,
+      seller_status: (c.thread as any).seller_status,
+      seller_state: (c.thread as any).seller_state,
+    }))
+    console.group('[InboxPipelineView] DEV proof')
+    console.log('Total cards rendered:', allCards.length)
+    console.log('Stage distribution:', stageDist)
+    console.log('Status distribution:', statusDist)
+    console.table(sample)
+    console.groupEnd()
+  }, [allCards])
 
   const visibleCards = useMemo(() => {
     const q = query.trim().toLowerCase()

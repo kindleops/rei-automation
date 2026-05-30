@@ -972,6 +972,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   const [error, setError] = useState<unknown>(null)
   const [recentlyUpdatedThreadIds, setRecentlyUpdatedThreadIds] = useState<Set<string>>(new Set())
+  const pausedRef = useRef(paused)
+  pausedRef.current = paused
 
   // Non-row metadata from the last successful API response (counts, map pins, etc.)
   const metaRef = useRef<Partial<InboxModel>>({})
@@ -1180,7 +1182,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       }
       
       // Implement paused check from props or options
-      if (paused || options.paused) {
+      if (pausedRef.current || options.paused) {
         if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'paused' })
         return null
       }
@@ -1224,7 +1226,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         void runLoad(lastFetchRef.current, 'refresh').then(resolve)
       }, delay)
     })
-  }, [runLoad, sourceMode, minRefreshMs, paused])
+  }, [runLoad, sourceMode, minRefreshMs])
 
   // ── Load More ─────────────────────────────────────────────────────────────
 

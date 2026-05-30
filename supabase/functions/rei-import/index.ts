@@ -203,6 +203,13 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 }
 
 function getIncomingToken(req: Request): string {
+  const url = new URL(req.url);
+
+  const queryToken =
+    url.searchParams.get("sync_token") ||
+    url.searchParams.get("token") ||
+    "";
+
   const xSyncToken =
     req.headers.get("x-sync-token") ||
     req.headers.get("X-Sync-Token") ||
@@ -213,7 +220,7 @@ function getIncomingToken(req: Request): string {
     ? authorization.slice(7).trim()
     : "";
 
-  return String(xSyncToken || bearerToken || "").trim();
+  return String(xSyncToken || bearerToken || queryToken || "").trim();
 }
 
 function getExpectedToken(): string {

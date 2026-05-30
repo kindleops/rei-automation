@@ -16,6 +16,9 @@ const PROOF_SOURCE = "auto-reply-internal-live-send-proof";
 const PROOF_MODE = "internal_only_live_proof";
 const AUTOMATION_MODE = "internal_only";
 const INBOUND_TEXT = "Yes I still own it";
+const LIVE_SEND_PROOF_ENABLED = ["1", "true", "yes", "on"].includes(
+  String(process.env.AUTO_REPLY_INTERNAL_LIVE_SEND_PROOF_ENABLED || "").toLowerCase(),
+);
 const ACTIVE_QUEUE_STATUSES = [
   "queued",
   "pending",
@@ -852,11 +855,6 @@ async function main() {
   console.log(`Internal-only live auto-reply send proof recipient=${TEST_PHONE}`);
   console.log("No global queue run will be invoked; this proof targets one queue row by id.");
 
-  mark("Supabase URL loaded", Boolean(SUPABASE_URL));
-  mark("Supabase service role loaded", Boolean(SUPABASE_SERVICE_ROLE_KEY));
-  hardAssert(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY, "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-
-  const proofKey = proofToken(10);
   const normalizedRecipient = normalizePhone(TEST_PHONE);
   hardAssert(normalizedRecipient === TEST_PHONE, "selected recipient is not the locked internal phone", normalizedRecipient);
   hardAssert(isInternalTestPhone(TEST_PHONE), "recipient is not registered as an internal test phone", TEST_PHONE);
@@ -869,6 +867,24 @@ async function main() {
 
   mark("internal recipient locked", TEST_PHONE === "+16127433952", TEST_PHONE);
   mark("proof sender allowlisted", APPROVED_PROOF_SENDERS.has(PROOF_FROM_PHONE), PROOF_FROM_PHONE);
+  mark(
+    "explicit live send proof flag checked",
+    true,
+    LIVE_SEND_PROOF_ENABLED
+      ? "AUTO_REPLY_INTERNAL_LIVE_SEND_PROOF_ENABLED=true"
+      : "disabled by default; set AUTO_REPLY_INTERNAL_LIVE_SEND_PROOF_ENABLED=true to perform the locked TextGrid send",
+  );
+
+  if (!LIVE_SEND_PROOF_ENABLED) {
+    console.log("PASS internal live auto-reply proof skipped: live TextGrid send is disabled by default");
+    return;
+  }
+
+  mark("Supabase URL loaded", Boolean(SUPABASE_URL));
+  mark("Supabase service role loaded", Boolean(SUPABASE_SERVICE_ROLE_KEY));
+  hardAssert(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY, "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+
+  const proofKey = proofToken(10);
 
   const textgridCredentials = getTextgridSendCredentialStatus();
   mark(

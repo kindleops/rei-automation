@@ -28,7 +28,7 @@ export const getBackendBaseUrl = (): string => {
     const explicitRemote = ((import.meta.env.VITE_BACKEND_API_FORCE_REMOTE as string | undefined) || '').toLowerCase() === 'true'
     if (!explicitRemote && (hostname === 'localhost' || hostname === '127.0.0.1')) {
       if (!(window as any).__BACKEND_URL_LOGGED) {
-        console.warn(`[BACKEND_API] Local dev detected. Will use relative paths via proxy.`)
+        console.log(`[BACKEND_API] Local dev detected. Will use relative paths via proxy.`)
         ;(window as any).__BACKEND_URL_LOGGED = true
       }
       return ''
@@ -64,7 +64,7 @@ export const getBackendBaseUrl = (): string => {
     const hostname = window.location.hostname
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       if (!(window as any).__BACKEND_URL_LOGGED) {
-        console.warn(`[BACKEND_API] VITE_BACKEND_API_URL is missing. Will use relative paths via proxy.`)
+        console.log(`[BACKEND_API] VITE_BACKEND_API_URL is missing. Will use relative paths via proxy.`)
         ;(window as any).__BACKEND_URL_LOGGED = true
       }
       return ''

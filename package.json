@@ -9,7 +9,10 @@
     "build:api": "npm --workspace apps/api run build",
     "build:dashboard": "npm --workspace apps/dashboard run build",
     "build": "npm run build:api && npm run build:dashboard",
+    "doctor:dev": "node scripts/dev-runtime-doctor.mjs",
     "boundary:audit": "node scripts/proof/monorepo-boundary-audit.mjs",
+    "proof:health": "node scripts/proof/cockpit-health-proof.mjs",
+    "proof:production-readiness": "node scripts/proof/production-readiness-proof.mjs",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
     "build:safe": "npm run boundary:audit && npm run build"
   }

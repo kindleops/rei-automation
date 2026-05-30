@@ -50,7 +50,7 @@ const CONTROL_KEYS = [
 
 const DEFAULTS = {
   queue_processor_mode: 'paused',
-  auto_reply_mode: 'guarded',
+  auto_reply_mode: 'disabled',
   campaign_mode: 'paused',
   candidate_source: 'v_sms_ready_contacts_expanded',
   queue_daily_send_cap: '500',
