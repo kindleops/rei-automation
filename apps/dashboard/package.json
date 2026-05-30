@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "setup:inbox": "node scripts/setup-inbox.mjs",
     "proof:queue-recovery": "node scripts/proof/queue-recovery.mjs",
-    "proof:inbox": "npx tsx scripts/proof/inbox-store-proof.ts",
+    "proof:inbox": "npx tsx scripts/proof/inbox-store-proof.ts && node scripts/proof/inbox-bucket-resolver-proof.mjs",
     "proof:inbox-integrity": "node scripts/proof/inbox-integrity.mjs",
     "proof:smart-inboxes": "node scripts/proof/smart-inboxes.mjs",
     "proof:inbox-buttons": "node scripts/proof/inbox-buttons.mjs",

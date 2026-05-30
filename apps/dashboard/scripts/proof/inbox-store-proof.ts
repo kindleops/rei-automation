@@ -199,6 +199,82 @@ test('REALTIME_PATCH_THREAD with unknown threadKey changes nothing', () => {
   assert(s.buckets['priority']?.rows[0] === before, 'no row must change when threadKey is unknown')
 })
 
+test('REALTIME_PATCH_THREAD applies delivery-only status to visible rows', () => {
+  let s = { ...EMPTY_INBOX_STORE_STATE }
+  s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'follow_up', requestId: 'fu-1' })
+  s = dispatch(s, {
+    type: 'BUCKET_FETCH_DONE',
+    bucketKey: 'follow_up',
+    requestId: 'fu-1',
+    rows: [row('phone:+16127433952', {
+      inbox_bucket: 'follow_up',
+      latest_message_direction: 'outbound',
+      latest_delivery_status: 'sent',
+      deliveryStatus: 'sent',
+    })],
+    cursor: null,
+    hasMore: false,
+  })
+
+  s = dispatch(s, {
+    type: 'REALTIME_PATCH_THREAD',
+    threadKey: '+16127433952',
+    patch: {
+      latest_delivery_status: 'delivered',
+      latestDeliveryStatus: 'delivered',
+      delivery_status: 'delivered',
+      deliveryStatus: 'delivered',
+      latest_delivered_at: '2026-05-29T10:06:00.000Z',
+      latestDeliveredAt: '2026-05-29T10:06:00.000Z',
+      provider_delivery_status: 'delivered',
+    },
+  })
+
+  const followUpRows = s.buckets['follow_up']?.rows as Record<string, unknown>[]
+  assertEqual(followUpRows.length, 1, 'delivery patch must not duplicate the row')
+  assertEqual(followUpRows[0]?.latest_delivery_status as string, 'delivered', 'snake_case latest delivery status must update')
+  assertEqual(followUpRows[0]?.latestDeliveryStatus as string, 'delivered', 'camelCase latest delivery status must update')
+  assertEqual(followUpRows[0]?.inbox_bucket as string, 'follow_up', 'delivery-only patch must preserve bucket')
+})
+
+test('REALTIME_PATCH_THREAD upsert moves a thread and applies count deltas', () => {
+  let s = { ...EMPTY_INBOX_STORE_STATE, viewCounts: { new_replies: 1, follow_up: 0, active: 1, waiting: 0 } }
+  const original = row('phone:+16127433952', {
+    id: 'stable-row-id',
+    inbox_bucket: 'new_replies',
+    latest_message_direction: 'inbound',
+    latest_message_at: '2026-05-29T10:00:00.000Z',
+  })
+  s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'all_messages', requestId: 'all-1' })
+  s = dispatch(s, { type: 'BUCKET_FETCH_DONE', bucketKey: 'all_messages', requestId: 'all-1', rows: [original], cursor: null, hasMore: false })
+  s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'new_replies', requestId: 'nr-1' })
+  s = dispatch(s, { type: 'BUCKET_FETCH_DONE', bucketKey: 'new_replies', requestId: 'nr-1', rows: [original], cursor: null, hasMore: false })
+
+  s = dispatch(s, {
+    type: 'REALTIME_PATCH_THREAD',
+    threadKey: 'phone:+16127433952',
+    targetBucketKey: 'follow_up',
+    upsert: true,
+    countDeltas: { new_replies: -1, follow_up: 1, waiting: 1, waiting_on_seller: 1 },
+    patch: {
+      preview: 'sent follow up',
+      inbox_bucket: 'follow_up',
+      latest_message_direction: 'outbound',
+      latest_message_at: '2026-05-29T10:05:00.000Z',
+    },
+  })
+
+  const allRows = s.buckets['all_messages']?.rows as Record<string, unknown>[]
+  const followUpRows = s.buckets['follow_up']?.rows as Record<string, unknown>[]
+  assertEqual(s.buckets['new_replies']?.rows.length ?? 0, 0, 'moved thread must leave new_replies')
+  assertEqual(followUpRows.length, 1, 'moved thread must appear in follow_up')
+  assertEqual(followUpRows[0]?.id as string, 'stable-row-id', 'stable row id must be preserved')
+  assertEqual(allRows[0]?.preview as string, 'sent follow up', 'all_messages row must update immediately')
+  assertEqual(s.viewCounts.new_replies, 0, 'new_replies count decrements')
+  assertEqual(s.viewCounts.follow_up, 1, 'follow_up count increments')
+  assertEqual(s.viewCounts.waiting, 1, 'waiting count increments for outbound latest message')
+})
+
 // ── Test 5: KPI fetch failure does not touch inbox rows ──────────────────────
 
 console.log('\n── Test 5: KPI / counts isolation ──')
@@ -298,10 +374,27 @@ test('REALTIME_PATCH_THREAD matches row by id when threadKey is absent', () => {
 test('REALTIME_PATCH_THREAD matches row by threadKey when id differs', () => {
   let s = { ...EMPTY_INBOX_STORE_STATE }
   s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'new_replies', requestId: 'nr-1' })
-  s = dispatch(s, { type: 'BUCKET_FETCH_DONE', bucketKey: 'new_replies', requestId: 'nr-1', rows: [{ id: 'internal-id', threadKey: 'phone:+16125550101', inbox_bucket: 'new_replies' }], cursor: null, hasMore: false })
-  s = dispatch(s, { type: 'REALTIME_PATCH_THREAD', threadKey: 'phone:+16125550101', patch: { preview: 'new message' } })
+  s = dispatch(s, { type: 'BUCKET_FETCH_DONE', bucketKey: 'new_replies', requestId: 'nr-1', rows: [{ id: 'internal-id', threadKey: 'phone:+16127433952', inbox_bucket: 'new_replies' }], cursor: null, hasMore: false })
+  s = dispatch(s, { type: 'REALTIME_PATCH_THREAD', threadKey: 'phone:+16127433952', patch: { preview: 'new message' } })
   const nrRows = s.buckets['new_replies']?.rows as Record<string, unknown>[]
   assertEqual(nrRows[0]?.preview as string, 'new message', 'row must be patchable by threadKey even when id is different')
+})
+
+test('REALTIME_PATCH_THREAD matches phone-prefixed rows with bare E.164 event keys', () => {
+  let s = { ...EMPTY_INBOX_STORE_STATE }
+  s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'new_replies', requestId: 'nr-1' })
+  s = dispatch(s, {
+    type: 'BUCKET_FETCH_DONE',
+    bucketKey: 'new_replies',
+    requestId: 'nr-1',
+    rows: [{ id: 'internal-id', threadKey: 'phone:+16127433952', inbox_bucket: 'new_replies' }],
+    cursor: null,
+    hasMore: false,
+  })
+  s = dispatch(s, { type: 'REALTIME_PATCH_THREAD', threadKey: '+16127433952', patch: { preview: 'bare phone event' }, upsert: true })
+  const nrRows = s.buckets['new_replies']?.rows as Record<string, unknown>[]
+  assertEqual(nrRows.length, 1, 'bare E.164 event must patch existing row instead of duplicating it')
+  assertEqual(nrRows[0]?.preview as string, 'bare phone event', 'existing phone-prefixed row must update')
 })
 
 // ── Test 9: Map pins cannot create synthetic inbox rows ───────────────────────
@@ -433,6 +526,33 @@ test('SET_VIEW_COUNTS enriches counts after rows are committed (delayed counts)'
   assertEqual(s.viewCounts.priority, 3, 'priority count must be set')
   // Rows are untouched
   assertEqual(s.buckets['all_messages']?.rows.length, 1, 'rows must not change when counts are enriched')
+})
+
+test('SET_VIEW_COUNTS preserveExisting does not overwrite valid counts with zero or approximate counts', () => {
+  let s = { ...EMPTY_INBOX_STORE_STATE, viewCounts: { active: 12, waiting: 3 } }
+  s = dispatch(s, {
+    type: 'SET_VIEW_COUNTS',
+    counts: { active: 0, waiting: 8, new_replies: 2 },
+    preserveExisting: true,
+    reason: 'visible_rows_approximate',
+  })
+  assertEqual(s.viewCounts.active, 12, 'existing active count must survive a degraded zero')
+  assertEqual(s.viewCounts.waiting, 3, 'existing waiting count must not be replaced by approximate count')
+  assertEqual(s.viewCounts.new_replies, 2, 'missing count can be filled from approximate visible rows')
+})
+
+test('SET_VIEW_COUNTS preserveExisting never zeroes a populated visible bucket', () => {
+  let s = { ...EMPTY_INBOX_STORE_STATE, viewCounts: { needs_review: 3, all_messages: 3 } }
+  s = dispatch(s, { type: 'BUCKET_FETCH_START', bucketKey: 'needs_review', requestId: 'nr1' })
+  s = dispatch(s, { type: 'BUCKET_FETCH_DONE', bucketKey: 'needs_review', requestId: 'nr1', rows: [row('r1'), row('r2'), row('r3')], cursor: null, hasMore: false })
+  s = dispatch(s, {
+    type: 'SET_VIEW_COUNTS',
+    counts: { needs_review: 0, all_messages: 0 },
+    preserveExisting: true,
+    reason: 'visible_rows_approximate',
+  })
+  assertEqual(s.viewCounts.needs_review, 3, 'needs_review count must survive degraded zero')
+  assertEqual(s.viewCounts.all_messages, 3, 'all_messages count must survive degraded zero')
 })
 
 test('counts enrichment failure does not set BUCKET_FETCH_ERROR', () => {

@@ -10,6 +10,7 @@
     "build:dashboard": "npm --workspace apps/dashboard run build",
     "build": "npm run build:api && npm run build:dashboard",
     "boundary:audit": "node scripts/proof/monorepo-boundary-audit.mjs",
+    "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
     "build:safe": "npm run boundary:audit && npm run build"
   }
 }

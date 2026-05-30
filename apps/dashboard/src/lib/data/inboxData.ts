@@ -135,12 +135,32 @@ export interface LiveInboxMapPin {
   latestMessageBody?: string
 }
 
+export interface LiveInboxDiagnostics {
+  source?: string | null
+  liveSource?: string | null
+  fallbackUsed?: boolean
+  countsDegraded?: boolean
+  countsApproximate?: boolean
+  countsSource?: string | null
+  countPreservedReason?: string | null
+  queryMs?: number | null
+  threadQueryMs?: number | null
+  countQueryMs?: number | null
+}
+
 export interface LiveInboxResponse {
   threads: InboxThread[]
   messages: ThreadMessage[]
   counts: Record<string, number | null | undefined>
   mapPins: LiveInboxMapPin[]
   pagination: LiveInboxPagination
+  diagnostics?: LiveInboxDiagnostics
+  source?: string | null
+  fallbackUsed?: boolean
+  countsDegraded?: boolean
+  countsApproximate?: boolean
+  countsSource?: string | null
+  countPreservedReason?: string | null
   rawRows?: AnyRecord[]
 }
 
@@ -308,6 +328,7 @@ const INBOX_DEBUG_VERBOSE = DEV && String(import.meta.env?.VITE_INBOX_DEBUG ?? '
 export const INBOX_DEBUG_LOOKUPS = INBOX_DEBUG_VERBOSE || (DEV && String(import.meta.env?.VITE_INBOX_DEBUG_LOOKUPS ?? 'false').toLowerCase() === 'true')
 const MESSAGE_EVENTS_THREAD_PAGE_SIZE = 250
 export const HYDRATED_INBOX_PAGE_SIZE = 100
+const INITIAL_BOOT_LIVE_LIMIT = 25
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_universal_inbox_threads'
 export const HYDRATED_INBOX_COUNTS_VIEW = 'inbox_category_counts'
 
@@ -1437,6 +1458,14 @@ export const getSellerPhoneFromMessage = (row: AnyRecord): SellerPhoneResult => 
   }
 
   // ── DEV warnings (Non-blocking / rate-limited equivalent) ────────────────
+  if (!sellerPhone) {
+    const fallbackIdentity = normalizePhone(row['canonical_e164']) || normalizePhone(row['thread_key'] ?? row['threadKey'])
+    if (fallbackIdentity) {
+      sellerPhone = fallbackIdentity
+      sellerPhoneSourceField = row['canonical_e164'] ? 'canonical_e164' : 'thread_key'
+    }
+  }
+
   if (DEV && !sellerPhone) {
     const fromPhone = normalizePhone(row['from_phone_number'])
     const toPhone = normalizePhone(row['to_phone_number'])
@@ -1583,12 +1612,15 @@ const getThreadKeyParts = (
   const prospectId = asString(row['prospect_id'], '')
   const propertyId = asString(row['property_id'], '')
   const { sellerPhone } = getSellerPhoneFromMessage(row)
+  const threadKeyFallback = normalizePhone(row['canonical_e164']) || normalizePhone(row['thread_key'] ?? row['threadKey'])
 
   // The inbox conversation is keyed by seller phone. Outbound rows often carry
   // owner/property IDs while inbound webhook rows do not, so phone-first keeps
   // replies merged with the original outreach thread.
   if (sellerPhone)
     return { key: `phone:${sellerPhone}`, method: 'seller_phone', confidence: 'medium' }
+  if (threadKeyFallback)
+    return { key: `phone:${threadKeyFallback}`, method: 'thread_key_or_canonical_e164', confidence: 'medium' }
   if (ownerId && propertyId)
     return { key: `owner_property:${ownerId}:${propertyId}`, method: 'master_owner_id+property_id', confidence: 'medium' }
   if (prospectId && propertyId)
@@ -1665,6 +1697,7 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
   const rawMessages = safeArray(payload['messages'] as AnyRecord[])
   const rawPins = safeArray((payload['mapPins'] ?? payload['map_pins']) as AnyRecord[])
   const pagination = (payload['pagination'] ?? {}) as AnyRecord
+  const diagnostics = (payload['diagnostics'] ?? {}) as AnyRecord
   return {
     threads: rawThreads.map(normalizeLiveThread),
     rawRows: rawThreads,
@@ -1688,6 +1721,24 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
       limit: asNumber(pagination['limit'], fallbackLimit),
       total: Number.isFinite(Number(pagination['total'])) ? Number(pagination['total']) : null,
     },
+    diagnostics: {
+      source: asString(diagnostics['source'] ?? payload['source'], '') || null,
+      liveSource: asString(diagnostics['live_source'] ?? diagnostics['liveSource'] ?? diagnostics['source'] ?? payload['source'], '') || null,
+      fallbackUsed: asBoolean(diagnostics['fallback_used'] ?? diagnostics['fallbackUsed'] ?? payload['fallback_used'] ?? payload['fallbackUsed'], false),
+      countsDegraded: asBoolean(diagnostics['countsDegraded'] ?? diagnostics['counts_degraded'] ?? payload['countsDegraded'] ?? payload['counts_degraded'], false),
+      countsApproximate: asBoolean(diagnostics['countsApproximate'] ?? diagnostics['counts_approximate'] ?? payload['countsApproximate'] ?? payload['counts_approximate'], false),
+      countsSource: asString(diagnostics['countsSource'] ?? diagnostics['counts_source'] ?? payload['countsSource'] ?? payload['counts_source'], '') || null,
+      countPreservedReason: asString(diagnostics['count_preserved_reason'] ?? diagnostics['countPreservedReason'] ?? payload['count_preserved_reason'] ?? payload['countPreservedReason'], '') || null,
+      queryMs: Number.isFinite(Number(diagnostics['queryMs'])) ? Number(diagnostics['queryMs']) : null,
+      threadQueryMs: Number.isFinite(Number(diagnostics['threadQueryMs'])) ? Number(diagnostics['threadQueryMs']) : null,
+      countQueryMs: Number.isFinite(Number(diagnostics['countQueryMs'])) ? Number(diagnostics['countQueryMs']) : null,
+    },
+    source: asString(payload['source'] ?? diagnostics['source'], '') || null,
+    fallbackUsed: asBoolean(payload['fallback_used'] ?? payload['fallbackUsed'] ?? diagnostics['fallback_used'] ?? diagnostics['fallbackUsed'], false),
+    countsDegraded: asBoolean(payload['countsDegraded'] ?? payload['counts_degraded'] ?? diagnostics['countsDegraded'] ?? diagnostics['counts_degraded'], false),
+    countsApproximate: asBoolean(payload['countsApproximate'] ?? payload['counts_approximate'] ?? diagnostics['countsApproximate'] ?? diagnostics['counts_approximate'], false),
+    countsSource: asString(payload['countsSource'] ?? payload['counts_source'] ?? diagnostics['countsSource'] ?? diagnostics['counts_source'], '') || null,
+    countPreservedReason: asString(payload['count_preserved_reason'] ?? payload['countPreservedReason'] ?? diagnostics['count_preserved_reason'] ?? diagnostics['countPreservedReason'], '') || null,
   }
 }
 
@@ -1726,14 +1777,23 @@ export const fetchLiveInbox = async ({
     throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
   }
   const payload = result.data as AnyRecord
-  if (payload['degraded']) {
+  const nestedData = ((payload['data'] && typeof payload['data'] === 'object') ? payload['data'] : null) as AnyRecord | null
+  const hasNestedLivePayload = Boolean(
+    nestedData &&
+    (
+      Array.isArray(nestedData['threads']) ||
+      Array.isArray(nestedData['messages']) ||
+      typeof nestedData['pagination'] === 'object' ||
+      typeof nestedData['counts'] === 'object'
+    )
+  )
+  const normalizedPayload = hasNestedLivePayload ? { ...payload, ...nestedData } : payload
+  const degradedThreads = safeArray((normalizedPayload['threads'] ?? []) as AnyRecord[])
+  if (payload['degraded'] && degradedThreads.length === 0) {
     // Backend hit its internal timeout — throw so the adapter falls back to cache
     // rather than overwriting good cached rows with an empty degraded response.
     throw new Error(`Live inbox API degraded (backend timeout)`)
   }
-  const normalizedPayload = asBoolean(payload['ok'], false)
-    ? ((payload['diagnostics'] as AnyRecord) ?? payload)
-    : payload
   return normalizeLiveInboxResponse(normalizedPayload, limit)
 }
 
@@ -1794,6 +1854,32 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   const needsReply = unreadCount > 0 || (latestMessageDirection === 'inbound' && !row.queue_status)
   
   const inboxBucket = asString(dc.inboxBucket || dc.inbox_bucket || row.inbox_bucket || row.inbox_category || 'all_messages').toLowerCase()
+  const deliveryStatus = asString(getFirst(row, [
+    'latest_delivery_status',
+    'delivery_status',
+    'provider_delivery_status',
+    'latest_provider_delivery_status',
+    'queue_status',
+  ]), '')
+  const providerDeliveryStatus = asString(getFirst(row, [
+    'latest_provider_delivery_status',
+    'provider_delivery_status',
+    'latest_delivery_status',
+    'delivery_status',
+    'queue_status',
+  ]), deliveryStatus)
+  const latestDeliveredAt = asIso(getFirst(row, ['latest_delivered_at', 'delivered_at'])) ?? null
+  const latestFailedAt = asIso(getFirst(row, ['latest_failed_at', 'failed_at'])) ?? null
+  const latestFailureReason = asString(getFirst(row, [
+    'latest_failure_reason',
+    'failure_reason',
+    'error_message',
+    'failed_reason',
+    'guard_reason',
+    'blocked_reason',
+    'paused_reason',
+  ]), '')
+  const queueStatus = asString(row.queue_status ?? row.queueStatus ?? dc.queue_status, '')
   
   const PRIORITY_BUCKET_MAP: Record<string, HydratedInboxCategory> = {
     hot: 'hot_leads',
@@ -1861,6 +1947,23 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     latestMessageAt,
     latestMessageDirection,
     latest_activity_at: dc.latestActivityAt || latestMessageAt,
+    deliveryStatus: deliveryStatus || undefined,
+    delivery_status: deliveryStatus || undefined,
+    latestDeliveryStatus: deliveryStatus || undefined,
+    latest_delivery_status: deliveryStatus || undefined,
+    providerDeliveryStatus: providerDeliveryStatus || undefined,
+    provider_delivery_status: providerDeliveryStatus || undefined,
+    latestProviderDeliveryStatus: providerDeliveryStatus || undefined,
+    latest_provider_delivery_status: providerDeliveryStatus || undefined,
+    latestDeliveredAt,
+    latest_delivered_at: latestDeliveredAt,
+    latestFailedAt,
+    latest_failed_at: latestFailedAt,
+    latestFailureReason: latestFailureReason || undefined,
+    latest_failure_reason: latestFailureReason || undefined,
+    failureReason: latestFailureReason || undefined,
+    queueStatus: queueStatus || undefined,
+    queue_status: queueStatus || undefined,
     
     ownerDisplayName: dc.displayName || dc.ownerName,
     propertyAddress: dc.propertyAddress,
@@ -1959,8 +2062,18 @@ export const getInboxRowsForView = async (
   has_more: boolean;
   next_cursor: string | null;
   counts?: AnyRecord | null;
+  diagnostics?: LiveInboxDiagnostics;
+  source?: string | null;
+  fallbackUsed?: boolean;
+  countsDegraded?: boolean;
+  countsApproximate?: boolean;
+  countsSource?: string | null;
+  countPreservedReason?: string | null;
 }> => {
-  const page_size = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
+  const requestedPageSize = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
+  const page_size = options._timeoutMode === 'initial_boot'
+    ? Math.min(requestedPageSize, INITIAL_BOOT_LIVE_LIMIT)
+    : requestedPageSize
   const rawCursor = options.cursor ?? null
   const numericOffset = options.offset ?? 0
 
@@ -2055,6 +2168,13 @@ export const getInboxRowsForView = async (
     has_more: asBoolean(finalPagination.has_more ?? finalPagination.hasMore, Boolean(nextCursor)),
     next_cursor: nextCursor,
     counts: finalCounts,
+    diagnostics: live.diagnostics,
+    source: live.source ?? live.diagnostics?.source ?? null,
+    fallbackUsed: live.fallbackUsed ?? live.diagnostics?.fallbackUsed ?? false,
+    countsDegraded: live.countsDegraded ?? live.diagnostics?.countsDegraded ?? false,
+    countsApproximate: live.countsApproximate ?? live.diagnostics?.countsApproximate ?? false,
+    countsSource: live.countsSource ?? live.diagnostics?.countsSource ?? null,
+    countPreservedReason: live.countPreservedReason ?? live.diagnostics?.countPreservedReason ?? null,
   }
 }
 
@@ -2527,9 +2647,9 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const filterState = options.filters || {}
   const mapPins: any[] = []
 
-  // Fire the background counts fetch IN PARALLEL with the live row fetch.
-  // Cap at 3s so a slow/timing-out Supabase query never blocks row commit.
-  // The /live response already embeds getLiveCounts data — this is enrichment only.
+  // Keep row delivery ahead of count enrichment.
+  // If the live response already degraded counts, or this is initial boot, do not
+  // block thread rendering on a secondary count request.
   const COUNTS_TIMEOUT_MS = 3000
   let viewResult: any
   try {
@@ -2550,23 +2670,39 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const threads = viewResult?.rows ?? []
   const totalAvailable = viewResult?.backend_count ?? threads.length
   const viewCounts = (viewResult?.counts as AnyRecord) ?? null
+  const liveDiagnostics = (viewResult?.diagnostics as LiveInboxDiagnostics | undefined) ?? {}
+  const countsDegraded = viewResult?.countsDegraded === true || liveDiagnostics.countsDegraded === true
+  const countsApproximate = viewResult?.countsApproximate === true || liveDiagnostics.countsApproximate === true
+  const countsSource = viewResult?.countsSource ?? liveDiagnostics.countsSource ?? null
+  const countPreservedReason = viewResult?.countPreservedReason ?? liveDiagnostics.countPreservedReason ?? null
+  const concreteCount = (...keys: string[]): number | undefined => {
+    for (const key of keys) {
+      const value = viewCounts?.[key]
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+    }
+    return undefined
+  }
 
   // Seed from the counts already embedded in the /live response — always available.
   let categoryCounts = {
-    hot_leads: Number(viewCounts?.priority ?? viewCounts?.hot_leads ?? 0),
-    needs_review: Number(viewCounts?.needs_review ?? 0),
-    new_inbound: Number(viewCounts?.new_replies ?? viewCounts?.new_inbound ?? 0),
-    automated: Number(viewCounts?.automated ?? 0),
-    outbound_active: Number(viewCounts?.follow_up ?? viewCounts?.outbound_active ?? 0),
-    cold_no_response: Number(viewCounts?.cold ?? viewCounts?.cold_no_response ?? 0),
-    dead: Number(viewCounts?.dead ?? 0),
-    all: Number(viewCounts?.all_messages ?? viewCounts?.all ?? viewCounts?.total ?? 0),
-    dnc_opt_out: Number(viewCounts?.suppressed ?? viewCounts?.dnc_opt_out ?? 0),
+    hot_leads: concreteCount('priority', 'hot_leads') ?? 0,
+    needs_review: concreteCount('needs_review') ?? 0,
+    new_inbound: concreteCount('new_replies', 'new_inbound') ?? 0,
+    automated: concreteCount('automated') ?? 0,
+    outbound_active: concreteCount('follow_up', 'outbound_active') ?? 0,
+    cold_no_response: concreteCount('cold', 'cold_no_response') ?? 0,
+    dead: concreteCount('dead') ?? 0,
+    all: concreteCount('all_messages', 'all', 'total') ?? 0,
+    dnc_opt_out: concreteCount('suppressed', 'dnc_opt_out') ?? 0,
     all_inbound: allInboundCount,
   }
 
-  const hasEmbeddedCounts = viewCounts && Object.keys(viewCounts).length > 0
-  if (!hasEmbeddedCounts) {
+  const hasEmbeddedCounts = Boolean(viewCounts && Object.values(viewCounts).some((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0))
+  const shouldBlockOnBackgroundCounts =
+    Boolean((viewResult as AnyRecord)?.allowBlockingCountFallback) &&
+    !countsDegraded &&
+    options._timeoutMode !== 'initial_boot'
+  if (!hasEmbeddedCounts && shouldBlockOnBackgroundCounts) {
     const countsRace = Promise.race([
       backendClient.fetchDealContextCounts('', options.signal).catch(() => null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), COUNTS_TIMEOUT_MS)),
@@ -2602,13 +2738,24 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     } else if (countsRes === null && DEV) {
       console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
     }
+  } else if (!hasEmbeddedCounts && DEV) {
+    console.log('[fetchInboxModel] skipping blocking count enrichment', {
+      timeoutMode: options._timeoutMode ?? null,
+      countsDegraded,
+      source: viewResult?.liveDataSource ?? viewResult?.source ?? liveDiagnostics.source ?? null,
+    })
   } else if (DEV) {
     console.log('[fetchInboxModel] using counts embedded in live response')
   }
 
-  const priorityInboxCount = Number(viewCounts?.priority ?? (categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound))
-  const activeInboxCount = Number(viewCounts?.active ?? (categoryCounts.automated + categoryCounts.outbound_active))
-  const waitingInboxCount = Number(viewCounts?.waiting ?? viewCounts?.waiting_on_seller ?? categoryCounts.cold_no_response)
+  const priorityInboxCount = concreteCount('priority') ?? categoryCounts.hot_leads
+  const activeInboxCount = concreteCount('active') ?? (categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound + categoryCounts.outbound_active)
+  const waitingInboxCount = concreteCount('waiting', 'waiting_on_seller') ?? threads.filter((thread: InboxThread) => {
+    const threadRecord = thread as unknown as AnyRecord
+    const direction = String(threadRecord['latestDirection'] ?? thread.latest_message_direction ?? '').toLowerCase()
+    const bucket = String(threadRecord['inboxBucket'] ?? thread.inbox_bucket ?? threadRecord['inboxCategory'] ?? '').toLowerCase()
+    return direction === 'outbound' && bucket !== 'dead' && bucket !== 'suppressed'
+  }).length
   const allInboxCount = categoryCounts.all || totalAvailable
   
   const unreadThreadsCount = categoryCounts.new_inbound
@@ -2642,20 +2789,20 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   else if (view === 'cold_no_response' || view === 'cold') bucketTotal = categoryCounts.cold_no_response
   else if (view === 'dead') bucketTotal = categoryCounts.dead
   else if (view === 'dnc_opt_out' || view === 'suppressed') bucketTotal = categoryCounts.dnc_opt_out
-  else if (view === 'unlinked') bucketTotal = Number(viewCounts?.unlinked ?? 0)
+  else if (view === 'unlinked') bucketTotal = concreteCount('unlinked') ?? threads.filter((thread: InboxThread) => !thread.propertyId).length
 
   return {
     threads,
     unreadCount: unreadThreadsCount,
     urgentCount: categoryCounts.hot_leads,
-    totalCount: bucketTotal || totalAvailable,
+    totalCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     aiDraftCount: threadList.filter((thread) => thread.aiDraft !== null).length,
     dataMode: 'live',
     liveFetchStatus: 'active',
     liveFetchError: null,
-    messageEventsCount: bucketTotal || totalAvailable,
+    messageEventsCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     messageEventsRawCount: bucketTotal,
-    groupedThreadCount: bucketTotal || totalAvailable,
+    groupedThreadCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     priorityInboxCount,
     activeInboxCount,
     waitingInboxCount,
@@ -2699,6 +2846,13 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     partiallyHydratedCount,
     orphanCount,
     latestFetchMs,
+    countsDegraded,
+    countsApproximate,
+    countsSource,
+    countPreservedReason,
+    liveDiagnostics,
+    liveDataSource: viewResult?.liveDataSource ?? viewResult?.source ?? liveDiagnostics.source ?? null,
+    fallbackUsed: viewResult?.fallbackUsed ?? liveDiagnostics.fallbackUsed ?? false,
     mapPins,
   }
 }
@@ -2725,6 +2879,7 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
   else if (status === 'pending') deliveryStatus = 'pending'
 
   const { sellerPhone, canonicalE164: msgCanonical } = getSellerPhoneFromMessage(row)
+  const rowThreadKey = asString(row['thread_key'] ?? row['threadKey'] ?? row['canonical_e164'], '') || msgCanonical || sellerPhone
   const source =
     asString(row['source_app'] ?? row['message_source'] ?? row['event_type'], '') ||
     asString(getNestedValue(row, 'metadata.source'), '') ||
@@ -2746,7 +2901,7 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
 
   return {
     id: asString(row['message_event_id'] ?? row['id'], createdAt),
-    threadKey: asString(row['thread_key'], ''),
+    threadKey: rowThreadKey,
     direction,
     body: asString(row['message_body'] ?? row['rendered_message'], '') || getMessageBody(row),
     createdAt,
@@ -2887,73 +3042,6 @@ const getThreadLookupIdentity = (
       ...buildPhoneVariants(sellerPhone),
     ])),
   }
-}
-
-const buildMessageEventThreadCandidates = (
-  thread: InboxThread | InboxWorkflowThread,
-): Array<{ key: string; value: string }> => {
-  const lookup = getThreadLookupIdentity(thread)
-  const filters: Array<{ key: string; value: string }> = []
-  Array.from(new Set([
-    lookup.selectedThreadKey,
-    lookup.canonicalE164,
-  ].filter(Boolean))).forEach((value) => {
-    filters.push({ key: 'thread_key', value })
-  })
-  lookup.phoneVariants.forEach((value) => {
-    filters.push({ key: 'from_phone_number', value })
-    filters.push({ key: 'to_phone_number', value })
-  })
-  ;[
-    ['master_owner_id', asString(thread.ownerId, '')],
-    ['prospect_id', asString(thread.prospectId, '')],
-    ['property_id', asString(thread.propertyId, '')],
-    ['queue_id', asString(thread.queueId, '')],
-    ['message_event_key', lookup.selectedThreadKey],
-  ].forEach(([key, value]) => {
-    if (value) filters.push({ key, value })
-  })
-  return filters
-}
-
-const getThreadMessagesFromMessageEvents = async (
-  thread: InboxThread | InboxWorkflowThread,
-  options: ThreadMessageFetchOptions = {},
-): Promise<ThreadMessage[]> => {
-  const supabase = getSupabaseClient()
-  const pageSize = MESSAGE_EVENTS_THREAD_PAGE_SIZE
-  const maxPages = Math.max(1, options.maxPages ?? 20)
-  const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : null
-  const candidateFilters = buildMessageEventThreadCandidates(thread)
-  if (candidateFilters.length === 0) {
-    if (DEV) console.warn('[ThreadMessageHydration] no candidate filters for fallback', { threadKey: getCanonicalThreadKey(thread) })
-    return []
-  }
-
-  const orClause = candidateFilters
-    .map(({ key, value }) => `${key}.eq.${safeFilterValue(value)}`)
-    .join(',')
-
-  const rows: AnyRecord[] = []
-  for (let page = 0; page < maxPages; page += 1) {
-    const { data, error } = await supabase
-      .from('message_events')
-      .select('*')
-      .or(orClause)
-      .order('event_timestamp', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true })
-      .range(page * pageSize, page * pageSize + pageSize - 1)
-
-    if (error) throw new Error(mapErrorMessage(error))
-
-    const sourceRows = safeArray(data as AnyRecord[])
-    rows.push(...sourceRows.filter((row) => doesMessageBelongToThread(row, thread)))
-    if (maxMessages !== null && rows.length >= maxMessages) break
-    if (sourceRows.length < pageSize) break
-  }
-
-  const bounded = maxMessages !== null ? rows.slice(0, maxMessages) : rows
-  return dedupeMessages(bounded.map(toThreadMessage))
 }
 
 export interface ThreadMessageFetchOptions {
@@ -3185,21 +3273,10 @@ export const getThreadMessagesForThread = async (
     }
   } catch (err) {
     if (options.signal?.aborted || (err as { name?: string })?.name === 'AbortError') throw err
-    if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages failed; falling back', err)
+    if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages degraded; preserving empty messages', err)
   }
 
-  const fallbackMessages = await getThreadMessagesFromMessageEvents(thread, options)
-  const mapped = applyDeliveryStatusDisplay(dedupeMessages(fallbackMessages))
-
-  if (DEV) {
-    console.log('[ThreadMessageHydration]', {
-      threadKey,
-      viewRows: 0,
-      mergedRows: mapped.length,
-    })
-  }
-
-  return mapped
+  return []
 }
 
 
@@ -3495,6 +3572,14 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
   }
 
   // ── Phase 2: main context queries using actual + bridged IDs ─────────────
+  const propertyFilters = propertyId
+    ? [{ key: 'property_id', value: propertyId }]
+    : [
+      { key: 'owner_id', value: ownerId },
+      { key: 'master_owner_id', value: ownerId },
+      { key: 'property_address', value: propertyAddress },
+    ]
+
   const [masterowners, owners, prospects, properties, emails, aiRows, queueRows, offers] = await Promise.all([
     runFilteredQuery('masterOwners', [
       { key: 'master_owner_id', value: ownerId },
@@ -3513,12 +3598,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
       { key: 'property_id', value: propertyId },
       { key: 'phone_number', value: searchPhone },
     ], 5, signal),
-    runFilteredQuery('properties', [
-      { key: 'property_id', value: propertyId },
-      { key: 'owner_id', value: ownerId },
-      { key: 'master_owner_id', value: ownerId },
-      { key: 'property_address', value: propertyAddress },
-    ], 5, signal),
+    runFilteredQuery('properties', propertyFilters, 5, signal),
     runFilteredQuery('emails', [
       { key: 'owner_id', value: ownerId },
       { key: 'prospect_id', value: prospectId },
@@ -4074,44 +4154,56 @@ export const sendDraft = async (_threadIdOrKey: string, _text: string): Promise<
  *   1. The most recent message_events row for that phone has is_opt_out=true
  *   2. A sms_suppression_list table exists and contains the phone
  */
-export const checkSuppressionStatus = async (phone: string): Promise<{ suppressed: boolean; reason: string | null }> => {
+export const checkSuppressionStatus = async (phone: string): Promise<{ suppressed: boolean; reason: string | null; degraded?: boolean; error?: string | null }> => {
   if (!phone) return { suppressed: false, reason: null }
   const supabase = getSupabaseClient()
   const variants = buildPhoneVariants(phone)
 
   // Check message_events for opt-out
-  const { data: optOutRows } = await supabase
-    .from('message_events')
-    .select('is_opt_out,opt_out_keyword')
-    .or(
-      variants.map(v => `from_phone_number.eq.${safeFilterValue(v)}`).concat(
-        variants.map(v => `to_phone_number.eq.${safeFilterValue(v)}`),
-      ).join(','),
-    )
-    .order('created_at', { ascending: false })
-    .limit(10)
+  try {
+    const { data: optOutRows, error: optOutError } = await supabase
+      .from('message_events')
+      .select('is_opt_out,opt_out_keyword')
+      .or(
+        variants.map(v => `from_phone_number.eq.${safeFilterValue(v)}`).concat(
+          variants.map(v => `to_phone_number.eq.${safeFilterValue(v)}`),
+        ).join(','),
+      )
+      .order('created_at', { ascending: false })
+      .limit(10)
 
-  const rows = safeArray(optOutRows as AnyRecord[])
-  const optedOut = rows.some((r) => asBoolean(r['is_opt_out'], false))
-  if (optedOut) {
-    const keywordRow = rows.find(r => r['opt_out_keyword'])
-    const keyword = asString(keywordRow ? (keywordRow as AnyRecord)['opt_out_keyword'] : null, '')
-    return { suppressed: true, reason: `Opted out${keyword ? ` (${keyword})` : ''}` }
+    if (optOutError) throw optOutError
+
+    const rows = safeArray(optOutRows as AnyRecord[])
+    const optedOut = rows.some((r) => asBoolean(r['is_opt_out'], false))
+    if (optedOut) {
+      const keywordRow = rows.find(r => r['opt_out_keyword'])
+      const keyword = asString(keywordRow ? (keywordRow as AnyRecord)['opt_out_keyword'] : null, '')
+      return { suppressed: true, reason: `Opted out${keyword ? ` (${keyword})` : ''}` }
+    }
+  } catch (error) {
+    if (DEV) console.warn('[checkSuppressionStatus] message_events lookup degraded', mapErrorMessage(error))
   }
 
-  // Try sms_suppression_list if it exists
+  // Actual live schema: phone_number / phone_e164 plus reason fields.
+  // Lookup failure is degraded and must not block the send flow.
   for (const variant of variants) {
-    const { data: suppRows, error: suppErr } = await supabase
-      .from('sms_suppression_list')
-      .select('id,reason')
-      .or(`phone.eq.${safeFilterValue(variant)},phone_number.eq.${safeFilterValue(variant)},canonical_e164.eq.${safeFilterValue(variant)}`)
-      .limit(1)
-    if (!suppErr && safeArray(suppRows as AnyRecord[]).length > 0) {
-      const suppRow = safeArray(suppRows as AnyRecord[])[0]!
-      return { suppressed: true, reason: `Suppressed: ${asString(getFirst(suppRow, ['reason']), 'on suppression list')}` }
+    try {
+      const { data: suppRows, error: suppErr } = await supabase
+        .from('sms_suppression_list')
+        .select('id,phone_number,phone_e164,reason,suppression_reason,suppression_type,is_active,suppressed_at')
+        .or(`phone_number.eq.${safeFilterValue(variant)},phone_e164.eq.${safeFilterValue(variant)}`)
+        .eq('is_active', true)
+        .limit(1)
+      if (suppErr) throw suppErr
+      if (safeArray(suppRows as AnyRecord[]).length > 0) {
+        const suppRow = safeArray(suppRows as AnyRecord[])[0]!
+        return { suppressed: true, reason: `Suppressed: ${asString(getFirst(suppRow, ['reason', 'suppression_reason', 'suppression_type']), 'on suppression list')}` }
+      }
+    } catch (error) {
+      if (DEV) console.warn('[checkSuppressionStatus] sms_suppression_list degraded', mapErrorMessage(error))
+      return { suppressed: false, reason: null, degraded: true, error: mapErrorMessage(error) }
     }
-    // If error code 42P01 (no such table), stop trying
-    if (suppErr && (suppErr as { code?: string }).code === '42P01') break
   }
 
   return { suppressed: false, reason: null }

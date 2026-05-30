@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../../../../_shared.js'
+import { degradedThreadMessagesPayload } from '@/lib/domain/inbox/degraded-read-responses.js'
 import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
 
 export const runtime = 'nodejs'
@@ -75,13 +76,14 @@ export async function GET(request, { params }) {
     )
   } catch (error) {
     return NextResponse.json(
-      {
-        ok: false,
-        action: 'thread-messages',
-        error: 'thread_messages_failed',
-        message: error?.message || 'Unknown thread messages error',
-      },
-      { status: 500, headers: cors },
+      degradedThreadMessagesPayload({
+        error,
+        thread_key,
+        canonical_e164,
+        offset,
+        limit,
+      }),
+      { status: 200, headers: cors },
     )
   }
 }

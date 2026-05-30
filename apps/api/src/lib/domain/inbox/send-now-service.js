@@ -49,6 +49,10 @@ function buildTransportFingerprint({ to_phone_number, message_body, now = Date.n
   return crypto.createHash("sha256").update(seed).digest("hex");
 }
 
+function quotePostgrestValue(value) {
+  return `"${clean(value).replaceAll('"', '""')}"`;
+}
+
 function isTransportFailureReason(reason = "") {
   const r = clean(reason).toLowerCase();
   if (!r) return false;
@@ -495,16 +499,49 @@ async function isHardComplianceBlocked({
   }
 
   try {
+    const normalized_to = normalizePhone(to_phone_number);
+    const suppression_phone_filter = [
+      normalized_to ? `phone_number.eq.${quotePostgrestValue(normalized_to)}` : null,
+      normalized_to ? `phone_e164.eq.${quotePostgrestValue(normalized_to)}` : null,
+    ].filter(Boolean).join(",");
+
+    if (!suppression_phone_filter) {
+      return { blocked: false, reason: null };
+    }
+
     const { data: suppression_rows, error } = await supabase
       .from("sms_suppression_list")
-      .select("id,reason")
-      .or(`phone.eq.${to_phone_number},phone_number.eq.${to_phone_number},canonical_e164.eq.${to_phone_number}`)
+      .select("id,phone_number,phone_e164,reason,suppression_reason,suppression_type,is_active,suppressed_at")
+      .or(suppression_phone_filter)
+      .eq("is_active", true)
       .limit(1);
     if (!error && Array.isArray(suppression_rows) && suppression_rows.length > 0) {
       return { blocked: true, reason: "compliance_suppression_list" };
     }
-  } catch {
-    // non-fatal
+    if (error) {
+      logger.warn("inbox_send_suppression_lookup_degraded", {
+        reason: "sms_suppression_list_query_failed",
+        code: error.code || null,
+        message: error.message || "unknown_error",
+      });
+      return {
+        blocked: false,
+        reason: null,
+        degraded: true,
+        degradation_reason: "sms_suppression_list_query_failed",
+      };
+    }
+  } catch (error) {
+    logger.warn("inbox_send_suppression_lookup_degraded", {
+      reason: "sms_suppression_list_exception",
+      message: error?.message || "unknown_error",
+    });
+    return {
+      blocked: false,
+      reason: null,
+      degraded: true,
+      degradation_reason: "sms_suppression_list_exception",
+    };
   }
 
   return { blocked: false, reason: null };
@@ -764,6 +801,9 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     to_phone_number: normalized.to_phone_number,
     supabase,
   });
+  if (compliance_block.degraded) {
+    warning_codes.push(compliance_block.degradation_reason || "suppression_lookup_degraded");
+  }
   if (compliance_block.blocked) {
     const proof = buildManualSendProof({
       input,

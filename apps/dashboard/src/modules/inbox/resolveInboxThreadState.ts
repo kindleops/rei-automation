@@ -25,6 +25,19 @@ export interface BucketClassification {
   }
 }
 
+export const ACTIVE_CANONICAL_BUCKETS = new Set<CanonicalBucket>([
+  'priority',
+  'new_replies',
+  'needs_review',
+  'follow_up',
+])
+
+export const isActiveCanonicalBucket = (bucket: unknown): boolean =>
+  ACTIVE_CANONICAL_BUCKETS.has(String(bucket ?? '').trim().toLowerCase() as CanonicalBucket)
+
+export const isWaitingInboxState = (state: BucketClassification): boolean =>
+  state.flags.latest_direction === 'outbound' && state.bucket !== 'dead' && state.bucket !== 'suppressed'
+
 const num = (v: unknown, fallback = 0): number => {
   const n = Number(String(v ?? '').replace(/[,$\s]/g, ''))
   return Number.isFinite(n) ? n : fallback

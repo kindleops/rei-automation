@@ -949,7 +949,7 @@ export const InboxSidebar = ({
 
   if (inboxMode === 'review50') {
     return (
-      <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
+      <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, 'nx-sidebar--mode-rail25', `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
         <div className="nx-review50-layout">
           <div className="nx-review50-left" ref={groupsRef}>
             {renderTopActions()}

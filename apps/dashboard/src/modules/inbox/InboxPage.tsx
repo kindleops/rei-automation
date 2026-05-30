@@ -100,6 +100,7 @@ import {
   openMapMode,
   resetLayoutMode,
   type ActiveOverlay,
+  type InboxLayoutState,
   type MapSourceMode,
 } from './inbox-layout-state'
 import {
@@ -539,7 +540,10 @@ export default function InboxPage() {
   const [scheduledTime, setScheduledTime] = useState<ScheduledTime | null>(null)
   const [scheduledTemplatePayload, setScheduledTemplatePayload] = useState<TemplateActionPayload | null>(null)
   // translate panel is now local to Composer; showTranslation drives nothing
-  const [layoutState, setLayoutState] = useState(defaultInboxLayoutState)
+  const [layoutState, setLayoutState] = useState<InboxLayoutState>(() => ({
+    ...defaultInboxLayoutState,
+    theme: resolveDataThemeAttr(loadSettings().nexusTheme) === 'light' ? 'light' : 'dark',
+  }))
   const [dossierFull, setDossierFull] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
   const hasLoadedInitialInboxRef = useRef(false)
@@ -681,7 +685,10 @@ export default function InboxPage() {
     const srv = data.counts ?? {}
     const sv = (key: string, fallback: number) => {
       const v = srv[key]
-      return (typeof v === 'number' && v >= 0) ? v : fallback
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+        return v === 0 && Number.isFinite(fallback) && fallback > 0 ? fallback : v
+      }
+      return fallback
     }
 
     const allCount = sv('all', data.allInboxCount ?? local.all)
@@ -694,7 +701,8 @@ export default function InboxPage() {
     const deadCount = sv('dead', local.dead ?? local.wrong_number ?? 0)
     const automated = sv('automated', sv('auto_replied', local.automated))
     const hotLeads = sv('hot_leads', local.hot_leads)
-    const activeCount = local.active
+    const activeCount = sv('active', local.active)
+    const waitingCount = sv('waiting', sv('waiting_on_seller', local.waiting ?? local.waiting_on_seller ?? 0))
 
     return {
       ...local,
@@ -709,7 +717,7 @@ export default function InboxPage() {
       suppressed,
       // legacy aliases kept for backwards compat
       follow_up_due: followUpCount,
-      waiting_on_seller: local.waiting_on_seller,
+      waiting_on_seller: waitingCount,
       automated,
       hot_leads: hotLeads,
       needs_review: needsReview,
@@ -718,12 +726,13 @@ export default function InboxPage() {
       failed: local.failed,
       all: allCount,
       active: activeCount,
+      waiting: waitingCount,
       my_priority: priorityCount,
       new_inbounds: newReplies,
       offer_needed: followUpCount,
       review_required: needsReview,
       active_conversations: activeCount,
-      waiting_for_reply: local.waiting_on_seller,
+      waiting_for_reply: waitingCount,
       all_threads: allCount,
       archived_leads: local.archived,
       wrong_numbers: local.wrong_number,
@@ -1935,8 +1944,13 @@ export default function InboxPage() {
   useEffect(() => {
     const sync = () => {
       const settings = loadSettings()
-      setActiveNexusThemeId(resolveDataThemeAttr(settings.nexusTheme) as NexusGlobalThemeId)
+      const resolvedThemeId = resolveDataThemeAttr(settings.nexusTheme) as NexusGlobalThemeId
+      setActiveNexusThemeId(resolvedThemeId)
       setActiveAccentPalette(settings.accentPalette)
+      setLayoutState((current) => {
+        const nextTheme = resolvedThemeId === 'light' ? 'light' : 'dark'
+        return current.theme === nextTheme ? current : { ...current, theme: nextTheme }
+      })
     }
     sync()
     return subscribeSettings(sync)
@@ -3618,6 +3632,8 @@ export default function InboxPage() {
     <WatchlistProvider>
     <div
       id="nx-inbox-root"
+      data-nexus-theme={activeNexusThemeId}
+      data-nexus-accent={activeAccentPalette}
       className={cls(
         'nx-premium-inbox nx-inbox',
         ...layoutClasses,
@@ -3660,6 +3676,7 @@ export default function InboxPage() {
         activeThemeId={activeNexusThemeId}
         activeAccentId={activeAccentPalette}
         onSelectTheme={(themeId) => {
+          setLayoutState((current) => ({ ...current, theme: themeId === 'light' ? 'light' : 'dark' }))
           updateSetting('nexusTheme', themeId)
           applyThemeToDOM()
         }}

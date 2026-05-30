@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
 import { inboxReducer, EMPTY_INBOX_STORE_STATE } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
-import { fetchInboxModel, type InboxFetchOptions, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
+import { fetchInboxModel, type InboxFetchOptions, type LiveInboxDiagnostics, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
@@ -123,8 +123,12 @@ export interface InboxThread {
   directionUsed?: string
   autoReplyStatus?: string
   deliveryStatus?: string
+  providerDeliveryStatus?: string
   latestDeliveryStatus?: string
+  latestProviderDeliveryStatus?: string
   latestDeliveredAt?: string | null
+  latestFailedAt?: string | null
+  latestFailureReason?: string | null
   latestSentAt?: string | null
   latestProviderSid?: string
   lastDeliveredAt?: string | null
@@ -258,6 +262,13 @@ export interface InboxThread {
   inbox_bucket?: string
   reply_intent?: string
   lead_temperature?: string
+  delivery_status?: string
+  latest_delivery_status?: string
+  provider_delivery_status?: string
+  latest_provider_delivery_status?: string
+  latest_delivered_at?: string | null
+  latest_failed_at?: string | null
+  latest_failure_reason?: string | null
   prospect_name?: string
   full_name?: string
   first_name?: string
@@ -271,7 +282,8 @@ export interface InboxThread {
   final_acquisition_score?: number
   priority_score?: number
   campaign_name?: string
-  queue_status?: string
+  queueStatus?: string | null
+  queue_status?: string | null
 
   // OWNER
   primary_owner_address?: string
@@ -443,6 +455,13 @@ export interface InboxModel {
   orphanCount?: number
   latestFetchMs?: number
   realtimeConnected?: boolean
+  countsDegraded?: boolean
+  countsApproximate?: boolean
+  countsSource?: string | null
+  countPreservedReason?: string | null
+  liveDiagnostics?: LiveInboxDiagnostics
+  liveDataSource?: string | null
+  fallbackUsed?: boolean
 }
 
 export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
@@ -639,7 +658,14 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
     autoReplyStatus: t.autoReplyStatus,
     matchedKeywords: t.matchedKeywords,
     updatedAt: lastAt,
-    queueStatus: t.autoReplyStatus || (t.queueId ? 'queued' : null),
+    deliveryStatus: t.deliveryStatus,
+    latestDeliveryStatus: t.latestDeliveryStatus || t.deliveryStatus,
+    providerDeliveryStatus: t.providerDeliveryStatus,
+    latestProviderDeliveryStatus: t.latestProviderDeliveryStatus || t.providerDeliveryStatus,
+    latestDeliveredAt: t.latestDeliveredAt ?? null,
+    latestFailedAt: t.latestFailedAt ?? null,
+    latestFailureReason: t.latestFailureReason ?? t.failureReason,
+    queueStatus: t.queueStatus || t.queue_status || t.autoReplyStatus || (t.queueId ? 'queued' : null),
   } as InboxWorkflowThread
 }
 
@@ -658,6 +684,210 @@ const extractViewCounts = (model: InboxModel): Record<string, number> => {
   return counts
 }
 
+const normalizePhoneLike = (value: unknown): string => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return raw
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  return raw.startsWith('+') ? `+${digits}` : raw
+}
+
+const normalizeRealtimeDirection = (value: unknown): 'inbound' | 'outbound' | 'unknown' => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (raw.startsWith('in') || raw.includes('incoming') || raw.includes('received')) return 'inbound'
+  if (raw.startsWith('out') || raw.includes('sent') || raw.includes('queued')) return 'outbound'
+  return 'unknown'
+}
+
+const normalizeRealtimeStatus = (value: unknown): string => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (raw.includes('deliver')) return 'delivered'
+  if (raw.includes('fail') || raw.includes('undeliv')) return 'failed'
+  if (raw.includes('sent') || raw === 'success') return 'sent'
+  if (raw.includes('queue') || raw === 'approval' || raw === 'scheduled') return 'queued'
+  if (raw.includes('process') || raw === 'sending') return 'sending'
+  return raw || 'pending'
+}
+
+const ACTIVE_COUNT_BUCKETS = new Set(['priority', 'new_replies', 'needs_review', 'follow_up'])
+
+const normalizeRealtimeBucket = (value: unknown): string => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  const aliases: Record<string, string> = {
+    hot_leads: 'priority',
+    positive_hot: 'priority',
+    new_inbound: 'new_replies',
+    needs_reply: 'new_replies',
+    manual_review: 'needs_review',
+    outbound_active: 'follow_up',
+    follow_up_due: 'follow_up',
+    waiting_on_seller: 'waiting',
+    waiting: 'waiting',
+    cold_no_response: 'cold',
+    dnc_opt_out: 'suppressed',
+    opt_out: 'suppressed',
+    wrong_number: 'dead',
+  }
+  return aliases[raw] ?? raw
+}
+
+const resolveRealtimeThreadKey = (row: Record<string, unknown>, table: string): string => {
+  const explicit = String(row.thread_key ?? row.threadKey ?? '').trim()
+  if (explicit) return explicit
+  const direction = table === 'send_queue' ? 'outbound' : normalizeRealtimeDirection(row.direction)
+  const sellerPhone = direction === 'inbound'
+    ? normalizePhoneLike(row.from_phone_number)
+    : normalizePhoneLike(row.to_phone_number)
+  return sellerPhone || normalizePhoneLike(row.canonical_e164) || normalizePhoneLike(row.phone_number)
+}
+
+const rowBucket = (row: Record<string, unknown> | null | undefined): string => normalizeRealtimeBucket(
+  row?.inbox_bucket ?? row?.inboxBucket ?? row?.inbox_category ?? row?.inboxCategory ?? row?.priorityBucket,
+)
+
+const rowDirection = (row: Record<string, unknown> | null | undefined): 'inbound' | 'outbound' | 'unknown' =>
+  normalizeRealtimeDirection(row?.latest_message_direction ?? row?.latestMessageDirection ?? row?.latestDirection ?? row?.direction)
+
+const isWaitingCount = (bucket: string, direction: 'inbound' | 'outbound' | 'unknown'): boolean =>
+  direction === 'outbound' && bucket !== 'dead' && bucket !== 'suppressed'
+
+const incrementCount = (counts: Record<string, number>, key: string, delta: number) => {
+  if (!key || delta === 0) return
+  counts[key] = (counts[key] ?? 0) + delta
+}
+
+const buildRealtimeCountDeltas = (
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown>,
+): Record<string, number> => {
+  const deltas: Record<string, number> = {}
+  const beforeBucket = rowBucket(before)
+  const afterBucket = rowBucket(after)
+  const beforeDirection = rowDirection(before)
+  const afterDirection = rowDirection(after)
+
+  if (!before) {
+    incrementCount(deltas, 'all', 1)
+    incrementCount(deltas, 'all_messages', 1)
+    incrementCount(deltas, afterBucket, 1)
+  } else if (beforeBucket && afterBucket && beforeBucket !== afterBucket) {
+    incrementCount(deltas, beforeBucket, -1)
+    incrementCount(deltas, afterBucket, 1)
+  }
+
+  const beforeActive = before ? ACTIVE_COUNT_BUCKETS.has(beforeBucket) : false
+  const afterActive = ACTIVE_COUNT_BUCKETS.has(afterBucket)
+  if (beforeActive !== afterActive) incrementCount(deltas, 'active', afterActive ? 1 : -1)
+
+  const beforeWaiting = before ? isWaitingCount(beforeBucket, beforeDirection) : false
+  const afterWaiting = isWaitingCount(afterBucket, afterDirection)
+  if (beforeWaiting !== afterWaiting) {
+    incrementCount(deltas, 'waiting', afterWaiting ? 1 : -1)
+    incrementCount(deltas, 'waiting_on_seller', afterWaiting ? 1 : -1)
+  }
+
+  return deltas
+}
+
+const resolveRealtimeBucketForRow = (row: Record<string, unknown>, table: string): string => {
+  const explicit = normalizeRealtimeBucket(row.inbox_bucket ?? row.inboxBucket ?? row.inbox_category ?? row.inboxCategory)
+  if (explicit) return explicit
+  const intent = String(row.detected_intent ?? row.primary_intent ?? '').toLowerCase()
+  const body = String(row.message_body ?? row.message_text ?? '').toLowerCase()
+  if (row.opt_out === true || row.is_opt_out === true || ['stop', 'opt_out', 'dnc'].some((token) => intent.includes(token) || body.includes(token))) return 'suppressed'
+  if (row.wrong_number === true || row.not_interested === true || ['wrong_number', 'not_interested'].some((token) => intent.includes(token))) return 'dead'
+  if (row.needs_review === true || intent.includes('manual_review')) return 'needs_review'
+  if (table === 'send_queue') return 'follow_up'
+  const direction = normalizeRealtimeDirection(row.direction)
+  if (direction === 'inbound') return 'new_replies'
+  if (direction === 'outbound') return 'follow_up'
+  return 'cold'
+}
+
+const buildRealtimeThreadPatch = (
+  row: Record<string, unknown>,
+  table: string,
+  threadKey: string,
+): Record<string, unknown> => {
+  const direction = table === 'send_queue' ? 'outbound' : normalizeRealtimeDirection(row.direction)
+  const body = String(row.message_body ?? row.message_text ?? row.rendered_message ?? '').trim()
+  const at = String(row.event_timestamp ?? row.message_created_at ?? row.sent_at ?? row.delivered_at ?? row.updated_at ?? row.created_at ?? new Date().toISOString())
+  const bucket = resolveRealtimeBucketForRow(row, table)
+  const deliveryStatus = normalizeRealtimeStatus(
+    row.delivery_status ?? row.provider_delivery_status ?? row.raw_carrier_status ?? row.queue_status ?? row.status,
+  )
+  const providerDeliveryStatus = String(
+    row.provider_delivery_status ?? row.raw_carrier_status ?? row.delivery_status ?? row.queue_status ?? '',
+  ).trim() || deliveryStatus
+  const latestDeliveredAt = row.delivered_at ?? null
+  const latestFailedAt = row.failed_at ?? null
+  const latestFailureReason = String(
+    row.failure_reason ?? row.error_message ?? row.failed_reason ?? row.guard_reason ?? row.blocked_reason ?? row.paused_reason ?? '',
+  ).trim() || null
+  const queueStatus = String(row.queue_status ?? '').trim() || undefined
+  const sellerPhone = direction === 'inbound'
+    ? normalizePhoneLike(row.from_phone_number)
+    : normalizePhoneLike(row.to_phone_number)
+  const ourNumber = direction === 'inbound'
+    ? normalizePhoneLike(row.to_phone_number)
+    : normalizePhoneLike(row.from_phone_number)
+  return {
+    threadKey,
+    thread_key: threadKey,
+    preview: body,
+    latestMessageBody: body,
+    latest_message_body: body,
+    lastMessageBody: body,
+    latestMessageAt: at,
+    latest_message_at: at,
+    latest_activity_at: at,
+    lastMessageIso: at,
+    lastMessageAt: at,
+    latestDirection: direction,
+    latestMessageDirection: direction,
+    latest_message_direction: direction,
+    directionUsed: direction,
+    deliveryStatus,
+    delivery_status: deliveryStatus,
+    latestDeliveryStatus: deliveryStatus,
+    latest_delivery_status: deliveryStatus,
+    providerDeliveryStatus,
+    provider_delivery_status: providerDeliveryStatus,
+    latestProviderDeliveryStatus: providerDeliveryStatus,
+    latest_provider_delivery_status: providerDeliveryStatus,
+    latestDeliveredAt,
+    latest_delivered_at: latestDeliveredAt,
+    lastDeliveredAt: latestDeliveredAt,
+    latestFailedAt,
+    latest_failed_at: latestFailedAt,
+    latestFailureReason,
+    latest_failure_reason: latestFailureReason,
+    failureReason: latestFailureReason ?? undefined,
+    latestSentAt: row.sent_at ?? (direction === 'outbound' ? at : null),
+    queueStatus,
+    queue_status: queueStatus,
+    sellerPhone: sellerPhone || undefined,
+    seller_phone: sellerPhone || undefined,
+    phoneNumber: sellerPhone || undefined,
+    canonicalE164: sellerPhone || undefined,
+    canonical_e164: sellerPhone || undefined,
+    ourNumber: ourNumber || undefined,
+    inboxBucket: bucket,
+    inbox_bucket: bucket,
+    inboxCategory: bucket,
+    inbox_category: bucket,
+    priorityBucket: bucket,
+    status: direction === 'inbound' ? 'unread' : 'replied',
+    unreadCount: direction === 'inbound' ? 1 : 0,
+    unread: direction === 'inbound',
+    isRead: direction !== 'inbound',
+    needsReply: direction === 'inbound',
+    queueId: String(row.queue_id ?? row.id ?? '').trim() || undefined,
+  }
+}
+
 // ── useInboxData — reducer-based, bucket-isolated ────────────────────────────
 //
 // State is managed by inboxReducer. Each bucket owns its own rows, loading state,
@@ -671,11 +901,65 @@ const extractViewCounts = (model: InboxModel): Record<string, number> => {
 const BUCKET_ALIAS_MAP: Record<string, string> = {
   all: 'all_messages',
   all_conversations: 'all_messages',
+  all_messages: 'all_messages',
+  hot_leads: 'priority',
+  positive_hot: 'priority',
+  new_inbound: 'new_replies',
   new_inbounds: 'new_replies',
+  needs_reply: 'new_replies',
+  needs_response: 'new_replies',
   my_priority: 'priority',
+  manual_review: 'needs_review',
+  outbound_active: 'follow_up',
+  follow_up_due: 'follow_up',
+  waiting_on_seller: 'waiting',
+  cold_no_response: 'cold',
+  dnc_opt_out: 'suppressed',
+  opt_out: 'suppressed',
+  wrong_number: 'dead',
 }
 
-const normalizeBucketKey = (key: string): string => BUCKET_ALIAS_MAP[key] ?? key
+const normalizeBucketKey = (key: string): string => {
+  const raw = String(key ?? '').trim().toLowerCase()
+  return BUCKET_ALIAS_MAP[raw] ?? raw
+}
+
+const threadIdentityCandidates = (value: unknown): string[] => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return []
+  const candidates = new Set<string>([raw])
+  const withoutPhonePrefix = raw.toLowerCase().startsWith('phone:') ? raw.slice(6).trim() : ''
+  if (withoutPhonePrefix) candidates.add(withoutPhonePrefix)
+  for (const candidate of [...candidates]) {
+    const digits = candidate.replace(/\D/g, '')
+    if (digits.length === 10) candidates.add(`+1${digits}`)
+    else if (digits.length === 11 && digits.startsWith('1')) candidates.add(`+${digits}`)
+    else if (candidate.startsWith('+') && digits.length >= 10) candidates.add(`+${digits}`)
+  }
+  return [...candidates].filter(Boolean)
+}
+
+const rowIdentityValues = (row: Record<string, unknown>): string[] => Array.from(new Set([
+  row.threadKey,
+  row.thread_key,
+  row.id,
+  row.canonicalE164,
+  row.canonical_e164,
+  row.sellerPhone,
+  row.seller_phone,
+  row.bestPhone,
+  row.best_phone,
+  row.phoneNumber,
+  row.phone_number,
+  row.phone,
+].flatMap(threadIdentityCandidates)))
+
+const rowIdentityMatches = (row: Record<string, unknown>, threadKey: string): boolean => {
+  const needles = threadIdentityCandidates(threadKey)
+  if (needles.length === 0) return false
+  const identities = new Set(rowIdentityValues(row))
+  return needles.some((needle) => identities.has(needle))
+}
 
 export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; paused?: boolean } = {}) => {
   const { initialSourceMode = 'conversations', paused = false } = options
@@ -720,8 +1004,11 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     // Never start a new refresh if same bucket fetch is already in flight.
     if (abortByBucketRef.current[bucketKey] && mode === 'refresh') {
-      if (isDev) console.log(`[InboxRefreshSkip] Already in flight for bucket: ${bucketKey}`)
-      return null
+      if (!options._force) {
+        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'already_in_flight' })
+        return null
+      }
+      abortByBucketRef.current[bucketKey]?.abort()
     }
 
     // Abort previous in-flight request for this specific bucket (only for append, or if we really want to supersede).
@@ -743,11 +1030,11 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
       const currentBucket = stateRef.current.buckets[bucketKey]
       const currentRowsCount = currentBucket?.rows?.length ?? 0
+      const hasThreadRows = (model.threads?.length ?? 0) > 0
 
-      // Protection Rule: Only allow live data into bucket rows. Fallback/degraded
-      // data is blocked regardless of current row count.
-      // On initial boot (0 rows) with degraded data, log and show empty state.
-      if (model.dataMode !== 'live') {
+      // Protection Rule: only block a degraded response when it has no rows to show.
+      // If threads exist, commit them and preserve the last good counts instead.
+      if (model.dataMode !== 'live' && !hasThreadRows) {
         if (currentRowsCount === 0) {
           console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads.length, dataMode: model.dataMode })
         } else {
@@ -759,13 +1046,22 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           requestId,
           error: model.liveFetchError ?? 'Data mode degraded. Inbox will retry on next poll.'
         })
-        delete abortByBucketRef.current[bucketKey]
+        if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
       }
 
+      if (model.dataMode !== 'live' && hasThreadRows) {
+        console.warn('[INBOX_DEGRADED_ROWS_COMMITTED]', {
+          bucketKey,
+          rowCount: model.threads.length,
+          dataMode: model.dataMode,
+          liveFetchError: model.liveFetchError ?? null,
+        })
+      }
+
       if (mode === 'append') {
-        // Protection Rule: Load-more failure (0 rows but not live) shouldn't overwrite anything.
-        if (model.dataMode !== 'live' && (model.threads?.length ?? 0) === 0) {
+        // Protection Rule: Load-more failure with zero rows shouldn't overwrite anything.
+        if (model.dataMode !== 'live' && !hasThreadRows) {
            console.warn('[Inbox Protection] Ignoring degraded load-more response.')
            dispatch({
              type: 'BUCKET_FETCH_ERROR',
@@ -773,7 +1069,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
              requestId,
              error: model.liveFetchError ?? 'Load more degraded.'
            })
-           delete abortByBucketRef.current[bucketKey]
+           if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
            return model
         }
 
@@ -797,16 +1093,33 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       }
 
       // Counts are isolated: SET_VIEW_COUNTS never touches bucket rows.
-      // Protection Rule: Only update counts if the response is fully healthy.
-      if (model.dataMode === 'live') {
+      // Protection Rule: only update counts when the response includes healthy counts.
+      if (model.dataMode === 'live' && model.countsDegraded !== true) {
         const counts = extractViewCounts(model)
         if (Object.keys(counts).length > 0) {
           dispatch({ type: 'SET_VIEW_COUNTS', counts })
         }
+      } else if (model.countsApproximate === true) {
+        const counts = Object.fromEntries(
+          Object.entries(extractViewCounts(model)).filter(([, value]) => Number(value) > 0),
+        )
+        if (Object.keys(counts).length > 0) {
+          console.log('[INBOX_COUNTS_APPROXIMATE_APPLIED]', {
+            bucketKey,
+            counts_source: model.countsSource ?? model.liveDiagnostics?.countsSource ?? 'visible_rows_approximate',
+            count_preserved_reason: model.countPreservedReason ?? model.liveDiagnostics?.countPreservedReason ?? 'approximate_counts_fill_missing_only',
+          })
+          dispatch({ type: 'SET_VIEW_COUNTS', counts, preserveExisting: true, reason: model.countPreservedReason ?? 'counts_approximate' })
+        }
+      } else if (model.countsDegraded === true) {
+        console.log('[INBOX_COUNTS_PRESERVED]', {
+          bucketKey,
+          count_preserved_reason: model.countPreservedReason ?? model.liveDiagnostics?.countPreservedReason ?? 'counts_degraded_no_replacement',
+        })
       }
 
       // Store secondary metadata (mapPins, pagination, debug counts) separately.
-      if (model.dataMode === 'live') {
+      if (model.dataMode === 'live' || hasThreadRows) {
         metaRef.current = {
           unreadCount: model.unreadCount,
           urgentCount: model.urgentCount,
@@ -820,7 +1133,14 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           orphanCount: model.orphanCount,
           latestFetchMs: fetchMs,
           lastLiveFetchAt: new Date().toISOString(),
-          dataMode: 'live' as const,
+          dataMode: model.dataMode,
+          countsDegraded: model.countsDegraded,
+          countsApproximate: model.countsApproximate,
+          countsSource: model.countsSource,
+          countPreservedReason: model.countPreservedReason,
+          liveDiagnostics: model.liveDiagnostics,
+          liveDataSource: model.liveDataSource,
+          fallbackUsed: model.fallbackUsed,
         }
       }
 
@@ -834,10 +1154,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           dataMode: model.dataMode,
         })
       }
-      delete abortByBucketRef.current[bucketKey]
+      if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
       return model
     } catch (err) {
-      delete abortByBucketRef.current[bucketKey]
+      if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
       if (controller.signal.aborted) return null
       const errMsg = err instanceof Error ? err.message : String(err)
       dispatch({ type: 'BUCKET_FETCH_ERROR', bucketKey, requestId, error: errMsg })
@@ -855,13 +1175,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     if (options._automatic && !options._force) {
       if (document.hidden) {
-        if (isDev) console.log('[InboxRefreshSkip] document hidden')
+        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'document_hidden' })
         return null
       }
       
       // Implement paused check from props or options
       if (paused || options.paused) {
-        if (isDev) console.log('[InboxRefreshSkip] paused (messages loading or heavy load)')
+        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'paused' })
         return null
       }
 
@@ -870,14 +1190,14 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       
       // Implement 2min minimum interval for auto-refresh
       if (now - last < minRefreshMs) {
-        if (isDev) console.log('[InboxRefreshSkip] min interval not met', { elapsed: now - last, min: minRefreshMs })
+        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'min_interval_not_met', elapsed: now - last, min: minRefreshMs })
         return null
       }
 
       // If active bucket already has live rows and last successful live fetch was <2 min ago, skip refresh.
       const currentBucket = stateRef.current.buckets[bucketKey]
       if (currentBucket && currentBucket.rows.length > 0 && (now - last < minRefreshMs)) {
-         if (isDev) console.log(`[InboxRefreshSkip] bucket ${bucketKey} already has live data`)
+         if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'bucket_recently_loaded' })
          return null
       }
     }
@@ -904,7 +1224,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         void runLoad(lastFetchRef.current, 'refresh').then(resolve)
       }, delay)
     })
-  }, [runLoad, sourceMode, minRefreshMs])
+  }, [runLoad, sourceMode, minRefreshMs, paused])
 
   // ── Load More ─────────────────────────────────────────────────────────────
 
@@ -951,49 +1271,61 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     if (shouldUseSupabase() && realtimeEnabled) {
       const supabase = getSupabaseClient()
-      const triggerRefresh = (payload: { table?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+      const findStoredThread = (threadKey: string): Record<string, unknown> | null => {
+        for (const bucket of Object.values(stateRef.current.buckets)) {
+          const found = bucket.rows.find((candidate) => {
+            const row = candidate as Record<string, unknown>
+            return rowIdentityMatches(row, threadKey)
+          }) as Record<string, unknown> | undefined
+          if (found) return found
+        }
+        return null
+      }
+
+      const triggerRefresh = (payload: { table?: string; eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
         const table = payload?.table ?? 'unknown'
-        const rawKey = payload?.new?.thread_key || payload?.old?.thread_key
-        const threadKey = typeof rawKey === 'string' ? rawKey : ''
+        const row = (payload?.new ?? payload?.old ?? {}) as Record<string, unknown>
+        const threadKey = resolveRealtimeThreadKey(row, table)
 
         if (threadKey) {
           markRecentlyUpdated(threadKey)
 
-          if (table === 'message_events' && payload.new) {
-            if (isDev) console.log('[SMOOTH_REALTIME_PATCH]', { table, threadKey, type: 'message' })
-            const row = payload.new as Record<string, unknown>
-            const direction = (row.direction as string) || 'inbound'
-            const body = (row.message_body as string) || (row.rendered_message as string) || ''
-            const at = (row.message_created_at as string) || (row.event_timestamp as string) || new Date().toISOString()
-            // Find current row to compute incremented counts
-            let currentMessageCount = 0
-            let currentUnreadCount = 0
-            for (const bucket of Object.values(stateRef.current.buckets)) {
-              const found = bucket.rows.find((r) => {
-                const t = r as Record<string, unknown>
-                return t.threadKey === threadKey || t.id === threadKey
-              }) as Record<string, unknown> | undefined
-              if (found) {
-                currentMessageCount = (found.messageCount as number) || 0
-                currentUnreadCount = (found.unreadCount as number) || 0
-                break
-              }
+          if ((table === 'message_events' || table === 'send_queue') && payload.new) {
+            const before = findStoredThread(threadKey)
+            const patch = buildRealtimeThreadPatch(payload.new, table, threadKey)
+            const beforeBucket = rowBucket(before)
+            const afterBucket = rowBucket(patch)
+            const countDeltas = buildRealtimeCountDeltas(before, patch)
+            const currentMessageCount = Number(before?.messageCount ?? 0)
+            const currentUnreadCount = Number(before?.unreadCount ?? 0)
+            if (table === 'message_events') {
+              patch.messageCount = currentMessageCount + (payload.eventType === 'INSERT' ? 1 : 0)
+              patch.unreadCount = patch.latestDirection === 'inbound'
+                ? Math.max(1, currentUnreadCount + (payload.eventType === 'INSERT' ? 1 : 0))
+                : 0
             }
+
+            console.log('[INBOX_REALTIME_EVENT_APPLIED]', {
+              realtime_event_applied: true,
+              table,
+              eventType: payload.eventType ?? null,
+              threadKey,
+              bucket_before: beforeBucket || null,
+              bucket_after: afterBucket || null,
+              countDeltas,
+            })
+
             dispatch({
               type: 'REALTIME_PATCH_THREAD',
               threadKey,
-              patch: {
-                preview: body,
-                lastMessageIso: at,
-                lastMessageLabel: at,
-                latestMessageBody: body,
-                latestMessageAt: at,
-                latestDirection: direction,
-                messageCount: currentMessageCount + 1,
-                status: direction === 'inbound' ? 'unread' : 'replied',
-                unreadCount: direction === 'inbound' ? currentUnreadCount + 1 : 0,
-                needsReply: direction === 'inbound',
-                isRead: direction !== 'inbound',
+              patch,
+              targetBucketKey: afterBucket,
+              upsert: true,
+              countDeltas,
+              diagnostics: {
+                realtime_event_applied: true,
+                bucket_before: beforeBucket || null,
+                bucket_after: afterBucket || null,
               },
             })
           }
@@ -1003,11 +1335,25 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             const row = payload.new as Record<string, unknown>
             const patch: Record<string, unknown> = {}
             if (row.inbox_category != null) patch.inboxCategory = row.inbox_category
+            if (row.inbox_category != null) patch.inbox_bucket = normalizeRealtimeBucket(row.inbox_category)
             if (row.detected_intent != null || row.ui_intent != null) patch.uiIntent = row.detected_intent || row.ui_intent
             if (row.thread_stage != null) patch.workflowStage = row.thread_stage
             if (row.is_archived != null) patch.status = row.is_archived ? 'archived' : (row.is_read ? 'read' : undefined)
             if (row.is_read != null) { patch.unreadCount = row.is_read ? 0 : undefined; patch.isRead = row.is_read }
-            dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch })
+            const before = findStoredThread(threadKey)
+            const beforeBucket = rowBucket(before)
+            const afterBucket = rowBucket({ ...(before ?? {}), ...patch })
+            const countDeltas = buildRealtimeCountDeltas(before, { ...(before ?? {}), ...patch })
+            console.log('[INBOX_REALTIME_EVENT_APPLIED]', {
+              realtime_event_applied: true,
+              table,
+              eventType: payload.eventType ?? null,
+              threadKey,
+              bucket_before: beforeBucket || null,
+              bucket_after: afterBucket || null,
+              countDeltas,
+            })
+            dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch, targetBucketKey: afterBucket, upsert: false, countDeltas })
           }
         }
 
@@ -1102,6 +1448,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     partiallyHydratedCount: metaRef.current.partiallyHydratedCount ?? 0,
     orphanCount: metaRef.current.orphanCount ?? 0,
     latestFetchMs: metaRef.current.latestFetchMs ?? 0,
+    countsDegraded: metaRef.current.countsDegraded ?? false,
+    countsApproximate: metaRef.current.countsApproximate ?? false,
+    countsSource: metaRef.current.countsSource ?? null,
+    countPreservedReason: metaRef.current.countPreservedReason ?? null,
+    liveDiagnostics: metaRef.current.liveDiagnostics,
+    liveDataSource: metaRef.current.liveDataSource ?? null,
+    fallbackUsed: metaRef.current.fallbackUsed ?? false,
     lastLiveFetchAt: metaRef.current.lastLiveFetchAt ?? null,
     messageEventsCount: null,
     messageEventsRawCount: null,

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { degradedLiveResponse, degradedThreadMessagesPayload } from "../../src/lib/domain/inbox/degraded-read-responses.js";
 import { getLiveInbox, getThreadMessages } from "../../src/lib/domain/inbox/live-inbox-service.js";
 
 function clean(value) {
@@ -79,10 +80,11 @@ function applyOrClause(rows, clause) {
 function createCanonicalInboxSupabase(seed = {}) {
   const threadRows = [...(seed.threadRows || [])];
   const messageEvents = [...(seed.messageEvents || [])];
+  const countRows = seed.countRows ? [...seed.countRows] : null;
 
   function getRowsForTable(table) {
     if (table === "v_inbox_threads_live_v2") return [...threadRows];
-    if (table === "v_inbox_thread_counts_live_v2") return [buildCountRow(threadRows)];
+    if (table === "v_inbox_thread_counts_live_v2") return countRows ? [...countRows] : [buildCountRow(threadRows)];
     if (table === "message_events") return [...messageEvents];
     return [];
   }
@@ -138,6 +140,10 @@ function createCanonicalInboxSupabase(seed = {}) {
         },
         then(resolve, reject) {
           return Promise.resolve().then(() => {
+            if (state.table === "v_inbox_thread_counts_live_v2" && seed.countError) {
+              return { data: null, count: null, error: { message: seed.countError } };
+            }
+
             let data = getRowsForTable(state.table);
 
             for (const filter of state.filters) {
@@ -173,6 +179,98 @@ function createCanonicalInboxSupabase(seed = {}) {
             }
 
             return { data, count, error: null };
+          }).then(resolve, reject);
+        },
+      };
+
+      return api;
+    },
+  };
+}
+
+function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
+  return {
+    from(table) {
+      if (table === "v_inbox_threads_live_v2" || table === "v_inbox_thread_counts_live_v2") {
+        return {
+          select() {
+            return {
+              limit() { return this; },
+              then(resolve, reject) {
+                return Promise.resolve({
+                  data: null,
+                  count: null,
+                  error: { message: `relation "${table}" does not exist` },
+                }).then(resolve, reject);
+              },
+            };
+          },
+        };
+      }
+
+      if (table !== "v_inbox_enriched") {
+        throw new Error(`unexpected table ${table}`);
+      }
+
+      const state = {
+        columns: "*",
+        countRequested: false,
+        range: null,
+        limit: null,
+        invalidColumns: [],
+      };
+
+      const api = {
+        select(columns, options = {}) {
+          state.columns = columns;
+          state.countRequested = options.count === "exact";
+          if (state.countRequested) trackers.fallbackExactCountRequested = true;
+          const columnList = String(columns || "").split(",").map((column) => clean(column)).filter(Boolean);
+          state.invalidColumns = columnList.filter((column) => ["unread_count", "created_at", "updated_at"].includes(column));
+          if (columnList.length <= 8 && columnList.includes("inbox_category")) {
+            trackers.fallbackCountQueryRequested = true;
+          }
+          return api;
+        },
+        eq() { return api; },
+        in() { return api; },
+        is() { return api; },
+        or() { return api; },
+        order() { return api; },
+        range(start, end) {
+          state.range = [start, end];
+          return api;
+        },
+        limit(value) {
+          state.limit = value;
+          return api;
+        },
+        then(resolve, reject) {
+          return Promise.resolve().then(() => {
+            if (state.countRequested) {
+              return {
+                data: null,
+                count: null,
+                error: { message: "exact count should not run against fallback source during initial boot" },
+              };
+            }
+
+            if (state.invalidColumns.length > 0) {
+              return {
+                data: null,
+                count: null,
+                error: { message: `unexpected fallback initial-boot columns: ${state.invalidColumns.join(",")}` },
+              };
+            }
+
+            let data = [...enrichedRows];
+            if (state.range) {
+              data = data.slice(state.range[0], state.range[1] + 1);
+            } else if (typeof state.limit === "number") {
+              data = data.slice(0, state.limit);
+            }
+
+            return { data, count: null, error: null };
           }).then(resolve, reject);
         },
       };
@@ -234,6 +332,36 @@ function makeEvent(overrides = {}) {
     ...overrides,
   };
 }
+
+test("degraded read-route payloads preserve 200-compatible inbox state", () => {
+  const livePayload = degradedLiveResponse({
+    timeoutMode: "manual_bucket_switch",
+    error: "live_inbox_failed_degraded",
+    reason: "live_error_preserve_client_counts",
+    dataMode: "error_preserved",
+    countsSource: "error",
+  });
+
+  assert.equal(livePayload.ok, true);
+  assert.equal(livePayload.degraded, true);
+  assert.deepEqual(livePayload.threads, []);
+  assert.equal(livePayload.countsDegraded, true);
+  assert.equal(livePayload.diagnostics.count_preserved_reason, "live_error_preserve_client_counts");
+
+  const messagesPayload = degradedThreadMessagesPayload({
+    error: new Error("message_events timeout"),
+    thread_key: "+15550000000",
+    canonical_e164: "+15550000000",
+    offset: 0,
+    limit: 200,
+  });
+
+  assert.equal(messagesPayload.ok, true);
+  assert.equal(messagesPayload.degraded, true);
+  assert.deepEqual(messagesPayload.messages, []);
+  assert.equal(messagesPayload.pagination.total, 0);
+  assert.equal(messagesPayload.diagnostics.degraded, true);
+});
 
 test("latest outbound message appears at the top of the inbox and duplicate-property threads stay single-row", async () => {
   const supabase = createCanonicalInboxSupabase({
@@ -457,4 +585,96 @@ test("counts come from the same canonical v2 source and match filter results", a
       `filter ${filter} should return the same count advertised by the v2 counts source`,
     );
   }
+});
+
+test("visible thread rows floor stale zero count rows", async () => {
+  const threadRows = [
+    makeThread({
+      thread_key: "+15550000041",
+      latest_message_direction: "inbound",
+      inbox_bucket: "new_replies",
+      latest_message_at: "2026-05-29T12:35:00.000Z",
+      unread_count: 1,
+    }),
+    makeThread({
+      thread_key: "+15550000042",
+      latest_message_direction: "inbound",
+      inbox_bucket: "new_replies",
+      latest_message_at: "2026-05-29T12:34:00.000Z",
+      unread_count: 1,
+    }),
+  ];
+  const zeroCounts = {
+    all: 0,
+    priority: 0,
+    new_replies: 0,
+    needs_review: 0,
+    follow_up: 0,
+    cold: 0,
+    dead: 0,
+    suppressed: 0,
+    active: 0,
+    waiting: 0,
+    unlinked: 0,
+  };
+  const supabase = createCanonicalInboxSupabase({ threadRows, countRows: [zeroCounts] });
+
+  const result = await getLiveInbox({ filter: "new_replies", limit: 20 }, { supabase });
+
+  assert.equal(result.threads.length, 2);
+  assert.equal(result.counts.new_replies, 2);
+  assert.equal(result.counts.needs_reply, 2);
+  assert.equal(result.counts.active, 2);
+  assert.equal(result.counts.all, 2);
+  assert.equal(result.countsDegraded, true);
+  assert.equal(result.countsApproximate, true);
+  assert.match(result.diagnostics?.countsSource || "", /visible_rows_floor/);
+});
+
+test("initial boot fallback returns threads without exact-counting v_inbox_enriched and marks counts degraded", async () => {
+  const trackers = {
+    fallbackExactCountRequested: false,
+    fallbackCountQueryRequested: false,
+  };
+  const supabase = createFallbackEnrichedSupabase([
+    {
+      thread_key: "+15550000099",
+      best_phone: "+15550000099",
+      seller_phone: "+15550000099",
+      display_phone: "+15550000099",
+      latest_direction: "inbound",
+      latest_message_at: "2026-05-29T12:45:00.000Z",
+      latest_message_body: "Interested in selling",
+      inbox_category: "hot_leads",
+      stage: "needs_response",
+      owner_display_name: "Fallback Seller",
+      display_name: "Fallback Seller",
+      property_address_full: "99 Fallback Ave",
+      display_address: "99 Fallback Ave",
+      market: "Dallas",
+      display_market: "Dallas",
+      property_type: "SFR",
+      show_in_priority_inbox: true,
+      is_suppressed: false,
+      is_read: false,
+      unread_count: 1,
+      created_at: "2026-05-29T12:40:00.000Z",
+      updated_at: "2026-05-29T12:45:00.000Z",
+    },
+  ], trackers);
+
+  const result = await getLiveInbox(
+    { filter: "all", timeout_mode: "initial_boot" },
+    { selectMode: "initial_boot_safe" },
+    { supabase },
+  );
+
+  assert.equal(result.threads.length, 1);
+  assert.equal(result.pagination.limit, 25);
+  assert.equal(result.source, "v_inbox_enriched");
+  assert.equal(result.fallback_used, true);
+  assert.equal(result.countsDegraded, true);
+  assert.equal(result.diagnostics?.countsDegraded, true);
+  assert.equal(trackers.fallbackExactCountRequested, false);
+  assert.equal(trackers.fallbackCountQueryRequested, false);
 });

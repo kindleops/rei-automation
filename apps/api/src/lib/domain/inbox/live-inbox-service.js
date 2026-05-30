@@ -5,6 +5,7 @@ const PRIMARY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
 const DEFAULT_LIMIT = 100;
+const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
 const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "thread_key",
@@ -14,6 +15,14 @@ const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "latest_message_at",
   "latest_message_body",
   "latest_message_direction",
+  "delivery_status",
+  "latest_delivery_status",
+  "provider_delivery_status",
+  "latest_provider_delivery_status",
+  "latest_delivered_at",
+  "latest_failed_at",
+  "latest_failure_reason",
+  "queue_status",
   "inbox_bucket",
   "universal_status",
   "universal_stage",
@@ -30,6 +39,39 @@ const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "needs_review",
   "created_at",
   "updated_at",
+].join(",");
+const ENRICHED_THREAD_INITIAL_BOOT_FIELDS = [
+  "thread_key",
+  "best_phone",
+  "seller_phone",
+  "display_phone",
+  "latest_direction",
+  "latest_message_at",
+  "latest_message_body",
+  "preview",
+  "inbox_category",
+  "stage",
+  "property_id",
+  "final_property_id",
+  "master_owner_id",
+  "final_master_owner_id",
+  "final_prospect_id",
+  "owner_display_name",
+  "event_seller_display_name",
+  "display_name",
+  "property_address_full",
+  "display_address",
+  "market",
+  "display_market",
+  "property_type",
+  "filter_property_type",
+  "show_in_priority_inbox",
+  "is_suppressed",
+  "detected_intent",
+  "ui_intent",
+  "is_read",
+  "latitude",
+  "longitude",
 ].join(",");
 const PRIMARY_COUNT_FALLBACK_FIELDS = [
   "thread_key",
@@ -52,6 +94,29 @@ const ENRICHED_COUNT_FALLBACK_FIELDS = [
   "stage",
   "detected_intent",
 ].join(",");
+const CANONICAL_COUNT_KEYS = [
+  "priority",
+  "new_replies",
+  "needs_review",
+  "follow_up",
+  "cold",
+  "dead",
+  "suppressed",
+  "active",
+  "waiting",
+  "unlinked",
+  "all",
+  "all_messages",
+  "hot_leads",
+  "new_inbound",
+  "needs_reply",
+  "manual_review",
+  "outbound_active",
+  "cold_no_response",
+  "dnc_opt_out",
+  "waiting_on_seller",
+  "automated",
+];
 const THREAD_SOURCE_CONFIGS = [
   {
     key: "primary",
@@ -77,8 +142,8 @@ const THREAD_SOURCE_CONFIGS = [
     countSource: null,
     directionColumn: "latest_direction",
     countFallbackFields: ENRICHED_COUNT_FALLBACK_FIELDS,
-    getSelectColumns() {
-      return "*";
+    getSelectColumns(selectMode) {
+      return selectMode === "initial_boot_safe" ? ENRICHED_THREAD_INITIAL_BOOT_FIELDS : "*";
     },
     searchColumns: [
       "thread_key",
@@ -119,6 +184,17 @@ function object(value) {
 function asTime(value) {
   const ts = new Date(value || 0).getTime();
   return Number.isFinite(ts) ? ts : 0;
+}
+
+function nowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function elapsedMs(startMs) {
+  return Math.max(0, Math.round(nowMs() - startMs));
 }
 
 function latestAt(row = {}) {
@@ -284,6 +360,16 @@ function buildEmptyCounts() {
   };
 }
 
+function buildNullCounts() {
+  return Object.fromEntries(CANONICAL_COUNT_KEYS.map((key) => [key, null]));
+}
+
+function removeZeroApproximateCounts(counts = {}) {
+  return Object.fromEntries(
+    Object.entries(counts).filter(([, value]) => Number(value) > 0)
+  );
+}
+
 function hasConcreteCountRow(row = {}) {
   return [
     "all",
@@ -318,6 +404,7 @@ function countFromRow(row = {}) {
   counts.new_inbound = counts.new_replies;
   counts.needs_reply = counts.new_replies;
   counts.manual_review = counts.needs_review;
+  counts.automated = Number(row.automated ?? counts.needs_review);
   counts.outbound_active = counts.follow_up;
   counts.cold_no_response = counts.cold;
   counts.dnc_opt_out = counts.suppressed;
@@ -351,6 +438,39 @@ function computeCountsFromThreads(rows = []) {
   counts.dnc_opt_out = counts.suppressed;
   counts.waiting_on_seller = counts.waiting;
   return counts;
+}
+
+function computeApproximateCountsFromVisibleRows(rows = [], filter = "all") {
+  const counts = computeCountsFromThreads(rows);
+  const approximate = removeZeroApproximateCounts(counts);
+  const normalizedFilter = normalizeLiveFilter(filter);
+  if (rows.length > 0 && normalizedFilter !== "all" && approximate[normalizedFilter] == null) {
+    approximate[normalizedFilter] = rows.length;
+  }
+  if (rows.length > 0 && approximate.all == null && normalizedFilter === "all") {
+    approximate.all = rows.length;
+    approximate.all_messages = rows.length;
+  }
+  return approximate;
+}
+
+function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
+  const approximate = computeApproximateCountsFromVisibleRows(rows, filter);
+  if (Object.keys(approximate).length === 0) return { counts, applied: false, approximate };
+
+  let applied = false;
+  const next = { ...counts };
+  for (const [key, value] of Object.entries(approximate)) {
+    const numericValue = Number(value);
+    const currentValue = Number(next[key]);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) continue;
+    if (!Number.isFinite(currentValue) || currentValue <= 0) {
+      next[key] = numericValue;
+      applied = true;
+    }
+  }
+
+  return { counts: next, applied, approximate };
 }
 
 function threadMatchesFilter(thread = {}, filter = "all") {
@@ -414,12 +534,13 @@ function normalizeCanonicalThreadKey(row = {}) {
   return (
     clean(row.canonical_thread_key) ||
     clean(row.thread_key) ||
-    clean(row.to_phone_number) ||
-    clean(row.from_phone_number) ||
     clean(row.canonical_e164) ||
+    clean(row.phone) ||
     clean(row.best_phone) ||
     clean(row.seller_phone) ||
     clean(row.display_phone) ||
+    clean(row.to_phone_number) ||
+    clean(row.from_phone_number) ||
     null
   );
 }
@@ -467,6 +588,17 @@ function normalizeThreadRow(row = {}, query = {}) {
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
   const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
+  const latestDeliveryStatus =
+    clean(row.latest_delivery_status) ||
+    clean(row.delivery_status) ||
+    clean(row.provider_delivery_status) ||
+    clean(row.latest_provider_delivery_status) ||
+    clean(row.queue_status) ||
+    null;
+  const latestProviderDeliveryStatus =
+    clean(row.latest_provider_delivery_status) ||
+    clean(row.provider_delivery_status) ||
+    latestDeliveryStatus;
   const ownerName =
     row.owner_name ||
     row.owner_display_name ||
@@ -491,6 +623,14 @@ function normalizeThreadRow(row = {}, query = {}) {
     message_body: row.latest_message_body ?? row.preview ?? row.message_body ?? null,
     latest_message_direction: normalizedDirection,
     direction: normalizedDirection,
+    delivery_status: row.delivery_status || latestDeliveryStatus,
+    latest_delivery_status: latestDeliveryStatus,
+    provider_delivery_status: row.provider_delivery_status || latestProviderDeliveryStatus,
+    latest_provider_delivery_status: latestProviderDeliveryStatus,
+    latest_delivered_at: row.latest_delivered_at || row.delivered_at || null,
+    latest_failed_at: row.latest_failed_at || row.failed_at || null,
+    latest_failure_reason: row.latest_failure_reason || row.failure_reason || row.error_message || null,
+    queue_status: row.queue_status || row.automation_status || null,
     inbox_bucket: computedBucket || "cold",
     inbox_category: row.inbox_category || computedBucket || "cold",
     inbox_status: row.inbox_status || row.universal_status || row.display_status || row.status || computedBucket || "cold",
@@ -531,6 +671,237 @@ function normalizeThreadRow(row = {}, query = {}) {
     longitude: row.longitude,
   };
   return applyInboxRowComputedFields(normalized, query);
+}
+
+function firstClean(...values) {
+  for (const value of values) {
+    const text = clean(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function deliveryEventTime(row = {}) {
+  return Math.max(
+    asTime(row.event_timestamp),
+    asTime(row.sent_at),
+    asTime(row.delivered_at),
+    asTime(row.failed_at),
+    asTime(row.updated_at),
+    asTime(row.created_at),
+  );
+}
+
+function queueEventTime(row = {}) {
+  return Math.max(
+    asTime(row.updated_at),
+    asTime(row.delivered_at),
+    asTime(row.sent_at),
+    asTime(row.scheduled_for_utc),
+    asTime(row.scheduled_for),
+    asTime(row.created_at),
+  );
+}
+
+function deliveryFailureReason(row = {}) {
+  const metadata = object(row.metadata);
+  return firstClean(
+    row.failure_reason,
+    row.error_message,
+    metadata.failure_reason,
+    metadata.error_message,
+    metadata.error,
+  ) || null;
+}
+
+function queueFailureReason(row = {}) {
+  return firstClean(
+    row.failed_reason,
+    row.guard_reason,
+    row.blocked_reason,
+    row.paused_reason,
+  ) || null;
+}
+
+function applyDeliverySnapshot(row = {}, delivery = null, queue = null) {
+  const latestDeliveryStatus = firstClean(
+    delivery?.delivery_status,
+    delivery?.raw_carrier_status,
+    delivery?.provider_delivery_status,
+    queue?.queue_status,
+    row.latest_delivery_status,
+    row.delivery_status,
+    row.provider_delivery_status,
+    row.latest_provider_delivery_status,
+  ) || null;
+  const latestProviderDeliveryStatus = firstClean(
+    delivery?.provider_delivery_status,
+    delivery?.delivery_status,
+    delivery?.raw_carrier_status,
+    latestDeliveryStatus,
+  ) || null;
+  const latestDeliveredAt = firstClean(
+    delivery?.delivered_at,
+    queue?.delivered_at,
+    row.latest_delivered_at,
+    row.delivered_at,
+  ) || null;
+  const latestFailedAt = firstClean(delivery?.failed_at, row.latest_failed_at, row.failed_at) || null;
+  const latestFailureReason = firstClean(
+    deliveryFailureReason(delivery || {}),
+    queueFailureReason(queue || {}),
+    row.latest_failure_reason,
+    row.failure_reason,
+    row.error_message,
+  ) || null;
+  const queueStatus = firstClean(queue?.queue_status, row.queue_status, row.automation_status) || null;
+
+  return {
+    ...row,
+    delivery_status: latestDeliveryStatus,
+    latest_delivery_status: latestDeliveryStatus,
+    provider_delivery_status: latestProviderDeliveryStatus,
+    latest_provider_delivery_status: latestProviderDeliveryStatus,
+    latest_delivered_at: latestDeliveredAt,
+    latest_failed_at: latestFailedAt,
+    latest_failure_reason: latestFailureReason,
+    queue_status: queueStatus,
+    queue_data: {
+      ...object(row.queue_data),
+      queue_status: queueStatus,
+      queue_id: firstClean(queue?.id, delivery?.queue_id, object(row.queue_data).queue_id) || undefined,
+      delivered_at: latestDeliveredAt || undefined,
+      failure_reason: latestFailureReason || undefined,
+    },
+    latest_message_event_data: {
+      ...object(row.latest_message_event_data),
+      message_event_id: firstClean(delivery?.id, object(row.latest_message_event_data).message_event_id) || undefined,
+      latest_delivery_status: latestDeliveryStatus,
+      latest_provider_delivery_status: latestProviderDeliveryStatus,
+      latest_delivered_at: latestDeliveredAt,
+      latest_failed_at: latestFailedAt,
+      latest_failure_reason: latestFailureReason,
+    },
+  };
+}
+
+async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabase) {
+  if (!Array.isArray(rows) || rows.length === 0 || !supabase?.from) return rows;
+
+  const threadKeys = [...new Set(
+    rows
+      .map((row) => clean(row.thread_key || row.canonical_thread_key))
+      .filter(Boolean)
+  )];
+  if (!threadKeys.length) return rows;
+
+  const messageLimit = Math.min(Math.max(threadKeys.length * 10, 25), 1000);
+  let messageQuery = supabase
+    .from("message_events")
+    .select([
+      "id",
+      "thread_key",
+      "queue_id",
+      "direction",
+      "delivery_status",
+      "provider_delivery_status",
+      "raw_carrier_status",
+      "delivered_at",
+      "failed_at",
+      "failure_reason",
+      "error_message",
+      "metadata",
+      "event_timestamp",
+      "sent_at",
+      "created_at",
+      "updated_at",
+    ].join(","))
+    .in("thread_key", threadKeys);
+  if (typeof messageQuery.ilike === "function") {
+    messageQuery = messageQuery.ilike("direction", "out%");
+  }
+  if (typeof messageQuery.order === "function") {
+    messageQuery = messageQuery
+      .order("event_timestamp", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false, nullsFirst: false });
+  }
+  if (typeof messageQuery.limit === "function") {
+    messageQuery = messageQuery.limit(messageLimit);
+  }
+  const { data: messageRows, error: messageError } = await messageQuery;
+
+  if (messageError) {
+    console.warn("[INBOX_DELIVERY_HYDRATION_SKIPPED]", {
+      source: "message_events",
+      message: messageError.message,
+    });
+    return rows;
+  }
+
+  const latestDeliveryByThread = new Map();
+  for (const row of [...(messageRows || [])].sort((a, b) => deliveryEventTime(b) - deliveryEventTime(a))) {
+    const threadKey = clean(row.thread_key);
+    if (threadKey && !latestDeliveryByThread.has(threadKey)) {
+      latestDeliveryByThread.set(threadKey, row);
+    }
+  }
+
+  const queueIds = [...new Set(
+    [...latestDeliveryByThread.values()]
+      .map((row) => clean(row.queue_id))
+      .filter(Boolean)
+  )];
+  const queueById = new Map();
+  const latestQueueByThread = new Map();
+
+  if (queueIds.length) {
+    const { data: queueRowsById, error: queueByIdError } = await supabase
+      .from("send_queue")
+      .select("id,thread_key,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
+      .in("id", queueIds)
+      .limit(queueIds.length);
+    if (queueByIdError) {
+      console.warn("[INBOX_DELIVERY_HYDRATION_SKIPPED]", {
+        source: "send_queue:id",
+        message: queueByIdError.message,
+      });
+    } else {
+      for (const row of queueRowsById || []) {
+        const id = clean(row.id);
+        if (id) queueById.set(id, row);
+      }
+    }
+  }
+
+  const { data: queueRowsByThread, error: queueByThreadError } = await supabase
+    .from("send_queue")
+    .select("id,thread_key,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
+    .in("thread_key", threadKeys)
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false, nullsFirst: false })
+    .limit(Math.min(Math.max(threadKeys.length * 5, 25), 500));
+
+  if (queueByThreadError) {
+    console.warn("[INBOX_DELIVERY_HYDRATION_SKIPPED]", {
+      source: "send_queue:thread_key",
+      message: queueByThreadError.message,
+    });
+  } else {
+    for (const row of [...(queueRowsByThread || [])].sort((a, b) => queueEventTime(b) - queueEventTime(a))) {
+      const threadKey = clean(row.thread_key);
+      if (threadKey && !latestQueueByThread.has(threadKey)) {
+        latestQueueByThread.set(threadKey, row);
+      }
+    }
+  }
+
+  return rows.map((row) => {
+    const threadKey = clean(row.thread_key || row.canonical_thread_key);
+    const delivery = latestDeliveryByThread.get(threadKey) || null;
+    const queue = queueById.get(clean(delivery?.queue_id)) || latestQueueByThread.get(threadKey) || null;
+    if (!delivery && !queue) return row;
+    return applyDeliverySnapshot(row, delivery, queue);
+  });
 }
 
 function toMessageAt(row = {}) {
@@ -707,9 +1078,14 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
   let lastError = null;
 
   for (const sourceConfig of sourceCandidates) {
-    let query = supabase
-      .from(sourceConfig.name)
-      .select(sourceConfig.getSelectColumns(selectMode), { count: "exact" });
+    const shouldRequestExactCount =
+      bool(params.include_total || params.exact_total) &&
+      selectMode !== "initial_boot_safe" &&
+      sourceConfig.key === "primary";
+    let query = supabase.from(sourceConfig.name);
+    query = shouldRequestExactCount
+      ? query.select(sourceConfig.getSelectColumns(selectMode), { count: "exact" })
+      : query.select(sourceConfig.getSelectColumns(selectMode));
 
     if (params.direction && params.direction !== "all") {
       query = query.eq(sourceConfig.directionColumn, normalizeDirection(params.direction));
@@ -761,7 +1137,13 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
 }
 
 export async function getLiveCounts(params = {}, deps = {}) {
+  const result = await getLiveCountsWithMeta(params, deps);
+  return result.counts;
+}
+
+async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
+  const disableCountFullScan = deps.disableCountFullScan === true;
 
   for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
     if (sourceConfig.countSource) {
@@ -777,13 +1159,22 @@ export async function getLiveCounts(params = {}, deps = {}) {
         if (row && hasConcreteCountRow(row)) {
           const counts = countFromRow(row);
           console.log("[INBOX_COUNTS_UPDATED]", counts);
-          return counts;
+          return {
+            counts,
+            source: sourceConfig.countSource,
+            approximate: false,
+            degraded: false,
+          };
         }
       } catch (error) {
         if (!isMissingSourceError(error)) {
           console.warn("[INBOX_COUNTS_FALLBACK]", error?.message || error);
         }
       }
+    }
+
+    if (disableCountFullScan) {
+      continue;
     }
 
     const { data: fallbackRows, error: fallbackError } = await supabase
@@ -797,16 +1188,24 @@ export async function getLiveCounts(params = {}, deps = {}) {
 
     const counts = computeCountsFromThreads((fallbackRows || []).map((row) => normalizeThreadRow(row, params)));
     console.log("[INBOX_COUNTS_UPDATED]", counts);
-    return counts;
+    return {
+      counts,
+      source: `${sourceConfig.name}:full_scan`,
+      approximate: false,
+      degraded: false,
+    };
   }
 
   throw new Error("live_inbox_counts_unavailable");
 }
 
 export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = {}) {
+  const startedAt = nowMs();
   const { options, deps } = splitOptionsAndDeps(optionsOrDeps, maybeDeps);
   const supabase = deps.supabase || defaultSupabase;
-  const limit = int(params.limit, DEFAULT_LIMIT);
+  const timeoutMode = lower(params.timeout_mode || params.timeoutMode);
+  const initialBootMode = timeoutMode === "initial_boot" || options.selectMode === "initial_boot_safe";
+  const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : DEFAULT_LIMIT);
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
@@ -830,6 +1229,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
+  const threadQueryStartedAt = nowMs();
   const { data: rawRows, count, sourceConfig } = await queryThreadSource(params, {
     supabase,
     limit,
@@ -839,6 +1239,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     offset,
     preferredThreadSource: deps.preferredThreadSource,
   });
+  const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
   const rows = (rawRows || []).map((row) => normalizeThreadRow(row, params));
   const postFiltered = sortThreads(rows)
@@ -846,10 +1247,76 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     .filter((row) => threadMatchesSearch(row, params.q));
 
   const hasMore = postFiltered.length > limit;
-  const finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
-  const liveCounts = skipCounts
-    ? buildEmptyCounts()
-    : await getLiveCounts({}, { ...deps, preferredThreadSource: sourceConfig.name });
+  let finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
+  let liveCounts = buildNullCounts();
+  let countQueryMs = 0;
+  let countsDegraded = false;
+  let countsApproximate = false;
+  let countsSource = skipCounts ? "skipped" : null;
+  let countPreservedReason = null;
+
+  if (!skipCounts) {
+    if (sourceConfig.key === "primary") {
+      const countQueryStartedAt = nowMs();
+      try {
+        const countResult = await getLiveCountsWithMeta({}, {
+          ...deps,
+          preferredThreadSource: sourceConfig.name,
+          disableCountFullScan: true,
+        });
+        liveCounts = countResult.counts;
+        countsSource = countResult.source;
+        countsApproximate = countResult.approximate === true;
+        countsDegraded = countResult.degraded === true;
+      } catch (error) {
+        countsDegraded = true;
+        countsApproximate = true;
+        countsSource = "visible_rows_approximate";
+        liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
+        countPreservedReason = Object.keys(liveCounts).length > 0
+          ? "count_views_failed_visible_rows_approximate"
+          : "count_views_failed_preserve_client_counts";
+        console.warn("[INBOX_COUNTS_DEGRADED]", {
+          source: sourceConfig.name,
+          message: error?.message || String(error),
+          derived_visible_counts: liveCounts,
+        });
+      } finally {
+        countQueryMs = elapsedMs(countQueryStartedAt);
+      }
+    } else {
+      countsDegraded = true;
+      countsApproximate = true;
+      countsSource = "visible_rows_approximate";
+      liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
+      countPreservedReason = Object.keys(liveCounts).length > 0
+        ? "fallback_thread_source_visible_rows_approximate"
+        : "fallback_thread_source_preserve_client_counts";
+    }
+  } else {
+    countPreservedReason = "counts_skipped_by_request";
+  }
+
+  if (!skipCounts) {
+    const countFloor = applyVisibleRowsCountFloor(liveCounts, finalRows, filter);
+    if (countFloor.applied) {
+      liveCounts = countFloor.counts;
+      countsDegraded = true;
+      countsApproximate = true;
+      countsSource = countsSource ? `${countsSource}:visible_rows_floor` : "visible_rows_floor";
+      countPreservedReason = countPreservedReason || "count_view_zero_visible_rows_floor";
+      console.warn("[INBOX_COUNTS_VISIBLE_ROWS_FLOOR]", {
+        source: sourceConfig.name,
+        bucket: filter,
+        rows: finalRows.length,
+        derived_visible_counts: countFloor.approximate,
+      });
+    }
+  }
+
+  const deliveryHydrationStartedAt = nowMs();
+  finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
+  const deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
 
   console.log("[INBOX_BUCKET_ROWS]", {
     source: sourceConfig.name,
@@ -868,6 +1335,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     };
     nextCursor = Buffer.from(JSON.stringify(cursorObj)).toString("base64");
   }
+
+  const diagnostics = {
+    source: sourceConfig.name,
+    live_source: sourceConfig.name,
+    fallback_used: sourceConfig.key !== "primary",
+    countsSource,
+    countsDegraded,
+    countsApproximate,
+    count_preserved_reason: countPreservedReason,
+    queryMs: elapsedMs(startedAt),
+    threadQueryMs,
+    countQueryMs,
+    deliveryHydrationMs,
+  };
 
   const mapPins = wantsMap
     ? finalRows
@@ -889,13 +1370,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     threads: finalRows,
     messages: finalRows,
     counts: liveCounts,
+    diagnostics,
+    source: sourceConfig.name,
+    fallback_used: sourceConfig.key !== "primary",
+    countsDegraded,
+    countsApproximate,
+    countsSource,
+    count_preserved_reason: countPreservedReason,
     mapPins,
     pagination: {
       limit,
       returned: finalRows.length,
       has_more: hasMore,
       next_cursor: nextCursor,
-      total: Number.isFinite(Number(count)) ? Number(count) : finalRows.length,
+      total: Number.isFinite(Number(count)) ? Number(count) : null,
     },
   };
 }
@@ -914,12 +1402,10 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     lookup.selectedThreadKey ? { column: "thread_key", value: lookup.selectedThreadKey } : null,
     lookup.selectedThreadKey ? { column: "to_phone_number", value: lookup.selectedThreadKey } : null,
     lookup.selectedThreadKey ? { column: "from_phone_number", value: lookup.selectedThreadKey } : null,
-    lookup.selectedThreadKey ? { column: "canonical_e164", value: lookup.selectedThreadKey } : null,
     ...phoneVariants.flatMap((value) => ([
       { column: "thread_key", value },
       { column: "to_phone_number", value },
       { column: "from_phone_number", value },
-      { column: "canonical_e164", value },
     ])),
   ].filter(Boolean));
 

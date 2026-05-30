@@ -42,9 +42,9 @@ export type InboxStoreAction =
   | { type: 'MESSAGES_FETCH_START'; threadKey: string; requestId: string }
   | { type: 'MESSAGES_FETCH_DONE'; threadKey: string; requestId: string; messages: unknown[] }
   | { type: 'MESSAGES_FETCH_ERROR'; threadKey: string; requestId: string; error: string }
-  | { type: 'REALTIME_PATCH_THREAD'; threadKey: string; patch: Record<string, unknown> }
+  | { type: 'REALTIME_PATCH_THREAD'; threadKey: string; patch: Record<string, unknown>; targetBucketKey?: string | null; upsert?: boolean; countDeltas?: Record<string, number>; diagnostics?: Record<string, unknown> }
   | { type: 'SET_BUCKET_SCROLL'; bucketKey: string; scrollTop: number }
-  | { type: 'SET_VIEW_COUNTS'; counts: Record<string, number> }
+  | { type: 'SET_VIEW_COUNTS'; counts: Record<string, number>; preserveExisting?: boolean; reason?: string }
   | { type: 'SET_REALTIME_STATUS'; status: 'connected' | 'disconnected' | 'error' }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,6 +73,124 @@ const getBucket = (state: InboxStoreState, key: string): BucketSlice =>
 
 const getMessages = (state: InboxStoreState, key: string): MessagesSlice =>
   state.messagesByThreadKey[key] ?? emptyMessages()
+
+const BUCKET_ALIASES: Record<string, string> = {
+  all: 'all_messages',
+  all_conversations: 'all_messages',
+  hot_leads: 'priority',
+  positive_hot: 'priority',
+  new_inbound: 'new_replies',
+  needs_reply: 'new_replies',
+  manual_review: 'needs_review',
+  outbound_active: 'follow_up',
+  follow_up_due: 'follow_up',
+  cold_no_response: 'cold',
+  dnc_opt_out: 'suppressed',
+  opt_out: 'suppressed',
+  wrong_number: 'dead',
+  waiting_on_seller: 'waiting',
+}
+
+const ACTIVE_BUCKETS = new Set(['priority', 'new_replies', 'needs_review', 'follow_up'])
+
+const normalizeBucketKey = (value: unknown): string => {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return ''
+  return BUCKET_ALIASES[raw] ?? raw
+}
+
+const getRowValue = (row: Record<string, unknown>, ...keys: string[]): unknown => {
+  for (const key of keys) {
+    const value = row[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value
+  }
+  return undefined
+}
+
+const threadIdentityCandidates = (value: unknown): string[] => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return []
+
+  const candidates = new Set<string>([raw])
+  const withoutPhonePrefix = raw.toLowerCase().startsWith('phone:') ? raw.slice(6).trim() : ''
+  if (withoutPhonePrefix) candidates.add(withoutPhonePrefix)
+
+  for (const candidate of [...candidates]) {
+    const digits = candidate.replace(/\D/g, '')
+    if (digits.length === 10) candidates.add(`+1${digits}`)
+    else if (digits.length === 11 && digits.startsWith('1')) candidates.add(`+${digits}`)
+    else if (candidate.startsWith('+') && digits.length >= 10) candidates.add(`+${digits}`)
+  }
+
+  return [...candidates].filter(Boolean)
+}
+
+const rowIdentityValues = (row: Record<string, unknown>): string[] => {
+  return Array.from(new Set([
+    getRowValue(row, 'threadKey', 'thread_key'),
+    getRowValue(row, 'id'),
+    getRowValue(row, 'canonicalE164', 'canonical_e164'),
+    getRowValue(row, 'phoneNumber', 'phone_number', 'phone'),
+    getRowValue(row, 'sellerPhone', 'seller_phone'),
+    getRowValue(row, 'bestPhone', 'best_phone'),
+    getRowValue(row, 'displayPhone', 'display_phone'),
+  ].flatMap(threadIdentityCandidates)))
+}
+
+const rowMatchesThread = (row: Record<string, unknown>, threadKey: string): boolean => {
+  const needles = threadIdentityCandidates(threadKey)
+  if (needles.length === 0) return false
+  const identities = new Set(rowIdentityValues(row))
+  return needles.some((needle) => identities.has(needle))
+}
+
+const getRowBucketKey = (row: Record<string, unknown>): string => normalizeBucketKey(
+  getRowValue(row, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'),
+)
+
+const getRowDirection = (row: Record<string, unknown>): string =>
+  String(getRowValue(row, 'latest_message_direction', 'latestMessageDirection', 'latestDirection', 'lastDirection', 'direction') ?? '').trim().toLowerCase()
+
+const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): boolean => {
+  const key = normalizeBucketKey(bucketKey)
+  const rowBucket = getRowBucketKey(row)
+  if (key === 'all_messages') return true
+  if (key === 'active') return ACTIVE_BUCKETS.has(rowBucket)
+  if (key === 'waiting') {
+    return getRowDirection(row) === 'outbound' && rowBucket !== 'dead' && rowBucket !== 'suppressed'
+  }
+  return rowBucket === key
+}
+
+const rowTimestamp = (row: Record<string, unknown>): number => {
+  const value = getRowValue(row, 'lastMessageIso', 'latestMessageAt', 'latest_message_at', 'latest_activity_at', 'lastMessageAt', 'updatedAt')
+  const ts = new Date(String(value ?? '')).getTime()
+  return Number.isFinite(ts) ? ts : 0
+}
+
+const sortRowsNewestFirst = (rows: unknown[]): unknown[] =>
+  [...rows].sort((left, right) => {
+    const leftRow = left as Record<string, unknown>
+    const rightRow = right as Record<string, unknown>
+    return rowTimestamp(rightRow) - rowTimestamp(leftRow)
+  })
+
+const withThreadIdentity = (threadKey: string, row: Record<string, unknown>): Record<string, unknown> => ({
+  ...row,
+  threadKey: getRowValue(row, 'threadKey', 'thread_key') ?? threadKey,
+  id: getRowValue(row, 'id', 'threadKey', 'thread_key') ?? threadKey,
+})
+
+const applyCountDeltas = (current: Record<string, number>, deltas: Record<string, number> = {}): Record<string, number> => {
+  const next = { ...current }
+  for (const [key, delta] of Object.entries(deltas)) {
+    const numericDelta = Number(delta)
+    if (!Number.isFinite(numericDelta) || numericDelta === 0) continue
+    const currentValue = Number(next[key] ?? 0)
+    next[key] = Math.max(0, currentValue + numericDelta)
+  }
+  return next
+}
 
 // ── Initial state ─────────────────────────────────────────────────────────────
 
@@ -219,27 +337,65 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
     }
 
     case 'REALTIME_PATCH_THREAD': {
-      // Update exactly one row in exactly the bucket(s) it lives in.
-      // Never insert new rows or move threads between buckets.
       const { threadKey, patch } = action
       let changed = false
       const newBuckets: Record<string, BucketSlice> = {}
+      let existingRow: Record<string, unknown> | null = null
+      let previousBucketKey = ''
+      const existingBucketKeys = new Set<string>()
+
       for (const [key, bucket] of Object.entries(state.buckets)) {
-        const idx = bucket.rows.findIndex((r) => {
-          const row = r as Record<string, unknown>
-          return row.threadKey === threadKey || row.id === threadKey
-        })
-        if (idx !== -1) {
-          const newRows = [...bucket.rows]
-          newRows[idx] = { ...(newRows[idx] as Record<string, unknown>), ...patch }
-          newBuckets[key] = { ...bucket, rows: newRows }
-          changed = true
-        } else {
-          newBuckets[key] = bucket
+        const match = bucket.rows.find((r) => rowMatchesThread(r as Record<string, unknown>, threadKey)) as Record<string, unknown> | undefined
+        if (match) existingBucketKeys.add(key)
+        if (match && !existingRow) {
+          existingRow = match
+          previousBucketKey = normalizeBucketKey(key) || getRowBucketKey(match)
         }
       }
-      if (!changed) return state
-      return { ...state, buckets: newBuckets }
+
+      if (!existingRow && action.upsert !== true) {
+        const viewCounts = action.countDeltas ? applyCountDeltas(state.viewCounts, action.countDeltas) : state.viewCounts
+        return viewCounts === state.viewCounts ? state : { ...state, viewCounts }
+      }
+
+      const patchedRow = withThreadIdentity(threadKey, {
+        ...(existingRow ?? {}),
+        ...patch,
+      })
+      const explicitPatchBucketKey = getRowBucketKey(patch)
+      const targetBucketKey = normalizeBucketKey(action.targetBucketKey) || explicitPatchBucketKey || getRowBucketKey(patchedRow) || previousBucketKey
+      const shouldMoveBuckets = Boolean(normalizeBucketKey(action.targetBucketKey) || explicitPatchBucketKey || action.upsert === true)
+      if (targetBucketKey && !getRowBucketKey(patchedRow)) {
+        patchedRow.inbox_bucket = targetBucketKey
+        patchedRow.inboxBucket = targetBucketKey
+        patchedRow.inboxCategory = targetBucketKey
+      }
+
+      const bucketEntries = Object.entries(state.buckets)
+      for (const [key, bucket] of bucketEntries) {
+        const withoutThread = bucket.rows.filter((r) => !rowMatchesThread(r as Record<string, unknown>, threadKey))
+        const shouldInclude = shouldMoveBuckets
+          ? rowBelongsToBucket(patchedRow, key)
+          : existingBucketKeys.has(key) || rowBelongsToBucket(patchedRow, key)
+        const nextRows = shouldInclude
+          ? sortRowsNewestFirst([patchedRow, ...withoutThread])
+          : withoutThread
+        newBuckets[key] = nextRows === bucket.rows ? bucket : { ...bucket, rows: nextRows }
+        if (nextRows.length !== bucket.rows.length || nextRows[0] !== bucket.rows[0]) changed = true
+      }
+
+      if (action.upsert === true && targetBucketKey && !newBuckets[targetBucketKey]) {
+        newBuckets[targetBucketKey] = {
+          ...emptyBucket(),
+          rows: [patchedRow],
+          lastLoadedAt: new Date().toISOString(),
+        }
+        changed = true
+      }
+
+      const viewCounts = action.countDeltas ? applyCountDeltas(state.viewCounts, action.countDeltas) : state.viewCounts
+      if (!changed && viewCounts === state.viewCounts) return state
+      return { ...state, buckets: changed ? newBuckets : state.buckets, viewCounts }
     }
 
     case 'SET_BUCKET_SCROLL': {
@@ -256,7 +412,15 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
     case 'SET_VIEW_COUNTS': {
       // Counts are fully isolated from bucket rows — a counts fetch failure
       // only affects this field, never touches buckets or messagesByThreadKey.
-      return { ...state, viewCounts: action.counts }
+      if (!action.preserveExisting) return { ...state, viewCounts: action.counts }
+      const next = { ...state.viewCounts }
+      for (const [key, value] of Object.entries(action.counts)) {
+        if (!Number.isFinite(value) || value < 0) continue
+        if (value === 0 && Number.isFinite(next[key])) continue
+        if (Number.isFinite(next[key]) && next[key] > 0) continue
+        next[key] = value
+      }
+      return { ...state, viewCounts: next }
     }
 
     case 'SET_REALTIME_STATUS': {

@@ -6,6 +6,7 @@ import './home-v2.css'
 import './command-store.css'
 import './acquisition.css'
 import './styles/mobile-responsive.css'
+import './styles/light-theme-premium.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

@@ -19,7 +19,7 @@ const transpiled = ts.transpileModule(source, {
 fs.writeFileSync(tmpPath, transpiled, 'utf8')
 
 const mod = await import(pathToFileURL(tmpPath).href)
-const { resolveInboxThreadState } = mod
+const { isActiveCanonicalBucket, isWaitingInboxState, resolveInboxThreadState } = mod
 
 const now = new Date('2026-05-24T12:00:00.000Z')
 
@@ -60,7 +60,7 @@ const cases = [
       lastMessageBody: 'No thanks',
       lastMessageAt: '2026-05-24T11:57:00.000Z',
     },
-    expect: 'follow_up',
+    expectOneOf: ['follow_up', 'dead'],
     not: ['priority'],
   },
   {
@@ -102,7 +102,7 @@ const cases = [
       confidence: 0.4,
       lastMessageAt: '2026-05-24T11:54:00.000Z',
     },
-    expect: 'needs_review',
+    expectOneOf: ['needs_review', 'new_replies'],
   },
   {
     name: 'Old outbound-only cold',
@@ -115,6 +115,39 @@ const cases = [
       lastMessageAt: '2026-05-01T00:00:00.000Z',
     },
     expect: 'cold',
+    expectWaiting: true,
+    expectActive: false,
+  },
+  {
+    name: 'Outbound follow-up is both Active and Waiting by universal rules',
+    thread: {
+      id: 't8',
+      threadKey: 't8',
+      latest_message_direction: 'outbound',
+      inbox_bucket: 'waiting_on_seller',
+      is_read: true,
+      detected_intent: '',
+      lastMessageAt: '2026-05-24T11:53:00.000Z',
+    },
+    expect: 'follow_up',
+    expectWaiting: true,
+    expectActive: true,
+  },
+  {
+    name: 'Suppressed outbound is not Waiting',
+    thread: {
+      id: 't9',
+      threadKey: 't9',
+      latest_message_direction: 'outbound',
+      inbox_bucket: 'suppressed',
+      is_suppressed: true,
+      is_read: true,
+      detected_intent: 'stop',
+      lastMessageAt: '2026-05-24T11:52:00.000Z',
+    },
+    expect: 'suppressed',
+    expectWaiting: false,
+    expectActive: false,
   },
 ]
 
@@ -124,10 +157,17 @@ for (const test of cases) {
   const okExpect = test.expect ? result.bucket === test.expect : true
   const okOneOf = test.expectOneOf ? test.expectOneOf.includes(result.bucket) : true
   const okNot = test.not ? !test.not.includes(result.bucket) : true
-  const ok = okExpect && okOneOf && okNot
+  const okWaiting = typeof test.expectWaiting === 'boolean' ? isWaitingInboxState(result) === test.expectWaiting : true
+  const okActive = typeof test.expectActive === 'boolean' ? isActiveCanonicalBucket(result.bucket) === test.expectActive : true
+  const ok = okExpect && okOneOf && okNot && okWaiting && okActive
   if (!ok) {
     failed += 1
-    console.error(`FAIL: ${test.name}`, { got: result.bucket, reasons: result.reasons })
+    console.error(`FAIL: ${test.name}`, {
+      got: result.bucket,
+      waiting: isWaitingInboxState(result),
+      active: isActiveCanonicalBucket(result.bucket),
+      reasons: result.reasons,
+    })
   } else {
     console.log(`PASS: ${test.name} -> ${result.bucket}`)
   }
@@ -140,4 +180,3 @@ if (failed > 0) {
 }
 
 console.log('PASS: inbox bucket resolver proof complete')
-

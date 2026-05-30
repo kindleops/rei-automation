@@ -595,6 +595,7 @@ const buyerActivityPlugin = (env: Record<string, string>): Plugin => ({
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const backendProxyTarget = env.VITE_BACKEND_API_URL || 'http://localhost:3000'
   return {
     plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {
@@ -604,17 +605,17 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       proxy: {
         '/api/cockpit': {
-          target: env.VITE_BACKEND_API_URL,
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
         },
         '/api/ops': {
-          target: env.VITE_BACKEND_API_URL,
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
         },
         '/api/internal': {
-          target: env.VITE_BACKEND_API_URL,
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
         }
