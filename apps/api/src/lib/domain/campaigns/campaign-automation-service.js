@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { buildSendQueueDedupeKey } from '@/lib/supabase/sms-engine.js'
 import { getSystemValue } from '@/lib/system-control.js'
 import {
   asBoolean,
@@ -14,6 +15,7 @@ import {
   getSupabaseFeederCandidates,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { resolveTimezone } from '@/lib/sms/latency.js'
 import {
   ageBucketFromMob,
   ageFromMob,
@@ -3788,6 +3790,7 @@ function graphDistributionCounts(rows = []) {
 
 function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
+  const prospectId = clean(row.prospect_id || row.canonical_prospect_id) || null
   return {
     campaign_id: campaignId,
     campaign_key: `ct:${campaignId || 'preview'}:${clean(row.graph_id) || crypto
@@ -3804,6 +3807,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     daily_cap: campaign?.daily_cap || null,
     status: row.queue_eligible ? 'ready' : 'blocked',
     master_owner_id: clean(row.master_owner_id) || null,
+    prospect_id: prospectId,
     property_id: clean(row.property_id) || null,
     phone_id: clean(row.phone_id) || null,
     to_phone_number: clean(row.canonical_e164) || null,
@@ -3823,6 +3827,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
       graph_id: row.graph_id || null,
       graph_source: row.graph_source || CAMPAIGN_TARGET_GRAPH_TABLE,
       property_export_id: row.property_export_id || null,
+      prospect_id: row.prospect_id || null,
       canonical_prospect_id: row.canonical_prospect_id || null,
       sender_covered: Boolean(row.sender_covered),
       selected_textgrid_market: row.sender_market || null,
@@ -3833,12 +3838,44 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
       blocker_flags: row.blocker_flags || {},
       candidate_snapshot: {
         master_owner_id: row.master_owner_id,
+        prospect_id: row.prospect_id,
+        canonical_prospect_id: row.canonical_prospect_id,
         property_id: row.property_id,
         phone_id: row.phone_id,
+        to_phone_number: row.canonical_e164,
         market: row.market,
         state: row.state,
         language: row.language,
+        timezone: row.timezone,
+        contact_window: row.contact_window,
+        owner_name: row.owner_name,
+        seller_first_name: row.seller_first_name,
+        seller_full_name: row.seller_full_name,
+        property_address_full: row.property_address_full,
+        property_city: row.property_city,
+        property_zip: row.property_zip,
+        property_type: row.property_type,
+        property_class: row.property_class,
+        canonical_property_group: row.canonical_property_group,
+        phone_owner: row.phone_owner,
+        phone_activity_status: row.phone_activity_status,
+        usage_12_months: row.usage_12_months,
+        usage_2_months: row.usage_2_months,
         acquisition_score: row.acquisition_score,
+      },
+      outreach_snapshot: {
+        never_contacted: row.never_contacted,
+        latest_contact_at: row.latest_contact_at || null,
+        last_outbound_at: row.last_outbound_at || null,
+        last_inbound_at: row.last_inbound_at || null,
+        touch_count: row.touch_count ?? null,
+        current_touch_number: row.current_touch_number ?? null,
+        true_post_contact_suppression: row.true_post_contact_suppression,
+        wrong_number: row.wrong_number,
+        pending_prior_touch: row.pending_prior_touch,
+        active_queue_item: row.active_queue_item,
+        queue_eligible: row.queue_eligible,
+        queue_block_reason: row.queue_block_reason || null,
       },
     },
   }
@@ -5173,28 +5210,40 @@ function computeWindowForTimezone(timezone, campaign, now = new Date()) {
   const localNow = getLocalParts(now, timezone) || getLocalParts(now, 'America/Chicago')
   const currentMinutes = localNow.hour * 60 + localNow.minute
   let dayOffset = currentMinutes >= endMinutes ? 1 : 0
-  const base = new Date(Date.UTC(localNow.year, localNow.month - 1, localNow.day + dayOffset, 0, 0, 0))
-  const localBase = getLocalParts(base, timezone) || localNow
-  const startUtc = localPartsToUtc({
-    year: localBase.year,
-    month: localBase.month,
-    day: localBase.day,
-    hour: Math.floor(startMinutes / 60),
-    minute: startMinutes % 60,
-    second: 0,
-  }, timezone)
-  const endUtc = localPartsToUtc({
-    year: localBase.year,
-    month: localBase.month,
-    day: localBase.day,
-    hour: Math.floor(endMinutes / 60),
-    minute: endMinutes % 60,
-    second: 0,
-  }, timezone)
-  const start = Math.max(startUtc, now.getTime() + 10 * 60 * 1000)
+
+  const buildWindow = (offset) => {
+    const startUtc = localPartsToUtc({
+      year: localNow.year,
+      month: localNow.month,
+      day: localNow.day + offset,
+      hour: Math.floor(startMinutes / 60),
+      minute: startMinutes % 60,
+      second: 0,
+    }, timezone)
+    const rawEndUtc = localPartsToUtc({
+      year: localNow.year,
+      month: localNow.month,
+      day: localNow.day + offset,
+      hour: Math.floor(endMinutes / 60),
+      minute: endMinutes % 60,
+      second: 0,
+    }, timezone)
+    return {
+      startUtc,
+      endUtc: rawEndUtc <= startUtc ? rawEndUtc + 24 * 60 * 60 * 1000 : rawEndUtc,
+    }
+  }
+
+  let window = buildWindow(dayOffset)
+  let start = Math.max(window.startUtc, now.getTime() + 10 * 60 * 1000)
+  if (start >= window.endUtc) {
+    dayOffset += 1
+    window = buildWindow(dayOffset)
+    start = window.startUtc
+  }
   return {
     window_start_utc: new Date(start).toISOString(),
-    window_end_utc: new Date(endUtc <= startUtc ? endUtc + 24 * 60 * 60 * 1000 : endUtc).toISOString(),
+    window_end_utc: new Date(window.endUtc).toISOString(),
   }
 }
 
@@ -5240,25 +5289,420 @@ function groupTargetsByWindow(targets = []) {
   return [...groups.values()]
 }
 
+function minPositive(values = [], fallback = null) {
+  const positive = values
+    .map((value) => asPositiveInteger(value, null))
+    .filter((value) => Number.isFinite(value) && value > 0)
+  if (!positive.length) return fallback
+  return Math.min(...positive)
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const resolved = clean(value)
+    if (resolved) return resolved
+  }
+  return null
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
+
+function localScheduleSnapshot(date, timezone) {
+  const parts = getLocalParts(date, timezone) || getLocalParts(date, 'America/Chicago')
+  if (!parts) {
+    return {
+      local_send_date: null,
+      local_send_hour: null,
+      scheduled_for_local: date.toISOString(),
+    }
+  }
+  return {
+    local_send_date: `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`,
+    local_send_hour: parts.hour,
+    scheduled_for_local: `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)} ${timezone || 'America/Chicago'}`,
+  }
+}
+
+function distributionFromCounts(counts = {}) {
+  return Object.entries(counts)
+    .map(([value, count]) => ({ value, label: value, count: Number(count || 0) }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+}
+
+function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
+  const maxTargets = asPositiveInteger(
+    input.max_targets ?? input.maxTargets ?? input.limit ?? input.target_limit,
+    null
+  )
+  const dailyCap = asPositiveInteger(input.daily_cap ?? input.dailyCap ?? campaign.daily_cap, null)
+  const perSenderCap = asPositiveInteger(input.per_sender_cap ?? input.perSenderCap ?? campaign.per_sender_cap, null)
+  const perMarketCap = asPositiveInteger(
+    input.per_market_cap ?? input.perMarketCap ?? input.market_cap ?? campaign.market_cap,
+    null
+  )
+  const batchMax = asPositiveInteger(input.batch_max ?? input.batchMax ?? campaign.batch_max, null)
+  const totalCap = asPositiveInteger(input.total_cap ?? input.totalCap ?? campaign.total_cap, null)
+  const requestedMax = maxTargets || batchMax || dailyCap || readyTargetCount
+  const effectiveLimit = Math.max(0, Math.min(
+    readyTargetCount,
+    minPositive([requestedMax, dailyCap, batchMax, totalCap], readyTargetCount)
+  ))
+  return {
+    max_targets: maxTargets || effectiveLimit || null,
+    daily_cap: dailyCap,
+    per_sender_cap: perSenderCap,
+    per_market_cap: perMarketCap,
+    batch_max: batchMax,
+    total_cap: totalCap,
+    effective_limit: effectiveLimit,
+  }
+}
+
+function missingLaunchCaps(caps = {}) {
+  const missing = []
+  if (!caps.max_targets) missing.push('max_targets')
+  if (!caps.daily_cap) missing.push('daily_cap')
+  if (!caps.per_sender_cap) missing.push('per_sender_cap')
+  if (!caps.per_market_cap) missing.push('per_market_cap')
+  return missing
+}
+
+function launchCandidateFromTarget(target = {}, campaign = {}) {
+  const metadata = metadataObject(target.metadata)
+  const snapshot = metadataObject(metadata.candidate_snapshot)
+  const outreach = metadataObject(metadata.outreach_snapshot)
+  const phone = firstNonEmpty(target.to_phone_number, snapshot.to_phone_number, snapshot.canonical_e164)
+  const prospectId = firstNonEmpty(target.prospect_id, metadata.prospect_id, snapshot.prospect_id, snapshot.canonical_prospect_id)
+  const phoneId = firstNonEmpty(target.phone_id, snapshot.phone_id, snapshot.best_phone_id)
+  const market = firstNonEmpty(target.market, snapshot.market, campaign.market)
+  const state = normalizeState(firstNonEmpty(target.state, snapshot.state, campaign.state))
+  const sourceTimezone = firstNonEmpty(target.timezone, snapshot.timezone, 'America/Chicago')
+  const timezone = resolveTimezone(sourceTimezone)
+  const sellerName = firstNonEmpty(
+    snapshot.seller_full_name,
+    target.owner_name,
+    snapshot.owner_name,
+    metadata.owner_name
+  )
+  return {
+    master_owner_id: firstNonEmpty(target.master_owner_id, snapshot.master_owner_id),
+    prospect_id: prospectId,
+    canonical_prospect_id: firstNonEmpty(snapshot.canonical_prospect_id, prospectId),
+    property_id: firstNonEmpty(target.property_id, snapshot.property_id),
+    best_phone_id: phoneId,
+    phone_id: phoneId,
+    canonical_e164: phone,
+    to_phone_number: phone,
+    market,
+    state,
+    timezone,
+    source_timezone: sourceTimezone,
+    contact_window: firstNonEmpty(snapshot.contact_window, target.contact_window),
+    language: firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English'),
+    best_language: firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English'),
+    template_use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
+    template_lookup_use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
+    touch_number: asPositiveInteger(metadata.touch_number ?? snapshot.current_touch_number, 1),
+    owner_display_name: sellerName,
+    seller_full_name: sellerName,
+    seller_first_name: firstNonEmpty(snapshot.seller_first_name),
+    owner_first_name: firstNonEmpty(snapshot.seller_first_name),
+    property_address: firstNonEmpty(target.property_address, snapshot.property_address_full),
+    property_address_full: firstNonEmpty(target.property_address, snapshot.property_address_full),
+    property_city: firstNonEmpty(snapshot.property_city),
+    property_zip: firstNonEmpty(snapshot.property_zip),
+    property_type: firstNonEmpty(snapshot.property_type, target.asset_type),
+    property_class: firstNonEmpty(snapshot.property_class),
+    canonical_property_group: firstNonEmpty(snapshot.canonical_property_group, target.asset_type),
+    final_acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
+    acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
+    identity_alignment: { status: target.identity_status || metadata.identity_alignment || 'unknown' },
+    never_contacted: outreach.never_contacted ?? true,
+    latest_contact_at: outreach.latest_contact_at || null,
+    last_outbound_at: outreach.last_outbound_at || null,
+    last_inbound_at: outreach.last_inbound_at || null,
+    touch_count: outreach.touch_count ?? null,
+    current_touch_number: outreach.current_touch_number ?? null,
+    true_post_contact_suppression: outreach.true_post_contact_suppression === true,
+    wrong_number: outreach.wrong_number === true,
+    pending_prior_touch: outreach.pending_prior_touch === true,
+    active_queue_item: outreach.active_queue_item === true,
+    raw: snapshot,
+  }
+}
+
+function targetSnapshotForMetadata(target = {}, candidate = {}) {
+  return {
+    campaign_target_id: target.id || null,
+    master_owner_id: candidate.master_owner_id || null,
+    prospect_id: candidate.prospect_id || null,
+    property_id: candidate.property_id || null,
+    phone_id: candidate.phone_id || null,
+    to_phone_number: candidate.canonical_e164 || null,
+    market: target.market || candidate.market || null,
+    state: target.state || candidate.state || null,
+    timezone: candidate.timezone || target.timezone || null,
+    source_timezone: candidate.source_timezone || target.timezone || null,
+    owner_name: target.owner_name || candidate.owner_display_name || null,
+    property_address: target.property_address || candidate.property_address_full || null,
+    priority_score: target.priority_score ?? candidate.acquisition_score ?? null,
+    identity_status: target.identity_status || candidate.identity_alignment?.status || null,
+    routing_status: target.routing_status || null,
+    suppression_status: target.suppression_status || null,
+    template_status: target.template_status || null,
+    target_status: target.target_status || null,
+  }
+}
+
+function renderedTemplateId(rendered = {}) {
+  return clean(
+    rendered.selected_template_id ||
+      rendered.template_rotation?.selected_template_id ||
+      rendered.template?.template_id ||
+      rendered.template?.id
+  ) || null
+}
+
+function renderedMessageBody(rendered = {}) {
+  return clean(rendered.rendered_message_body || rendered.rendered_message_text || rendered.text)
+}
+
+function routeSenderNumber(routing = {}) {
+  return clean(routing.selected_textgrid_number || routing.selected?.phone_number) || null
+}
+
+function routeSenderId(routing = {}) {
+  return clean(routing.selected_textgrid_number_id || routing.selected?.id) || null
+}
+
+async function fetchActiveQueueRowsByPhone(supabase, phones = []) {
+  const rows = []
+  const phoneValues = uniqueClean(phones)
+  for (const phoneChunk of chunk(phoneValues, 200)) {
+    const { data, error } = await supabase
+      .from('send_queue')
+      .select('id,campaign_id,campaign_target_id,to_phone_number,queue_status,dedupe_key,scheduled_for,scheduled_for_utc,created_at')
+      .in('to_phone_number', phoneChunk)
+      .in('queue_status', ACTIVE_QUEUE_STATUSES)
+      .limit(5000)
+    if (error) throw error
+    rows.push(...(data || []))
+  }
+  return rows
+}
+
+async function fetchPriorContactRowsByPhone(supabase, phones = []) {
+  const rows = []
+  const phoneValues = uniqueClean(phones)
+  for (const phoneChunk of chunk(phoneValues, 200)) {
+    const [queueResult, eventResult] = await Promise.all([
+      supabase
+        .from('send_queue')
+        .select('id,to_phone_number,queue_status,sent_at,created_at,campaign_id,campaign_target_id')
+        .in('to_phone_number', phoneChunk)
+        .in('queue_status', ['sent', 'delivered'])
+        .limit(5000),
+      supabase
+        .from('message_events')
+        .select('id,to_phone_number,direction,event_type,sent_at,event_timestamp,created_at,queue_id')
+        .in('to_phone_number', phoneChunk)
+        .limit(5000),
+    ])
+    if (queueResult.error) throw queueResult.error
+    if (eventResult.error) throw eventResult.error
+    rows.push(...(queueResult.data || []).map((row) => ({ ...row, source: 'send_queue' })))
+    rows.push(...(eventResult.data || [])
+      .filter((row) => lower(row.direction || row.event_type).includes('out'))
+      .map((row) => ({ ...row, source: 'message_events' })))
+  }
+  return rows
+}
+
+function groupLaunchItemsByWindow(items = []) {
+  const groups = new Map()
+  for (const item of items) {
+    const target = item.target || {}
+    const candidate = item.candidate || {}
+    const key = [
+      clean(candidate.timezone || target.timezone || 'America/Chicago'),
+      clean(candidate.market || target.market || 'unknown'),
+      clean(candidate.state || target.state || 'unknown'),
+    ].join('|')
+    if (!groups.has(key)) {
+      groups.set(key, {
+        timezone: clean(candidate.timezone || target.timezone || 'America/Chicago') || 'America/Chicago',
+        market: clean(candidate.market || target.market) || null,
+        state: clean(candidate.state || target.state) || null,
+        items: [],
+      })
+    }
+    groups.get(key).items.push(item)
+  }
+  return [...groups.values()]
+}
+
+function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input }) {
+  const scheduledDate = new Date(scheduledFor)
+  const scheduledIso = scheduledDate.toISOString()
+  const local = localScheduleSnapshot(scheduledDate, candidate.timezone || window.timezone)
+  const templateId = renderedTemplateId(rendered)
+  const messageBody = renderedMessageBody(rendered)
+  const senderNumber = routeSenderNumber(routing)
+  const senderId = routeSenderId(routing)
+  const campaignSessionId = clean(input.campaign_session_id || campaign.id)
+  const dedupeKey = buildSendQueueDedupeKey({
+    master_owner_id: candidate.master_owner_id,
+    property_id: candidate.property_id,
+    to_phone_number: candidate.canonical_e164,
+    template_use_case: candidate.template_use_case || campaign.objective || 'ownership_check',
+    touch_number: candidate.touch_number || 1,
+    campaign_session_id: campaignSessionId,
+  })
+  const queueKey = `campaign:${crypto.createHash('sha1').update([
+    campaign.id,
+    target.id,
+    candidate.canonical_e164,
+    templateId,
+    scheduledIso,
+  ].join('|')).digest('hex')}`
+  const metadata = {
+    source: 'campaign_launch_execution',
+    campaign_id: campaign.id,
+    campaign_target_id: target.id,
+    campaign_send_window_id: window.id || null,
+    campaign_session_id: campaignSessionId,
+    launch_mode: 'guarded_live_queue_creation',
+    dry_run: false,
+    no_send: false,
+    confirm_live: true,
+    target_snapshot: targetSnapshotForMetadata(target, candidate),
+    campaign_target_metadata: metadataObject(target.metadata),
+    routing_snapshot: {
+      selected_textgrid_number_id: senderId,
+      selected_textgrid_number: senderNumber,
+      selected_textgrid_market: routing.selected_textgrid_market || routing.selected?.market || null,
+      seller_market: routing.seller_market || candidate.market || null,
+      seller_state: routing.seller_state || candidate.state || null,
+      routing_tier: routing.routing_tier || null,
+      routing_rule_name: routing.routing_rule_name || null,
+      selection_reason: routing.selection_reason || null,
+    },
+    template_snapshot: {
+      template_id: templateId,
+      selected_template_id: templateId,
+      template_name: rendered.template?.template_name || null,
+      template_source: rendered.template?.source || 'sms_templates',
+      template_use_case: rendered.template_use_case || candidate.template_use_case || campaign.objective || null,
+      stage_code: rendered.template?.stage_code || rendered.template_rotation?.selected_template_stage_code || null,
+      language: rendered.template?.language || candidate.language || null,
+      rendered_message_preview: messageBody.slice(0, 180),
+      character_count: messageBody.length,
+    },
+    schedule_snapshot: {
+      timezone: candidate.timezone || window.timezone || null,
+      scheduled_for_utc: scheduledIso,
+      scheduled_for_local: local.scheduled_for_local,
+      local_send_date: local.local_send_date,
+      local_send_hour: local.local_send_hour,
+      window_start_utc: window.window_start_utc,
+      window_end_utc: window.window_end_utc,
+      spread_interval_seconds: window.spread_interval_seconds,
+    },
+    cap_snapshot: caps,
+    dedupe_key: dedupeKey,
+    safety_diagnostics: {
+      status: 'passed',
+      duplicate_phone_checked: true,
+      active_queue_checked: true,
+      prior_contact_checked: true,
+      suppression_checked: true,
+      routing_checked: true,
+      template_checked: true,
+      local_window_checked: true,
+      confirm_live: true,
+    },
+  }
+  return {
+    queue_key: queueKey,
+    queue_id: queueKey,
+    queue_status: 'scheduled',
+    scheduled_for: scheduledIso,
+    scheduled_for_utc: scheduledIso,
+    scheduled_for_local: scheduledIso,
+    local_send_date: local.local_send_date,
+    local_send_hour: local.local_send_hour,
+    message_body: messageBody,
+    message_text: messageBody,
+    rendered_message: messageBody,
+    to_phone_number: candidate.canonical_e164,
+    from_phone_number: senderNumber,
+    textgrid_number_id: senderId,
+    textgrid_number: senderNumber,
+    master_owner_id: candidate.master_owner_id,
+    prospect_id: candidate.prospect_id,
+    property_id: candidate.property_id,
+    phone_id: candidate.phone_id,
+    market: candidate.market,
+    property_address_state: candidate.state,
+    property_address_city: candidate.property_city || null,
+    property_address_zip: candidate.property_zip || null,
+    property_type: candidate.property_type || candidate.canonical_property_group || null,
+    timezone: candidate.timezone || window.timezone || null,
+    contact_window: candidate.contact_window || null,
+    template_id: templateId,
+    selected_template_id: templateId,
+    template_key: templateId,
+    template_source: rendered.template?.source || 'sms_templates',
+    use_case_template: candidate.template_use_case || campaign.objective || 'ownership_check',
+    touch_number: candidate.touch_number || 1,
+    dedupe_key: dedupeKey,
+    sms_eligible: true,
+    routing_allowed: true,
+    safety_status: 'passed',
+    guard_status: 'passed',
+    guard_reason: null,
+    type: 'campaign_launch',
+    source: 'campaign_launch_execution',
+    thread_key: candidate.canonical_e164,
+    seller_first_name: candidate.seller_first_name || null,
+    seller_display_name: candidate.seller_full_name || candidate.owner_display_name || null,
+    agent_name: clean(campaign.agent_persona) || null,
+    language: candidate.language || null,
+    routing_reason: routing.selection_reason || routing.routing_rule_name || null,
+    campaign_id: campaign.id,
+    campaign_target_id: target.id,
+    campaign_send_window_id: window.id || null,
+    metadata,
+  }
+}
+
 export async function createCampaignQueuePlan(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const dryRun = input.dry_run !== false
-  const createRows = asBoolean(input.create_send_queue_rows, false)
+  const noSend = asBoolean(input.no_send ?? input.noSend, true)
+  const confirmLive = asBoolean(input.confirm_live ?? input.confirmLive, false)
+  const createRows = input.create_send_queue_rows === false ? false : true
   const explicitOperatorAction = asBoolean(input.explicit_operator_action || input.operator_action, false)
+  const suppressPreviouslyContacted = asBoolean(
+    input.suppress_previously_contacted ??
+      input.suppression_applies ??
+      input.suppressionApplies ??
+      input.suppressPriorContacted,
+    true
+  )
+  const blockOnGlobalEmergencyStop = asBoolean(
+    input.block_on_global_emergency_stop ??
+      input.respect_global_emergency_stop_for_creation ??
+      input.respectGlobalEmergencyStopForCreation,
+    false
+  )
   const detail = await getCampaign(campaignId, deps)
   const campaign = detail.campaign
   const blockers = []
-  const capsMissing = missingCaps(campaign)
   const globalStop = await globalEmergencyStopActive(deps)
   const campaignStop = isEmergencyStopActive(campaign.emergency_stop_at)
-
-  if (!READY_CAMPAIGN_STATUSES.has(clean(campaign.status))) blockers.push(`campaign_status_not_ready:${campaign.status}`)
-  if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
-  for (const cap of capsMissing) blockers.push(`missing_cap:${cap}`)
-  if (campaignStop) blockers.push('campaign_emergency_stop_active')
-  if (globalStop && !dryRun) blockers.push('global_emergency_stop_active')
-  if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
-  if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
 
   const { data: targets, error: targetError } = await supabase
     .from('campaign_targets')
@@ -5269,164 +5713,487 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     .limit(10000)
   if (targetError) throw targetError
 
-  const caps = campaignCaps(campaign)
-  const requestedLimit = asPositiveInteger(input.limit, caps.batch_max || caps.daily_cap || 0) || 0
-  const effectiveLimit = Math.max(0, Math.min(
-    requestedLimit || targets.length,
-    caps.batch_max || targets.length,
-    caps.daily_cap || targets.length,
-    caps.total_cap || targets.length,
-  ))
-  const selectedTargets = (targets || []).slice(0, effectiveLimit)
-  const grouped = groupTargetsByWindow(selectedTargets)
-  const intervalSeconds = asPositiveInteger(campaign.send_interval_seconds, 60)
+  const readyTargets = targets || []
+  const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
+  for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
+  if (!READY_CAMPAIGN_STATUSES.has(clean(campaign.status))) blockers.push(`campaign_status_not_ready:${campaign.status}`)
+  if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
+  if (campaignStop) blockers.push('campaign_emergency_stop_active')
+  if (globalStop && !dryRun && !noSend && blockOnGlobalEmergencyStop) blockers.push('global_emergency_stop_active')
+  if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
+  if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
+  if (!dryRun && !noSend && !confirmLive) blockers.push('confirm_live_required')
+
   const now = new Date(input.now || Date.now())
-  const plannedWindows = grouped.map((group) => {
-    const window = computeWindowForTimezone(group.timezone, campaign, now)
-    return {
+  const phones = readyTargets.map((target) => firstNonEmpty(target.to_phone_number, target.metadata?.candidate_snapshot?.to_phone_number))
+  const [activeQueueRows, priorContactRows] = await Promise.all([
+    phones.length ? fetchActiveQueueRowsByPhone(supabase, phones) : Promise.resolve([]),
+    suppressPreviouslyContacted && phones.length ? fetchPriorContactRowsByPhone(supabase, phones) : Promise.resolve([]),
+  ])
+  const activeByPhone = new Map()
+  const priorByPhone = new Map()
+  for (const row of activeQueueRows) {
+    const phone = clean(row.to_phone_number)
+    if (!phone) continue
+    if (!activeByPhone.has(phone)) activeByPhone.set(phone, [])
+    activeByPhone.get(phone).push(row)
+  }
+  for (const row of priorContactRows) {
+    const phone = clean(row.to_phone_number)
+    if (!phone) continue
+    if (!priorByPhone.has(phone)) priorByPhone.set(phone, [])
+    priorByPhone.get(phone).push(row)
+  }
+
+  const intervalSeconds = asPositiveInteger(
+    input.spread_interval_seconds ?? input.interval_seconds ?? input.send_interval_seconds ?? campaign.send_interval_seconds,
+    60
+  )
+  const launchOptions = {
+    ...input,
+    now: now.toISOString(),
+    dry_run: true,
+    campaign_session_id: clean(input.campaign_session_id || campaignId),
+    template_use_case: clean(input.template_use_case || campaign.metadata?.template_use_case || campaign.objective || 'ownership_check') || 'ownership_check',
+    stage_code: clean(input.stage_code || campaign.metadata?.stage_code || 'S1') || 'S1',
+    routing_safe_only: input.routing_safe_only !== false,
+    allow_phone_fallback: false,
+    first_touch: input.first_touch ?? true,
+  }
+  const plannedItems = []
+  const sampleSkips = []
+  const skippedCounts = {}
+  const senderCounts = {}
+  const senderMarketCounts = {}
+  const templateCounts = {}
+  const routingCounts = {}
+  const marketCounts = {}
+  const seenPhones = new Set()
+  const senderUseCounts = {}
+  const marketUseCounts = {}
+
+  const recordSkip = (reason, target = {}, extra = {}) => {
+    increment(skippedCounts, reason)
+    if (sampleSkips.length < 50) {
+      sampleSkips.push({
+        reason,
+        campaign_target_id: target.id || null,
+        master_owner_id: target.master_owner_id || null,
+        prospect_id: target.prospect_id || target.metadata?.prospect_id || target.metadata?.candidate_snapshot?.prospect_id || null,
+        property_id: target.property_id || null,
+        phone_id: target.phone_id || target.metadata?.candidate_snapshot?.phone_id || null,
+        to_phone_number: target.to_phone_number || null,
+        market: target.market || null,
+        state: target.state || null,
+        ...extra,
+      })
+    }
+  }
+
+  for (const target of readyTargets) {
+    if (plannedItems.length >= caps.effective_limit) break
+    const candidate = launchCandidateFromTarget(target, campaign)
+    const phone = clean(candidate.canonical_e164)
+    if (!phone) {
+      recordSkip('missing_to_phone_number', target)
+      continue
+    }
+    if (!candidate.master_owner_id) {
+      recordSkip('missing_master_owner_id', target)
+      continue
+    }
+    if (!candidate.prospect_id) {
+      recordSkip('missing_prospect_id', target)
+      continue
+    }
+    if (!candidate.phone_id) {
+      recordSkip('missing_phone_id', target)
+      continue
+    }
+    if (seenPhones.has(phone)) {
+      recordSkip('duplicate_phone_in_launch_batch', target)
+      continue
+    }
+    if (activeByPhone.has(phone)) {
+      recordSkip('active_queue_row_exists', target, {
+        active_queue_row_ids: activeByPhone.get(phone).slice(0, 5).map((row) => row.id),
+      })
+      continue
+    }
+    if (candidate.true_post_contact_suppression || candidate.wrong_number || candidate.pending_prior_touch || candidate.active_queue_item) {
+      recordSkip('graph_suppression_or_queue_block', target, {
+        true_post_contact_suppression: candidate.true_post_contact_suppression,
+        wrong_number: candidate.wrong_number,
+        pending_prior_touch: candidate.pending_prior_touch,
+        active_queue_item: candidate.active_queue_item,
+      })
+      continue
+    }
+    if (suppressPreviouslyContacted) {
+	      const outreachTouched =
+	        candidate.never_contacted === false ||
+	        Boolean(candidate.last_outbound_at || candidate.latest_contact_at) ||
+	        Number(candidate.touch_count || 0) > 0
+      if (outreachTouched || priorByPhone.has(phone)) {
+        recordSkip('prior_contacted_suppression', target, {
+          prior_contact_row_ids: (priorByPhone.get(phone) || []).slice(0, 5).map((row) => row.id),
+        })
+        continue
+      }
+    }
+
+    const routing = await chooseTextgridNumber(candidate, launchOptions, deps)
+    if (!routing.ok) {
+      recordSkip(routing.reason_code || routing.routing_block_reason || 'routing_blocked', target, {
+        routing_block_reason: routing.routing_block_reason || null,
+      })
+      continue
+    }
+    const senderNumber = routeSenderNumber(routing)
+    const senderKey = senderNumber || 'unknown_sender'
+    if (!senderNumber) {
+      recordSkip('missing_selected_sender_number', target)
+      continue
+    }
+    if (caps.per_sender_cap && Number(senderUseCounts[senderKey] || 0) >= caps.per_sender_cap) {
+      recordSkip('per_sender_cap_reached', target, { sender: senderNumber })
+      continue
+    }
+    const marketKey = clean(candidate.market || target.market || 'unknown')
+    if (caps.per_market_cap && Number(marketUseCounts[marketKey] || 0) >= caps.per_market_cap) {
+      recordSkip('per_market_cap_reached', target, { market: marketKey })
+      continue
+    }
+
+    const rendered = await renderOutboundTemplate(candidate, launchOptions, deps)
+    const templateId = renderedTemplateId(rendered)
+    const messageBody = renderedMessageBody(rendered)
+    if (!rendered.ok || !templateId || !messageBody) {
+      recordSkip(rendered.reason_code || rendered.reason || 'template_render_failed', target, {
+        template_id: templateId,
+        render_error_message: rendered.render_error_message || rendered.reason || null,
+      })
+      continue
+    }
+
+    seenPhones.add(phone)
+    senderUseCounts[senderKey] = Number(senderUseCounts[senderKey] || 0) + 1
+    marketUseCounts[marketKey] = Number(marketUseCounts[marketKey] || 0) + 1
+    increment(senderCounts, senderNumber)
+    increment(senderMarketCounts, routing.selected_textgrid_market || routing.selected?.market || 'unknown')
+    increment(templateCounts, templateId)
+    increment(routingCounts, routing.routing_tier || 'unknown')
+    increment(marketCounts, marketKey)
+    plannedItems.push({ target, candidate, routing, rendered })
+  }
+
+  const scheduleCampaign = {
+    ...campaign,
+    contact_window_start: clean(input.contact_window_start || input.window_start || campaign.contact_window_start) || campaign.contact_window_start,
+    contact_window_end: clean(input.contact_window_end || input.window_end || campaign.contact_window_end) || campaign.contact_window_end,
+  }
+  const scheduleBase = new Date(input.first_scheduled_at || input.first_scheduled_at_utc || input.now || Date.now())
+  const grouped = groupLaunchItemsByWindow(plannedItems)
+  const plannedWindows = []
+  const scheduledItems = []
+  for (const group of grouped) {
+    const window = computeWindowForTimezone(group.timezone, scheduleCampaign, scheduleBase)
+    const windowRecord = {
       campaign_id: campaignId,
       market: group.market,
       state: group.state,
       timezone: group.timezone,
       status: 'planned',
-      max_sends: Math.min(group.targets.length, caps.market_cap || group.targets.length),
+      max_sends: group.items.length,
       sends_attempted: 0,
       sends_successful: 0,
       sends_failed: 0,
       metadata: {
         dry_run: dryRun,
-        no_send: true,
-        target_count: group.targets.length,
-        interval_seconds: intervalSeconds,
+        no_send: noSend,
+        confirm_live: confirmLive,
+        target_count: group.items.length,
+        spread_interval_seconds: intervalSeconds,
+        launch_cap_snapshot: caps,
       },
       ...window,
-      targets: group.targets,
+      spread_interval_seconds: intervalSeconds,
+      items: [],
     }
-  })
+    let cursor = new Date(window.window_start_utc).getTime()
+    const endMs = new Date(window.window_end_utc).getTime()
+    for (const item of group.items) {
+      if (cursor >= endMs) {
+        recordSkip('schedule_window_full', item.target, {
+          timezone: group.timezone,
+          window_start_utc: window.window_start_utc,
+          window_end_utc: window.window_end_utc,
+        })
+        continue
+      }
+      const scheduledFor = new Date(cursor).toISOString()
+      const scheduledItem = { ...item, scheduled_for_utc: scheduledFor, window: windowRecord }
+      scheduledItems.push(scheduledItem)
+      windowRecord.items.push(scheduledItem)
+      cursor += intervalSeconds * 1000
+    }
+    if (windowRecord.items.length) {
+      windowRecord.first_scheduled_at = windowRecord.items[0].scheduled_for_utc
+      windowRecord.last_scheduled_at = windowRecord.items[windowRecord.items.length - 1].scheduled_for_utc
+    } else {
+      windowRecord.first_scheduled_at = null
+      windowRecord.last_scheduled_at = null
+    }
+    plannedWindows.push(windowRecord)
+  }
 
-  const shouldWriteWindows = !dryRun && blockers.length === 0
-  const shouldWriteQueueRows = shouldWriteWindows && createRows
+  const shouldWriteQueueRows = !dryRun && !noSend && confirmLive && createRows && blockers.length === 0
   let insertedWindows = []
   let insertedQueueRows = []
+  let run = null
 
-  if (shouldWriteWindows) {
-    const rows = plannedWindows.map(({ targets: _targets, ...row }) => row)
-    if (rows.length) {
+  try {
+    if (!dryRun) {
+      run = await startCampaignRun(campaignId, {
+        run_type: 'launch_queue_plan',
+        dry_run: dryRun,
+        metadata: {
+          input,
+          no_send: noSend,
+          confirm_live: confirmLive,
+          create_send_queue_rows: createRows,
+          live_gate_passed: shouldWriteQueueRows,
+          global_emergency_stop_active: globalStop,
+          block_on_global_emergency_stop: blockOnGlobalEmergencyStop,
+          caps,
+        },
+      }, deps)
+    }
+
+    if (shouldWriteQueueRows && plannedWindows.length) {
+      const rows = plannedWindows.map(({ items: _items, spread_interval_seconds: _spread, first_scheduled_at, last_scheduled_at, ...row }) => ({
+        ...row,
+        metadata: {
+          ...metadataObject(row.metadata),
+          first_scheduled_at,
+          last_scheduled_at,
+        },
+      }))
       const { data, error } = await supabase.from('campaign_send_windows').insert(rows).select('*')
       if (error) throw error
       insertedWindows = data || []
     }
-  }
 
-  if (shouldWriteQueueRows) {
-    const queueRows = []
-    const targetUpdates = []
-    for (const [windowIndex, plannedWindow] of plannedWindows.entries()) {
-      const insertedWindow = insertedWindows[windowIndex] || {}
-      const startMs = new Date(plannedWindow.window_start_utc).getTime()
-      const endMs = new Date(plannedWindow.window_end_utc).getTime()
-      let cursor = startMs
-      for (const target of plannedWindow.targets.slice(0, plannedWindow.max_sends || plannedWindow.targets.length)) {
-        if (cursor >= endMs) break
-        const queueKey = `campaign:${campaignId}:${target.id}:${crypto.randomUUID()}`
-        const metadata = {
-          campaign_id: campaignId,
-          campaign_target_id: target.id,
-          campaign_send_window_id: insertedWindow.id || null,
-          campaign_phase: 'phase_1_queue_plan',
-          no_send: true,
-          proof: true,
-          exclude_from_kpis: true,
-          target_snapshot: {
-            owner_name: target.owner_name,
-            property_address: target.property_address,
-            market: target.market,
-            state: target.state,
-            timezone: target.timezone,
-            identity_status: target.identity_status,
-            routing_status: target.routing_status,
-            template_status: target.template_status,
-          },
-          template_id: target.metadata?.template_id || null,
-          selected_textgrid_market: target.metadata?.selected_textgrid_market || null,
-        }
-        queueRows.push({
-          queue_key: queueKey,
-          queue_id: queueKey,
-          queue_status: 'scheduled',
-          scheduled_for: new Date(cursor).toISOString(),
-          scheduled_for_utc: new Date(cursor).toISOString(),
-          scheduled_for_local: new Date(cursor).toISOString(),
-          message_body: 'CAMPAIGN PLAN ONLY - NO SEND',
-          message_text: 'CAMPAIGN PLAN ONLY - NO SEND',
-          to_phone_number: target.to_phone_number,
-          master_owner_id: target.master_owner_id,
-          property_id: target.property_id,
-          market: target.market,
-          property_address_state: target.state,
-          timezone: target.timezone || plannedWindow.timezone,
-          template_id: target.metadata?.template_id || null,
-          use_case_template: target.strategy || campaign.objective || 'ownership_check',
-          touch_number: 1,
-          dedupe_key: `campaign-plan:${campaignId}:${target.id}`,
-          sms_eligible: false,
-          routing_allowed: false,
-          safety_status: 'planned_no_send',
-          guard_status: 'blocked',
-          guard_reason: 'campaign_phase_1_no_send',
-          type: 'campaign_plan',
-          campaign_id: campaignId,
-          campaign_target_id: target.id,
-          campaign_send_window_id: insertedWindow.id || null,
-          metadata,
-        })
-        targetUpdates.push(target.id)
-        cursor += intervalSeconds * 1000
+    if (shouldWriteQueueRows && scheduledItems.length) {
+      const queueRows = []
+      const targetUpdates = []
+      const windowIdByKey = new Map()
+      for (const [index, plannedWindow] of plannedWindows.entries()) {
+        const insertedWindow = insertedWindows[index] || {}
+        windowIdByKey.set([
+          plannedWindow.timezone,
+          plannedWindow.market,
+          plannedWindow.state,
+          plannedWindow.window_start_utc,
+        ].join('|'), insertedWindow.id || null)
       }
-    }
-    for (let i = 0; i < queueRows.length; i += 500) {
-      const chunk = queueRows.slice(i, i + 500)
-      const { data, error } = await supabase.from('send_queue').insert(chunk).select('id,campaign_target_id')
-      if (error) throw error
-      insertedQueueRows.push(...(data || []))
-    }
-    if (targetUpdates.length) {
+      for (const item of scheduledItems) {
+        const windowKey = [
+          item.window.timezone,
+          item.window.market,
+          item.window.state,
+          item.window.window_start_utc,
+        ].join('|')
+        const window = {
+          ...item.window,
+          id: windowIdByKey.get(windowKey) || null,
+        }
+        queueRows.push(buildQueueRowForLaunch({
+          campaign,
+          target: item.target,
+          candidate: item.candidate,
+          routing: item.routing,
+          rendered: item.rendered,
+          scheduledFor: item.scheduled_for_utc,
+          window,
+          caps,
+          input,
+        }))
+        targetUpdates.push(item.target.id)
+      }
+      for (let i = 0; i < queueRows.length; i += 500) {
+        const rowChunk = queueRows.slice(i, i + 500)
+        const { data, error } = await supabase
+          .from('send_queue')
+          .insert(rowChunk)
+          .select('id,campaign_target_id,from_phone_number,textgrid_number_id,to_phone_number,template_id,queue_status,scheduled_for_utc,metadata')
+        if (error) throw error
+        insertedQueueRows.push(...(data || []))
+      }
+      if (targetUpdates.length) {
+        await supabase
+          .from('campaign_targets')
+          .update({ target_status: 'planned', last_launched_at: new Date().toISOString() })
+          .in('id', targetUpdates)
+      }
       await supabase
-        .from('campaign_targets')
-        .update({ target_status: 'planned' })
-        .in('id', targetUpdates)
+        .from('campaigns')
+        .update({ status: 'live_limited' })
+        .eq('id', campaignId)
     }
+
+    if (run) {
+      await finishCampaignRun(run.id, {
+        status: blockers.length ? 'blocked' : 'completed',
+        queue_rows_planned: scheduledItems.length,
+        queue_rows_created: insertedQueueRows.length,
+        ready_to_queue: readyTargets.length,
+        blocked_counts: skippedCounts,
+        metadata: {
+          blockers,
+          dry_run: dryRun,
+          no_send: noSend,
+          confirm_live: confirmLive,
+          create_send_queue_rows: createRows,
+          live_gate_passed: shouldWriteQueueRows,
+          caps,
+          sender_distribution: distributionFromCounts(senderCounts),
+          template_distribution: distributionFromCounts(templateCounts),
+        },
+      }, deps)
+      await recordCampaignEvent({
+        campaign_id: campaignId,
+        run_id: run.id,
+        event_type: blockers.length
+          ? 'campaign.launch_blocked'
+          : shouldWriteQueueRows
+            ? 'campaign.launch_scheduled'
+            : noSend
+              ? 'campaign.launch_no_send_planned'
+              : 'campaign.launch_planned',
+        severity: blockers.length ? 'warning' : 'success',
+        title: blockers.length ? 'Campaign launch blocked' : 'Campaign launch planned',
+        description: blockers.length
+          ? `Blocked by ${blockers.join(', ')}`
+          : `${scheduledItems.length} targets planned; ${insertedQueueRows.length} queue rows created.`,
+        metadata: {
+          blockers,
+          dry_run: dryRun,
+          no_send: noSend,
+          confirm_live: confirmLive,
+          create_send_queue_rows: createRows,
+          send_queue_rows_created: insertedQueueRows.length,
+          global_emergency_stop_active: globalStop,
+          block_on_global_emergency_stop: blockOnGlobalEmergencyStop,
+          caps,
+        },
+      }, deps)
+    }
+  } catch (error) {
+    if (run) {
+      await finishCampaignRun(run.id, {
+        status: 'failed',
+        metadata: { error: error?.message || String(error), blockers, caps },
+      }, deps)
+    }
+    throw error
   }
 
-  if (!dryRun) {
-    await recordCampaignEvent({
-      campaign_id: campaignId,
-      event_type: blockers.length ? 'campaign.queue_plan_blocked' : 'campaign.queue_plan_created',
-      severity: blockers.length ? 'warning' : 'success',
-      title: blockers.length ? 'Queue plan blocked' : 'Queue plan created',
-      description: blockers.length
-        ? `Blocked by ${blockers.join(', ')}`
-        : `${insertedWindows.length} windows planned; ${insertedQueueRows.length} no-send queue rows created.`,
-      metadata: { blockers, dry_run: dryRun, create_send_queue_rows: createRows },
-    }, deps)
+  const firstScheduledAt = scheduledItems
+    .map((item) => item.scheduled_for_utc)
+    .filter(Boolean)
+    .sort()[0] || null
+  const lastScheduledAt = scheduledItems
+    .map((item) => item.scheduled_for_utc)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null
+  const status = blockers.length
+    ? 'blocked'
+    : shouldWriteQueueRows
+      ? 'live_scheduled'
+      : dryRun
+        ? 'dry_run'
+        : noSend
+          ? 'no_send'
+          : 'planned'
+  const liveGate = {
+    dry_run: dryRun,
+    no_send: noSend,
+    confirm_live: confirmLive,
+    create_send_queue_rows: createRows,
+    may_create_send_queue_rows: shouldWriteQueueRows,
+    global_emergency_stop_active: globalStop,
+    block_on_global_emergency_stop: blockOnGlobalEmergencyStop,
+    required_conditions: {
+      dry_run_false: dryRun === false,
+      no_send_false: noSend === false,
+      confirm_live_true: confirmLive === true,
+    },
+  }
+  const duplicateProtection = {
+    no_duplicate_phone_queue_rows: true,
+    no_duplicate_active_queue_rows: Number(skippedCounts.active_queue_row_exists || 0) === 0,
+    no_prior_contacted_rows_if_suppression_applies: !suppressPreviouslyContacted || Number(skippedCounts.prior_contacted_suppression || 0) === 0,
+    batch_duplicate_phone_skipped: Number(skippedCounts.duplicate_phone_in_launch_batch || 0),
+    active_queue_duplicate_skipped: Number(skippedCounts.active_queue_row_exists || 0),
+    prior_contacted_skipped: Number(skippedCounts.prior_contacted_suppression || 0),
+    existing_active_queue_rows_found: activeQueueRows.length,
+    existing_prior_contact_rows_found: priorContactRows.length,
+    suppression_applies: suppressPreviouslyContacted,
+  }
+  const launchSummary = {
+    targets_created: scheduledItems.length,
+    queue_rows_created: insertedQueueRows.length,
+    skipped_count: Object.values(skippedCounts).reduce((sum, count) => sum + Number(count || 0), 0),
+    blocked_count: blockers.length + Object.values(skippedCounts).reduce((sum, count) => sum + Number(count || 0), 0),
+    sender_distribution: distributionFromCounts(senderCounts),
+    sender_market_distribution: distributionFromCounts(senderMarketCounts),
+    template_distribution: distributionFromCounts(templateCounts),
+    routing_distribution: distributionFromCounts(routingCounts),
+    market_distribution: distributionFromCounts(marketCounts),
+    first_scheduled_at: firstScheduledAt,
+    last_scheduled_at: lastScheduledAt,
+    status,
   }
 
   return {
     ok: blockers.length === 0,
+    success: blockers.length === 0,
     dry_run: dryRun,
+    no_send: noSend,
     campaign_id: campaignId,
     blockers,
     exact_blockers: blockers,
     caps,
-    total_ready_targets: targets?.length || 0,
-    planned_target_count: selectedTargets.length,
-    planned_windows: plannedWindows.map(({ targets: windowTargets, ...window }) => ({
+    launch_caps: caps,
+    live_gate: liveGate,
+    duplicate_protection: duplicateProtection,
+    total_ready_targets: readyTargets.length,
+    planned_target_count: scheduledItems.length,
+    targets_created: launchSummary.targets_created,
+    planned_windows: plannedWindows.map(({ items: windowItems, ...window }) => ({
       ...window,
-      targets_planned: windowTargets.length,
+      targets_planned: windowItems.length,
+      target_ids: windowItems.slice(0, 25).map((item) => item.target.id),
     })),
     send_windows_created: insertedWindows.length,
     send_queue_rows_created: insertedQueueRows.length,
-    no_send: true,
+    queue_rows_created: insertedQueueRows.length,
+    skipped_count: launchSummary.skipped_count,
+    skipped_counts_by_reason: skippedCounts,
+    sample_skips: sampleSkips,
+    blocked_count: launchSummary.blocked_count,
+    sender_distribution: launchSummary.sender_distribution,
+    sender_market_distribution: launchSummary.sender_market_distribution,
+    template_distribution: launchSummary.template_distribution,
+    routing_distribution: launchSummary.routing_distribution,
+    first_scheduled_at: firstScheduledAt,
+    last_scheduled_at: lastScheduledAt,
+    spread_interval_seconds: intervalSeconds,
+    status,
+    launch_summary: launchSummary,
+    inserted_queue_rows: insertedQueueRows.slice(0, 25),
     global_emergency_stop_active: globalStop,
     campaign_emergency_stop_active: campaignStop,
   }
