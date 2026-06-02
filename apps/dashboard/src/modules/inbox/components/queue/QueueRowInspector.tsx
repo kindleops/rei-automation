@@ -173,8 +173,10 @@ export const QueueRowInspector: FC<QueueRowInspectorProps> = ({
                 </div>
 
                 {/* Campaign */}
-                <span className="sqd-cell sqd-cell--dim">
-                  {truncate(item.campaignName || item.useCase || item.currentStage || '—', 14)}
+                <span className="sqd-cell sqd-cell--dim sqd-cell--campaign-meta">
+                  <strong>{truncate(item.campaignName || item.useCase || item.currentStage || '—', 14)}</strong>
+                  <small>campaign_id: {item.campaignId ? truncate(item.campaignId, 18) : '—'}</small>
+                  <small>campaign_target_id: {item.campaignTargetId ? truncate(item.campaignTargetId, 18) : '—'}</small>
                 </span>
 
                 {/* Market */}

@@ -59,6 +59,10 @@ const deliveryFromStatus = (status: QueueItemStatus): DeliveryStatus => {
 
 const statusLabelFor = (status: QueueItemStatus): string => status.replace(/_/g, ' ')
 
+const asRecord = (value: unknown): AnyRecord => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as AnyRecord : {}
+)
+
 export const fetchQueueModel = async (): Promise<QueueModel> => {
   const supabase = getSupabaseClient()
 
@@ -89,11 +93,18 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const oid = asString(getFirst(row, ['owner_id', 'master_owner_id']), '')
     if (oid) ownerIds.add(oid)
 
-    const md = (row.metadata as AnyRecord) || {}
-    const cid = asString(getFirst(row, ['campaign_id']), md.campaign_id as string)
+    const md = asRecord(row.metadata)
+    const targetSnapshot = asRecord(md.target_snapshot)
+    const cid = asString(
+      getFirst(row, ['campaign_id']),
+      asString(getFirst(md, ['campaign_id']), asString(getFirst(targetSnapshot, ['campaign_id']), '')),
+    )
     if (cid) campaignIds.add(cid)
 
-    const tid = md.campaign_target_id as string
+    const tid = asString(
+      getFirst(row, ['campaign_target_id']),
+      asString(getFirst(md, ['campaign_target_id']), asString(getFirst(targetSnapshot, ['campaign_target_id']), '')),
+    )
     if (tid) targetIds.add(tid)
   }
 
@@ -162,9 +173,15 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
   const items: QueueItem[] = queueRows.map((row, index) => {
     const id = asString(row['id'], `queue-${index + 1}`)
     const queueId = asString(getFirst(row, ['queue_id', 'id']), id)
-    const md = (row.metadata as AnyRecord) || {}
+    const md = asRecord(row.metadata)
+    const targetSnapshot = asRecord(md.target_snapshot)
+    const templateSnapshot = asRecord(md.template_snapshot)
 
-    const target = targetByQid.get(queueId) || targetById.get(md.campaign_target_id as string) || null
+    const metadataCampaignTargetId = asString(
+      getFirst(row, ['campaign_target_id']),
+      asString(getFirst(md, ['campaign_target_id']), asString(getFirst(targetSnapshot, ['campaign_target_id']), '')),
+    )
+    const target = targetByQid.get(queueId) || targetById.get(metadataCampaignTargetId) || null
     const event = eventByQid.get(queueId) || null
 
     const basePropId = asString(getFirst(target || {}, ['property_id']), asString(getFirst(row, ['property_id']), ''))
@@ -173,7 +190,10 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const baseOwnerId = asString(getFirst(target || {}, ['owner_id']), asString(getFirst(row, ['owner_id', 'master_owner_id']), asString(getFirst(property || {}, ['owner_id', 'master_owner_id']), '')))
     const owner = ownerById.get(baseOwnerId) || null
 
-    const baseCmpId = asString(getFirst(target || {}, ['campaign_id']), asString(getFirst(row, ['campaign_id']), md.campaign_id as string))
+    const baseCmpId = asString(
+      getFirst(target || {}, ['campaign_id']),
+      asString(getFirst(row, ['campaign_id']), asString(getFirst(md, ['campaign_id']), asString(getFirst(targetSnapshot, ['campaign_id']), ''))),
+    )
     const campaign = cmpById.get(baseCmpId) || null
 
     const status = toQueueStatus(getFirst(row, ['queue_status', 'status']))
@@ -212,7 +232,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const textgridMessageId = asString(getFirst(row, ['textgrid_message_id']), '') || asString(getFirst(md, ['textgrid_message_id']), '') || null
 
     const messageText = asString(getFirst(row, ['message_body', 'message_text', 'message']), '')
-    const templateId = asString(getFirst(row, ['template_key', 'selected_template_id']), '') || asString(getFirst(md, ['selected_template_id', 'template_id']), asString(getFirst(target || {}, ['template_id']), '')) || null
+    const templateId = asString(getFirst(row, ['template_key', 'selected_template_id']), '') || asString(getFirst(md, ['selected_template_id', 'template_id']), asString(getFirst(templateSnapshot, ['selected_template_id', 'template_id']), asString(getFirst(target || {}, ['template_id']), ''))) || null
 
     const guardReason = asString(getFirst(row, ['guard_reason']), '') || null
     const deliveryStatus = deliveryFromStatus(status)
@@ -221,7 +241,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     // Source inference
     let rowSource: QueueItem['rowSource'] = 'unknown'
     const qKey = asString(row.queue_key, '')
-    if (target) rowSource = 'campaign'
+    if (target || baseCmpId || metadataCampaignTargetId || md.source === 'campaign_launch_execution') rowSource = 'campaign'
     else if (qKey.startsWith('feed') || md.source === 'feeder') rowSource = 'feeder'
     else if (md.auto_reply) rowSource = 'auto_reply'
     else if (md.source === 'manual') rowSource = 'manual'
@@ -232,7 +252,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     if (sellerName === 'Unknown seller') flags.push('MISSING_OWNER')
     if (propertyAddress === 'No property linked') flags.push('MISSING_PROPERTY')
     if (status === 'sent' && !event) flags.push('MISSING_MESSAGE_EVENT')
-    if (rowSource === 'campaign' && !target) flags.push('MISSING_CAMPAIGN_TARGET')
+    if (rowSource === 'campaign' && !metadataCampaignTargetId && !target) flags.push('MISSING_CAMPAIGN_TARGET')
     if (!templateId) flags.push('MISSING_TEMPLATE')
     if (fromPhone && !textgridNumbers.some(n => n.number === fromPhone || n.phone_number === fromPhone)) flags.push('MISSING_TEXTGRID_NUMBER')
     if (status === 'sent' && !providerMessageId && !textgridMessageId) flags.push('MISSING_PROVIDER_ID')
@@ -261,7 +281,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       toPhoneNumber: asString(getFirst(row, ['to_phone_number', 'phone']), ''),
       fromPhoneNumber: fromPhone,
       agent: asString(getFirst(row, ['agent_name', 'selected_agent_id', 'agent']), '') || asString(getFirst(md, ['agent_name', 'agent_first_name']), 'NEXUS'),
-      templateName: asString(getFirst(row, ['template_key', 'template_name', 'use_case_template']), '') || asString(getFirst(md, ['template_use_case', 'selected_template_use_case']), 'Template not attached'),
+      templateName: asString(getFirst(row, ['template_key', 'template_name', 'use_case_template']), '') || asString(getFirst(templateSnapshot, ['template_name', 'template_use_case']), asString(getFirst(md, ['template_use_case', 'selected_template_use_case']), 'Template not attached')),
       templateId,
       selectedTemplateId: templateId,
       templateSource: 'system',
@@ -324,10 +344,14 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       approvalReason: asString(getFirst(row, ['approval_reason'])) || asString(md.approval_reason) || null,
       priorThreadSummary: asString(getFirst(row, ['prior_thread_summary'])) || asString(md.prior_thread_summary) || null,
 
-      campaignId: campaign ? asString(campaign.id, '') || null : null,
-      campaignName: campaign ? asString(campaign.campaign_name, '') || null : null,
-      campaignTargetId: target ? asString(target.id, '') || null : null,
-      campaignTargetStatus: target ? asString(target.status, '') || null : null,
+      campaignId: baseCmpId || (campaign ? asString(campaign.id, '') : '') || null,
+      campaignName: campaign
+        ? asString(campaign.campaign_name, '') || asString(campaign.name, '') || null
+        : asString(getFirst(md, ['campaign_name']), '') || null,
+      campaignTargetId: metadataCampaignTargetId || (target ? asString(target.id, '') : '') || null,
+      campaignTargetStatus: target
+        ? asString(getFirst(target, ['target_status', 'status']), '') || null
+        : asString(getFirst(row, ['campaign_target_status']), asString(getFirst(targetSnapshot, ['target_status']), '')) || null,
       routingTier: asNumber(getFirst(row, ['routing_tier']), 0) || null,
       routingRuleName: asString(getFirst(row, ['routing_rule_name']), '') || null,
       lastEventType: event ? asString(event.event_type, '') || null : null,

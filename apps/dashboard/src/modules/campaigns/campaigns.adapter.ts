@@ -12,50 +12,107 @@ import type {
   CampaignLogEvent,
   SuppressionCheck,
   CreateCampaignPayload,
+  CampaignLaunchPayload,
+  CampaignLaunchResult,
 } from './campaigns.types'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getDealContextList } from '../../lib/data/dealContext'
 import { asNumber, asString, isDev } from '../../lib/data/shared'
+import {
+  createCampaignBackend,
+  buildCampaignTargets,
+  getCampaignBackend,
+  listCampaignsBackend,
+  queueCampaignPlan,
+} from '../../lib/api/backendClient'
 
 // ── Supabase loaders ────────────────────────────────────────────────────────────
 
 export const createCampaign = async (payload: CreateCampaignPayload): Promise<string> => {
-  if (!hasSupabaseEnv) {
-    console.warn('[NEXUS] Supabase not connected. Simulating campaign creation:', payload)
-    return 'cmp-mock-id'
+  const res = await createCampaignBackend({
+    ...payload,
+    auto_send_enabled: false,
+    auto_reply_mode: 'disabled',
+    auto_queue_enabled: payload.target_filters.auto_queue_enabled === true,
+  })
+  if (!res.ok) throw new Error(res.message || res.error)
+  return res.data.campaign_id
+}
+
+export const buildCampaignTargetSnapshots = async (
+  campaignId: string,
+  options: { limit: number },
+): Promise<{ built_count: number; no_send_queue_rows_created?: boolean; preview?: Record<string, unknown> }> => {
+  const res = await buildCampaignTargets(campaignId, {
+    limit: options.limit,
+    target_limit: options.limit,
+    max_targets: options.limit,
+  })
+  if (!res.ok) throw new Error(res.message || res.error)
+  return {
+    built_count: res.data.built_count ?? 0,
+    no_send_queue_rows_created: res.data.no_send_queue_rows_created,
+    preview: res.data.preview,
   }
-  
-  const client = getSupabaseClient()
-  
-  // Construct the insert payload. 
-  // Base columns go to the root level.
-  // Extended configuration goes to jsonb columns.
-  const row = {
-    campaign_name: payload.name,
-    description: payload.description,
-    status: payload.status,
-    campaign_type: payload.campaign_type,
-    template_use_case: payload.template_use_case,
-    stage_code: payload.stage_code,
-    // Send window basic policies can go as root columns if needed, but per payload they might just go into target_filters JSONB
-    target_filters: payload.target_filters,
+}
+
+export const launchCampaign = async (
+  campaignId: string,
+  payload: CampaignLaunchPayload,
+): Promise<CampaignLaunchResult> => {
+  const res = await queueCampaignPlan(campaignId, payload as unknown as Record<string, unknown>)
+  if (res.ok) return res.data as CampaignLaunchResult
+
+  const upstream = res.upstream
+  if (upstream && typeof upstream === 'object') {
+    return {
+      ...(upstream as CampaignLaunchResult),
+      ok: false,
+      success: false,
+      message: res.message,
+    }
   }
 
-  const { data, error } = await client
-    .from('sms_campaigns')
-    .insert([row])
-    .select('campaign_id')
-    .single()
-    
-  if (error) {
-    console.error('Failed to create campaign:', error)
-    throw error
-  }
-  
-  return data?.campaign_id ?? ''
+  throw new Error(res.message || res.error)
 }
 
 export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
+  const backend = await listCampaignsBackend()
+  if (backend.ok && backend.data?.campaigns) {
+    return backend.data.campaigns.map((row: any) => ({
+      id: row.id,
+      campaign_name: row.campaign_name ?? row.name,
+      status: row.status,
+      total_targets: row.total_targets ?? 0,
+      ready_targets: row.ready_targets ?? 0,
+      scheduled_targets: row.scheduled_targets ?? 0,
+      queued_targets: row.queued_targets ?? 0,
+      sent_count: row.sent_count ?? 0,
+      delivered_count: row.delivered_count ?? 0,
+      failed_count: row.failed_count ?? 0,
+      reply_count: row.reply_count ?? 0,
+      positive_reply_count: row.positive_reply_count ?? 0,
+      negative_reply_count: row.negative_reply_count ?? 0,
+      opt_out_count: row.opt_out_count ?? 0,
+      delivery_rate: row.delivery_rate ?? 0,
+      reply_rate: row.reply_rate ?? 0,
+      positive_rate: row.positive_rate ?? 0,
+      opt_out_rate: row.opt_out_rate ?? 0,
+      failure_rate: row.failure_rate ?? 0,
+      next_send_at: row.next_send_at ?? null,
+      last_send_at: row.last_send_at ?? null,
+      send_interval_seconds: row.send_interval_seconds ?? 60,
+      send_window_start: row.send_window_start ?? null,
+      send_window_end: row.send_window_end ?? null,
+      auto_queue_enabled: row.auto_queue_enabled ?? false,
+      auto_send_enabled: row.auto_send_enabled ?? false,
+      blocked_reason_counts: row.blocked_reason_counts ?? {},
+      health_score: row.health_score ?? 0,
+      health_status: row.health_status ?? 'caution',
+    }))
+  }
+
+  if (!hasSupabaseEnv) return []
   const client = getSupabaseClient()
   const { data, error } = await client
     .from('v_sms_campaign_dashboard')
@@ -96,6 +153,38 @@ export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
 }
 
 export const fetchCampaignTargets = async (campaignId: string): Promise<CampaignTarget[]> => {
+  const backend = await getCampaignBackend(campaignId)
+  if (backend.ok && Array.isArray(backend.data.targets)) {
+    return backend.data.targets.map((row: any) => ({
+      id: row.id,
+      campaign_id: row.campaign_id,
+      target_status: row.target_status ?? row.status ?? 'ready',
+      master_owner_id: row.master_owner_id ?? null,
+      property_id: row.property_id ?? null,
+      phone_id: row.phone_id ?? null,
+      canonical_e164: row.to_phone_number ?? row.canonical_e164 ?? null,
+      seller_first_name: row.owner_name?.split(' ')[0] ?? null,
+      seller_full_name: row.owner_name ?? null,
+      property_address_full: row.property_address ?? null,
+      property_address_city: null,
+      property_address_state: row.state ?? null,
+      property_address_zip: null,
+      market: row.market ?? null,
+      language: row.language ?? null,
+      final_acquisition_score: row.priority_score ?? null,
+      last_contact_at: null,
+      suppression_status: row.suppression_status ?? null,
+      suppression_reason: row.block_reason ?? null,
+      template_id: row.metadata?.template_id ?? null,
+      template_name: row.metadata?.template_name ?? null,
+      scheduled_for: null,
+      sent_at: null,
+      delivered_at: null,
+      failed_at: row.target_status === 'failed' ? row.updated_at ?? null : null,
+      replied_at: null,
+    }))
+  }
+
   try {
     const { rows } = await getDealContextList({
       campaign_id: campaignId,
@@ -178,6 +267,29 @@ export const fetchCampaignTargets = async (campaignId: string): Promise<Campaign
 }
 
 export const fetchCampaignQueue = async (campaignId: string): Promise<CampaignQueueRow[]> => {
+  const backend = await getCampaignBackend(campaignId)
+  if (backend.ok && Array.isArray(backend.data.send_windows)) {
+    return backend.data.send_windows.map((row: any) => ({
+      id: row.id,
+      campaign_id: campaignId,
+      campaign_target_id: null,
+      queue_row_id: null,
+      seller_full_name: null,
+      property_address_full: null,
+      market: row.market ?? null,
+      template_id: null,
+      template_name: 'Planned send window',
+      from_phone_number: null,
+      to_phone_number: null,
+      scheduled_for: row.window_start_utc ?? null,
+      queue_status: (row.status === 'planned' ? 'scheduled' : row.status) as CampaignQueueRow['queue_status'],
+      delivery_status: row.status ?? null,
+      failure_category: row.auto_pause_reason ?? null,
+      failed_reason: row.auto_pause_reason ?? null,
+      last_event_at: row.updated_at ?? row.created_at ?? null,
+    }))
+  }
+
   try {
     const { rows } = await getDealContextList({
       campaign_id: campaignId,
@@ -383,8 +495,21 @@ export const fetchCampaignTemplates = async (_campaignId: string): Promise<Campa
   return [] // Real implementation requires join with template usage
 }
 
-export const fetchCampaignLogs = async (_campaignId: string): Promise<CampaignLogEvent[]> => {
-  return [] // Real implementation requires campaign_events table
+export const fetchCampaignLogs = async (campaignId: string): Promise<CampaignLogEvent[]> => {
+  const backend = await getCampaignBackend(campaignId)
+  if (backend.ok && Array.isArray(backend.data.events)) {
+    return backend.data.events.map((row: any) => ({
+      id: row.id,
+      campaign_id: row.campaign_id,
+      event_type: row.event_type,
+      severity: row.severity ?? 'info',
+      title: row.title ?? row.event_type,
+      description: row.description ?? '',
+      created_at: row.created_at,
+      metadata: row.metadata ?? {},
+    }))
+  }
+  return []
 }
 
 export const queueBatch = async (campaignId: string, options: { limit: number; dry_run: boolean; respect_send_window: boolean; interval_seconds: number }) => {
@@ -403,7 +528,7 @@ export const fetchCampaignMarketMetrics = async (campaignId: string): Promise<Ca
 }
 
 const buildKpis = (campaigns: CampaignSummary[]): CampaignKpis => {
-  const active = campaigns.filter((c) => c.status === 'active')
+  const active = campaigns.filter((c) => ['active', 'ready', 'live_limited'].includes(c.status))
   const totalTargets = campaigns.reduce((s, c) => s + c.total_targets, 0)
   const readyTargets = campaigns.reduce((s, c) => s + c.ready_targets, 0)
   const scheduledSends = campaigns.reduce((s, c) => s + c.scheduled_targets, 0)

@@ -77,6 +77,8 @@ const OperationalRow = ({
     <div className="nx-op-cell is-seller">
       <span className="nx-seller-name">{item.sellerName}</span>
       <span className="nx-seller-address">{item.propertyAddress}</span>
+      <span className="nx-op-campaign-meta">campaign_id: {item.campaignId || '—'}</span>
+      <span className="nx-op-campaign-meta">campaign_target_id: {item.campaignTargetId || '—'}</span>
       <div className="nx-op-hover-intel">
         <span className={cls('nx-temp-dot', `is-${item.sellerTemperature}`)} />
         <small>{item.sellerTemperature.toUpperCase()}</small>
@@ -232,6 +234,8 @@ const TacticalIntelligenceStack = ({
         {/* Global Core Execution Details */}
         <CollapsibleInspectorCard title="Execution Details" icon="radar">
           <div className="nx-inspector-grid">
+            <IntelRow label="campaign_id" value={item.campaignId || '—'} />
+            <IntelRow label="campaign_target_id" value={item.campaignTargetId || '—'} />
             <IntelRow label="Scheduled" value={new Date(item.scheduledForLocal).toLocaleString()} />
             <IntelRow label="Priority" value={item.priority.toUpperCase()} className={cls(item.priority === 'P0' && 'is-urgent')} />
             <IntelRow label="Stage" value={item.currentStage} />
@@ -680,6 +684,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                     <thead>
                       <tr>
                         <th>Seller / Property</th>
+                        <th>Campaign Metadata</th>
                         <th style={{ width: '25%' }}>Message Preview</th>
                         <th>Status</th>
                         <th>Scheduled</th>
@@ -702,6 +707,12 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                             <div className="nx-cell-owner">
                               <strong>{item.sellerName}</strong>
                               <small>{item.propertyAddress}</small>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="nx-cell-owner nx-cell-owner--metadata">
+                              <small>campaign_id: {item.campaignId || '—'}</small>
+                              <small>campaign_target_id: {item.campaignTargetId || '—'}</small>
                             </div>
                           </td>
                           <td className="nx-cell-preview">
@@ -732,7 +743,7 @@ export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
                       ))}
                       {filteredItems.length === 0 && (
                         <tr>
-                          <td colSpan={10} className="nx-table-empty">
+                          <td colSpan={11} className="nx-table-empty">
                             No items found in the current view.
                           </td>
                         </tr>

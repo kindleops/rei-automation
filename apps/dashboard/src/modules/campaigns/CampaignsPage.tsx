@@ -75,18 +75,20 @@ const fmtDate = (iso: string | null | undefined): string => {
 
 const statusOrder: Record<CampaignStatus, number> = {
   active: 0,
-  scheduled: 1,
-  paused: 2,
-  draft: 3,
-  completed: 4,
-  archived: 5,
+  live_limited: 1,
+  ready: 2,
+  scheduled: 3,
+  paused: 4,
+  draft: 5,
+  completed: 6,
+  archived: 7,
 }
 
 // ── Primitive components ──────────────────────────────────────────────────────
 
 const StatusBadge = ({ status }: { status: CampaignStatus }) => {
   const labels: Record<CampaignStatus, string> = {
-    active: 'Active', paused: 'Paused', scheduled: 'Scheduled',
+    active: 'Active', ready: 'Ready', live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
     draft: 'Draft', completed: 'Completed', archived: 'Archived',
   }
   return (
@@ -148,8 +150,8 @@ export const computeHealth = (c: CampaignSummary): { level: HealthLevel; score: 
   if (c.opt_out_rate > 3) { score -= 10; if (c.opt_out_rate > 6) { score -= 15; issues.push(`Opt-out rate ${fmtPct(c.opt_out_rate)} exceeds safe threshold`) } else { issues.push(`Opt-out rate ${fmtPct(c.opt_out_rate)} is elevated`) } }
   if (c.failed_count > 20) { score -= 10; issues.push(`${c.failed_count} failed sends detected`) }
   if (c.reply_rate < 5) { score -= 5; issues.push(`Reply rate ${fmtPct(c.reply_rate)} is below target`) }
-  if (!c.auto_send_enabled && c.status === 'active') { score -= 5; issues.push('Auto-send is disabled') }
-  if (c.ready_targets === 0 && c.status === 'active') { score -= 10; issues.push('No ready targets — queue may be exhausted') }
+  if (c.auto_send_enabled) { score -= 15; issues.push('Auto-send must stay disabled in Phase 1') }
+  if (c.ready_targets === 0 && ['active', 'ready', 'live_limited'].includes(c.status)) { score -= 10; issues.push('No ready targets — build or refresh target list') }
 
   const level: HealthLevel = score >= 80 ? 'healthy' : score >= 55 ? 'caution' : 'dangerous'
   return { level, score: Math.max(0, score), issues }
@@ -250,6 +252,45 @@ const SuppressionChecklist = ({ checks }: { checks: SuppressionCheck[] }) => (
 )
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
+
+const CampaignDetailOpsStrip = ({
+  campaign,
+  scopeLabel,
+}: {
+  campaign: CampaignSummary
+  scopeLabel: string
+}) => {
+  const queueRows = campaign.queued_targets + campaign.scheduled_targets
+  const deliveryState = campaign.sent_count > 0
+    ? `${fmt(campaign.delivered_count)} of ${fmt(campaign.sent_count)} delivered`
+    : 'No sends yet'
+  const replies = campaign.reply_count || campaign.positive_reply_count + campaign.negative_reply_count
+
+  return (
+    <div className="ccc__detail-ops-strip">
+      <div>
+        <span>Graph Scope</span>
+        <strong>{scopeLabel}</strong>
+      </div>
+      <div>
+        <span>Target Count</span>
+        <strong>{fmt(campaign.total_targets)}</strong>
+      </div>
+      <div>
+        <span>Queue Rows</span>
+        <strong>{fmt(queueRows)}</strong>
+      </div>
+      <div>
+        <span>Delivery State</span>
+        <strong>{deliveryState}</strong>
+      </div>
+      <div>
+        <span>Replies</span>
+        <strong>{fmt(replies)}</strong>
+      </div>
+    </div>
+  )
+}
 
 const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
   const checks = buildSuppressionChecklist(campaign)
@@ -942,6 +983,7 @@ export const DetailPanel = ({
             Refresh
           </button>
         </div>
+        <CampaignDetailOpsStrip campaign={campaign} scopeLabel={scopeLabel} />
       </div>
 
       <div className="ccc__detail-tabs">
@@ -1130,8 +1172,8 @@ export const CampaignsPage = () => {
     }
 
     list.sort((a, b) => {
-      let av: number | string | boolean = a[sortKey] ?? ''
-      let bv: number | string | boolean = b[sortKey] ?? ''
+      let av: number | string | boolean = typeof a[sortKey] === 'object' ? '' : a[sortKey] ?? ''
+      let bv: number | string | boolean = typeof b[sortKey] === 'object' ? '' : b[sortKey] ?? ''
       if (sortKey === 'status') { av = statusOrder[a.status] ?? 99; bv = statusOrder[b.status] ?? 99 }
       if (typeof av === 'boolean') av = av ? 1 : 0
       if (typeof bv === 'boolean') bv = bv ? 1 : 0
