@@ -324,10 +324,10 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
     textPrimary: '#f6fee7', textSecondary: 'rgba(204,228,145,0.65)', textMuted: 'rgba(204,228,145,0.40)',
   },
   red_ops: {
-    id: 'red_ops', label: 'Red Ops',
-    bg: '#0e0608', surface: '#160a0d', elevated: '#200e12',
-    border: 'rgba(255,107,99,0.14)', accent: '#ff6b63', accentGlow: 'rgba(191,29,29,0.32)',
-    textPrimary: '#fff2ee', textSecondary: 'rgba(255,210,205,0.65)', textMuted: 'rgba(255,210,205,0.40)',
+    id: 'red_ops', label: 'RedOps',
+    bg: '#160305', surface: '#200609', elevated: '#2c0a0e',
+    border: 'rgba(255, 18, 18, 0.18)', accent: '#ff1212', accentGlow: 'rgba(255, 18, 18, 0.30)',
+    textPrimary: '#fff0f1', textSecondary: '#c99da2', textMuted: '#a68085',
   },
   matrix: {
     id: 'matrix', label: 'Matrix',
@@ -361,9 +361,9 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
   },
   light: {
     id: 'light', label: 'Light',
-    bg: '#f8fafc', surface: '#f1f5f9', elevated: '#e2e8f0',
-    border: 'rgba(15,23,42,0.10)', accent: '#0a84ff', accentGlow: 'rgba(10,132,255,0.18)',
-    textPrimary: '#0f172a', textSecondary: '#64748b', textMuted: '#94a3b8',
+    bg: '#f8fbff', surface: '#ffffff', elevated: '#f8fbff',
+    border: 'rgba(15,23,42,0.10)', accent: '#007aff', accentGlow: 'rgba(0,122,255,0.18)',
+    textPrimary: '#06111f', textSecondary: '#334155', textMuted: '#64748b',
   },
   // ── Legacy themes (preserved for localStorage backward compat) ─────────
   'dark-matter': {
@@ -425,6 +425,16 @@ export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: str
   ice:     { primary: '#a0d8f0', glow: 'rgba(160,216,240,0.22)', soft: 'rgba(160,216,240,0.12)' },
 }
 
+// Higher-contrast accent values for white/light-mode backgrounds
+export const LIGHT_ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
+  cyan:    { primary: '#00b8ff', glow: 'rgba(0,184,255,0.20)',   soft: 'rgba(0,184,255,0.10)'   },
+  emerald: { primary: '#14b86a', glow: 'rgba(20,184,106,0.20)',  soft: 'rgba(20,184,106,0.10)'  },
+  amber:   { primary: '#ffb020', glow: 'rgba(255,176,32,0.20)',  soft: 'rgba(255,176,32,0.12)'  },
+  violet:  { primary: '#7c3cff', glow: 'rgba(124,60,255,0.20)',  soft: 'rgba(124,60,255,0.10)'  },
+  rose:    { primary: '#ff2d75', glow: 'rgba(255,45,117,0.20)',  soft: 'rgba(255,45,117,0.10)'  },
+  ice:     { primary: '#0ea5e9', glow: 'rgba(14,165,233,0.20)',  soft: 'rgba(14,165,233,0.10)'  },
+}
+
 export function getActiveTheme(): ThemeTokens {
   const s = loadSettings()
   return THEME_PRESETS[s.nexusTheme] ?? THEME_PRESETS['dark-matter']
@@ -449,7 +459,9 @@ export function resolveDataThemeAttr(nexusTheme: NexusTheme): string {
 export function applyThemeToDOM(): void {
   const theme = getActiveTheme()
   const settings = loadSettings()
-  const accent = ACCENT_PALETTES[settings.accentPalette] ?? ACCENT_PALETTES.cyan
+  const isLight = resolveDataThemeAttr(settings.nexusTheme) === 'light'
+  const paletteMap = isLight ? LIGHT_ACCENT_PALETTES : ACCENT_PALETTES
+  const accent = paletteMap[settings.accentPalette] ?? paletteMap.cyan
   const root = document.documentElement
 
   // Set the theme attribute — nexus-theme.css variables cascade from here

@@ -42,6 +42,7 @@ export async function OPTIONS(request) {
 
 export async function GET(request) {
   const cors = corsHeaders(request)
+  const startedAt = Date.now()
   const auth = ensureMutationAuth(request)
   if (!auth.ok) {
     return NextResponse.json(
@@ -54,7 +55,17 @@ export async function GET(request) {
   const thread_key = clean(searchParams.get('thread_key'))
 
   if (!thread_key) {
-    return NextResponse.json({ ok: false, error: 'missing_thread_key' }, { status: 400, headers: cors })
+    return NextResponse.json(
+      {
+        ok: true,
+        degraded: true,
+        error_code: 'missing_thread_key',
+        error: 'missing_thread_key',
+        action: 'thread-dossier',
+        diagnostics: { queryMs: Date.now() - startedAt, sourceUsed: null },
+      },
+      { status: 200, headers: cors },
+    )
   }
 
   try {
@@ -127,20 +138,30 @@ export async function GET(request) {
     return NextResponse.json(
       {
         ok: true,
+        degraded: false,
         action: 'thread-dossier',
         diagnostics,
+        queryMs: Date.now() - startedAt,
+        sourceUsed: 'thread-context-service',
       },
       { status: 200, headers: cors },
     )
   } catch (error) {
     return NextResponse.json(
       {
-        ok: false,
+        ok: true,
+        degraded: true,
         action: 'thread-dossier',
+        error_code: 'thread_dossier_failed',
         error: 'thread_dossier_failed',
         message: error?.message || 'Unknown thread dossier error',
+        diagnostics: {
+          thread_key,
+          queryMs: Date.now() - startedAt,
+          sourceUsed: 'thread-context-service',
+        },
       },
-      { status: 500, headers: cors },
+      { status: 200, headers: cors },
     )
   }
 }

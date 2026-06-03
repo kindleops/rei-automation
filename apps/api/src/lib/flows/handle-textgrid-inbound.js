@@ -35,6 +35,7 @@ import {
 import { updateMasterOwnerAfterInbound } from "@/lib/domain/master-owners/update-master-owner-after-inbound.js";
 import { isNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
 import { cancelPendingQueueItemsForOwner } from "@/lib/domain/queue/cancel-pending-queue-items.js";
+import { isEmergencyStopActive } from "@/lib/domain/queue/queue-control-safety.js";
 import { extractUnderwritingSignals } from "@/lib/domain/underwriting/extract-underwriting-signals.js";
 import { buildInboundConversationState } from "@/lib/domain/communications-engine/state-machine.js";
 import {
@@ -190,6 +191,30 @@ function buildAutopilotStatusText({
   return autopilot_enabled
     ? `Autopilot enabled — scheduling unavailable`
     : "Manual review required";
+}
+
+export function deriveInboundAutopilotQueueOverrides({
+  autopilot_schedule = null,
+  context = null,
+  env = process.env,
+} = {}) {
+  const summary = context?.summary || {};
+  const timezone_label =
+    clean(autopilot_schedule?.timezone_label) ||
+    clean(summary.timezone) ||
+    clean(summary.market_timezone) ||
+    clean(summary.timezone_label) ||
+    clean(env.DEFAULT_CONTACT_TIMEZONE) ||
+    "America/Chicago";
+  const contact_window =
+    clean(summary.contact_window) ||
+    clean(summary.market_contact_window) ||
+    null;
+
+  return {
+    timezone_label,
+    contact_window,
+  };
 }
 
 function buildDiscordReviewMetadata({
@@ -742,13 +767,16 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   const { auto_reply_enabled: system_auto_reply_enabled, followup_enabled: system_followup_enabled } =
     await runtimeDeps.getSystemFlags(["auto_reply_enabled", "followup_enabled"]);
   const system_auto_reply_mode = await runtimeDeps.getSystemValue("auto_reply_mode");
-  const auto_reply_mode_resolution = resolveGuardedAutoReplyMode({
-    requestedMode: auto_reply_mode,
-    systemMode: system_auto_reply_mode,
-    legacyEnabled: Boolean(auto_reply_enabled_final && system_auto_reply_enabled),
-    legacyDryRun: Boolean(auto_reply_dry_run_final),
-    legacyLiveEnabled: Boolean(auto_reply_live_enabled_final),
-  });
+  const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
+  const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
+    ? { mode: "disabled", source: "queue_emergency_stop" }
+    : resolveGuardedAutoReplyMode({
+        requestedMode: auto_reply_mode,
+        systemMode: system_auto_reply_mode,
+        legacyEnabled: Boolean(auto_reply_enabled_final && system_auto_reply_enabled),
+        legacyDryRun: Boolean(auto_reply_dry_run_final),
+        legacyLiveEnabled: Boolean(auto_reply_live_enabled_final),
+      });
   const auto_reply_mode_final = auto_reply_mode_resolution.mode;
   const inbound_autopilot_enabled = autoReplyModeAllowsDiagnostics(auto_reply_mode_final);
   const inbound_auto_reply_queue_enabled = Boolean(
@@ -1606,6 +1634,10 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         inbound_autopilot_delay_seconds,
         new Date().toISOString()
       );
+      const autopilot_queue_overrides = deriveInboundAutopilotQueueOverrides({
+        autopilot_schedule,
+        context,
+      });
 
       const is_preview = !auto_reply_plan.should_queue_reply;
       let cash_offer_snapshot_id = null;
@@ -1681,6 +1713,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             dryRun: !should_queue_live,
             autoReplyMode: auto_reply_mode_final,
             scheduleDelaySeconds: inbound_autopilot_delay_seconds,
+            timezoneOverride: autopilot_queue_overrides.timezone_label,
+            contactWindowOverride: autopilot_queue_overrides.contact_window,
             supabaseClient: runtimeDeps.getSupabaseClient?.(),
           });
 

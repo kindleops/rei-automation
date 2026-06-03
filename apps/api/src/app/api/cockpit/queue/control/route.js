@@ -17,6 +17,7 @@ import {
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from '@/lib/domain/queue/queue-control-safety.js'
+import { getCampaignAwareQueueDiagnostics } from '@/lib/domain/campaigns/campaign-automation-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -449,6 +450,37 @@ async function loadCampaignDiagnostics(values) {
     diagnostics: parseDiagnostics(values.queue_last_run_diagnostics),
   }
 
+  let campaignAware = {
+    active_campaign: null,
+    campaign_queue_depth: 0,
+    queue_depth_by_campaign: {},
+    next_send_window: null,
+    blocked_reason_counts: {},
+    campaigns: [],
+  }
+  try {
+    campaignAware = await getCampaignAwareQueueDiagnostics()
+  } catch (error) {
+    errors.push({ label: 'campaign_aware_queue', message: error?.message || String(error) })
+  }
+
+  const exactBlockers = []
+  const activeCampaign = campaignAware.active_campaign
+  if (!activeCampaign) exactBlockers.push('no_ready_or_live_limited_campaign')
+  if (isEmergencyStopActive(values.queue_emergency_stop_at)) exactBlockers.push('global_queue_emergency_stop_active')
+  if (asBoolean(values.queue_auto_send_enabled, false)) exactBlockers.push('global_auto_send_must_remain_disabled')
+  if (!asBoolean(values.queue_auto_enqueue_enabled, false)) exactBlockers.push('global_auto_enqueue_disabled')
+  if (activeCampaign) {
+    if (!activeCampaign.auto_queue_enabled) exactBlockers.push('active_campaign_auto_queue_disabled')
+    if (activeCampaign.auto_send_enabled) exactBlockers.push('active_campaign_auto_send_must_remain_disabled')
+    if (clean(activeCampaign.auto_reply_mode || 'disabled') !== 'disabled') exactBlockers.push('active_campaign_auto_reply_must_remain_disabled')
+    if (!asPositiveInteger(activeCampaign.daily_cap, null)) exactBlockers.push('active_campaign_missing_daily_cap')
+    if (!asPositiveInteger(activeCampaign.total_cap, null)) exactBlockers.push('active_campaign_missing_total_cap')
+    if (!asPositiveInteger(activeCampaign.batch_max, null)) exactBlockers.push('active_campaign_missing_batch_max')
+    if (!asPositiveInteger(activeCampaign.market_cap, null)) exactBlockers.push('active_campaign_missing_market_cap')
+    if (!asPositiveInteger(activeCampaign.per_sender_cap, null)) exactBlockers.push('active_campaign_missing_per_sender_cap')
+  }
+
   return {
     queue_processor_mode: values.queue_processor_mode,
     auto_reply_mode: values.auto_reply_mode,
@@ -473,6 +505,8 @@ async function loadCampaignDiagnostics(values) {
       positive_replies_today: positiveRepliesToday,
     },
     last_run: lastRun,
+    ...campaignAware,
+    exact_blockers: exactBlockers,
     diagnostics_errors: errors,
   }
 }

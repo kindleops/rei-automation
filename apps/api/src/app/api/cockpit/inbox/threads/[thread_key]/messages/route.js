@@ -25,24 +25,38 @@ export async function GET(request, { params }) {
 
   const { thread_key } = await params
   const { searchParams } = new URL(request.url)
+  const conversation_thread_id = searchParams.get('conversation_thread_id') || searchParams.get('conversationThreadId')
+  const legacy_thread_key = searchParams.get('legacy_thread_key') || searchParams.get('legacyThreadKey')
+  const normalized_phone = searchParams.get('normalized_phone') || searchParams.get('normalizedPhone')
   const canonical_e164 = searchParams.get('canonical_e164')
   const phone = searchParams.get('phone')
   const best_phone = searchParams.get('best_phone')
   const seller_phone = searchParams.get('seller_phone')
+  const prospect_id = searchParams.get('prospect_id')
+  const property_id = searchParams.get('property_id')
+  const master_owner_id = searchParams.get('master_owner_id') || searchParams.get('owner_id')
+  const latest_message_id = searchParams.get('latest_message_id') || searchParams.get('latestMessageId') || searchParams.get('latest_message_event_id') || searchParams.get('latestMessageEventId')
   const offset = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
-  const limit = Math.min(500, Math.max(1, Number.parseInt(searchParams.get('limit') || '200', 10) || 200))
+  const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '50', 10) || 50))
 
   if (!thread_key) {
     return NextResponse.json({ ok: false, error: 'missing_thread_key' }, { status: 400, headers: cors })
   }
 
   try {
-    const { rows, total, diagnostics } = await getThreadMessages({
+    const { rows, total, diagnostics, conversationThreadId, integrityBlocked } = await getThreadMessages({
       selected_thread_key: thread_key,
+      conversation_thread_id,
+      legacy_thread_key,
+      normalized_phone,
       canonical_e164,
       phone,
       best_phone,
       seller_phone,
+      prospect_id,
+      property_id,
+      master_owner_id,
+      latest_message_id,
     }, { offset, limit })
 
     const nextOffset = offset + rows.length
@@ -60,12 +74,16 @@ export async function GET(request, { params }) {
         ok: true,
         action: 'thread-messages',
         thread_key,
+        conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+        integrity_blocked: integrityBlocked === true,
         messages: rows,
         pagination,
         // Keep diagnostics wrapper for backward compatibility
         diagnostics: {
           ...diagnostics,
           thread_key,
+          conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+          integrity_blocked: integrityBlocked === true,
           canonical_e164: canonical_e164 || diagnostics?.canonical_e164 || null,
           canonical_thread_key: diagnostics?.canonical_thread_key || thread_key,
           messages: rows,

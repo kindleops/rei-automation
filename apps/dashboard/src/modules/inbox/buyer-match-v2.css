@@ -31,6 +31,10 @@
   display: none;
 }
 
+.bm2-workspace.is-pane-75 {
+  grid-template-columns: 220px 1fr 280px;
+}
+
 /* -- Outside-Filter Banner -- */
 .bm2-filter-banner {
   position: absolute;

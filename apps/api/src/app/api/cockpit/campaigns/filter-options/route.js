@@ -1,61 +1,93 @@
-import { NextResponse } from 'next/server';
-import supabase from '@/lib/supabase/client';
+import { NextResponse } from 'next/server.js'
+import { corsHeaders, ensureMutationAuth } from '../../_shared.js'
+import { queryCampaignFieldOptions } from '@/lib/domain/campaigns/campaign-field-catalog.js'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+const LEGACY_FIELD_MAP = Object.freeze({
+  states: 'properties.property_state',
+  markets: 'properties.market',
+  counties: 'properties.property_county_name',
+  cities: 'properties.property_address_city',
+  zip_codes: 'properties.property_zip',
+  property_tags: 'properties.seller_tags_text',
+  property_types: 'properties.property_type',
+  property_classes: 'properties.property_class',
+  owner_types: 'properties.owner_type',
+  owner_type_guesses: 'master_owners.owner_type_guess',
+  person_flags: 'prospects.person_flags_text',
+  languages: 'prospects.language_preference',
+  contact_windows: 'prospects.contact_window',
+  sender_markets: 'sender_coverage.selected_textgrid_market',
+  template_use_cases: 'properties.options',
+  stage_codes: 'properties.contact_status',
+})
+
+const EMPTY_LEGACY_KEYS = Object.freeze([
+  'agent_families',
+  'agent_personas',
+])
+
+function withCors(request, payload, status = 200) {
+  return NextResponse.json(payload, { status, headers: corsHeaders(request) })
+}
+
+export async function OPTIONS(request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) })
+}
+
+function legacyOptionsFromResult(result) {
+  return (Array.isArray(result?.options) ? result.options : []).map((option) => ({
+    value: option.value,
+    label: option.label,
+    count: Number(option.count || 0),
+    ...(option.healthy_count !== undefined ? { healthy_count: option.healthy_count } : {}),
+  }))
+}
 
 export async function GET(request) {
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+
   try {
-    // Attempt to get real distinct values. If no RPC exists, we will provide the required
-    // real labels that the user requested to be returned from the API, with mock/zero counts
-    // since Supabase REST doesn't support GROUP BY natively without a view/RPC.
-    
-    // We can get states and markets from textgrid_numbers if possible, or from properties.
-    // For now, we'll return the hardcoded lists as requested by the user from the API side.
-    const property_tags = [
-      'Absentee Owner', 'High Equity', 'Heavily Dated', 'Cash Buyer', 'Mid-Term Owner',
-      'Free And Clear', 'Tired Landlord', 'Senior Owner', 'No Updates', 'Long Term Owner',
-      'Corporate Owner', 'Tax Delinquent', 'Empty Nester', 'Out Of State Owner', 'Vacant Home',
-      'Adjustable Loan', 'Likely To Move', 'New Owner', 'Active Lien', 'Low Equity',
-      'Probate', 'Off Market', 'Bank Owned', 'Preforeclosure', 'Foreclosure',
-      'Zombie Property', 'Upcoming Auction', 'HOA Lien', 'Recently Sold'
-    ].map(t => ({ value: t, label: t, count: Math.floor(Math.random() * 50000) }));
+    const entries = await Promise.all(
+      Object.entries(LEGACY_FIELD_MAP).map(async ([legacyKey, field]) => {
+        const result = await queryCampaignFieldOptions({ field_key: field, limit: 250 })
+        return [legacyKey, legacyOptionsFromResult(result), result]
+      })
+    )
 
-    const states = ['TX', 'FL', 'CA', 'GA', 'NC', 'OH', 'AZ'].map(s => ({ value: s, label: s, count: Math.floor(Math.random() * 100000) }));
-    const markets = ['Dallas-Fort Worth', 'Houston', 'Miami', 'Atlanta', 'Phoenix', 'Charlotte'].map(m => ({ value: m, label: m, count: Math.floor(Math.random() * 50000) }));
-    
-    const owner_types = [
-      'Individual', 'Corporate', 'Trust / Estate', 'Bank / Lender', 'Government', 
-      'LLC/Corp | Absentee', 'Individual | Absentee', 'Individual | Owner Occ'
-    ].map(o => ({ value: o, label: o, count: Math.floor(Math.random() * 40000) }));
+    const payload = Object.fromEntries(entries.map(([key, options]) => [key, options]))
+    for (const key of EMPTY_LEGACY_KEYS) payload[key] = []
 
-    const property_types = ['sfr', 'mfr', 'land', 'commercial', 'mobile'].map(t => ({ value: t, label: t.toUpperCase(), count: Math.floor(Math.random() * 10000) }));
-    
-    const languages = ['english', 'spanish', 'bilingual'].map(l => ({ value: l, label: l.charAt(0).toUpperCase() + l.slice(1), count: Math.floor(Math.random() * 200000) }));
-    const agent_personas = ['friendly', 'professional', 'direct', 'urgent'].map(p => ({ value: p, label: p.charAt(0).toUpperCase() + p.slice(1), count: 0 }));
-    
-    const stage_codes = ['first_touch', 'second_touch', 'drip_3'].map(s => ({ value: s, label: s, count: 0 }));
-    const template_use_cases = ['cold_outreach', 'warm_nurture'].map(s => ({ value: s, label: s, count: 0 }));
+    payload.sender_markets = (payload.sender_markets || []).map((option) => ({
+      ...option,
+      healthy_count: option.count,
+    }))
+    payload._diagnostics = Object.fromEntries(
+      entries.map(([key, , result]) => [
+        key,
+        {
+          field: result.field?.key || LEGACY_FIELD_MAP[key],
+          sourceUsed: result.sourceUsed || null,
+          sourceColumn: result.sourceColumn || null,
+          countSourceUsed: result.countSourceUsed || null,
+          countColumn: result.countColumn || null,
+          countMeaning: result.countMeaning || null,
+          warnings: result.warnings || [],
+        },
+      ])
+    )
 
-    return NextResponse.json({
-      states,
-      markets,
-      counties: [],
-      cities: [],
-      zip_codes: [],
-      property_tags,
-      property_types,
-      property_classes: [],
-      owner_types,
-      owner_type_guesses: [],
-      person_flags: [],
-      languages,
-      agent_families: [],
-      agent_personas,
-      contact_windows: [],
-      sender_markets: markets.map(m => ({ ...m, healthy_count: m.count * 0.9 })),
-      template_use_cases,
-      stage_codes
-    });
+    return withCors(request, payload, 200)
   } catch (err) {
-    console.error('Filter options error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('campaigns.filter_options_failed', err)
+    return withCors(request, {
+      ok: false,
+      error: 'campaign_filter_options_failed',
+      message: err?.message || String(err),
+    }, 500)
   }
 }

@@ -7,9 +7,10 @@ import crypto from "node:crypto";
 
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/utils/phones.js";
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { processSendQueueItem, loadQueueRowById } from "@/lib/domain/queue/process-send-queue.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
+import { getSystemValue } from "@/lib/system-control.js";
 import {
   insertSupabaseSendQueueRow,
   checkBlacklistPriorFailure,
@@ -36,6 +37,10 @@ function asBoolean(value, fallback = false) {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
+}
+
+function objectMetadata(value = null) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function normalizeBodyForFingerprint(value = "") {
@@ -338,8 +343,12 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
   const use_case_template = clean(input.use_case_template) || "manual_reply";
   const type = clean(input.type) || "outbound";
   const queue_key = clean(input.queue_key) || `inbox:send_now:${crypto.randomUUID()}`;
-  const source = clean(input.source) || "inbox";
-  const action = clean(input.action) || "send_now";
+  const input_metadata = objectMetadata(input.metadata);
+  const action = clean(input.action) || clean(input_metadata.action) || "send_now";
+  const source =
+    clean(input.source) ||
+    clean(input_metadata.source) ||
+    (action === "send_now" ? "manual_inbox" : "inbox");
   const created_from = clean(input.created_from) || "leadcommand_inbox";
 
   if (!thread_key) {
@@ -692,6 +701,12 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     supabase = defaultSupabase,
   } = deps;
 
+  const input_metadata = objectMetadata(input.metadata);
+  const bypassed_queue_emergency_stop =
+    asBoolean(input.bypassed_queue_emergency_stop, false) ||
+    asBoolean(input_metadata.bypassed_queue_emergency_stop, false);
+  const metadata_source = clean(input.source) || clean(input_metadata.source) || "manual_inbox";
+
   // ── Step 1: Resolve from_phone_number ──────────────────────────────
   const normalized_to = normalizePhone(clean(input.to_phone_number));
   let resolved_from = normalizePhone(clean(input.from_phone_number));
@@ -732,9 +747,12 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         from_phone_number: resolved_from || null,
         thread_key: clean(input.thread_key) || null,
         metadata: {
-          source: "inbox",
+          source: metadata_source,
+          send_source: metadata_source,
           action: "send_now",
           created_from: "leadcommand_inbox",
+          ...(clean(input.action).toLowerCase() === "send_now" || !clean(input.action) ? { manual_operator_send: true } : {}),
+          ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
           validation_error: validation.error,
           input_preview: {
             thread_key: clean(input.thread_key)?.slice(0, 40) || null,
@@ -984,8 +1002,11 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       delivery_confirmed: "⏳ Pending",
       metadata: {
         source: normalized.source,
+        send_source: normalized.source,
         action: normalized.action,
         created_from: normalized.created_from,
+        ...(is_manual_send_now ? { manual_operator_send: true } : {}),
+        ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         operator_override: operator_override ? true : false,
         transport_fingerprint,
         manual_send_warning_codes: warning_codes,
@@ -1188,9 +1209,55 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     asBoolean(input.operator_override, false) ||
     asBoolean(input.force, false);
 
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_settings = {
+    campaign_mode: await get_system_value("campaign_mode"),
+    queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+  };
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    runtime_settings,
+    { action: "manual_inbox_send_now_queue_create", failClosed: false }
+  );
+  const bypassed_queue_emergency_stop =
+    runtime_brake.ok === false && runtime_brake.reason === "queue_emergency_stop_active";
+  if (!runtime_brake.ok && !bypassed_queue_emergency_stop) {
+    return {
+      ok: false,
+      status: 423,
+      error: "runtime_brake_active",
+      reason: runtime_brake.reason,
+      detail_reason: runtime_brake.reason,
+      message: runtime_brake.message,
+      diagnostics: runtime_brake.diagnostics,
+      message_event_id: null,
+      queue_audit_id: null,
+      provider_message_id: null,
+      provider_message_sid: null,
+      delivery_status_display: null,
+      hard_block: true,
+      operator_override_allowed: false,
+    };
+  }
+
+  const manual_input = {
+    ...input,
+    source: "manual_inbox",
+    send_source: "manual_inbox",
+    manual_operator_send: true,
+    ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+    metadata: {
+      ...objectMetadata(input.metadata),
+      source: "manual_inbox",
+      send_source: "manual_inbox",
+      manual_operator_send: true,
+      ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+    },
+  };
+
   // 1. Create the audit row (validation + compliance check happens inside)
   // This row starts as 'queued' but we will claim it immediately.
-  const audit_result = await createQueueRowImpl(input, {
+  const audit_result = await createQueueRowImpl(manual_input, {
     ...deps,
     supabase,
   });
@@ -1229,6 +1296,8 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       updated_at: now,
       metadata: {
         ...(audit_result.result?.raw?.metadata ?? {}),
+        source: "manual_inbox",
+        ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         manual_send_attempted_at: now,
         manual_lock_token,
       }
@@ -1277,6 +1346,15 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       bypass_system_control: true,
       bypass_reason: "manual_operator_send",
       bypass_content_guards: operator_override_requested,
+      source: "manual_inbox",
+      send_source: "manual_inbox",
+      manual_operator_send: true,
+      metadata: {
+        source: "manual_inbox",
+        send_source: "manual_inbox",
+        manual_operator_send: true,
+        ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+      },
     });
   } catch (error) {
     provider_error = error;

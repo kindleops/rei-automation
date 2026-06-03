@@ -53,6 +53,8 @@ const isCanonicalInboxRowKey = (value: string): boolean =>
   value.startsWith('row:') && value.split(':').length >= 5
 
 export const getInboxThreadKey = (thread: InboxRowLike): string => readString(recordOf(thread), [
+  'conversationThreadId',
+  'conversation_thread_id',
   'threadKey',
   'thread_key',
 ])

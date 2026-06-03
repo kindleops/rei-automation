@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { NexusMap } from './NexusMap'
 import { useGlobalCommandSearch } from '../../command-center/useGlobalCommandSearch'
@@ -380,7 +380,7 @@ export const LiveDashboardPage = ({ data }: { data: LiveDashboardModel }) => {
     }
   }, [])
 
-  const onKeyboardShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const onKeyboardShortcut = useCallback((event: KeyboardEvent) => {
     const target = event.target
     if (
       target instanceof HTMLInputElement ||
@@ -409,7 +409,7 @@ export const LiveDashboardPage = ({ data }: { data: LiveDashboardModel }) => {
         return
       }
     }
-  })
+  }, [activeDrawer, commandMapOverlayOpen, dashboardPaletteOpen, layoutMode])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -420,7 +420,7 @@ export const LiveDashboardPage = ({ data }: { data: LiveDashboardModel }) => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [])
+  }, [onKeyboardShortcut])
 
   const handleToggleLeftRail = () => {
     setLeftRailOpen((current) => !current)

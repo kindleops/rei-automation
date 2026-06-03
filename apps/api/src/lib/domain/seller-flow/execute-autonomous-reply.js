@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/utils/phones.js";
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
+import { getSystemValue } from "@/lib/system-control.js";
 import {
   insertSupabaseSendQueueRow,
   writeOutboundSuccessMessageEvent,
@@ -49,6 +51,29 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
   if (!thread_key || !to_phone || !from_phone || !message_body || !source_event_id) {
     logger.warn("auto_reply.missing_required_fields", { input });
     return { ok: false, reason: "missing_required_fields" };
+  }
+
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    {
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "autonomous_reply_queue_create", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    logger.warn("auto_reply.blocked_runtime_brake", {
+      reason: runtime_brake.reason,
+      thread_key,
+    });
+    return {
+      ok: false,
+      status: 423,
+      reason: runtime_brake.reason,
+      error: runtime_brake.error,
+      diagnostics: runtime_brake.diagnostics,
+    };
   }
 
   // ── 1. Idempotency Check (inbound_event_id + stage + response_template_id)

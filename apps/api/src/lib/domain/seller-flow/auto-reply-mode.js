@@ -1,4 +1,4 @@
-import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
+import { isInternalTestPhone } from "../../config/internal-phones.js";
 
 export const AUTO_REPLY_MODES = Object.freeze([
   "disabled",
@@ -27,6 +27,9 @@ export function resolveGuardedAutoReplyMode({
   legacyDryRun = false,
   legacyLiveEnabled = false,
 } = {}) {
+  const system_mode = normalizeAutoReplyMode(systemMode, null);
+  if (system_mode) return { mode: system_mode, source: "system_control" };
+
   const explicit = normalizeAutoReplyMode(requestedMode, null);
   if (explicit) return { mode: explicit, source: "request" };
 
@@ -35,9 +38,6 @@ export function resolveGuardedAutoReplyMode({
     null
   );
   if (env_mode) return { mode: env_mode, source: "env" };
-
-  const system_mode = normalizeAutoReplyMode(systemMode, null);
-  if (system_mode) return { mode: system_mode, source: "system_control" };
 
   if (legacyEnabled && legacyDryRun) {
     return { mode: "dry_run", source: "legacy_dry_run_flag" };

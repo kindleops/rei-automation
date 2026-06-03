@@ -1,62 +1,53 @@
-import { NextResponse } from 'next/server';
-import supabase from '@/lib/supabase/client';
+import { NextResponse } from 'next/server.js'
+import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../_shared.js'
+import {
+  createCampaign,
+  listCampaigns,
+} from '@/lib/domain/campaigns/campaign-automation-service.js'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
+function withCors(request, payload, status = 200) {
+  return NextResponse.json(payload, { status, headers: corsHeaders(request) })
+}
+
+export async function OPTIONS(request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) })
+}
+
+export async function GET(request) {
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+
+  try {
+    const result = await listCampaigns()
+    return withCors(request, result, 200)
+  } catch (error) {
+    console.error('campaigns.list_failed', error)
+    return withCors(request, {
+      ok: false,
+      error: 'campaigns_list_failed',
+      message: error?.message || String(error),
+    }, 500)
+  }
+}
 
 export async function POST(request) {
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+
   try {
-    const payload = await request.json();
-    
-    // As per user spec:
-    // Create a real campaign row in public.sms_campaigns.
-    // Store all campaign configuration inside metadata.target_filters 
-    // if target_filters column does not exist.
-    
-    const row = {
-      campaign_name: payload.campaign_name,
-      status: 'draft',
-      source_view: payload.source_view || 'v_sms_ready_contacts',
-      target_goal_count: payload.target_goal_count || null,
-      max_total_sends: payload.max_total_sends || null,
-      auto_send_enabled: payload.auto_send_enabled || false,
-      health_guard_enabled: payload.health_guard_enabled || true,
-      send_window_policy: payload.send_window_policy || 'national_et_to_pt',
-      send_window_start_time: payload.send_window_start_time || '08:00',
-      send_window_start_timezone: payload.send_window_start_timezone || 'America/New_York',
-      send_window_end_time: payload.send_window_end_time || '20:00',
-      send_window_end_timezone: payload.send_window_end_timezone || 'America/Los_Angeles',
-      send_interval_seconds: payload.send_interval_seconds || 15,
-      max_sends_per_number_per_day: payload.max_sends_per_number_per_day || 200,
-      max_sends_per_market_per_day: payload.max_sends_per_market_per_day || 1000,
-      pause_on_blacklist_rate: payload.pause_on_blacklist_rate || 5,
-      pause_on_optout_rate: payload.pause_on_optout_rate || 5,
-      pause_on_failure_rate: payload.pause_on_failure_rate || 5,
-      metadata: payload.metadata || {}
-    };
-
-    const { data, error } = await supabase
-      .from('sms_campaigns')
-      .insert([row])
-      .select('campaign_id')
-      .single();
-
-    if (error) {
-      // In case the new columns don't exist yet on sms_campaigns, fallback to dumping into metadata
-      if (error.message.includes('column') && error.message.includes('does not exist')) {
-        console.warn('Falling back to pure metadata insert for sms_campaigns due to missing columns');
-        const fallbackRow = {
-          campaign_name: payload.campaign_name,
-          status: 'draft',
-          metadata: { ...row }
-        };
-        const fallbackReq = await supabase.from('sms_campaigns').insert([fallbackRow]).select('campaign_id').single();
-        if (fallbackReq.error) throw fallbackReq.error;
-        return NextResponse.json({ success: true, campaign_id: fallbackReq.data.campaign_id });
-      }
-      throw error;
-    }
-
-    return NextResponse.json({ success: true, campaign_id: data.campaign_id });
-  } catch (err) {
-    console.error('Create campaign error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const payload = await parseJsonSafe(request)
+    const result = await createCampaign(payload)
+    return withCors(request, result, result.ok === false ? Number(result.status || 423) : 200)
+  } catch (error) {
+    console.error('campaigns.create_failed', error)
+    return withCors(request, {
+      ok: false,
+      error: 'campaign_create_failed',
+      message: error?.message || String(error),
+    }, 500)
   }
 }

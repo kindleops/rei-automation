@@ -5,8 +5,10 @@ import { getSystemValue } from '@/lib/system-control.js'
 import { supabase } from '@/lib/supabase/client.js'
 import {
   asBoolean,
+  blockedRuntimeBrakeResult,
   blockedSafetyResult,
   clean,
+  evaluateQueueCreationRuntimeBrakes,
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from '@/lib/domain/queue/queue-control-safety.js'
@@ -35,6 +37,8 @@ async function loadSafetySettings(configuredMode) {
     queue_market_filter: await getSystemValue('queue_market_filter'),
     queue_state_filter: await getSystemValue('queue_state_filter'),
     queue_all_market_ack: await getSystemValue('queue_all_market_ack'),
+    queue_auto_enqueue_enabled: await getSystemValue('queue_auto_enqueue_enabled'),
+    queue_emergency_stop_at: await getSystemValue('queue_emergency_stop_at'),
   }
 }
 
@@ -100,6 +104,14 @@ export async function POST(request) {
   }
 
   const validation = validateLiveLimitedRails(safety, { require_scope: true, require_send_caps: true })
+  const runtimeBrake = evaluateQueueCreationRuntimeBrakes(safetySettings, {
+    action: 'queue-more',
+    requireAutoEnqueue: false,
+    failClosed: true,
+  })
+  if (!runtimeBrake.ok) {
+    return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, 'queue-more'), { status: runtimeBrake.status })
+  }
   if (!validation.ok) {
     return NextResponse.json(blockedSafetyResult(validation, 'queue-more'), { status: validation.status })
   }

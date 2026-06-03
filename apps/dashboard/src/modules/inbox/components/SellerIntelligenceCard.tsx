@@ -1,7 +1,8 @@
-import { useEffect, type FormEvent } from 'react'
-import type { ThreadMessage } from '../../../lib/data/inboxData'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { getThreadMessages, type ThreadMessage } from '../../../lib/data/inboxData'
 import { buildStreetViewUrl } from '../inbox-normalization'
 import '../seller-intelligence-card.css'
+import '../map-intelligence-cards.css'
 
 type SellerRecord = Record<string, unknown>
 type DensityMode = 'compact' | 'balanced' | 'expanded' | 'full'
@@ -261,7 +262,6 @@ export const getNormalizedPropertyImages = (record: SellerRecord) => {
     streetViewImage = normalize(payload.streetview_image)
   }
 
-  // Fallback to Google Street View API if no image is found in record
   if (!streetViewImage) {
     const address = normalize(firstDefined(record, [
       'property_address_full',
@@ -381,6 +381,29 @@ const buildCompactStatusItems = (record: SellerRecord, messages: ThreadMessage[]
   return items
 }
 
+const smsDeliveryClass = (status: string): string => {
+  const s = status.toLowerCase()
+  if (s === 'delivered') return 'nx-seller-card__sms-delivery--delivered'
+  if (s === 'sent') return 'nx-seller-card__sms-delivery--sent'
+  if (s === 'failed') return 'nx-seller-card__sms-delivery--failed'
+  if (s === 'queued' || s === 'approval') return 'nx-seller-card__sms-delivery--queued'
+  return ''
+}
+
+const smsFmtTime = (iso: string | undefined): string => {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const diff = (Date.now() - d.getTime()) / 1000
+    if (diff < 60) return 'just now'
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch {
+    return ''
+  }
+}
+
 export function SellerIntelligenceCard({
   record,
   layoutMode = 'full',
@@ -396,6 +419,54 @@ export function SellerIntelligenceCard({
   onOpenConversation,
 }: SellerIntelligenceCardProps) {
   if (!record) return null
+
+  const [isSmsFlipped, setIsSmsFlipped] = useState(false)
+  const [smsMessages, setSmsMessages] = useState<ThreadMessage[]>([])
+  const [smsLoading, setSmsLoading] = useState(false)
+  const [smsDraft, setSmsDraft] = useState('')
+  const smsListRef = useRef<HTMLDivElement>(null)
+
+  const threadKey = normalize(firstDefined(record, ['thread_key', 'threadKey', 'conversation_id', 'conversationId']))
+
+  // Load SMS messages when flipped
+  useEffect(() => {
+    if (!isSmsFlipped || variant !== 'selected') return
+    // Prefer passed-in messages when available
+    if (messages.length > 0) {
+      setSmsMessages(messages)
+      return
+    }
+    if (!threadKey) return
+    let cancelled = false
+    setSmsLoading(true)
+    getThreadMessages(threadKey)
+      .then((msgs) => { if (!cancelled) { setSmsMessages(msgs); setSmsLoading(false) } })
+      .catch(() => { if (!cancelled) { setSmsLoading(false) } })
+    return () => { cancelled = true }
+  }, [isSmsFlipped, threadKey, variant, messages])
+
+  // Auto-scroll SMS list to bottom
+  useEffect(() => {
+    if (isSmsFlipped && smsListRef.current) {
+      smsListRef.current.scrollTop = smsListRef.current.scrollHeight
+    }
+  }, [smsMessages, isSmsFlipped])
+
+  // Escape: flip back or close
+  useEffect(() => {
+    if (variant !== 'selected') return
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isSmsFlipped) {
+          setIsSmsFlipped(false)
+        } else {
+          onClose?.()
+        }
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [variant, isSmsFlipped, onClose])
 
   const densityMode = variant === 'hover' ? 'compact' : resolveDensityMode(layoutMode)
   const sellerName = normalize(firstDefined(record, [
@@ -425,12 +496,12 @@ export function SellerIntelligenceCard({
   ])) || 'Property Unknown'
   const ownerType = deriveOwnerType(record)
   const propertyType = titleize(normalize(firstDefined(record, ['property_type', 'propertyType', 'property_class', 'propertyClass'])) || '—')
-  
+
   const { streetViewImage, mapImage, satelliteImage } = getNormalizedPropertyImages(record)
   const imageSequence = [streetViewImage, satelliteImage, mapImage]
     .filter(Boolean)
     .map(url => url!.replace(/^http:\/\//i, 'https://'))
-  
+
   const currentImageUrl = imageSequence[0] || null
 
   useEffect(() => {
@@ -462,16 +533,12 @@ export function SellerIntelligenceCard({
   const messageLabel = messageDirection === 'inbound' || hasReply(record, messages) ? 'Last Reply' : 'Last Outreach'
   const statusItems = buildCompactStatusItems(record, messages)
   const canShowPropertyTypeBadge = variant === 'selected' || densityMode !== 'compact'
-  const actionButtons = [
-    { label: 'Open', enabled: variant === 'selected' && Boolean(onOpenConversation), onClick: onOpenConversation },
-    { label: 'SMS', enabled: variant === 'selected' && Boolean(onOpenConversation), onClick: onOpenConversation },
-    { label: 'Follow-Up', enabled: false, onClick: undefined },
-  ]
-  const imgHtml = currentImageUrl ? `<img 
-    src="${currentImageUrl}" 
-    alt="${address.replace(/"/g, '&quot;')}" 
-    loading="lazy" 
-    style="object-fit: cover; width: 100%; height: 100%; border-radius: 8px" 
+
+  const imgHtml = currentImageUrl ? `<img
+    src="${currentImageUrl}"
+    alt="${address.replace(/"/g, '&quot;')}"
+    loading="lazy"
+    style="object-fit: cover; width: 100%; height: 100%; border-radius: 8px"
     onerror="
       var seq = [${imageSequence.map(s => `'${s}'`).join(',')}];
       var idx = parseInt(this.getAttribute('data-err') || '0') + 1;
@@ -485,27 +552,28 @@ export function SellerIntelligenceCard({
           placeholder.style.display = 'flex';
         }
       }
-    " 
+    "
   />` : ''
 
-  return (
-    <article className={cls('nx-seller-card', `is-${variant}`, `seller-card--${densityMode}`)}>
+  // ── Front face content (card + deal summary) ──────────────────────────────
+  const frontFace = (
+    <>
       <div className="nx-seller-card__image" style={{ minHeight: '140px' }}>
         {currentImageUrl && (
           <div dangerouslySetInnerHTML={{ __html: imgHtml }} style={{ width: '100%', height: '100%', display: 'flex' }} />
         )}
-        <div 
-          className="nx-seller-card__image-placeholder" 
-          style={{ 
-            display: currentImageUrl ? 'none' : 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            minHeight: '140px', 
-            backgroundColor: '#111', 
-            borderRadius: '8px', 
-            color: '#666', 
-            width: '100%', 
-            height: '100%' 
+        <div
+          className="nx-seller-card__image-placeholder"
+          style={{
+            display: currentImageUrl ? 'none' : 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '140px',
+            backgroundColor: '#111',
+            borderRadius: '8px',
+            color: '#666',
+            width: '100%',
+            height: '100%',
           }}
         >
           Street View Preview
@@ -573,21 +641,46 @@ export function SellerIntelligenceCard({
           <p className="nx-seller-card__message-copy">{messageBody}</p>
         </section>
 
+        {/* ── Action row — updated with SMS flip + Deal Intel ── */}
         <section className="nx-seller-card__actions-row">
-          {actionButtons.map((button) => (
+          {variant === 'selected' && onOpenDealIntelligence ? (
             <button
-              key={button.label}
               type="button"
-              className={cls('nx-seller-card__mini-action', button.label === 'Open' && button.enabled && 'is-primary')}
-              onClick={button.enabled ? button.onClick : undefined}
-              disabled={!button.enabled}
-              aria-disabled={!button.enabled}
-              title={button.enabled ? button.label : variant === 'hover' ? 'Open the seller card to act' : 'Safe action not wired here'}
+              className="nx-mic-btn nx-mic-btn--primary"
+              onClick={onOpenDealIntelligence}
+              title="Open full Deal Intelligence"
             >
-              {button.label}
+              Deal Intel
             </button>
-          ))}
-          {variant === 'selected' && onOpenDealIntelligence ? <button type="button" className="nx-seller-card__mini-action" onClick={onOpenDealIntelligence}>Comp Intel</button> : null}
+          ) : null}
+          {variant === 'selected' ? (
+            <button
+              type="button"
+              className="nx-mic-btn nx-mic-btn--violet"
+              onClick={() => setIsSmsFlipped(true)}
+              title="Open SMS conversation"
+            >
+              SMS
+            </button>
+          ) : null}
+          {variant === 'selected' && onOpenConversation ? (
+            <button
+              type="button"
+              className="nx-mic-btn"
+              onClick={onOpenConversation}
+              title="Open full conversation"
+            >
+              Open
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="nx-mic-btn"
+            disabled
+            title="Follow-Up scheduling coming soon"
+          >
+            Follow-Up
+          </button>
         </section>
 
         {variant === 'selected' ? (
@@ -610,10 +703,153 @@ export function SellerIntelligenceCard({
                 <button type="submit" disabled={!draftText.trim() || disabled}>Send</button>
               </form>
             ) : null}
-
             {loading ? <div className="nx-seller-card__loading">Syncing conversation…</div> : null}
           </section>
         ) : null}
+      </div>
+    </>
+  )
+
+  // ── Back face: SMS conversation view ─────────────────────────────────────
+  const displayMessages = smsMessages.length > 0 ? smsMessages : messages
+  const sentCount = normalize(firstDefined(record, ['sent_count']))
+  const latestMsgAt = normalize(firstDefined(record, ['latest_message_at', 'last_activity_at']))
+
+  const backFace = variant === 'selected' ? (
+    <div className="nx-seller-card__sms-view">
+      {/* SMS header */}
+      <div className="nx-seller-card__sms-head">
+        <div className="nx-seller-card__sms-head-identity">
+          <div className="nx-seller-card__sms-name">{sellerName}</div>
+          <div className="nx-seller-card__sms-addr">{address}</div>
+          <div className="nx-seller-card__sms-status">
+            {sentCount ? `${sentCount} sent` : 'Conversation'}
+            {latestMsgAt ? ` · ${formatRelativeTime(latestMsgAt)}` : ''}
+          </div>
+        </div>
+        <div className="nx-seller-card__sms-head-actions">
+          <button
+            type="button"
+            className="nx-mic-btn nx-mic-btn--sm"
+            onClick={() => setIsSmsFlipped(false)}
+            title="Back to deal summary"
+          >
+            ← Back
+          </button>
+          {onClose ? (
+            <button
+              type="button"
+              className="nx-mic-btn nx-mic-btn--sm"
+              onClick={onClose}
+              aria-label="Close card"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Message list */}
+      <div ref={smsListRef} className="nx-seller-card__sms-messages">
+        {smsLoading && (
+          <div className="nx-seller-card__sms-empty">Loading conversation…</div>
+        )}
+        {!smsLoading && displayMessages.length === 0 && (
+          <div className="nx-seller-card__sms-empty">
+            {threadKey ? 'No messages found.' : 'No thread key — open full inbox to view this conversation.'}
+          </div>
+        )}
+        {displayMessages.slice(-40).map((msg) => {
+          const isOut = msg.direction === 'outbound'
+          const timeStr = smsFmtTime(msg.createdAt || msg.timelineAt)
+          const delivClass = msg.deliveryStatus ? smsDeliveryClass(msg.deliveryStatus) : ''
+          return (
+            <div
+              key={msg.id}
+              className={cls('nx-seller-card__sms-msg', isOut ? 'nx-seller-card__sms-msg--out' : 'nx-seller-card__sms-msg--in')}
+            >
+              <div className="nx-seller-card__sms-bubble">
+                {msg.body || <em style={{ opacity: 0.5 }}>No content</em>}
+              </div>
+              {(timeStr || msg.deliveryStatus) ? (
+                <div className="nx-seller-card__sms-meta">
+                  {timeStr ? <span>{timeStr}</span> : null}
+                  {isOut && msg.deliveryStatus ? (
+                    <span className={delivClass}>{msg.deliveryStatus}</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Compose area */}
+      <div className="nx-seller-card__sms-compose">
+        <div className="nx-seller-card__sms-input-row">
+          <textarea
+            className="nx-seller-card__sms-input"
+            value={smsDraft}
+            onChange={(e) => setSmsDraft(e.target.value)}
+            placeholder={disabled ? 'Messaging not available here' : 'Type a message…'}
+            disabled={disabled}
+            rows={1}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && smsDraft.trim() && !disabled) {
+                e.preventDefault()
+                onSend?.()
+                setSmsDraft('')
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="nx-mic-btn nx-mic-btn--primary"
+            disabled={!smsDraft.trim() || disabled}
+            onClick={() => {
+              if (!smsDraft.trim() || disabled) return
+              onSend?.()
+              setSmsDraft('')
+            }}
+          >
+            Send
+          </button>
+        </div>
+        <div className="nx-seller-card__sms-compose-btns">
+          {onOpenConversation ? (
+            <button type="button" className="nx-mic-btn nx-mic-btn--sm" onClick={onOpenConversation}>
+              Open Full Inbox
+            </button>
+          ) : null}
+          <button type="button" className="nx-mic-btn nx-mic-btn--sm" disabled title="Templates coming soon">
+            Templates
+          </button>
+          <button type="button" className="nx-mic-btn nx-mic-btn--sm" disabled title="AI Draft coming soon">
+            AI Draft
+          </button>
+          <button
+            type="button"
+            className="nx-mic-btn nx-mic-btn--sm"
+            onClick={() => setIsSmsFlipped(false)}
+          >
+            ← Back
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  return (
+    <article className={cls('nx-seller-card', `is-${variant}`, `seller-card--${densityMode}`)}>
+      <div className={cls('nx-seller-card__scene', isSmsFlipped && 'is-flipped')}>
+        <div className="nx-seller-card__face--front">
+          {frontFace}
+        </div>
+        {variant === 'selected' && (
+          <div className="nx-seller-card__face--back">
+            {backFace}
+          </div>
+        )}
       </div>
     </article>
   )

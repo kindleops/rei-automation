@@ -246,7 +246,11 @@ export const InboxCampaignView = ({
   // 50/75/100% — full Campaign Command Center inside the pane
   return (
     <div
-      className="ccc"
+      className={cls(
+        'ccc',
+        `is-pane-${paneWidth}`,
+        commandState.activeCampaignId && 'is-detail-open'
+      )}
       style={{
         height: '100%',
         // Override the viewport height since we're inside a pane, not the full page

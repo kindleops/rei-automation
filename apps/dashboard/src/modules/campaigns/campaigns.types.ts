@@ -1,5 +1,7 @@
 export type CampaignStatus =
   | 'active'
+  | 'ready'
+  | 'live_limited'
   | 'paused'
   | 'scheduled'
   | 'draft'
@@ -32,6 +34,8 @@ export interface CampaignSummary {
   send_window_start: string | null
   send_window_end: string | null
   auto_send_enabled: boolean
+  auto_queue_enabled?: boolean
+  blocked_reason_counts?: Record<string, number>
   health_score: number
   health_status: 'healthy' | 'caution' | 'dangerous'
 }
@@ -134,6 +138,73 @@ export interface CampaignLogEvent {
   metadata: any
 }
 
+export type CampaignLaunchMode = 'dry_run' | 'no_send' | 'live'
+
+export interface CampaignLaunchDistributionEntry {
+  value: string
+  label: string
+  count: number
+}
+
+export interface CampaignLaunchPayload {
+  dry_run: boolean
+  no_send: boolean
+  confirm_live: boolean
+  create_send_queue_rows: boolean
+  explicit_operator_action: boolean
+  max_targets: number
+  daily_cap: number
+  per_sender_cap?: number
+  per_market_cap?: number
+  first_scheduled_at?: string
+  spread_interval_seconds?: number
+  contact_window_start?: string
+  contact_window_end?: string
+}
+
+export interface CampaignLaunchResult {
+  ok?: boolean
+  success?: boolean
+  dry_run?: boolean
+  no_send?: boolean
+  campaign_id?: string
+  status?: string
+  targets_created?: number
+  queue_rows_created?: number
+  send_queue_rows_created?: number
+  skipped_count?: number
+  blocked_count?: number
+  sender_distribution?: CampaignLaunchDistributionEntry[]
+  template_distribution?: CampaignLaunchDistributionEntry[]
+  first_scheduled_at?: string | null
+  last_scheduled_at?: string | null
+  blockers?: string[]
+  exact_blockers?: string[]
+  skipped_counts_by_reason?: Record<string, number>
+  sample_skips?: Array<Record<string, unknown>>
+  planned_target_count?: number
+  total_ready_targets?: number
+  send_windows_created?: number
+  planned_windows?: Array<Record<string, unknown>>
+  launch_summary?: {
+    targets_created?: number
+    queue_rows_created?: number
+    skipped_count?: number
+    blocked_count?: number
+    sender_distribution?: CampaignLaunchDistributionEntry[]
+    template_distribution?: CampaignLaunchDistributionEntry[]
+    first_scheduled_at?: string | null
+    last_scheduled_at?: string | null
+    status?: string
+  }
+  target_build?: {
+    built_count?: number
+    no_send_queue_rows_created?: boolean
+    preview?: Record<string, unknown>
+  } | null
+  message?: string
+}
+
 // ── Shared Types from Before ──────────────────────────────────────────────
 
 export interface CampaignMarketMetric {
@@ -217,7 +288,7 @@ export interface CreateCampaignPayload {
   template_use_case: string
   stage_code: string
   
-  // All configuration goes here as requested: "Store all targeting settings in sms_campaigns.target_filters JSONB"
+  // Phase 1 stores targeting settings in the campaign metadata target_filters JSON.
   target_filters: {
     // 2. Geography
     states: string[]
@@ -320,6 +391,10 @@ export interface CreateCampaignPayload {
     interval_seconds: number
     daily_cap: number | null
     total_cap: number | null
+    batch_max?: number | null
+    market_cap?: number | null
+    per_sender_cap?: number | null
+    auto_queue_enabled?: boolean
     auto_send_enabled: boolean
     routing_safe_only: boolean
     start_paused: boolean

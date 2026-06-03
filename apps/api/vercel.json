@@ -20,6 +20,10 @@
     {
       "path": "/api/internal/autopilot/run",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/maintenance/reap-graph-runs",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

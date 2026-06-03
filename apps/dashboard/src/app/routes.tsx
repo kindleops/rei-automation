@@ -56,6 +56,7 @@ import { loadAgents } from '../modules/agents/agents.adapter'
 import type { AgentsModel } from '../modules/agents/agents.adapter'
 import { MobileCommandCenter } from '../modules/mobile/MobileCommandCenter'
 import { CampaignsPage } from '../modules/campaigns/CampaignsPage'
+import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
 
 interface AppRoute<TData> {
   path: string
@@ -303,6 +304,13 @@ const campaignsRoute = defineRoute<null>({
   render: () => <CampaignsPage />,
 })
 
+const emailRoute = defineRoute<null>({
+  path: '/email',
+  title: 'NEXUS | Email Command Center',
+  loader: async () => null,
+  render: () => <EmailCommandCenter />,
+})
+
 const mobileRoute = defineRoute<null>({
   path: '/mobile',
   title: 'NEXUS | Mobile Command Center',
@@ -342,6 +350,7 @@ const routes = [
   queueRoute,
   dossierRoute,
   campaignsRoute,
+  emailRoute,
   mobileRoute,
 ]
 

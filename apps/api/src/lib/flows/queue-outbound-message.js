@@ -14,6 +14,11 @@ import {
 } from "@/lib/providers/podio.js";
 import { findQueueItems } from "@/lib/podio/queries/find-queue-items.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import {
+  evaluateQueueCreationRuntimeBrakes,
+} from "@/lib/domain/queue/queue-control-safety.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 // ── New SMS engine modules ───────────────────────────────────────────────
 import { mapNextAction, ACTIONS } from "@/lib/sms/flow_map.js";
@@ -334,6 +339,26 @@ export async function queueOutboundMessage({
   const resolved_inbound_from = clean(inbound_from) || clean(phone);
   const normalized_inbound_from = normalizeUsPhone10(resolved_inbound_from);
   const message_override = clean(rendered_message_text) || clean(message_text);
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    {
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "queueOutboundMessage", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    return {
+      ok: false,
+      stage: "runtime_brake",
+      reason: runtime_brake.reason,
+      error: runtime_brake.error,
+      message: runtime_brake.message,
+      diagnostics: runtime_brake.diagnostics,
+      inbound_from: normalized_inbound_from,
+    };
+  }
 
   info("outbound.queue_message_started", {
     inbound_from: resolved_inbound_from,

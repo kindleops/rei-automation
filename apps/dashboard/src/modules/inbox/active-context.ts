@@ -18,6 +18,7 @@ export type InboxWorkspaceView =
   | 'comp_intelligence'
   | 'buyer_match'
   | 'campaigns'
+  | 'email'
 
 export type ActiveInboxContextIntent =
   | 'open_thread'

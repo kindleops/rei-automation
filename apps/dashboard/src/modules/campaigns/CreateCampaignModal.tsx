@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, CreateCampaignPayload } from './campaigns.types'
 import { buildCampaignTargetSnapshots, createCampaign, launchCampaign } from './campaigns.adapter'
@@ -50,6 +50,15 @@ interface OptionLoadState {
   loading: boolean
   degraded?: boolean
   message?: string
+}
+
+interface PreviewMeta {
+  ms: number
+  ts: string
+  requestId: string
+  resultHash?: string | null
+  previousTotalMatched?: number | null
+  countUnchanged?: boolean
 }
 
 const FRIENDLY_OPERATORS: Record<string, string> = {
@@ -206,6 +215,52 @@ const formatScopeLabel = (value: string | undefined | null): string => {
   return formatLabel(normalized.replace(/[.:]+/g, '_'))
 }
 
+const asDiagnosticRecords = (value: unknown): Array<Record<string, unknown>> => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+}
+
+const asStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean)
+}
+
+const diagnosticFieldKey = (item: Record<string, unknown>): string => {
+  return String(item.field_key ?? item.fieldKey ?? item.field ?? item.key ?? '').trim()
+}
+
+const diagnosticLabel = (item: Record<string, unknown>, fallback = 'Filter'): string => {
+  const explicit = String(item.label ?? '').trim()
+  if (explicit) return explicit
+  const fieldKey = diagnosticFieldKey(item)
+  if (fieldKey) return formatLabel(fieldKey.replace(/[.:]+/g, '_'))
+  return fallback
+}
+
+const diagnosticReason = (item: Record<string, unknown>, fallback = 'n/a'): string => {
+  return String(item.unsupported_reason ?? item.reason ?? item.skipped_reason ?? item.message ?? fallback).trim() || fallback
+}
+
+const shortHash = (value: string | null | undefined): string | null => {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return null
+  return normalized.length > 12 ? normalized.slice(0, 12) : normalized
+}
+
+const formatPreviewWarning = (warning: string): string => {
+  const normalized = warning.toLowerCase()
+  if (normalized.includes('campaign_target_graph_select_compat_fallback')) {
+    return 'Graph source is missing newer filter columns; using compatible preview columns.'
+  }
+  if (normalized.includes('campaign_target_graph_count_unavailable') && normalized.includes('does not exist')) {
+    return 'Filter applied, but the graph column is missing in the database migration.'
+  }
+  if (normalized.includes('campaign_target_graph_rows_unavailable') && normalized.includes('does not exist')) {
+    return 'Preview source is missing a graph column required by the latest compiler.'
+  }
+  return warning.replace(/_/g, ' ')
+}
+
 const valueAsArray = (value: unknown): string[] => {
   if (Array.isArray(value)) return value.map((entry) => String(entry))
   if (typeof value === 'string' && value.trim()) return [value]
@@ -322,15 +377,15 @@ const buildLaunchPayload = (settings: LaunchSettings): CampaignLaunchPayload => 
 }
 
 const launchModeLabel = (mode: CampaignLaunchMode): string => {
-  if (mode === 'dry_run') return 'Dry Run'
-  if (mode === 'no_send') return 'No Send'
-  return 'Live'
+  if (mode === 'dry_run') return 'Test Run'
+  if (mode === 'no_send') return 'Prepare Only'
+  return 'Schedule Live'
 }
 
 const launchButtonLabel = (mode: CampaignLaunchMode): string => {
-  if (mode === 'dry_run') return 'Run Dry Run'
-  if (mode === 'no_send') return 'Run No Send'
-  return 'Launch Live'
+  if (mode === 'dry_run') return 'Run Test'
+  if (mode === 'no_send') return 'Prepare Targets'
+  return 'Schedule Live'
 }
 
 const getLaunchSummaryValue = (
@@ -357,11 +412,14 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const [isSaving, setIsSaving] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
   const [fieldPickerState, setFieldPickerState] = useState<{ domain: CampaignDomainKey; category: string } | null>(null)
-  const [previewMeta, setPreviewMeta] = useState<{ ms: number; ts: string } | null>(null)
+  const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null)
   const [launchSettings, setLaunchSettings] = useState<LaunchSettings>(() => createDefaultLaunchSettings())
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
   const [launchResult, setLaunchResult] = useState<CampaignLaunchResult | null>(null)
+  const latestPreviewRequestRef = useRef<string | null>(null)
+  const previewSequenceRef = useRef(0)
+  const previewResultRef = useRef<CampaignPreviewResult | null>(null)
 
   const activeFilterDraft = useMemo(
     () => buildActiveFilterDraft(draft, filterStatuses),
@@ -396,44 +454,68 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
     return () => { cancelled = true }
   }, [])
 
+  const runPreview = useCallback((reason: 'auto' | 'manual' = 'auto') => {
+    if (!activePreviewKey) return
+    const sequence = previewSequenceRef.current + 1
+    previewSequenceRef.current = sequence
+    const requestId = `campaign-preview-${Date.now()}-${sequence}`
+    latestPreviewRequestRef.current = requestId
+    const activeCount = Object.values(activeFilterDraft.target_filters).reduce((sum, filters) => sum + filters.length, 0)
+    const previous = previewResultRef.current
+    const t0 = Date.now()
+    setIsPreviewLoading(true)
+    previewTargets(activeFilterDraft, { requestId })
+      .then((result) => {
+        if (latestPreviewRequestRef.current !== requestId) return
+        const previousTotal = previous?.total_matched ?? null
+        const countUnchanged = previousTotal !== null && activeCount > 0 && previousTotal === result.total_matched
+        previewResultRef.current = result
+        setPreview(result)
+        setPreviewMeta({
+          ms: result.query_ms ?? Date.now() - t0,
+          ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          requestId: result.request_id ?? requestId,
+          resultHash: result.result_hash ?? null,
+          previousTotalMatched: previousTotal,
+          countUnchanged,
+        })
+        if (import.meta.env.DEV) {
+          console.info('[CreateCampaignModal] preview updated', {
+            reason,
+            requestId,
+            resultHash: result.result_hash,
+            totalMatched: result.total_matched,
+          })
+        }
+      })
+      .catch((error) => {
+        if (latestPreviewRequestRef.current !== requestId) return
+        console.error('[CreateCampaignModal] preview failed', error)
+        setPreview(null)
+        previewResultRef.current = null
+        emitNotification({
+          title: 'Campaign preview failed',
+          detail: error instanceof Error ? error.message : String(error),
+          severity: 'critical',
+        })
+      })
+      .finally(() => {
+        if (latestPreviewRequestRef.current === requestId) setIsPreviewLoading(false)
+      })
+  }, [activeFilterDraft, activePreviewKey])
+
   useEffect(() => {
     if (!activePreviewKey) {
+      latestPreviewRequestRef.current = `cleared-${Date.now()}`
+      previewResultRef.current = null
       setPreview(null)
       setPreviewMeta(null)
       setIsPreviewLoading(false)
       return
     }
-
-    let cancelled = false
-    const t0 = Date.now()
-    setIsPreviewLoading(true)
-    const timer = window.setTimeout(() => {
-      previewTargets(activeFilterDraft)
-        .then((result) => {
-          if (!cancelled) {
-            setPreview(result)
-            setPreviewMeta({ ms: result.query_ms ?? Date.now() - t0, ts: new Date().toLocaleTimeString() })
-          }
-        })
-        .catch((error) => {
-          console.error('[CreateCampaignModal] preview failed', error)
-          if (!cancelled) {
-            setPreview(null)
-            emitNotification({
-              title: 'Campaign preview failed',
-              detail: error instanceof Error ? error.message : String(error),
-              severity: 'critical',
-            })
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setIsPreviewLoading(false)
-        })
-    }, 900)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
+    runPreview('auto')
+    // activePreviewKey is the serialized active-filter contract; draft-only edits should not trigger preview.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePreviewKey])
 
   const fieldsByKey = useMemo(() => {
@@ -985,10 +1067,10 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
   const selectedLaunchCopy =
     launchSettings.mode === 'dry_run'
-      ? 'Dry Run creates no queue rows'
+      ? 'Test Run creates no queue rows'
       : launchSettings.mode === 'no_send'
-        ? 'No Send creates targets but no queue rows'
-        : 'Live creates scheduled queue rows'
+        ? 'Prepare Only creates targets without queue rows'
+        : 'Schedule Live creates guarded queue rows'
 
   const modal = (
     <div className="cmp-studio-overlay">
@@ -1050,36 +1132,27 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
             </div>
           ) : null}
 
-          <div className="cmp-launch-execution">
-            <div className="cmp-launch-execution__header">
-              <div>
-                <span className="cmp-domain-kicker">Launch Execution</span>
-                <h3>Queue Plan Controls</h3>
+          <div className="cmp-launch-execution cmp-launch-execution--compact">
+            <div className="cmp-launch-compact-bar">
+              <div className="cmp-launch-mode-segment" role="group" aria-label="Launch mode">
+                {([
+                  ['dry_run', 'Test Run'],
+                  ['no_send', 'Prepare Only'],
+                  ['live', 'Schedule Live'],
+                ] as Array<[CampaignLaunchMode, string]>).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`cmp-launch-mode-chip ${launchSettings.mode === mode ? 'is-active' : ''}`}
+                    onClick={() => updateLaunchSetting({ mode })}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-              <span className={`cmp-launch-mode-pill is-${launchSettings.mode}`}>{selectedLaunchCopy}</span>
-            </div>
 
-            <div className="cmp-launch-mode-row" role="group" aria-label="Launch mode">
-              {([
-                ['dry_run', 'Dry Run', 'Dry Run creates no queue rows'],
-                ['no_send', 'No Send', 'No Send creates targets but no queue rows'],
-                ['live', 'Live', 'Live creates scheduled queue rows'],
-              ] as Array<[CampaignLaunchMode, string, string]>).map(([mode, label, detail]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`cmp-launch-mode ${launchSettings.mode === mode ? 'is-active' : ''}`}
-                  onClick={() => updateLaunchSetting({ mode })}
-                >
-                  <strong>{label}</strong>
-                  <span>{detail}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="cmp-launch-field-grid">
-              <label>
-                <span>Max Targets</span>
+              <label className="cmp-launch-mini-field">
+                <span>Target Count</span>
                 <input
                   type="number"
                   min={1}
@@ -1087,67 +1160,91 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                   onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
                 />
               </label>
-              <label>
-                <span>Daily Cap</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={launchSettings.daily_cap}
-                  onChange={(event) => updateLaunchSetting({ daily_cap: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Sender Cap</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={launchSettings.per_sender_cap}
-                  onChange={(event) => updateLaunchSetting({ per_sender_cap: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Market Cap</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={launchSettings.per_market_cap}
-                  onChange={(event) => updateLaunchSetting({ per_market_cap: event.target.value })}
-                />
-              </label>
-              <label className="cmp-launch-field-grid__wide">
-                <span>First Scheduled</span>
+
+              <label className="cmp-launch-mini-field cmp-launch-mini-field--time">
+                <span>Start</span>
                 <input
                   type="datetime-local"
                   value={launchSettings.first_scheduled_at}
                   onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
                 />
               </label>
-              <label>
-                <span>Spacing Seconds</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={launchSettings.spread_interval_seconds}
-                  onChange={(event) => updateLaunchSetting({ spread_interval_seconds: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Window Start</span>
-                <input
-                  type="time"
-                  value={launchSettings.contact_window_start}
-                  onChange={(event) => updateLaunchSetting({ contact_window_start: event.target.value })}
-                />
-              </label>
-              <label>
-                <span>Window End</span>
-                <input
-                  type="time"
-                  value={launchSettings.contact_window_end}
-                  onChange={(event) => updateLaunchSetting({ contact_window_end: event.target.value })}
-                />
-              </label>
+
+              <div className="cmp-launch-pacing">
+                <span>Pacing</span>
+                <strong>{formatNumber(parsePositiveInt(launchSettings.daily_cap, 1))}/day · {parsePositiveInt(launchSettings.spread_interval_seconds, 60)}s spacing</strong>
+              </div>
+
+              <button
+                className="cmp-launch-btn is-accent cmp-launch-primary-cta"
+                disabled={isLaunching || !canRunLaunch}
+                title={canRunLaunch ? selectedLaunchCopy : 'Add a campaign name first'}
+                onClick={requestLaunch}
+              >
+                {isLaunching ? 'Launching...' : launchButtonLabel(launchSettings.mode)}
+              </button>
             </div>
+
+            <details className="cmp-launch-advanced">
+              <summary>
+                <span>Advanced Launch Settings</span>
+                <Icon name="chevron-down" size={12} />
+              </summary>
+              <div className="cmp-launch-field-grid cmp-launch-field-grid--advanced">
+                <label>
+                  <span>Daily Cap</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={launchSettings.daily_cap}
+                    onChange={(event) => updateLaunchSetting({ daily_cap: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Sender Cap</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={launchSettings.per_sender_cap}
+                    onChange={(event) => updateLaunchSetting({ per_sender_cap: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Market Cap</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={launchSettings.per_market_cap}
+                    onChange={(event) => updateLaunchSetting({ per_market_cap: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Spacing Seconds</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={launchSettings.spread_interval_seconds}
+                    onChange={(event) => updateLaunchSetting({ spread_interval_seconds: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Window Start</span>
+                  <input
+                    type="time"
+                    value={launchSettings.contact_window_start}
+                    onChange={(event) => updateLaunchSetting({ contact_window_start: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Window End</span>
+                  <input
+                    type="time"
+                    value={launchSettings.contact_window_end}
+                    onChange={(event) => updateLaunchSetting({ contact_window_end: event.target.value })}
+                  />
+                </label>
+              </div>
+            </details>
           </div>
 
           <div className="cmp-domain-tabs">
@@ -1303,12 +1400,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                   title={hasMeaningfulFilters ? 'Refresh target reach preview' : totalDraftCount > 0 ? 'Set a draft filter first' : 'Add and set a filter first'}
                   onClick={() => {
                     if (!hasMeaningfulFilters) return
-                    const t0 = Date.now()
-                    setIsPreviewLoading(true)
-                    void previewTargets(activeFilterDraft).then((r) => {
-                      setPreview(r)
-                      setPreviewMeta({ ms: r.query_ms ?? Date.now() - t0, ts: new Date().toLocaleTimeString() })
-                    }).finally(() => setIsPreviewLoading(false))
+                    runPreview('manual')
                   }}
                 >
                   {isPreviewLoading ? 'Updating…' : 'Preview Targets'}
@@ -1316,19 +1408,6 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                 {!hasMeaningfulFilters && totalDraftCount > 0 && (
                   <span className="cmp-launch-btn-reason">Set drafts first</span>
                 )}
-              </div>
-              <div className="cmp-launch-btn-wrap">
-                <button
-                  className="cmp-launch-btn is-accent"
-                  disabled={isLaunching || !canRunLaunch}
-                  title={canRunLaunch ? selectedLaunchCopy : 'Add a campaign name first'}
-                  onClick={requestLaunch}
-                >
-                  {isLaunching ? 'Launching...' : launchButtonLabel(launchSettings.mode)}
-                </button>
-                <span className="cmp-launch-btn-reason">
-                  {canRunLaunch ? selectedLaunchCopy : 'Name required'}
-                </span>
               </div>
             </div>
           </div>
@@ -1388,7 +1467,7 @@ const LaunchConfirmModal = ({
           <Icon name="shield" size={18} />
           <div>
             <h3>Confirm Live Queue Creation</h3>
-            <p>Live creates scheduled queue rows.</p>
+            <p>Schedule Live creates guarded scheduled queue rows.</p>
           </div>
         </div>
         <div className="cmp-launch-confirm__grid">
@@ -1400,9 +1479,9 @@ const LaunchConfirmModal = ({
           <div><span>Spacing</span><strong>{payload.spread_interval_seconds}s</strong></div>
         </div>
         <div className="cmp-launch-confirm__copy">
-          <div>Dry Run creates no queue rows</div>
-          <div>No Send creates targets but no queue rows</div>
-          <div>Live creates scheduled queue rows</div>
+          <div>Test Run creates no queue rows</div>
+          <div>Prepare Only creates targets without queue rows</div>
+          <div>Schedule Live creates guarded scheduled queue rows</div>
           <div>confirm_live will be sent as true for this request.</div>
         </div>
         <div className="cmp-launch-confirm__actions">
@@ -1489,9 +1568,9 @@ const LaunchSummaryModal = ({
         )}
 
         <div className="cmp-launch-confirm__copy">
-          <div>Dry Run creates no queue rows</div>
-          <div>No Send creates targets but no queue rows</div>
-          <div>Live creates scheduled queue rows</div>
+          <div>Test Run creates no queue rows</div>
+          <div>Prepare Only creates targets without queue rows</div>
+          <div>Schedule Live creates guarded scheduled queue rows</div>
         </div>
 
         <div className="cmp-launch-confirm__actions">
@@ -1627,7 +1706,7 @@ const TargetReachPanel = ({
   preview: CampaignPreviewResult | null
   loading: boolean
   activeDomain: CampaignDomainKey
-  previewMeta: { ms: number; ts: string } | null
+  previewMeta: PreviewMeta | null
   backendDegraded: boolean
   filterGroups: CampaignFilterGroups
   totalDraftCount: number
@@ -1641,7 +1720,23 @@ const TargetReachPanel = ({
     .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || left[0].localeCompare(right[0]))
   const activeFilterCount = Object.values(filterGroups).reduce((sum, f) => sum + f.length, 0)
   const showZeroMatchWarn = preview !== null && !loading && preview.total_matched === 0 && activeFilterCount > 0
-  const unsupportedCount = preview?.unsupported_in_preview.length ?? 0
+  const unsupportedFilters = [
+    ...(preview?.unsupported_in_preview ?? []).map((item) => ({ fieldKey: item.fieldKey, label: item.label, message: 'Filter applied but no graph column mapping found.' })),
+    ...((preview?.unsupportedFilters ?? preview?.unsupported_filters ?? []) as Array<Record<string, unknown>>).map((item) => ({
+      fieldKey: String(item.field_key ?? item.fieldKey ?? ''),
+      label: String(item.label ?? item.field_key ?? item.fieldKey ?? 'Unsupported filter'),
+      message: String(item.message ?? 'Filter applied but no graph column mapping found.'),
+    })),
+  ].filter((item, index, all) => {
+    const key = item.fieldKey || item.label
+    return Boolean(key) && all.findIndex((other) => (other.fieldKey || other.label) === key) === index
+  })
+  const unsupportedCount = unsupportedFilters.length
+  const missingMappingCount = unsupportedFilters.filter((item) => item.message.includes('no graph column mapping')).length
+  const previewWarningMessages = Array.from(new Set((preview?.warnings ?? [])
+    .map((warning) => formatPreviewWarning(String(warning ?? '').trim()))
+    .filter(Boolean)))
+    .slice(0, 3)
   const showMatchedNotReady = preview !== null && !loading && preview.total_matched > 0 && preview.ready_to_queue === 0
   const queueScopeIsSample = preview?.queue_eligibility_scope === 'candidate_window'
 
@@ -1650,10 +1745,12 @@ const TargetReachPanel = ({
       <div className="cmp-summary-header">
         <div>
           <div className="cmp-summary-title">Target Reach</div>
-          <div className="cmp-summary-subtitle">{loading ? 'Updating reach' : preview?.query_ms !== undefined ? `${preview.query_ms}ms query` : 'Preview estimate'}</div>
+          <div className="cmp-summary-subtitle">
+            {loading ? 'Updating reach' : previewMeta ? `Updated ${previewMeta.ts}` : preview?.query_ms !== undefined ? `${preview.query_ms}ms query` : 'Preview estimate'}
+          </div>
         </div>
         <span className={`cmp-summary-status ${loading ? 'is-loading' : backendDegraded || preview?.degraded ? 'is-degraded' : preview ? 'is-ready' : ''}`}>
-          {loading ? 'Updating' : backendDegraded || preview?.degraded ? 'Degraded' : preview ? 'Ready' : 'Standby'}
+          {loading ? 'Updating' : backendDegraded || preview?.degraded ? 'Degraded' : preview ? 'Updated' : 'Standby'}
         </span>
       </div>
 
@@ -1668,8 +1765,10 @@ const TargetReachPanel = ({
 
       <div className="cmp-summary-body">
         <div className="cmp-reach-grid">
-          <Metric label="Matched Properties" value={preview?.total_matched_properties ?? preview?.total_matched} />
+          <Metric label={preview?.addressable_properties_approximate ? 'Addressable *' : 'Addressable'} value={preview?.addressable_properties} />
+          <Metric label="Reachable" value={preview?.total_matched_properties ?? preview?.total_matched} />
           <Metric label="Clean Targets" value={preview?.clean_targets} />
+          <Metric label="Sender-Covered" value={preview?.sender_covered} />
           <Metric label="Ready to Queue" value={preview?.ready_to_queue} variant="success" />
           <Metric label="Queueable Today" value={preview?.queueable_today} variant="accent" />
         </div>
@@ -1736,7 +1835,25 @@ const TargetReachPanel = ({
         {!showZeroMatchWarn && unsupportedCount > 0 && (
           <div className="cmp-diag-alert cmp-diag-alert--info">
             <Icon name="alert-circle" size={12} />
-            Some filters are approved but not available in the active preview source.
+            {missingMappingCount > 0 ? 'Filter applied but no graph column mapping found.' : 'Some filters are approved but not available in the active preview source.'}
+          </div>
+        )}
+
+        {!loading && previewMeta?.countUnchanged && activeFilterCount > 0 && unsupportedCount === 0 && (
+          <div className="cmp-diag-alert cmp-diag-alert--info">
+            <Icon name="alert-circle" size={12} />
+            Filter applied, count unchanged.
+          </div>
+        )}
+
+        {!loading && previewWarningMessages.length > 0 && (
+          <div className="cmp-preview-warnings-list">
+            {previewWarningMessages.map((warning) => (
+              <div key={warning} className="cmp-preview-warning">
+                <Icon name="alert-circle" size={12} />
+                <span>{warning}</span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1843,33 +1960,69 @@ const BackendStatusStrip = ({
 }: {
   activeDomain: CampaignDomainKey
   preview: CampaignPreviewResult | null
-  previewMeta: { ms: number; ts: string } | null
+  previewMeta: PreviewMeta | null
   backendDegraded: boolean
   filterGroups: CampaignFilterGroups
   totalDraftCount: number
 }) => {
   const [expanded, setExpanded] = useState(false)
   const source = DOMAIN_SOURCE_VIEWS[activeDomain] ?? 'unknown'
-  const unsupportedCount = preview?.unsupported_in_preview.length ?? 0
+  const unsupportedFilters = [
+    ...(preview?.unsupported_in_preview ?? []).map((item) => ({
+      fieldKey: item.fieldKey,
+      label: item.label,
+      reason: item.reason,
+      message: 'Filter applied but no graph column mapping found.',
+    })),
+    ...asDiagnosticRecords(preview?.unsupportedFilters ?? preview?.unsupported_filters).map((item) => ({
+      fieldKey: diagnosticFieldKey(item),
+      label: diagnosticLabel(item, 'Unsupported filter'),
+      reason: diagnosticReason(item, 'unsupported_in_preview'),
+      message: String(item.message ?? 'Filter applied but no graph column mapping found.'),
+    })),
+  ].filter((item, index, all) => {
+    const key = item.fieldKey || item.label
+    return Boolean(key) && all.findIndex((other) => (other.fieldKey || other.label) === key) === index
+  })
+  const skippedFilters = asDiagnosticRecords(preview?.skippedFilters ?? preview?.skipped_filters)
+  const sourceColumnsUsed = preview?.sourceColumnsUsed ?? preview?.source_columns_used ?? preview?.graph_columns_used ?? {}
+  const sourceColumnRows = Object.entries(sourceColumnsUsed)
+    .map(([fieldKey, columns]) => [fieldKey, asStringList(columns)] as const)
+    .filter(([, columns]) => columns.length > 0)
+  const graphColumnsUsed = Array.from(new Set(sourceColumnRows.flatMap(([, columns]) => columns))).sort()
+  const payloadFiltersByDomain = preview?.payloadFiltersByDomain ?? preview?.payload_filters_by_domain ?? {}
+  const payloadDomainRows = Object.entries(payloadFiltersByDomain)
+    .map(([domain, filters]) => [domain, asDiagnosticRecords(filters)] as const)
+    .filter(([, filters]) => filters.length > 0)
+  const payloadFilterCount = payloadDomainRows.reduce((sum, [, filters]) => sum + filters.length, 0)
+  const resultHash = preview?.result_hash ?? previewMeta?.resultHash ?? null
+  const displayHash = shortHash(resultHash)
+  const graphSource = preview?.full_source_reach?.graph_source
+    ?? (preview?.queue_eligibility_scope === 'campaign_target_graph' ? 'campaign_target_graph' : null)
+  const graphCountSource = preview?.full_source_reach?.count_source ?? preview?.queue_eligibility_scope ?? null
+  const graphSourceLabel = graphSource
+    ? `${graphSource} / ${!graphCountSource || graphCountSource === graphSource ? 'full' : formatScopeLabel(graphCountSource)}`
+    : null
+  const unsupportedCount = unsupportedFilters.length
   const modeLabel = backendDegraded || preview?.degraded ? 'Fallback' : preview ? 'Backend' : 'Standby'
   const activeFilterCount = Object.values(filterGroups).reduce((s, f) => s + f.length, 0)
 
   const appliedCount = preview?.applied_filters?.length
     ?? activeFilterCount
   const warningsCount = preview?.warnings?.length ?? 0
-  const sourceUsed = preview?.source ?? (preview ? 'local_fallback' : null)
+  const sourceUsed = graphSourceLabel ?? preview?.source ?? (preview ? 'local_fallback' : null)
 
   const domainCounts = Object.entries(filterGroups)
     .filter(([, filters]) => filters.length > 0)
     .map(([domain, filters]) => ({ domain, count: filters.length }))
 
   const layerCounts = preview ? {
-    propertiesMatched: (preview as any).layer_counts?.properties_matched,
-    prospectsMatched: (preview as any).layer_counts?.prospects_matched,
-    masterOwnersMatched: (preview as any).layer_counts?.master_owners_matched,
-    phonesMatched: (preview as any).layer_counts?.phones_matched,
-    outreachEligible: (preview as any).layer_counts?.outreach_eligible,
-    senderCoverageEligible: (preview as any).layer_counts?.sender_coverage_eligible,
+    propertiesMatched: preview.layer_counts?.properties_matched,
+    prospectsMatched: preview.layer_counts?.prospects_matched,
+    masterOwnersMatched: preview.layer_counts?.master_owners_matched,
+    phonesMatched: preview.layer_counts?.phones_matched,
+    outreachEligible: preview.layer_counts?.outreach_eligible,
+    senderCoverageEligible: preview.layer_counts?.sender_coverage_eligible,
   } : null
 
   return (
@@ -1890,6 +2043,11 @@ const BackendStatusStrip = ({
         {unsupportedCount > 0 && (
           <span className="cmp-backend-item cmp-backend-unsupported" title="Filters not reflected in estimate">
             {unsupportedCount} unsupported
+          </span>
+        )}
+        {displayHash && (
+          <span className="cmp-backend-item cmp-backend-hash" title={String(resultHash)}>
+            hash {displayHash}
           </span>
         )}
         {totalDraftCount > 0 && (
@@ -1918,16 +2076,44 @@ const BackendStatusStrip = ({
               <strong>{sourceUsed ?? source}</strong>
             </div>
             <div className="cmp-diag-row">
+              <span>Graph source</span>
+              <strong>{graphSourceLabel ?? 'n/a'}</strong>
+            </div>
+            <div className="cmp-diag-row">
               <span>Applied filters</span>
               <strong>{appliedCount}</strong>
+            </div>
+            <div className="cmp-diag-row">
+              <span>Active filters</span>
+              <strong>{activeFilterCount}</strong>
+            </div>
+            <div className="cmp-diag-row">
+              <span>Draft filters</span>
+              <strong className={totalDraftCount > 0 ? 'is-warn' : ''}>{totalDraftCount}</strong>
+            </div>
+            <div className="cmp-diag-row">
+              <span>Payload filters</span>
+              <strong>{payloadFilterCount}</strong>
+            </div>
+            <div className="cmp-diag-row">
+              <span>Graph columns</span>
+              <strong>{graphColumnsUsed.length}</strong>
             </div>
             <div className="cmp-diag-row">
               <span>Unsupported</span>
               <strong className={unsupportedCount > 0 ? 'is-warn' : ''}>{unsupportedCount}</strong>
             </div>
             <div className="cmp-diag-row">
+              <span>Skipped</span>
+              <strong className={skippedFilters.length > 0 ? 'is-warn' : ''}>{skippedFilters.length}</strong>
+            </div>
+            <div className="cmp-diag-row">
               <span>Warnings</span>
               <strong className={warningsCount > 0 ? 'is-warn' : ''}>{warningsCount}</strong>
+            </div>
+            <div className="cmp-diag-row">
+              <span>Last preview hash</span>
+              <strong title={String(resultHash ?? '')}>{displayHash ?? 'n/a'}</strong>
             </div>
           </div>
 
@@ -1952,9 +2138,70 @@ const BackendStatusStrip = ({
             </div>
           )}
 
+          {payloadDomainRows.length > 0 && (
+            <div className="cmp-diag-section">
+              <div className="cmp-diag-subtitle">Payload Filters By Domain</div>
+              <div className="cmp-diag-kv-list">
+                {payloadDomainRows.map(([domain, filters]) => (
+                  <div key={domain} className="cmp-diag-code-row">
+                    <span>{formatLabel(domain.replace(/[.:]+/g, '_'))}</span>
+                    <code>{filters.length} filter{filters.length !== 1 ? 's' : ''}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sourceColumnRows.length > 0 && (
+            <div className="cmp-diag-section">
+              <div className="cmp-diag-subtitle">Graph Columns Used</div>
+              <div className="cmp-diag-kv-list">
+                {sourceColumnRows.map(([fieldKey, columns]) => (
+                  <div key={fieldKey} className="cmp-diag-code-row">
+                    <span>{fieldKey}</span>
+                    <code>{columns.join(', ')}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {unsupportedFilters.length > 0 && (
+            <div className="cmp-diag-section">
+              <div className="cmp-diag-subtitle">Unsupported Filters</div>
+              <div className="cmp-diag-kv-list">
+                {unsupportedFilters.map((item, index) => (
+                  <div key={`${item.fieldKey || item.label}-${index}`} className="cmp-diag-code-row is-warn">
+                    <span>{item.fieldKey || item.label}</span>
+                    <code>{item.message || item.reason}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {skippedFilters.length > 0 && (
+            <div className="cmp-diag-section">
+              <div className="cmp-diag-subtitle">Skipped Filters</div>
+              <div className="cmp-diag-kv-list">
+                {skippedFilters.map((item, index) => {
+                  const fieldKey = diagnosticFieldKey(item) || diagnosticLabel(item, 'filter')
+                  return (
+                    <div key={`${fieldKey}-${index}`} className="cmp-diag-code-row is-warn">
+                      <span>{fieldKey}</span>
+                      <code>{diagnosticReason(item, 'skipped')}</code>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {unsupportedCount > 0 && (
             <div className="cmp-diag-note">
-              Some filters are approved but not available in the active preview source.
+              {unsupportedFilters.some((item) => item.message.includes('no graph column mapping'))
+                ? 'Filter applied but no graph column mapping found.'
+                : 'Some filters are approved but not available in the active preview source.'}
             </div>
           )}
 
@@ -1979,11 +2226,11 @@ const BackendStatusStrip = ({
             </details>
           )}
 
-          {import.meta.env.DEV && preview && (preview as any)._raw && (
+          {import.meta.env.DEV && preview && preview._raw != null && (
             <details className="cmp-diag-raw" style={{ marginTop: 8 }}>
               <summary style={{ cursor: 'pointer', fontSize: 10, opacity: 0.7 }}>Raw API response</summary>
               <pre style={{ fontSize: 9, maxHeight: 200, overflow: 'auto', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {JSON.stringify((preview as any)._raw, null, 2)}
+                {JSON.stringify(preview._raw, null, 2)}
               </pre>
             </details>
           )}

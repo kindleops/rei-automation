@@ -68,9 +68,9 @@ export const nexusGlobalThemes: Record<NexusGlobalThemeId, NexusGlobalThemeDefin
   },
   red_ops: {
     id: 'red_ops',
-    label: 'Red Ops',
+    label: 'RedOps',
     description: 'Tactical black/red — danger/urgency emphasis',
-    accent: '#ff6b63',
+    accent: '#ff1212',
     personality: 'tactical',
     mapThemeId: 'red_ops',
     defaultAnimationLevel: 'full',

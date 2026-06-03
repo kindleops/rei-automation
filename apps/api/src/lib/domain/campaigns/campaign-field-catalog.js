@@ -59,6 +59,10 @@ const SOURCE_BY_DOMAIN = {
   sender_coverage: 'v_feeder_candidates_fast',
 }
 
+const FIELD_KEY_ALIASES = Object.freeze({
+  'properties.units': 'properties.units_count',
+})
+
 const CANONICAL_SOURCE_MAPPINGS = Object.freeze({
   'properties.market': {
     canonicalField: 'properties.market',
@@ -708,7 +712,76 @@ const ENUM_COLUMNS = new Set([
   'sender_coverage_status',
 ])
 
-const PREVIEW_SUPPORTED_COLUMNS = new Set(FIELD_GROUPS.flatMap((group) => group.columns))
+const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
+  'properties.property_id',
+  'properties.property_county_name',
+  'properties.property_state',
+  'properties.property_zip',
+  'properties.market',
+  'properties.property_address_city',
+  'properties.property_address_county_name',
+  'properties.property_address_state',
+  'properties.property_address_zip',
+  'properties.property_type',
+  'properties.property_class',
+  'properties.units_count',
+  'properties.tax_delinquent',
+  'properties.active_lien',
+  'properties.property_flags_text',
+  'properties.building_condition',
+  'properties.rehab_level',
+  'properties.estimated_value',
+  'properties.equity_amount',
+  'properties.equity_percent',
+  'properties.seller_tags_text',
+  'properties.seller_tags_json',
+  'properties.structured_motivation_score',
+  'properties.deal_strength_score',
+  'properties.tag_distress_score',
+  'properties.final_acquisition_score',
+  'properties.owner_type',
+  'properties.owner_type_guess',
+  'properties.is_corporate_owner',
+  'properties.out_of_state_owner',
+  'prospects.language_preference',
+  'prospects.gender',
+  'prospects.marital_status',
+  'prospects.education_model',
+  'prospects.occupation_group',
+  'prospects.est_household_income',
+  'prospects.net_asset_value',
+  'prospects.buying_power',
+  'prospects.age_bucket',
+  'prospects.timezone',
+  'prospects.contact_window',
+  'prospects.matching_flags',
+  'prospects.person_flags_text',
+  'prospects.seller_tags_text',
+  'prospects.sms_eligible',
+  'prospects.email_eligible',
+  'master_owners.owner_type_guess',
+  'master_owners.priority_tier',
+  'master_owners.follow_up_cadence',
+  'master_owners.priority_score',
+  'phones.phone_owner',
+  'phones.activity_status',
+  'phones.usage_12_months',
+  'phones.usage_2_months',
+  'outreach.never_contacted',
+  'outreach.last_sms_at',
+  'outreach.last_outbound_at',
+  'outreach.last_touch_at',
+  'outreach.touch_count',
+  'outreach.current_touch_number',
+  'outreach.true_post_contact_suppression',
+  'outreach.pending_prior_touch',
+  'outreach.duplicate_queue_status',
+  'sender_coverage.routing_allowed',
+  'sender_coverage.routing_tier',
+  'sender_coverage.selected_textgrid_market',
+  'sender_coverage.selected_textgrid_state',
+  'sender_coverage.sender_coverage_status',
+])
 
 const SPECIAL_LABELS = {
   age: 'Age',
@@ -806,7 +879,7 @@ function buildFieldCatalog() {
         searchable: type === 'enum' || type === 'text' || type === 'json',
         supports_options: supportsOptions,
         supports_counts: true,
-        supported_in_preview: PREVIEW_SUPPORTED_COLUMNS.has(column),
+        supported_in_preview: PREVIEW_SUPPORTED_FIELD_KEYS.has(`${domain}.${column}`),
         description: descriptionForField(domain, category, humanizeColumn(column)),
         ...(derivedFrom ? { derived_from: derivedFrom } : {}),
       }
@@ -818,7 +891,8 @@ export const CAMPAIGN_FIELD_CATALOG = Object.freeze(buildFieldCatalog())
 export const CAMPAIGN_FIELD_BY_KEY = new Map(CAMPAIGN_FIELD_CATALOG.map((field) => [field.key, field]))
 
 export function normalizeCampaignFieldKey(value) {
-  return clean(value)
+  const normalized = clean(value)
+  return FIELD_KEY_ALIASES[normalized] || normalized
 }
 
 export function getCampaignFieldDefinition(fieldKey) {
@@ -1005,6 +1079,8 @@ function graphSourceColumnForField(field) {
     property_address_city: 'property_city',
     property_county_name: 'property_county_name',
     property_address_county_name: 'property_county_name',
+    seller_tags_text: 'podio_tags',
+    seller_tags_json: 'podio_tags',
     language_preference: 'language',
     est_household_income: 'income',
     selected_textgrid_market: 'sender_market',

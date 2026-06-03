@@ -10,10 +10,12 @@ import {
   prepareRenderedSmsForQueue,
 } from "@/lib/sms/sanitize.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
@@ -1187,8 +1189,11 @@ export async function executeInboundAutomationDecision({
   autoReplyMode = null,
   proofRun = false,
   scheduleDelaySeconds = 0,
+  timezoneOverride = null,
+  contactWindowOverride = null,
   now = new Date().toISOString(),
   supabaseClient = null,
+  getSystemValue: getSystemValueImpl = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -1570,6 +1575,18 @@ export async function executeInboundAutomationDecision({
   const scheduled_for = new Date(
     new Date(now).getTime() + Math.max(Number(scheduleDelaySeconds) || 0, 0) * 1000
   ).toISOString();
+  const timezone_label =
+    clean(timezoneOverride) ||
+    clean(context?.summary?.timezone) ||
+    clean(context?.summary?.market_timezone) ||
+    clean(context?.summary?.timezone_label) ||
+    clean(process.env.DEFAULT_CONTACT_TIMEZONE) ||
+    "America/Chicago";
+  const contact_window =
+    clean(contactWindowOverride) ||
+    clean(context?.summary?.contact_window) ||
+    clean(context?.summary?.market_contact_window) ||
+    null;
 
   const legacy_plan = automationDecisionToLegacyPlan({
     decision: base_decision,
@@ -1643,6 +1660,63 @@ export async function executeInboundAutomationDecision({
     clean(threadKey) || normalized_to_phone,
   ].join(":");
 
+  const get_system_value =
+    getSystemValueImpl || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    {
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "inbound_auto_reply_queue_create", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    const blocked_decision = {
+      ...base_decision,
+      should_queue_reply: false,
+      should_mark_human_review: false,
+      reply_mode: "none",
+      audit_reason: runtime_brake.reason,
+    };
+
+    return {
+      ok: true,
+      automation_decision: blocked_decision,
+      selected_template,
+      rendered_message_text,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: {
+        ok: false,
+        status: 423,
+        reason: runtime_brake.reason,
+        error: runtime_brake.error,
+        diagnostics: runtime_brake.diagnostics,
+      },
+      suppression_applied: false,
+      duplicate_suppressed: false,
+      dry_run: true,
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
+      audit_reason: blocked_decision.audit_reason,
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: blocked_decision.audit_reason,
+        plan: automationDecisionToLegacyPlan({
+          decision: blocked_decision,
+          classification,
+          selectedTemplate: selected_template,
+          renderedMessageText: rendered_message_text,
+        }),
+        brain_stage: selected_use_case,
+        rendered_text: rendered_message_text,
+        template_id: clean(selected_template.template_id || selected_template.id) || null,
+      },
+    };
+  }
+
   const queue_result = await insertSupabaseSendQueueRow({
     queue_key,
     queue_id: queue_key,
@@ -1658,13 +1732,8 @@ export async function executeInboundAutomationDecision({
     scheduled_for,
     scheduled_for_utc: scheduled_for,
     scheduled_for_local: scheduled_for,
-    timezone:
-      clean(context?.summary?.market_timezone) ||
-      clean(context?.summary?.timezone) ||
-      "America/Chicago",
-    contact_window:
-      clean(context?.summary?.contact_window) ||
-      "12AM-11:59PM CT",
+    timezone: timezone_label,
+    contact_window,
     send_priority: 5,
     retry_count: 0,
     max_retries: 3,

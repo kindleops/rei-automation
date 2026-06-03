@@ -9,6 +9,7 @@ import {
   blockedRuntimeBrakeResult,
   evaluateQueueCreationRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
@@ -139,11 +140,14 @@ function asNumber(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function toTimestamp(value) {
+export function toTimestamp(value) {
   if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  const time = date.getTime();
-  return Number.isFinite(time) ? time : null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const ms = Date.parse(String(value));
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function asPositiveInteger(value, fallback = null) {
@@ -174,6 +178,15 @@ function pick(...values) {
     if (value !== null && value !== undefined && clean(value) !== "") return value;
   }
   return null;
+}
+
+function hasOwn(value = {}, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function numberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function extractExactProspectMatchingFlags(value) {
@@ -2065,40 +2078,49 @@ export async function getSupabaseFeederCandidates(
     : Math.min(Math.max(requestedLimit * 5, 10), 2500);
   const effective_offset = Math.max(0, Math.trunc(Number(candidate_offset) || 0));
 
-  let query = supabase.from(source_name).select("*");
+  const rows = [];
+  const page_size = 1000;
+  const last_index = effective_offset + effective_fetch_limit - 1;
 
-  if (ENRICHED_SOURCES.has(source_name)) {
-    // Enriched views carry outreach-state columns — order fresh/high-value candidates first.
-    // The REST layer does not guarantee VIEW ORDER BY, so we push ordering explicitly.
-    query = query
-      .order("never_contacted", { ascending: false, nullsFirst: false })
-      .order("touch_count",     { ascending: true,  nullsFirst: true  })
-      .order("final_acquisition_score", { ascending: false, nullsFirst: false })
-      .order("best_phone_score",        { ascending: false, nullsFirst: false });
-  } else if (source_name === "v_sms_campaign_queue_candidates") {
-    // Base candidate view has no outreach state — order by score only.
-    query = query
-      .order("final_acquisition_score", { ascending: false, nullsFirst: false })
-      .order("best_phone_score",        { ascending: false, nullsFirst: false });
+  for (let page_start = effective_offset; page_start <= last_index; page_start += page_size) {
+    const page_end = Math.min(page_start + page_size - 1, last_index);
+    let query = supabase.from(source_name).select("*");
+
+    if (ENRICHED_SOURCES.has(source_name)) {
+      // Enriched views carry outreach-state columns — order fresh/high-value candidates first.
+      // The REST layer does not guarantee VIEW ORDER BY, so we push ordering explicitly.
+      query = query
+        .order("never_contacted", { ascending: false, nullsFirst: false })
+        .order("touch_count",     { ascending: true,  nullsFirst: true  })
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("best_phone_score",        { ascending: false, nullsFirst: false });
+    } else if (source_name === "v_sms_campaign_queue_candidates") {
+      // Base candidate view has no outreach state — order by score only.
+      query = query
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("best_phone_score",        { ascending: false, nullsFirst: false });
+    }
+
+    const { data, error } = await query.range(page_start, page_end);
+
+    if (error) {
+      return {
+        ok: false,
+        error: "CANDIDATE_SOURCE_UNAVAILABLE",
+        source: source_name,
+        requested_source: requested_source || null,
+        scanned_count: 0,
+        rows: [],
+        candidate_source_error: error?.message || String(error),
+        available_hint: [...CANDIDATE_SOURCE_AVAILABLE_HINT],
+      };
+    }
+
+    const page_rows = Array.isArray(data) ? data : [];
+    rows.push(...page_rows);
+    if (page_rows.length < page_end - page_start + 1) break;
   }
 
-  query = query.range(effective_offset, effective_offset + effective_fetch_limit - 1);
-  const { data, error } = await query;
-
-  if (error) {
-    return {
-      ok: false,
-      error: "CANDIDATE_SOURCE_UNAVAILABLE",
-      source: source_name,
-      requested_source: requested_source || null,
-      scanned_count: 0,
-      rows: [],
-      candidate_source_error: error?.message || String(error),
-      available_hint: [...CANDIDATE_SOURCE_AVAILABLE_HINT],
-    };
-  }
-
-  const rows = Array.isArray(data) ? data : [];
   const normalized = rows
     .map((row) =>
       normalizeCandidateRow(row, {
@@ -2454,6 +2476,10 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
 }
 
 export async function evaluateCandidateEligibility(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.evaluateCandidateEligibility === "function") {
+    return deps.evaluateCandidateEligibility(candidate, options);
+  }
+
   if (!candidate.master_owner_id) {
     return { ok: false, reason_code: REASON_CODES.NO_MASTER_OWNER, reason: "missing_master_owner_id" };
   }
@@ -2687,6 +2713,7 @@ function buildRoutingSelection({
   routing_rule_name = null,
   seller_market = null,
   seller_state = null,
+  rejected_candidate_count = 0,
 } = {}) {
   return {
     ok: true,
@@ -2699,6 +2726,7 @@ function buildRoutingSelection({
     selected_textgrid_number: selected?.phone_number || null,
     seller_market: seller_market || null,
     seller_state: seller_state || null,
+    rejected_candidate_count,
     routing_block_reason: null,
     selected: {
       id: selected?.id || null,
@@ -2754,6 +2782,17 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
 
   const seller_market = normalizeMarket(candidate.market);
   const seller_state = lower(candidate.state);
+  const first_touch = asBoolean(
+    options.first_touch ?? candidate.is_first_touch,
+    Number(candidate.touch_number || 1) === 1
+  );
+  const require_local_routing = asBoolean(options.require_local_routing, false);
+  const allow_regional_fallback_for_first_touch = asBoolean(
+    options.allow_regional_fallback_for_first_touch,
+    false
+  );
+  const exact_market_required =
+    require_local_routing || (first_touch && !allow_regional_fallback_for_first_touch);
 
   const exact = numbers.filter((row) => row.market_normalized === seller_market).sort(byUsageThenRecency);
   const alias = numbers
@@ -2788,7 +2827,35 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "exact_market_match",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
+  }
+
+  if (exact_market_required) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.ROUTING_BLOCKED,
+      routing_allowed: false,
+      routing_tier: "blocked",
+      selection_reason: null,
+      routing_rule_name: regional_rule?.name || null,
+      selected_textgrid_market: null,
+      selected_textgrid_number: null,
+      seller_market: candidate.market || null,
+      seller_state: candidate.state || null,
+      rejected_candidate_count: numbers.length,
+      routing_block_reason: "NO_VALID_LOCAL_TEXTGRID_NUMBER",
+      selected: null,
+      diagnostics: {
+        require_local_routing,
+        first_touch,
+        allow_regional_fallback_for_first_touch,
+        exact_market_required,
+        seller_market: candidate.market || null,
+        selected_textgrid_market: null,
+        rejected_candidate_count: numbers.length,
+      },
+    };
   }
 
   if (alias.length) {
@@ -2799,6 +2866,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "approved_alias_match",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2810,6 +2878,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: regional_rule?.name || null,
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2821,6 +2890,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "approved_nationwide_fallback",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2835,6 +2905,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       selected_textgrid_number: null,
       seller_market: candidate.market || null,
       seller_state: candidate.state || null,
+      rejected_candidate_count: numbers.length,
       routing_block_reason: "NO_APPROVED_ROUTING_PATH",
       selected: null,
     };
@@ -3635,6 +3706,34 @@ export async function hydratePropertyForCandidate(candidate = {}, deps = {}) {
 // ─────────────────────────────────────────────────────────────────────────────────
 
 export async function createSendQueueItem(candidate = {}, options = {}, deps = {}) {
+  const campaign_session_id = clean(pick(options.campaign_session_id, candidate.campaign_session_id)) || null;
+  const campaign_mode = clean(options.campaign_mode) || null;
+  const approval_mode = clean(options.approval_mode) || null;
+  const no_send_specified =
+    hasOwn(options, "no_send") ||
+    hasOwn(options, "noSend") ||
+    hasOwn(options, "proof_no_send");
+  const no_send = no_send_specified
+    ? asBoolean(pick(options.no_send, options.noSend, options.proof_no_send), false)
+    : false;
+  const proof_mode = asBoolean(pick(options.proof_mode, options.proofMode, options.proof), false);
+  const exclude_from_kpis = asBoolean(options.exclude_from_kpis, no_send || proof_mode);
+  const cap_basis_snapshot = Array.isArray(options.cap_basis_snapshot)
+    ? options.cap_basis_snapshot
+    : Array.isArray(options.cap_basis)
+      ? options.cap_basis
+      : null;
+  const effective_total_cap = numberOrNull(options.effective_total_cap);
+  const remaining_cap_before_create = numberOrNull(options.remaining_cap_before_create);
+  const selected_sender_diagnostics = {
+    selected_textgrid_number_id: options.selected_textgrid_number_id || null,
+    selected_textgrid_number: options.selected_textgrid_number || null,
+    selected_textgrid_market: options.selected_textgrid_market || null,
+    routing_tier: asNumber(options.routing_tier, null),
+    selection_reason: options.selection_reason || null,
+    routing_allowed: options.routing_allowed !== false,
+    routing_block_reason: options.routing_block_reason || null,
+  };
   const effective_phone_id = candidate.best_phone_id || candidate.phone_id;
   const idempotency_key = buildIdempotencyKey({
     master_owner_id: candidate.master_owner_id,
@@ -3642,7 +3741,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     phone_id: effective_phone_id,
     template_use_case: options.template_use_case,
     touch_number: candidate.touch_number,
-    campaign_session_id: candidate.campaign_session_id,
+    campaign_session_id,
   });
 
   const dedupe_key = buildSendQueueDedupeKey({
@@ -3651,7 +3750,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     to_phone_number: candidate.canonical_e164,
     template_use_case: options.template_use_case,
     touch_number: candidate.touch_number,
-    campaign_session_id: candidate.campaign_session_id,
+    campaign_session_id,
   });
 
   const queue_key = buildQueueKeyFromIdempotencyKey(idempotency_key);
@@ -3689,7 +3788,12 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
   const safety_diagnostics = {
     status: "passed",
     evaluated_at: options.now || new Date().toISOString(),
-    campaign_session_id: candidate.campaign_session_id || null,
+    campaign_session_id,
+    campaign_mode,
+    approval_mode,
+    no_send,
+    cap_basis: cap_basis_snapshot,
+    effective_total_cap,
     dedupe_key,
     queue_key,
     checks: {
@@ -3708,6 +3812,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       tier: asNumber(options.routing_tier, null),
       block_reason: options.routing_block_reason || null,
       selected_textgrid_number_id: options.selected_textgrid_number_id || null,
+      selected_textgrid_number: options.selected_textgrid_number || null,
       selected_textgrid_market: options.selected_textgrid_market || null,
     },
     template: {
@@ -3759,15 +3864,31 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     template_key: clean(pick(options.template_id, options.selected_template_id)) || null,
     language: clean(pick(candidate.language, candidate.best_language)) || null,
     routing_tier: asNumber(options.routing_tier, null),
-    safety_status: "passed",
+    sms_eligible: no_send ? false : true,
+    routing_allowed: no_send ? false : options.routing_allowed !== false,
+    safety_status: no_send ? "blocked" : "passed",
     metadata: {
       idempotency_key,
-      campaign_session_id: candidate.campaign_session_id,
+      campaign_session_id,
+      campaign_mode,
+      approval_mode,
+      ...(no_send_specified ? { no_send } : {}),
+      ...(proof_mode ? { proof: true, proof_mode: true } : {}),
+      ...(exclude_from_kpis ? { exclude_from_kpis: true } : {}),
+      cap_basis: cap_basis_snapshot,
+      cap_basis_snapshot,
+      effective_total_cap,
+      remaining_cap_before_create,
+      queue_limited_request_context:
+        options.queue_limited_request_context && typeof options.queue_limited_request_context === "object" && !Array.isArray(options.queue_limited_request_context)
+          ? options.queue_limited_request_context
+          : null,
       safety_diagnostics,
       template_use_case: options.template_use_case,
       selected_textgrid_number_id: options.selected_textgrid_number_id,
       selected_textgrid_number: options.selected_textgrid_number,
       selected_textgrid_market: options.selected_textgrid_market,
+      selected_sender_diagnostics,
       seller_market: candidate.market,
       seller_state: candidate.state,
       routing_tier: options.routing_tier,
@@ -3795,7 +3916,10 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
         canonical_phone_masked: maskPhone(candidate.canonical_e164),
         seller_market: candidate.market,
         seller_state: candidate.state,
-        campaign_session_id: candidate.campaign_session_id,
+        campaign_session_id,
+        campaign_mode,
+        approval_mode,
+        ...(no_send_specified ? { no_send } : {}),
         touch_number: candidate.touch_number,
         template_use_case: options.template_use_case || null,
         template_key: clean(options.template_id) || null,
@@ -3977,6 +4101,10 @@ export function buildFeederDiagnostics(summary = {}) {
     schedule_interval_seconds: Number(summary.schedule_interval_seconds || 0),
     schedule_window_full_count: Number(summary.schedule_window_full_count || 0),
     schedule_overflow_blocked_count: Number(summary.schedule_overflow_blocked_count || 0),
+    invalid_scheduled_for_count: Number(summary.invalid_scheduled_for_count || 0),
+    invalid_scheduled_for_examples: Array.isArray(summary.invalid_scheduled_for_examples)
+      ? summary.invalid_scheduled_for_examples.slice(0, 3)
+      : [],
     first_scheduled_for: summary.first_scheduled_for || null,
     last_scheduled_for: summary.last_scheduled_for || null,
     error: clean(summary.error) || null,
@@ -4068,11 +4196,11 @@ function getSkipDiagnostics(candidate, options) {
 
 export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
 
   // ── System control gate ────────────────────────────────────────────────
   if (!input.dry_run) {
-    const get_system_value =
-      deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
     const runtime_brake = evaluateQueueCreationRuntimeBrakes(
       {
         campaign_mode: await get_system_value("campaign_mode"),
@@ -4127,11 +4255,35 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     market: clean(input.market) || null,
     state: clean(input.state) || null,
     routing_safe_only: asBoolean(input.routing_safe_only, true),
+    require_local_routing: asBoolean(
+      input.require_local_routing ?? await get_system_value("require_local_routing"),
+      false
+    ),
+    allow_regional_fallback_for_first_touch: asBoolean(
+      input.allow_regional_fallback_for_first_touch ??
+        await get_system_value("allow_regional_fallback_for_first_touch"),
+      false
+    ),
     allow_phone_fallback: asBoolean(input.allow_phone_fallback, false),
     within_contact_window_now: asBoolean(input.within_contact_window_now, true),
     template_use_case: clean(input.template_use_case) || "ownership_check",
     touch_number: asPositiveInteger(input.touch_number, 1),
     campaign_session_id: clean(input.campaign_session_id) || `session-${now.slice(0, 10)}`,
+    campaign_mode: clean(input.campaign_mode) || null,
+    approval_mode: clean(input.approval_mode || input.approvalMode || input.approval) || null,
+    ...(hasOwn(input, "no_send") ? { no_send: asBoolean(input.no_send, false) } : {}),
+    ...(hasOwn(input, "noSend") ? { noSend: asBoolean(input.noSend, false) } : {}),
+    ...(hasOwn(input, "proof_no_send") ? { proof_no_send: asBoolean(input.proof_no_send, false) } : {}),
+    proof_mode: asBoolean(input.proof_mode ?? input.proofMode ?? input.proof, false),
+    exclude_from_kpis: asBoolean(input.exclude_from_kpis ?? input.excludeFromKpis, false),
+    cap_basis: Array.isArray(input.cap_basis) ? input.cap_basis : null,
+    cap_basis_snapshot: Array.isArray(input.cap_basis_snapshot) ? input.cap_basis_snapshot : null,
+    effective_total_cap: Number.isFinite(Number(input.effective_total_cap)) ? Number(input.effective_total_cap) : null,
+    remaining_cap_before_create: Number.isFinite(Number(input.remaining_cap_before_create)) ? Number(input.remaining_cap_before_create) : null,
+    queue_limited_request_context:
+      input.queue_limited_request_context && typeof input.queue_limited_request_context === "object" && !Array.isArray(input.queue_limited_request_context)
+        ? input.queue_limited_request_context
+        : null,
     batch_name: clean(input.batch_name) || null,
     debug_templates: asBoolean(input.debug_templates, false),
     schedule_spread: asBoolean(input.schedule_spread, false),
@@ -4186,6 +4338,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       schedule_interval_seconds: options.schedule_interval_seconds_min || 0,
       schedule_window_full_count: 0,
       schedule_overflow_blocked_count: 0,
+      invalid_scheduled_for_count: 0,
+      invalid_scheduled_for_examples: [],
       first_scheduled_for: null,
       last_scheduled_for: null,
       selected_textgrid_market_counts: {},
@@ -4264,6 +4418,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     schedule_interval_seconds: options.schedule_interval_seconds_min || 0,
     schedule_window_full_count: 0,
     schedule_overflow_blocked_count: 0,
+    invalid_scheduled_for_count: 0,
+    invalid_scheduled_for_examples: [],
     first_scheduled_for: null,
     last_scheduled_for: null,
     selected_textgrid_market_counts: {},
@@ -4540,6 +4696,54 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       continue;
     }
 
+    const selected_template_id =
+      rendered.selected_template_id ||
+      rendered.template_rotation?.selected_template_id ||
+      rendered.template?.template_id ||
+      rendered.template?.id ||
+      null;
+    const health_guard = evaluateSmsHealthGuard({
+      from_phone_number: routing.selected_textgrid_number || routing.selected?.phone_number,
+      template_id: selected_template_id,
+      routing_tier: routing.routing_tier,
+      first_touch: candidate.is_first_touch,
+      require_local_routing: options.require_local_routing,
+      allow_regional_fallback_for_first_touch: options.allow_regional_fallback_for_first_touch,
+      metadata: {
+        routing_tier: routing.routing_tier,
+        touch_number: candidate.touch_number,
+        selected_template_id,
+      },
+      system_control: {
+        require_local_routing: options.require_local_routing,
+        allow_regional_fallback_for_first_touch: options.allow_regional_fallback_for_first_touch,
+      },
+      now,
+    });
+
+    if (!health_guard.allowed) {
+      summary.skipped_count += 1;
+      summary.routing_block_count += 1;
+      summary.sample_skips.push({
+        reason_code: REASON_CODES.ROUTING_BLOCKED,
+        reason: health_guard.reason,
+        block_class: health_guard.block_class,
+        master_owner_id: candidate.master_owner_id,
+        property_id: candidate.property_id,
+        routing_allowed: false,
+        routing_tier: routing.routing_tier,
+        selected_textgrid_market: routing.selected_textgrid_market,
+        selected_textgrid_number: routing.selected_textgrid_number,
+        selected_template_id,
+        seller_market: routing.seller_market || candidate.market,
+        seller_state: routing.seller_state || candidate.state,
+        routing_block_reason: health_guard.reason,
+        diagnostics: health_guard.diagnostics,
+        ..._preview,
+      });
+      continue;
+    }
+
     let scheduled_for;
     if (spread_scheduler) {
       const spread_result = spread_scheduler.nextScheduledFor(candidate);
@@ -4692,7 +4896,22 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       continue;
     }
 
-    if (queue_result.inserted?.queue_status === "scheduled" || (scheduled_for && toTimestamp(scheduled_for) > Date.now())) {
+    const scheduledAtMs = toTimestamp(scheduled_for);
+    if (scheduled_for && scheduledAtMs === null) {
+      summary.invalid_scheduled_for_count += 1;
+      if (summary.invalid_scheduled_for_examples.length < 3) {
+        summary.invalid_scheduled_for_examples.push({
+          scheduled_for: String(scheduled_for),
+          queue_key: queue_result.queue_key || null,
+          master_owner_id: candidate.master_owner_id || null,
+          property_id: candidate.property_id || null,
+        });
+      }
+    }
+    const isScheduled =
+      queue_result.inserted?.queue_status === "scheduled" ||
+      (scheduledAtMs && scheduledAtMs > Date.now());
+    if (isScheduled) {
       summary.scheduled_count = (summary.scheduled_count || 0) + 1;
     } else {
       summary.queued_count += 1;

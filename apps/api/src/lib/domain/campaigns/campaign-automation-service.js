@@ -1130,6 +1130,7 @@ function previewOptionsFromInput(input = {}, campaign = null) {
     frontend_payload_domain_counts: metadataObject(input.frontend_payload_domain_counts),
     frontend_dropped_filter_count: Number(input.frontend_dropped_filter_count || 0),
     frontend_dropped_filters: Array.isArray(input.frontend_dropped_filters) ? input.frontend_dropped_filters : [],
+    request_id: clean(input.request_id || input.requestId) || null,
     include_diagnostics: asBoolean(
       input.proof ?? input.debug ?? input.dev ?? input.include_diagnostics ?? process.env.NODE_ENV !== 'production',
       false
@@ -1605,6 +1606,7 @@ function buildPreviewWarnings(catalogFilters = {}) {
   const warnings = []
   for (const filter of catalogFilters.unsupported || []) {
     if (filter.warning) warnings.push(filter.warning)
+    if (filter.message) warnings.push(`${filter.field_key || filter.fieldKey || filter.label}: ${filter.message}`)
     warnings.push(`unsupported_in_preview: ${filter.label} is approved but unsupported in preview.`)
   }
   for (const field of catalogFilters.unknown || []) {
@@ -1837,7 +1839,9 @@ function buildPreviewDiagnostics({
   queryMs,
 }) {
   const skippedFilters = buildSkippedPreviewFilters(catalogFilters)
+  const payloadFiltersByDomain = groupPreviewFiltersByDomain(catalogFilters.applied || [])
   return {
+    requestId: options.request_id || null,
     receivedSource: options.received_source,
     normalizedSource: options.candidate_source,
     sourceUsed: source?.source || null,
@@ -1856,6 +1860,7 @@ function buildPreviewDiagnostics({
     droppedFilters: (catalogFilters.dropped || []).map(publicFilter),
     appliedSqlFilters: buildAppliedFilterSummary({ source, options, catalogFilters }),
     sourceColumnsUsed: buildPreviewSourceColumnsUsed(catalogFilters),
+    payloadFiltersByDomain,
     previewSourceColumns: sourceColumns.previewSourceColumns || [],
     previewSourceDerivedFields: sourceColumns.previewSourceDerivedFields || [],
     sourceRowsSampledForColumns: sourceColumns.sampledRowCount || 0,
@@ -1864,19 +1869,50 @@ function buildPreviewDiagnostics({
   }
 }
 
+function previewResultHash(response = {}, diagnostics = {}) {
+  const payload = {
+    request_id: response.request_id || diagnostics.requestId || null,
+    source: diagnostics.sourceUsed || response.candidate_source || response.source || null,
+    total_matched: response.total_matched ?? response.total_matched_properties ?? response.reach?.totalMatched ?? null,
+    clean_targets: response.clean_targets ?? response.reach?.cleanTargets ?? null,
+    ready_to_queue: response.ready_to_queue ?? response.reach?.readyToQueue ?? null,
+    queueable_today: response.queueable_today ?? response.reach?.queueableToday ?? null,
+    applied_filters: diagnostics.appliedFilters || response.appliedFilters || response.applied_filters || [],
+    unsupported_filters: diagnostics.unsupportedFilters || response.unsupported_in_preview || [],
+    graph_columns_used: diagnostics.sourceColumnsUsed || {},
+  }
+  return crypto
+    .createHash('sha1')
+    .update(JSON.stringify(payload))
+    .digest('hex')
+    .slice(0, 16)
+}
+
 function withPreviewDiagnostics(response, diagnostics, includeDiagnostics) {
-  if (!includeDiagnostics) return response
-  return {
+  const base = {
     ...response,
+    request_id: diagnostics.requestId || response.request_id || null,
+    result_hash: response.result_hash || previewResultHash(response, diagnostics),
+  }
+  if (!includeDiagnostics) return base
+  return {
+    ...base,
     diagnostics,
     receivedSource: diagnostics.receivedSource,
     normalizedFilters: diagnostics.normalizedFilters,
     supportedFilters: diagnostics.supportedFilters,
     unsupportedFilters: diagnostics.unsupportedFilters,
+    unsupported_filters: diagnostics.unsupportedFilters,
     appliedSqlFilters: diagnostics.appliedSqlFilters,
+    applied_sql_filters: diagnostics.appliedSqlFilters,
     sourceFallbackUsed: diagnostics.sourceFallbackUsed,
     sourceColumnsUsed: diagnostics.sourceColumnsUsed,
+    source_columns_used: diagnostics.sourceColumnsUsed,
+    graph_columns_used: diagnostics.sourceColumnsUsed,
     skippedFilters: diagnostics.skippedFilters,
+    skipped_filters: diagnostics.skippedFilters,
+    payloadFiltersByDomain: diagnostics.payloadFiltersByDomain,
+    payload_filters_by_domain: diagnostics.payloadFiltersByDomain,
     frontend_payload_domain_counts: diagnostics.frontendPayloadDomainCounts,
     backend_received_domain_counts: diagnostics.backendReceivedDomainCounts,
     backend_applied_domain_counts: diagnostics.backendAppliedDomainCounts,
@@ -1970,6 +2006,17 @@ const FULL_REACH_GRAPH_FILTER_COLUMNS = Object.freeze({
   'properties.market': 'market',
   'properties.property_type': 'property_type',
   'properties.property_class': 'property_class',
+  'properties.units': 'units_count',
+  'properties.units_count': 'units_count',
+  'properties.tax_delinquent': 'tax_delinquent',
+  'properties.active_lien': 'active_lien',
+  'properties.property_flags_text': 'property_flags_text',
+  'properties.building_condition': 'building_condition',
+  'properties.rehab_level': 'rehab_level',
+  'properties.owner_type': 'owner_type',
+  'properties.owner_type_guess': 'owner_type_guess',
+  'properties.is_corporate_owner': 'is_corporate_owner',
+  'properties.out_of_state_owner': 'out_of_state_owner',
   'properties.estimated_value': 'estimated_value',
   'properties.equity_percent': 'equity_percent',
   'properties.cash_offer': 'cash_offer',
@@ -3341,12 +3388,25 @@ const CAMPAIGN_TARGET_GRAPH_SELECT = [
   'property_county_name',
   'property_type',
   'property_class',
+  'units_count',
+  'tax_delinquent',
+  'active_lien',
+  'property_flags_text',
+  'building_condition',
+  'owner_type',
+  'is_corporate_owner',
+  'out_of_state_owner',
   'canonical_property_group',
   'language',
+  'gender',
+  'marital_status',
   'age_bucket',
   'occupation_group',
   'education_model',
   'income',
+  'net_asset_value',
+  'buying_power',
+  'email_eligible',
   'owner_type_guess',
   'priority_tier',
   'follow_up_cadence',
@@ -3394,6 +3454,25 @@ const CAMPAIGN_TARGET_GRAPH_SELECT = [
   'source_updated_at',
   'generated_at',
 ].join(',')
+const CAMPAIGN_TARGET_GRAPH_OPTIONAL_FILTER_COLUMNS = new Set([
+  'units_count',
+  'tax_delinquent',
+  'active_lien',
+  'property_flags_text',
+  'building_condition',
+  'owner_type',
+  'is_corporate_owner',
+  'out_of_state_owner',
+  'gender',
+  'marital_status',
+  'net_asset_value',
+  'buying_power',
+  'email_eligible',
+])
+const CAMPAIGN_TARGET_GRAPH_COMPAT_SELECT = CAMPAIGN_TARGET_GRAPH_SELECT
+  .split(',')
+  .filter((column) => !CAMPAIGN_TARGET_GRAPH_OPTIONAL_FILTER_COLUMNS.has(column))
+  .join(',')
 const CAMPAIGN_TARGET_GRAPH_PAGE_SIZE = 1000
 const CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT = 5000
 const CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT = 100000
@@ -3409,7 +3488,17 @@ const CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS = Object.freeze({
   'properties.property_address_county_name': 'property_county_name',
   'properties.property_type': 'property_type',
   'properties.property_class': 'property_class',
+  'properties.units': 'units_count',
+  'properties.units_count': 'units_count',
+  'properties.tax_delinquent': 'tax_delinquent',
+  'properties.active_lien': 'active_lien',
+  'properties.property_flags_text': 'property_flags_text',
+  'properties.building_condition': 'building_condition',
   'properties.rehab_level': 'rehab_level',
+  'properties.owner_type': 'owner_type',
+  'properties.owner_type_guess': 'owner_type_guess',
+  'properties.is_corporate_owner': 'is_corporate_owner',
+  'properties.out_of_state_owner': 'out_of_state_owner',
   'properties.estimated_value': 'estimated_value',
   'properties.equity_amount': 'equity_amount',
   'properties.equity_percent': 'equity_percent',
@@ -3425,11 +3514,17 @@ const CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS = Object.freeze({
   'prospects.education_model': 'education_model',
   'prospects.occupation_group': 'occupation_group',
   'prospects.est_household_income': 'income',
+  'prospects.gender': 'gender',
+  'prospects.marital_status': 'marital_status',
+  'prospects.net_asset_value': 'net_asset_value',
+  'prospects.buying_power': 'buying_power',
   'prospects.timezone': 'timezone',
   'prospects.contact_window': 'contact_window',
   'prospects.sms_eligible': 'sms_eligible',
+  'prospects.email_eligible': 'email_eligible',
   'prospects.matching_flags': 'matching_flags_text',
   'prospects.person_flags_text': 'matching_flags_text',
+  'prospects.seller_tags_text': 'podio_tags',
   'master_owners.owner_type_guess': 'owner_type_guess',
   'master_owners.priority_tier': 'priority_tier',
   'master_owners.follow_up_cadence': 'follow_up_cadence',
@@ -3519,6 +3614,80 @@ function graphFilterColumn(filter = {}) {
   if (!field) return null
   const column = field.key?.split('.').pop()
   return CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS[`${field.domain}.${column}`] || null
+}
+
+function graphApplicationColumn(filter = {}) {
+  const fieldKey = clean(filter.field_key || filter.fieldKey || filter.field)
+  if (fieldKey === 'sender_coverage.sender_coverage_status') return 'sender_covered'
+  if (fieldKey === 'outreach.duplicate_queue_status') return 'active_queue_item'
+  return graphFilterColumn(filter)
+}
+
+function resolveCatalogFiltersForTargetGraph(catalogFilters = {}) {
+  const supported = []
+  const mappingUnsupported = []
+
+  for (const filter of catalogFilters.supported || []) {
+    const graphColumn = graphApplicationColumn(filter)
+    const normalized = {
+      ...filter,
+      graph_column: graphColumn || null,
+      preview_column: graphColumn || null,
+      preview_columns: graphColumn ? [graphColumn] : [],
+      preview_mapping: {
+        field_key: filter.field_key,
+        graph_column: graphColumn || null,
+        preview_column: graphColumn || null,
+        preview_columns: graphColumn ? [graphColumn] : [],
+      },
+    }
+    if (graphColumn) {
+      supported.push({
+        ...normalized,
+        applied_in_preview: true,
+      })
+    } else {
+      mappingUnsupported.push({
+        ...publicFilter(normalized),
+        supported_in_preview: false,
+        applied_in_preview: false,
+        unsupported_reason: 'missing_campaign_target_graph_column_mapping',
+        message: 'Filter applied but no graph column mapping found.',
+      })
+    }
+  }
+
+  const unsupported = [
+    ...(catalogFilters.unsupported || []).map((filter) => ({
+      ...publicFilter(filter),
+      supported_in_preview: false,
+      applied_in_preview: false,
+      unsupported_reason: filter.unsupported_reason || 'unsupported_in_target_graph',
+      message: filter.message || 'Filter applied but no graph column mapping found.',
+    })),
+    ...mappingUnsupported,
+  ]
+  const unknown = (catalogFilters.unknown || []).map((filter) => ({
+    ...publicFilter(filter),
+    supported_in_preview: false,
+    applied_in_preview: false,
+    unsupported_reason: 'unknown_campaign_field',
+    message: 'Filter applied but no graph column mapping found.',
+  }))
+
+  return {
+    ...catalogFilters,
+    unknown,
+    supported,
+    unsupported,
+    applied: [
+      ...supported.map(publicFilter),
+      ...unsupported,
+      ...unknown,
+    ],
+    pre_filters: supported.filter((filter) => !SENDER_COVERAGE_FIELDS.has(filter.field_key)),
+    sender_filters: supported.filter((filter) => SENDER_COVERAGE_FIELDS.has(filter.field_key)),
+  }
 }
 
 function graphBooleanValue(value) {
@@ -3634,6 +3803,20 @@ function applyCampaignGraphFilters(query, options = {}, warnings = [], { require
   return query
 }
 
+function missingOptionalGraphColumn(error) {
+  const message = errorMessage(error).toLowerCase()
+  for (const column of CAMPAIGN_TARGET_GRAPH_OPTIONAL_FILTER_COLUMNS) {
+    if (
+      message.includes(`.${column} does not exist`) ||
+      message.includes(` ${column} does not exist`) ||
+      message.includes(`"${column}"`)
+    ) {
+      return column
+    }
+  }
+  return null
+}
+
 async function countCampaignGraphRows({ supabase, options, extra = null, requireQueueEligible = false }) {
   const warnings = []
   let query = supabase
@@ -3652,14 +3835,14 @@ async function countCampaignGraphRows({ supabase, options, extra = null, require
   return { ok: true, count: Number(count || 0), warnings }
 }
 
-async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEligible = false }) {
+async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEligible = false, selectColumns = CAMPAIGN_TARGET_GRAPH_SELECT, didCompatRetry = false }) {
   const rows = []
   const warnings = []
   const cappedLimit = Math.max(1, Math.min(Number(limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT), CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT))
   for (let offset = 0; offset < cappedLimit; offset += CAMPAIGN_TARGET_GRAPH_PAGE_SIZE) {
     let query = supabase
       .from(CAMPAIGN_TARGET_GRAPH_TABLE)
-      .select(CAMPAIGN_TARGET_GRAPH_SELECT)
+      .select(selectColumns)
       .order('queue_eligible', { ascending: false, nullsFirst: false })
       .order('acquisition_score', { ascending: false, nullsFirst: false })
       .order('best_phone_score', { ascending: false, nullsFirst: false })
@@ -3667,6 +3850,25 @@ async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEl
     query = applyCampaignGraphFilters(query, options, warnings, { requireQueueEligible })
     const { data, error } = await query
     if (error) {
+      const missingColumn = missingOptionalGraphColumn(error)
+      if (!didCompatRetry && missingColumn) {
+        const compat = await fetchCampaignGraphRows({
+          supabase,
+          options,
+          limit,
+          requireQueueEligible,
+          selectColumns: CAMPAIGN_TARGET_GRAPH_COMPAT_SELECT,
+          didCompatRetry: true,
+        })
+        return {
+          ...compat,
+          warnings: uniqueClean([
+            `campaign_target_graph_select_compat_fallback:${missingColumn}`,
+            ...(compat.warnings || []),
+            ...warnings,
+          ]),
+        }
+      }
       return {
         ok: false,
         rows,
@@ -3678,6 +3880,57 @@ async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEl
     if (page.length < CAMPAIGN_TARGET_GRAPH_PAGE_SIZE || rows.length >= cappedLimit) break
   }
   return { ok: true, rows, warnings }
+}
+
+const PROPERTY_UNIVERSE_FILTER_COLUMNS = Object.freeze({
+  'properties.market': 'market',
+  'properties.property_address_city': 'property_address_city',
+  'properties.property_address_state': 'property_address_state',
+  'properties.property_address_zip': 'property_address_zip',
+  'properties.property_address_county_name': 'property_address_county_name',
+  // Canonical redirects: the bare property_* columns are sparse partial mirrors
+  // (property_address_* is 100% populated), so the addressable universe always
+  // resolves geography through the canonical address columns.
+  'properties.property_state': 'property_address_state',
+  'properties.property_zip': 'property_address_zip',
+  'properties.property_county_name': 'property_address_county_name',
+  'properties.property_type': 'property_type',
+  'properties.property_class': 'property_class',
+})
+
+// Top of the funnel: how many rows in public.properties (the canonical source of
+// truth) match the audience's property-level criteria BEFORE any contact /
+// SMS-eligibility / sender-coverage narrowing. This is the "addressable" number the
+// operator expects to see; the graph total below it is the reachable subset.
+// Non-property filters (prospects/phones/outreach/sender_coverage) intentionally do
+// not constrain the universe -- they narrow the funnel further down. Any property
+// attribute we cannot resolve to a concrete properties column flags the result
+// approximate rather than silently overcounting. Failures are non-fatal (count=null)
+// so a universe hiccup never degrades the rest of the preview.
+async function countAddressableProperties({ supabase, options }) {
+  let query = supabase
+    .from('properties')
+    .select('property_id', { count: 'exact', head: true })
+  if (options.market) query = query.eq('market', options.market)
+  if (options.state) query = query.eq('property_address_state', normalizeState(options.state))
+
+  let approximate = false
+  for (const filter of options.catalog_filters?.supported || []) {
+    const key = clean(filter.field_key || filter.fieldKey)
+    if (!key.startsWith('properties.')) continue
+    const column = PROPERTY_UNIVERSE_FILTER_COLUMNS[key]
+    if (!column) {
+      approximate = true
+      continue
+    }
+    query = applySupabaseFilterToColumn(query, filter, column)
+  }
+
+  const { count, error } = await query
+  if (error) {
+    return { ok: false, count: null, approximate, warnings: [`addressable_universe_unavailable:${errorMessage(error)}`] }
+  }
+  return { ok: true, count: Number(count || 0), approximate, warnings: [] }
 }
 
 async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueueEligibleRows = false }) {
@@ -3695,6 +3948,7 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     activeQueue,
     noSenderCoverage,
     rows,
+    addressable,
   ] = await Promise.all([
     countCampaignGraphRows({ supabase, options }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.not('prospect_id', 'is', null) }),
@@ -3726,6 +3980,7 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       limit: rowLimit,
       requireQueueEligible: requireQueueEligibleRows,
     }),
+    countAddressableProperties({ supabase, options }),
   ])
 
   const allResults = [
@@ -3749,10 +4004,13 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     ok: allResults.every((result) => result.ok !== false),
     warnings: uniqueClean([
       ...allResults.flatMap((result) => result.warnings || []),
+      ...(addressable.warnings || []),
       ...(graphRefreshStatus.warnings || []),
     ]),
     graphRefreshStatus,
     totalMatched: total.count,
+    addressableProperties: addressable.ok === false ? null : addressable.count,
+    addressableApproximate: Boolean(addressable.approximate),
     linkedProspects: linkedProspects.count,
     smsEligible: smsEligible.count,
     cleanTargets: cleanTargets.count,
@@ -3974,7 +4232,7 @@ function graphAppliedFilterSummary(options = {}) {
     ...(options.catalog_filters?.supported || []).map((filter) => ({
       phase: SENDER_COVERAGE_FIELDS.has(filter.field_key) ? 'sender_coverage_filter' : 'target_graph_filter',
       field_key: filter.field_key,
-      graph_column: graphFilterColumn(filter) || null,
+      graph_column: graphApplicationColumn(filter) || null,
       operator: filter.operator,
       value: summarizeFilterValue(filter.value),
     })),
@@ -3985,7 +4243,11 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const startedAt = Date.now()
   const supabase = deps.supabase || defaultSupabase
   const campaign = input.campaign || null
-  const options = previewOptionsFromInput(input, campaign)
+  const baseOptions = previewOptionsFromInput(input, campaign)
+  const options = {
+    ...baseOptions,
+    catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters),
+  }
   options.target_limit = Math.max(1, Math.min(options.target_limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT, CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT))
 
   if (!supabase) {
@@ -4062,7 +4324,12 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
       sampleTargets: [],
       sample_blocks: [],
       target_rows: [],
-      reach: { totalMatched: 0, cleanTargets: 0, readyToQueue: 0, queueableToday: 0 },
+      reach: { addressableProperties: null, addressableApproximate: false, totalMatched: 0, cleanTargets: 0, readyToQueue: 0, queueableToday: 0 },
+      addressable_properties: null,
+      addressable_properties_approximate: false,
+      funnel: [],
+      headline_metric: 'ready_to_queue',
+      headline_count: 0,
       blocked: buildBlockedSummary({}),
       appliedFilters: options.catalog_filters.applied,
       graph_join_key_report: { graph_source: CAMPAIGN_TARGET_GRAPH_TABLE, unavailable: true },
@@ -4126,6 +4393,15 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const blockedSummary = buildBlockedSummary(blocked)
   const dailyCap = asPositiveInteger(input.daily_cap ?? campaign?.daily_cap ?? options.filters.daily_cap, null)
   const queueableToday = dailyCap ? Math.min(graph.readyToQueue, dailyCap) : graph.readyToQueue
+  const audienceFunnel = [
+    { key: 'addressable', label: 'Addressable properties', count: graph.addressableProperties, approximate: Boolean(graph.addressableApproximate) },
+    { key: 'reachable', label: 'With reachable contact', count: graph.totalMatched },
+    { key: 'sms_eligible', label: 'SMS-eligible', count: graph.smsEligible },
+    { key: 'clean', label: 'Clean (not suppressed / wrong number)', count: graph.cleanTargets },
+    { key: 'sender_covered', label: 'Sender-covered', count: graph.senderCovered },
+    { key: 'ready_to_queue', label: 'Ready to queue', count: graph.readyToQueue },
+    { key: 'queueable_today', label: 'Queueable today', count: queueableToday },
+  ]
   const distributionsCounts = graphDistributionCounts(graph.rows || [])
   const distributions = {
     markets: bucketArray(distributionsCounts.markets),
@@ -4152,7 +4428,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     droppedFilterCount: Number(options.catalog_filters.dropped_filter_count || 0),
     droppedFilters: (options.catalog_filters.dropped || []).map(publicFilter),
     appliedSqlFilters: graphAppliedFilterSummary(options),
-    sourceColumnsUsed: Object.fromEntries((options.catalog_filters.supported || []).map((filter) => [filter.field_key, [graphFilterColumn(filter)].filter(Boolean)])),
+    sourceColumnsUsed: Object.fromEntries((options.catalog_filters.supported || []).map((filter) => [filter.field_key, [graphApplicationColumn(filter)].filter(Boolean)])),
     previewSourceColumns: CAMPAIGN_TARGET_GRAPH_SELECT.split(','),
     previewSourceDerivedFields: [],
     sourceRowsSampledForColumns: graph.rows.length,
@@ -4228,11 +4504,18 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     sample_blocks: sampleBlocks,
     target_rows: targetRows,
     reach: {
+      addressableProperties: graph.addressableProperties,
+      addressableApproximate: Boolean(graph.addressableApproximate),
       totalMatched: graph.totalMatched,
       cleanTargets: graph.cleanTargets,
       readyToQueue: graph.readyToQueue,
       queueableToday,
     },
+    addressable_properties: graph.addressableProperties,
+    addressable_properties_approximate: Boolean(graph.addressableApproximate),
+    funnel: audienceFunnel,
+    headline_metric: 'ready_to_queue',
+    headline_count: graph.readyToQueue,
     blocked: blockedSummary,
     distributions,
     sampleTargets,

@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import './map-intelligence-cards.css'
 import type { FeatureCollection, GeoJsonProperties, LineString, Point, Polygon } from 'geojson'
 import { getThreadMessages, type ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
@@ -50,6 +51,16 @@ import {
   type MapStyleMode,
 } from './commandMapThemes'
 import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from '../dashboard/live/map/pin-icons'
+import {
+  getMapThemeTokens,
+  buildClusterRingExpr,
+  buildClusterCoreExpr,
+  buildClusterStrokeExpr,
+  buildMarkerColorExpr,
+  PRIORITY_MARKER_STATES,
+  PRIORITY_ASSET_TYPES,
+} from './map-theme-tokens'
+import { fetchMapProperties } from '../../lib/api/backendClient'
 import type { LocationResult } from '../command-center/command.types'
 
 export type { MapStyleMode } from './commandMapThemes'
@@ -115,6 +126,17 @@ const CENSUS_SOURCE_ID = 'census-geo-source'
 const BUYER_DEMAND_SOURCE_ID = 'buyer-demand-source'
 const SOLD_COMPS_SOURCE_ID = 'sold-comps-source'
 const SELLER_PINS_SOURCE_ID = 'seller-pins-source'
+
+// Property universe — viewport-fetched full property database layer
+const PROPERTY_UNIVERSE_SOURCE_ID = 'inbox-property-universe'
+const PROPERTY_UNIVERSE_LAYER_IDS = {
+  clusterRing:  'prop-univ-cluster-ring',
+  clusterCore:  'prop-univ-cluster-core',
+  clusterCount: 'prop-univ-cluster-count',
+  markerGlow:   'prop-univ-marker-glow',
+  markers:      'prop-univ-markers',
+} as const
+
 const CENSUS_LAYER_IDS = {
   fill: 'census-overlay-fill',
   line: 'census-overlay-line',
@@ -154,6 +176,8 @@ const SELLER_PINS_LAYER_IDS = {
 const ALL_SELLER_PINS_LAYER_IDS = Object.values(SELLER_PINS_LAYER_IDS)
 
 const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v2'
+const SELECTED_STAR_SOURCE_ID = 'command-selected-star'
+const SELECTED_STAR_LAYER_ID = 'command-selected-star-layer'
 export type MapOverlayToggles = {
   roads: boolean
   cities: boolean
@@ -342,7 +366,16 @@ type MapKpiChip = {
   tone: string
 }
 
-type ControlsTab = 'view' | 'seller_layers' | 'buyer_layers' | 'census' | 'filters' | 'map_style'
+type ControlsTab = 'modes' | 'filters' | 'style' | 'intel' | 'performance'
+type MapModeKey = 'acquisition' | 'buyer_demand' | 'opportunity_heat' | 'execution' | 'comps' | 'territory' | 'census'
+type FilterCategory = 'property' | 'prospect' | 'owner' | 'buyer' | 'saved'
+type CinematicControlsState = {
+  livePulses: 'off' | 'subtle' | 'full'
+  pinGlow: 'off' | 'subtle' | 'full'
+  eventTrail: boolean
+  soundFx: 'off' | 'soft' | 'full'
+  mapAtmosphere: 'clean' | 'cinematic' | 'tactical'
+}
 
 type ClusterCensusSummary = {
   id: string
@@ -464,6 +497,19 @@ type BuyerFeatureProps = {
   sourceLabel: string
 }
 
+const DEBUG_MAP_CARDS = false
+
+type MapEntityKind = 'seller' | 'sold_comp'
+type MapCardIntent = 'hover' | 'selected'
+type MapCardState = {
+  kind: MapEntityKind
+  intent: MapCardIntent
+  id: string
+  anchor: { x: number; y: number }
+  feature: Record<string, unknown>
+  containerSize: { width: number; height: number }
+} | null
+
 const defaultBuyerLayerToggles: BuyerLayerToggles = {
   sellerThreads: true,
   buyerMatches: true,
@@ -542,62 +588,61 @@ const defaultBuyerDemandLayers: BuyerDemandLayerToggles = {
 
 const EMPTY_GEOJSON: FeatureCollection<Point, Record<string, unknown>> = { type: 'FeatureCollection', features: [] }
 const CONTROLS_TABS: Array<{ key: ControlsTab; label: string }> = [
-  { key: 'view', label: 'View' },
-  { key: 'seller_layers', label: 'Seller Layers' },
-  { key: 'buyer_layers', label: 'Buyer Layers' },
-  { key: 'census', label: 'Census' },
+  { key: 'modes', label: 'Modes' },
   { key: 'filters', label: 'Filters' },
-  { key: 'map_style', label: 'Map Style' },
+  { key: 'style', label: 'Style' },
+  { key: 'intel', label: 'Intel' },
+  { key: 'performance', label: 'Perf' },
 ]
-const BUYER_SOURCE_OPTIONS = [
-  ['off_market_buyer', 'Off-Market Buyer'],
-  ['mls_buyer', 'MLS Buyer'],
-  ['public_record_buyer', 'Public Record Buyer'],
-  ['repeat_buyer', 'Repeat Buyer'],
-  ['cash_buyer', 'Cash Buyer'],
-  ['hard_money_buyer', 'Hard Money Buyer'],
-  ['institutional_buyer', 'Institutional Buyer'],
-  ['corporate_buyer', 'Corporate Buyer'],
-  ['local_investor', 'Local Investor'],
-  ['out_of_state_buyer', 'Out-of-State Buyer'],
-  ['retail_noise', 'Retail / Noise'],
-  ['builder', 'Builder'],
-  ['landlord', 'Landlord'],
-  ['flipper', 'Flipper'],
-  ['wholesaler', 'Wholesaler'],
-] as const
-const BUYER_IDENTITY_OPTIONS = [
-  ['llc_corp', 'LLC / Corp'],
-  ['individual_buyer', 'Individual Buyer'],
-] as const
-const BUYER_ASSET_OPTIONS = [
-  'Single Family',
-  'Duplex',
-  'Triplex',
-  'Fourplex',
-  'Multifamily 5+',
-  'Commercial',
-  'Land',
-  'Mobile Home',
-  'Condo',
-  'Townhome',
-  'Mixed Use',
-  'Industrial',
-  'Retail',
-  'Office',
-  'Storage',
-] as const
-const BUYER_DEAL_OPTIONS = [
-  ['off_market', 'MLS vs Off-Market'],
-  ['mls', 'MLS Buyer'],
-  ['corporate_buyer', 'Buyer Paid Cash'],
-] as const
-const BUYER_MATCH_OPTIONS = [
-  ['price_match', 'Price Match'],
-  ['asset_match', 'Asset Match'],
-  ['location_match', 'Location Match'],
-  ['velocity_match', 'Velocity Match'],
-] as const
+
+const MAP_MODES: Array<{ key: MapModeKey; label: string; description: string; swatches: string[] }> = [
+  { key: 'acquisition', label: 'Acquisition Radar', description: 'Seller leads, threads, motivation, urgency', swatches: ['#eab308', '#22c55e', '#3b82f6'] },
+  { key: 'buyer_demand', label: 'Buyer Demand', description: 'Buyer comps, repeat buyers, liquidity', swatches: ['#a855f7', '#06b6d4', '#38bdf8'] },
+  { key: 'comps', label: 'Comps Intel', description: 'Sold comps, price anchors, valuation context', swatches: ['#ef4444', '#3b82f6', '#eab308'] },
+  { key: 'execution', label: 'Execution Live', description: 'Queued, sent, delivered, failed, replies', swatches: ['#22c55e', '#f97316', '#ef4444'] },
+  { key: 'opportunity_heat', label: 'Opportunity Heat', description: 'Equity, distress, motivation, census pressure', swatches: ['#f97316', '#ec4899', '#eab308'] },
+  { key: 'territory', label: 'Territory Scan', description: 'Property universe, asset mix, boundaries', swatches: ['#64748b', '#94a3b8', '#475569'] },
+  { key: 'census', label: 'Census Intel', description: 'Demographic and economic overlays', swatches: ['#06b6d4', '#8b5cf6', '#38bdf8'] },
+]
+
+const FILTER_CATEGORIES: Array<{ key: FilterCategory; label: string }> = [
+  { key: 'property', label: 'Property' },
+  { key: 'prospect', label: 'Prospect' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'buyer', label: 'Buyer' },
+  { key: 'saved', label: 'Saved' },
+]
+
+const FILTER_PRESETS: Array<{ key: string; label: string; filters: Partial<MapFilterState> }> = [
+  { key: 'hot_sellers', label: 'Hot Sellers', filters: { leadTemperature: 'hot' } },
+  { key: 'follow_up', label: 'Follow-Up Due', filters: { followUpDue: true } },
+  { key: 'unread', label: 'New Replies', filters: { unreadOnly: true } },
+  { key: 'high_equity', label: 'High Equity Absentee', filters: { highEquity: true } },
+  { key: 'landlords', label: 'Tired Landlords', filters: { leadTemperature: 'warm' } },
+  { key: 'multi_24', label: '2–4 Unit Owners', filters: { propertyType: '2–4 Units' } },
+  { key: 'multi_5plus', label: '5+ Multifamily', filters: { propertyType: '5+ Units' } },
+  { key: 'storage', label: 'Storage Owners', filters: { propertyType: 'Storage' } },
+  { key: 'delinquent', label: 'Tax Delinquent', filters: {} },
+  { key: 'out_of_state', label: 'Out-of-State', filters: {} },
+  { key: 'buyer_dense', label: 'Buyer Dense', filters: {} },
+  { key: 'institutional_excl', label: 'Institutional Excl.', filters: {} },
+]
+
+type CinematicThemeDef = { id: MapStyleMode; label: string; description: string; bestFor: string }
+const CINEMATIC_THEME_DEFINITIONS: CinematicThemeDef[] = [
+  { id: 'satellite', label: 'Satellite Recon', description: 'Parcel-level satellite acquisition view', bestFor: 'Acquisitions' },
+  { id: 'red_ops', label: 'Red Ops', description: 'High-intensity execution mode', bestFor: 'Execution' },
+  { id: 'dark_ops', label: 'Executive', description: 'Clean institutional review mode', bestFor: 'Review' },
+  { id: 'blueprint', label: 'Blueprint', description: 'Technical parcel and census analysis', bestFor: 'Analysis' },
+  { id: 'light_street', label: 'Light Street', description: 'Bright street-level review mode', bestFor: 'Due Diligence' },
+  { id: 'terrain', label: 'Terrain', description: 'Land and geography context', bestFor: 'Land' },
+  { id: 'minimal_black', label: 'Monochrome', description: 'Low-noise neutral analysis', bestFor: 'Stealth' },
+  { id: 'midnight', label: 'Night Vision', description: 'Low-light tactical night mode', bestFor: 'Night Ops' },
+  { id: 'acquisition_radar', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
+  { id: 'matrix', label: 'Matrix', description: 'High-contrast signal mode', bestFor: 'Signals' },
+]
+
+
 const MAP_LEGEND_ITEMS = [
   { label: 'Not Contacted', color: '#97a3b6' },
   { label: 'Active Cluster', color: '#3b82f6' },
@@ -1249,7 +1294,16 @@ const fetchDarkStyleSpec = async (): Promise<maplibregl.StyleSpecification | nul
   return darkStyleSpecPromise
 }
 
-const isCustomLayer = (id?: string) => !id ? false : id.startsWith('command-') || id.startsWith('census-') || id.startsWith('buyer-demand-') || id.startsWith('sold-comps-')
+const isCustomLayer = (id?: string) => !id ? false : (
+  id.startsWith('command-') ||
+  id.startsWith('census-') ||
+  id.startsWith('buyer-demand-') ||
+  id.startsWith('sold-comps-') ||
+  id.startsWith('prop-univ-') ||
+  id.startsWith('seller-pins-') ||
+  id.startsWith('command-map-theme-') ||
+  id.startsWith('nx-icm-hybrid-')
+)
 const hybridLayerPrefix = 'nx-icm-hybrid-'
 const THEME_TINT_GEOJSON: FeatureCollection<Polygon, GeoJsonProperties> = {
   type: 'FeatureCollection',
@@ -1906,6 +1960,7 @@ const sellerCardMaxWidthForLayout = (layoutMode: ViewLayoutMode): string => {
   return '440px'
 }
 
+
 const buildHoverCardMarkup = (record: Record<string, unknown>, layoutMode: ViewLayoutMode): string =>
   renderToStaticMarkup(
     <SellerIntelligenceCard
@@ -1928,14 +1983,11 @@ const buildBuyerHoverMarkup = (buyer: BuyerFeatureProps, styleMode: MapStyleMode
       <p class="nx-icm-hover__address"><span class="nx-icm-hover__address-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s6-5 6-10a6 6 0 0 0-12 0c0 5 6 10 6 10Z" /><circle cx="12" cy="10" r="2.2" /></svg></span>${escapeHtml(buyer.propertyAddressFull || buyer.market || 'Market Unknown')}</p>
       <div class="nx-icm-hover__stats">
         <div class="nx-icm-hover__metric is-accent"><div class="nx-icm-hover__metric-copy"><span>Sale Price</span><strong>${escapeHtml(formatCurrency(buyer.salePrice || null))}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Purchase Date</span><strong>${escapeHtml(buyer.saleDate ? formatRelative(buyer.saleDate) : 'Unknown')}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Buyer Type</span><strong>${escapeHtml(buyer.buyerType || buyer.category || 'Investor')}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Type / Asset</span><strong>${escapeHtml(buyer.propertyType || buyer.buyerActivitySignal || 'Buyer')}</strong></div></div>
+        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Sold</span><strong>${escapeHtml(buyer.saleDate ? formatRelative(buyer.saleDate) : 'Unknown')}</strong></div></div>
+        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Type</span><strong>${escapeHtml(buyer.buyerType || buyer.category || 'Investor')}</strong></div></div>
         <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>PPSF</span><strong>${buyer.pricePerSqft ? escapeHtml(formatCurrency(buyer.pricePerSqft)) : '—'}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Source</span><strong>${escapeHtml(buyer.sourceLabel || 'Buyer')}</strong></div></div>
         <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Distance</span><strong>${buyer.distanceMiles ? `${buyer.distanceMiles.toFixed(1)} mi` : '—'}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Match Score</span><strong>${buyer.matchScore ? `${Math.round(buyer.matchScore)}/100` : '—'}</strong></div></div>
-        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Activity</span><strong>${escapeHtml(buyer.buyerActivitySignal || buyer.market || 'Live')}</strong></div></div>
+        <div class="nx-icm-hover__metric"><div class="nx-icm-hover__metric-copy"><span>Source</span><strong>${escapeHtml(buyer.sourceLabel || 'Buyer')}</strong></div></div>
       </div>
     </div>
   </article>
@@ -2260,281 +2312,490 @@ const buildSoldCompPresentation = (
   }
 }
 
-const buildSoldCompHoverMarkup = (comp: RecentSoldComp, styleMode: MapStyleMode, subject?: { latitude?: number | null; longitude?: number | null } | null, zoom: number = 14): string => {
-  const intelligence = buildSoldCompPresentation(comp, subject, zoom)
-  const themeStyle = cardThemeStyleAttr(styleMode)
-  return `
-  <article class="nx-icm-hover nx-icm-hover--sold-comp ${intelligence.variant === 'multifamily' ? 'is-multifamily' : 'is-residential'}" style="${escapeHtml(themeStyle)} --nx-sold-comp-accent:${escapeHtml(intelligence.accentHex)};">
-    <div class="nx-sold-comp__body">
-      <div class="nx-sold-comp__sold-header">
-        <div class="nx-sold-comp__sold-type">${escapeHtml(intelligence.sourceLabel.toUpperCase())}</div>
-        <div class="nx-sold-comp__hero">
-          <div>
-          <div class="nx-sold-comp__price">${escapeHtml(intelligence.salePrice)}</div>
-            <p class="nx-sold-comp__eyebrow">Sold ${escapeHtml(intelligence.saleDate)}</p>
-          </div>
-        </div>
-      </div>
 
-      ${intelligence.imageUrl ? `
-        <div class="nx-sold-comp__media">
-          <img src="${escapeHtml(intelligence.imageUrl)}" alt="${escapeHtml(comp.property_address_full || 'Sold comp')} preview" loading="lazy" />
-          <div class="nx-sold-comp__media-scrim"></div>
-          <span class="nx-sold-comp__media-badge">${escapeHtml(intelligence.imageLabel)}</span>
-        </div>
-      ` : ''}
+// ── Unified Map Card System ────────────────────────────────────────────────
+// Single source of truth for all floating map cards.
+// Replaces: standalone hoverPopupRef seller/comp hover + old compCardAnchor system.
 
-      <section class="nx-sold-comp__address-block">
-        <div class="nx-sold-comp__address-topline">
-          <div class="nx-sold-comp__address">${escapeHtml(comp.property_address_full || 'Property Unknown')}</div>
-          <span class="nx-sold-comp__property-badge">${escapeHtml(intelligence.propertyLabel)}</span>
-        </div>
-        <div class="nx-sold-comp__meta-row">
-          ${intelligence.distanceLabel ? `<span class="nx-sold-comp__distance">${escapeHtml(intelligence.distanceLabel)}</span>` : ''}
-          ${intelligence.subtypeLabel ? `<span class="nx-sold-comp__dot"></span><span>${escapeHtml(intelligence.subtypeLabel)}</span>` : ''}
-        </div>
-      </section>
+const DEBUG_MAP_CARDS_CONST = false // Separate from module-level for React closure safety
 
-      <section class="nx-sold-comp__buyer-row">
-        <div class="nx-sold-comp__buyer-avatar">${escapeHtml(intelligence.buyerInitials)}</div>
-        <div class="nx-sold-comp__buyer-copy">
-          <div class="nx-sold-comp__buyer-name">${escapeHtml(intelligence.buyerName)}</div>
-          <div class="nx-sold-comp__badge-stack">
-            <span class="nx-icm-hover__status nx-icm-hover__status--${intelligence.buyerTone}">${escapeHtml(intelligence.buyerType)}</span>
-            <span class="nx-sold-comp__micro-pill">${escapeHtml(intelligence.entityLabel)}</span>
-          </div>
-        </div>
-      </section>
+function getViewportSafeCardStyle(
+  anchor: { x: number; y: number },
+  containerSize: { width: number; height: number },
+  cardWidth: number,
+  cardMaxHeight: number,
+  gap = 18,
+  navOffset = 88,
+  bottomOffset = 36,
+): React.CSSProperties {
+  const { x, y } = anchor
+  const { width: cw, height: ch } = containerSize
+  const LEFT_MARGIN = 16
+  const RIGHT_MARGIN = 16
 
-      <section class="nx-sold-comp__metrics ${intelligence.variant === 'multifamily' ? 'is-multifamily' : 'is-residential'}">
-        ${intelligence.headlineMetrics.map((metric) => `
-          <div class="nx-sold-comp__metric ${metric.emphasis === 'accent' ? 'is-accent' : ''} ${metric.emphasis === 'hero' ? 'is-hero' : ''}">
-            <span>${escapeHtml(metric.label)}</span>
-            <strong>${escapeHtml(metric.value)}</strong>
-          </div>
-        `).join('')}
-      </section>
+  let left = x + gap
+  let top = y - Math.floor(cardMaxHeight / 2)
 
-      <section class="nx-sold-comp__metrics is-support ${intelligence.variant === 'multifamily' ? 'is-multifamily' : 'is-residential'}">
-        ${intelligence.supportMetrics.map((metric) => `
-          <div class="nx-sold-comp__metric ${metric.emphasis === 'accent' ? 'is-accent' : ''}">
-            <span>${escapeHtml(metric.label)}</span>
-            <strong>${escapeHtml(metric.value)}</strong>
-          </div>
-        `).join('')}
-      </section>
+  // Flip left if near right edge
+  if (left + cardWidth > cw - RIGHT_MARGIN) {
+    left = x - cardWidth - gap
+  }
+  // Clamp left
+  if (left < LEFT_MARGIN) left = LEFT_MARGIN
+  // Clamp top below nav
+  if (top < navOffset) top = navOffset
+  // Clamp top above bottom
+  const maxTop = ch - cardMaxHeight - bottomOffset
+  if (top > maxTop) top = Math.max(navOffset, maxTop)
 
-      <section class="nx-sold-comp__chip-section">
-        <div class="nx-sold-comp__chips">
-          ${intelligence.intelligenceChips.map((chip) => `
-            <div class="nx-sold-comp__chip ${chip.tone ? `is-${chip.tone}` : ''}">
-              <span>${escapeHtml(chip.label)}</span>
-              <strong>${escapeHtml(chip.value)}</strong>
-            </div>
-          `).join('')}
-        </div>
-        <p class="nx-sold-comp__why">${escapeHtml(intelligence.whyItMatters)}</p>
-      </section>
-    </div>
-  </article>
-`
+  const availHeight = ch - top - bottomOffset
+  const finalHeight = Math.min(cardMaxHeight, Math.max(240, availHeight))
+  return {
+    position: 'absolute',
+    left,
+    top,
+    width: Math.min(cardWidth, cw - LEFT_MARGIN - RIGHT_MARGIN),
+    height: finalHeight,
+    maxHeight: finalHeight,
+    // overflow: hidden is on the card via CSS, body handles internal scroll
+  }
 }
 
-const SoldCompSelectionCard = ({
+
+const SoldCompMapCard = ({
   comp,
+  intent,
+  anchor,
+  containerSize,
   subject,
-  onCenterMap,
   onClose,
+  onCenterMap,
+  onOpenCompIntel,
+  onMouseEnter,
+  onMouseLeave,
 }: {
-  comp: RecentSoldComp | null
+  comp: RecentSoldComp
+  intent: MapCardIntent
+  anchor: { x: number; y: number }
+  containerSize: { width: number; height: number }
   subject?: any | null
-  onCenterMap: (lng: number, lat: number) => void
   onClose: () => void
+  onCenterMap: (lng: number, lat: number) => void
+  onOpenCompIntel?: () => void
+  onOpenDealIntelligence?: () => void
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
 }) => {
-  if (!comp) return null
-  const imageUrl = comp.streetview_image || comp.satellite_image || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
-  
+  const isSelected = intent === 'selected'
+  const cardWidth = isSelected ? 480 : 360
+  const cardMaxHeight = isSelected
+    ? Math.min(720, containerSize.height - 120)
+    : Math.min(420, containerSize.height - 140)
+
+  const cardStyle = getViewportSafeCardStyle(anchor, containerSize, cardWidth, cardMaxHeight)
+
+  const intelligence = buildSoldCompPresentation(comp, subject, 14)
   const price = comp.mls_sold_price ?? comp.sale_price ?? 0
-  const priceLabel = formatCurrency(price)
+  const imageUrl = comp.streetview_image || comp.satellite_image || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
   const ppsf = comp.computed_ppsf ?? comp.arv_ppsf ?? (price && comp.building_square_feet ? Math.round(price / comp.building_square_feet) : null)
-  
-  const sourceLabel = comp.sale_source || 'Unknown Sale Source'
-  const ownerLabel = comp.owner_type_label || 'Unknown Owner Type'
-  const buyerLabel = comp.buyer_type_label || 'Unknown Buyer Type'
-
-  const sectionLabelStyle: React.CSSProperties = {
-    fontSize: '10px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    color: 'rgba(255,255,255,0.4)',
-    marginBottom: '12px',
-    borderBottom: '1px solid rgba(255,255,255,0.1)',
-    paddingBottom: '4px',
-    display: 'block'
-  }
-
-  const dataRowStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    padding: '6px 0',
-    borderBottom: '1px solid rgba(255,255,255,0.05)',
-    fontSize: '13px'
-  }
-
-  const dataLabelStyle: React.CSSProperties = {
-    opacity: 0.6
-  }
-
-  const dataValueStyle: React.CSSProperties = {
-    fontWeight: 600
-  }
-
-  const distance = (subject?.latitude && subject?.longitude) 
+  const distance = (subject?.latitude && subject?.longitude)
     ? haversineMiles(subject.latitude, subject.longitude, comp.latitude, comp.longitude)
     : null
 
   return (
-    <article className="nx-icm-buyer-card" style={{ 
-      borderColor: '#ef4444', 
-      width: '420px', 
-      maxHeight: '90vh', 
-      overflowY: 'auto',
-      background: 'rgba(15, 12, 12, 0.98)',
-      backdropFilter: 'blur(10px)',
-      boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-      padding: 0
-    }}>
-      <div style={{ position: 'relative', height: '180px', width: '100%' }}>
+    <div
+      className={cls(
+        'nx-map-card nx-map-card--comp',
+        isSelected ? 'nx-map-card--selected' : 'nx-map-card--hover',
+      )}
+      style={cardStyle}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* MAP_CARD_AUDIT: unified sold comp card (hover=compact, selected=full) */}
+      {/* Close button */}
+      {isSelected && (
+        <button type="button" className="nx-map-card__close-btn" onClick={onClose} aria-label="Close">×</button>
+      )}
+
+      {/* Media header */}
+      <div className="nx-map-card__media">
         {imageUrl ? (
-          <img src={imageUrl} alt="Property" style={{ width: '100%', height: '100%', objectFit: 'cover' }} loading="lazy" />
+          <img src={imageUrl} alt={comp.property_address_full || 'Comp'} loading="lazy" />
         ) : (
-          <div style={{ width: '100%', height: '100%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.2)' }}>No Preview Available</div>
+          <div className="nx-map-card__media-placeholder">No Preview</div>
         )}
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.4), transparent 40%, rgba(0,0,0,0.9))' }} />
-        <button 
-          type="button" 
-          onClick={onClose}
-          style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 12px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', zIndex: 10 }}
-        >
-          Close
-        </button>
-        <div style={{ position: 'absolute', bottom: '16px', left: '20px', zIndex: 5 }}>
-          <div style={{ color: '#ef4444', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', marginBottom: '4px' }}>
-            {sourceLabel} • {comp.sale_date ? new Date(comp.sale_date).toLocaleDateString() : 'Unknown Date'}
+        <div className="nx-map-card__media-scrim" />
+        <div className="nx-map-card__media-hero">
+          <div className="nx-map-card__price-label">{intelligence.salePrice}</div>
+          <div className="nx-map-card__price-sub">
+            <span className="nx-map-card__pill nx-map-card__pill--source">{intelligence.sourceLabel}</span>
+            <span>{intelligence.saleDate}</span>
           </div>
-          <div style={{ fontSize: '32px', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em', lineHeight: 1 }}>{priceLabel}</div>
-          <div style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>{comp.property_address_full}</div>
         </div>
       </div>
 
-      <div style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-          <span style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '4px 8px', borderRadius: '2px', fontSize: '10px', fontWeight: 700, border: '1px solid rgba(239, 68, 68, 0.3)' }}>{ownerLabel}</span>
-          <span style={{ background: comp.is_institutional_buyer ? 'rgba(168, 85, 247, 0.1)' : 'rgba(59, 130, 246, 0.1)', color: comp.is_institutional_buyer ? '#a855f7' : '#3b82f6', padding: '4px 8px', borderRadius: '2px', fontSize: '10px', fontWeight: 700, border: comp.is_institutional_buyer ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)' }}>{buyerLabel}</span>
-          {distance !== null && (
-            <span style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'rgba(255,255,255,0.6)', padding: '4px 8px', borderRadius: '2px', fontSize: '10px', fontWeight: 700, border: '1px solid rgba(255, 255, 255, 0.1)' }}>{distance.toFixed(2)} mi away</span>
-          )}
+      {/* Scrollable body */}
+      <div className="nx-map-card__body">
+        {/* Address + pills */}
+        <div className="nx-map-card__identity">
+          <div className="nx-map-card__pills">
+            <span className="nx-map-card__pill">{intelligence.propertyLabel}</span>
+            {distance !== null && (
+              <span className="nx-map-card__pill nx-map-card__pill--muted">{distance.toFixed(1)} mi</span>
+            )}
+            {comp.deal_grade ? (
+              <span className="nx-map-card__pill nx-map-card__pill--gold">Grade {comp.deal_grade}</span>
+            ) : null}
+            <span className={cls('nx-map-card__pill', `nx-map-card__pill--buyer-${intelligence.buyerTone}`)}>
+              {intelligence.buyerType}
+            </span>
+          </div>
+          <div className="nx-map-card__address">{comp.property_address_full || 'Address Unknown'}</div>
         </div>
 
-        <section style={{ marginBottom: '24px' }}>
-          <label style={sectionLabelStyle}>Property Profile</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Type</span><span style={dataValueStyle}>{comp.property_type || '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Class</span><span style={dataValueStyle}>{comp.normalized_asset_class || '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Beds / Baths</span><span style={dataValueStyle}>{comp.total_bedrooms ?? '—'} / {comp.total_baths ?? '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Sqft</span><span style={dataValueStyle}>{formatInteger(comp.building_square_feet)}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Units</span><span style={dataValueStyle}>{comp.units_count ?? 1}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Year Built</span><span style={dataValueStyle}>{comp.year_built ?? '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Lot Size</span><span style={dataValueStyle}>{comp.lot_acreage ? `${comp.lot_acreage} ac` : comp.lot_square_feet ? `${formatInteger(comp.lot_square_feet)} sqft` : '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Condition</span><span style={dataValueStyle}>{comp.building_condition || 'Average'}</span></div>
+        {/* Buyer row */}
+        <div className="nx-map-card__buyer-row">
+          <div className="nx-map-card__buyer-avatar">{intelligence.buyerInitials}</div>
+          <div className="nx-map-card__buyer-copy">
+            <div className="nx-map-card__buyer-name">{intelligence.buyerName}</div>
+            <div className="nx-map-card__buyer-entity">{intelligence.entityLabel}</div>
           </div>
-        </section>
+        </div>
 
-        <section style={{ marginBottom: '24px' }}>
-          <label style={sectionLabelStyle}>Sale Intelligence</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>MLS Sold Price</span><span style={dataValueStyle}>{formatCurrency(comp.mls_sold_price)}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Public Sale Price</span><span style={dataValueStyle}>{formatCurrency(comp.sale_price)}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Price / Sqft</span><span style={dataValueStyle}>{formatCurrency(ppsf)}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Deal Grade</span><span style={{ ...dataValueStyle, color: '#22c55e' }}>{comp.deal_grade || 'A'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>Confidence</span><span style={dataValueStyle}>{comp.comp_confidence_score ? `${Math.round(comp.comp_confidence_score)}/100` : '—'}</span></div>
-            <div style={dataRowStyle}><span style={dataLabelStyle}>ARV Estimate</span><span style={dataValueStyle}>{formatCurrency(comp.arv_estimate)}</span></div>
+        {/* Why it matters */}
+        {intelligence.whyItMatters && (
+          <div className="nx-map-card__match-note">
+            ◆ {intelligence.whyItMatters}
           </div>
-        </section>
+        )}
 
-        <section style={{ marginBottom: '24px' }}>
-          <label style={sectionLabelStyle}>Buyer Intelligence</label>
-          <div style={dataRowStyle}><span style={dataLabelStyle}>Owner/Buyer Name</span><span style={dataValueStyle}>{comp.owner_name || '—'}</span></div>
-          <div style={dataRowStyle}><span style={dataLabelStyle}>Buyer Type</span><span style={dataValueStyle}>{buyerLabel}</span></div>
-          {comp.is_institutional_buyer && (
-            <>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Institution Match</span><span style={{ ...dataValueStyle, color: '#a855f7' }}>{comp.institutional_match_name}</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Match Method</span><span style={dataValueStyle}>{comp.institutional_match_method} ({comp.institutional_match_confidence})</span></div>
-            </>
-          )}
-          <div style={dataRowStyle}><span style={dataLabelStyle}>Corporate Owner</span><span style={dataValueStyle}>{comp.is_corporate_owner ? 'YES' : 'NO'}</span></div>
-        </section>
-
-        {subject && (
-          <section style={{ marginBottom: '24px' }}>
-            <label style={sectionLabelStyle}>Comp Matching</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Distance</span><span style={dataValueStyle}>{distance?.toFixed(2)} mi</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Similarity</span><span style={dataValueStyle}>{comp.comp_confidence_score ? `${Math.round(comp.comp_confidence_score)}%` : '—'}</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Asset Class</span><span style={{ ...dataValueStyle, color: subject.normalized_asset_class === comp.normalized_asset_class ? '#22c55e' : '#ef4444' }}>{subject.normalized_asset_class === comp.normalized_asset_class ? 'MATCH' : 'MISMATCH'}</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Sqft Delta</span><span style={dataValueStyle}>{Math.abs((subject.building_square_feet || 0) - (comp.building_square_feet || 0))} sqft</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Beds Match</span><span style={dataValueStyle}>{subject.total_bedrooms === comp.total_bedrooms ? 'YES' : 'NO'}</span></div>
-              <div style={dataRowStyle}><span style={dataLabelStyle}>Year Delta</span><span style={dataValueStyle}>{comp.year_built && subject.year_built ? Math.abs(comp.year_built - subject.year_built) : '—'} yrs</span></div>
+        {/* Headline metrics */}
+        <div className="nx-map-card__metric-grid">
+          {intelligence.headlineMetrics.slice(0, isSelected ? 6 : 3).map((m) => (
+            <div key={m.label} className={cls('nx-map-card__metric', m.emphasis === 'accent' ? 'nx-map-card__metric--accent' : m.emphasis === 'hero' ? 'nx-map-card__metric--hero' : '')}>
+              <span>{m.label}</span>
+              <strong>{m.value}</strong>
             </div>
-          </section>
-        )}
+          ))}
+          {ppsf && (
+            <div className="nx-map-card__metric">
+              <span>PPSF</span>
+              <strong>{formatCurrency(ppsf)}</strong>
+            </div>
+          )}
+        </div>
 
-        {!subject && (
-          <div style={{ padding: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '4px', fontSize: '11px', color: '#3b82f6', marginBottom: '24px', textAlign: 'center' }}>
-            Select a property to use this comp in ARV analysis.
+        {/* Support metrics — selected only */}
+        {isSelected && intelligence.supportMetrics.length > 0 && (
+          <div className="nx-map-card__metric-grid nx-map-card__metric-grid--support">
+            {intelligence.supportMetrics.map((m) => (
+              <div key={m.label} className={cls('nx-map-card__metric', m.emphasis === 'accent' ? 'nx-map-card__metric--accent' : '')}>
+                <span>{m.label}</span>
+                <strong>{m.value}</strong>
+              </div>
+            ))}
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '32px' }}>
-          <button 
-            type="button" 
-            className="nx-icm__mode-tab" 
-            style={{ width: '100%', height: '40px', background: '#ef4444', color: '#fff', fontWeight: 700, border: 'none', opacity: subject ? 1 : 0.5 }}
-            disabled={!subject}
-            onClick={() => alert('TODO: Add ARV/Comp Intelligence UI connection')}
-          >
-            ADD TO ARV
-          </button>
-          <button 
-            type="button" 
-            className="nx-icm__mode-tab" 
-            style={{ width: '100%', height: '40px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.6)' }}
-            onClick={() => alert('TODO: Add Exclude Comp UI connection')}
-          >
-            EXCLUDE COMP
-          </button>
-          <button 
-            type="button" 
-            className="nx-icm__mode-tab" 
-            style={{ width: '100%', height: '40px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
-            onClick={() => alert('TODO: Open Comp Intelligence View')}
-          >
-            INTEL VIEW
-          </button>
-          <button 
-            type="button" 
-            className="nx-icm__mode-tab" 
-            style={{ width: '100%', height: '40px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
-            onClick={() => onCenterMap(comp.longitude, comp.latitude)}
-          >
-            CENTER MAP
-          </button>
-        </div>
+        {/* Intelligence chips — selected only */}
+        {isSelected && intelligence.intelligenceChips.length > 0 && (
+          <div className="nx-map-card__chips">
+            {intelligence.intelligenceChips.map((chip) => (
+              <div key={chip.label} className={cls('nx-map-card__chip', chip.tone ? `nx-map-card__chip--${chip.tone}` : '')}>
+                <span>{chip.label}</span>
+                <strong>{chip.value}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Subject comp match — selected only */}
+        {isSelected && subject && distance !== null && (
+          <div className="nx-map-card__metric-grid nx-map-card__metric-grid--support">
+            <div className="nx-map-card__metric">
+              <span>Distance</span>
+              <strong>{distance.toFixed(2)} mi</strong>
+            </div>
+            <div className={cls('nx-map-card__metric', subject.normalized_asset_class === comp.normalized_asset_class ? 'nx-map-card__metric--green' : 'nx-map-card__metric--accent')}>
+              <span>Asset Match</span>
+              <strong>{subject.normalized_asset_class === comp.normalized_asset_class ? 'Match' : 'Mismatch'}</strong>
+            </div>
+          </div>
+        )}
       </div>
-    </article>
+
+      {/* Footer actions */}
+      {isSelected && (
+        <div className="nx-map-card__footer nx-map-card__actions">
+          <button type="button" className="nx-mic-btn nx-mic-btn--success" onClick={() => { if (DEBUG_MAP_CARDS_CONST) console.debug('[MapCard] Add to ARV') }}>Add to ARV</button>
+          <button type="button" className="nx-mic-btn nx-mic-btn--danger" onClick={() => { if (DEBUG_MAP_CARDS_CONST) console.debug('[MapCard] Exclude comp') }}>Exclude</button>
+          <button type="button" className="nx-mic-btn" onClick={() => onCenterMap(comp.longitude, comp.latitude)}>Center</button>
+          {onOpenCompIntel && (
+            <button type="button" className="nx-mic-btn nx-mic-btn--violet" onClick={onOpenCompIntel}>Comp Intel</button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
+
+const SellerMapCard = ({
+  pin,
+  intent,
+  anchor,
+  containerSize,
+  onClose,
+  onCenterMap,
+  onOpenDealIntelligence,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  pin: Record<string, unknown>
+  intent: MapCardIntent
+  anchor: { x: number; y: number }
+  containerSize: { width: number; height: number }
+  onClose: () => void
+  onCenterMap: () => void
+  onOpenDealIntelligence?: () => void
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+}) => {
+  const isSelected = intent === 'selected'
+  const cardWidth = isSelected ? 440 : 340
+  const cardMaxHeight = isSelected
+    ? Math.min(680, containerSize.height - 120)
+    : Math.min(380, containerSize.height - 140)
+  const cardStyle = getViewportSafeCardStyle(anchor, containerSize, cardWidth, cardMaxHeight)
+
+  const stage = text(pin.conversation_stage || pin.seller_stage || pin.pipeline_stage || '')
+  const status = text(pin.conversation_status || pin.contact_status || '')
+  const isHot = lower(pin.lead_temperature) === 'hot' || lower(pin.lead_temperature) === 'very_hot'
+  const isPositive = lower(stage).includes('positive') || lower(stage).includes('negotiating') || lower(stage).includes('offer')
+  const accentMod = isHot ? 'nx-map-card--seller-hot' : isPositive ? 'nx-map-card--seller-positive' : ''
+
+  const sellerName = text(pin.seller_display_name || pin.owner_display_name || pin.owner_name || pin.seller_name || 'Unknown Seller')
+  const address = text(pin.property_address_full || pin.address || (pin as any).situs_address || '')
+  const estValue = num(pin.estimated_value)
+  const equityPct = num(pin.equity_percent)
+  const repairs = num(pin.repair_estimate || pin.estimated_repair_cost)
+  const motivationScore = num(pin.motivation_score || pin.final_acquisition_score || pin.priority_score)
+  const propertyType = text(pin.property_type || pin.normalized_asset_class || '')
+  const units = num(pin.units || pin.units_count)
+  const beds = num(pin.total_bedrooms || (pin as any).beds || (pin as any).bedrooms)
+  const baths = num(pin.total_baths || (pin as any).baths || (pin as any).bathrooms)
+  const sqft = num(pin.building_square_feet || (pin as any).sqft)
+  const ownershipYears = num(pin.ownership_years)
+  const sentCount = num(pin.sent_count)
+  const rawImageUrl = text(pin.streetview_image || pin.street_view_image || pin.map_image || '')
+  const imageUrl = rawImageUrl || (address && address !== 'Property Unknown' ? (buildStreetViewUrl(address) || '') : '')
+
+  const stageLabel = text(pin.market_status_label || stage || status || 'Active')
+  const lastActivity = text(pin.latest_message_body || (pin as any).last_outreach_message || pin.last_message || (pin as any).latestMessageBody || '')
+  const lastActivityTime = text(pin.last_reply_at || pin.last_outbound_at || (pin as any).last_activity_at || pin.latest_message_at || '')
+
+  const rawTags = text((pin as any).seller_tags_text || (pin as any).property_flags_text || '')
+  const tags = rawTags ? rawTags.split(/[;,|]/).map((t: string) => t.trim()).filter(Boolean).slice(0, isSelected ? 6 : 3) : []
+
+  const physicalParts: string[] = []
+  if (beds !== null && beds > 0) physicalParts.push(`${Math.round(beds)} bd`)
+  if (baths !== null && baths > 0) physicalParts.push(`${Math.round(baths)} ba`)
+  if (sqft !== null && sqft > 0) physicalParts.push(`${formatInteger(sqft)} sqft`)
+  const physicalSummary = physicalParts.join(' · ')
+
+  return (
+    <div
+      className={cls(
+        'nx-map-card nx-map-card--seller',
+        accentMod,
+        isSelected ? 'nx-map-card--selected' : 'nx-map-card--hover',
+      )}
+      style={cardStyle}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* MAP_CARD_AUDIT: unified seller card (hover=compact, selected=expanded) */}
+      {/* Close button — only in selected mode */}
+      {isSelected && (
+        <button type="button" className="nx-map-card__close-btn" onClick={onClose} aria-label="Close (Esc)">×</button>
+      )}
+
+      {/* Media header */}
+      {imageUrl && (
+        <div className="nx-map-card__media nx-map-card__media--seller">
+          <img src={imageUrl} alt={address || sellerName} loading="lazy" />
+          <div className="nx-map-card__media-scrim" />
+        </div>
+      )}
+
+      <div className="nx-map-card__body">
+        {/* Identity */}
+        <div className="nx-map-card__identity">
+          <div className="nx-map-card__pills">
+            {stageLabel && <span className="nx-map-card__pill nx-map-card__pill--stage">{stageLabel}</span>}
+            {propertyType && <span className="nx-map-card__pill nx-map-card__pill--muted">{propertyType}</span>}
+            {units && units > 1 && <span className="nx-map-card__pill nx-map-card__pill--muted">{Math.round(units)} units</span>}
+            {isSelected && sentCount !== null && sentCount > 0 && (
+              <span className="nx-map-card__pill nx-map-card__pill--muted">{Math.round(sentCount)} sent</span>
+            )}
+          </div>
+          <div className="nx-map-card__seller-name">{sellerName}</div>
+          <div className="nx-map-card__address">{address}</div>
+          {physicalSummary && <div className="nx-map-card__physical">{physicalSummary}</div>}
+        </div>
+
+        {/* Value metrics */}
+        <div className="nx-map-card__metric-grid">
+          {estValue !== null && (
+            <div className="nx-map-card__metric">
+              <span>Est. Value</span>
+              <strong>{formatCompactCurrency(estValue)}</strong>
+            </div>
+          )}
+          {equityPct !== null && (
+            <div className={cls('nx-map-card__metric', equityPct >= 40 ? 'nx-map-card__metric--green' : '')}>
+              <span>Equity</span>
+              <strong>{Math.round(equityPct)}%</strong>
+            </div>
+          )}
+          {repairs !== null && (
+            <div className="nx-map-card__metric">
+              <span>Repairs</span>
+              <strong>{formatCompactCurrency(repairs)}</strong>
+            </div>
+          )}
+          {isSelected && ownershipYears !== null && (
+            <div className="nx-map-card__metric">
+              <span>Owned</span>
+              <strong>{Math.round(ownershipYears)} yrs</strong>
+            </div>
+          )}
+        </div>
+
+        {/* Motivation score bar */}
+        {motivationScore !== null && (
+          <div className="nx-map-card__scorebar">
+            <span>Motivation</span>
+            <div className="nx-map-card__scorebar-track">
+              <div className="nx-map-card__scorebar-fill" style={{ width: `${Math.min(100, motivationScore)}%` }} />
+            </div>
+            <strong>{Math.round(motivationScore)}</strong>
+          </div>
+        )}
+
+        {/* Tags — selected only */}
+        {isSelected && tags.length > 0 && (
+          <div className="nx-map-card__tags">
+            {tags.map((tag: string) => (
+              <span key={tag} className="nx-map-card__pill nx-map-card__pill--tag">{tag}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Last activity */}
+        {lastActivity && (
+          <div className="nx-map-card__last-activity">
+            <span>Last Reply{lastActivityTime ? ` · ${formatRelative(lastActivityTime)}` : ''}</span>
+            <p>{lastActivity.length > 100 ? `${lastActivity.slice(0, 100)}…` : lastActivity}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      {isSelected && (
+        <div className="nx-map-card__footer nx-map-card__actions">
+          <button type="button" className="nx-mic-btn nx-mic-btn--primary" onClick={onCenterMap}>Center</button>
+          {onOpenDealIntelligence && (
+            <button type="button" className="nx-mic-btn nx-mic-btn--violet" onClick={onOpenDealIntelligence}>Deal Intel</button>
+          )}
+          <button type="button" className="nx-mic-btn" onClick={onClose}>Close</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const MapEntityCard = ({
+  card,
+  subject,
+  onClose,
+  onCenterMap,
+  onOpenDealIntelligence,
+  onOpenCompIntel,
+  clearHoverTimerRef,
+  cancelClearHover,
+}: {
+  card: MapCardState
+  subject?: any | null
+  onClose: () => void
+  onCenterMap: (lng: number, lat: number) => void
+  onOpenDealIntelligence?: () => void
+  onOpenCompIntel?: () => void
+  clearHoverTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
+  cancelClearHover: () => void
+}) => {
+  if (!card) return null
+
+  const handleMouseEnter = () => {
+    if (card.intent === 'hover') cancelClearHover()
+  }
+  const handleMouseLeave = () => {
+    if (card.intent === 'hover') {
+      if (clearHoverTimerRef.current) clearTimeout(clearHoverTimerRef.current)
+      clearHoverTimerRef.current = setTimeout(() => {
+        clearHoverTimerRef.current = null
+        onClose()
+      }, 120)
+    }
+  }
+
+  if (card.kind === 'sold_comp') {
+    const comp = card.feature as unknown as RecentSoldComp
+    return (
+      <div
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: card.intent === 'selected' ? 28 : 22 }}
+      >
+        <SoldCompMapCard
+          comp={comp}
+          intent={card.intent}
+          anchor={card.anchor}
+          containerSize={card.containerSize}
+          subject={subject}
+          onClose={onClose}
+          onCenterMap={onCenterMap}
+          onOpenCompIntel={onOpenCompIntel}
+          onOpenDealIntelligence={onOpenDealIntelligence}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        />
+      </div>
+    )
+  }
+
+  if (card.kind === 'seller') {
+    const pin = card.feature
+    return (
+      <div
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: card.intent === 'selected' ? 28 : 22 }}
+      >
+        <SellerMapCard
+          pin={pin}
+          intent={card.intent}
+          anchor={card.anchor}
+          containerSize={card.containerSize}
+          onClose={onClose}
+          onCenterMap={() => onCenterMap(Number(pin.lng ?? pin.longitude ?? 0), Number(pin.lat ?? pin.latitude ?? 0))}
+          onOpenDealIntelligence={onOpenDealIntelligence}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        />
+      </div>
+    )
+  }
+
+  return null
+}
+
 
 const BuyerSelectionCard = ({
   purchase,
@@ -2988,6 +3249,7 @@ const MiniSellerPinPopup = ({
   onClose,
   onOpenProperty,
   onOpenQueue,
+  onOpenDealIntelligence,
   hydrating = false,
   hydrationFailed = false,
 }: {
@@ -2996,6 +3258,7 @@ const MiniSellerPinPopup = ({
   onClose: () => void
   onOpenProperty?: () => void
   onOpenQueue?: () => void
+  onOpenDealIntelligence?: () => void
   hydrating?: boolean
   hydrationFailed?: boolean
 }) => {
@@ -3047,6 +3310,7 @@ const MiniSellerPinPopup = ({
         disabled
         onClose={onClose}
         onOpenConversation={onOpenProperty}
+        onOpenDealIntelligence={onOpenDealIntelligence}
       />
 
       {mode === 'queued' && (
@@ -3087,6 +3351,63 @@ const MiniSellerPinPopup = ({
       )}
     </div>
   )
+}
+
+// ── WebGL / style safety helpers ──────────────────────────────────────────────
+function isMapSafe(map: maplibregl.Map | null | undefined): map is maplibregl.Map {
+  return !!map && !(map as unknown as { _removed?: boolean })._removed && typeof map.loaded === 'function'
+}
+
+function isStyleSafe(map: maplibregl.Map | null | undefined): map is maplibregl.Map {
+  try {
+    if (!isMapSafe(map)) return false
+    const style = map.getStyle?.()
+    return !!style && !!(style as unknown as { sources?: unknown }).sources && !!(style as unknown as { layers?: unknown }).layers
+  } catch {
+    return false
+  }
+}
+
+function safeGetSource(map: maplibregl.Map | null | undefined, sourceId: string): maplibregl.Source | null {
+  try {
+    if (!isStyleSafe(map)) return null
+    return map!.getSource(sourceId) || null
+  } catch {
+    return null
+  }
+}
+
+function safeSetGeoJsonSourceData(
+  map: maplibregl.Map | null | undefined,
+  sourceId: string,
+  data: Parameters<maplibregl.GeoJSONSource['setData']>[0],
+): boolean {
+  try {
+    const source = safeGetSource(map, sourceId) as (maplibregl.GeoJSONSource & { setData?: (data: unknown) => void }) | null
+    if (!source || typeof source.setData !== 'function') return false
+    source.setData(data)
+    return true
+  } catch (error) {
+    console.warn('[CommandMap] safeSetGeoJsonSourceData skipped', { sourceId, error })
+    return false
+  }
+}
+
+// Only query layers that actually exist in the current style, and always
+// return [] on any error — never propagate MapLibre internal crashes.
+function safeQueryRenderedFeatures(
+  map: maplibregl.Map,
+  point: maplibregl.PointLike,
+  layerIds: string[],
+): maplibregl.MapGeoJSONFeature[] {
+  try {
+    if (!isStyleSafe(map)) return []
+    const existing = layerIds.filter((id) => { try { return !!map.getLayer(id) } catch { return false } })
+    if (existing.length === 0) return []
+    return map.queryRenderedFeatures(point, { layers: existing })
+  } catch {
+    return []
+  }
 }
 
 interface Props {
@@ -3150,6 +3471,329 @@ const defaultFilters: MapFilterState = {
   dateRange: '',
 }
 
+// ── Deal Intelligence Side Sheet ─────────────────────────────────────────────
+type DealIntelSheetData =
+  | { type: 'seller'; thread: InboxWorkflowThread | null; pin?: CommandMapSellerPin | null }
+  | { type: 'comp'; comp: RecentSoldComp }
+
+const DealIntelligenceSideSheet = ({
+  data,
+  onClose,
+}: {
+  data: DealIntelSheetData
+  onClose: () => void
+}) => {
+  const [activeTab, setActiveTab] = useState(0)
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  const isComp = data.type === 'comp'
+  const tabs = isComp
+    ? ['Summary', 'Sale', 'Match', 'Buyer', 'Nearby', 'Actions']
+    : ['Summary', 'Property', 'Owner', 'Conversation', 'Comps', 'Actions']
+
+  // Helper formatters
+  const fmtNum = (n: number | null | undefined): string =>
+    n != null && Number.isFinite(n) ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n) : '—'
+  const fmtMoney = (n: number | null | undefined): string => {
+    if (n == null || !Number.isFinite(n)) return '—'
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(n)
+  }
+  const fmtPct = (n: number | null | undefined): string =>
+    n != null && Number.isFinite(n) ? `${Math.round(n)}%` : '—'
+  const fmtRel = (iso: string | null | undefined): string => {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    const diff = (Date.now() - d.getTime()) / 60000
+    if (diff < 60) return `${Math.max(1, Math.floor(diff))}m ago`
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`
+    return `${Math.floor(diff / 1440)}d ago`
+  }
+
+  const Metric = ({ label, value, accent, gold, green }: { label: string; value: string; accent?: boolean; gold?: boolean; green?: boolean }) => (
+    <div className={cls('nx-deal-sheet__metric', accent && 'nx-deal-sheet__metric--accent', gold && 'nx-deal-sheet__metric--gold', green && 'nx-deal-sheet__metric--green', isComp && 'nx-deal-sheet__metric--comp')}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+
+  const SectionLabel = ({ label }: { label: string }) => (
+    <span className={cls('nx-deal-sheet__section-label', isComp && 'nx-deal-sheet__section-label--comp')}>{label}</span>
+  )
+
+  const EmptyTab = ({ title, sub }: { title: string; sub: string }) => (
+    <div className="nx-deal-sheet__empty-tab">
+      <strong>{title}</strong>
+      <span>{sub}</span>
+    </div>
+  )
+
+  // ── Seller tab content ────────────────────────────────────────────────────
+  const renderSellerTab = () => {
+    const t = data.type === 'seller' ? data.thread : null
+    const pin = data.type === 'seller' ? data.pin : null
+    const rec = (t as any) || (pin as any) || {}
+
+    if (activeTab === 0) { // Summary
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Deal Summary" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Est. Value"     value={fmtMoney(rec.estimated_value ?? rec.estimatedValue)} accent />
+            <Metric label="Equity"         value={fmtPct(rec.equity_percent ?? rec.equityPercent)} />
+            <Metric label="Repairs"        value={fmtMoney(rec.estimated_repair_cost ?? rec.estimatedRepairCost)} />
+            <Metric label="Motivation"     value={rec.motivation_score != null ? `${Math.round(rec.motivation_score)}/100` : '—'} />
+            <Metric label="Acquisition"    value={rec.final_acquisition_score != null ? `${Math.round(rec.final_acquisition_score)}/100` : '—'} />
+            <Metric label="Stage"          value={text(rec.conversation_stage ?? rec.seller_stage ?? rec.stage) || '—'} />
+          </div>
+          {rec.last_outreach_message || rec.latest_message_body ? (
+            <div>
+              <SectionLabel label="Last Message" />
+              <div className="nx-deal-sheet__text-block">
+                {rec.last_outreach_message || rec.latest_message_body}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+    if (activeTab === 1) { // Property
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Property Details" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Type"       value={text(rec.property_type ?? rec.propertyType) || '—'} />
+            <Metric label="Beds"       value={fmtNum(rec.total_bedrooms ?? rec.beds)} />
+            <Metric label="Baths"      value={fmtNum(rec.total_baths ?? rec.baths)} />
+            <Metric label="Sqft"       value={fmtNum(rec.building_square_feet ?? rec.sqft)} />
+            <Metric label="Units"      value={fmtNum(rec.units_count ?? rec.units)} />
+            <Metric label="Year Built" value={fmtNum(rec.year_built)} />
+            <Metric label="Lot"        value={rec.lot_acreage ? `${rec.lot_acreage} ac` : fmtNum(rec.lot_square_feet) !== '—' ? `${fmtNum(rec.lot_square_feet)} sf` : '—'} />
+            <Metric label="Condition"  value={text(rec.building_condition) || '—'} />
+          </div>
+          {rec.property_address_full || rec.address ? (
+            <div>
+              <SectionLabel label="Address" />
+              <div className="nx-deal-sheet__text-block">{rec.property_address_full || rec.address}</div>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+    if (activeTab === 2) { // Owner
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Owner Information" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Owner Name"   value={text(rec.owner_display_name ?? rec.owner_name) || '—'} />
+            <Metric label="Owner Type"   value={text(rec.owner_type) || '—'} />
+            <Metric label="Yrs Owned"    value={fmtNum(rec.ownership_years)} />
+            <Metric label="Last Sale"    value={rec.last_sale_date ? new Date(rec.last_sale_date).toLocaleDateString() : '—'} />
+            <Metric label="Absentee"     value={rec.absentee_owner ? 'Yes' : rec.absentee_owner === false ? 'No' : '—'} />
+            <Metric label="Out of State" value={rec.out_of_state_owner ? 'Yes' : rec.out_of_state_owner === false ? 'No' : '—'} />
+          </div>
+        </div>
+      )
+    }
+    if (activeTab === 3) { // Conversation
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Conversation Status" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Reply Status"  value={text(rec.reply_status ?? rec.replyStatus) || '—'} accent />
+            <Metric label="Last Reply"    value={fmtRel(rec.last_reply_at ?? rec.lastReplyAt)} />
+            <Metric label="Last Outreach" value={fmtRel(rec.last_outbound_at ?? rec.lastOutboundAt)} />
+            <Metric label="Automation"    value={text(rec.automation_status ?? rec.automationStatus) || '—'} />
+          </div>
+          {rec.latest_message_body || rec.last_message ? (
+            <div>
+              <SectionLabel label="Latest Message" />
+              <div className="nx-deal-sheet__text-block">{rec.latest_message_body || rec.last_message}</div>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+    if (activeTab === 4) { // Comps
+      return <EmptyTab title="Comp Analysis" sub="Select comp markers on the map to compare against this property." />
+    }
+    if (activeTab === 5) { // Actions
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Actions" />
+          <div className="nx-deal-sheet__actions-grid">
+            <button type="button" className="nx-deal-sheet__action-btn nx-deal-sheet__action-btn--primary" disabled>
+              Open Inbox
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Follow-Up
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Make Offer
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Add Note
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+
+  // ── Comp tab content ──────────────────────────────────────────────────────
+  const renderCompTab = () => {
+    const comp = data.type === 'comp' ? data.comp : null
+    if (!comp) return null
+
+    const price = comp.mls_sold_price ?? comp.sale_price ?? 0
+    const ppsf = comp.computed_ppsf ?? comp.arv_ppsf ?? (price && comp.building_square_feet ? Math.round(price / comp.building_square_feet) : null)
+
+    if (activeTab === 0) { // Summary
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Sale Summary" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Sale Price"  value={fmtMoney(price)} accent />
+            <Metric label="PPSF"        value={ppsf ? fmtMoney(ppsf) : '—'} />
+            <Metric label="Confidence"  value={comp.comp_confidence_score ? `${Math.round(comp.comp_confidence_score)}/100` : '—'} />
+            <Metric label="Grade"       value={comp.deal_grade || '—'} gold />
+            <Metric label="ARV Est."    value={fmtMoney(comp.arv_estimate)} />
+            <Metric label="Source"      value={comp.sale_source || '—'} />
+          </div>
+          <div>
+            <SectionLabel label="Address" />
+            <div className="nx-deal-sheet__text-block">{comp.property_address_full || 'Unknown'}</div>
+          </div>
+        </div>
+      )
+    }
+    if (activeTab === 1) { // Sale
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Sale Details" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="MLS Price"    value={fmtMoney(comp.mls_sold_price)} accent />
+            <Metric label="Public Price" value={fmtMoney(comp.sale_price)} />
+            <Metric label="PPSF"         value={ppsf ? fmtMoney(ppsf) : '—'} />
+            <Metric label="Sale Date"    value={comp.sale_date ? new Date(comp.sale_date).toLocaleDateString() : '—'} />
+            <Metric label="Type"         value={comp.property_type || '—'} />
+            <Metric label="Asset Class"  value={comp.normalized_asset_class || '—'} />
+          </div>
+        </div>
+      )
+    }
+    if (activeTab === 2) { // Match
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Property Details" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Beds"       value={fmtNum(comp.total_bedrooms)} />
+            <Metric label="Baths"      value={fmtNum(comp.total_baths)} />
+            <Metric label="Sqft"       value={fmtNum(comp.building_square_feet)} />
+            <Metric label="Units"      value={fmtNum(comp.units_count)} />
+            <Metric label="Year Built" value={fmtNum(comp.year_built)} />
+            <Metric label="Condition"  value={comp.building_condition || '—'} />
+            <Metric label="Lot"        value={comp.lot_acreage ? `${comp.lot_acreage} ac` : fmtNum(comp.lot_square_feet) !== '—' ? `${fmtNum(comp.lot_square_feet)} sf` : '—'} />
+            <Metric label="Confidence" value={comp.comp_confidence_score ? `${Math.round(comp.comp_confidence_score)}%` : '—'} accent />
+          </div>
+        </div>
+      )
+    }
+    if (activeTab === 3) { // Buyer
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Buyer Intelligence" />
+          <div className="nx-deal-sheet__metrics">
+            <Metric label="Name"       value={comp.owner_name || '—'} />
+            <Metric label="Buyer Type" value={comp.buyer_type_label || '—'} accent />
+            <Metric label="Corporate"  value={comp.is_corporate_owner ? 'Yes' : 'No'} />
+            <Metric label="Institutional" value={comp.is_institutional_buyer ? 'Yes' : 'No'} />
+          </div>
+          {comp.is_institutional_buyer && comp.institutional_match_name ? (
+            <div>
+              <SectionLabel label="Institution Match" />
+              <div className="nx-deal-sheet__text-block">
+                {comp.institutional_match_name}
+                {comp.institutional_match_confidence ? ` (${comp.institutional_match_confidence})` : ''}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+    if (activeTab === 4) { // Nearby
+      return <EmptyTab title="Nearby Comps" sub="Select more comp markers to build a nearby comp set for this property." />
+    }
+    if (activeTab === 5) { // Actions
+      return (
+        <div className="nx-deal-sheet__section">
+          <SectionLabel label="Actions" />
+          <div className="nx-deal-sheet__actions-grid">
+            <button type="button" className="nx-deal-sheet__action-btn nx-deal-sheet__action-btn--comp" disabled>
+              Add to ARV
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Exclude Comp
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Find Similar
+            </button>
+            <button type="button" className="nx-deal-sheet__action-btn" disabled>
+              Export
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+
+  const titleName = isComp
+    ? (data.type === 'comp' ? (data.comp.property_address_full || 'Sold Comp') : '')
+    : (data.type === 'seller' ? (text((data.thread as any)?.seller_name ?? (data.thread as any)?.owner_name) || 'Seller') : '')
+  const titleSub = isComp
+    ? (data.type === 'comp' ? (data.comp.property_address_full || '') : '')
+    : (data.type === 'seller' ? (text((data.thread as any)?.property_address_full ?? (data.thread as any)?.address) || '') : '')
+
+  return (
+    <div className="nx-deal-sheet">
+      <div className="nx-deal-sheet__topbar">
+        <button type="button" className="nx-deal-sheet__back" onClick={onClose}>← Back</button>
+        <div className="nx-deal-sheet__title-block">
+          <div className="nx-deal-sheet__title-name" title={titleName}>{titleName}</div>
+          {titleSub && titleSub !== titleName ? <div className="nx-deal-sheet__title-sub" title={titleSub}>{titleSub}</div> : null}
+        </div>
+        <span className={cls('nx-deal-sheet__type-badge', isComp && 'nx-deal-sheet__type-badge--comp')}>
+          {isComp ? 'Comp Intel' : 'Deal Intel'}
+        </span>
+      </div>
+
+      <div className="nx-deal-sheet__tabs">
+        {tabs.map((tab, i) => (
+          <button
+            key={tab}
+            type="button"
+            className={cls('nx-deal-sheet__tab', activeTab === i && 'is-active', isComp && 'nx-deal-sheet__tab--comp')}
+            onClick={() => setActiveTab(i)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      <div className="nx-deal-sheet__content">
+        {isComp ? renderCompTab() : renderSellerTab()}
+      </div>
+    </div>
+  )
+}
+
 export function InboxCommandMap({
   threads,
   visibleThreads,
@@ -3187,8 +3831,12 @@ export function InboxCommandMap({
   const containerRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
+  const mapContextLostRef = useRef(false)
+  const mapContainerKeyRef = useRef(0)
+  const propUnivHandlersRegisteredRef = useRef(false)
   const animationRef = useRef<number | null>(null)
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
+  const clearPinHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const threadPopupRef = useRef<maplibregl.Popup | null>(null)
   const threadPopupRootRef = useRef<Root | null>(null)
   const threadPopupHostRef = useRef<HTMLDivElement | null>(null)
@@ -3203,9 +3851,14 @@ export function InboxCommandMap({
   const performanceSettingsRef = useRef<CommandMapPerformanceSettings | null>(null)
   const reducedMotionRef = useRef(false)
   const selectedThreadRef = useRef<InboxWorkflowThread | null>(null)
+  const [selectedSoldComp, setSelectedSoldComp] = useState<RecentSoldComp | null>(null)
+  const selectedSoldCompRef = useRef<RecentSoldComp | null>(null)
   useEffect(() => {
     selectedThreadRef.current = selectedThread
   }, [selectedThread])
+  useEffect(() => {
+    selectedSoldCompRef.current = selectedSoldComp
+  }, [selectedSoldComp])
   const mapStyleModeRef = useRef<MapStyleMode>(initialMapStyleMode)
   const activeBaseStyleIdRef = useRef(getCommandMapBaseStyleId(initialMapStyleMode))
   const activeThemeRef = useRef<CommandMapThemeDefinition>(getCommandMapTheme(initialMapStyleMode))
@@ -3270,6 +3923,7 @@ export function InboxCommandMap({
   const sellerPinHydrationAbortRef = useRef<AbortController | null>(null)
   const sellerPinsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sellerPinsAbortRef = useRef<AbortController | null>(null)
+  const propertyUniverseAbortRef = useRef<AbortController | null>(null)
   const styleLoadSeqRef = useRef(0)
   const styleLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const styleLoadStartedAtRef = useRef<number | null>(null)
@@ -3287,20 +3941,44 @@ export function InboxCommandMap({
   const [soldCompsGeojson, setSoldCompsGeojson] = useState<FeatureCollection<Point, Record<string, unknown>>>(EMPTY_GEOJSON)
   const [soldComps, setSoldComps] = useState<RecentSoldComp[]>([])
   const [, setSoldCompsLoading] = useState(false)
-  const [selectedSoldComp, setSelectedSoldComp] = useState<RecentSoldComp | null>(null)
+  const [, setCompCardAnchor] = useState<React.CSSProperties | null>(null)
+  const [hoveredMapCard, setHoveredMapCard] = useState<MapCardState>(null)
+  const [selectedMapCard, setSelectedMapCard] = useState<MapCardState>(null)
+  const hoveredMapCardRef = useRef<MapCardState>(null)
+  const selectedMapCardRef = useRef<MapCardState>(null)
+  useEffect(() => {
+    hoveredMapCardRef.current = hoveredMapCard
+  }, [hoveredMapCard])
+  useEffect(() => {
+    selectedMapCardRef.current = selectedMapCard
+  }, [selectedMapCard])
+  const [dealIntelSheet, setDealIntelSheet] = useState<DealIntelSheetData | null>(null)
   const [selectedThreadCensus, setSelectedThreadCensus] = useState<CensusData | null>(null)
   const [selectedBuyerPurchase, setSelectedBuyerPurchase] = useState<BuyerRecentPurchase | null>(null)
   const [hoveredClusterSummary, setHoveredClusterSummary] = useState<ClusterCensusSummary | null>(null)
   const [selectedClusterSummary, setSelectedClusterSummary] = useState<ClusterCensusSummary | null>(null)
-  const [showLegendPanel, setShowLegendPanel] = useState(true)
-  const [showCensusDock, setShowCensusDock] = useState(true)
+  const [showLegendPanel, setShowLegendPanel] = useState(false)
+  const [showCensusDock, setShowCensusDock] = useState(false)
 
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [activeControlsTab, setActiveControlsTab] = useState<ControlsTab>('view')
+  const [activeControlsTab, setActiveControlsTab] = useState<ControlsTab>('modes')
+  const [mapMode, setMapMode] = useState<MapModeKey>('acquisition')
+  const [filterCategory, setFilterCategory] = useState<FilterCategory>('prospect')
+  const [filterSearch, setFilterSearch] = useState('')
+  const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false)
+  const [cinematicControls, setCinematicControls] = useState<CinematicControlsState>({
+    livePulses: 'off',
+    pinGlow: 'subtle',
+    eventTrail: false,
+    soundFx: 'off',
+    mapAtmosphere: 'clean',
+  })
   const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>('full')
   const [mapStyleMode, setMapStyleMode] = useState<MapStyleMode>(initialMapStyleMode)
   const [baseStyleLoading, setBaseStyleLoading] = useState(false)
   const [styleFallbackWarning, setStyleFallbackWarning] = useState<string | null>(null)
+  const [mapContextLost, setMapContextLost] = useState(false)
+  const [mapContainerKey, setMapContainerKey] = useState(0)
 
   const scheduleMapResize = () => {
     const map = mapRef.current
@@ -3366,6 +4044,122 @@ export function InboxCommandMap({
       [key]: enabled,
     })
   }
+
+  // ── Map Mode Preset Application ────────────────────────────────────────────
+  // Skip the initial mount — only fire when user actively changes mode.
+  const _mapModeInitRef = useRef(true)
+  useEffect(() => {
+    if (_mapModeInitRef.current) { _mapModeInitRef.current = false; return }
+
+    const enabledLayers: string[] = []
+    const disabledLayers: string[] = []
+    const track = (name: string, on: boolean) => (on ? enabledLayers : disabledLayers).push(name)
+
+    switch (mapMode) {
+      case 'acquisition':
+        setSellerPinLayers((p) => {
+          track('sellerPins', true); track('newReplies', true); track('hot', true)
+          track('positive', true); track('negotiating', true); track('issues', true)
+          return { ...p, sellerPins: true, newReplies: true, hot: true, positive: true, negotiating: true, issues: true, blocked: false }
+        })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false); track('buyerHeatmap', false)
+          return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setCensusLayers(defaultCensusLayers)
+        setShowCensusDock(false)
+        break
+
+      case 'buyer_demand':
+        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setBuyerLayers((p) => {
+          track('buyerMatches', true); track('buyerHeatmap', true); track('recentSoldComps', true)
+          track('repeatBuyers', true); track('corporateBuyers', true); track('localInvestors', true)
+          return { ...p, sellerThreads: false, buyerMatches: true, buyerHeatmap: true, recentSoldComps: true, repeatBuyers: true, corporateBuyers: true, localInvestors: true, flippers: true, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setCensusLayers(defaultCensusLayers)
+        setShowCensusDock(false)
+        break
+
+      case 'comps':
+        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setBuyerLayers((p) => {
+          track('recentSoldComps', true); track('buyerMatches', true); track('buyerProfiles', true)
+          return { ...p, sellerThreads: false, recentSoldComps: true, buyerMatches: true, buyerProfiles: true, buyerHeatmap: false }
+        })
+        setBuyerDemandLayers((p) => {
+          track('soldPrice', true); track('activity6mo', true)
+          return { ...p, soldPrice: true, activity6mo: true, buyerHeat: false, investorDemand: false }
+        })
+        setCensusLayers(defaultCensusLayers)
+        setShowCensusDock(false)
+        break
+
+      case 'execution':
+        setSellerPinLayers((p) => {
+          track('sellerPins', true); track('queued', true); track('scheduled', true)
+          track('ready', true); track('sent', true); track('delivered', true); track('failedIssue', true)
+          return { ...p, sellerPins: true, queued: true, scheduled: true, ready: true, activeSending: true, sent: true, delivered: true, failedIssue: true, newReplies: true }
+        })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false)
+          return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setCensusLayers(defaultCensusLayers)
+        setShowCensusDock(false)
+        break
+
+      case 'opportunity_heat':
+        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false)
+          return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers((p) => {
+          track('investorDemand', true); track('activity6mo', true); track('buyerHeat', true)
+          return { ...p, investorDemand: true, activity6mo: true, buyerHeat: true, soldPrice: false }
+        })
+        setCensusLayers(() => { track('vacancyHeat', true); return { ...defaultCensusLayers, vacancyHeat: true } })
+        setShowCensusDock(false)
+        break
+
+      case 'territory':
+        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false)
+          return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setCensusLayers(defaultCensusLayers)
+        setMapOverlays((p) => { track('zip', true); track('cities', true); track('roads', true); return { ...p, zip: true, cities: true, roads: true } })
+        setShowCensusDock(false)
+        break
+
+      case 'census':
+        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false)
+          return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setSingleCensusMetric('incomeHeat', true)
+        track('incomeHeat', true)
+        setShowCensusDock(true)
+        break
+
+      default:
+        break
+    }
+
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('[MapMode] applied', { mode: mapMode, enabledLayers, disabledLayers })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapMode])
 
   useEffect(() => {
     setDockTier(preferredDockTier)
@@ -3572,6 +4366,33 @@ export function InboxCommandMap({
     [buyerCommandData?.profiles, selectedBuyerKey, selectedBuyerPurchase?.buyerKey],
   )
   const buyerFilterCount = useMemo(() => countBuyerFilters(buyerFilters), [buyerFilters])
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (filters.market) count++
+    if (filters.stage) count++
+    if (filters.status) count++
+    if (filters.leadTemperature) count++
+    if (filters.automationStatus) count++
+    if (filters.propertyType) count++
+    if (filters.unreadOnly) count++
+    if (filters.followUpDue) count++
+    if (filters.highEquity) count++
+    count += buyerFilterCount
+    return count
+  }, [filters, buyerFilterCount])
+  const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => {
+    if (!selectedPin || !selectedPin.lat || !selectedPin.lng) {
+      return { type: 'FeatureCollection', features: [] }
+    }
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [selectedPin.lng, selectedPin.lat] },
+        properties: { conversation_id: selectedPin.conversation_id },
+      }],
+    }
+  }, [selectedPin])
   const buyerFilterOptions = useMemo(() => {
     const profiles = buyerCommandData?.profiles ?? []
     const purchases = buyerCommandData?.recentPurchases ?? []
@@ -3605,15 +4426,7 @@ export function InboxCommandMap({
     } as CSSProperties),
     [activeThemeDefinition, mapStyleMode],
   )
-  const toggleBuyerFilterArray = (
-    key: 'buyerSourceTypes' | 'buyerRoles' | 'buyerIdentityTags' | 'assetTypes' | 'dealTypes' | 'locationTags' | 'matchTags',
-    value: string,
-  ) => {
-    if (!buyerFilters) return
-    const current = buyerFilters[key]
-    const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
-    onBuyerFiltersChange?.({ [key]: next } as Partial<BuyerMapFilters>)
-  }
+
   const clearBuyerFilters = () => onBuyerFiltersChange?.(defaultBuyerMapFilters)
   const liveActivityEvents = useMemo(() => (
     loadLiveActivityFeed({
@@ -3809,6 +4622,7 @@ export function InboxCommandMap({
           hydrating={activeSellerPinPopup.hydrating}
           hydrationFailed={activeSellerPinPopup.hydrationFailed}
           onClose={() => setActiveSellerPinPopup(null)}
+          onOpenDealIntelligence={() => setDealIntelSheet({ type: 'seller', thread: null, pin: sellerPin })}
           onOpenProperty={() => {
             const propertyId = text((sellerPin as any).property_id)
             const masterOwnerId = text((sellerPin as any).master_owner_id || (sellerPin as any).owner_id || (sellerPin as any).seller_id || (sellerPin as any).prospect_id)
@@ -3849,7 +4663,10 @@ export function InboxCommandMap({
             void onQuickReplySend?.(popupDraft)
           }}
           onClose={() => setActiveThreadPopup(null)}
-          onOpenDealIntelligence={popupThread ? () => onOpenDealIntelligenceRef.current?.(popupThread.id) : undefined}
+          onOpenDealIntelligence={popupThread ? () => {
+            setDealIntelSheet({ type: 'seller', thread: popupThread })
+            onOpenDealIntelligenceRef.current?.(popupThread.id)
+          } : undefined}
         />,
       )
     }
@@ -3894,7 +4711,7 @@ export function InboxCommandMap({
 
   useEffect(() => {
     if (!filtersOpen) return
-    setActiveControlsTab((current) => current || 'view')
+    setActiveControlsTab((current) => current || 'modes')
     const handlePointerDown = (event: MouseEvent) => {
       if (!controlsRef.current?.contains(event.target as Node)) setFiltersOpen(false)
     }
@@ -3908,6 +4725,27 @@ export function InboxCommandMap({
       document.removeEventListener('keydown', handleEscape)
     }
   }, [filtersOpen])
+
+  useEffect(() => {
+    if (!selectedSoldComp) return
+    const handleEscapeComp = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedSoldComp(null)
+        setCompCardAnchor(null)
+      }
+    }
+    document.addEventListener('keydown', handleEscapeComp)
+    return () => document.removeEventListener('keydown', handleEscapeComp)
+  }, [selectedSoldComp])
+
+  useEffect(() => {
+    if (!selectedMapCard) return
+    const handleEscapeCard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedMapCard(null)
+    }
+    document.addEventListener('keydown', handleEscapeCard)
+    return () => document.removeEventListener('keydown', handleEscapeCard)
+  }, [selectedMapCard])
 
   useEffect(() => {
     if (!rootRef.current || typeof ResizeObserver === 'undefined') return
@@ -4312,6 +5150,30 @@ export function InboxCommandMap({
       if (map.getLayer(SOLD_COMPS_CLUSTER_LAYER_IDS.core)) {
         map.setPaintProperty(SOLD_COMPS_CLUSTER_LAYER_IDS.core, 'circle-color', soldCompColor)
       }
+
+      // Property universe — retheme clusters and markers to match active theme
+      const puTokens = getMapThemeTokens(theme.id)
+      if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)) {
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, 'circle-color', buildClusterRingExpr(puTokens) as maplibregl.ExpressionSpecification)
+      }
+      if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore)) {
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, 'circle-color', buildClusterCoreExpr(puTokens) as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, 'circle-stroke-color', buildClusterStrokeExpr(puTokens) as maplibregl.ExpressionSpecification)
+      }
+      if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount)) {
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount, 'text-color', puTokens.clusterLabelColor)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount, 'text-halo-color', puTokens.clusterLabelHalo)
+      }
+      if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow)) {
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, 'circle-opacity', puTokens.markerGlowOpacity)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, 'circle-color', buildMarkerColorExpr(puTokens) as maplibregl.ExpressionSpecification)
+      }
+      if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markers)) {
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-color', buildMarkerColorExpr(puTokens) as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-opacity', puTokens.markerIconOpacity)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-color', puTokens.markerIconHaloColor)
+        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-width', puTokens.markerIconHaloWidth)
+      }
     }
 
     const ensureThemeOverlayInfrastructure = (map: maplibregl.Map) => {
@@ -4433,7 +5295,7 @@ export function InboxCommandMap({
       const darkStyle = await fetchDarkStyleSpec()
       if (!darkStyle) return
 
-      if (darkStyle.glyphs && !map.getStyle().glyphs) {
+      if (darkStyle.glyphs && !map.getStyle?.()?.glyphs) {
         // No runtime setter exists; retained through the base style spec above.
       }
 
@@ -5406,6 +6268,200 @@ export function InboxCommandMap({
           layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
         })
       }
+      // ── Property universe — viewport-fetched full property database ──────
+      if (!map.getSource(PROPERTY_UNIVERSE_SOURCE_ID)) {
+        map.addSource(PROPERTY_UNIVERSE_SOURCE_ID, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+          cluster: true,
+          clusterRadius: 52,
+          clusterMaxZoom: 11,
+          clusterProperties: {
+            hot_count:   ['+', ['case', ['==', ['get', 'markerState'], 'hot'], 1, 0]],
+            reply_count: ['+', ['case', ['==', ['get', 'markerState'], 'new_reply'], 1, 0]],
+            pos_count:   ['+', ['case', ['in', ['get', 'markerState'], ['literal', ['positive', 'negotiating']]], 1, 0]],
+            comm_count:  ['+', ['case', ['in', ['get', 'assetType'], ['literal', ['commercial', 'office', 'industrial', 'warehouse', 'storage', 'shopping_plaza', 'retail', 'hotel', 'mhp', 'mixed_use']]], 1, 0]],
+            top_score:   ['max', ['get', 'acquisitionScore']],
+          },
+        })
+      }
+
+      const puTheme = activeThemeRef.current.id
+      const puTokens = getMapThemeTokens(puTheme)
+      // Insert below existing cluster layers so active seller pins render above
+      const puAnchor = map.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.clusterRing,
+          type: 'circle',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-radius': ['step', ['get', 'point_count'], 22, 50, 30, 250, 38, 1000, 46],
+            'circle-color': buildClusterRingExpr(puTokens) as maplibregl.ExpressionSpecification,
+            'circle-blur': 0.8,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.clusterCore,
+          type: 'circle',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-radius': ['step', ['get', 'point_count'], 14, 50, 20, 250, 26, 1000, 32],
+            'circle-color': buildClusterCoreExpr(puTokens) as maplibregl.ExpressionSpecification,
+            'circle-stroke-width': 1.4,
+            'circle-stroke-color': buildClusterStrokeExpr(puTokens) as maplibregl.ExpressionSpecification,
+            'circle-opacity': 0.92,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.clusterCount,
+          type: 'symbol',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['has', 'point_count'],
+          layout: {
+            'text-field': ['step', ['get', 'point_count'],
+              ['to-string', ['get', 'point_count']],
+              1000, ['concat', ['to-string', ['/', ['round', ['/', ['get', 'point_count'], 100]], 10]], 'k'],
+            ],
+            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+            'text-size': 11,
+            'text-allow-overlap': true,
+            visibility: 'none',
+          },
+          paint: {
+            'text-color': puTokens.clusterLabelColor,
+            'text-halo-color': puTokens.clusterLabelHalo,
+            'text-halo-width': 1,
+          },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
+          type: 'circle',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-radius': 12,
+            'circle-blur': puTokens.markerGlowBlur,
+            'circle-opacity': puTokens.markerGlowOpacity,
+            'circle-color': buildMarkerColorExpr(puTokens) as maplibregl.ExpressionSpecification,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markers)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.markers,
+          type: 'symbol',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['!', ['has', 'point_count']],
+          layout: {
+            'icon-image': ['match', ['get', 'assetType'],
+              'sfr', 'nexus-pin-sfr', 'condo', 'nexus-pin-sfr', 'townhome', 'nexus-pin-sfr',
+              'multifamily_small', 'nexus-pin-multi', 'multifamily_large', 'nexus-pin-apt',
+              'storage', 'nexus-pin-storage', 'shopping_plaza', 'nexus-pin-retail', 'retail', 'nexus-pin-retail',
+              'office', 'nexus-pin-office', 'industrial', 'nexus-pin-industrial', 'warehouse', 'nexus-pin-industrial',
+              'mixed_use', 'nexus-pin-comm', 'hotel', 'nexus-pin-hotel', 'mhp', 'nexus-pin-mhp',
+              'land', 'nexus-pin-land', 'commercial', 'nexus-pin-comm', 'nexus-pin-default',
+            ] as maplibregl.ExpressionSpecification,
+            'icon-size': 0.32,
+            'icon-allow-overlap': false,
+            'icon-ignore-placement': false,
+            visibility: 'none',
+          },
+          paint: {
+            'icon-color': buildMarkerColorExpr(puTokens) as maplibregl.ExpressionSpecification,
+            'icon-opacity': puTokens.markerIconOpacity,
+            'icon-halo-color': puTokens.markerIconHaloColor,
+            'icon-halo-width': puTokens.markerIconHaloWidth,
+          },
+        }, puAnchor)
+      }
+
+      // Click cluster → zoom in
+      // Click individual marker → open property card via seller context
+      // Guard: only register once per map instance (addMapLayers runs on every style.load)
+      if (!propUnivHandlersRegisteredRef.current) {
+        propUnivHandlersRegisteredRef.current = true
+
+        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, (e) => {
+          e.preventDefault()
+          const feature = e.features?.[0]
+          if (!feature?.geometry || feature.geometry.type !== 'Point') return
+          const clusterId = feature.properties?.cluster_id as number
+          const coords = feature.geometry.coordinates as [number, number]
+          const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource
+          void src.getClusterExpansionZoom(clusterId).then((zoom) => {
+            map.easeTo({ center: coords, zoom: zoom + 0.5, duration: 700 })
+          })
+        })
+
+        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.markers, (e) => {
+          const feature = e.features?.[0]
+          if (!feature?.properties) return
+          const propertyId = String(feature.properties.propertyId || feature.properties.property_id || '')
+          if (!propertyId) return
+          const coords = (feature.geometry as Point).coordinates as [number, number]
+          hoverPopupRef.current?.remove()
+          setSelectedClusterSummary(null)
+          setSelectedCensusFeature(null)
+          onSelectSellerContextRef.current?.({
+            propertyId,
+            sourceView: 'map',
+            intent: 'open_seller',
+          })
+          const bounds = map.getBounds()
+          if (!bounds.contains(coords)) map.easeTo({ center: coords, duration: 500 })
+        })
+
+        // Use circle layers (markerGlow + clusterCore) for cursor — NOT the symbol layer.
+        // Registering mouseenter on symbol layers causes MapLibre to run hit detection
+        // against the symbol bucket on every mousemove, which crashes when the bucket's
+        // string table is not yet populated (race with tile loading).
+        for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow]) {
+          map.on('mouseenter', lid, () => { map.getCanvas().style.cursor = 'pointer' })
+          map.on('mouseleave', lid, () => { map.getCanvas().style.cursor = '' })
+        }
+      }
+
+      // ── Selected property star marker — always on top of all other layers ──
+      if (!map.getSource(SELECTED_STAR_SOURCE_ID)) {
+        map.addSource(SELECTED_STAR_SOURCE_ID, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      }
+      if (!map.getLayer(SELECTED_STAR_LAYER_ID)) {
+        map.addLayer({
+          id: SELECTED_STAR_LAYER_ID,
+          type: 'symbol',
+          source: SELECTED_STAR_SOURCE_ID,
+          layout: {
+            'icon-image': PIN_ICON.selected,
+            'icon-size': 0.54,
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+          },
+          paint: {
+            'icon-color': '#FFD700',
+            'icon-opacity': 1,
+            'icon-halo-color': 'rgba(0,0,0,0.55)',
+            'icon-halo-width': 2,
+          },
+        })
+      }
+
       syncLayerVisibility(map, activityModeRef.current)
     }
 
@@ -5489,8 +6545,41 @@ export function InboxCommandMap({
       pitchWithRotate: false,
     })
     mapRef.current = map
+    mapContextLostRef.current = false
     activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
+
+    const canvas = map.getCanvas?.()
+    const handleContextLost = (event: Event) => {
+      console.warn('[CommandMap] WebGL context lost')
+      mapContextLostRef.current = true
+      setMapContextLost(true)
+      event.preventDefault()
+    }
+    const handleContextRestored = () => {
+      console.info('[CommandMap] WebGL context restored')
+      // Delay recovery to the next animation frame so MapLibre's own recovery
+      // handlers run first. If the map is still broken after that (shader compile
+      // failure), force a full remount via mapContainerKey.
+      requestAnimationFrame(() => {
+        if (!mapRef.current) return
+        try {
+          const gl = mapRef.current.getCanvas().getContext('webgl') ?? mapRef.current.getCanvas().getContext('webgl2')
+          if (!gl || gl.isContextLost()) {
+            // Context still lost — force full remount
+            mapContextLostRef.current = false
+            setMapContextLost(false)
+            setMapContainerKey((k) => k + 1)
+            mapContainerKeyRef.current += 1
+            return
+          }
+        } catch { /* ignore */ }
+        mapContextLostRef.current = false
+        setMapContextLost(false)
+      })
+    }
+    canvas?.addEventListener('webglcontextlost', handleContextLost, false)
+    canvas?.addEventListener('webglcontextrestored', handleContextRestored, false)
     if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
     styleLoadTimerRef.current = setTimeout(() => {
       if (styleFallbackGuardRef.current) return
@@ -5501,7 +6590,11 @@ export function InboxCommandMap({
     }, 6500)
 
     const handleStyleReady = () => {
-      addMapLayers(map)
+      try {
+        addMapLayers(map)
+      } catch (err) {
+        console.warn('[CommandMap] addMapLayers error during style.load — layers may be partially missing', err)
+      }
       void syncBasemapPresentation(map)
       scheduleMapResize()
       const styleLoadMs = styleLoadStartedAtRef.current ? Math.round(performance.now() - styleLoadStartedAtRef.current) : null
@@ -5542,6 +6635,7 @@ export function InboxCommandMap({
       handleStyleReady()
 
       const handlePinClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
         const id = String(feature.properties?.conversation_id || '')
@@ -5559,6 +6653,7 @@ export function InboxCommandMap({
       }
 
       const handleClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
         const clusterId = Number(feature.properties?.cluster_id)
@@ -5570,9 +6665,9 @@ export function InboxCommandMap({
         if (Number.isFinite(clusterId)) {
           buildClusterSummaryFromLeaves(clusterId, coordinates, 'selected')
         }
-        const source = map.getSource(CLUSTER_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+        const source = safeGetSource(map, CLUSTER_SOURCE_ID) as (maplibregl.GeoJSONSource & {
           getClusterExpansionZoom?: (id: number, cb: (error: Error | null, zoom: number) => void) => void
-        }) | undefined
+        }) | null
         if (!source?.getClusterExpansionZoom || !Number.isFinite(clusterId)) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
@@ -5585,6 +6680,7 @@ export function InboxCommandMap({
       }
 
       const handlePinHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        cancelClearPinHover()
         setHoveredClusterSummary(null)
         const feature = event.features?.[0]
         if (!feature?.properties) return
@@ -5609,38 +6705,59 @@ export function InboxCommandMap({
       }
 
       const clearPinHover = () => {
-        hoverPopupRef.current?.remove()
-        setHoveredClusterSummary(null)
+        // Hover-intent delay: when moving between pin sub-layers (core → ring → glow),
+        // MapLibre fires mouseleave then mouseenter rapidly. The 120ms delay prevents
+        // the hover popup from flickering by giving the next mouseenter time to cancel.
+        if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
+        clearPinHoverTimerRef.current = setTimeout(() => {
+          clearPinHoverTimerRef.current = null
+          hoverPopupRef.current?.remove()
+          hoverPopupRef.current = null
+          setHoveredClusterSummary(null)
+          setHoveredMapCard(null)
+        }, 120)
+      }
+
+      const cancelClearPinHover = () => {
+        if (clearPinHoverTimerRef.current) {
+          clearTimeout(clearPinHoverTimerRef.current)
+          clearPinHoverTimerRef.current = null
+        }
       }
 
       const handleSellerPinHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        cancelClearPinHover()
         setHoveredClusterSummary(null)
         const feature = event.features?.[0]
         if (!feature?.properties) return
         const props = sanitizeSellerPinRecord(feature.properties as unknown as Partial<CommandMapSellerPin>)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const popup = hoverPopupRef.current ?? new maplibregl.Popup({
-          closeButton: false,
-          closeOnClick: false,
-          offset: 18,
-          className: 'nx-icm-hover-popup',
-          maxWidth: sellerCardMaxWidthForLayout(layoutMode),
+        const pixelPoint = map.project(coordinates)
+        const containerEl = containerRef.current
+        const containerBounds = containerEl?.getBoundingClientRect()
+        const containerWidth = containerBounds?.width ?? window.innerWidth
+        const containerHeight = containerBounds?.height ?? window.innerHeight
+        map.getCanvas().style.cursor = 'pointer'
+        if (DEBUG_MAP_CARDS) console.debug('[MapCard] seller hover', { id: props.property_id, feature: props })
+        setHoveredMapCard({
+          kind: 'seller',
+          intent: 'hover',
+          id: String(props.property_id || (props as any).seller_id || coordinates.join(',')),
+          anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          feature: props as Record<string, unknown>,
+          containerSize: { width: containerWidth, height: containerHeight },
         })
-        popup
-          .setLngLat(coordinates)
-          .setHTML(buildHoverCardMarkup(props as Record<string, unknown>, layoutMode))
-          .addTo(map)
-        hoverPopupRef.current = popup
       }
 
       const handleSellerPinClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
         const clusterId = feature.properties?.cluster_id
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const source = map.getSource(SELLER_PINS_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+        const source = safeGetSource(map, SELLER_PINS_SOURCE_ID) as (maplibregl.GeoJSONSource & {
           getClusterExpansionZoom?: (id: number, cb: (error: Error | null, zoom: number) => void) => void
-        }) | undefined
+        }) | null
         if (!source?.getClusterExpansionZoom || clusterId === undefined) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
@@ -5649,18 +6766,26 @@ export function InboxCommandMap({
       }
 
       const handleSellerPinClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature?.properties) return
         const props = sanitizeSellerPinRecord(feature.properties as unknown as Partial<CommandMapSellerPin>)
         const propertyId = String(props.property_id || '')
         if (!propertyId) return
         hoverPopupRef.current?.remove()
+        hoverPopupRef.current = null
         threadPopupRef.current?.remove()
+        setHoveredMapCard(null)
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
         setSelectedSoldComp(null)
+        // Clear old MapLibre Popup state — seller click now uses React overlay
+        setActiveThreadPopup(null)
+        setActiveSellerPinPopup(null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
+
+        // Match the click to a hydrated thread for inbox panel sync (non-overlay use)
         const matchedThread = hydratedThreadsByPropertyIdRef.current.get(propertyId)
           || visibleHydratedThreadsRef.current.find((thread) => text((thread as any).propertyId || (thread as any).property_id) === propertyId)
           || hydratedThreadsByIdRef.current.get(propertyId)
@@ -5677,17 +6802,39 @@ export function InboxCommandMap({
         if (matchedThread) {
           setSelectedPinId(matchedThread.id)
           onSelectThreadIdRef.current?.(matchedThread.id)
-          setActiveThreadPopup({ id: matchedThread.id, coordinates })
-          setActiveSellerPinPopup(null)
+          // Merge thread data into pin for the card
+          const mergedFeature = { ...props, ...matchedThread as unknown as Record<string, unknown> }
+          const pixelPoint = map.project(coordinates)
+          const containerEl = containerRef.current
+          const containerBounds = containerEl?.getBoundingClientRect()
+          const containerWidth = containerBounds?.width ?? window.innerWidth
+          const containerHeight = containerBounds?.height ?? window.innerHeight
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            id: matchedThread.id,
+            anchor: { x: pixelPoint.x, y: pixelPoint.y },
+            feature: mergedFeature,
+            containerSize: { width: containerWidth, height: containerHeight },
+          })
         } else {
           setSelectedPinId(propertyId)
-          setActiveThreadPopup(null)
-          setActiveSellerPinPopup({ pin: props, coordinates, hydrating: false, hydrationFailed: false })
+          const pixelPoint = map.project(coordinates)
+          const containerEl = containerRef.current
+          const containerBounds = containerEl?.getBoundingClientRect()
+          const containerWidth = containerBounds?.width ?? window.innerWidth
+          const containerHeight = containerBounds?.height ?? window.innerHeight
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            id: propertyId,
+            anchor: { x: pixelPoint.x, y: pixelPoint.y },
+            feature: props as Record<string, unknown>,
+            containerSize: { width: containerWidth, height: containerHeight },
+          })
         }
 
-        // Only pan/zoom if the pin is outside the current viewport. Do NOT
-        // force-zoom to 14: that causes a jarring recenter and resets the user's
-        // zoom level, which is unexpected when the pin is already visible.
+        // Only pan if the pin is outside the current viewport — don't force-zoom
         const bounds = map.getBounds()
         const [pinLng, pinLat] = coordinates
         const isPinVisible = bounds.contains([pinLng, pinLat])
@@ -5695,6 +6842,7 @@ export function InboxCommandMap({
           map.easeTo({ center: coordinates, duration: 500 })
         }
       }
+
 
       const handleClusterHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         const feature = event.features?.[0]
@@ -5710,6 +6858,7 @@ export function InboxCommandMap({
       }
 
       const handleBuyerHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        cancelClearPinHover()
         setHoveredClusterSummary(null)
         const feature = event.features?.[0]
         const props = feature?.properties as BuyerFeatureProps | undefined
@@ -5730,9 +6879,13 @@ export function InboxCommandMap({
       }
 
       const handleBuyerClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         const props = feature?.properties as BuyerFeatureProps | undefined
         if (!feature || !props) return
+        cancelClearPinHover()
+        hoverPopupRef.current?.remove()
+        hoverPopupRef.current = null
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
         const exactPurchase = buyerPurchasesRef.current.find((purchase) =>
@@ -5745,44 +6898,75 @@ export function InboxCommandMap({
       }
 
       const handleSoldCompHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        if (selectedMapCardRef.current?.kind === 'sold_comp') return
+        cancelClearPinHover()
         const feature = event.features?.[0]
         const props = feature?.properties as RecentSoldComp | undefined
         if (!feature || !props) return
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
+        const pixelPoint = map.project(coordinates)
+        const containerEl = containerRef.current
+        const containerBounds = containerEl?.getBoundingClientRect()
+        const containerWidth = containerBounds?.width ?? window.innerWidth
+        const containerHeight = containerBounds?.height ?? window.innerHeight
         hoverPopupRef.current?.remove()
-        const popup = new maplibregl.Popup({
-          closeButton: false,
-          closeOnClick: false,
-          offset: 18,
-          className: 'nx-icm-hover-popup',
-          maxWidth: sellerCardMaxWidthForLayout(layoutMode),
+        hoverPopupRef.current = null
+        map.getCanvas().style.cursor = 'pointer'
+        if (DEBUG_MAP_CARDS) console.debug('[MapCard] comp hover', { id: props.property_id, feature: props })
+        
+        const rawComp = soldComps.find((item) => String(item.property_id) === String(props.property_id)) || props
+
+        setHoveredMapCard({
+          kind: 'sold_comp',
+          intent: 'hover',
+          id: String(props.property_id || coordinates.join(',')),
+          anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          feature: rawComp as unknown as Record<string, unknown>,
+          containerSize: { width: containerWidth, height: containerHeight },
         })
-        popup
-          .setLngLat(coordinates)
-          .setHTML(buildSoldCompHoverMarkup(props, mapStyleModeRef.current, selectedThreadRef.current, map.getZoom()))
-          .addTo(map)
-        hoverPopupRef.current = popup
       }
 
       const handleSoldCompClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         const props = feature?.properties as RecentSoldComp | undefined
         if (!feature || !props) return
+        cancelClearPinHover()
+        hoverPopupRef.current?.remove()
+        hoverPopupRef.current = null
+        setHoveredMapCard(null)
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
-        setSelectedSoldComp(props)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
+        const pixelPoint = map.project(coordinates)
+        const containerEl = containerRef.current
+        const containerBounds = containerEl?.getBoundingClientRect()
+        const containerWidth = containerBounds?.width ?? window.innerWidth
+        const containerHeight = containerBounds?.height ?? window.innerHeight
+        if (DEBUG_MAP_CARDS) console.debug('[MapCard] comp click selected', { id: props.property_id, feature: props })
+        
+        const rawComp = soldComps.find((item) => String(item.property_id) === String(props.property_id)) || props
+
+        setSelectedMapCard({
+          kind: 'sold_comp',
+          intent: 'selected',
+          id: String(props.property_id || coordinates.join(',')),
+          anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          feature: rawComp as unknown as Record<string, unknown>,
+          containerSize: { width: containerWidth, height: containerHeight },
+        })
         map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 11.8), duration: 560 })
       }
 
       const handleBuyerClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
         const clusterId = Number(feature.properties?.cluster_id)
-        const source = map.getSource(BUYER_PURCHASE_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+        const source = safeGetSource(map, BUYER_PURCHASE_SOURCE_ID) as (maplibregl.GeoJSONSource & {
           getClusterExpansionZoom?: (id: number, cb: (error: Error | null, zoom: number) => void) => void
-        }) | undefined
+        }) | null
         if (!source?.getClusterExpansionZoom || !Number.isFinite(clusterId)) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
@@ -5843,6 +7027,7 @@ export function InboxCommandMap({
       }
 
       const handleCensusClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         if (!activeCensusMetricRef.current) return
         const clicked = event.features?.[0]
         const featureId = String(clicked?.properties?.id || '')
@@ -5852,12 +7037,13 @@ export function InboxCommandMap({
       }
 
       const handleSoldCompClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
         const clusterId = Number(feature.properties?.cluster_id)
-        const source = map.getSource(SOLD_COMPS_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+        const source = safeGetSource(map, SOLD_COMPS_SOURCE_ID) as (maplibregl.GeoJSONSource & {
           getClusterExpansionZoom?: (id: number, cb: (error: Error | null, zoom: number) => void) => void
-        }) | undefined
+        }) | null
         if (!source?.getClusterExpansionZoom || !Number.isFinite(clusterId)) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
@@ -5883,14 +7069,26 @@ export function InboxCommandMap({
       map.on('click', SELLER_PINS_LAYER_IDS.icon, handleSellerPinClick)
       map.on('click', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterClick)
       map.on('click', (event) => {
-        const rendered = map.queryRenderedFeatures(event.point, {
-          layers: ['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-icon-raw', 'command-pin-icon-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_LAYER_IDS.icon, SOLD_COMPS_LAYER_IDS.label, SOLD_COMPS_CLUSTER_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.clusterCore],
-        })
+        if ((event as any)._clickHandled) return
+        if (mapContextLostRef.current || !isStyleSafe(map)) return
+        // Use circle/fill layers only for background-click detection — exclude symbol
+        // layers (icon, label) which can crash MapLibre's hit detection when the
+        // symbol bucket string table is not yet populated.
+        const rendered = safeQueryRenderedFeatures(map, event.point, [
+          'command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core',
+          'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core',
+          SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core,
+          SELLER_PINS_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.clusterCore,
+          PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
+        ])
         if (rendered.length === 0) {
           setActiveThreadPopup(null)
           setActiveSellerPinPopup(null)
           setSelectedBuyerPurchase(null)
           setSelectedSoldComp(null)
+          setCompCardAnchor(null)
+          setSelectedMapCard(null)
+          setHoveredMapCard(null)
           setSelectedClusterSummary(null)
           setSelectedCensusFeature(null)
           onBackgroundClickRef.current?.()
@@ -5898,32 +7096,28 @@ export function InboxCommandMap({
       })
       map.on('mouseenter', 'command-pin-core-raw', handlePinHover)
       map.on('mouseenter', 'command-pin-core-clustered', handlePinHover)
-      map.on('mouseenter', 'command-pin-icon-raw', handlePinHover)
-      map.on('mouseenter', 'command-pin-icon-clustered', handlePinHover)
+      // Do NOT register mouseenter on symbol layers (command-pin-icon-*) — see cursor
+      // comment above. The circle core layers provide sufficient hover coverage.
       map.on('mouseenter', 'command-pin-cluster-core', handleClusterHover)
       map.on('mouseenter', CENSUS_LAYER_IDS.fill, handleCensusHover)
       map.on('mouseenter', 'command-buyer-purchase-core', handleBuyerHover)
       map.on('mouseenter', 'command-buyer-profile-core', handleBuyerHover)
       map.on('mouseenter', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompHover)
       map.on('mouseenter', SOLD_COMPS_LAYER_IDS.marker, handleSoldCompHover)
-      map.on('mouseenter', SOLD_COMPS_LAYER_IDS.label, handleSoldCompHover)
+      // sold-comps-label is a symbol layer — skip mouseenter to avoid crash
       map.on('mouseenter', SELLER_PINS_LAYER_IDS.core, handleSellerPinHover)
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.icon, handleSellerPinHover)
+      // seller-pins-icon is a symbol layer — skip mouseenter; core provides coverage
       map.on('mouseenter', SELLER_PINS_LAYER_IDS.ring, handleSellerPinHover)
       map.on('mouseenter', SELLER_PINS_LAYER_IDS.glow, handleSellerPinHover)
       map.on('mouseleave', 'command-pin-core-raw', clearPinHover)
       map.on('mouseleave', 'command-pin-core-clustered', clearPinHover)
-      map.on('mouseleave', 'command-pin-icon-raw', clearPinHover)
-      map.on('mouseleave', 'command-pin-icon-clustered', clearPinHover)
       map.on('mouseleave', 'command-pin-cluster-core', clearClusterHover)
       map.on('mouseleave', CENSUS_LAYER_IDS.fill, clearCensusHover)
       map.on('mouseleave', 'command-buyer-purchase-core', clearPinHover)
       map.on('mouseleave', 'command-buyer-profile-core', clearPinHover)
       map.on('mouseleave', SOLD_COMPS_LAYER_IDS.hit, clearPinHover)
       map.on('mouseleave', SOLD_COMPS_LAYER_IDS.marker, clearPinHover)
-      map.on('mouseleave', SOLD_COMPS_LAYER_IDS.label, clearPinHover)
       map.on('mouseleave', SELLER_PINS_LAYER_IDS.core, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.icon, clearPinHover)
       map.on('mouseleave', SELLER_PINS_LAYER_IDS.ring, clearPinHover)
       map.on('mouseleave', SELLER_PINS_LAYER_IDS.glow, clearPinHover)
 
@@ -6045,7 +7239,11 @@ export function InboxCommandMap({
       }
       animationRef.current = requestAnimationFrame(animate)
 
-      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-icon-raw', 'command-pin-icon-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_LAYER_IDS.icon, SOLD_COMPS_LAYER_IDS.label, SOLD_COMPS_CLUSTER_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.core] as const).forEach((layerId) => {
+      // Only register cursor changes on circle/fill layers — NOT symbol layers.
+      // Symbol layer mouseenter triggers MapLibre hit detection on every mousemove
+      // which crashes with "Out of bounds" when the symbol bucket string table is
+      // not yet populated (race condition during tile loading).
+      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.core] as const).forEach((layerId) => {
         if (mapRef.current?.getLayer(layerId)) {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer' })
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = '' })
@@ -6058,8 +7256,11 @@ export function InboxCommandMap({
     })
 
     return () => {
+      canvas?.removeEventListener('webglcontextlost', handleContextLost)
+      canvas?.removeEventListener('webglcontextrestored', handleContextRestored)
       if (animationRef.current !== null) cancelAnimationFrame(animationRef.current)
       if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
+      if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
       hoverPopupRef.current?.remove()
       threadPopupRootRef.current?.unmount()
       threadPopupRootRef.current = null
@@ -6067,23 +7268,26 @@ export function InboxCommandMap({
       threadPopupRef.current?.remove()
       threadPopupRef.current = null
       applyCommandMapThemeRef.current = null
-      map.remove()
+      propUnivHandlersRegisteredRef.current = false
+      try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
       mapRef.current = null
     }
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapContainerKey])
 
   useEffect(() => {
-    const rawSource = mapRef.current?.getSource(RAW_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    const clusterSource = mapRef.current?.getSource(CLUSTER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    const buyerPurchaseSource = mapRef.current?.getSource(BUYER_PURCHASE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    const buyerProfileSource = mapRef.current?.getSource(BUYER_PROFILE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    const buyerTrailSource = mapRef.current?.getSource(BUYER_TRAIL_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    rawSource?.setData(geojson)
-    clusterSource?.setData(geojson)
-    buyerPurchaseSource?.setData(buyerPurchasesGeojson)
-    buyerProfileSource?.setData(buyerProfilesGeojson)
-    buyerTrailSource?.setData(buyerTrailGeojson)
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, RAW_SOURCE_ID, geojson)
+    safeSetGeoJsonSourceData(mapRef.current, CLUSTER_SOURCE_ID, geojson)
+    safeSetGeoJsonSourceData(mapRef.current, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
+    safeSetGeoJsonSourceData(mapRef.current, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
+    safeSetGeoJsonSourceData(mapRef.current, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
   }, [buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson])
+
+  useEffect(() => {
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, SELECTED_STAR_SOURCE_ID, selectedStarGeojson)
+  }, [selectedStarGeojson])
 
   useEffect(() => {
     const map = mapRef.current
@@ -6091,17 +7295,84 @@ export function InboxCommandMap({
     applyCommandMapThemeRef.current?.(map, mapStyleMode)
   }, [mapStyleMode])
 
+  // ── Property universe viewport fetch ─────────────────────────────────────
+  // Fetches the full property database for the current viewport whenever
+  // the user pans/zooms to a new area. Only runs at zoom >= 10 (cluster view).
   useEffect(() => {
-    if (!mapRef.current?.isStyleLoaded()) return
-    const layers = mapRef.current.getStyle()?.layers ?? []
+    const map = mapRef.current
+    if (!isStyleSafe(map) || baseStyleLoading) return
+    if (!viewportBounds || viewportZoom < 10) return
+
+    propertyUniverseAbortRef.current?.abort()
+    propertyUniverseAbortRef.current = new AbortController()
+    const signal = propertyUniverseAbortRef.current.signal
+
+    void fetchMapProperties({
+      lat_min: viewportBounds.south,
+      lat_max: viewportBounds.north,
+      lng_min: viewportBounds.west,
+      lng_max: viewportBounds.east,
+      zoom: Math.round(viewportZoom),
+    }, signal).then((result) => {
+      if (!result.ok || signal.aborted) return
+      const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
+      src?.setData({
+        type: 'FeatureCollection',
+        features: result.data.data.features as GeoJSON.Feature<Point>[],
+      })
+    }).catch(() => { /* aborted or network error */ })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportBounds, viewportZoom, baseStyleLoading])
+
+  // ── Property universe zoom-gated visibility ───────────────────────────────
+  // zoom < 10      → hidden entirely (national view)
+  // zoom 10–11.75  → clusters only
+  // zoom 11.75–13  → clusters + priority individual markers
+  // zoom >= 13     → clusters + all individual markers
+  useEffect(() => {
+    const map = mapRef.current
+    if (!isStyleSafe(map) || baseStyleLoading) return
+
+    const showClusters = viewportZoom >= 10
+    const showMarkers = viewportZoom >= 11.75
+    const vis = (v: boolean) => v ? 'visible' : 'none'
+
+    for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterCount]) {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showClusters))
+    }
+    for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, PROPERTY_UNIVERSE_LAYER_IDS.markers]) {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showMarkers))
+    }
+
+    if (showMarkers) {
+      const baseFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
+      const priorityFilter: maplibregl.FilterSpecification = ['all',
+        baseFilter,
+        ['any',
+          ['in', ['get', 'markerState'], ['literal', [...PRIORITY_MARKER_STATES]]],
+          ['in', ['get', 'assetType'],   ['literal', [...PRIORITY_ASSET_TYPES]]],
+          ['>=', ['get', 'acquisitionScore'], 85],
+        ],
+      ]
+      const activeFilter = viewportZoom < 13 ? priorityFilter : baseFilter
+      for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.markers, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow]) {
+        if (map.getLayer(lid)) map.setFilter(lid, activeFilter)
+      }
+    }
+  }, [viewportZoom, baseStyleLoading])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!isStyleSafe(map)) return
+    const layers = map.getStyle()?.layers ?? []
     layers.forEach((layer) => {
       const typedLayer = layer as StyleLayerLike
       if (!typedLayer.id || isCustomLayer(typedLayer.id)) return
       const categories = classifyBaseLayer(typedLayer)
       if (categories.length === 0) return
       const visible = categories.every((category) => mapOverlays[category])
-      if (mapRef.current?.getLayer(typedLayer.id)) {
-        mapRef.current.setLayoutProperty(typedLayer.id, 'visibility', visible ? 'visible' : 'none')
+      if (map.getLayer(typedLayer.id)) {
+        map.setLayoutProperty(typedLayer.id, 'visibility', visible ? 'visible' : 'none')
       }
     })
   }, [mapOverlays])
@@ -6143,7 +7414,7 @@ export function InboxCommandMap({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!isStyleSafe(map)) return
     const clusteredMode =
       (activityMode !== 'sends' && !activeKpiFilter)
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
@@ -6161,7 +7432,7 @@ export function InboxCommandMap({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!isStyleSafe(map)) return
     const purchasesVisible = buyerLayers.buyerRecentPurchases || buyerLayers.buyerMatches
     BUYER_PURCHASE_CLUSTER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', purchasesVisible ? 'visible' : 'none')
@@ -6278,7 +7549,7 @@ export function InboxCommandMap({
   }, [activeCensusMetric])
 
   const buildClusterSummaryFromLeaves = (clusterId: number, coordinates: [number, number], mode: 'hover' | 'selected') => {
-    const source = mapRef.current?.getSource(CLUSTER_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+    const source = safeGetSource(mapRef.current, CLUSTER_SOURCE_ID) as (maplibregl.GeoJSONSource & {
       getClusterLeaves?: (
         clusterId: number,
         limit: number,
@@ -6758,28 +8029,28 @@ export function InboxCommandMap({
 
   // ── Push census + buyer demand GeoJSON to map sources ─────────────────────
   useEffect(() => {
-    const censusSource = mapRef.current?.getSource(CENSUS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    censusSource?.setData(censusGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, CENSUS_SOURCE_ID, censusGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
   }, [censusGeojson])
 
   useEffect(() => {
-    const bdSource = mapRef.current?.getSource(BUYER_DEMAND_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    bdSource?.setData(buyerDemandGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, BUYER_DEMAND_SOURCE_ID, buyerDemandGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
   }, [buyerDemandGeojson])
 
   useEffect(() => {
-    const scSource = mapRef.current?.getSource(SOLD_COMPS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    scSource?.setData(soldCompsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, SOLD_COMPS_SOURCE_ID, soldCompsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
   }, [soldCompsGeojson])
 
   useEffect(() => {
-    const spSource = mapRef.current?.getSource(SELLER_PINS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-    spSource?.setData(sellerPinsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
+    if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
+    safeSetGeoJsonSourceData(mapRef.current, SELLER_PINS_SOURCE_ID, sellerPinsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
   }, [sellerPinsGeojson])
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!isStyleSafe(map)) return
     const visible = sellerPinLayers.sellerPins
     const spIconLayerId = 'seller-pins-icon'
     const spGlowLayerId = `${SOLD_COMPS_LAYER_IDS.marker}-glow`
@@ -6798,7 +8069,7 @@ export function InboxCommandMap({
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !sellerPinLayers.sellerPins) return
+    if (!isStyleSafe(map) || !sellerPinLayers.sellerPins) return
     const pointFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
     const clusterFilter: maplibregl.FilterSpecification = ['has', 'point_count']
     if (map.getLayer(SELLER_PINS_LAYER_IDS.core)) map.setFilter(SELLER_PINS_LAYER_IDS.core, pointFilter)
@@ -6816,7 +8087,7 @@ export function InboxCommandMap({
   // ── Census layer visibility + hovered outline ─────────────────────────────
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!isStyleSafe(map)) return
     const visible = Boolean(activeCensusMetric && censusGeojson.features.length > 0)
     if (map.getLayer(CENSUS_LAYER_IDS.fill)) map.setLayoutProperty(CENSUS_LAYER_IDS.fill, 'visibility', visible ? 'visible' : 'none')
     if (map.getLayer(CENSUS_LAYER_IDS.line)) map.setLayoutProperty(CENSUS_LAYER_IDS.line, 'visibility', visible ? 'visible' : 'none')
@@ -6831,7 +8102,7 @@ export function InboxCommandMap({
   // ── Buyer demand layer visibility ─────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!isStyleSafe(map)) return
     ALL_BUYER_DEMAND_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) {
         const metricMap: Record<string, keyof BuyerDemandLayerToggles> = {
@@ -6896,7 +8167,6 @@ export function InboxCommandMap({
   const statuses = Array.from(new Set(allPins.map((pin) => pin.conversation_status).filter(Boolean))).sort()
   const temperatures = Array.from(new Set(allPins.map((pin) => pin.lead_temperature).filter(Boolean))).sort()
   const automationStatuses = Array.from(new Set(allPins.map((pin) => pin.automation_status).filter(Boolean))).sort()
-  const propertyTypes = Array.from(new Set(allPins.map((pin) => pin.property_type).filter(Boolean))).sort()
   const selectedUnmapped = useMemo(
     () => selectedHydratedThread ? buildMapPin(selectedHydratedThread).unmapped : null,
     [selectedHydratedThread],
@@ -6934,7 +8204,26 @@ export function InboxCommandMap({
     }
     if (event.targetType === 'sold_comp' && event.targetId) {
       const comp = soldComps.find((item) => String(item.property_id) === event.targetId)
-      if (comp) setSelectedSoldComp(comp)
+      if (comp) {
+        setSelectedSoldComp(comp)
+        const lat = Number(comp.latitude)
+        const lng = Number(comp.longitude)
+        const containerEl = containerRef.current
+        const containerBounds = containerEl?.getBoundingClientRect()
+        const containerWidth = containerBounds?.width ?? window.innerWidth
+        const containerHeight = containerBounds?.height ?? window.innerHeight
+        const coordinates: [number, number] = [lng, lat]
+        const pixelPoint = mapRef.current ? mapRef.current.project(coordinates) : { x: containerWidth / 2, y: containerHeight / 2 }
+        
+        setSelectedMapCard({
+          kind: 'sold_comp',
+          intent: 'selected',
+          id: String(comp.property_id),
+          anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          feature: comp as unknown as Record<string, unknown>,
+          containerSize: { width: containerWidth, height: containerHeight },
+        })
+      }
     }
     if (center) {
       mapRef.current?.easeTo({
@@ -6978,6 +8267,13 @@ export function InboxCommandMap({
         </div>
         {filtersOpen && (
           <div className="nx-icm__controls-popover">
+            <div className="nx-icm__controls-drawer-header">
+              <div className="nx-icm__controls-drawer-title">
+                <span className="nx-icm__controls-drawer-eyebrow">Map Command</span>
+                <span className="nx-icm__controls-style-badge">{activeThemeDefinition.label}</span>
+              </div>
+              <button type="button" className="nx-icm__controls-close" aria-label="Close map controls" onClick={() => setFiltersOpen(false)}>✕</button>
+            </div>
             <div className="nx-icm__controls-tabs" role="tablist" aria-label="Map controls tabs">
               {CONTROLS_TABS.map((tab) => (
                 <button
@@ -6986,15 +8282,123 @@ export function InboxCommandMap({
                   className={cls('nx-icm__controls-tab', activeControlsTab === tab.key && 'is-active')}
                   onClick={() => setActiveControlsTab(tab.key)}
                 >
-                  {tab.key === 'buyer_layers' ? `Buyer Layers${buyerFilterCount > 0 ? ` · ${buyerFilterCount}` : ''}` : tab.label}
+                  {tab.key === 'filters' && activeFilterCount > 0 ? `Filters · ${activeFilterCount}` : tab.label}
                 </button>
               ))}
             </div>
             <div className="nx-icm__controls-panel">
-              {activeControlsTab === 'view' && (
+              {activeControlsTab === 'modes' && (
                 <>
+                  {/* Mode selector — premium 2-column cards */}
                   <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">View Mode</span>
+                    <div className="nx-icm__map-mode-grid">
+                      {MAP_MODES.map((mode) => (
+                        <button
+                          key={mode.key}
+                          type="button"
+                          className={cls('nx-icm__map-mode-card', mapMode === mode.key && 'is-active')}
+                          onClick={() => setMapMode(mode.key)}
+                        >
+                          <div className="nx-icm__map-mode-header">
+                            <span className="nx-icm__map-mode-name">{mode.label}</span>
+                            <div className="nx-icm__map-mode-swatches">
+                              {mode.swatches.map((color) => (
+                                <span key={color} className="nx-icm__map-mode-swatch" style={{ background: color }} />
+                              ))}
+                            </div>
+                          </div>
+                          <span className="nx-icm__map-mode-desc">{mode.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Active Overlays — mode-contextual */}
+                  <div className="nx-icm__controls-group">
+                    <div className="nx-icm__controls-headerline">
+                      <span className="nx-icm__controls-label">Active Overlays</span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', sourceMode === 'all_active_coordinate_threads' && 'is-active')} onClick={() => onSourceModeChange?.('all_active_coordinate_threads')}>All</button>
+                        <button type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', sourceMode === 'visible_threads' && 'is-active')} onClick={() => onSourceModeChange?.('visible_threads')}>Filtered</button>
+                      </div>
+                    </div>
+                    <div className="nx-icm__layer-toggle-grid">
+                      {mapMode === 'acquisition' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.sellerPins} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sellerPins: e.target.checked }))} /><span>Seller Leads</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.sellerThreads} onChange={(e) => setBuyerLayers((c) => ({ ...c, sellerThreads: e.target.checked }))} /><span>Active Threads</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.hot} onChange={(e) => setSellerPinLayers((c) => ({ ...c, hot: e.target.checked }))} /><span>Hot Sellers</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.newReplies} onChange={(e) => setSellerPinLayers((c) => ({ ...c, newReplies: e.target.checked }))} /><span>New Replies</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.negotiating} onChange={(e) => setSellerPinLayers((c) => ({ ...c, negotiating: e.target.checked }))} /><span>Negotiating</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.issues} onChange={(e) => setSellerPinLayers((c) => ({ ...c, issues: e.target.checked }))} /><span>Issues / Urgent</span></label>
+                      </>)}
+                      {mapMode === 'buyer_demand' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.buyerMatches} onChange={(e) => setBuyerLayers((c) => ({ ...c, buyerMatches: e.target.checked }))} /><span>Buyer Comps</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.buyerHeatmap} onChange={(e) => setBuyerLayers((c) => ({ ...c, buyerHeatmap: e.target.checked }))} /><span>Buyer Heatmap</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.repeatBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, repeatBuyers: e.target.checked }))} /><span>Repeat Buyers</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.corporateBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, corporateBuyers: e.target.checked }))} /><span>Corp. Buyers</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.localInvestors} onChange={(e) => setBuyerLayers((c) => ({ ...c, localInvestors: e.target.checked }))} /><span>Local Investors</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.flippers} onChange={(e) => setBuyerLayers((c) => ({ ...c, flippers: e.target.checked }))} /><span>Flippers</span></label>
+                      </>)}
+                      {mapMode === 'opportunity_heat' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.sellerPins} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sellerPins: e.target.checked }))} /><span>Property Universe</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerDemandLayers.investorDemand} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, investorDemand: e.target.checked }))} /><span>Motivation Heat</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerDemandLayers.activity6mo} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, activity6mo: e.target.checked }))} /><span>Equity Heat</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerDemandLayers.buyerHeat} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, buyerHeat: e.target.checked }))} /><span>Distress Heat</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={censusLayers.vacancyHeat} onChange={(e) => setSingleCensusMetric('vacancyHeat', e.target.checked)} /><span>Vacancy / Census</span></label>
+                      </>)}
+                      {mapMode === 'execution' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.queued} onChange={(e) => setSellerPinLayers((c) => ({ ...c, queued: e.target.checked }))} /><span>Queued</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.scheduled} onChange={(e) => setSellerPinLayers((c) => ({ ...c, scheduled: e.target.checked }))} /><span>Scheduled</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.ready} onChange={(e) => setSellerPinLayers((c) => ({ ...c, ready: e.target.checked }))} /><span>Ready / Active</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.sent} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sent: e.target.checked }))} /><span>Sent</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.delivered} onChange={(e) => setSellerPinLayers((c) => ({ ...c, delivered: e.target.checked }))} /><span>Delivered</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.failedIssue} onChange={(e) => setSellerPinLayers((c) => ({ ...c, failedIssue: e.target.checked }))} /><span>Failed / Issues</span></label>
+                      </>)}
+                      {mapMode === 'comps' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.recentSoldComps} onChange={(e) => setBuyerLayers((c) => ({ ...c, recentSoldComps: e.target.checked }))} /><span>Sold Comps</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.buyerMatches} onChange={(e) => setBuyerLayers((c) => ({ ...c, buyerMatches: e.target.checked }))} /><span>Buyer Comps</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerDemandLayers.soldPrice} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, soldPrice: e.target.checked }))} /><span>Sold Price Labels</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerDemandLayers.activity6mo} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, activity6mo: e.target.checked }))} /><span>Activity 6mo</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.buyerProfiles} onChange={(e) => setBuyerLayers((c) => ({ ...c, buyerProfiles: e.target.checked }))} /><span>Buyer Profiles</span></label>
+                      </>)}
+                      {(mapMode === 'territory') && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.sellerPins} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sellerPins: e.target.checked }))} /><span>Property Universe</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.zip} onChange={(e) => setMapOverlays((c) => ({ ...c, zip: e.target.checked }))} /><span>ZIP Boundaries</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.cities} onChange={(e) => setMapOverlays((c) => ({ ...c, cities: e.target.checked }))} /><span>Cities</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.roads} onChange={(e) => setMapOverlays((c) => ({ ...c, roads: e.target.checked }))} /><span>Roads</span></label>
+                      </>)}
+                      {mapMode === 'census' && CENSUS_TOGGLE_DEFS.map((def) => (
+                        <label key={def.key} className="nx-icm__layer-toggle" style={{ '--layer-accent': def.color } as CSSProperties}>
+                          <input type="checkbox" checked={censusLayers[def.key]} onChange={(e) => setSingleCensusMetric(def.key, e.target.checked)} />
+                          <span>{def.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Advanced Overlays — collapsed by default */}
+                  <div className="nx-icm__controls-group nx-icm__advanced-layers">
+                    <button type="button" className="nx-icm__advanced-toggle" onClick={() => setAdvancedLayersOpen((v) => !v)}>
+                      <span className="nx-icm__controls-label">Advanced Overlays</span>
+                      <span className="nx-icm__advanced-arrow">{advancedLayersOpen ? '▲' : '▼'}</span>
+                    </button>
+                    {advancedLayersOpen && (
+                      <div className="nx-icm__layer-toggle-grid">
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.roads} onChange={(e) => setMapOverlays((c) => ({ ...c, roads: e.target.checked }))} /><span>Roads</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.cities} onChange={(e) => setMapOverlays((c) => ({ ...c, cities: e.target.checked }))} /><span>Cities</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.poi} onChange={(e) => setMapOverlays((c) => ({ ...c, poi: e.target.checked }))} /><span>POI</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={mapOverlays.zip} onChange={(e) => setMapOverlays((c) => ({ ...c, zip: e.target.checked }))} /><span>ZIP</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.notContacted} onChange={(e) => setSellerPinLayers((c) => ({ ...c, notContacted: e.target.checked }))} /><span>Not Contacted</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.contacted} onChange={(e) => setSellerPinLayers((c) => ({ ...c, contacted: e.target.checked }))} /><span>Contacted</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.positive} onChange={(e) => setSellerPinLayers((c) => ({ ...c, positive: e.target.checked }))} /><span>Raw Seller Signals</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.offMarketBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, offMarketBuyers: e.target.checked }))} /><span>Raw Buyer Signals</span></label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Activity focus */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Activity Focus</span>
                     <div className="nx-icm__controls-segment">
                       {([
                         ['all', 'All'],
@@ -7008,55 +8412,495 @@ export function InboxCommandMap({
                       ))}
                     </div>
                   </div>
-                  <div className="nx-icm__controls-grid">
-                    <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Pin Scope</span>
-                      <div className="nx-icm__controls-segment">
-                        <button type="button" className={cls('nx-icm__mode-tab', sourceMode === 'all_active_coordinate_threads' && 'is-active')} onClick={() => onSourceModeChange?.('all_active_coordinate_threads')}>
-                          All Pins
-                        </button>
-                        <button type="button" className={cls('nx-icm__mode-tab', sourceMode === 'visible_threads' && 'is-active')} onClick={() => onSourceModeChange?.('visible_threads')}>
-                          Filtered Pins
-                        </button>
-                      </div>
+                </>
+              )}
+              {activeControlsTab === 'filters' && (
+                <>
+                  {/* Filter header — count + search */}
+                  <div className="nx-icm__filter-header">
+                    <div className="nx-icm__filter-header-meta">
+                      {activeFilterCount > 0 && (
+                        <span className="nx-icm__filter-active-count">{activeFilterCount} active</span>
+                      )}
                     </div>
+                    <input
+                      className="nx-icm__filter-search"
+                      type="search"
+                      placeholder="Search 200+ filters..."
+                      value={filterSearch}
+                      onChange={(e) => setFilterSearch(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Preset segment chips */}
+                  <div className="nx-icm__filter-preset-row">
+                    {FILTER_PRESETS.map((preset) => (
+                      <button key={preset.key} type="button" className="nx-icm__filter-preset-chip" onClick={() => setFilters((c) => ({ ...c, ...preset.filters }))}>
+                        {preset.label}
+                      </button>
+                    ))}
+                    {activeFilterCount > 0 && (
+                      <button type="button" className="nx-icm__filter-preset-chip nx-icm__filter-preset-chip--clear" onClick={() => { setFilters(defaultFilters); setActiveKpiFilter(null) }}>
+                        Clear {activeFilterCount}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter category tabs */}
+                  <div className="nx-icm__filter-cat-tabs">
+                    {FILTER_CATEGORIES.map((cat) => (
+                      <button key={cat.key} type="button" className={cls('nx-icm__filter-cat-tab', filterCategory === cat.key && 'is-active')} onClick={() => setFilterCategory(cat.key)}>
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Property filters */}
+                  {filterCategory === 'property' && (
+                    <>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Asset &amp; Use</span>
+                        <div className="nx-icm__filter-grid">
+                          <select className="nx-icm__field" value={filters.propertyType} onChange={(e) => setFilters((c) => ({ ...c, propertyType: e.target.value }))}>
+                            <option value="">All Asset Types</option>
+                            {['SFR', '2–4 Units', '5+ Units', 'Storage', 'Retail', 'Office', 'Industrial', 'Land', 'Mixed Use'].map((t) => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Ownership</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Owner Occupied</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Absentee Owner</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Out-of-State</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Corporate Owner</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Trust Owner</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Ownership Yrs</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Distress Signals</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Vacant</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Tax Delinquent</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Active Lien</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Foreclosure</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Pre-Foreclosure</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Auction</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Scores</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Motivation Score</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Acq Score</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Deal Strength</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Distress Score</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Opp Score</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Value &amp; Equity</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.highEquity} onChange={(e) => setFilters((c) => ({ ...c, highEquity: e.target.checked }))} /><span>High Equity</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Equity %</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Est Value</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Cash Offer</span></label>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Prospect filters */}
+                  {filterCategory === 'prospect' && (
+                    <>
+                      <div className="nx-icm__controls-group">
+                        <div className="nx-icm__controls-headerline">
+                          <span className="nx-icm__controls-label">KPI Focus</span>
+                          <label className="nx-icm__checkbox" style={{ fontSize: 11, minHeight: 28 }}>
+                            <input type="checkbox" checked={showKpiBadges} onChange={(e) => setShowKpiBadges(e.target.checked)} />
+                            Badges
+                          </label>
+                        </div>
+                        <div className="nx-icm__controls-segment">
+                          {kpiChips.map((chip) => (
+                            <button key={chip.key} type="button" className={cls('nx-icm__kpi-chip', activeKpiFilter === chip.key && 'is-active')} onClick={() => setActiveKpiFilter((c) => c === chip.key ? null : chip.key)} style={{ '--icm-kpi-tone': chip.tone } as CSSProperties}>
+                              <span>{chip.label}</span><strong>{chip.count}</strong>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Conversation</span>
+                        <div className="nx-icm__filter-grid">
+                          <select className="nx-icm__field" value={filters.market} onChange={(e) => setFilters((c) => ({ ...c, market: e.target.value }))}><option value="">All Markets</option>{markets.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.stage} onChange={(e) => setFilters((c) => ({ ...c, stage: e.target.value }))}><option value="">All Stages</option>{stages.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.status} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))}><option value="">All Statuses</option>{statuses.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.leadTemperature} onChange={(e) => setFilters((c) => ({ ...c, leadTemperature: e.target.value }))}><option value="">All Temps</option>{temperatures.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select>
+                        </div>
+                        <div className="nx-icm__layer-toggle-grid" style={{ marginTop: 6 }}>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.unreadOnly} onChange={(e) => setFilters((c) => ({ ...c, unreadOnly: e.target.checked }))} /><span>Unread</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.followUpDue} onChange={(e) => setFilters((c) => ({ ...c, followUpDue: e.target.checked }))} /><span>Follow-Up Due</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Reply</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Inbound</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Outreach</span>
+                        <div className="nx-icm__filter-grid">
+                          <select className="nx-icm__field" value={filters.automationStatus} onChange={(e) => setFilters((c) => ({ ...c, automationStatus: e.target.value }))}><option value="">All Automation</option>{automationStatuses.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+                        </div>
+                        <div className="nx-icm__layer-toggle-grid" style={{ marginTop: 6 }}>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Contacted</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Touch Count</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Campaign</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Agent Persona</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Contactability</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>SMS Eligible</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Has Phone</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Has Email</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Phone Conf.</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Excl. Suppressed</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Excl. DNC/Opt-Out</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Intent Signals</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Positive</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Negotiating</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Price Mentioned</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Timeline Mentioned</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Not Interested</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Wrong Number</span></label>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Owner filters */}
+                  {filterCategory === 'owner' && (
+                    <>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Identity</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Individual</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Corporate</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Trust</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Institutional</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>HF Exclusion</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Portfolio</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Portfolio Size</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Multi-Property</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Total Equity</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Landlord Signal</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Location</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Mailing State</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Mailing City</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Out-of-State</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Contact Quality</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Phone</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Email</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Phone Conf.</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Channel</span></label>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Buyer filters */}
+                  {filterCategory === 'buyer' && (
+                    <>
+                      {buyerFilters && (
+                        <>
+                          <datalist id="buyer-markets">{buyerFilterOptions.markets.map((v) => <option key={v} value={v} />)}</datalist>
+                          <datalist id="buyer-property-types">{buyerFilterOptions.propertyTypes.map((v) => <option key={v} value={v} />)}</datalist>
+                          <div className="nx-icm__controls-group">
+                            <div className="nx-icm__controls-headerline">
+                              <span className="nx-icm__controls-label">Buyer Activity</span>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                {buyerFilterCount > 0 && <span className="nx-icm__pill-note">{buyerFilterCount} active</span>}
+                                <button type="button" className="nx-icm__mode-tab" onClick={clearBuyerFilters}>Clear</button>
+                              </div>
+                            </div>
+                            <div className="nx-icm__filter-grid">
+                              <select className="nx-icm__field" value={buyerFilters.activityWindowDays} onChange={(e) => onBuyerFiltersChange?.({ activityWindowDays: Number(e.target.value) as BuyerMapFilters['activityWindowDays'] })}>{[30, 90, 180, 365].map((d) => <option key={d} value={d}>{d}d window</option>)}</select>
+                              <select className="nx-icm__field" value={buyerFilters.radiusMiles} onChange={(e) => onBuyerFiltersChange?.({ radiusMiles: Number(e.target.value) as BuyerMapFilters['radiusMiles'] })}>{[1, 3, 5, 10].map((m) => <option key={m} value={m}>{m} mi radius</option>)}</select>
+                              <input className="nx-icm__field" list="buyer-markets" value={buyerFilters.market} onChange={(e) => onBuyerFiltersChange?.({ market: e.target.value })} placeholder="Market" />
+                              <input className="nx-icm__field" list="buyer-property-types" value={buyerFilters.propertyType} onChange={(e) => onBuyerFiltersChange?.({ propertyType: e.target.value })} placeholder="Property Type" />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Buyer Type</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.repeatBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, repeatBuyers: e.target.checked }))} /><span>Repeat Buyer</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.corporateBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, corporateBuyers: e.target.checked }))} /><span>Corporate</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.localInvestors} onChange={(e) => setBuyerLayers((c) => ({ ...c, localInvestors: e.target.checked }))} /><span>Local Investor</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.flippers} onChange={(e) => setBuyerLayers((c) => ({ ...c, flippers: e.target.checked }))} /><span>Flipper</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.builders} onChange={(e) => setBuyerLayers((c) => ({ ...c, builders: e.target.checked }))} /><span>Builder</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Retail Excl.</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Asset Match</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Asset Type</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Units</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Sqft Range</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Year Built</span></label>
+                        </div>
+                      </div>
+                      <div className="nx-icm__controls-group">
+                        <span className="nx-icm__controls-label">Price Metrics</span>
+                        <div className="nx-icm__layer-toggle-grid">
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Purchase Price</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>PPSF</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>PPU</span></label>
+                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>% of ARV</span></label>
+                        </div>
+                      </div>
+                      {!buyerFilters && (
+                        <div className="nx-icm__controls-group">
+                          <p className="nx-icm__placeholder-note">Select a thread with buyer data to unlock comp filters.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Saved segments */}
+                  {filterCategory === 'saved' && (
                     <div className="nx-icm__controls-group">
-                      <div className="nx-icm__controls-headerline">
-                        <span className="nx-icm__controls-label">KPI Focus</span>
-                        <label className="nx-icm__checkbox">
-                          <input type="checkbox" checked={showKpiBadges} onChange={(event) => setShowKpiBadges(event.target.checked)} />
-                          KPI Badges
-                        </label>
-                      </div>
-                      <div className="nx-icm__controls-segment">
-                        {kpiChips.map((chip) => (
+                      <p className="nx-icm__placeholder-note">Saved segments coming soon. Build a filter set and pin it for instant recall.</p>
+                    </div>
+                  )}
+                </>
+              )}
+              {activeControlsTab === 'style' && (
+                <>
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Map Preset</span>
+                    <div className="nx-icm__style-card-grid">
+                      {CINEMATIC_THEME_DEFINITIONS.map((theme) => {
+                        const themeData = COMMAND_MAP_THEME_OPTIONS.find((t) => t.id === theme.id)
+                        if (!themeData) return null
+                        return (
                           <button
-                            key={chip.key}
+                            key={theme.id}
                             type="button"
-                            className={cls('nx-icm__kpi-chip', activeKpiFilter === chip.key && 'is-active')}
-                            onClick={() => setActiveKpiFilter((current) => current === chip.key ? null : chip.key)}
-                            style={{ '--icm-kpi-tone': chip.tone } as CSSProperties}
+                            className={cls('nx-icm__style-card', mapStyleMode === theme.id && 'is-active')}
+                            onClick={() => setMapStyleMode(theme.id)}
                           >
-                            <span>{chip.label}</span>
-                            <strong>{chip.count}</strong>
+                            <span className="nx-icm__style-card-swatch" style={{ background: themeData.clusterPalette.core }} />
+                            <div className="nx-icm__style-card-body">
+                              <span className="nx-icm__style-card-name">{theme.label}</span>
+                              <span className="nx-icm__style-card-desc">{theme.description}</span>
+                            </div>
+                            <div className="nx-icm__style-card-right">
+                              {mapStyleMode === theme.id && <span className="nx-icm__style-card-check">✓</span>}
+                              <span className="nx-icm__style-card-best-for">{theme.bestFor}</span>
+                            </div>
                           </button>
-                        ))}
-                      </div>
+                        )
+                      })}
                     </div>
                   </div>
                   <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Map UI</span>
+                    <span className="nx-icm__controls-label">Dimension</span>
                     <div className="nx-icm__controls-segment">
-                      <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={showLegendPanel} onChange={(event) => setShowLegendPanel(event.target.checked)} />
-                        Map Key
+                      <button type="button" className={cls('nx-icm__mode-tab', mapDimension === '2d' && 'is-active')} onClick={() => setMapDimension('2d')}>2D</button>
+                      <button type="button" className={cls('nx-icm__mode-tab', mapDimension === '3d' && 'is-active')} onClick={() => setMapDimension('3d')}>3D</button>
+                    </div>
+                  </div>
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Cinematic Controls</span>
+                    <div className="nx-icm__cinematic-rows">
+                      <div className="nx-icm__cinematic-row">
+                        <span>Live Pulses</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['off', 'subtle', 'full'] as const).map((v) => (
+                            <button key={v} type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', cinematicControls.livePulses === v && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, livePulses: v }))}>{v}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="nx-icm__cinematic-row">
+                        <span>Pin Glow</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['off', 'subtle', 'full'] as const).map((v) => (
+                            <button key={v} type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', cinematicControls.pinGlow === v && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, pinGlow: v }))}>{v}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="nx-icm__cinematic-row">
+                        <span>Event Trail</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', !cinematicControls.eventTrail && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, eventTrail: false }))}>off</button>
+                          <button type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', cinematicControls.eventTrail && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, eventTrail: true }))}>on</button>
+                        </div>
+                      </div>
+                      <div className="nx-icm__cinematic-row">
+                        <span>Sound FX</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['off', 'soft', 'full'] as const).map((v) => (
+                            <button key={v} type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', cinematicControls.soundFx === v && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, soundFx: v }))}>{v}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="nx-icm__cinematic-row">
+                        <span>Map Atmosphere</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['clean', 'cinematic', 'tactical'] as const).map((v) => (
+                            <button key={v} type="button" className={cls('nx-icm__mode-tab nx-icm__mode-tab--sm', cinematicControls.mapAtmosphere === v && 'is-active')} onClick={() => setCinematicControls((c) => ({ ...c, mapAtmosphere: v }))}>{v}</button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              {activeControlsTab === 'intel' && (
+                <>
+                  {/* Panel visibility toggles — owns key/census/KPI globally */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Panel Visibility</span>
+                    <div className="nx-icm__intel-panel-toggles">
+                      <label className="nx-icm__intel-panel-toggle">
+                        <input type="checkbox" checked={showLegendPanel} onChange={(e) => setShowLegendPanel(e.target.checked)} />
+                        <div className="nx-icm__intel-panel-toggle-body">
+                          <span>Show Map Key</span>
+                          <small>Color legend overlay</small>
+                        </div>
                       </label>
-                      <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={showCensusDock} onChange={(event) => setShowCensusDock(event.target.checked)} />
-                        Census Intelligence
+                      <label className="nx-icm__intel-panel-toggle">
+                        <input type="checkbox" checked={showCensusDock} onChange={(e) => setShowCensusDock(e.target.checked)} />
+                        <div className="nx-icm__intel-panel-toggle-body">
+                          <span>Show Census Dock</span>
+                          <small>Left-side census panel</small>
+                        </div>
                       </label>
                     </div>
                   </div>
+
+                  {/* Census Intelligence */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Census Intelligence</span>
+                    <div className="nx-icm__census-toggle-grid">
+                      {CENSUS_TOGGLE_DEFS.map((def) => (
+                        <button
+                          key={def.key}
+                          type="button"
+                          className={cls('nx-icm__census-toggle-btn', censusLayers[def.key] && 'is-active')}
+                          style={{ '--census-accent': def.color } as CSSProperties}
+                          onClick={() => setSingleCensusMetric(def.key, !censusLayers[def.key])}
+                        >
+                          <span className="nx-icm__census-toggle-dot" />
+                          <span>{def.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Selected Property Intel */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Selected Property</span>
+                    {selectedPin ? (
+                      <div className="nx-icm__intel-property-rows">
+                        <div className="nx-icm__intel-row"><span>Address</span><strong>{selectedPin.address || '—'}</strong></div>
+                        <div className="nx-icm__intel-row"><span>Asset Type</span><strong>{selectedPin.property_type || '—'}</strong></div>
+                        {selectedPin.motivation_score != null && (
+                          <div className="nx-icm__intel-row"><span>Motivation</span><strong>{selectedPin.motivation_score}</strong></div>
+                        )}
+                        {selectedPin.final_acquisition_score != null && (
+                          <div className="nx-icm__intel-row"><span>Acq Score</span><strong>{selectedPin.final_acquisition_score}</strong></div>
+                        )}
+                        {censusPanelModel.data?.investor_opportunity_score != null && (
+                          <div className="nx-icm__intel-row"><span>Opp Score</span><strong>{censusPanelModel.data.investor_opportunity_score.toFixed(1)}</strong></div>
+                        )}
+                        {buyerCommandData?.summary && (
+                          <>
+                            <div className="nx-icm__intel-row"><span>Buyer Demand</span><strong>{buyerCommandData.summary.demandLabel}</strong></div>
+                            <div className="nx-icm__intel-row"><span>Active Matches</span><strong>{buyerCommandData.summary.activeBuyerMatches}</strong></div>
+                            <div className="nx-icm__intel-row"><span>Nearby Buys</span><strong>{buyerCommandData.summary.recentPurchasesNearby}</strong></div>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="nx-icm__intel-skeleton">
+                        <span>Select a property on the map</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Area Signals */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Area Signals</span>
+                    {censusPanelModel.data ? (
+                      <div className="nx-icm__area-signal-list">
+                        {(censusPanelModel.data.renter_occupied_percent ?? 0) > 0.5 && (
+                          <div className="nx-icm__area-signal is-warning">High renter concentration</div>
+                        )}
+                        {(censusPanelModel.data.vacancy_rate ?? 0) > 0.1 && (
+                          <div className="nx-icm__area-signal is-warning">High vacancy rate</div>
+                        )}
+                        {(censusPanelModel.data.owner_occupied_percent ?? 1) < 0.4 && (
+                          <div className="nx-icm__area-signal is-warning">Low owner occupancy</div>
+                        )}
+                        {buyerCommandData?.summary && (buyerCommandData.summary.recentPurchasesNearby ?? 0) > 3 && (
+                          <div className="nx-icm__area-signal is-positive">Strong buyer activity nearby</div>
+                        )}
+                        {(censusPanelModel.data.investor_opportunity_score ?? 0) > 70 && (
+                          <div className="nx-icm__area-signal is-positive">High investor opportunity score</div>
+                        )}
+                        {!censusPanelModel.data.renter_occupied_percent && !censusPanelModel.data.vacancy_rate && (
+                          <div className="nx-icm__intel-skeleton"><span>Census signals load with area data</span></div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="nx-icm__intel-skeleton">
+                        <span>Select a property or region for area signals</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Map Legend — inline, no auto-show on drawer open */}
+                  <div className="nx-icm__controls-group">
+                    <span className="nx-icm__controls-label">Map Legend</span>
+                    <div className="nx-icm__legend-grid is-expanded">
+                      {(sellerPinLayers.sellerPins ? SELLER_PINS_LEGEND_ITEMS : MAP_LEGEND_ITEMS).map((item) => (
+                        <div key={item.label} className="nx-icm__legend-row">
+                          <span
+                            className="nx-icm__legend-chip"
+                            style={{
+                              backgroundColor: 'isRing' in item && item.isRing ? 'transparent' : item.color,
+                              border: 'isRing' in item && item.isRing ? `2px solid ${item.color}` : 'none',
+                            }}
+                          />
+                          <span className="nx-icm__legend-label">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+              {activeControlsTab === 'performance' && (
+                <>
                   <div className="nx-icm__controls-group">
                     <span className="nx-icm__controls-label">Performance Mode</span>
                     <div className="nx-icm__controls-segment">
@@ -7091,7 +8935,7 @@ export function InboxCommandMap({
                   </div>
                   <div className="nx-icm__controls-grid">
                     <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Live Activity Mode</span>
+                      <span className="nx-icm__controls-label">Live Activity</span>
                       <div className="nx-icm__controls-segment">
                         {(['hidden', 'minimal', 'compact', 'expanded', 'docked'] as const).map((value) => (
                           <button
@@ -7109,7 +8953,7 @@ export function InboxCommandMap({
                       </div>
                     </div>
                     <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Cluster Aggressiveness</span>
+                      <span className="nx-icm__controls-label">Cluster</span>
                       <div className="nx-icm__controls-segment">
                         {(['low', 'medium', 'high'] as const).map((value) => (
                           <button key={value} type="button" className={cls('nx-icm__mode-tab', performanceSettings.clusterAggressiveness === value && 'is-active')} onClick={() => patchPerformanceSettings({ clusterAggressiveness: value })}>
@@ -7120,425 +8964,22 @@ export function InboxCommandMap({
                     </div>
                   </div>
                   <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Performance Effects</span>
+                    <span className="nx-icm__controls-label">Effects</span>
                     <div className="nx-icm__controls-segment">
                       <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={performanceSettings.showHeatEffects} onChange={(event) => patchPerformanceSettings({ showHeatEffects: event.target.checked })} />
-                        Show Heat Effects
+                        <input type="checkbox" checked={performanceSettings.showHeatEffects} onChange={(e) => patchPerformanceSettings({ showHeatEffects: e.target.checked })} />
+                        Heat Effects
                       </label>
                       <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={liveActivitySettings.onlyCurrentBounds} onChange={(event) => patchLiveActivitySettings({ onlyCurrentBounds: event.target.checked })} />
+                        <input type="checkbox" checked={liveActivitySettings.onlyCurrentBounds} onChange={(e) => patchLiveActivitySettings({ onlyCurrentBounds: e.target.checked })} />
                         Bounds-Locked Feed
                       </label>
-                    </div>
-                  </div>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Map Legend</span>
-                    <div className="nx-icm__legend-grid is-expanded">
-                      {(sellerPinLayers.sellerPins ? SELLER_PINS_LEGEND_ITEMS : MAP_LEGEND_ITEMS).map((item) => (
-                        <div key={item.label} className="nx-icm__legend-row">
-                          <span
-                            className="nx-icm__legend-chip"
-                            style={{
-                              backgroundColor: 'isRing' in item && item.isRing ? 'transparent' : item.color,
-                              border: 'isRing' in item && item.isRing ? `2px solid ${item.color}` : 'none'
-                            }}
-                          />
-                          <span className="nx-icm__legend-label">{item.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-              {activeControlsTab === 'seller_layers' && (
-                <>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Seller Thread Layers</span>
-                    <div className="nx-icm__controls-segment">
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.sellerPins} onChange={(e) => setSellerPinLayers((current) => ({ ...current, sellerPins: e.target.checked }))} />Live Seller Pins</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.sellerThreads} onChange={(e) => setBuyerLayers((current) => ({ ...current, sellerThreads: e.target.checked }))} />Inbox Threads</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={mapOverlays.roads} onChange={(e) => setMapOverlays((current) => ({ ...current, roads: e.target.checked }))} />Roads</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={mapOverlays.cities} onChange={(e) => setMapOverlays((current) => ({ ...current, cities: e.target.checked }))} />Cities</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={mapOverlays.poi} onChange={(e) => setMapOverlays((current) => ({ ...current, poi: e.target.checked }))} />POI</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={mapOverlays.zip} onChange={(e) => setMapOverlays((current) => ({ ...current, zip: e.target.checked }))} />ZIP</label>
-                    </div>
-                  </div>
-                  {sellerPinLayers.sellerPins && (
-                    <>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Seller State Filters</span>
-                        <div className="nx-icm__controls-segment">
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.notContacted} onChange={(e) => setSellerPinLayers((c) => ({ ...c, notContacted: e.target.checked }))} />Not Contacted</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.contacted} onChange={(e) => setSellerPinLayers((c) => ({ ...c, contacted: e.target.checked }))} />Contacted</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.newReplies} onChange={(e) => setSellerPinLayers((c) => ({ ...c, newReplies: e.target.checked }))} />New Replies</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.positive} onChange={(e) => setSellerPinLayers((c) => ({ ...c, positive: e.target.checked }))} />Positive</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.negotiating} onChange={(e) => setSellerPinLayers((c) => ({ ...c, negotiating: e.target.checked }))} />Negotiating</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.hot} onChange={(e) => setSellerPinLayers((c) => ({ ...c, hot: e.target.checked }))} />Hot</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.issues} onChange={(e) => setSellerPinLayers((c) => ({ ...c, issues: e.target.checked }))} />Issues</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.blocked} onChange={(e) => setSellerPinLayers((c) => ({ ...c, blocked: e.target.checked }))} />Blocked</label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Execution Filters</span>
-                        <div className="nx-icm__controls-segment">
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.queued} onChange={(e) => setSellerPinLayers((c) => ({ ...c, queued: e.target.checked }))} />Queued</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.scheduled} onChange={(e) => setSellerPinLayers((c) => ({ ...c, scheduled: e.target.checked }))} />Scheduled</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.ready} onChange={(e) => setSellerPinLayers((c) => ({ ...c, ready: e.target.checked }))} />Ready</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.activeSending} onChange={(e) => setSellerPinLayers((c) => ({ ...c, activeSending: e.target.checked }))} />Active/Sending</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.sent} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sent: e.target.checked }))} />Sent</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.delivered} onChange={(e) => setSellerPinLayers((c) => ({ ...c, delivered: e.target.checked }))} />Delivered</label>
-                          <label className="nx-icm__checkbox"><input type="checkbox" checked={sellerPinLayers.failedIssue} onChange={(e) => setSellerPinLayers((c) => ({ ...c, failedIssue: e.target.checked }))} />Failed/Issue</label>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-              {activeControlsTab === 'buyer_layers' && (
-                <>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Buyer Intelligence Layers</span>
-                    <div className="nx-icm__controls-segment">
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.buyerFocusMode} onChange={(e) => setBuyerLayers((current) => ({ ...current, buyerFocusMode: e.target.checked }))} />Buyer Focus Mode</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.buyerMatches} onChange={(e) => setBuyerLayers((current) => ({ ...current, buyerMatches: e.target.checked }))} />Buyer Matches</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.buyerRecentPurchases} onChange={(e) => setBuyerLayers((current) => ({ ...current, buyerRecentPurchases: e.target.checked }))} />Buyer Activity</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.buyerHeatmap} onChange={(e) => setBuyerLayers((current) => ({ ...current, buyerHeatmap: e.target.checked }))} />Buyer Heatmap</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.buyerProfiles} onChange={(e) => setBuyerLayers((current) => ({ ...current, buyerProfiles: e.target.checked }))} />Buyer Profiles</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.recentSoldComps} onChange={(e) => setBuyerLayers((current) => ({ ...current, recentSoldComps: e.target.checked }))} />Sold Comps</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.repeatBuyers} onChange={(e) => setBuyerLayers((current) => ({ ...current, repeatBuyers: e.target.checked }))} />Repeat Buyers</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.corporateBuyers} onChange={(e) => setBuyerLayers((current) => ({ ...current, corporateBuyers: e.target.checked }))} />Corporate Buyers</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.localInvestors} onChange={(e) => setBuyerLayers((current) => ({ ...current, localInvestors: e.target.checked }))} />Local Investors</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.offMarketBuyers} onChange={(e) => setBuyerLayers((current) => ({ ...current, offMarketBuyers: e.target.checked }))} />Off-Market Buyers</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.retailNoise} onChange={(e) => setBuyerLayers((current) => ({ ...current, retailNoise: e.target.checked }))} />Retail / Noise</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.institutional} onChange={(e) => setBuyerLayers((current) => ({ ...current, institutional: e.target.checked }))} />Institutional</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.landlords} onChange={(e) => setBuyerLayers((current) => ({ ...current, landlords: e.target.checked }))} />Landlords</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.flippers} onChange={(e) => setBuyerLayers((current) => ({ ...current, flippers: e.target.checked }))} />Flippers</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerLayers.builders} onChange={(e) => setBuyerLayers((current) => ({ ...current, builders: e.target.checked }))} />Builders</label>
-                    </div>
-                  </div>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Buyer Demand Layers</span>
-                    <div className="nx-icm__controls-segment">
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerDemandLayers.activity6mo} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, activity6mo: e.target.checked }))} />Buyer Activity 6mo</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerDemandLayers.investorDemand} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, investorDemand: e.target.checked }))} />Investor Demand</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerDemandLayers.buyerHeat} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, buyerHeat: e.target.checked }))} />Buyer Heat</label>
-                      <label className="nx-icm__checkbox"><input type="checkbox" checked={buyerDemandLayers.soldPrice} onChange={(e) => setBuyerDemandLayers((c) => ({ ...c, soldPrice: e.target.checked }))} />Sold Price Labels</label>
-                    </div>
-                  </div>
-                  {selectedThread && buyerCommandData?.summary && (
-                    <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Buyer Demand Summary</span>
-                      <div className="nx-icm__buyer-summary">
-                        <div><span>Buyer Demand</span><strong>{buyerCommandData.summary.demandLabel}</strong></div>
-                        <div><span>Top Match</span><strong>{buyerCommandData.summary.topBuyerMatch}</strong></div>
-                        <div><span>Active Matches</span><strong>{buyerCommandData.summary.activeBuyerMatches}</strong></div>
-                        <div><span>Avg Match Score</span><strong>{buyerCommandData.summary.averageMatchScore ?? '—'}</strong></div>
-                        <div><span>Nearby Purchases</span><strong>{buyerCommandData.summary.recentPurchasesNearby}</strong></div>
-                        <div><span>Dispo Confidence</span><strong>{buyerCommandData.summary.dispoConfidence}%</strong></div>
-                      </div>
-                      <p className="nx-icm__buyer-summary-note">{buyerCommandData.summary.recommendedAction}</p>
-                      {buyerCommandData.summary.topMarkets.length > 0 && (
-                        <div className="nx-icm__controls-segment">
-                          {buyerCommandData.summary.topMarkets.slice(0, 5).map((market) => (
-                            <button
-                              key={market}
-                              type="button"
-                              className={cls('nx-icm__mode-tab', buyerFilters?.market === market && 'is-active')}
-                              onClick={() => onBuyerFiltersChange?.({ market })}
-                            >
-                              {market}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {buyerFilters && (
-                    <>
-                      <datalist id="buyer-markets">
-                        {buyerFilterOptions.markets.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-states">
-                        {buyerFilterOptions.states.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-zips">
-                        {buyerFilterOptions.zips.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-property-types">
-                        {buyerFilterOptions.propertyTypes.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-asset-classes">
-                        {buyerFilterOptions.assetClasses.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-names">
-                        {buyerFilterOptions.buyerNames.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-                      <datalist id="buyer-exit-strategies">
-                        {buyerFilterOptions.exitStrategies.map((value) => <option key={value} value={value} />)}
-                      </datalist>
-
-                      <div className="nx-icm__controls-group">
-                        <div className="nx-icm__controls-headerline">
-                          <span className="nx-icm__controls-label">Buyer Filters</span>
-                          <div className="nx-icm__controls-segment">
-                            <span className="nx-icm__pill-note">{buyerFilterCount} active</span>
-                            <button type="button" className="nx-icm__mode-tab" onClick={clearBuyerFilters}>Clear Buyer Filters</button>
-                          </div>
-                        </div>
-                        <div className="nx-icm__filter-grid">
-                          <select className="nx-icm__field" value={buyerFilters.activityWindowDays} onChange={(e) => onBuyerFiltersChange?.({ activityWindowDays: Number(e.target.value) as BuyerMapFilters['activityWindowDays'] })}>
-                            {[30, 90, 180, 365].map((days) => <option key={days} value={days}>{days} day window</option>)}
-                          </select>
-                          <select className="nx-icm__field" value={buyerFilters.radiusMiles} onChange={(e) => onBuyerFiltersChange?.({ radiusMiles: Number(e.target.value) as BuyerMapFilters['radiusMiles'] })}>
-                            {[1, 3, 5, 10].map((miles) => <option key={miles} value={miles}>{miles} mile radius</option>)}
-                          </select>
-                          <input className="nx-icm__field" list="buyer-markets" value={buyerFilters.market} onChange={(e) => onBuyerFiltersChange?.({ market: e.target.value })} placeholder="Market" />
-                          <input className="nx-icm__field" list="buyer-property-types" value={buyerFilters.propertyType} onChange={(e) => onBuyerFiltersChange?.({ propertyType: e.target.value })} placeholder="Property Type" />
-                        </div>
-                      </div>
-
-                      <div className="nx-icm__controls-grid nx-icm__controls-grid--buyer">
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">A. Buyer Source / Type</span>
-                          <div className="nx-icm__controls-segment nx-icm__controls-segment--pills">
-                            {BUYER_SOURCE_OPTIONS.map(([value, label]) => (
-                              <button key={value} type="button" className={cls('nx-icm__mode-tab', buyerFilters.buyerRoles.includes(value) && 'is-active')} onClick={() => toggleBuyerFilterArray('buyerRoles', value)}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">B. Buyer Identity</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" list="buyer-names" value={buyerFilters.buyerName} onChange={(e) => onBuyerFiltersChange?.({ buyerName: e.target.value })} placeholder="Buyer Name" />
-                            <input className="nx-icm__field" value={buyerFilters.entityName} onChange={(e) => onBuyerFiltersChange?.({ entityName: e.target.value })} placeholder="Entity Name" />
-                            <input className="nx-icm__field" value={buyerFilters.mailingName} onChange={(e) => onBuyerFiltersChange?.({ mailingName: e.target.value })} placeholder="Mailing Name" />
-                            <input className="nx-icm__field" value={buyerFilters.companyName} onChange={(e) => onBuyerFiltersChange?.({ companyName: e.target.value })} placeholder="Company Name" />
-                            <input className="nx-icm__field" value={buyerFilters.buyerPhone} onChange={(e) => onBuyerFiltersChange?.({ buyerPhone: e.target.value })} placeholder="Buyer Phone" />
-                            <input className="nx-icm__field" value={buyerFilters.buyerEmail} onChange={(e) => onBuyerFiltersChange?.({ buyerEmail: e.target.value })} placeholder="Buyer Email" />
-                            <input className="nx-icm__field" list="buyer-markets" value={buyerFilters.buyerMarket} onChange={(e) => onBuyerFiltersChange?.({ buyerMarket: e.target.value })} placeholder="Buyer Market" />
-                            <input className="nx-icm__field" list="buyer-states" value={buyerFilters.buyerState} onChange={(e) => onBuyerFiltersChange?.({ buyerState: e.target.value })} placeholder="Buyer State" />
-                            <input className="nx-icm__field" list="buyer-zips" value={buyerFilters.buyerZip} onChange={(e) => onBuyerFiltersChange?.({ buyerZip: e.target.value })} placeholder="Buyer ZIP" />
-                          </div>
-                          <div className="nx-icm__controls-segment nx-icm__controls-segment--pills">
-                            {BUYER_IDENTITY_OPTIONS.map(([value, label]) => (
-                              <button key={value} type="button" className={cls('nx-icm__mode-tab', buyerFilters.buyerIdentityTags.includes(value) && 'is-active')} onClick={() => toggleBuyerFilterArray('buyerIdentityTags', value)}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">C. Purchase Behavior</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.minPurchaseCount} onChange={(e) => onBuyerFiltersChange?.({ minPurchaseCount: Number(e.target.value) || 0 })} placeholder="Purchase Count Min" />
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.maxPurchaseCount} onChange={(e) => onBuyerFiltersChange?.({ maxPurchaseCount: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Purchase Count Max" />
-                            <input className="nx-icm__field" type="date" value={buyerFilters.lastPurchaseDateFrom} onChange={(e) => onBuyerFiltersChange?.({ lastPurchaseDateFrom: e.target.value })} />
-                            <input className="nx-icm__field" type="date" value={buyerFilters.lastPurchaseDateTo} onChange={(e) => onBuyerFiltersChange?.({ lastPurchaseDateTo: e.target.value })} />
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.minAveragePurchasePrice} onChange={(e) => onBuyerFiltersChange?.({ minAveragePurchasePrice: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Avg Purchase Min" />
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.maxAveragePurchasePrice} onChange={(e) => onBuyerFiltersChange?.({ maxAveragePurchasePrice: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Avg Purchase Max" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.minCashPurchasePercent} onChange={(e) => onBuyerFiltersChange?.({ minCashPurchasePercent: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Cash Purchase % Min" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.maxCashPurchasePercent} onChange={(e) => onBuyerFiltersChange?.({ maxCashPurchasePercent: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Cash Purchase % Max" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.minVelocityScore} onChange={(e) => onBuyerFiltersChange?.({ minVelocityScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Velocity Min" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.maxVelocityScore} onChange={(e) => onBuyerFiltersChange?.({ maxVelocityScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Velocity Max" />
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.minDaysSinceLastBuy} onChange={(e) => onBuyerFiltersChange?.({ minDaysSinceLastBuy: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Days Since Last Buy Min" />
-                            <input className="nx-icm__field" type="number" min={0} value={buyerFilters.maxDaysSinceLastBuy} onChange={(e) => onBuyerFiltersChange?.({ maxDaysSinceLastBuy: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Days Since Last Buy Max" />
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">D. Asset Filters</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" list="buyer-property-types" value={buyerFilters.propertyType} onChange={(e) => onBuyerFiltersChange?.({ propertyType: e.target.value })} placeholder="Property Type" />
-                            <input className="nx-icm__field" list="buyer-asset-classes" value={buyerFilters.assetClass} onChange={(e) => onBuyerFiltersChange?.({ assetClass: e.target.value })} placeholder="Asset Class" />
-                          </div>
-                          <div className="nx-icm__controls-segment nx-icm__controls-segment--pills">
-                            {BUYER_ASSET_OPTIONS.map((value) => (
-                              <button key={value} type="button" className={cls('nx-icm__mode-tab', buyerFilters.assetTypes.includes(value) && 'is-active')} onClick={() => toggleBuyerFilterArray('assetTypes', value)}>
-                                {value}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">E. Physical Property Filters</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minBeds} onChange={(e) => onBuyerFiltersChange?.({ minBeds: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Beds Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxBeds} onChange={(e) => onBuyerFiltersChange?.({ maxBeds: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Beds Max" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minBaths} onChange={(e) => onBuyerFiltersChange?.({ minBaths: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Baths Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxBaths} onChange={(e) => onBuyerFiltersChange?.({ maxBaths: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Baths Max" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minUnits} onChange={(e) => onBuyerFiltersChange?.({ minUnits: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Units Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxUnits} onChange={(e) => onBuyerFiltersChange?.({ maxUnits: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Units Max" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minSqft} onChange={(e) => onBuyerFiltersChange?.({ minSqft: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Sq Ft Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxSqft} onChange={(e) => onBuyerFiltersChange?.({ maxSqft: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Sq Ft Max" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.yearBuiltMin} onChange={(e) => onBuyerFiltersChange?.({ yearBuiltMin: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Year Built Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.yearBuiltMax} onChange={(e) => onBuyerFiltersChange?.({ yearBuiltMax: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Year Built Max" />
-                            <input className="nx-icm__field" value={buyerFilters.condition} onChange={(e) => onBuyerFiltersChange?.({ condition: e.target.value })} placeholder="Condition" />
-                            <input className="nx-icm__field" value={buyerFilters.renovationLevel} onChange={(e) => onBuyerFiltersChange?.({ renovationLevel: e.target.value })} placeholder="Renovation Level" />
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">F. Deal / Comp Filters</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minSalePrice} onChange={(e) => onBuyerFiltersChange?.({ minSalePrice: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Sale Price Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxSalePrice} onChange={(e) => onBuyerFiltersChange?.({ maxSalePrice: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Sale Price Max" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minPricePerSqft} onChange={(e) => onBuyerFiltersChange?.({ minPricePerSqft: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Price / Sq Ft Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxPricePerSqft} onChange={(e) => onBuyerFiltersChange?.({ maxPricePerSqft: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Price / Sq Ft Max" />
-                            <input className="nx-icm__field" type="date" value={buyerFilters.soldDateFrom} onChange={(e) => onBuyerFiltersChange?.({ soldDateFrom: e.target.value })} />
-                            <input className="nx-icm__field" type="date" value={buyerFilters.soldDateTo} onChange={(e) => onBuyerFiltersChange?.({ soldDateTo: e.target.value })} />
-                          </div>
-                          <div className="nx-icm__controls-segment nx-icm__controls-segment--pills">
-                            {BUYER_DEAL_OPTIONS.map(([value, label]) => (
-                              <button key={value} type="button" className={cls('nx-icm__mode-tab', buyerFilters.dealTypes.includes(value) && 'is-active')} onClick={() => toggleBuyerFilterArray('dealTypes', value)}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">G. Location Filters</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" list="buyer-markets" value={buyerFilters.market} onChange={(e) => onBuyerFiltersChange?.({ market: e.target.value })} placeholder="Market" />
-                            <input className="nx-icm__field" value={buyerFilters.submarket} onChange={(e) => onBuyerFiltersChange?.({ submarket: e.target.value })} placeholder="Submarket" />
-                            <input className="nx-icm__field" value={buyerFilters.county} onChange={(e) => onBuyerFiltersChange?.({ county: e.target.value })} placeholder="County" />
-                            <input className="nx-icm__field" value={buyerFilters.city} onChange={(e) => onBuyerFiltersChange?.({ city: e.target.value })} placeholder="City" />
-                            <input className="nx-icm__field" list="buyer-zips" value={buyerFilters.zip} onChange={(e) => onBuyerFiltersChange?.({ zip: e.target.value })} placeholder="ZIP" />
-                            <input className="nx-icm__field" value={buyerFilters.neighborhood} onChange={(e) => onBuyerFiltersChange?.({ neighborhood: e.target.value })} placeholder="Neighborhood" />
-                            <input className="nx-icm__field" value={buyerFilters.censusTract} onChange={(e) => onBuyerFiltersChange?.({ censusTract: e.target.value })} placeholder="Census Tract" />
-                            <input className="nx-icm__field" value={buyerFilters.schoolDistrict} onChange={(e) => onBuyerFiltersChange?.({ schoolDistrict: e.target.value })} placeholder="School District" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.minDistanceFromSubject} onChange={(e) => onBuyerFiltersChange?.({ minDistanceFromSubject: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Distance Min" />
-                            <input className="nx-icm__field" type="number" value={buyerFilters.maxDistanceFromSubject} onChange={(e) => onBuyerFiltersChange?.({ maxDistanceFromSubject: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Distance Max" />
-                          </div>
-                        </div>
-
-                        <div className="nx-icm__controls-group">
-                          <span className="nx-icm__controls-label">H. Buyer Match Filters</span>
-                          <div className="nx-icm__filter-grid">
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.minMatchScore} onChange={(e) => onBuyerFiltersChange?.({ minMatchScore: Number(e.target.value) || 0 })} placeholder="Buyer Match Score Min" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.maxMatchScore} onChange={(e) => onBuyerFiltersChange?.({ maxMatchScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Buyer Match Score Max" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.minConfidenceScore} onChange={(e) => onBuyerFiltersChange?.({ minConfidenceScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Confidence Score Min" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.maxConfidenceScore} onChange={(e) => onBuyerFiltersChange?.({ maxConfidenceScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Confidence Score Max" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.minDispoPriorityScore} onChange={(e) => onBuyerFiltersChange?.({ minDispoPriorityScore: Number(e.target.value) || 0 })} placeholder="Demand Score Min" />
-                            <input className="nx-icm__field" type="number" min={0} max={100} value={buyerFilters.maxDispoPriorityScore} onChange={(e) => onBuyerFiltersChange?.({ maxDispoPriorityScore: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Demand Score Max" />
-                            <input className="nx-icm__field" list="buyer-exit-strategies" value={buyerFilters.exitStrategyMatch} onChange={(e) => onBuyerFiltersChange?.({ exitStrategyMatch: e.target.value })} placeholder="Exit Strategy Match" />
-                          </div>
-                          <div className="nx-icm__controls-segment nx-icm__controls-segment--pills">
-                            {BUYER_MATCH_OPTIONS.map(([value, label]) => (
-                              <button key={value} type="button" className={cls('nx-icm__mode-tab', buyerFilters.matchTags.includes(value) && 'is-active')} onClick={() => toggleBuyerFilterArray('matchTags', value)}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-              {activeControlsTab === 'census' && (
-                <>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Census Layers</span>
-                    <div className="nx-icm__controls-segment">
-                      {CENSUS_TOGGLE_DEFS.map((def) => (
-                        <label key={def.key} className="nx-icm__checkbox">
-                          <input type="checkbox" checked={censusLayers[def.key]} onChange={(e) => setSingleCensusMetric(def.key, e.target.checked)} />
-                          {def.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Census UI</span>
-                    <div className="nx-icm__controls-segment">
-                      <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={showCensusDock} onChange={(event) => setShowCensusDock(event.target.checked)} />
-                        Show Census Intelligence
-                      </label>
-                      <label className="nx-icm__checkbox">
-                        <input type="checkbox" checked={showLegendPanel} onChange={(event) => setShowLegendPanel(event.target.checked)} />
-                        Show Map Key
-                      </label>
-                    </div>
-                  </div>
-                  <CensusIntelPanel
-                    data={censusPanelModel.data}
-                    styleMode={mapStyleMode}
-                    title={censusPanelModel.title}
-                    subtitle={censusPanelModel.subtitle}
-                    metrics={censusPanelModel.metrics}
-                    emptyMessage={censusPanelModel.emptyMessage}
-                  />
-                </>
-              )}
-              {activeControlsTab === 'filters' && (
-                <div className="nx-icm__controls-group">
-                  <span className="nx-icm__controls-label">Thread Filters</span>
-                  <div className="nx-icm__filter-grid">
-                    <select className="nx-icm__field" value={filters.market} onChange={(e) => setFilters((current) => ({ ...current, market: e.target.value }))}>
-                      <option value="">All Markets</option>
-                      {markets.map((market) => <option key={market} value={market}>{market}</option>)}
-                    </select>
-                    <select className="nx-icm__field" value={filters.stage} onChange={(e) => setFilters((current) => ({ ...current, stage: e.target.value }))}>
-                      <option value="">All Stages</option>
-                      {stages.map((stage) => <option key={stage} value={stage}>{stage.replace(/_/g, ' ')}</option>)}
-                    </select>
-                    <select className="nx-icm__field" value={filters.status} onChange={(e) => setFilters((current) => ({ ...current, status: e.target.value }))}>
-                      <option value="">All Statuses</option>
-                      {statuses.map((status) => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}
-                    </select>
-                    <select className="nx-icm__field" value={filters.leadTemperature} onChange={(e) => setFilters((current) => ({ ...current, leadTemperature: e.target.value }))}>
-                      <option value="">All Temperatures</option>
-                      {temperatures.map((temperature) => <option key={temperature} value={temperature}>{temperature.replace(/_/g, ' ')}</option>)}
-                    </select>
-                    <select className="nx-icm__field" value={filters.automationStatus} onChange={(e) => setFilters((current) => ({ ...current, automationStatus: e.target.value }))}>
-                      <option value="">All Automation</option>
-                      {automationStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-                    </select>
-                    <select className="nx-icm__field" value={filters.propertyType} onChange={(e) => setFilters((current) => ({ ...current, propertyType: e.target.value }))}>
-                      <option value="">All Property Types</option>
-                      {propertyTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                    </select>
-                    <label className="nx-icm__checkbox"><input type="checkbox" checked={filters.unreadOnly} onChange={(e) => setFilters((current) => ({ ...current, unreadOnly: e.target.checked }))} />Unread</label>
-                    <label className="nx-icm__checkbox"><input type="checkbox" checked={filters.followUpDue} onChange={(e) => setFilters((current) => ({ ...current, followUpDue: e.target.checked }))} />Follow-Up Due</label>
-                    <label className="nx-icm__checkbox"><input type="checkbox" checked={filters.highEquity} onChange={(e) => setFilters((current) => ({ ...current, highEquity: e.target.checked }))} />High Equity</label>
-                  </div>
-                </div>
-              )}
-              {activeControlsTab === 'map_style' && (
-                <>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Map Style</span>
-                    <div className="nx-icm__controls-segment">
-                      {COMMAND_MAP_THEME_OPTIONS.map((theme) => (
-                        <button key={theme.id} type="button" className={cls('nx-icm__mode-tab', mapStyleMode === theme.id && 'is-active')} onClick={() => setMapStyleMode(theme.id)}>
-                          {theme.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="nx-icm__controls-group">
-                    <span className="nx-icm__controls-label">Dimension</span>
-                    <div className="nx-icm__controls-segment">
-                      <button type="button" className={cls('nx-icm__mode-tab', mapDimension === '2d' && 'is-active')} onClick={() => setMapDimension('2d')}>
-                        2D
-                      </button>
-                      <button type="button" className={cls('nx-icm__mode-tab', mapDimension === '3d' && 'is-active')} onClick={() => setMapDimension('3d')}>
-                        3D
-                      </button>
                     </div>
                   </div>
                 </>
               )}
             </div>
-            <div className="nx-icm__controls-actions">
+            <div className="nx-icm__controls-footer">
               <button type="button" className="nx-icm__mode-tab" onClick={() => {
                 setFilters(defaultFilters)
                 setActiveKpiFilter(null)
@@ -7553,7 +8994,8 @@ export function InboxCommandMap({
         )}
       </div>}
 
-      <div ref={containerRef} className="nx-icm__canvas" />
+
+      <div key={mapContainerKey} ref={containerRef} className="nx-icm__canvas" />
 
       {tempLocation && (
         <aside className="cc-map-dossier" style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, width: '320px' }}>
@@ -7759,11 +9201,13 @@ export function InboxCommandMap({
       )}
 
       {emptyStateMessage && (
-        <div className="nx-icm__empty">
-          <div className="nx-icm__empty-title">No Visible Pins</div>
-          <p className="nx-icm__empty-sub">{emptyStateMessage}</p>
+        <div className="nx-icm__no-pins-toast">
+          <div className="nx-icm__no-pins-toast-body">
+            <span className="nx-icm__no-pins-toast-title">No visible pins</span>
+            <span className="nx-icm__no-pins-toast-sub">{emptyStateMessage}</span>
+          </div>
           {selectedHiddenByFilters && selectedBasePin && (
-            <button type="button" className="nx-icm__mode-tab is-active" onClick={() => setShowSelectedHidden(true)}>
+            <button type="button" className="nx-icm__no-pins-toast-action" onClick={() => setShowSelectedHidden(true)}>
               Show Selected
             </button>
           )}
@@ -7827,14 +9271,74 @@ export function InboxCommandMap({
         </div>
       )}
 
-      {selectedSoldComp && (
-        <div className="nx-icm__buyer-selection-shell">
-          <SoldCompSelectionCard
-            comp={selectedSoldComp}
-            subject={selectedThread}
-            onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
-            onClose={() => setSelectedSoldComp(null)}
-          />
+      {/* MAP_CARD_AUDIT: unified hover card — replaces hoverPopupRef for seller and comp */}
+      {hoveredMapCard && !selectedMapCard && (
+        <MapEntityCard
+          card={hoveredMapCard}
+          subject={selectedThread}
+          onClose={() => setHoveredMapCard(null)}
+          onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
+          onOpenDealIntelligence={hoveredMapCard.kind === 'seller' ? () => {
+            const pin = hoveredMapCard.feature
+            setDealIntelSheet({ type: 'seller', thread: null, pin: pin as unknown as CommandMapSellerPin })
+          } : undefined}
+          clearHoverTimerRef={clearPinHoverTimerRef}
+          cancelClearHover={() => {
+            if (clearPinHoverTimerRef.current) {
+              clearTimeout(clearPinHoverTimerRef.current)
+              clearPinHoverTimerRef.current = null
+            }
+          }}
+        />
+      )}
+
+      {/* MAP_CARD_AUDIT: unified selected card — replaces selectedSoldComp + compCardAnchor */}
+      {selectedMapCard && (
+        <MapEntityCard
+          card={selectedMapCard}
+          subject={selectedThread}
+          onClose={() => setSelectedMapCard(null)}
+          onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
+          onOpenDealIntelligence={selectedMapCard.kind === 'seller' ? () => {
+            const pin = selectedMapCard.feature
+            setDealIntelSheet({ type: 'seller', thread: null, pin: pin as unknown as CommandMapSellerPin })
+          } : undefined}
+          onOpenCompIntel={selectedMapCard.kind === 'sold_comp' ? () => {
+            const comp = selectedMapCard.feature as unknown as RecentSoldComp
+            setDealIntelSheet({ type: 'comp', comp })
+          } : undefined}
+          clearHoverTimerRef={clearPinHoverTimerRef}
+          cancelClearHover={() => {
+            if (clearPinHoverTimerRef.current) {
+              clearTimeout(clearPinHoverTimerRef.current)
+              clearPinHoverTimerRef.current = null
+            }
+          }}
+        />
+      )}
+
+      {dealIntelSheet && (
+        <DealIntelligenceSideSheet
+          data={dealIntelSheet}
+          onClose={() => setDealIntelSheet(null)}
+        />
+      )}
+
+      {mapContextLost && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,10,15,0.88)', backdropFilter: 'blur(4px)', gap: 12 }}>
+          <p style={{ color: '#94a3b8', margin: 0, fontSize: 13 }}>Map renderer paused — click reload map</p>
+          <button
+            type="button"
+            className="nx-icm__mode-tab is-active"
+            onClick={() => {
+              mapContextLostRef.current = false
+              setMapContextLost(false)
+              setMapContainerKey((k) => k + 1)
+              mapContainerKeyRef.current += 1
+            }}
+          >
+            Reload map
+          </button>
         </div>
       )}
     </div>

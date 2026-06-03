@@ -3,8 +3,10 @@ import { ensureMutationAuth } from '../../_shared.js'
 import { runSendQueue } from '@/lib/domain/queue/run-send-queue.js'
 import { getSystemValue } from '@/lib/system-control.js'
 import {
+  blockedRuntimeBrakeResult,
   blockedSafetyResult,
   clean,
+  evaluateQueueSendRuntimeBrakes,
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from '@/lib/domain/queue/queue-control-safety.js'
@@ -35,11 +37,19 @@ export async function POST(request) {
     queue_market_throttle: await getSystemValue('queue_market_throttle'),
     queue_sender_throttle: await getSystemValue('queue_sender_throttle'),
     queue_all_market_ack: await getSystemValue('queue_all_market_ack'),
+    queue_emergency_stop_at: await getSystemValue('queue_emergency_stop_at'),
   }
 
   const requestedMode = clean(body.mode || configuredMode || 'safe').toLowerCase()
   const runLimit = Math.max(1, Math.min(250, asNumber(body.limit ?? body.caps?.queue_run_limit, asNumber(await getSystemValue('queue_run_limit'), 50))))
   const safety = normalizeSafetyInput({ ...body, limit: runLimit }, safetySettings)
+  const runtimeBrake = evaluateQueueSendRuntimeBrakes(safetySettings, {
+    action: 'queue-run',
+    failClosed: true,
+  })
+  if (!runtimeBrake.ok) {
+    return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, 'queue-run'), { status: runtimeBrake.status })
+  }
   const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true })
   if (!validation.ok) {
     return NextResponse.json(blockedSafetyResult(validation, 'queue-run'), { status: validation.status })

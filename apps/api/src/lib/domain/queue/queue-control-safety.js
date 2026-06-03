@@ -168,3 +168,137 @@ export function blockedSafetyResult(validation, action = "queue_action") {
     },
   };
 }
+
+export function isEmergencyStopActive(value) {
+  const normalized = clean(value).toLowerCase();
+  if (!normalized) return false;
+  return !["0", "false", "off", "none", "null", "cleared", "clear"].includes(normalized);
+}
+
+function runtimeBrakeBlocked(reason, message, settings = {}, action = "queue_action") {
+  return {
+    ok: false,
+    status: 423,
+    action,
+    error: "runtime_brake_active",
+    reason,
+    message,
+    diagnostics: {
+      queue_processor_mode: clean(settings.queue_processor_mode) || null,
+      campaign_mode: clean(settings.campaign_mode) || null,
+      auto_reply_mode: clean(settings.auto_reply_mode) || null,
+      queue_auto_send_enabled: clean(settings.queue_auto_send_enabled) || null,
+      queue_auto_enqueue_enabled: clean(settings.queue_auto_enqueue_enabled) || null,
+      queue_emergency_stop_at: clean(settings.queue_emergency_stop_at) || null,
+    },
+  };
+}
+
+export function evaluateQueueSendRuntimeBrakes(settings = {}, options = {}) {
+  const action = clean(options.action) || "queue_send";
+  const fail_closed = options.failClosed === true;
+  const emergency_stop_at = settings.queue_emergency_stop_at;
+  if (isEmergencyStopActive(emergency_stop_at)) {
+    return runtimeBrakeBlocked(
+      "queue_emergency_stop_active",
+      "Emergency stop is active; live queue sends are blocked.",
+      settings,
+      action
+    );
+  }
+
+  const raw_mode = clean(settings.queue_processor_mode);
+  const queue_processor_mode = raw_mode
+    ? normalizeQueueProcessorMode(raw_mode)
+    : fail_closed
+      ? "off"
+      : null;
+  if (queue_processor_mode === "off") {
+    return runtimeBrakeBlocked(
+      "queue_processor_paused",
+      "queue_processor_mode is off/paused; live sends are blocked.",
+      settings,
+      action
+    );
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    action,
+    diagnostics: {
+      queue_processor_mode,
+      queue_emergency_stop_at: clean(emergency_stop_at) || null,
+    },
+  };
+}
+
+export function evaluateQueueCreationRuntimeBrakes(settings = {}, options = {}) {
+  const action = clean(options.action) || "queue_create";
+  const fail_closed = options.failClosed === true;
+  const require_auto_enqueue = options.requireAutoEnqueue === true;
+  const emergency_stop_at = settings.queue_emergency_stop_at;
+  if (isEmergencyStopActive(emergency_stop_at)) {
+    return runtimeBrakeBlocked(
+      "queue_emergency_stop_active",
+      "Emergency stop is active; live queue creation is blocked.",
+      settings,
+      action
+    );
+  }
+
+  const raw_campaign_mode = clean(settings.campaign_mode);
+  const campaign_mode = raw_campaign_mode
+    ? normalizeCampaignMode(raw_campaign_mode)
+    : fail_closed
+      ? "paused"
+      : null;
+  if (campaign_mode === "paused") {
+    return runtimeBrakeBlocked(
+      "campaign_paused",
+      "campaign_mode is paused; live queue creation is blocked.",
+      settings,
+      action
+    );
+  }
+
+  if (campaign_mode && campaign_mode !== "live_limited") {
+    return runtimeBrakeBlocked(
+      "campaign_not_live_limited",
+      "campaign_mode must be live_limited before live queue creation.",
+      settings,
+      action
+    );
+  }
+
+  if (require_auto_enqueue && !asBoolean(settings.queue_auto_enqueue_enabled, false)) {
+    return runtimeBrakeBlocked(
+      "queue_auto_enqueue_disabled",
+      "queue_auto_enqueue_enabled is false; automatic queue creation is blocked.",
+      settings,
+      action
+    );
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    action,
+    diagnostics: {
+      campaign_mode,
+      queue_auto_enqueue_enabled: clean(settings.queue_auto_enqueue_enabled) || null,
+      queue_emergency_stop_at: clean(emergency_stop_at) || null,
+    },
+  };
+}
+
+export function blockedRuntimeBrakeResult(evaluation = {}, action = "queue_action") {
+  return {
+    ok: false,
+    action,
+    error: evaluation.error || "runtime_brake_active",
+    reason: evaluation.reason || "runtime_brake_active",
+    message: evaluation.message || "Runtime safety brake is active.",
+    diagnostics: evaluation.diagnostics || {},
+  };
+}

@@ -13,6 +13,10 @@
     "boundary:audit": "node scripts/proof/monorepo-boundary-audit.mjs",
     "proof:health": "node scripts/proof/cockpit-health-proof.mjs",
     "proof:production-readiness": "node scripts/proof/production-readiness-proof.mjs",
+    "proof:sms-readiness": "node scripts/proof/sms-automation-readiness-audit.mjs",
+    "proof:sms-retry-safety": "node scripts/proof/sms-retry-safety-proof.mjs",
+    "proof:sms-autopilot-dry-run": "node scripts/proof/sms-autopilot-dry-run-proof.mjs",
+    "proof:sms-health-guard": "node scripts/proof/sms-health-guard-proof.mjs",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
     "build:safe": "npm run boundary:audit && npm run build"
   }

@@ -198,6 +198,8 @@ test("getThreadMessages returns canonical message_events in ascending chronologi
       event_timestamp: "2026-05-01T10:00:00.000Z",
       created_at: "2026-05-01T10:00:00.000Z",
       canonical_e164: "+15559876543",
+      delivery_status: "sent",
+      provider_delivery_status: "sent",
     },
     {
       id: "ev-2",
@@ -225,6 +227,12 @@ test("getThreadMessages returns canonical message_events in ascending chronologi
   );
   assert.equal(result.rows[0].source_table, "message_events");
   assert.equal(result.rows.at(-1)?.canonical_thread_key, threadKey);
+  assert.equal(result.rows[0].body, "First");
+  assert.equal(result.rows[0].normalized_body, "first");
+  assert.equal(result.rows[0].is_outbound, true);
+  assert.equal(result.rows[1].is_inbound, true);
+  assert.equal(result.rows[0].provider_status, "sent");
+  assert.equal(result.rows[0].lifecycle_status, "sent");
 });
 
 test("optimistic send patch marks replied threads as follow_up and refreshes live inbox", () => {

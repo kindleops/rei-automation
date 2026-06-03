@@ -39,6 +39,7 @@ export function isManualInboxSend(queue_item = null) {
     use_case_template === "inbox_manual_send_now" ||
     action === "send_now" ||
     source === "inbox" ||
+    source === "manual_inbox" ||
     created_from === "leadcommand_inbox"
   );
 }

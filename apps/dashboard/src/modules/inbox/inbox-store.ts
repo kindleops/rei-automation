@@ -26,7 +26,7 @@ export interface InboxStoreState {
   buckets: Record<string, BucketSlice>
   messagesByThreadKey: Record<string, MessagesSlice>
   selectedThreadKey: string | null
-  realtimeStatus: 'connected' | 'disconnected' | 'error'
+  realtimeStatus: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
   viewCounts: Record<string, number>
 }
 
@@ -45,7 +45,7 @@ export type InboxStoreAction =
   | { type: 'REALTIME_PATCH_THREAD'; threadKey: string; patch: Record<string, unknown>; targetBucketKey?: string | null; upsert?: boolean; countDeltas?: Record<string, number>; diagnostics?: Record<string, unknown> }
   | { type: 'SET_BUCKET_SCROLL'; bucketKey: string; scrollTop: number }
   | { type: 'SET_VIEW_COUNTS'; counts: Record<string, number>; preserveExisting?: boolean; reason?: string }
-  | { type: 'SET_REALTIME_STATUS'; status: 'connected' | 'disconnected' | 'error' }
+  | { type: 'SET_REALTIME_STATUS'; status: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled' }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,12 +110,14 @@ const getRowValue = (row: Record<string, unknown>, ...keys: string[]): unknown =
 const threadIdentityCandidates = (value: unknown): string[] => {
   const raw = String(value ?? '').trim()
   if (!raw) return []
+  if (raw.toLowerCase().startsWith('ct:')) return [raw]
 
   const candidates = new Set<string>([raw])
   const withoutPhonePrefix = raw.toLowerCase().startsWith('phone:') ? raw.slice(6).trim() : ''
   if (withoutPhonePrefix) candidates.add(withoutPhonePrefix)
 
   for (const candidate of [...candidates]) {
+    if (candidate.includes('|')) continue
     const digits = candidate.replace(/\D/g, '')
     if (digits.length === 10) candidates.add(`+1${digits}`)
     else if (digits.length === 11 && digits.startsWith('1')) candidates.add(`+${digits}`)
@@ -127,6 +129,7 @@ const threadIdentityCandidates = (value: unknown): string[] => {
 
 const rowIdentityValues = (row: Record<string, unknown>): string[] => {
   return Array.from(new Set([
+    getRowValue(row, 'conversationThreadId', 'conversation_thread_id'),
     getRowValue(row, 'threadKey', 'thread_key'),
     getRowValue(row, 'id'),
     getRowValue(row, 'canonicalE164', 'canonical_e164'),
@@ -177,6 +180,8 @@ const sortRowsNewestFirst = (rows: unknown[]): unknown[] =>
 
 const withThreadIdentity = (threadKey: string, row: Record<string, unknown>): Record<string, unknown> => ({
   ...row,
+  conversationThreadId: getRowValue(row, 'conversationThreadId', 'conversation_thread_id') ?? threadKey,
+  conversation_thread_id: getRowValue(row, 'conversation_thread_id', 'conversationThreadId') ?? threadKey,
   threadKey: getRowValue(row, 'threadKey', 'thread_key') ?? threadKey,
   id: getRowValue(row, 'id', 'threadKey', 'thread_key') ?? threadKey,
 })
@@ -199,7 +204,7 @@ export const EMPTY_INBOX_STORE_STATE: InboxStoreState = {
   buckets: {},
   messagesByThreadKey: {},
   selectedThreadKey: null,
-  realtimeStatus: 'disconnected',
+  realtimeStatus: 'connecting',
   viewCounts: {},
 }
 

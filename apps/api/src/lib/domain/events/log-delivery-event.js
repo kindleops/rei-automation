@@ -1,5 +1,6 @@
 import { mapTextgridFailureBucket } from "@/lib/providers/textgrid.js";
 import { updateMessageEventStatus } from "@/lib/domain/events/update-message-event-status.js";
+import { normalizeTextGridFailure } from "@/lib/domain/messaging/textgrid-failure-normalization.js";
 
 const defaultDeps = {
   mapTextgridFailureBucket,
@@ -50,6 +51,14 @@ export function __resetLogDeliveryEventTestDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 
+function failureBucketForNormalized(normalized_failure, fallback) {
+  if (normalized_failure.failure_class === "content_filter_blocked") return "Spam";
+  if (normalized_failure.failure_class === "recipient_opted_out") return "DNC";
+  if (normalized_failure.failure_class === "invalid_to_number") return "Hard Bounce";
+  if (normalized_failure.failure_class === "recipient_out_of_credit") return "Soft Bounce";
+  return runtimeDeps.mapTextgridFailureBucket(fallback) || "Other";
+}
+
 export async function logDeliveryEvent({
   provider_message_id = null,
   delivery_status = null,
@@ -63,13 +72,27 @@ export async function logDeliveryEvent({
     delivery_status || raw_carrier_status
   );
   const is_failed = normalized_status === "Failed";
+  const normalized_failure = normalizeTextGridFailure({
+    status: delivery_status || raw_carrier_status,
+    error_message,
+    error_status,
+  });
   const failure_bucket = is_failed
-    ? runtimeDeps.mapTextgridFailureBucket({
+    ? failureBucketForNormalized(normalized_failure, {
         ok: false,
         error_message,
         error_status,
-      }) || "Other"
+      })
     : null;
+  const normalized_failure_fields = normalized_failure.failure_class
+    ? {
+        failure_class: normalized_failure.failure_class,
+        provider_failure_reason: normalized_failure.provider_failure_reason,
+        normalized_reason: normalized_failure.normalized_reason,
+        retry_allowed: normalized_failure.retry_allowed,
+        is_terminal: normalized_failure.is_terminal,
+      }
+    : {};
 
   const result = await runtimeDeps.updateMessageEventStatus({
     event_item_id,
@@ -86,6 +109,7 @@ export async function logDeliveryEvent({
     failed_at: normalized_status === "Failed" ? occurred_at : null,
     failure_code: error_status,
     failure_reason: error_message,
+    ...normalized_failure_fields,
   });
 
   if (!result.ok) {

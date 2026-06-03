@@ -1,36 +1,10 @@
 import { NextResponse } from 'next/server.js'
-import { ensureMutationAuth } from '../../_shared.js'
+import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { degradedThreadMessagesPayload } from '@/lib/domain/inbox/degraded-read-responses.js'
 import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const ALLOWED_ORIGINS = new Set([
-  'https://ops.leadcommand.ai',
-  'https://nexus-dashboard.vercel.app',
-  'http://localhost:5173',
-])
-
-function resolveAllowedOrigin(origin) {
-  if (!origin) return null
-  if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
-  return null
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get('origin')
-  const allowedOrigin = resolveAllowedOrigin(origin)
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  }
-  if (allowedOrigin) headers['Access-Control-Allow-Origin'] = allowedOrigin
-  return headers
-}
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -47,24 +21,62 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url)
   const thread_key = clean(searchParams.get('thread_key'))
+  const conversation_thread_id = clean(searchParams.get('conversation_thread_id') || searchParams.get('conversationThreadId'))
+  const legacy_thread_key = clean(searchParams.get('legacy_thread_key') || searchParams.get('legacyThreadKey'))
+  const normalized_phone = clean(searchParams.get('normalized_phone') || searchParams.get('normalizedPhone'))
   const canonical_e164 = clean(searchParams.get('canonical_e164'))
+  const phone_e164 = clean(searchParams.get('phone_e164'))
   const phone = clean(searchParams.get('phone'))
   const best_phone = clean(searchParams.get('best_phone'))
   const seller_phone = clean(searchParams.get('seller_phone'))
+  const prospect_id = clean(searchParams.get('prospect_id'))
+  const property_id = clean(searchParams.get('property_id'))
+  const owner_id = clean(searchParams.get('owner_id'))
+  const master_owner_id = clean(searchParams.get('master_owner_id'))
+  const latest_message_id = clean(searchParams.get('latest_message_id') || searchParams.get('latestMessageId') || searchParams.get('latest_message_event_id') || searchParams.get('latestMessageEventId'))
   const offset = Math.max(0, Number.parseInt(clean(searchParams.get('offset')) || '0', 10) || 0)
-  const limit = Math.min(500, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '200', 10) || 200))
+  const limit = Math.min(100, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '50', 10) || 50))
 
-  if (!thread_key) {
-    return NextResponse.json({ ok: false, error: 'missing_thread_key' }, { status: 400, headers: cors })
+  if (!thread_key && !conversation_thread_id && !legacy_thread_key && !normalized_phone && !canonical_e164 && !phone_e164 && !phone && !best_phone && !seller_phone && !prospect_id && !property_id && !owner_id && !master_owner_id && !latest_message_id) {
+    return NextResponse.json(
+      degradedThreadMessagesPayload({
+        error: new Error('missing_thread_identity'),
+        thread_key: null,
+        canonical_e164: null,
+        offset,
+        limit,
+        diagnostics: {
+          error_code: 'missing_thread_identity',
+          identities_tried: {
+            thread_keys: [],
+            phones: [],
+            prospect_ids: [],
+            property_ids: [],
+            master_owner_ids: [],
+          },
+        },
+      }),
+      { status: 200, headers: cors },
+    )
   }
 
   try {
-    const { rows, total, diagnostics } = await getThreadMessages({
+    const startedAt = Date.now()
+    const { rows, total, diagnostics, threadKey, conversationThreadId, integrityBlocked, identityUsed, sourceUsed, queryMs } = await getThreadMessages({
       selected_thread_key: thread_key,
+      conversation_thread_id,
+      legacy_thread_key,
+      normalized_phone,
       canonical_e164,
+      phone_e164,
       phone,
       best_phone,
       seller_phone,
+      prospect_id,
+      property_id,
+      owner_id,
+      master_owner_id,
+      latest_message_id,
     }, { offset, limit })
     const nextOffset = offset + rows.length
 
@@ -72,7 +84,16 @@ export async function GET(request) {
       {
         ok: true,
         action: 'thread-messages',
+        degraded: false,
+        integrity_blocked: integrityBlocked === true,
+        integrityBlocked: integrityBlocked === true,
         thread_key,
+        threadKey: threadKey || thread_key || null,
+        conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+        conversationThreadId: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+        identityUsed: identityUsed || null,
+        sourceUsed: sourceUsed || 'message_events',
+        queryMs: Number.isFinite(Number(queryMs)) ? Number(queryMs) : Date.now() - startedAt,
         messages: rows,
         pagination: {
           offset,
@@ -84,8 +105,16 @@ export async function GET(request) {
         diagnostics: {
           ...diagnostics,
           thread_key,
+          threadKey: threadKey || thread_key || null,
+          conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+          conversationThreadId: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+          integrity_blocked: integrityBlocked === true,
           canonical_e164: canonical_e164 || diagnostics?.canonical_e164 || null,
-          canonical_thread_key: diagnostics?.canonical_thread_key || thread_key,
+          phone_e164: phone_e164 || null,
+          canonical_thread_key: diagnostics?.canonical_thread_key || thread_key || null,
+          identityUsed: identityUsed || diagnostics?.identityUsed || null,
+          sourceUsed: sourceUsed || diagnostics?.sourceUsed || 'message_events',
+          queryMs: Number.isFinite(Number(queryMs)) ? Number(queryMs) : Date.now() - startedAt,
           messages: rows,
           pagination: {
             offset,
@@ -102,10 +131,27 @@ export async function GET(request) {
     return NextResponse.json(
       degradedThreadMessagesPayload({
         error,
-        thread_key,
-        canonical_e164,
+        thread_key: thread_key || null,
+        canonical_e164: canonical_e164 || phone_e164 || null,
         offset,
         limit,
+        diagnostics: {
+          input: {
+            thread_key,
+            conversation_thread_id,
+            legacy_thread_key,
+            normalized_phone,
+            canonical_e164,
+            phone_e164,
+            phone,
+            best_phone,
+            seller_phone,
+            prospect_id,
+            property_id,
+            owner_id,
+            master_owner_id,
+          },
+        },
       }),
       { status: 200, headers: cors },
     )

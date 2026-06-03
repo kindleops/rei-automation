@@ -4,6 +4,8 @@ import { captureRouteException } from "@/lib/monitoring/sentry.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import {
   blockedSafetyResult,
+  blockedRuntimeBrakeResult,
+  evaluateQueueCreationRuntimeBrakes,
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from "@/lib/domain/queue/queue-control-safety.js";
@@ -167,7 +169,18 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
         route_logger?.warn?.("queue_engine_secret.not_configured", {
           hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
         });
-        return auth.response;
+        return json_response(
+          {
+            ok: false,
+            route,
+            error: auth.auth?.reason || "unauthorized",
+            message: auth.auth?.reason || "unauthorized",
+            queued_count: 0,
+            scheduled_count: 0,
+            invalid_scheduled_for_count: 0,
+          },
+          { status: auth.auth?.status || 401 }
+        );
       }
 
       const { getSharedSecretAuthResult } = await import("@/lib/security/shared-secret.js");
@@ -181,7 +194,18 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
           reason: engine_result.reason,
           via: engine_result.via || null,
         });
-        return json_response({ ok: false, error: "unauthorized" }, { status: 401 });
+        return json_response(
+          {
+            ok: false,
+            route,
+            error: "unauthorized",
+            message: "unauthorized",
+            queued_count: 0,
+            scheduled_count: 0,
+            invalid_scheduled_for_count: 0,
+          },
+          { status: 401 }
+        );
       }
       auth = {
         authorized: true,
@@ -211,9 +235,21 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
       queue_market_filter: await get_system_value("queue_market_filter"),
       queue_state_filter: await get_system_value("queue_state_filter"),
       queue_all_market_ack: await get_system_value("queue_all_market_ack"),
+      queue_auto_enqueue_enabled: await get_system_value("queue_auto_enqueue_enabled"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
     };
     const safety = normalizeSafetyInput(normalized, safety_settings);
     if (!normalized.dry_run) {
+      const runtime_brake = evaluateQueueCreationRuntimeBrakes(safety_settings, {
+        action: "feed_candidates",
+        requireAutoEnqueue: false,
+        failClosed: true,
+      });
+      if (!runtime_brake.ok) {
+        return json_response(blockedRuntimeBrakeResult(runtime_brake, "feed_candidates"), {
+          status: runtime_brake.status,
+        });
+      }
       const validation = validateLiveLimitedRails(safety, { require_scope: true, require_send_caps: true });
       if (!validation.ok) {
         return json_response(blockedSafetyResult(validation, "feed_candidates"), { status: validation.status });
@@ -312,6 +348,9 @@ export async function handleFeedCandidatesRequest(request, method = "GET", optio
         route,
         error: error?.message || "feed_candidates_failed",
         message: error?.message || "feed_candidates_failed",
+        queued_count: 0,
+        scheduled_count: 0,
+        invalid_scheduled_for_count: 0,
       },
       { status: 500 }
     );

@@ -11,6 +11,14 @@ import {
   type AnyRecord,
 } from './shared'
 import { getDealContextList, type DealContext } from './dealContext'
+import {
+  loadDashboardViewModel,
+  logCacheAccess,
+} from './dashboardDataLayer'
+import {
+  commitDashboardDealIntel,
+  commitDashboardPipeline,
+} from './dashboardEntityStore'
 import type {
   AcquisitionAiBrain,
   AcquisitionAutomation,
@@ -165,6 +173,10 @@ export const linkOfferToContracts = (offer: AnyRecord, contracts: AnyRecord[]) =
 }
 
 const DEAL_CONTEXT_DATASET_LIMIT = 1200
+const DATASET_CACHE_TTL_MS = 30_000
+
+let datasetCache: { data: Dataset; loadedAt: number } | null = null
+let datasetInFlight: Promise<Dataset> | null = null
 
 const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
   const ownersById = new Map<string, AnyRecord>()
@@ -813,7 +825,7 @@ const safeSelect = async (
   }
 }
 
-const fetchDataset = async (): Promise<Dataset> => {
+const fetchDatasetUncached = async (): Promise<Dataset> => {
   if (!shouldUseSupabase()) return mockDataset()
 
   try {
@@ -823,6 +835,14 @@ const fetchDataset = async (): Promise<Dataset> => {
     })
 
     if (dealContext.rows.length > 0) {
+      commitDashboardDealIntel(dealContext.rows as unknown as AnyRecord[], {
+        source: 'acquisition_deal_context',
+        viewModel: 'deal_intelligence_view',
+      })
+      commitDashboardPipeline(dealContext.rows as unknown as AnyRecord[], {
+        source: 'acquisition_deal_context',
+        viewModel: 'pipeline_cards_view',
+      })
       return mapDealContextsToDataset(dealContext.rows)
     }
   } catch (error) {
@@ -885,7 +905,7 @@ const fetchDataset = async (): Promise<Dataset> => {
     return mockDataset()
   }
 
-  return {
+  const dataset = {
     masterowners,
     owners,
     prospects,
@@ -905,6 +925,49 @@ const fetchDataset = async (): Promise<Dataset> => {
     titleRouting,
     closings,
     dealRevenue,
+  }
+  commitDashboardDealIntel(properties, {
+    source: 'acquisition_fallback_tables',
+    viewModel: 'deal_intelligence_view',
+  })
+  commitDashboardPipeline([...properties, ...offers], {
+    source: 'acquisition_fallback_tables',
+    viewModel: 'pipeline_cards_view',
+  })
+  return dataset
+}
+
+const fetchDataset = async (): Promise<Dataset> => {
+  const now = Date.now()
+  if (datasetCache && now - datasetCache.loadedAt < DATASET_CACHE_TTL_MS) {
+    logCacheAccess('acquisition_dataset', true, {
+      ageMs: now - datasetCache.loadedAt,
+      source: 'memory',
+    })
+    return datasetCache.data
+  }
+
+  if (datasetInFlight) {
+    logCacheAccess('acquisition_dataset', true, {
+      source: 'in_flight',
+    })
+    return datasetInFlight
+  }
+
+  logCacheAccess('acquisition_dataset', false, {
+    ttlMs: DATASET_CACHE_TTL_MS,
+  })
+  datasetInFlight = loadDashboardViewModel('deal_intelligence_view', fetchDatasetUncached, {
+    source: 'acquisition_workspace',
+    limit: DEAL_CONTEXT_DATASET_LIMIT,
+  })
+
+  try {
+    const data = await datasetInFlight
+    datasetCache = { data, loadedAt: Date.now() }
+    return data
+  } finally {
+    datasetInFlight = null
   }
 }
 

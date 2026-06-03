@@ -93,6 +93,7 @@ export async function POST(request, { params }) {
 
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
+  const startedAt = Date.now()
 
   try {
     const auth = ensureMutationAuth(request)
@@ -111,24 +112,73 @@ export async function GET(request, { params }) {
     if (error) {
       console.error('[VALUATION_SNAPSHOT_FETCH_ERROR]', { property_id, error: error.message })
       return NextResponse.json(
-        { ok: false, fallback: true, error: 'snapshot_fetch_failed', message: error.message },
+        {
+          ok: true,
+          degraded: true,
+          fallback: true,
+          error_code: 'snapshot_fetch_failed',
+          error: 'snapshot_fetch_failed',
+          message: error.message,
+          data: null,
+          diagnostics: {
+            property_id,
+            queryMs: Date.now() - startedAt,
+            sourceUsed: 'property_valuation_snapshots',
+          },
+        },
         { status: 200, headers: cors },
       )
     }
 
     if (!data) {
       return NextResponse.json(
-        { ok: true, data: null, fallback: true, warnings: ['valuation_snapshot_missing'] },
+        {
+          ok: true,
+          degraded: true,
+          data: null,
+          fallback: true,
+          warnings: ['valuation_snapshot_missing'],
+          diagnostics: {
+            property_id,
+            queryMs: Date.now() - startedAt,
+            sourceUsed: 'property_valuation_snapshots',
+          },
+        },
         { status: 200, headers: cors },
       )
     }
 
-    return NextResponse.json({ ok: true, data }, { status: 200, headers: cors })
+    return NextResponse.json(
+      {
+        ok: true,
+        degraded: false,
+        data,
+        queryMs: Date.now() - startedAt,
+        sourceUsed: 'property_valuation_snapshots',
+        diagnostics: {
+          property_id,
+          queryMs: Date.now() - startedAt,
+          sourceUsed: 'property_valuation_snapshots',
+        },
+      },
+      { status: 200, headers: cors },
+    )
   } catch (fatal) {
     const errMsg = fatal?.message || 'snapshot_route_fatal'
     console.error('[VALUATION_SNAPSHOT_ROUTE_FATAL]', { error: errMsg })
     return NextResponse.json(
-      { ok: false, fallback: true, error: errMsg },
+      {
+        ok: true,
+        degraded: true,
+        fallback: true,
+        error_code: 'snapshot_route_fatal',
+        error: errMsg,
+        data: null,
+        diagnostics: {
+          queryMs: Date.now() - startedAt,
+          sourceUsed: 'property_valuation_snapshots',
+        },
+      },
       { status: 200, headers: cors },
     )
   }

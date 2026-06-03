@@ -2,6 +2,8 @@ import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import {
   blockedSafetyResult,
+  blockedRuntimeBrakeResult,
+  evaluateQueueSendRuntimeBrakes,
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from "@/lib/domain/queue/queue-control-safety.js";
@@ -174,8 +176,20 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       queue_market_throttle: await get_system_value("queue_market_throttle"),
       queue_sender_throttle: await get_system_value("queue_sender_throttle"),
       queue_all_market_ack: await get_system_value("queue_all_market_ack"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
     };
     const safety = normalizeSafetyInput({ ...body, limit }, safety_settings);
+    if (!dry_run) {
+      const runtime_brake = evaluateQueueSendRuntimeBrakes(safety_settings, {
+        action: "queue_run",
+        failClosed: true,
+      });
+      if (!runtime_brake.ok) {
+        return json_response(blockedRuntimeBrakeResult(runtime_brake, "queue_run"), {
+          status: runtime_brake.status,
+        });
+      }
+    }
 
     if (queue_row_id) {
       const { loadQueueRowById, processSendQueue } = await import("@/lib/domain/queue/process-send-queue.js");

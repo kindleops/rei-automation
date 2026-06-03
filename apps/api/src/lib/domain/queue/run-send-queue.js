@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import { info, warn } from "@/lib/logging/logger.js";
-import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
+import {
+  blockedRuntimeBrakeResult,
+  evaluateQueueSendRuntimeBrakes,
+} from "@/lib/domain/queue/queue-control-safety.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { 
   processSendQueueItem as defaultProcessSendQueueItem,
   loadQueueRowById
@@ -58,6 +62,13 @@ async function buildQueueCandidates(limit = 50, now = nowIso(), deps = {}) {
   return buildSupabaseCandidateSummary(limit, now, deps);
 }
 
+async function loadQueueSendBrakeSettings(get_system_value) {
+  return {
+    queue_processor_mode: await get_system_value("queue_processor_mode"),
+    queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+  };
+}
+
 export async function runSendQueue(
   {
     limit = 50,
@@ -71,6 +82,8 @@ export async function runSendQueue(
     (typeof getSystemFlag === "function"
       ? getSystemFlag
       : async () => true);
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
   const log_info = deps.info || info;
   const log_warn = deps.warn || warn;
   const supabase = deps.supabaseClient || defaultSupabase;
@@ -80,6 +93,26 @@ export async function runSendQueue(
   const processing_run_id = crypto.randomUUID();
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
+
+  if (!dry_run) {
+    const runtime_brake = evaluateQueueSendRuntimeBrakes(
+      await loadQueueSendBrakeSettings(get_system_value),
+      { action: "runSendQueue", failClosed: false }
+    );
+    if (!runtime_brake.ok) {
+      log_info("queue_runner.blocked_runtime_brake", {
+        reason: runtime_brake.reason,
+        diagnostics: runtime_brake.diagnostics,
+      });
+      return {
+        status: 423,
+        ...blockedRuntimeBrakeResult(runtime_brake, "runSendQueue"),
+        skipped: true,
+        sent_count: 0,
+        results: [],
+      };
+    }
+  }
 
   // Canonical lifecycle reconciliation before claiming rows so stale runnable
   // rows don't re-enter active processing unexpectedly.

@@ -12,6 +12,7 @@ export async function OPTIONS(request) {
 
 export async function GET(request, { params }) {
   const headers = corsHeaders(request)
+  const startedAt = Date.now()
 
   try {
     const auth = ensureMutationAuth(request)
@@ -34,10 +35,18 @@ export async function GET(request, { params }) {
     if (!row && routeError) {
       return NextResponse.json(
         {
-          ok: false,
+          ok: true,
+          degraded: true,
           fallback: true,
+          error_code: 'deal_context_thread_fetch_failed',
           error: routeError,
-          diagnostics: { thread_key, stage: 'primary_and_fallback_failed' },
+          data: null,
+          diagnostics: {
+            thread_key,
+            stage: 'primary_and_fallback_failed',
+            queryMs: Date.now() - startedAt,
+            sourceUsed: 'v_deal_context_cards:fallback',
+          },
         },
         { status: 200, headers },
       )
@@ -47,10 +56,17 @@ export async function GET(request, { params }) {
       console.warn('[DEAL_CONTEXT_ROUTE_DONE]', { ok: false, thread_key, reason: 'not_found' })
       return NextResponse.json(
         {
-          ok: false,
+          ok: true,
+          degraded: true,
           fallback: true,
+          error_code: 'deal_context_not_found',
           error: 'deal_context_not_found',
-          diagnostics: { thread_key },
+          data: null,
+          diagnostics: {
+            thread_key,
+            queryMs: Date.now() - startedAt,
+            sourceUsed: 'v_deal_context_cards:fallback',
+          },
         },
         { status: 200, headers },
       )
@@ -72,14 +88,37 @@ export async function GET(request, { params }) {
     })
 
     return NextResponse.json(
-      { ok: true, data: row, partial },
+      {
+        ok: true,
+        degraded: partial,
+        data: row,
+        partial,
+        queryMs: Date.now() - startedAt,
+        sourceUsed: partial ? 'deal_context_fallback' : 'v_deal_context_cards',
+        diagnostics: {
+          thread_key,
+          queryMs: Date.now() - startedAt,
+          sourceUsed: partial ? 'deal_context_fallback' : 'v_deal_context_cards',
+        },
+      },
       { status: 200, headers },
     )
   } catch (fatal) {
     const errMsg = fatal?.message || 'deal_context_route_fatal'
     console.error('[DEAL_CONTEXT_ROUTE_FATAL]', { error: errMsg })
     return NextResponse.json(
-      { ok: false, fallback: true, error: errMsg },
+      {
+        ok: true,
+        degraded: true,
+        fallback: true,
+        error_code: 'deal_context_route_fatal',
+        error: errMsg,
+        data: null,
+        diagnostics: {
+          queryMs: Date.now() - startedAt,
+          sourceUsed: 'v_deal_context_cards:fallback',
+        },
+      },
       { status: 200, headers },
     )
   }

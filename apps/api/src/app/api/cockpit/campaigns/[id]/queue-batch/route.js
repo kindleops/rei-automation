@@ -1,79 +1,47 @@
-import { NextResponse } from 'next/server';
-import supabase from '@/lib/supabase/client';
+import { NextResponse } from 'next/server.js'
+import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../../_shared.js'
+import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automation-service.js'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
+function withCors(request, payload, status = 200) {
+  return NextResponse.json(payload, { status, headers: corsHeaders(request) })
+}
+
+async function campaignIdFromParams(params) {
+  const resolved = await params
+  return resolved?.id || resolved?.campaign_id || null
+}
+
+export async function OPTIONS(request) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) })
+}
 
 export async function POST(request, { params }) {
-  try {
-    const { id: campaign_id } = await params;
-    const { limit = 100, interval_seconds = 15 } = await request.json();
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
 
-    // 1. Fetch ready targets
-    const { data: targets, error: targetErr } = await supabase
-      .from('sms_campaign_targets')
-      .select('*')
-      .eq('campaign_id', campaign_id)
-      .eq('target_status', 'ready')
-      .limit(limit);
-
-    if (targetErr) throw targetErr;
-    if (!targets || targets.length === 0) {
-      return NextResponse.json({ success: true, queued_count: 0, message: 'No ready targets found.' });
-    }
-
-    // 2. Prepare queue rows
-    const queueRows = [];
-    let delaySeconds = 0;
-    const now = new Date();
-
-    for (const t of targets) {
-      const scheduledTime = new Date(now.getTime() + delaySeconds * 1000);
-      
-      queueRows.push({
-        status: 'scheduled',
-        scheduled_for: scheduledTime.toISOString(),
-        canonical_e164: t.canonical_e164,
-        market: t.market,
-        timezone: t.timezone,
-        metadata: {
-          campaign_id,
-          campaign_target_id: t.target_id,
-          seller_name: t.seller_name,
-          best_language: t.best_language,
-          agent_persona: t.agent_persona
-        }
-      });
-      delaySeconds += interval_seconds;
-    }
-
-    // 3. Insert into send_queue
-    const { data: insertedQueue, error: queueErr } = await supabase
-      .from('send_queue')
-      .insert(queueRows)
-      .select('id');
-      
-    if (queueErr) {
-      // Fallback if table schema differs (e.g., requires specific columns)
-      console.error('Queue insert error:', queueErr);
-      throw queueErr;
-    }
-
-    // 4. Update targets to queued
-    const targetIds = targets.map(t => t.target_id || t.id); // depending on PK name
-    const { error: updateErr } = await supabase
-      .from('sms_campaign_targets')
-      .update({ target_status: 'queued' })
-      .in('target_id', targetIds);
-      
-    if (updateErr) {
-      // Try fallback if PK is `id` instead of `target_id`
-      await supabase.from('sms_campaign_targets').update({ target_status: 'queued' }).in('id', targetIds);
-    }
-
-    // 5. Update campaign status if necessary
-    await supabase.from('sms_campaigns').update({ status: 'active' }).eq('campaign_id', campaign_id);
-
-    return NextResponse.json({ success: true, queued_count: queueRows.length });
-  } catch (err) {
-    console.error('Queue batch error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  const campaignId = await campaignIdFromParams(params)
+  if (!campaignId) {
+    return withCors(request, { ok: false, error: 'campaign_id_required' }, 400)
   }
+
+  const body = await parseJsonSafe(request)
+  const result = await createCampaignQueuePlan(campaignId, {
+    ...body,
+    dry_run: true,
+    create_send_queue_rows: false,
+    explicit_operator_action: true,
+  })
+
+  return withCors(request, {
+    ...result,
+    success: result.ok !== false,
+    queued_count: 0,
+    send_queue_rows_created: 0,
+    deprecated_route: true,
+    message: 'queue-batch is disabled for Phase 1. Use queue-plan dry runs; no send_queue rows were created.',
+  }, 200)
 }

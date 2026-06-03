@@ -12,6 +12,10 @@ import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import { updateContactOutreachState } from "@/lib/domain/outreach/outreach-service.js";
+import {
+  normalizeTextGridFailure,
+  textGridFailureMetadata,
+} from "@/lib/domain/messaging/textgrid-failure-normalization.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -33,6 +37,11 @@ const CANONICAL_TERMINAL_QUEUE_STATUSES = [
 ];
 
 function mapTransportTerminalStatus({ error_message = "", error_status = "" } = {}) {
+  const normalized = normalizeTextGridFailure({ error_message, error_status, status: "failed" });
+  if (normalized.failure_class === "content_filter_blocked") return "carrier_blocked";
+  if (normalized.failure_class === "recipient_opted_out") return "opted_out";
+  if (normalized.failure_class === "invalid_to_number") return "invalid_number";
+
   const msg = lower(error_message);
   const status = lower(error_status);
   const combined = `${msg} ${status}`;
@@ -41,6 +50,14 @@ function mapTransportTerminalStatus({ error_message = "", error_status = "" } = 
   if (combined.includes("invalid") || combined.includes("not a valid phone") || combined.includes("unknown destination")) return "invalid_number";
   if (combined.includes("carrier") || combined.includes("spam") || combined.includes("blocked")) return "carrier_blocked";
   return "failed_transport";
+}
+
+function legacyFailureBucketForTextGrid(normalized = {}, fallbackInput = {}) {
+  if (normalized.failure_class === "content_filter_blocked") return "Spam";
+  if (normalized.failure_class === "recipient_opted_out") return "DNC";
+  if (normalized.failure_class === "invalid_to_number") return "Hard Bounce";
+  if (normalized.failure_class === "recipient_out_of_credit") return "Soft Bounce";
+  return mapTextgridFailureBucket(fallbackInput) || null;
 }
 
 function clean(value) {
@@ -66,6 +83,14 @@ function addMinutesIso(value, minutes = 5) {
 // explicitly carries retryable=false.
 function isNonRetryableProviderError(error) {
   if (!error) return false;
+  const normalized = normalizeTextGridFailure(error);
+  if (
+    ["content_filter_blocked", "recipient_opted_out", "invalid_to_number"].includes(
+      normalized.failure_class
+    )
+  ) {
+    return true;
+  }
   const msg = String(error.message ?? "").toLowerCase();
   if (msg.includes("21610")) return true;
   if (msg.includes("blacklist rule")) return true;
@@ -282,6 +307,7 @@ export function normalizeSendQueueRow(row) {
     master_owner_id: safe_row.master_owner_id || null,
     prospect_id: safe_row.prospect_id || null,
     property_id: safe_row.property_id || null,
+    phone_id: safe_row.phone_id || safe_row.phone_item_id || null,
     market_id: safe_row.market_id || null,
     sms_agent_id: safe_row.sms_agent_id || null,
     textgrid_number_id: safe_row.textgrid_number_id || null,
@@ -334,6 +360,9 @@ export function normalizeSendQueueRow(row) {
     offer_record_sync_status:  safe_row.offer_record_sync_status  || null,
     offer_record_sync_error:   safe_row.offer_record_sync_error   || null,
     offer_record_synced_at:    safe_row.offer_record_synced_at    || null,
+    campaign_id: safe_row.campaign_id || null,
+    campaign_target_id: safe_row.campaign_target_id || null,
+    campaign_send_window_id: safe_row.campaign_send_window_id || null,
   };
 }
 
@@ -367,6 +396,7 @@ function canonicalThreadKeyForDirection(direction, from_phone_number, to_phone_n
 
 export function shouldRunSendQueueRow(row, now = nowIso()) {
   const normalized = normalizeSendQueueRow(row);
+  const metadata = ensureObject(normalized.metadata);
   const destination = resolveQueueDestinationPhone(normalized);
   const now_ts = toTimestamp(now) ?? Date.now();
   const scheduled_ts = toTimestamp(normalized.scheduled_for_utc || normalized.scheduled_for || normalized.created_at);
@@ -378,6 +408,34 @@ export function shouldRunSendQueueRow(row, now = nowIso()) {
     return {
       ok: false,
       reason: "queue_status_not_queued",
+      row: normalized,
+    };
+  }
+
+  if (
+    asNullableBoolean(metadata.no_send, false) === true ||
+    asNullableBoolean(metadata.proof_no_send, false) === true ||
+    clean(metadata.proof_mode).toLowerCase() === "no_send"
+  ) {
+    return {
+      ok: false,
+      reason: "no_send_queue_row",
+      row: normalized,
+    };
+  }
+
+  if (normalized.sms_eligible === false) {
+    return {
+      ok: false,
+      reason: "sms_ineligible",
+      row: normalized,
+    };
+  }
+
+  if (normalized.routing_allowed === false) {
+    return {
+      ok: false,
+      reason: "routing_not_allowed",
       row: normalized,
     };
   }
@@ -1253,6 +1311,18 @@ function buildFailureMessageEvent(row, error, options = {}) {
           error_message: clean(error?.message),
           error_status: error?.status || null,
         };
+  const normalized_failure = normalizeTextGridFailure({
+    ...failure_result,
+    status: failure_result?.status || "failed",
+    message: error?.message,
+    error,
+    metadata: row_metadata,
+  });
+  const provider_failure_reason =
+    clean(normalized_failure.provider_failure_reason) ||
+    clean(error?.message) ||
+    clean(options.send_result?.error_message) ||
+    "send_failed";
 
   return {
     message_event_key: `failed_${queue_key}_${timestamp_key}`,
@@ -1269,11 +1339,14 @@ function buildFailureMessageEvent(row, error, options = {}) {
     queue_id: normalized.id,
     failed_at: event_timestamp,
     event_timestamp,
-    error_message: clean(error?.message) || clean(options.send_result?.error_message) || "send_failed",
-    failure_reason: clean(error?.message) || clean(options.send_result?.error_message) || "send_failed",
-    failure_bucket: mapTextgridFailureBucket(failure_result) || null,
+    provider_delivery_status: clean(options.send_result?.status) || "failed",
+    raw_carrier_status: String(options.send_result?.error_status || options.send_result?.status || "failed"),
+    delivery_status: normalized_failure.delivery_status || "failed",
+    error_message: provider_failure_reason,
+    failure_reason: provider_failure_reason,
+    failure_bucket: legacyFailureBucketForTextGrid(normalized_failure, failure_result),
     is_final_failure:
-      normalized.retry_count + 1 >= normalized.max_retries,
+      normalized_failure.is_terminal || normalized.retry_count + 1 >= normalized.max_retries,
     master_owner_id: normalized.master_owner_id,
     prospect_id: normalized.prospect_id,
     property_id: normalized.property_id,
@@ -1294,8 +1367,9 @@ function buildFailureMessageEvent(row, error, options = {}) {
     metadata: {
       source: "supabase_send_queue",
       queue_key,
+      ...textGridFailureMetadata(normalized_failure),
       error: {
-        message: clean(error?.message) || null,
+        message: provider_failure_reason || null,
         status: error?.status || null,
       },
       send_result: options.send_result || null,
@@ -1557,10 +1631,32 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
   const next_retry_count = normalized.retry_count + 1;
+  const normalized_failure = normalizeTextGridFailure({
+    ...ensureObject(options.send_result),
+    status: ensureObject(options.send_result).status,
+    message: error?.message,
+    error,
+    metadata: normalized.metadata,
+  });
   const non_retryable = isNonRetryableProviderError(error);
-  const is_final_failure = non_retryable || next_retry_count >= normalized.max_retries;
-  const error_message = clean(error?.message) || "send_failed";
-  const failure_bucket = non_retryable ? "provider_blacklist_pair" : null;
+  const is_final_failure =
+    normalized_failure.is_terminal || non_retryable || next_retry_count >= normalized.max_retries;
+  const error_message =
+    clean(normalized_failure.provider_failure_reason) ||
+    clean(error?.message) ||
+    "send_failed";
+  const normalized_failure_is_known =
+    Boolean(normalized_failure.failure_class) &&
+    normalized_failure.failure_class !== "unknown_failure";
+  const failure_bucket = normalized_failure_is_known
+    ? legacyFailureBucketForTextGrid(normalized_failure, {
+        ok: false,
+        error_message,
+        error_status: error?.status || null,
+      })
+    : non_retryable
+      ? "provider_blacklist_pair"
+      : null;
 
   const payload = {
     queue_status: is_final_failure ? "failed" : "queued",
@@ -1576,11 +1672,15 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       provider_error: {
         message: error_message,
         status: error?.status || null,
-        retryable: !is_final_failure,
-        ...(non_retryable ? { non_retryable_reason: "textgrid_21610_blacklist" } : {}),
+        retryable: normalized_failure.retry_allowed && !is_final_failure,
+        failure_class: normalized_failure.failure_class || null,
+        normalized_reason: normalized_failure.normalized_reason || null,
+        provider_failure_reason: error_message,
+        ...(non_retryable ? { non_retryable_reason: normalized_failure.normalized_reason || "textgrid_non_retryable_failure" } : {}),
         final_queue_status: is_final_failure ? "failed" : "queued",
         recorded_at: now,
       },
+      ...textGridFailureMetadata(normalized_failure),
       ...(failure_bucket ? { failure_bucket, final_failure: true } : {}),
       final_queue_status: is_final_failure ? "failed" : "queued",
       finalized_at: now,
@@ -1593,7 +1693,8 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     to_phone_number: normalized.to_phone_number || null,
     failed_reason: error_message,
     failure_bucket: failure_bucket || "unknown",
-    retryable: !is_final_failure,
+    failure_class: normalized_failure.failure_class || null,
+    retryable: normalized_failure.retry_allowed && !is_final_failure,
     non_retryable,
     next_action: is_final_failure ? "terminal_failed" : "requeue_with_backoff",
     retry_count: next_retry_count,
@@ -2625,6 +2726,18 @@ export async function syncDeliveryEvent(payload, options = {}) {
   }
   const provider_status = lower(payload?.status || payload?.provider_delivery_status);
   const raw_carrier_status = clean(payload?.error_status || payload?.status || "");
+  const normalized_failure = normalizeTextGridFailure({
+    ...ensureObject(payload),
+    status: payload?.status || payload?.provider_delivery_status,
+    error_message: payload?.error_message,
+    reason: payload?.reason,
+    raw: payload?.raw || payload,
+    metadata: payload?.metadata,
+  });
+  const provider_failure_reason =
+    clean(normalized_failure.provider_failure_reason) ||
+    clean(payload?.error_message) ||
+    "delivery_failed";
   // Normalize provider status to the three canonical delivery states.
   // Intermediate TextGrid states (queued, pending, awaiting_response, etc.) are
   // accepted-but-not-yet-delivered and must not overwrite delivery_status with
@@ -2635,7 +2748,9 @@ export async function syncDeliveryEvent(payload, options = {}) {
     "pending_delivered_to_carrier", "awaiting_response",
   ]);
   const incoming_delivery_status =
-    provider_status === "delivered"
+    normalized_failure.failure_class
+      ? "failed"
+      : provider_status === "delivered"
       ? "delivered"
       : FINAL_FAILED_STATUSES.has(provider_status)
         ? "failed"
@@ -2659,6 +2774,8 @@ export async function syncDeliveryEvent(payload, options = {}) {
       provider_delivery_status: provider_status || null,
       raw_carrier_status: raw_carrier_status || null,
       delivery_status: final_delivery_status,
+      failure_reason: final_delivery_status === "failed" ? provider_failure_reason : null,
+      metadata: final_delivery_status === "failed" ? textGridFailureMetadata(normalized_failure) : undefined,
       updated_at: now,
     });
   }
@@ -2710,16 +2827,19 @@ export async function syncDeliveryEvent(payload, options = {}) {
       event_update.error_message = null;
       event_update.failure_reason = null;
       event_update.failure_bucket = null;
-    } else if (["failed", "undelivered", "error"].includes(provider_status)) {
+    } else if (final_delivery_status === "failed") {
       event_update.failed_at = now;
-      event_update.error_message = clean(payload?.error_message) || "delivery_failed";
-      event_update.failure_reason = clean(payload?.error_message) || "delivery_failed";
-      event_update.failure_bucket =
-        mapTextgridFailureBucket({
-          ok: false,
-          error_message: payload?.error_message,
-          error_status: payload?.error_status,
-        }) || null;
+      event_update.error_message = provider_failure_reason;
+      event_update.failure_reason = provider_failure_reason;
+      event_update.failure_bucket = legacyFailureBucketForTextGrid(normalized_failure, {
+        ok: false,
+        error_message: provider_failure_reason,
+        error_status: payload?.error_status,
+      });
+      event_update.metadata = {
+        ...ensureObject(existing.metadata),
+        ...textGridFailureMetadata(normalized_failure),
+      };
     }
 
     const { data: updated_event, error: update_event_error } = await supabase
@@ -2818,14 +2938,13 @@ export async function syncDeliveryEvent(payload, options = {}) {
     queue_payload.delivery_confirmed = "confirmed";
     queue_payload.queue_status = "delivered";
     queue_payload.failed_reason = null;
-  } else if (["failed", "undelivered", "error"].includes(provider_status)) {
+  } else if (final_delivery_status === "failed") {
     const terminal_status = mapTransportTerminalStatus({
-      error_message: payload?.error_message,
+      error_message: provider_failure_reason,
       error_status: payload?.error_status,
     });
     queue_payload.delivery_confirmed = "failed";
-    queue_payload.failed_reason =
-      clean(payload?.error_message) || "delivery_failed";
+    queue_payload.failed_reason = provider_failure_reason;
     queue_payload.queue_status = final_delivery_status === "sent" ? "sent" : terminal_status;
   } else if (provider_status === "sent") {
     queue_payload.queue_status = "sent";
@@ -2841,6 +2960,20 @@ export async function syncDeliveryEvent(payload, options = {}) {
   if (send_queue_error) throw send_queue_error;
 
   for (const row of send_queue_data || []) {
+    if (final_delivery_status === "failed" && normalized_failure.failure_class) {
+      const { error: queue_metadata_error } = await supabase
+        .from(SEND_QUEUE_TABLE)
+        .update({
+          metadata: {
+            ...ensureObject(row?.metadata),
+            ...textGridFailureMetadata(normalized_failure),
+          },
+          updated_at: now,
+        })
+        .eq("id", row.id);
+      if (queue_metadata_error) throw queue_metadata_error;
+    }
+
     const sent_at = toIsoOrNull(row?.sent_at);
     let delivered_at = toIsoOrNull(row?.delivered_at);
     if (delivered_at && sent_at && toTimestamp(delivered_at) < toTimestamp(sent_at)) {
@@ -2907,7 +3040,7 @@ export function buildSendQueueDedupeKey({
 
 const SEND_QUEUE_COLUMNS = [
   "id", "queue_key", "queue_status", "scheduled_for", "send_priority", "is_locked", "locked_at", 
-  "lock_token", "retry_count", "max_retries", "next_retry_at", "message_body", "phone_number_id", 
+  "lock_token", "retry_count", "max_retries", "next_retry_at", "message_body", "phone_number_id", "phone_id",
   "to_phone_number", "from_phone_number", "metadata", "created_at", "updated_at", "property_address", 
   "queue_id", "queue_sequence", "property_type", "owner_type", "scheduled_for_local", 
   "scheduled_for_utc", "timezone", "contact_window", "sent_at", "delivered_at", "failed_reason", 
@@ -2922,7 +3055,8 @@ const SEND_QUEUE_COLUMNS = [
   "textgrid_number", "selected_template_id",
   "property_address_state", "language", "routing_tier",
   "property_address_city", "property_address_zip", "seller_status",
-  "pipeline_stage", "agent_name", "template_key"
+  "pipeline_stage", "agent_name", "template_key",
+  "campaign_id", "campaign_target_id", "campaign_send_window_id"
 ];
 
 function sanitizeSendQueuePayload(payload) {
@@ -3022,6 +3156,7 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   const is_inbox_send_now =
     isInboxSendNowRow(row) ||
     metadataSourceValue(row) === "inbox" ||
+    metadataSourceValue(row) === "manual_inbox" ||
     metadataActionValue(row) === "send_now" ||
     metadataCreatedFromValue(row) === "leadcommand_inbox";
 

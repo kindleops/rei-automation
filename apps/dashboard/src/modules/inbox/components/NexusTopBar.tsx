@@ -81,7 +81,7 @@ const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
   { id: 'dark', label: 'Dark' },
   { id: 'satellite', label: 'Satellite' },
   { id: 'terrain', label: 'Terrain' },
-  { id: 'red_ops', label: 'Red Ops' },
+  { id: 'red_ops', label: 'RedOps' },
   { id: 'matrix', label: 'Matrix' },
   { id: 'blueprint', label: 'Blueprint' },
   { id: 'executive', label: 'Executive' },

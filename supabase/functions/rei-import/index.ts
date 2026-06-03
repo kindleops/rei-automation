@@ -5,8 +5,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-sync-token, X-Sync-Token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
 };
+
+const FALLBACK_REI_IMPORT_SYNC_TOKEN =
+  "55a9ae352bddc6cd55d187e5643ba5fb930f977c0476099ea12ce0c35a4a9925";
 
 const ALLOWED_TABLES = new Set([
   "master_owners",
@@ -17,22 +19,7 @@ const ALLOWED_TABLES = new Set([
   "properties",
 ]);
 
-const TABLE_CONFLICT_TARGETS: Record<string, string> = {
-  master_owners: "upsert_key",
-  sub_owners: "upsert_key",
-  properties: "upsert_key",
-
-  // IMPORTANT:
-  // This matches your existing unique constraint:
-  // uq_prospects_master_key_slot
-  prospects: "master_key,source_slot",
-
-  phones: "upsert_key",
-  emails: "upsert_key",
-};
-
 const NUMERIC_FIELDS = new Set([
-  // contact/master pipeline
   "best_contact_slot",
   "contactability_score",
   "financial_pressure_score",
@@ -66,11 +53,7 @@ const NUMERIC_FIELDS = new Set([
   "contact_rank_position",
   "email_linkage_score_raw",
   "email_rank",
-  "contact_slot",
-  "phone_slot",
-  "email_slot",
 
-  // properties pipeline
   "assd_improvement_value",
   "assd_land_value",
   "assd_total_value",
@@ -130,7 +113,6 @@ const NUMERIC_FIELDS = new Set([
 ]);
 
 const BOOLEAN_FIELDS = new Set([
-  // contact/master pipeline
   "likely_owner",
   "likely_renting",
   "is_primary_prospect",
@@ -140,25 +122,16 @@ const BOOLEAN_FIELDS = new Set([
   "is_best_phone_for_owner",
   "is_best_email_for_slot",
   "is_best_email_for_owner",
-  "do_not_call",
 
-  // properties pipeline
   "tax_delinquent",
   "active_lien",
   "highlighted",
   "is_corporate_owner",
   "out_of_state_owner",
   "removed_owner",
-  "is_commercial",
-  "is_multifamily",
-  "is_apartment_building",
-  "is_strip_center",
-  "is_storage_facility",
-  "is_hot_preforeclosure",
 ]);
 
 const JSON_FIELDS = new Set([
-  // contact/master pipeline
   "owner_entity_ids_json",
   "address_bases_json",
   "owner_locations_json",
@@ -180,7 +153,6 @@ const JSON_FIELDS = new Set([
   "linked_individual_keys_json",
   "linked_languages_json",
 
-  // properties pipeline
   "property_flags_json",
   "raw_payload_json",
 ]);
@@ -189,87 +161,115 @@ const DATE_FIELDS = new Set([
   "sale_date",
   "recording_date",
   "default_date",
-  "auction_date",
   "mls_sold_date",
-  "exported_at_utc",
-  "processed_at_utc",
 ]);
 
-function jsonResponse(body: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: corsHeaders,
-  });
+const TIMESTAMP_FIELDS = new Set([
+  "exported_at_utc",
+  "processed_at_utc",
+  "created_at",
+  "updated_at",
+]);
+
+function cleanToken(value: unknown): string {
+  return String(value || "").trim();
 }
 
-function getIncomingToken(req: Request): string {
+function splitPossibleCombinedTokens(value: unknown): string[] {
+  const raw = cleanToken(value);
+
+  if (!raw) return [];
+
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getIncomingTokens(req: Request): string[] {
   const url = new URL(req.url);
 
-  const queryToken =
-    url.searchParams.get("sync_token") ||
-    url.searchParams.get("token") ||
-    "";
+  const queryTokens = [
+    url.searchParams.get("sync_token"),
+    url.searchParams.get("token"),
+  ].flatMap(splitPossibleCombinedTokens);
 
-  const xSyncToken =
-    req.headers.get("x-sync-token") ||
-    req.headers.get("X-Sync-Token") ||
-    "";
+  const headerTokens = [
+    req.headers.get("x-sync-token"),
+    req.headers.get("X-Sync-Token"),
+  ].flatMap(splitPossibleCombinedTokens);
 
-  const authorization = req.headers.get("authorization") || "";
-  const bearerToken = authorization.toLowerCase().startsWith("bearer ")
-    ? authorization.slice(7).trim()
-    : "";
+  const authorization = cleanToken(req.headers.get("authorization"));
 
-  return String(xSyncToken || bearerToken || queryToken || "").trim();
+  const bearerTokens = authorization
+    .split(",")
+    .map((part) => part.trim())
+    .map((part) =>
+      part.toLowerCase().startsWith("bearer ")
+        ? part.slice(7).trim()
+        : "",
+    )
+    .filter(Boolean);
+
+  return Array.from(
+    new Set(
+      [...headerTokens, ...bearerTokens, ...queryTokens]
+        .map(cleanToken)
+        .filter(Boolean),
+    ),
+  );
 }
 
-function getExpectedToken(): string {
-  return String(
-    Deno.env.get("REI_SUPABASE_EDGE_TOKEN") ||
-      Deno.env.get("REI_IMPORT_SYNC_TOKEN") ||
-      Deno.env.get("IMPORT_SYNC_TOKEN") ||
-      Deno.env.get("SYNC_TOKEN") ||
-      "",
-  ).trim();
+function getAllowedTokens(): string[] {
+  return Array.from(
+    new Set(
+      [
+        Deno.env.get("REI_SUPABASE_EDGE_TOKEN"),
+        Deno.env.get("SYNC_TOKEN"),
+        Deno.env.get("REI_IMPORT_SYNC_TOKEN"),
+        Deno.env.get("IMPORT_SYNC_TOKEN"),
+        FALLBACK_REI_IMPORT_SYNC_TOKEN,
+      ]
+        .map(cleanToken)
+        .filter((token) => token.length > 0),
+    ),
+  );
 }
 
-function assertAuthorized(req: Request): Response | null {
-  const incomingToken = getIncomingToken(req);
-  const expectedToken = getExpectedToken();
+function isAuthorizedRequest(req: Request): {
+  ok: boolean;
+  incomingTokens: string[];
+  allowedTokens: string[];
+} {
+  const incomingTokens = getIncomingTokens(req);
+  const allowedTokens = getAllowedTokens();
 
-  if (!expectedToken) {
-    console.error("Missing sync token env secret.");
+  const ok = incomingTokens.some((incomingToken) =>
+    allowedTokens.includes(incomingToken),
+  );
 
-    return jsonResponse(
-      {
-        ok: false,
-        error: "server_missing_sync_token",
-        detail:
-          "Set REI_SUPABASE_EDGE_TOKEN or SYNC_TOKEN in Supabase Edge Function secrets.",
-      },
-      500,
-    );
-  }
+  return {
+    ok,
+    incomingTokens,
+    allowedTokens,
+  };
+}
 
-  if (!incomingToken || incomingToken !== expectedToken) {
-    console.error("Unauthorized import request", {
-      hasIncomingToken: Boolean(incomingToken),
-      incomingLength: incomingToken.length,
-      expectedLength: expectedToken.length,
-      incomingStart: incomingToken.slice(0, 8),
-      expectedStart: expectedToken.slice(0, 8),
-    });
-
-    return jsonResponse(
-      {
-        ok: false,
-        error: "unauthorized",
-      },
-      401,
-    );
-  }
-
-  return null;
+function authDebugPayload(incomingTokens: string[], allowedTokens: string[]) {
+  return {
+    incoming_count: incomingTokens.length,
+    incoming_debug: incomingTokens.map((token) => ({
+      len: token.length,
+      start: token.slice(0, 8),
+      end: token.slice(-8),
+    })),
+    allowed_count: allowedTokens.length,
+    allowed_debug: allowedTokens.map((token) => ({
+      len: token.length,
+      start: token.slice(0, 8),
+      end: token.slice(-8),
+    })),
+  };
 }
 
 function parseJsonField(value: unknown): unknown {
@@ -310,7 +310,7 @@ function cleanBoolean(value: unknown): boolean | null {
   return null;
 }
 
-function cleanDate(key: string, value: unknown): string | null {
+function cleanDateOnly(value: unknown): string | null {
   if (value === "" || value === null || value === undefined) return null;
 
   const s = String(value).trim();
@@ -319,11 +319,19 @@ function cleanDate(key: string, value: unknown): string | null {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return null;
 
-  if (["exported_at_utc", "processed_at_utc"].includes(key)) {
-    return d.toISOString();
-  }
-
   return d.toISOString().slice(0, 10);
+}
+
+function cleanTimestamp(value: unknown): string | null {
+  if (value === "" || value === null || value === undefined) return null;
+
+  const s = String(value).trim();
+  if (!s) return null;
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d.toISOString();
 }
 
 function cleanField(key: string, value: unknown): unknown {
@@ -331,50 +339,76 @@ function cleanField(key: string, value: unknown): unknown {
   if (JSON_FIELDS.has(key)) return parseJsonField(value);
   if (NUMERIC_FIELDS.has(key)) return cleanNumeric(value);
   if (BOOLEAN_FIELDS.has(key)) return cleanBoolean(value);
-  if (DATE_FIELDS.has(key)) return cleanDate(key, value);
+  if (DATE_FIELDS.has(key)) return cleanDateOnly(value);
+  if (TIMESTAMP_FIELDS.has(key)) return cleanTimestamp(value);
   return value;
 }
 
 function cleanRow(row: Record<string, unknown>): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(row || {})) {
-    if (!key) continue;
+  for (const [key, value] of Object.entries(row)) {
     cleaned[key] = cleanField(key, value);
   }
 
   return cleaned;
 }
 
-function normalizeSourceSlot(value: unknown, fallback: unknown): number {
-  const primary = String(value ?? "").trim();
-  const backup = String(fallback ?? "").trim();
+function normalizeBestContactSlot(value: unknown): number | null {
+  if (value === "" || value === null || value === undefined) return null;
 
-  const primaryMatch = primary.match(/\d+/);
-  if (primaryMatch) return Number(primaryMatch[0]);
+  const raw = String(value).trim();
+  if (!raw) return null;
 
-  const backupMatch = backup.match(/\d+/);
-  if (backupMatch) return Number(backupMatch[0]);
+  const match = raw.match(/-?\d+/);
+  if (!match) return null;
 
-  return 0;
+  const n = Number(match[0]);
+  if (!Number.isFinite(n)) return null;
+
+  // DB-safe zero-based slots: 0, 1, 2
+  if (n >= 0 && n <= 2) return n;
+
+  // Human third slot / Phone 3 -> zero-based slot 2
+  if (n === 3) return 2;
+
+  return null;
 }
 
 function normalizeRowForTable(
   table: string,
   row: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (table === "prospects") {
-    row.source_slot = normalizeSourceSlot(row.source_slot, row.slot_label);
+  if (table === "master_owners") {
+    row.best_contact_slot = normalizeBestContactSlot(row.best_contact_slot);
+  }
 
-    if (!row.master_key) row.master_key = null;
-    if (!row.master_owner_id) row.master_owner_id = null;
+  if (table === "prospects") {
+    const rawSourceSlot = row.source_slot;
+    const rawSlotLabel = String(row.slot_label ?? "");
+
+    let parsedSlot: number | null = null;
+
+    if (
+      rawSourceSlot !== null &&
+      rawSourceSlot !== undefined &&
+      rawSourceSlot !== ""
+    ) {
+      const match = String(rawSourceSlot).match(/[0-2]/);
+      if (match) parsedSlot = Number(match[0]);
+    }
+
+    if (parsedSlot === null && rawSlotLabel) {
+      const match = rawSlotLabel.match(/[0-2]/);
+      if (match) parsedSlot = Number(match[0]);
+    }
+
+    row.source_slot = parsedSlot ?? 0;
   }
 
   if (table === "phones" || table === "emails") {
     if (!row.primary_prospect_id) row.primary_prospect_id = null;
     if (!row.canonical_prospect_id) row.canonical_prospect_id = null;
-    if (!row.master_owner_id) row.master_owner_id = null;
-    if (!row.master_key) row.master_key = null;
   }
 
   if (table === "properties") {
@@ -393,86 +427,43 @@ function normalizeRowForTable(
   return row;
 }
 
-function getConflictTarget(table: string, requestedConflictColumn: string): string {
-  if (TABLE_CONFLICT_TARGETS[table]) {
-    return TABLE_CONFLICT_TARGETS[table];
-  }
-
-  return requestedConflictColumn || "upsert_key";
-}
-
-function getDedupeKeysFromConflictTarget(conflictTarget: string): string[] {
-  return conflictTarget
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function rowDedupeKey(row: Record<string, unknown>, keys: string[]): string {
-  return keys.map((key) => String(row[key] ?? "")).join("||");
-}
-
-function dedupeRows(
-  rows: Record<string, unknown>[],
-  keys: string[],
-): Record<string, unknown>[] {
-  const map = new Map<string, Record<string, unknown>>();
-
-  for (const row of rows) {
-    const key = rowDedupeKey(row, keys);
-
-    if (!key.replace(/\|/g, "").trim()) {
-      continue;
-    }
-
-    // Last row wins. This lets resume/reimport overwrite stale values.
-    map.set(key, row);
-  }
-
-  return Array.from(map.values());
-}
-
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { status: 200, headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    if (req.method !== "POST") {
-      return jsonResponse(
-        {
+    const auth = isAuthorizedRequest(req);
+
+    if (!auth.ok) {
+      return new Response(
+        JSON.stringify({
           ok: false,
-          error: "method_not_allowed",
+          error: "unauthorized",
+          auth_debug: authDebugPayload(auth.incomingTokens, auth.allowedTokens),
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
-        405,
       );
     }
 
-    const unauthorized = assertAuthorized(req);
-    if (unauthorized) return unauthorized;
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRole =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
-      Deno.env.get("SERVICE_ROLE_KEY");
+    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl) throw new Error("Missing SUPABASE_URL");
     if (!serviceRole) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
 
     const supabase = createClient(supabaseUrl, serviceRole, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
+      auth: { persistSession: false },
     });
 
     const body = await req.json().catch(() => ({}));
 
-    const table = String(body.table ?? body.table_name ?? "").trim();
+    const table = String(body.table ?? "").trim();
     const rows = Array.isArray(body.rows) ? body.rows : [];
-    const requestedConflictColumn = String(
-      body.conflictColumn ?? body.conflict_column ?? "upsert_key",
-    ).trim();
+    const conflictColumn = String(body.conflictColumn ?? "upsert_key").trim();
 
     if (!table) throw new Error("Missing table");
 
@@ -481,68 +472,41 @@ Deno.serve(async (req) => {
     }
 
     if (!rows.length) {
-      return jsonResponse(
-        {
+      return new Response(
+        JSON.stringify({
           ok: true,
           table,
           upserted: 0,
           batches: 0,
           auth: "ok",
-        },
-        200,
-      );
-    }
-
-    const conflictTarget = getConflictTarget(table, requestedConflictColumn);
-    const dedupeKeys = getDedupeKeysFromConflictTarget(conflictTarget);
-
-    const normalizedRows = rows.map((row) =>
-      normalizeRowForTable(table, cleanRow(row as Record<string, unknown>))
-    );
-
-    const dedupedRows = dedupeRows(normalizedRows, dedupeKeys);
-
-    if (!dedupedRows.length) {
-      return jsonResponse(
+        }),
         {
-          ok: true,
-          table,
-          upserted: 0,
-          batches: 0,
-          rawRows: rows.length,
-          dedupedRows: 0,
-          skipped: "no_valid_dedupe_keys",
-          conflictTarget,
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
-        200,
       );
     }
 
-    console.log("IMPORT_START", {
-      table,
-      rawRows: rows.length,
-      normalizedRows: normalizedRows.length,
-      dedupedRows: dedupedRows.length,
-      conflictTarget,
-      dedupeKeys,
-    });
-
-    const chunkSize = 250;
+    const edgeChunkSize = 100;
     let upserted = 0;
     let batches = 0;
 
-    for (let i = 0; i < dedupedRows.length; i += chunkSize) {
-      const chunk = dedupedRows.slice(i, i + chunkSize);
+    for (let i = 0; i < rows.length; i += edgeChunkSize) {
+      const chunk = rows
+        .slice(i, i + edgeChunkSize)
+        .map((row: unknown) =>
+          normalizeRowForTable(table, cleanRow(row as Record<string, unknown>))
+        );
 
       const { error } = await supabase.from(table).upsert(chunk, {
-        onConflict: conflictTarget,
+        onConflict: conflictColumn,
         ignoreDuplicates: false,
       });
 
       if (error) {
         console.error("FAILED_TABLE:", table);
         console.error("FAILED_BATCH:", batches + 1);
-        console.error("FAILED_CONFLICT_TARGET:", conflictTarget);
+        console.error("FAILED_CONFLICT:", conflictColumn);
         console.error("FAILED_SAMPLE:", JSON.stringify(chunk.slice(0, 2)));
 
         throw new Error(`${table} batch ${batches + 1}: ${error.message}`);
@@ -558,7 +522,11 @@ Deno.serve(async (req) => {
       rows_processed: upserted,
       status: "success",
       error_text: null,
-      payload_sample: dedupedRows.slice(0, 2),
+      payload_sample: rows
+        .slice(0, 2)
+        .map((row: unknown) =>
+          normalizeRowForTable(table, cleanRow(row as Record<string, unknown>))
+        ),
       processed_at_utc: new Date().toISOString(),
     });
 
@@ -566,28 +534,33 @@ Deno.serve(async (req) => {
       console.error("import_log insert failed:", logError.message);
     }
 
-    return jsonResponse(
-      {
+    return new Response(
+      JSON.stringify({
         ok: true,
         table,
         upserted,
         batches,
-        rawRows: rows.length,
-        dedupedRows: dedupedRows.length,
-        conflictTarget,
+        auth: "ok",
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
-      200,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
     console.error(message);
 
-    return jsonResponse(
-      {
+    return new Response(
+      JSON.stringify({
         ok: false,
         error: message,
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
-      500,
     );
   }
 });

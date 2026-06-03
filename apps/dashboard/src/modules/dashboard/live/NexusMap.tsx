@@ -32,9 +32,24 @@ import {
   titleStateFromLead as mapTitleState,
 } from './map/lead-intel'
 import { buildMarketHeatFieldGeoJSON } from './map/heat-field'
-import { loadSettings, resolveMapStyleUrl } from '../../../shared/settings'
+import { loadPropertyIcons } from './map/pin-icons'
+import {
+  ASSET_ICON_MAPLIBRE_EXPR,
+} from './map/asset-type'
+import {
+  getMapThemeTokens,
+  buildClusterRingExpr,
+  buildClusterCoreExpr,
+  buildClusterStrokeExpr,
+  buildMarkerColorExpr,
+  PRIORITY_MARKER_STATES,
+  PRIORITY_ASSET_TYPES,
+} from './map/map-theme-tokens'
+import type { PropertyLayerTokens } from './map/map-theme-tokens'
+import { loadSettings, resolveMapStyleUrl, subscribeSettings } from '../../../shared/settings'
 import { playSound } from '../../../shared/sounds'
 import type { LocationResult } from '../../command-center/command.types'
+import { fetchMapProperties } from '../../../lib/api/backendClient'
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -87,6 +102,44 @@ interface FocusFeatureProps {
   id: string
   kind: 'subject' | 'comp' | 'activity'
   score: number
+}
+
+// Properties from the viewport map endpoint (/api/internal/dashboard/ops/map)
+interface PropertyUniverseFeatureProps {
+  property_id: string
+  assetType: string
+  markerState: string
+  acquisitionScore: number
+  motivationScore: number
+  market: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  propertyType: string | null
+  units: number
+  contactStatus: string | null
+  activityStatus: string | null
+  // Marker-mode extras (present at zoom >= 13)
+  address?: string | null
+  ownerName?: string | null
+  ownerType?: string | null
+  estimatedValue?: number | null
+  equityAmount?: number | null
+  equityPercent?: number | null
+  salePrice?: number | null
+  mlsSoldPrice?: number | null
+  mlsSoldDate?: string | null
+  marketStatusLabel?: string | null
+  buildingSqft?: number | null
+  bedrooms?: number | null
+  baths?: number | null
+  yearBuilt?: number | null
+  cashOffer?: number | null
+  repairCost?: number | null
+  smsEligible?: boolean | null
+  streetviewImage?: string | null
+  satelliteImage?: string | null
+  highlighted?: boolean | null
 }
 
 type DetailLevel = 'national' | 'market' | 'property'
@@ -175,6 +228,12 @@ const MAP_LAYER_IDS = {
   buyerDemand: 'leads-buyer-demand',
   aiPriority: 'leads-ai-priority',
   marketHeatField: 'market-heat-field',
+  // Property universe — viewport-fetched full property database
+  propertyClusters: 'property-clusters',
+  propertyClusterCount: 'property-cluster-count',
+  propertyClusterRing: 'property-cluster-ring',
+  propertyMarkers: 'property-markers',
+  propertyMarkerGlow: 'property-marker-glow',
 } as const
 
 const SOURCE_IDS = {
@@ -184,6 +243,7 @@ const SOURCE_IDS = {
   eventPulses: 'event-pulses',
   focusNearby: 'focus-nearby',
   terrainDem: 'nexus-dem',
+  propertiesUniverse: 'properties-universe',
 } as const
 
 const MODE_TO_TOGGLE: Record<DashboardMapMode, LayerToggleKey> = {
@@ -552,11 +612,15 @@ export const NexusMap = ({
 }: NexusMapProps) => {
   const [streetViewOpen, setStreetViewOpen] = useState(false)
   const [tempLocation, setTempLocation] = useState<LocationResult | null>(null)
+  const [selectedProperty, setSelectedProperty] = useState<PropertyUniverseFeatureProps | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
   const tempMarkerRef = useRef<maplibregl.Marker | null>(null)
+  const propertiesAbortRef = useRef<AbortController | null>(null)
+  const propertiesLayerEnabledRef = useRef(true)
   const mapReadyRef = useRef(false)
+  const currentZoomRef = useRef(DEFAULT_ZOOM)
   const eventPulsesRef = useRef<EventPulse[]>([])
   const lastTimelineCountRef = useRef(0)
   const detailLevelRef = useRef<DetailLevel>('national')
@@ -670,6 +734,40 @@ export const NexusMap = ({
     setLayerVisible(MAP_LAYER_IDS.focusNearby, showFocusNearby)
     setLayerVisible(MAP_LAYER_IDS.focusNearbyLabel, showFocusNearby && labelsEnabledRef.current)
 
+    // Property universe clusters: visible whenever not in national view
+    const showPropertyClusters = propertiesLayerEnabledRef.current && detail !== 'national'
+    setLayerVisible(MAP_LAYER_IDS.propertyClusterRing, showPropertyClusters)
+    setLayerVisible(MAP_LAYER_IDS.propertyClusters, showPropertyClusters)
+    setLayerVisible(MAP_LAYER_IDS.propertyClusterCount, showPropertyClusters)
+
+    // Individual property markers: zoom-gated
+    // zoom < 11.75  → clusters only, no individual markers
+    // zoom 11.75–13 → priority markers only (new_reply, hot, positive, special assets, high score)
+    // zoom >= 13    → all individual markers
+    const zoom = currentZoomRef.current
+    const showPropertyMarkers = propertiesLayerEnabledRef.current && zoom >= 11.75
+    setLayerVisible(MAP_LAYER_IDS.propertyMarkerGlow, showPropertyMarkers)
+    setLayerVisible(MAP_LAYER_IDS.propertyMarkers, showPropertyMarkers)
+
+    if (showPropertyMarkers) {
+      const baseFilter = ['!', ['has', 'point_count']]
+      const priorityFilter = ['all',
+        baseFilter,
+        ['any',
+          ['in', ['get', 'markerState'], ['literal', [...PRIORITY_MARKER_STATES]]],
+          ['in', ['get', 'assetType'],   ['literal', [...PRIORITY_ASSET_TYPES]]],
+          ['>=', ['get', 'acquisitionScore'], 85],
+        ],
+      ]
+      const activeFilter = zoom < 13 ? priorityFilter : baseFilter
+      if (map.getLayer(MAP_LAYER_IDS.propertyMarkers)) {
+        map.setFilter(MAP_LAYER_IDS.propertyMarkers, activeFilter as ExpressionSpecification)
+      }
+      if (map.getLayer(MAP_LAYER_IDS.propertyMarkerGlow)) {
+        map.setFilter(MAP_LAYER_IDS.propertyMarkerGlow, activeFilter as ExpressionSpecification)
+      }
+    }
+
     if (buildingsEnabledRef.current) {
       const shouldShowBuildings = detail === 'property' || map.getZoom() >= 13.5
       setLayerVisible(MAP_LAYER_IDS.buildings3d, shouldShowBuildings)
@@ -677,6 +775,7 @@ export const NexusMap = ({
   }
 
   const setDetailLevelFromZoom = (zoom: number) => {
+    currentZoomRef.current = zoom
     const tuning = viewportTuningRef.current
     const tunedNext: DetailLevel = zoom <= tuning.nationalMaxZoom
       ? 'national'
@@ -1484,6 +1583,181 @@ export const NexusMap = ({
         hoverPopupRef.current?.remove()
       })
 
+      // ── Property universe — SDF icons + cluster source ───────────
+      loadPropertyIcons(map)
+
+      // Resolve initial theme tokens for property universe layers
+      const initTokens: PropertyLayerTokens = getMapThemeTokens(settings.nexusTheme)
+
+      map.addSource(SOURCE_IDS.propertiesUniverse, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+        cluster: true,
+        clusterRadius: 52,
+        clusterMaxZoom: 11,
+        clusterProperties: {
+          hot_count:    ['+', ['case', ['==', ['get', 'markerState'], 'hot'], 1, 0]],
+          reply_count:  ['+', ['case', ['==', ['get', 'markerState'], 'new_reply'], 1, 0]],
+          pos_count:    ['+', ['case', ['in', ['get', 'markerState'], ['literal', ['positive', 'negotiating']]], 1, 0]],
+          comm_count:   ['+', ['case', ['in', ['get', 'assetType'], ['literal', ['commercial', 'office', 'industrial', 'warehouse', 'storage', 'shopping_plaza', 'retail', 'hotel', 'mhp', 'mixed_use']]], 1, 0]],
+          top_score:    ['max', ['get', 'acquisitionScore']],
+        },
+      })
+
+      // Cluster outer glow ring — urgency-state color, theme-aware
+      map.addLayer({
+        id: MAP_LAYER_IDS.propertyClusterRing,
+        type: 'circle',
+        source: SOURCE_IDS.propertiesUniverse,
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-radius': ['step', ['get', 'point_count'], 22, 50, 30, 250, 38, 1000, 46],
+          'circle-color': buildClusterRingExpr(initTokens) as ExpressionSpecification,
+          'circle-blur': 0.8,
+        },
+      })
+
+      // Cluster core circle — theme-aware fill + stroke
+      map.addLayer({
+        id: MAP_LAYER_IDS.propertyClusters,
+        type: 'circle',
+        source: SOURCE_IDS.propertiesUniverse,
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-radius': ['step', ['get', 'point_count'], 14, 50, 20, 250, 26, 1000, 32],
+          'circle-color': buildClusterCoreExpr(initTokens) as ExpressionSpecification,
+          'circle-stroke-width': 1.4,
+          'circle-stroke-color': buildClusterStrokeExpr(initTokens) as ExpressionSpecification,
+          'circle-opacity': 0.92,
+        },
+      })
+
+      // Cluster count label — theme-aware text
+      map.addLayer({
+        id: MAP_LAYER_IDS.propertyClusterCount,
+        type: 'symbol',
+        source: SOURCE_IDS.propertiesUniverse,
+        filter: ['has', 'point_count'],
+        layout: {
+          'text-field': [
+            'step', ['get', 'point_count'],
+            ['to-string', ['get', 'point_count']],
+            1000, ['concat', ['to-string', ['/', ['round', ['/', ['get', 'point_count'], 100]], 10]], 'k'],
+          ],
+          'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+          'text-size': 11,
+          'text-allow-overlap': true,
+        },
+        paint: {
+          'text-color': initTokens.clusterLabelColor,
+          'text-halo-color': initTokens.clusterLabelHalo,
+          'text-halo-width': 1,
+        },
+      })
+
+      // Individual unclustered property markers — SDF icon + theme-aware state color
+      map.addLayer({
+        id: MAP_LAYER_IDS.propertyMarkerGlow,
+        type: 'circle',
+        source: SOURCE_IDS.propertiesUniverse,
+        filter: ['!', ['has', 'point_count']],
+        paint: {
+          'circle-radius': 12,
+          'circle-blur': initTokens.markerGlowBlur,
+          'circle-opacity': initTokens.markerGlowOpacity,
+          'circle-color': buildMarkerColorExpr(initTokens) as ExpressionSpecification,
+        },
+      })
+
+      map.addLayer({
+        id: MAP_LAYER_IDS.propertyMarkers,
+        type: 'symbol',
+        source: SOURCE_IDS.propertiesUniverse,
+        filter: ['!', ['has', 'point_count']],
+        layout: {
+          'icon-image': ASSET_ICON_MAPLIBRE_EXPR as ExpressionSpecification,
+          'icon-size': 0.32,
+          'icon-allow-overlap': false,
+          'icon-ignore-placement': false,
+        },
+        paint: {
+          'icon-color': buildMarkerColorExpr(initTokens) as ExpressionSpecification,
+          'icon-opacity': initTokens.markerIconOpacity,
+          'icon-halo-color': initTokens.markerIconHaloColor,
+          'icon-halo-width': initTokens.markerIconHaloWidth,
+        },
+      })
+
+      // Click cluster → zoom into it
+      map.on('click', MAP_LAYER_IDS.propertyClusters, (e) => {
+        e.preventDefault()
+        const feature = e.features?.[0]
+        if (!feature?.geometry || feature.geometry.type !== 'Point') return
+        const clusterId = feature.properties?.cluster_id as number
+        const coords = feature.geometry.coordinates as [number, number]
+        const source = map.getSource(SOURCE_IDS.propertiesUniverse) as maplibregl.GeoJSONSource
+        void source.getClusterExpansionZoom(clusterId).then((zoom) => {
+          map.easeTo({ center: coords, zoom: zoom + 0.5, duration: 700 })
+        })
+      })
+
+      // Click individual property marker → show property card
+      map.on('click', MAP_LAYER_IDS.propertyMarkers, (e) => {
+        e.preventDefault()
+        const feature = e.features?.[0]
+        if (!feature?.properties) return
+        const props = feature.properties as PropertyUniverseFeatureProps
+        setSelectedProperty(props)
+      })
+
+      // Pointer cursors for property layers
+      for (const layer of [MAP_LAYER_IDS.propertyClusters, MAP_LAYER_IDS.propertyMarkers]) {
+        map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer' })
+        map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = '' })
+      }
+
+      // ── Viewport-aware property universe fetch ───────────────────────────
+      // Set up debounced moveend/zoomend listeners here, after the map is ready,
+      // so the source exists before we try to update it.
+      let vpDebounce: ReturnType<typeof setTimeout> | null = null
+
+      const fetchViewport = () => {
+        if (!propertiesLayerEnabledRef.current) return
+        propertiesAbortRef.current?.abort()
+        propertiesAbortRef.current = new AbortController()
+        const signal = propertiesAbortRef.current.signal
+        const bounds = map.getBounds()
+        const zoom = Math.round(map.getZoom())
+        void fetchMapProperties(
+          {
+            lat_min: bounds.getSouth(),
+            lat_max: bounds.getNorth(),
+            lng_min: bounds.getWest(),
+            lng_max: bounds.getEast(),
+            zoom,
+          },
+          signal,
+        ).then((result) => {
+          if (!result.ok || signal.aborted) return
+          const src = map.getSource(SOURCE_IDS.propertiesUniverse) as maplibregl.GeoJSONSource | undefined
+          src?.setData({
+            type: 'FeatureCollection',
+            features: result.data.data.features as GeoJSON.Feature<Point>[],
+          })
+        }).catch(() => { /* aborted or network error */ })
+      }
+
+      const onVpChange = () => {
+        if (vpDebounce) clearTimeout(vpDebounce)
+        vpDebounce = setTimeout(fetchViewport, 350)
+      }
+
+      map.on('moveend', onVpChange)
+      map.on('zoomend', onVpChange)
+
+      // Kick off initial load shortly after map ready
+      setTimeout(fetchViewport, 800)
+
       mapReadyRef.current = true
       setDetailLevelFromZoom(map.getZoom())
 
@@ -1601,6 +1875,44 @@ export const NexusMap = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Property universe layer theme update ─────────────────────────────────
+  const applyPropertyUniverseTheme = (nexusTheme: string) => {
+    const map = mapRef.current
+    if (!map || !mapReadyRef.current) return
+    const t = getMapThemeTokens(nexusTheme)
+    if (map.getLayer(MAP_LAYER_IDS.propertyClusterRing)) {
+      map.setPaintProperty(MAP_LAYER_IDS.propertyClusterRing, 'circle-color', buildClusterRingExpr(t) as ExpressionSpecification)
+    }
+    if (map.getLayer(MAP_LAYER_IDS.propertyClusters)) {
+      map.setPaintProperty(MAP_LAYER_IDS.propertyClusters, 'circle-color', buildClusterCoreExpr(t) as ExpressionSpecification)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyClusters, 'circle-stroke-color', buildClusterStrokeExpr(t) as ExpressionSpecification)
+    }
+    if (map.getLayer(MAP_LAYER_IDS.propertyClusterCount)) {
+      map.setPaintProperty(MAP_LAYER_IDS.propertyClusterCount, 'text-color', t.clusterLabelColor)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyClusterCount, 'text-halo-color', t.clusterLabelHalo)
+    }
+    if (map.getLayer(MAP_LAYER_IDS.propertyMarkerGlow)) {
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkerGlow, 'circle-opacity', t.markerGlowOpacity)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkerGlow, 'circle-color', buildMarkerColorExpr(t) as ExpressionSpecification)
+    }
+    if (map.getLayer(MAP_LAYER_IDS.propertyMarkers)) {
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkers, 'icon-color', buildMarkerColorExpr(t) as ExpressionSpecification)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkers, 'icon-opacity', t.markerIconOpacity)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkers, 'icon-halo-color', t.markerIconHaloColor)
+      map.setPaintProperty(MAP_LAYER_IDS.propertyMarkers, 'icon-halo-width', t.markerIconHaloWidth)
+    }
+  }
+
+  // Subscribe to settings changes to re-theme property universe layers when the
+  // user switches themes without remounting the map.
+  useEffect(() => {
+    return subscribeSettings(() => {
+      const { nexusTheme } = loadSettings()
+      applyPropertyUniverseTheme(nexusTheme)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Update lead GeoJSON (on leads, mapMode, or selectedLeadId change) ───
   useEffect(() => {
     if (!mapReadyRef.current || !mapRef.current) return
@@ -1671,6 +1983,8 @@ export const NexusMap = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Viewport fetch is wired inside map.on('load') to run only after the map is ready.
 
   // ── Retune camera profile for laptop vs large external displays ──────────
   useEffect(() => {
@@ -2043,6 +2357,69 @@ export const NexusMap = ({
             <button type="button" onClick={() => onOpenLead(selectedLeadForMapCard.id)}>
               Open Lead
             </button>
+          </div>
+        </aside>
+      ) : null}
+
+      {selectedProperty && !selectedLeadForMapCard ? (
+        <aside className="cc-map-dossier cc-map-dossier--property" role="status" aria-live="polite">
+          <div className="cc-map-dossier__top">
+            <strong>{selectedProperty.ownerName ?? selectedProperty.city ?? 'Property'}</strong>
+            <span className="cc-map-dossier__asset-type">{selectedProperty.assetType?.replace(/_/g, ' ')}</span>
+          </div>
+          <span className="cc-map-dossier__address">
+            {selectedProperty.address ?? [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(', ')}
+          </span>
+          <div className="cc-map-dossier__meta">
+            {selectedProperty.estimatedValue ? (
+              <span>${Math.round(selectedProperty.estimatedValue / 1000)}k est.</span>
+            ) : null}
+            {selectedProperty.equityPercent != null ? (
+              <span>{Math.round(selectedProperty.equityPercent)}% equity</span>
+            ) : null}
+            {selectedProperty.bedrooms || selectedProperty.baths ? (
+              <span>{selectedProperty.bedrooms ?? '?'}bd / {selectedProperty.baths ?? '?'}ba</span>
+            ) : null}
+            {selectedProperty.buildingSqft ? (
+              <span>{selectedProperty.buildingSqft.toLocaleString()} sqft</span>
+            ) : null}
+            {selectedProperty.yearBuilt ? (
+              <span>Built {selectedProperty.yearBuilt}</span>
+            ) : null}
+            {selectedProperty.units > 1 ? (
+              <span>{selectedProperty.units} units</span>
+            ) : null}
+            <span className="cc-map-dossier__state">{selectedProperty.markerState?.replace(/_/g, ' ')}</span>
+            {selectedProperty.acquisitionScore > 0 ? (
+              <span>Score {selectedProperty.acquisitionScore}</span>
+            ) : null}
+          </div>
+          {selectedProperty.cashOffer || selectedProperty.repairCost ? (
+            <div className="cc-map-dossier__meta">
+              {selectedProperty.cashOffer ? <span>Offer ${Math.round(selectedProperty.cashOffer / 1000)}k</span> : null}
+              {selectedProperty.repairCost ? <span>Repairs ${Math.round(selectedProperty.repairCost / 1000)}k</span> : null}
+            </div>
+          ) : null}
+          <div className="cc-map-dossier__actions">
+            <button
+              type="button"
+              className="is-active"
+              onClick={() => setSelectedProperty(null)}
+            >
+              Dismiss
+            </button>
+            {selectedProperty.property_id ? (
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('nexus:command-action', {
+                    detail: { action: 'open-property', propertyId: selectedProperty.property_id },
+                  }))
+                }}
+              >
+                Open
+              </button>
+            ) : null}
           </div>
         </aside>
       ) : null}

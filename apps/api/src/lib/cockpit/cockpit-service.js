@@ -394,7 +394,7 @@ export async function runInboxAction({
       {
         ...payload,
         thread_key: threadKey,
-        source: clean(payload.source) || 'inbox',
+        source: 'manual_inbox',
         action: 'send_now',
         created_from: clean(payload.created_from) || 'leadcommand_inbox',
       },

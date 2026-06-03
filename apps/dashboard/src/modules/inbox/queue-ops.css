@@ -246,7 +246,7 @@
 
 .sqd-table__head--ops {
   display: grid;
-  grid-template-columns: 180px 110px 100px 140px 58px 58px 80px 100px 90px 100px 80px 90px;
+  grid-template-columns: minmax(170px, 1.25fr) minmax(170px, 1.15fr) 88px minmax(120px, 0.9fr) 58px 58px 78px 92px 82px 92px 78px 78px;
   gap: 0;
   padding: 9px 16px;
   background: rgba(255, 255, 255, 0.028);
@@ -260,7 +260,7 @@
 
 .sqd-table__row--ops {
   display: grid;
-  grid-template-columns: 180px 110px 100px 140px 58px 58px 80px 100px 90px 100px 80px 90px;
+  grid-template-columns: minmax(170px, 1.25fr) minmax(170px, 1.15fr) 88px minmax(120px, 0.9fr) 58px 58px 78px 92px 82px 92px 78px 78px;
   gap: 0;
   padding: 8px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.038);
@@ -278,6 +278,29 @@
 .sqd-table__row--ops.has-diagnostics { background: rgba(251, 191, 36, 0.03); }
 .sqd-table__row--ops.has-diagnostics:hover { background: rgba(251, 191, 36, 0.06); }
 .sqd-table__row--ops.is-selected { background: rgba(72, 138, 236, 0.1); }
+
+.sqd-cell--campaign-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sqd-cell--campaign-meta strong {
+  color: rgba(226, 234, 255, 0.78);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sqd-cell--campaign-meta small {
+  color: rgba(108, 133, 178, 0.72);
+  font-size: 8.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ── Diagnostic Badges ───────────────────────────────────────────────────── */
 

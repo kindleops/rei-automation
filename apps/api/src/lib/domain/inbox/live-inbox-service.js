@@ -1,18 +1,33 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 
-const PRIMARY_THREAD_SOURCE = "v_inbox_threads_live_v2";
+const PRIMARY_THREAD_SOURCE = "inbox_threads_view";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
+const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
 const DEFAULT_LIMIT = 100;
 const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
 const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "thread_key",
+  "canonical_thread_key",
+  "canonical_e164",
+  "seller_phone",
+  "display_phone",
   "best_phone",
   "direction",
   "conversation_stage",
+  "owner_name",
+  "seller_display_name",
+  "seller_first_name",
+  "property_address_full",
+  "property_address_city",
+  "property_state",
+  "property_zip",
+  "market",
+  "property_type",
   "latest_message_at",
+  "latest_message_event_id",
   "latest_message_body",
   "latest_message_direction",
   "delivery_status",
@@ -27,10 +42,18 @@ const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "universal_status",
   "universal_stage",
   "property_id",
+  "prospect_id",
   "master_owner_id",
+  "selected_property_id",
+  "thread_property_id",
+  "thread_master_owner_id",
+  "thread_prospect_id",
   "last_message_at",
   "lead_temperature",
   "reply_intent",
+  "message_count",
+  "inbound_count",
+  "outbound_count",
   "suppression_status",
   "unread_count",
   "wrong_number",
@@ -121,6 +144,24 @@ const THREAD_SOURCE_CONFIGS = [
   {
     key: "primary",
     name: PRIMARY_THREAD_SOURCE,
+    countSource: PRIMARY_COUNT_SOURCE,
+    directionColumn: "latest_message_direction",
+    countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
+    getSelectColumns(selectMode) {
+      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+    },
+    searchColumns: [
+      "thread_key",
+      "canonical_e164",
+      "seller_phone",
+      "owner_name",
+      "property_address_full",
+      "latest_message_body",
+    ],
+  },
+  {
+    key: "legacy_primary",
+    name: LEGACY_THREAD_SOURCE,
     countSource: PRIMARY_COUNT_SOURCE,
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
@@ -249,6 +290,95 @@ function normalizePhone(value) {
   return raw.startsWith("+") ? raw : `+${digits}`;
 }
 
+function readObjectPath(source = {}, path = "") {
+  return path.split(".").reduce((current, key) => object(current)[key], source);
+}
+
+function firstCleanValue(...values) {
+  for (const value of values) {
+    const text = clean(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function normalizedPhoneForIdentity(row = {}) {
+  const direction = normalizeDirection(row.direction || row.latest_message_direction || row.latest_direction);
+  const inboundCounterparty = direction === "inbound" ? row.from_phone_number : null;
+  const outboundCounterparty = direction === "outbound" ? row.to_phone_number : null;
+  const threadKey = clean(row.thread_key);
+  const canonicalThreadKey = clean(row.canonical_thread_key);
+  return normalizePhone(
+    row.normalized_phone ||
+    row.canonical_e164 ||
+    row.phone_e164 ||
+    row.seller_phone ||
+    row.best_phone ||
+    row.display_phone ||
+    row.phone ||
+    inboundCounterparty ||
+    outboundCounterparty ||
+    row.to_phone_number ||
+    row.from_phone_number ||
+    (threadKey.startsWith("ct:") ? null : threadKey) ||
+    (canonicalThreadKey.startsWith("ct:") ? null : canonicalThreadKey)
+  );
+}
+
+function campaignOrSequenceIdentity(row = {}) {
+  return firstCleanValue(
+    row.campaign_id,
+    row.campaignId,
+    row.sequence_id,
+    row.sequenceId,
+    row.campaign_session_id,
+    readObjectPath(row, "campaign_data.id"),
+    readObjectPath(row, "campaign_data.campaign_id"),
+    readObjectPath(row, "queue_data.campaign_id"),
+    readObjectPath(row, "queue_data.sequence_id"),
+    readObjectPath(row, "metadata.campaign_id"),
+    readObjectPath(row, "metadata.sequence_id")
+  );
+}
+
+export function buildConversationThreadId(row = {}) {
+  const prospectId = firstCleanValue(row.prospect_id, row.prospectId, row.final_prospect_id, row.canonical_prospect_id);
+  const propertyId = firstCleanValue(row.property_id, row.propertyId, row.final_property_id, row.selected_property_id, row.thread_property_id);
+  const masterOwnerId = firstCleanValue(row.master_owner_id, row.masterOwnerId, row.owner_id, row.ownerId, row.final_master_owner_id, row.thread_master_owner_id);
+  const normalizedPhone = normalizedPhoneForIdentity(row);
+  const campaignOrSequenceId = campaignOrSequenceIdentity(row);
+  const parts = [];
+
+  if (prospectId) parts.push(`prospect:${prospectId}`);
+  if (propertyId) parts.push(`property:${propertyId}`);
+  if (masterOwnerId) parts.push(`owner:${masterOwnerId}`);
+  if (normalizedPhone) parts.push(`phone:${normalizedPhone}`);
+  if (!prospectId && !propertyId && !masterOwnerId && campaignOrSequenceId) {
+    parts.push(`campaign:${campaignOrSequenceId}`);
+  }
+
+  return parts.length ? `ct:${parts.join("|")}` : null;
+}
+
+function parseConversationThreadId(value) {
+  const text = clean(value);
+  if (!text.startsWith("ct:")) return {};
+  const parsed = {};
+  for (const segment of text.slice(3).split("|")) {
+    const splitAt = segment.indexOf(":");
+    if (splitAt <= 0) continue;
+    const key = segment.slice(0, splitAt);
+    const rawValue = segment.slice(splitAt + 1);
+    if (!rawValue) continue;
+    if (key === "prospect") parsed.prospectId = rawValue;
+    if (key === "property") parsed.propertyId = rawValue;
+    if (key === "owner") parsed.masterOwnerId = rawValue;
+    if (key === "phone") parsed.normalizedPhone = normalizePhone(rawValue);
+    if (key === "campaign") parsed.campaignId = rawValue;
+  }
+  return parsed;
+}
+
 function buildPhoneVariants(...values) {
   const variants = new Set();
   for (const value of values) {
@@ -278,26 +408,53 @@ function normalizeThreadLookupInput(input) {
   if (typeof input === "string") {
     return {
       selectedThreadKey: clean(input) || null,
+      conversationThreadId: null,
+      legacyThreadKey: null,
       canonicalE164: null,
+      normalizedPhone: null,
+      phoneE164: null,
       phone: null,
       bestPhone: null,
       sellerPhone: null,
+      prospectId: null,
+      propertyId: null,
+      masterOwnerId: null,
+      ownerId: null,
+      latestMessageId: null,
     };
   }
 
   const lookup = object(input);
   return {
     selectedThreadKey: clean(
+      lookup.conversation_thread_id ||
+      lookup.conversationThreadId ||
       lookup.selected_thread_key ||
       lookup.selectedThreadKey ||
       lookup.thread_key ||
       lookup.threadKey ||
       lookup.id
     ) || null,
+    conversationThreadId: clean(lookup.conversation_thread_id || lookup.conversationThreadId || lookup.canonical_thread_id || lookup.canonicalThreadId) || null,
+    legacyThreadKey: clean(lookup.legacy_thread_key || lookup.legacyThreadKey || lookup.raw_thread_key || lookup.rawThreadKey) || null,
+    normalizedPhone: normalizePhone(lookup.normalized_phone || lookup.normalizedPhone),
     canonicalE164: normalizePhone(lookup.canonical_e164 || lookup.canonicalE164),
+    phoneE164: normalizePhone(lookup.phone_e164 || lookup.phoneE164),
     phone: normalizePhone(lookup.phone),
     bestPhone: normalizePhone(lookup.best_phone || lookup.bestPhone),
     sellerPhone: normalizePhone(lookup.seller_phone || lookup.sellerPhone),
+    prospectId: clean(lookup.prospect_id || lookup.prospectId) || null,
+    propertyId: clean(lookup.property_id || lookup.propertyId) || null,
+    masterOwnerId: clean(lookup.master_owner_id || lookup.masterOwnerId || lookup.owner_id || lookup.ownerId) || null,
+    ownerId: clean(lookup.owner_id || lookup.ownerId) || null,
+    latestMessageId: clean(
+      lookup.latest_message_id ||
+      lookup.latestMessageId ||
+      lookup.latest_message_event_id ||
+      lookup.latestMessageEventId ||
+      lookup.message_event_id ||
+      lookup.messageEventId
+    ) || null,
   };
 }
 
@@ -586,6 +743,15 @@ function normalizeThreadRow(row = {}, query = {}) {
   const normalizedDirection = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);
   const latestMessageAt = latestAt(row);
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
+  const normalizedPhone = normalizedPhoneForIdentity({
+    ...row,
+    direction: normalizedDirection,
+  });
+  const conversationThreadId = buildConversationThreadId({
+    ...row,
+    direction: normalizedDirection,
+    canonical_e164: normalizedPhone || row.canonical_e164,
+  }) || canonicalThreadKey;
   const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
   const latestDeliveryStatus =
@@ -599,6 +765,14 @@ function normalizeThreadRow(row = {}, query = {}) {
     clean(row.latest_provider_delivery_status) ||
     clean(row.provider_delivery_status) ||
     latestDeliveryStatus;
+  const latestMessageEventId = firstClean(
+    row.latest_message_id,
+    row.latestMessageId,
+    row.latest_message_event_id,
+    row.latestMessageEventId,
+    row.message_event_id,
+    object(row.latest_message_event_data).message_event_id,
+  ) || null;
   const ownerName =
     row.owner_name ||
     row.owner_display_name ||
@@ -612,11 +786,19 @@ function normalizeThreadRow(row = {}, query = {}) {
     null;
   const normalized = {
     ...row,
-    id: msgId(row) || canonicalThreadKey,
+    id: conversationThreadId || row.id || msgId(row) || canonicalThreadKey,
+    conversation_thread_id: row.conversation_thread_id || conversationThreadId,
+    conversationThreadId: row.conversationThreadId || row.conversation_thread_id || conversationThreadId,
+    normalized_phone: normalizedPhone,
+    legacy_thread_key: row.legacy_thread_key || row.thread_key || canonicalThreadKey,
     thread_key: row.thread_key || canonicalThreadKey,
     canonical_thread_key: canonicalThreadKey,
-    canonical_e164: row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
+    canonical_e164: normalizedPhone || row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
     latest_message_at: latestMessageAt,
+    latest_message_id: latestMessageEventId,
+    latestMessageId: latestMessageEventId,
+    latest_message_event_id: latestMessageEventId,
+    latestMessageEventId: latestMessageEventId,
     latest_activity_at: latestMessageAt,
     last_message_at: row.last_message_at || latestMessageAt,
     latest_message_body: row.latest_message_body ?? row.preview ?? row.message_body ?? null,
@@ -640,15 +822,21 @@ function normalizeThreadRow(row = {}, query = {}) {
     universal_stage: row.universal_stage || row.stage || row.queue_stage || null,
     detected_intent: row.detected_intent || row.reply_intent || row.ui_intent || null,
     reply_intent: row.reply_intent || row.detected_intent || row.ui_intent || null,
-    best_phone: row.best_phone || row.canonical_e164 || row.seller_phone || row.display_phone || null,
-    phone: row.phone || row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
-    seller_phone: row.seller_phone || row.canonical_e164 || row.best_phone || row.display_phone || null,
-    display_phone: row.display_phone || row.canonical_e164 || row.seller_phone || row.best_phone || null,
+    best_phone: row.best_phone || normalizedPhone || row.canonical_e164 || row.seller_phone || row.display_phone || null,
+    phone: row.phone || normalizedPhone || row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
+    seller_phone: row.seller_phone || normalizedPhone || row.canonical_e164 || row.best_phone || row.display_phone || null,
+    display_phone: row.display_phone || normalizedPhone || row.canonical_e164 || row.seller_phone || row.best_phone || null,
     seller_display_name: row.seller_display_name || row.owner_display_name || row.event_seller_display_name || displayName(row),
     owner_name: ownerName,
     owner_display_name: row.owner_display_name || ownerName,
     property_address: propertyAddress,
-    property_address_full: row.property_address_full || row.display_address || row.event_property_address || null,
+    property_address_full: row.property_address_full || propertyAddress || row.display_address || row.event_property_address || null,
+    property_address_city: row.property_address_city || row.city || row.filter_city || null,
+    property_address_state: row.property_address_state || row.property_state || row.state || row.filter_state || null,
+    property_address_zip: row.property_address_zip || row.property_zip || row.zip || row.filter_zip || null,
+    city: row.city || row.property_address_city || row.filter_city || null,
+    state: row.state || row.property_state || row.property_address_state || row.filter_state || null,
+    zip: row.zip || row.property_zip || row.property_address_zip || row.filter_zip || null,
     market: row.market || row.display_market || row.market_region || null,
     property_type: row.property_type || row.filter_property_type || null,
     suppression_status: row.suppression_status || (row.is_suppressed === true ? "suppressed" : null),
@@ -839,7 +1027,8 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
   }
 
   const latestDeliveryByThread = new Map();
-  for (const row of [...(messageRows || [])].sort((a, b) => deliveryEventTime(b) - deliveryEventTime(a))) {
+  const sortedDeliveryRows = [...(messageRows || [])].sort((a, b) => deliveryEventTime(b) - deliveryEventTime(a));
+  for (const row of sortedDeliveryRows) {
     const threadKey = clean(row.thread_key);
     if (threadKey && !latestDeliveryByThread.has(threadKey)) {
       latestDeliveryByThread.set(threadKey, row);
@@ -857,7 +1046,7 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
   if (queueIds.length) {
     const { data: queueRowsById, error: queueByIdError } = await supabase
       .from("send_queue")
-      .select("id,thread_key,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
+      .select("id,thread_key,from_phone_number,to_phone_number,property_id,prospect_id,master_owner_id,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
       .in("id", queueIds)
       .limit(queueIds.length);
     if (queueByIdError) {
@@ -875,7 +1064,7 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
 
   const { data: queueRowsByThread, error: queueByThreadError } = await supabase
     .from("send_queue")
-    .select("id,thread_key,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
+    .select("id,thread_key,from_phone_number,to_phone_number,property_id,prospect_id,master_owner_id,queue_status,delivered_at,failed_reason,guard_reason,blocked_reason,paused_reason,updated_at,sent_at,scheduled_for_utc,scheduled_for,created_at")
     .in("thread_key", threadKeys)
     .order("updated_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false, nullsFirst: false })
@@ -886,8 +1075,10 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
       source: "send_queue:thread_key",
       message: queueByThreadError.message,
     });
-  } else {
-    for (const row of [...(queueRowsByThread || [])].sort((a, b) => queueEventTime(b) - queueEventTime(a))) {
+  }
+  const sortedQueueRows = [...(queueRowsByThread || [])].sort((a, b) => queueEventTime(b) - queueEventTime(a));
+  if (!queueByThreadError) {
+    for (const row of sortedQueueRows) {
       const threadKey = clean(row.thread_key);
       if (threadKey && !latestQueueByThread.has(threadKey)) {
         latestQueueByThread.set(threadKey, row);
@@ -897,8 +1088,9 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
 
   return rows.map((row) => {
     const threadKey = clean(row.thread_key || row.canonical_thread_key);
-    const delivery = latestDeliveryByThread.get(threadKey) || null;
-    const queue = queueById.get(clean(delivery?.queue_id)) || latestQueueByThread.get(threadKey) || null;
+    const hasStrongIdentity = Boolean(clean(row.prospect_id || row.final_prospect_id || row.property_id || row.final_property_id || row.master_owner_id || row.final_master_owner_id || row.owner_id));
+    const delivery = sortedDeliveryRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || (!hasStrongIdentity ? latestDeliveryByThread.get(threadKey) : null) || null;
+    const queue = queueById.get(clean(delivery?.queue_id)) || sortedQueueRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || (!hasStrongIdentity ? latestQueueByThread.get(threadKey) : null) || null;
     if (!delivery && !queue) return row;
     return applyDeliverySnapshot(row, delivery, queue);
   });
@@ -916,22 +1108,79 @@ function toMessageAt(row = {}) {
   );
 }
 
+function normalizeBody(value) {
+  return clean(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeDeliveryStatusValue(...values) {
+  const statuses = values.map(lower).filter(Boolean);
+  if (statuses.some((status) => status.includes("deliver") && !status.includes("undeliver"))) return "delivered";
+  if (statuses.some((status) => status.includes("fail") || status.includes("undeliv") || status.includes("error"))) return "failed";
+  if (statuses.some((status) => status.includes("queue") || status.includes("pending") || status.includes("schedul") || status.includes("approval"))) return "queued";
+  if (statuses.some((status) => status.includes("sent") || status === "success" || status === "accepted")) return "sent";
+  return statuses[0] || null;
+}
+
 function normalizeMessageRow(row = {}) {
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
   const messageAt = toMessageAt(row);
+  const normalizedPhone = normalizedPhoneForIdentity(row);
+  const direction = normalizeDirection(row.direction);
+  const body = firstCleanValue(row.message_body, row.body, row.normalized_body);
+  const providerStatus = firstCleanValue(row.provider_status, row.provider_delivery_status, row.raw_carrier_status, row.delivery_status);
+  const lifecycleStatus = normalizeDeliveryStatusValue(
+    row.lifecycle_status,
+    row.delivery_status,
+    row.provider_status,
+    row.provider_delivery_status,
+    row.raw_carrier_status,
+    row.queue_status,
+    row.status,
+    row.delivered_at ? "delivered" : null,
+    row.failed_at ? "failed" : null,
+  );
+  const hasExplicitConversationFlag = Object.prototype.hasOwnProperty.call(row, "conversation_thread_id_explicit");
+  const explicitConversationThreadId = hasExplicitConversationFlag && row.conversation_thread_id_explicit !== true
+    ? ""
+    : clean(row.conversation_thread_id || row.conversationThreadId);
+  const conversationThreadId = buildConversationThreadId({
+    ...row,
+    canonical_e164: normalizedPhone || row.canonical_e164,
+  }) || explicitConversationThreadId || canonicalThreadKey;
   return {
     ...row,
     id: row.id || row.message_event_id || null,
+    message_id: firstCleanValue(row.message_id, row.provider_message_sid, row.provider_message_id, row.id, row.message_event_id) || null,
     message_event_id: row.message_event_id || row.id || null,
+    conversation_thread_id: explicitConversationThreadId || conversationThreadId,
+    conversation_thread_id_explicit: Boolean(explicitConversationThreadId),
+    conversationThreadId: explicitConversationThreadId || conversationThreadId,
+    normalized_phone: normalizedPhone,
+    legacy_thread_key: row.legacy_thread_key || row.thread_key || canonicalThreadKey,
     thread_key: row.thread_key || canonicalThreadKey,
     canonical_thread_key: canonicalThreadKey,
-    direction: normalizeDirection(row.direction),
+    canonical_e164: normalizedPhone || row.canonical_e164 || null,
+    direction,
+    body,
+    normalized_body: firstCleanValue(row.normalized_body, normalizeBody(body)) || null,
     message_created_at: row.message_created_at || row.created_at || messageAt,
     event_timestamp: row.event_timestamp || messageAt,
+    sent_at: row.sent_at || null,
+    delivered_at: row.delivered_at || null,
+    delivery_status: lifecycleStatus || row.delivery_status || null,
+    provider_status: providerStatus || null,
+    lifecycle_status: lifecycleStatus || null,
+    from_number: row.from_number || row.from_phone_number || null,
+    to_number: row.to_number || row.to_phone_number || null,
+    phone_number: row.phone_number || normalizedPhone || null,
+    campaign_id: firstCleanValue(row.campaign_id, row.campaignId, readObjectPath(row, "metadata.campaign_id")) || null,
+    sequence_id: firstCleanValue(row.sequence_id, row.sequenceId, readObjectPath(row, "metadata.sequence_id")) || null,
+    is_inbound: direction === "inbound",
+    is_outbound: direction === "outbound",
     current_stage: row.current_stage || row.stage_after || object(row.metadata).current_stage || object(row.metadata).stage_after || null,
     detected_intent: row.detected_intent || object(row.metadata).detected_intent || null,
     auto_reply_status: row.auto_reply_status || object(row.metadata).auto_reply_status || null,
-    provider_delivery_status: row.provider_delivery_status || row.delivery_status || row.raw_carrier_status || null,
+    provider_delivery_status: providerStatus || null,
     source_table: "message_events",
     source_app: "message_events",
     latest_message_source: "message_events",
@@ -1081,7 +1330,7 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     const shouldRequestExactCount =
       bool(params.include_total || params.exact_total) &&
       selectMode !== "initial_boot_safe" &&
-      sourceConfig.key === "primary";
+      (sourceConfig.key === "primary" || sourceConfig.key === "legacy_primary");
     let query = supabase.from(sourceConfig.name);
     query = shouldRequestExactCount
       ? query.select(sourceConfig.getSelectColumns(selectMode), { count: "exact" })
@@ -1256,7 +1505,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   let countPreservedReason = null;
 
   if (!skipCounts) {
-    if (sourceConfig.key === "primary") {
+    if (sourceConfig.key === "primary" || sourceConfig.key === "legacy_primary") {
       const countQueryStartedAt = nowMs();
       try {
         const countResult = await getLiveCountsWithMeta({}, {
@@ -1388,38 +1637,759 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   };
 }
 
-export async function getThreadMessages(threadLookupInput, { offset = 0, limit = 200 } = {}, deps = {}) {
-  const supabase = deps.supabase || defaultSupabase;
-  const lookup = normalizeThreadLookupInput(threadLookupInput);
-  const phoneVariants = buildPhoneVariants(
+function emptyIdentitySets() {
+  return {
+    threadKeys: new Set(),
+    phones: new Set(),
+    prospectIds: new Set(),
+    propertyIds: new Set(),
+    masterOwnerIds: new Set(),
+  };
+}
+
+function identitySnapshot(identities = emptyIdentitySets()) {
+  return {
+    thread_keys: [...identities.threadKeys].filter(Boolean),
+    phones: [...identities.phones].filter(Boolean),
+    prospect_ids: [...identities.prospectIds].filter(Boolean),
+    property_ids: [...identities.propertyIds].filter(Boolean),
+    master_owner_ids: [...identities.masterOwnerIds].filter(Boolean),
+  };
+}
+
+function addPhoneIdentity(identities, ...values) {
+  for (const value of values) {
+    for (const variant of buildPhoneVariants(value)) {
+      if (variant) identities.phones.add(variant);
+    }
+  }
+}
+
+function addLookupIdentities(identities, lookup = {}) {
+  [
+    lookup.selectedThreadKey,
+  ].map(clean).filter(Boolean).forEach((value) => identities.threadKeys.add(value));
+
+  addPhoneIdentity(
+    identities,
     lookup.selectedThreadKey,
     lookup.canonicalE164,
+    lookup.phoneE164,
     lookup.phone,
     lookup.bestPhone,
     lookup.sellerPhone,
   );
-  const orClause = buildOrEqualsClause([
-    lookup.selectedThreadKey ? { column: "thread_key", value: lookup.selectedThreadKey } : null,
-    lookup.selectedThreadKey ? { column: "to_phone_number", value: lookup.selectedThreadKey } : null,
-    lookup.selectedThreadKey ? { column: "from_phone_number", value: lookup.selectedThreadKey } : null,
-    ...phoneVariants.flatMap((value) => ([
-      { column: "thread_key", value },
-      { column: "to_phone_number", value },
-      { column: "from_phone_number", value },
-    ])),
-  ].filter(Boolean));
 
+  if (lookup.prospectId) identities.prospectIds.add(clean(lookup.prospectId));
+  if (lookup.propertyId) identities.propertyIds.add(clean(lookup.propertyId));
+  if (lookup.masterOwnerId) identities.masterOwnerIds.add(clean(lookup.masterOwnerId));
+  if (lookup.ownerId) identities.masterOwnerIds.add(clean(lookup.ownerId));
+}
+
+function addRowIdentities(identities, row = {}) {
+  [
+    row.thread_key,
+    row.canonical_thread_key,
+  ].map(clean).filter(Boolean).forEach((value) => identities.threadKeys.add(value));
+
+  addPhoneIdentity(
+    identities,
+    row.canonical_e164,
+    row.phone_e164,
+    row.phone,
+    row.best_phone,
+    row.seller_phone,
+    row.display_phone,
+    row.from_phone_number,
+    row.to_phone_number,
+    row.recipient_phone,
+  );
+
+  [
+    row.prospect_id,
+    row.final_prospect_id,
+    row.canonical_prospect_id,
+  ].map(clean).filter(Boolean).forEach((value) => identities.prospectIds.add(value));
+
+  [
+    row.property_id,
+    row.final_property_id,
+  ].map(clean).filter(Boolean).forEach((value) => identities.propertyIds.add(value));
+
+  [
+    row.master_owner_id,
+    row.final_master_owner_id,
+    row.owner_id,
+  ].map(clean).filter(Boolean).forEach((value) => identities.masterOwnerIds.add(value));
+}
+
+function buildColumnValueFilters(columns = [], values = []) {
+  const uniqueValues = [...new Set(values.map(clean).filter(Boolean))];
+  return columns.flatMap((column) =>
+    uniqueValues.map((value) => ({ column, value }))
+  );
+}
+
+function identityFiltersForMessageEvents(identities = emptyIdentitySets()) {
+  return [
+    ...buildColumnValueFilters(["thread_key"], [...identities.threadKeys]),
+    ...buildColumnValueFilters(["thread_key", "from_phone_number", "to_phone_number"], [...identities.phones]),
+    ...buildColumnValueFilters(["prospect_id"], [...identities.prospectIds]),
+    ...buildColumnValueFilters(["property_id"], [...identities.propertyIds]),
+    ...buildColumnValueFilters(["master_owner_id"], [...identities.masterOwnerIds]),
+  ];
+}
+
+function messageBelongsToIdentities(row = {}, identities = emptyIdentitySets()) {
+  const rowThreadKey = clean(row.thread_key || row.canonical_thread_key);
+  if (rowThreadKey && identities.threadKeys.has(rowThreadKey)) return true;
+
+  const rowPhones = buildPhoneVariants(
+    row.canonical_e164,
+    row.phone_e164,
+    row.phone,
+    row.from_phone_number,
+    row.to_phone_number,
+    row.best_phone,
+    row.seller_phone,
+  );
+  if (rowPhones.some((value) => identities.phones.has(value))) return true;
+
+  const prospectId = clean(row.prospect_id || row.canonical_prospect_id);
+  if (prospectId && identities.prospectIds.has(prospectId)) return true;
+
+  const propertyId = clean(row.property_id);
+  if (propertyId && identities.propertyIds.has(propertyId)) return true;
+
+  const masterOwnerId = clean(row.master_owner_id || row.owner_id);
+  if (masterOwnerId && identities.masterOwnerIds.has(masterOwnerId)) return true;
+
+  return false;
+}
+
+async function queryIdentityRows({
+  supabase,
+  source,
+  filters,
+  limit = 50,
+  orderBy = null,
+}) {
+  const orClause = buildOrEqualsClause(filters);
+  if (!orClause) return { rows: [], error: null };
+
+  try {
+    let query = supabase.from(source).select("*");
+    if (typeof query.or === "function") query = query.or(orClause);
+    if (orderBy && typeof query.order === "function") {
+      query = query.order(orderBy, { ascending: false, nullsFirst: false });
+    }
+    if (typeof query.limit === "function") query = query.limit(limit);
+    const { data, error } = await query;
+    if (error) return { rows: [], error };
+    return { rows: Array.isArray(data) ? data : [], error: null };
+  } catch (error) {
+    return { rows: [], error };
+  }
+}
+
+function dedupeRowsByMessageId(rows = []) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = clean(row.id || row.message_event_id || row.message_event_key || row.provider_message_sid) ||
+      `${clean(row.thread_key)}:${clean(row.direction)}:${clean(row.message_body)}:${clean(toMessageAt(row))}`;
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, row);
+  }
+  return [...byKey.values()];
+}
+
+async function collectIdentitySource({
+  supabase,
+  identities,
+  source,
+  label,
+  columns,
+  values,
+  diagnostics,
+  limit = 25,
+}) {
+  const before = identitySnapshot(identities);
+  const { rows, error } = await queryIdentityRows({
+    supabase,
+    source,
+    filters: buildColumnValueFilters(columns, values),
+    limit,
+  });
+
+  if (error) {
+    diagnostics.sourceResults.push({
+      source: label || source,
+      ok: false,
+      rows: 0,
+      error: error.message || String(error),
+    });
+    return [];
+  }
+
+  for (const row of rows) addRowIdentities(identities, row);
+  const after = identitySnapshot(identities);
+  diagnostics.sourceResults.push({
+    source: label || source,
+    ok: true,
+    rows: rows.length,
+    expanded: {
+      thread_keys: Math.max(0, after.thread_keys.length - before.thread_keys.length),
+      phones: Math.max(0, after.phones.length - before.phones.length),
+      prospect_ids: Math.max(0, after.prospect_ids.length - before.prospect_ids.length),
+      property_ids: Math.max(0, after.property_ids.length - before.property_ids.length),
+      master_owner_ids: Math.max(0, after.master_owner_ids.length - before.master_owner_ids.length),
+    },
+  });
+  return rows;
+}
+
+async function collectPhoneNumberIdentities({ supabase, identities, diagnostics }) {
+  const phoneValues = [...identities.phones];
+  if (!phoneValues.length) return [];
+
+  const allRows = [];
+  for (const column of ["canonical_e164", "phone_number", "best_phone", "phone"]) {
+    const rows = await collectIdentitySource({
+      supabase,
+      identities,
+      source: "phone_numbers",
+      label: `phone_numbers:${column}`,
+      columns: [column],
+      values: phoneValues,
+      diagnostics,
+      limit: 25,
+    });
+    allRows.push(...rows);
+  }
+  return allRows;
+}
+
+async function collectProspectIdentities({ supabase, identities, diagnostics }) {
+  const filters = [
+    ...buildColumnValueFilters(["id", "prospect_id"], [...identities.prospectIds]),
+    ...buildColumnValueFilters(["master_owner_id", "owner_id"], [...identities.masterOwnerIds]),
+    ...buildColumnValueFilters(["property_id"], [...identities.propertyIds]),
+  ];
+  if (!filters.length) return [];
+  const { rows, error } = await queryIdentityRows({
+    supabase,
+    source: "prospects",
+    filters,
+    limit: 25,
+  });
+  if (error) {
+    diagnostics.sourceResults.push({
+      source: "prospects",
+      ok: false,
+      rows: 0,
+      error: error.message || String(error),
+    });
+    return [];
+  }
+  for (const row of rows) addRowIdentities(identities, row);
+  diagnostics.sourceResults.push({ source: "prospects", ok: true, rows: rows.length });
+  return rows;
+}
+
+async function collectInboxViewIdentities({ supabase, identities, diagnostics }) {
+  const snapshot = identitySnapshot(identities);
+  const primaryValues = [
+    ...snapshot.thread_keys,
+    ...snapshot.phones,
+  ];
+
+  await collectIdentitySource({
+    supabase,
+    identities,
+    source: PRIMARY_THREAD_SOURCE,
+    label: PRIMARY_THREAD_SOURCE,
+    columns: ["thread_key", "canonical_thread_key", "canonical_e164", "best_phone", "seller_phone"],
+    values: primaryValues,
+    diagnostics,
+    limit: 10,
+  });
+
+  await collectIdentitySource({
+    supabase,
+    identities,
+    source: FALLBACK_THREAD_SOURCE,
+    label: FALLBACK_THREAD_SOURCE,
+    columns: ["thread_key", "best_phone", "seller_phone", "display_phone"],
+    values: primaryValues,
+    diagnostics,
+    limit: 10,
+  });
+
+  const idValues = identitySnapshot(identities);
+  await collectIdentitySource({
+    supabase,
+    identities,
+    source: PRIMARY_THREAD_SOURCE,
+    label: `${PRIMARY_THREAD_SOURCE}:ids`,
+    columns: ["property_id", "prospect_id", "master_owner_id"],
+    values: [
+      ...idValues.property_ids,
+      ...idValues.prospect_ids,
+      ...idValues.master_owner_ids,
+    ],
+    diagnostics,
+    limit: 10,
+  });
+
+  await collectIdentitySource({
+    supabase,
+    identities,
+    source: FALLBACK_THREAD_SOURCE,
+    label: `${FALLBACK_THREAD_SOURCE}:ids`,
+    columns: ["property_id", "final_property_id", "final_prospect_id", "master_owner_id", "final_master_owner_id"],
+    values: [
+      ...idValues.property_ids,
+      ...idValues.prospect_ids,
+      ...idValues.master_owner_ids,
+    ],
+    diagnostics,
+    limit: 10,
+  });
+}
+
+async function queryMessageEventsByIdentities({ supabase, identities, fetchLimit, diagnostics }) {
+  const filters = identityFiltersForMessageEvents(identities);
+  const orClause = buildOrEqualsClause(filters);
+  if (!orClause) {
+    diagnostics.sourceResults.push({
+      source: "message_events",
+      ok: true,
+      rows: 0,
+      skipped: true,
+      reason: "no_thread_identity",
+    });
+    return [];
+  }
+
+  let query = supabase
+    .from("message_events")
+    .select("*");
+
+  if (typeof query.or === "function") query = query.or(orClause);
+
+  if (typeof query.order === "function") {
+    query = query.order("event_timestamp", { ascending: false, nullsFirst: false });
+    query = query.order("created_at", { ascending: false, nullsFirst: false });
+  }
+
+  if (typeof query.limit === "function") {
+    query = query.limit(fetchLimit);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  diagnostics.sourceResults.push({
+    source: "message_events",
+    ok: true,
+    rows: rows.length,
+    filter_count: filters.length,
+  });
+  return rows;
+}
+
+function resolveIdentityUsed(row = {}, identities = emptyIdentitySets()) {
+  const rowThreadKey = clean(row.thread_key || row.canonical_thread_key);
+  if (rowThreadKey && identities.threadKeys.has(rowThreadKey)) return `thread_key:${rowThreadKey}`;
+
+  for (const phone of buildPhoneVariants(row.from_phone_number, row.to_phone_number, row.canonical_e164)) {
+    if (identities.phones.has(phone)) return `phone:${phone}`;
+  }
+
+  const propertyId = clean(row.property_id);
+  if (propertyId && identities.propertyIds.has(propertyId)) return `property_id:${propertyId}`;
+
+  const prospectId = clean(row.prospect_id);
+  if (prospectId && identities.prospectIds.has(prospectId)) return `prospect_id:${prospectId}`;
+
+  const masterOwnerId = clean(row.master_owner_id || row.owner_id);
+  if (masterOwnerId && identities.masterOwnerIds.has(masterOwnerId)) return `master_owner_id:${masterOwnerId}`;
+
+  return null;
+}
+
+function getLookupNormalizedPhone(lookup = {}) {
+  const legacyThreadKey = clean(lookup.legacyThreadKey);
+  const selectedThreadKey = clean(lookup.selectedThreadKey);
+  const safeLegacyThreadKey = legacyThreadKey.startsWith("ct:") ? null : legacyThreadKey;
+  const safeSelectedThreadKey = selectedThreadKey.startsWith("ct:") ? null : selectedThreadKey;
+  return normalizePhone(
+    lookup.normalizedPhone ||
+    lookup.canonicalE164 ||
+    lookup.phoneE164 ||
+    lookup.phone ||
+    lookup.bestPhone ||
+    lookup.sellerPhone ||
+    safeLegacyThreadKey ||
+    safeSelectedThreadKey
+  );
+}
+
+function buildLookupConversationThreadId(lookup = {}) {
+  return clean(lookup.conversationThreadId) || buildConversationThreadId({
+    prospect_id: lookup.prospectId,
+    property_id: lookup.propertyId,
+    master_owner_id: lookup.masterOwnerId || lookup.ownerId,
+    normalized_phone: getLookupNormalizedPhone(lookup),
+    campaign_id: lookup.campaignId,
+    sequence_id: lookup.sequenceId,
+  });
+}
+
+function distinctCleanValues(rows = [], ...keys) {
+  const values = new Set();
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = clean(row?.[key]);
+      if (value) values.add(value);
+    }
+  }
+  return [...values];
+}
+
+function auditThreadIdentity({ lookup = {}, rows = [], conversationThreadId = null }) {
+  const normalizedRows = rows.map((row) => ({
+    ...row,
+    conversation_thread_id: clean(row.conversation_thread_id) || buildConversationThreadId(row),
+  }));
+  const distinctProspectIds = distinctCleanValues(normalizedRows, "prospect_id", "canonical_prospect_id", "final_prospect_id");
+  const distinctPropertyIds = distinctCleanValues(normalizedRows, "property_id", "final_property_id");
+  const distinctOwnerIds = distinctCleanValues(normalizedRows, "master_owner_id", "owner_id", "final_master_owner_id");
+  const distinctThreadIds = distinctCleanValues(normalizedRows, "conversation_thread_id");
+  const explicitThreadIds = distinctCleanValues(rows.filter((row) => row.conversation_thread_id_explicit === true), "conversation_thread_id");
+  const audit = {
+    thread_key: lookup.legacyThreadKey || lookup.selectedThreadKey || null,
+    conversation_thread_id: conversationThreadId || null,
+    prospect_id: lookup.prospectId || null,
+    property_id: lookup.propertyId || null,
+    master_owner_id: lookup.masterOwnerId || lookup.ownerId || null,
+    normalized_phone: getLookupNormalizedPhone(lookup) || null,
+    messages_returned: rows.length,
+    distinct_prospect_ids: distinctProspectIds,
+    distinct_property_ids: distinctPropertyIds,
+    distinct_owner_ids: distinctOwnerIds,
+    distinct_thread_ids: distinctThreadIds,
+    explicit_thread_ids: explicitThreadIds,
+    distinct_counts: {
+      prospect_ids: distinctProspectIds.length,
+      property_ids: distinctPropertyIds.length,
+      owner_ids: distinctOwnerIds.length,
+      thread_ids: distinctThreadIds.length,
+      explicit_thread_ids: explicitThreadIds.length,
+    },
+  };
+  audit.integrity_blocked =
+    distinctProspectIds.length > 1 ||
+    distinctPropertyIds.length > 1 ||
+    distinctOwnerIds.length > 1 ||
+    explicitThreadIds.length > 1;
+  return audit;
+}
+
+function applyPhoneAnyFilter(query, normalizedPhone) {
+  const { orClause } = buildPhoneAnyFilter(normalizedPhone);
+  return orClause && typeof query.or === "function" ? query.or(orClause) : query;
+}
+
+function buildPhoneAnyFilter(normalizedPhone) {
+  const phoneVariants = buildPhoneVariants(normalizedPhone);
+  const filters = buildColumnValueFilters(["from_phone_number", "to_phone_number", "thread_key"], phoneVariants);
+  return {
+    phoneVariants,
+    filters,
+    orClause: buildOrEqualsClause(filters),
+  };
+}
+
+function buildStrictMessageStrategies(lookup = {}) {
+  const normalizedPhone = getLookupNormalizedPhone(lookup);
+  const conversationThreadId = buildLookupConversationThreadId(lookup);
+  const strategies = [];
+
+  if (lookup.latestMessageId) {
+    strategies.push({
+      name: "latest_message_id_exact",
+      filter: {
+        table: "message_events",
+        eq: { id: lookup.latestMessageId },
+      },
+      apply(query) {
+        return query.eq("id", lookup.latestMessageId);
+      },
+    });
+  }
+
+  if (lookup.propertyId && normalizedPhone) {
+    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
+    strategies.push({
+      name: "property_id+normalized_phone",
+      filter: {
+        table: "message_events",
+        eq: { property_id: lookup.propertyId },
+        phoneVariants: phoneFilter.phoneVariants,
+        or: phoneFilter.orClause,
+      },
+      apply(query) {
+        return applyPhoneAnyFilter(query.eq("property_id", lookup.propertyId), normalizedPhone);
+      },
+    });
+  }
+
+  if ((lookup.masterOwnerId || lookup.ownerId) && normalizedPhone) {
+    const ownerId = lookup.masterOwnerId || lookup.ownerId;
+    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
+    strategies.push({
+      name: "master_owner_id+normalized_phone",
+      filter: {
+        table: "message_events",
+        eq: { master_owner_id: ownerId },
+        phoneVariants: phoneFilter.phoneVariants,
+        or: phoneFilter.orClause,
+      },
+      apply(query) {
+        return applyPhoneAnyFilter(query.eq("master_owner_id", ownerId), normalizedPhone);
+      },
+    });
+  }
+
+  if (lookup.prospectId && normalizedPhone) {
+    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
+    strategies.push({
+      name: "prospect_id+normalized_phone",
+      filter: {
+        table: "message_events",
+        eq: { prospect_id: lookup.prospectId },
+        phoneVariants: phoneFilter.phoneVariants,
+        or: phoneFilter.orClause,
+      },
+      apply(query) {
+        return applyPhoneAnyFilter(query.eq("prospect_id", lookup.prospectId), normalizedPhone);
+      },
+    });
+  }
+
+  // Phone-only fallback: catches message_events rows where property_id/master_owner_id
+  // aren't populated. rowConflictsWithLookup (applied in messageMatchesStrictLookup)
+  // prevents cross-property bleed for rows that do have conflicting IDs.
+  if (normalizedPhone) {
+    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
+    strategies.push({
+      name: "normalized_phone_fallback",
+      filter: {
+        table: "message_events",
+        phoneVariants: phoneFilter.phoneVariants,
+        or: phoneFilter.orClause,
+        audit: "phone_only_with_identity_audit",
+      },
+      apply(query) {
+        return applyPhoneAnyFilter(query, normalizedPhone);
+      },
+    });
+  }
+
+  return { strategies, normalizedPhone, conversationThreadId };
+}
+
+function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
+  if (strategyName === "latest_message_id_exact") {
+    return clean(row.id || row.message_event_id) === clean(lookup.latestMessageId);
+  }
+
+  const rowConversationThreadId = clean(row.conversation_thread_id) || buildConversationThreadId(row);
+  const lookupConversationThreadId = buildLookupConversationThreadId(lookup);
+  if (strategyName === "conversation_thread_id") {
+    return Boolean(rowConversationThreadId && lookupConversationThreadId && rowConversationThreadId === lookupConversationThreadId && !rowConflictsWithLookup(row, lookup));
+  }
+
+  const normalizedPhone = getLookupNormalizedPhone(lookup);
+  const rowPhones = new Set(buildPhoneVariants(
+    row.normalized_phone,
+    row.canonical_e164,
+    row.phone_e164,
+    row.seller_phone,
+    row.from_phone_number,
+    row.to_phone_number,
+    row.thread_key,
+  ));
+  const hasPhone = normalizedPhone && buildPhoneVariants(normalizedPhone).some((phone) => rowPhones.has(phone));
+  if (!hasPhone) return false;
+  if (rowConflictsWithLookup(row, lookup)) return false;
+
+  if (strategyName === "prospect_id+normalized_phone") {
+    return clean(row.prospect_id || row.canonical_prospect_id) === clean(lookup.prospectId);
+  }
+  if (strategyName === "property_id+normalized_phone") {
+    return clean(row.property_id || row.final_property_id) === clean(lookup.propertyId);
+  }
+  if (strategyName === "master_owner_id+normalized_phone") {
+    return clean(row.master_owner_id || row.owner_id || row.final_master_owner_id) === clean(lookup.masterOwnerId || lookup.ownerId);
+  }
+  if (strategyName === "normalized_phone_unlinked") return true;
+  if (strategyName === "normalized_phone_fallback") return true;
+  return false;
+}
+
+function rowConflictsWithLookup(row = {}, lookup = {}) {
+  const rowProspectId = clean(row.prospect_id || row.canonical_prospect_id || row.final_prospect_id);
+  const rowPropertyId = clean(row.property_id || row.final_property_id);
+  const rowOwnerId = clean(row.master_owner_id || row.owner_id || row.final_master_owner_id);
+  const lookupProspectId = clean(lookup.prospectId);
+  const lookupPropertyId = clean(lookup.propertyId);
+  const lookupOwnerId = clean(lookup.masterOwnerId || lookup.ownerId);
+
+  if (lookupProspectId && rowProspectId && rowProspectId !== lookupProspectId) return true;
+  if (lookupPropertyId && rowPropertyId && rowPropertyId !== lookupPropertyId) return true;
+  if (lookupOwnerId && rowOwnerId && rowOwnerId !== lookupOwnerId) return true;
+  return false;
+}
+
+function buildLatestPreviewMessageRow({ lookup = {}, previewRow = {}, previewSource = "latest_preview_source" } = {}) {
+  const row = object(previewRow);
+  const body = firstClean(row.latest_message_body, row.preview, row.message_body);
+  if (!body) return null;
+
+  const normalizedPhone = getLookupNormalizedPhone(lookup) || normalizedPhoneForIdentity(row);
+  const direction = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction) || "unknown";
+  const timelineAt = firstClean(
+    row.latest_message_at,
+    row.latest_activity_at,
+    row.last_message_at,
+    row.event_timestamp,
+    row.message_created_at,
+    row.created_at,
+    row.updated_at,
+  ) || new Date().toISOString();
+  const latestMessageId = firstClean(
+    row.latest_message_id,
+    row.latestMessageId,
+    row.latest_message_event_id,
+    row.latestMessageEventId,
+    row.message_event_id,
+    object(row.latest_message_event_data).message_event_id,
+  );
+  const threadIdentity = clean(row.conversation_thread_id) || buildLookupConversationThreadId(lookup) || clean(row.thread_key) || clean(lookup.selectedThreadKey) || normalizedPhone;
+  const previewId = latestMessageId || `preview:${threadIdentity || "thread"}:${timelineAt}`;
+  const senderPhone = firstClean(row.sender_phone, row.our_number, row.from_phone_number);
+  const fromPhone = direction === "inbound" ? normalizedPhone : senderPhone;
+  const toPhone = direction === "inbound" ? senderPhone : normalizedPhone;
+  const metadata = {
+    ...object(row.metadata),
+    preview_fallback: true,
+    preview_source: previewSource,
+    latest_message_source: row.latest_message_source || previewSource,
+  };
+
+  const normalized = normalizeMessageRow({
+    ...row,
+    id: previewId,
+    message_event_id: latestMessageId || previewId,
+    message_id: latestMessageId || previewId,
+    conversation_thread_id: threadIdentity,
+    conversation_thread_id_explicit: Boolean(clean(row.conversation_thread_id)),
+    thread_key: clean(row.thread_key) || clean(lookup.legacyThreadKey) || normalizedPhone || clean(lookup.selectedThreadKey),
+    canonical_thread_key: clean(row.canonical_thread_key) || clean(row.thread_key) || clean(lookup.legacyThreadKey) || normalizedPhone || clean(lookup.selectedThreadKey),
+    canonical_e164: normalizedPhone || row.canonical_e164 || null,
+    normalized_phone: normalizedPhone || row.normalized_phone || null,
+    direction,
+    message_body: body,
+    body,
+    event_timestamp: timelineAt,
+    message_created_at: timelineAt,
+    created_at: timelineAt,
+    sent_at: direction === "outbound" ? firstClean(row.sent_at, row.latest_message_at, timelineAt) : row.sent_at || null,
+    delivered_at: firstClean(row.latest_delivered_at, row.delivered_at) || null,
+    failed_at: firstClean(row.latest_failed_at, row.failed_at) || null,
+    delivery_status: firstClean(row.latest_delivery_status, row.delivery_status, row.queue_status, direction === "inbound" ? "received" : null) || null,
+    provider_delivery_status: firstClean(row.latest_provider_delivery_status, row.provider_delivery_status, row.delivery_status) || null,
+    provider_status: firstClean(row.latest_provider_delivery_status, row.provider_delivery_status, row.delivery_status) || null,
+    failure_reason: firstClean(row.latest_failure_reason, row.failure_reason, row.error_message) || null,
+    error_message: firstClean(row.latest_failure_reason, row.failure_reason, row.error_message) || null,
+    from_phone_number: fromPhone || row.from_phone_number || null,
+    to_phone_number: toPhone || row.to_phone_number || null,
+    property_id: clean(lookup.propertyId) || row.property_id || row.final_property_id || null,
+    prospect_id: clean(lookup.prospectId) || row.prospect_id || row.final_prospect_id || null,
+    master_owner_id: clean(lookup.masterOwnerId || lookup.ownerId) || row.master_owner_id || row.final_master_owner_id || row.owner_id || null,
+    source_app: `${previewSource}:latest_preview`,
+    latest_message_source: previewSource,
+    metadata,
+  });
+
+  return {
+    ...normalized,
+    source_table: previewSource,
+    source_app: `${previewSource}:latest_preview`,
+    latest_message_source: previewSource,
+    preview_fallback: true,
+    synthetic_preview: !latestMessageId,
+    metadata,
+  };
+}
+
+function candidateMatchesThreadIdentity(candidate = {}, thread = {}) {
+  const threadConversationId = clean(thread.conversation_thread_id) || buildConversationThreadId(thread);
+  const candidateConversationId = clean(candidate.conversation_thread_id) || buildConversationThreadId(candidate);
+  if (threadConversationId && candidateConversationId && threadConversationId === candidateConversationId) return true;
+
+  const threadPhone = normalizedPhoneForIdentity(thread);
+  const candidatePhones = new Set(buildPhoneVariants(
+    candidate.normalized_phone,
+    candidate.canonical_e164,
+    candidate.seller_phone,
+    candidate.from_phone_number,
+    candidate.to_phone_number,
+    candidate.thread_key,
+  ));
+  const phoneMatches = Boolean(threadPhone && buildPhoneVariants(threadPhone).some((phone) => candidatePhones.has(phone)));
+  if (!phoneMatches) return false;
+
+  const threadProspectId = clean(thread.prospect_id || thread.final_prospect_id || thread.canonical_prospect_id);
+  const threadPropertyId = clean(thread.property_id || thread.final_property_id || thread.selected_property_id || thread.thread_property_id);
+  const threadOwnerId = clean(thread.master_owner_id || thread.final_master_owner_id || thread.owner_id || thread.thread_master_owner_id);
+  if (threadProspectId && clean(candidate.prospect_id || candidate.canonical_prospect_id) === threadProspectId) return true;
+  if (threadPropertyId && clean(candidate.property_id || candidate.final_property_id) === threadPropertyId) return true;
+  if (threadOwnerId && clean(candidate.master_owner_id || candidate.owner_id || candidate.final_master_owner_id) === threadOwnerId) return true;
+  return !threadProspectId && !threadPropertyId && !threadOwnerId;
+}
+
+async function queryMessageEventsByStrictStrategy({
+  supabase,
+  lookup,
+  strategy,
+  offset,
+  limit,
+  diagnostics,
+}) {
   let query = supabase
     .from("message_events")
     .select("*", { count: "exact" });
 
-  if (orClause && typeof query.or === "function") {
-    query = query.or(orClause);
-  }
+  query = strategy.apply(query);
+  const filterAudit = {
+    table: "message_events",
+    strategy: strategy.name,
+    filters: strategy.filter || null,
+    order: [
+      { column: "event_timestamp", ascending: false, nullsFirst: false },
+      { column: "created_at", ascending: false, nullsFirst: false },
+    ],
+    range: { from: offset, to: offset + limit - 1 },
+  };
+
+  console.log("[THREAD_HYDRATION_MESSAGE_FILTER]", filterAudit);
 
   if (typeof query.order === "function") {
-    query = query.order("event_timestamp", { ascending: true, nullsFirst: false });
-    query = query.order("created_at", { ascending: true });
+    query = query.order("event_timestamp", { ascending: false, nullsFirst: false });
+    query = query.order("created_at", { ascending: false, nullsFirst: false });
   }
 
   if (typeof query.range === "function") {
@@ -1429,34 +2399,301 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
   }
 
   const { data, error, count } = await query;
-  if (error) throw error;
+  if (error) {
+    diagnostics.sourceResults.push({
+      source: "message_events",
+      strategy: strategy.name,
+      filter: filterAudit,
+      ok: false,
+      rows: 0,
+      error: error.message || String(error),
+    });
+    return { rows: [], total: 0, error };
+  }
 
-  const rows = sortThreads(
-    (data || [])
-      .filter((row) => messageBelongsToLookup(row, lookup))
-      .map((row) => normalizeMessageRow(row))
-  ).sort((left, right) => (
-    asTime(left.event_timestamp || left.message_created_at || left.created_at) -
-    asTime(right.event_timestamp || right.message_created_at || right.created_at) ||
-    clean(left.id).localeCompare(clean(right.id))
-  ));
+  const rows = dedupeRowsByMessageId(Array.isArray(data) ? data : [])
+    .filter((row) => messageMatchesStrictLookup(row, lookup, strategy.name))
+    .map((row) => normalizeMessageRow(row))
+    .sort((left, right) => (
+      asTime(left.event_timestamp || left.message_created_at || left.created_at) -
+      asTime(right.event_timestamp || right.message_created_at || right.created_at) ||
+      clean(left.id).localeCompare(clean(right.id))
+    ));
 
-  const total = rows.length;
+  diagnostics.sourceResults.push({
+    source: "message_events",
+    strategy: strategy.name,
+    filter: filterAudit,
+    ok: true,
+    rows: rows.length,
+    total: Number.isFinite(Number(count)) ? Number(count) : rows.length,
+  });
+  return {
+    rows,
+    total: Number.isFinite(Number(count)) ? Number(count) : rows.length,
+    error: null,
+  };
+}
+
+export async function getThreadMessages(threadLookupInput, { offset = 0, limit = 50 } = {}, deps = {}) {
+  const startedAt = nowMs();
+  const supabase = deps.supabase || defaultSupabase;
+  const baseLookup = normalizeThreadLookupInput(threadLookupInput);
+  const parsedConversationId = parseConversationThreadId(baseLookup.conversationThreadId || baseLookup.selectedThreadKey);
+  const lookup = {
+    ...baseLookup,
+    prospectId: baseLookup.prospectId || parsedConversationId.prospectId || null,
+    propertyId: baseLookup.propertyId || parsedConversationId.propertyId || null,
+    masterOwnerId: baseLookup.masterOwnerId || parsedConversationId.masterOwnerId || null,
+    normalizedPhone: baseLookup.normalizedPhone || parsedConversationId.normalizedPhone || null,
+    latestMessageId: baseLookup.latestMessageId || null,
+  };
+  const safeOffset = Math.max(0, Number.parseInt(clean(offset) || "0", 10) || 0);
+  const safeLimit = Math.min(100, Math.max(1, Number.parseInt(clean(limit) || "50", 10) || 50));
+  const { strategies, normalizedPhone, conversationThreadId } = buildStrictMessageStrategies(lookup);
   const diagnostics = {
     selected_thread_key: lookup.selectedThreadKey,
-    canonical_thread_key: lookup.selectedThreadKey || lookup.canonicalE164 || lookup.phone || lookup.bestPhone || lookup.sellerPhone || null,
-    canonical_e164: lookup.canonicalE164,
-    lookup_strategy_used: "message_events_canonical_thread_key",
-    message_count: rows.length,
+    legacy_thread_key: lookup.legacyThreadKey || null,
+    conversation_thread_id: conversationThreadId,
+    canonical_thread_key: conversationThreadId || lookup.selectedThreadKey || lookup.canonicalE164 || lookup.phoneE164 || lookup.phone || lookup.bestPhone || lookup.sellerPhone || null,
+    canonical_e164: normalizedPhone || lookup.canonicalE164 || lookup.phoneE164 || null,
+    normalized_phone: normalizedPhone || null,
+    input: {
+      thread_key: lookup.selectedThreadKey,
+      conversation_thread_id: lookup.conversationThreadId,
+      legacy_thread_key: lookup.legacyThreadKey,
+      normalized_phone: lookup.normalizedPhone,
+      phone_e164: lookup.phoneE164,
+      phone: lookup.phone,
+      best_phone: lookup.bestPhone,
+      seller_phone: lookup.sellerPhone,
+      prospect_id: lookup.prospectId,
+      property_id: lookup.propertyId,
+      master_owner_id: lookup.masterOwnerId,
+      owner_id: lookup.ownerId,
+      latest_message_id: lookup.latestMessageId,
+    },
+    lookup_strategy_used: "message_events_fallback_order",
     fallback_used: false,
-    strategies_tried: ["message_events_canonical_thread_key"],
+    strategies_tried: strategies.map((strategy) => strategy.name),
+    fallback_order: [
+      "latest_message_id_exact",
+      "property_id+normalized_phone",
+      "master_owner_id+normalized_phone",
+      "prospect_id+normalized_phone",
+      "normalized_phone_fallback",
+      "latest_preview_source_row",
+    ],
+    sourceResults: [],
   };
 
-  console.log("[INBOX_THREAD_MESSAGE_LOOKUP]", diagnostics);
+  if (strategies.length === 0 && !deps.latestPreviewRow) {
+    const audit = auditThreadIdentity({ lookup, rows: [], conversationThreadId });
+    const finalDiagnostics = {
+      ...diagnostics,
+      identityUsed: null,
+      sourceUsed: "message_events:empty",
+      identities_tried: {
+        conversation_thread_id: conversationThreadId,
+        normalized_phone: normalizedPhone,
+        prospect_ids: lookup.prospectId ? [lookup.prospectId] : [],
+        property_ids: lookup.propertyId ? [lookup.propertyId] : [],
+        master_owner_ids: lookup.masterOwnerId || lookup.ownerId ? [lookup.masterOwnerId || lookup.ownerId] : [],
+      },
+      identitiesTried: null,
+      threadIdentityAudit: audit,
+      message_count: 0,
+      total_matched_messages: 0,
+      queryMs: elapsedMs(startedAt),
+      error_code: "missing_safe_conversation_identity",
+    };
+    console.warn("[THREAD_IDENTITY_AUDIT]", audit);
+    return {
+      rows: [],
+      total: 0,
+      diagnostics: finalDiagnostics,
+      threadKey: lookup.selectedThreadKey || null,
+      conversationThreadId,
+      integrityBlocked: false,
+      identityUsed: null,
+      sourceUsed: "message_events:empty",
+      queryMs: finalDiagnostics.queryMs,
+    };
+  }
+
+  const strategyResults = [];
+  const fetchLimit = safeOffset + safeLimit;
+  for (const strategy of strategies) {
+    const result = await queryMessageEventsByStrictStrategy({
+      supabase,
+      lookup,
+      strategy,
+      offset: 0,
+      limit: fetchLimit,
+      diagnostics,
+    });
+    if (result.error) {
+      diagnostics.fallback_used = true;
+      continue;
+    }
+    strategyResults.push({ ...result, strategy });
+    // Short-circuit: once we have enough rows from a reliable strategy, stop.
+    const totalFound = strategyResults.reduce((sum, r) => sum + r.rows.length, 0);
+    if (totalFound >= fetchLimit && strategy.name !== "conversation_thread_id") break;
+  }
+
+  if (strategyResults.flatMap((r) => r.rows).length === 0 && deps.latestPreviewRow) {
+    const previewSource = clean(deps.latestPreviewSource) || clean(deps.previewSource) || "latest_preview_source";
+    const previewMessage = buildLatestPreviewMessageRow({
+      lookup,
+      previewRow: deps.latestPreviewRow,
+      previewSource,
+    });
+    if (previewMessage) {
+      strategyResults.push({
+        rows: [previewMessage],
+        total: 1,
+        error: null,
+        strategy: { name: "latest_preview_source_row", source: previewSource },
+      });
+      diagnostics.fallback_used = true;
+      diagnostics.preview_fallback_used = true;
+      diagnostics.sourceResults.push({
+        source: previewSource,
+        strategy: "latest_preview_source_row",
+        ok: true,
+        rows: 1,
+        filter: {
+          source_row: true,
+          latest_message_body: true,
+          latest_message_event_id: previewMessage.message_event_id || null,
+          thread_key: previewMessage.thread_key || null,
+        },
+      });
+      console.warn("[THREAD_HYDRATION_PREVIEW_ROW_FALLBACK]", {
+        source: previewSource,
+        thread_key: lookup.selectedThreadKey,
+        conversation_thread_id: conversationThreadId,
+        latest_message_event_id: previewMessage.message_event_id || null,
+        latest_message_at: previewMessage.event_timestamp || previewMessage.message_created_at || null,
+      });
+    } else {
+      diagnostics.sourceResults.push({
+        source: previewSource,
+        strategy: "latest_preview_source_row",
+        ok: true,
+        rows: 0,
+        skipped: true,
+        reason: "preview_source_row_missing_body",
+      });
+    }
+  }
+
+  const mergedRows = dedupeRowsByMessageId(strategyResults.flatMap((result) => result.rows))
+    .map((row) => normalizeMessageRow(row))
+    .sort((left, right) => (
+      asTime(right.event_timestamp || right.message_created_at || right.created_at) -
+      asTime(left.event_timestamp || left.message_created_at || left.created_at) ||
+      clean(right.id).localeCompare(clean(left.id))
+    ));
+  const pagedRows = mergedRows
+    .slice(safeOffset, safeOffset + safeLimit)
+    .sort((left, right) => (
+      asTime(left.event_timestamp || left.message_created_at || left.created_at) -
+      asTime(right.event_timestamp || right.message_created_at || right.created_at) ||
+      clean(left.id).localeCompare(clean(right.id))
+    ));
+  const rows = pagedRows;
+  const total = Math.max(
+    mergedRows.length,
+    ...strategyResults.map((result) => Number.isFinite(Number(result.total)) ? Number(result.total) : 0),
+  );
+  const audit = auditThreadIdentity({ lookup, rows, conversationThreadId });
+  const identityUsed = strategyResults
+    .filter((result) => result.rows.length > 0)
+    .map((result) => result.strategy?.name)
+    .filter(Boolean)
+    .join("+") || null;
+  const latestIdExactUsed = strategyResults.some((r) => r.strategy?.name === "latest_message_id_exact" && r.rows.length > 0);
+  const previewFallbackUsed = strategyResults.find((r) => r.strategy?.name === "latest_preview_source_row" && r.rows.length > 0);
+  const sourceUsed = rows.length > 0
+    ? (previewFallbackUsed ? `${previewFallbackUsed.strategy.source || "latest_preview_source"}:latest_preview` : latestIdExactUsed ? "message_events:latest_message_id_exact" : "message_events")
+    : "message_events:empty";
+  const identitiesTried = {
+    conversation_thread_id: conversationThreadId,
+    normalized_phone: normalizedPhone,
+    prospect_ids: lookup.prospectId ? [lookup.prospectId] : [],
+    property_ids: lookup.propertyId ? [lookup.propertyId] : [],
+    master_owner_ids: lookup.masterOwnerId || lookup.ownerId ? [lookup.masterOwnerId || lookup.ownerId] : [],
+    latest_message_id: lookup.latestMessageId || null,
+  };
+  const finalDiagnostics = {
+    ...diagnostics,
+    identityUsed,
+    sourceUsed,
+    identities_tried: identitiesTried,
+    identitiesTried,
+    threadIdentityAudit: audit,
+    integrity_blocked: audit.integrity_blocked,
+    message_count: rows.length,
+    total_matched_messages: total,
+    strategy_match_counts: Object.fromEntries(strategyResults.map((result) => [result.strategy?.name || "unknown", result.rows.length])),
+    queryMs: elapsedMs(startedAt),
+  };
+
+  const auditLog = {
+    ...audit,
+    messages_returned: rows.length,
+    distinct_thread_ids: audit.distinct_thread_ids,
+  };
+  if (audit.integrity_blocked) {
+    console.error("[THREAD_IDENTITY_AUDIT]", auditLog);
+  } else {
+    console.log("[THREAD_IDENTITY_AUDIT]", auditLog);
+  }
+  console.log("[INBOX_THREAD_MESSAGE_LOOKUP]", finalDiagnostics);
+
+  const fallbackResult = strategyResults.find((r) => r.strategy?.name === "normalized_phone_fallback");
+  console.log("[THREAD_HYDRATION_QUERY_AUDIT]", {
+    received_thread_key: lookup.selectedThreadKey || null,
+    parsed_conversation_thread_id: conversationThreadId || null,
+    parsed_prospect_id: lookup.prospectId || null,
+    parsed_property_id: lookup.propertyId || null,
+    parsed_owner_id: lookup.masterOwnerId || lookup.ownerId || null,
+    parsed_phone: normalizedPhone || null,
+    query_strategy_used: identityUsed || null,
+    messages_found: rows.length,
+    fallback_strategy_used: fallbackResult && fallbackResult.rows.length > 0 ? "normalized_phone_fallback" : null,
+    fallback_messages_found: fallbackResult?.rows?.length ?? 0,
+  });
+
+  if (audit.integrity_blocked) {
+    return {
+      rows: [],
+      total: 0,
+      diagnostics: {
+        ...finalDiagnostics,
+        error_code: "thread_identity_integrity_violation",
+        warning: "Multiple prospects/properties/owners/thread IDs matched this selection. Messages were blocked to avoid rendering the wrong thread.",
+      },
+      threadKey: lookup.selectedThreadKey || null,
+      conversationThreadId,
+      integrityBlocked: true,
+      identityUsed,
+      sourceUsed: "message_events:blocked",
+      queryMs: finalDiagnostics.queryMs,
+    };
+  }
 
   return {
     rows,
     total,
-    diagnostics,
+    diagnostics: finalDiagnostics,
+    threadKey: lookup.selectedThreadKey || null,
+    conversationThreadId,
+    integrityBlocked: false,
+    identityUsed,
+    sourceUsed,
+    queryMs: finalDiagnostics.queryMs,
   };
 }

@@ -76,7 +76,7 @@ export async function loadThreadContext({ thread_key, supabase }) {
       // Fallback if the view is missing or empty
       if (!res.ok || res.rows.length === 0) {
         const fallbackRes = await safeSelect(supabase, "inbox_messages_hydrated", (q) =>
-          q.select("*").eq("thread_key", thread_key).order("created_at", { ascending: false }).limit(200)
+          q.select("*").eq("thread_key", thread_key).order("event_timestamp", { ascending: false }).limit(200)
         );
         if (fallbackRes.ok && fallbackRes.rows.length > 0) {
           return fallbackRes;
@@ -121,7 +121,7 @@ export async function loadThreadContext({ thread_key, supabase }) {
     templatesRes,
     stateRes,
   ] = await Promise.all([
-    safeSelect(supabase, "properties", (q) => (propertyIds.length ? q.select("*").in("id", propertyIds) : Promise.resolve({ data: [] }))),
+    safeSelect(supabase, "properties", (q) => (propertyIds.length ? q.select("id,property_id,master_owner_id,owner_id,property_address,property_address_full,property_address_city,property_address_state,property_address_zip,market,market_id,property_type,beds,baths,sqft,year_built,estimated_value,arv,motivation_score,priority_score,status").in("id", propertyIds) : Promise.resolve({ data: [] }))),
     safeSelect(supabase, "master_owners", (q) => (masterOwnerIds.length ? q.select("*").in("id", masterOwnerIds) : Promise.resolve({ data: [] }))),
     safeSelect(supabase, "owners", (q) => (ownerIds.length ? q.select("*").in("id", ownerIds) : Promise.resolve({ data: [] }))),
     safeSelect(supabase, "prospects", (q) => (ownerIds.length ? q.select("*").in("id", ownerIds) : Promise.resolve({ data: [] }))),

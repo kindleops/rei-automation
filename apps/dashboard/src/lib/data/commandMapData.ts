@@ -522,6 +522,10 @@ const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
   'render_priority',
 ].join(',')
 
+// Tracks the last seller-pin error message to suppress identical repeated spam.
+let _lastSellerPinErrorMsg: string | null = null
+let _lastSellerPinErrorAt = 0
+
 export const loadCommandMapSellerPins = async (
   bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
   zoomLevel: number,
@@ -540,9 +544,17 @@ export const loadCommandMapSellerPins = async (
   if (options.signal) query = query.abortSignal(options.signal)
   const { data, error } = await query
   if (error || !data) {
-    console.error('Failed to load seller pins', error)
+    // Suppress identical repeated error messages (e.g. RPC 500 storm).
+    const msg = String(error?.message ?? error ?? 'unknown')
+    const now = Date.now()
+    if (msg !== _lastSellerPinErrorMsg || now - _lastSellerPinErrorAt > 30_000) {
+      if (import.meta.env.DEV) console.warn('[CommandMap] seller pins RPC failed (returning empty):', msg)
+      _lastSellerPinErrorMsg = msg
+      _lastSellerPinErrorAt = now
+    }
     return []
   }
+  _lastSellerPinErrorMsg = null
   return data as CommandMapSellerPin[]
 }
 

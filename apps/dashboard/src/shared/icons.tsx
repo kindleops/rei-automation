@@ -10,6 +10,7 @@ export type IconName =
   | 'chevron-down'
   | 'chevron-up'
   | 'chevron-right'
+  | 'chevron-left'
   | 'arrow-up-right'
   | 'clock'
   | 'shield'
@@ -154,6 +155,12 @@ export const Icon = ({ name, size, ...rest }: IconProps) => {
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
           <path d="m9 6 6 6-6 6" {...commonProps} />
+        </svg>
+      )
+    case 'chevron-left':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+          <path d="m15 18-6-6 6-6" {...commonProps} />
         </svg>
       )
     case 'arrow-up-right':

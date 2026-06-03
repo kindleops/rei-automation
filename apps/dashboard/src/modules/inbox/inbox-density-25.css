@@ -516,188 +516,188 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Panel background */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 {
-  background: #f5f7fb !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 {
+  background: #ffffff !important;
 }
 
 /* Row base */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25 {
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25 {
   background: transparent !important;
-  border-bottom: 1px solid rgba(18, 31, 54, 0.07) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
   box-shadow: none !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25:hover {
-  background: rgba(15, 30, 58, 0.035) !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25:hover {
+  background: #f8fafc !important;
   transform: none !important;
   box-shadow: none !important;
 }
 
 /* Left accent rail — keep same vivid colors, they read well on light */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25::before {
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25::before {
   opacity: 0.85;
 }
 
 /* Selected row — clean pale blue, no pink borders */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-selected {
-  background: rgba(10, 132, 255, 0.07) !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected {
+  background: var(--nx-accent-soft) !important;
   box-shadow: none !important;
-  border-bottom-color: rgba(10, 132, 255, 0.10) !important;
+  border-bottom-color: var(--nx-accent-glow) !important;
   transform: none !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-selected::before {
-  background: #2563eb !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected::before {
+  background: var(--nx-accent) !important;
   opacity: 1;
-  box-shadow: 2px 0 6px rgba(37, 99, 235, 0.18) !important;
+  box-shadow: 2px 0 6px var(--nx-accent-glow) !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-selected:hover {
-  background: rgba(10, 132, 255, 0.09) !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected:hover {
+  background: var(--nx-accent-soft) !important;
 }
 
 /* Unread pip */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__pip {
-  background: #2563eb;
-  box-shadow: 0 0 4px rgba(37, 99, 235, 0.35);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__pip {
+  background: var(--nx-accent);
+  box-shadow: 0 0 4px var(--nx-accent-glow);
 }
 
 /* Primary name — dark navy, not pale blue */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__name {
-  color: #0f1c30 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__name {
+  color: var(--nx-text) !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__name {
-  color: #060e1a !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__name {
+  color: var(--nx-text) !important;
   font-weight: 700;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-selected .nx-row25__name {
-  color: #0a1929 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected .nx-row25__name {
+  color: var(--nx-text) !important;
 }
 
 /* Stage number badge */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-num {
-  background: rgba(37, 99, 235, 0.08);
-  border-color: rgba(37, 99, 235, 0.18);
-  color: #1d4ed8;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-num {
+  background: var(--nx-accent-soft);
+  border-color: var(--nx-accent-glow);
+  color: var(--nx-accent);
 }
 
 /* Address — tier 2 */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__addr {
-  color: #4a6080 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr {
+  color: #334155 !important;
 }
 
 /* Meta text — tier 3, muted but legible */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__meta {
-  color: #7a8fa8 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__meta {
+  color: #475569 !important;
 }
 
 /* Stage chips */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-chip {
-  background: rgba(18, 31, 54, 0.04);
-  border-color: rgba(18, 31, 54, 0.10);
-  color: #6c7e96;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-chip {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-hot {
-  color: #0d7a4e;
-  border-color: rgba(13, 122, 78, 0.18);
-  background: rgba(13, 122, 78, 0.06);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-hot {
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.25);
+  background: rgba(5, 150, 105, 0.08);
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-wait {
-  color: #92540c;
-  border-color: rgba(146, 84, 12, 0.16);
-  background: rgba(146, 84, 12, 0.05);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-wait {
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.25);
+  background: rgba(217, 119, 6, 0.08);
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-cold {
-  color: #1e4a8c;
-  border-color: rgba(30, 74, 140, 0.16);
-  background: rgba(30, 74, 140, 0.05);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-cold {
+  color: #1d4ed8;
+  border-color: rgba(29, 78, 216, 0.25);
+  background: rgba(29, 78, 216, 0.08);
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-dead {
-  color: #9b2c2c;
-  border-color: rgba(155, 44, 44, 0.14);
-  background: rgba(155, 44, 44, 0.04);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__stage-chip.is-dead {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(220, 38, 38, 0.08);
 }
 
 /* Message preview — readable medium-dark */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__preview {
-  color: #2d3e56 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__preview {
+  color: #334155 !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__preview {
-  color: #1a2d47 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__preview {
+  color: #1e293b !important;
   font-weight: 500;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25.is-selected .nx-row25__preview {
-  color: #243a55 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected .nx-row25__preview {
+  color: #1e293b !important;
 }
 
 /* Footer separator */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__footer-sep {
-  color: rgba(18, 31, 54, 0.20);
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__footer-sep {
+  color: #cbd5e1;
 }
 
 /* Timestamp */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__age {
-  color: #8fa3b8 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__age {
+  color: #64748b !important;
 }
 
 /* Delivery indicators */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__delivery.is-inbound   { color: #5b21b6; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__delivery.is-delivered { color: #0d7a4e; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sent      { color: #7a8fa8; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sending   { color: #9aa8b8; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__delivery.is-failed    { color: #b91c1c; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-inbound   { color: #4f46e5; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-delivered { color: #059669; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sent      { color: #475569; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sending   { color: #64748b; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-failed    { color: #dc2626; }
 
 /* Intel zone — EV / EQ / SCR */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__k {
-  color: #8fa3b8;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__k {
+  color: #475569;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__v {
-  color: #1a2d47;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v {
+  color: #090d16;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__v.is-green { color: #0d7a4e; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__v.is-amber { color: #92540c; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__v.is-muted { color: #8fa3b8; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-green { color: #059669; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-amber { color: #d97706; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-muted { color: #64748b; }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v {
-  color: #6c7e96;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v {
+  color: #334155;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v.is-green { color: #0d7a4e; }
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v.is-amber { color: #92540c; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v.is-green { color: #059669; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v.is-amber { color: #d97706; }
 
 /* Load more button */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-load-more-btn {
-  border-color: rgba(18, 31, 54, 0.12) !important;
-  color: #7a8fa8 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-load-more-btn {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #475569 !important;
 }
 
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-load-more-btn:hover:not(:disabled) {
-  background: rgba(18, 31, 54, 0.04) !important;
-  color: #4a6080 !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-load-more-btn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.04) !important;
+  color: #090d16 !important;
 }
 
 /* Empty state */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__empty {
-  color: #8fa3b8;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__empty {
+  color: #64748b;
 }
 
 /* Search bar and chips */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__top-glow {
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__top-glow {
   background: transparent;
 }
 
 /* Focus ring */
-.nx-premium-inbox.is-light-mode .nx-sidebar--mode-rail25 .nx-row25:focus-visible {
-  background: rgba(10, 132, 255, 0.05) !important;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25:focus-visible {
+  background: rgba(37, 99, 235, 0.05) !important;
   outline: none !important;
 }

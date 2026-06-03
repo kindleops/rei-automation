@@ -34,22 +34,74 @@ export async function OPTIONS(request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) })
 }
 
+/** Flatten a persisted candidate row (+ its metadata blob) back into the rich
+ *  BuyerMatchCandidate shape the cockpit UI renders. */
+function shapeCandidate(c) {
+  const m = c.metadata || {}
+  return {
+    buyer_match_candidate_id: c.buyer_match_candidate_id,
+    buyer_match_run_id: c.buyer_match_run_id,
+    buyer_entity_id: c.buyer_entity_id,
+    buyer_key: m.buyer_key ?? null,
+    buyer_name: c.buyer_display_name,
+    buyer_type: c.buyer_type,
+    is_corporate_buyer: m.is_corporate_buyer ?? false,
+    is_repeat_buyer: m.is_repeat_buyer ?? false,
+    mailing_city: m.mailing_city ?? null,
+    mailing_state: m.mailing_state ?? null,
+    mailing_zip: m.mailing_zip ?? null,
+    markets_active: m.markets_active ?? [],
+    zips_active: m.zips_active ?? [],
+    counties_active: m.counties_active ?? [],
+    preferred_asset_classes: m.preferred_asset_classes ?? [],
+    purchase_count: m.purchase_count ?? 0,
+    purchase_count_180d: m.purchase_count_180d ?? 0,
+    purchase_count_365d: m.purchase_count_365d ?? 0,
+    first_purchase_date: m.first_purchase_date ?? null,
+    last_purchase_date: m.last_purchase_date ?? null,
+    avg_purchase_price: m.avg_purchase_price ?? null,
+    median_purchase_price: m.median_purchase_price ?? null,
+    max_purchase_price: m.max_purchase_price ?? null,
+    avg_ppsf: m.avg_ppsf ?? null,
+    velocity_score: m.velocity_score ?? null,
+    investor_score: m.investor_score ?? null,
+    avg_potential_spread: m.avg_potential_spread ?? null,
+    distance_miles: m.distance_miles ?? null,
+    matched_purchase_count: m.matched_purchase_count ?? null,
+    likely_exit_low: m.likely_exit_low ?? null,
+    likely_exit_high: m.likely_exit_high ?? null,
+    market_match_score: c.market_match_score,
+    asset_match_score: c.asset_match_score,
+    price_match_score: c.price_match_score,
+    recency_score: c.recency_score,
+    repeat_buyer_score: c.repeat_buyer_score,
+    spread_fit_score: c.spread_fit_score,
+    institutional_score: m.institutional_score ?? null,
+    total_match_score: c.match_score,
+    match_grade: c.match_grade,
+    reason_for_match: c.reason_for_match,
+    buyer_response_status: c.buyer_response_status,
+    package_sent_at: c.package_sent_at,
+    selected: c.selected,
+    notes: c.notes,
+  }
+}
+
 export async function GET(request, { params }) {
   const cors = corsHeaders(request)
-  const { property_id } = params
+  const { property_id } = await params
   const { searchParams } = new URL(request.url)
 
-  const grade = searchParams.get('grade') // A+, A, B, C, D
-  const status = searchParams.get('status') // not_contacted, interested, passed, package_sent
-  const selectedParam = searchParams.get('selected') // true/false
+  const grade = searchParams.get('grade')
+  const status = searchParams.get('status')
+  const selectedParam = searchParams.get('selected')
   const limit = parseInt(searchParams.get('limit') ?? '50', 10)
   const offset = parseInt(searchParams.get('offset') ?? '0', 10)
 
   try {
-    // Find latest run for this property
     const { data: latest_run } = await supabase
       .from('buyer_match_runs')
-      .select('run_id')
+      .select('buyer_match_run_id')
       .eq('property_id', property_id)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -64,10 +116,10 @@ export async function GET(request, { params }) {
 
     let query = supabase
       .from('buyer_match_candidates')
-      .select('*, buyer_entities_v2(*)', { count: 'exact' })
-      .eq('run_id', latest_run.run_id)
+      .select('*', { count: 'exact' })
+      .eq('buyer_match_run_id', latest_run.buyer_match_run_id)
       .eq('property_id', property_id)
-      .order('total_match_score', { ascending: false })
+      .order('match_score', { ascending: false })
       .range(offset, offset + limit - 1)
 
     if (grade) query = query.eq('match_grade', grade)
@@ -75,15 +127,14 @@ export async function GET(request, { params }) {
     if (selectedParam !== null) query = query.eq('selected', selectedParam === 'true')
 
     const { data: candidates, count, error } = await query
-
     if (error) throw error
 
     return NextResponse.json(
       {
         ok: true,
         data: {
-          run_id: latest_run.run_id,
-          candidates: candidates ?? [],
+          run_id: latest_run.buyer_match_run_id,
+          candidates: (candidates ?? []).map(shapeCandidate),
           total: count ?? 0,
           limit,
           offset,

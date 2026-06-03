@@ -354,6 +354,24 @@
   border-radius: 3px;
 }
 
+.nx-load-older-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 12px;
+  flex: 0 0 auto;
+}
+
+.nx-load-older-row .nx-btn {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.nx-load-older-row svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* ── Message Bubbles ───────────────────────────────────────── */
 .nx-bubble-wrap {
   display: flex;
@@ -1041,6 +1059,47 @@
   font-size: 13px;
   padding: 32px;
   text-align: center;
+}
+
+.nx-hydration-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px;
+  gap: 6px;
+}
+
+.nx-hydration-failed__dev-banner {
+  padding: 4px 10px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #92400e;
+  font-family: monospace;
+}
+
+.nx-hydration-failed__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--nx-text-muted);
+  font-size: 13px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.nx-hydration-failed__body p {
+  margin: 0;
+}
+
+.nx-hydration-failed__sub {
+  font-size: 11px;
+  opacity: 0.65;
+  max-width: 260px;
+  line-height: 1.4;
 }
 
 .nx-inbox__messages-loading-icon {

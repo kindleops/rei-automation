@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
 import { emitNotification } from '../../../shared/NotificationToast'
 
@@ -40,6 +40,53 @@ export interface CampaignControlDiagnostics {
     at?: string | null
     diagnostics?: unknown
   }
+  active_campaign?: {
+    id: string
+    name?: string
+    campaign_name?: string
+    status?: string
+    ready_targets?: number
+    scheduled_targets?: number
+    next_send_at?: string | null
+    auto_queue_enabled?: boolean
+    auto_send_enabled?: boolean
+    auto_reply_mode?: string
+    daily_cap?: number | string | null
+    total_cap?: number | string | null
+    batch_max?: number | string | null
+    market_cap?: number | string | null
+    per_sender_cap?: number | string | null
+  } | null
+  campaigns?: Array<{
+    id: string
+    name?: string
+    campaign_name?: string
+    status?: string
+    ready_targets?: number
+    scheduled_targets?: number
+    next_send_at?: string | null
+  }>
+  campaign_queue_depth?: number | string | null
+  campaign_queue_depth_detail?: {
+    active_queue_rows?: number
+    total_targets?: number
+    ready_targets?: number
+    planned_targets?: number
+    queued_targets?: number
+    blocked_targets?: number
+    by_target_status?: Record<string, number>
+  }
+  next_send_window?: {
+    id?: string
+    market?: string | null
+    state?: string | null
+    timezone?: string | null
+    window_start_utc?: string | null
+    window_end_utc?: string | null
+    status?: string
+  } | null
+  blocked_reason_counts?: Record<string, number>
+  exact_blockers?: string[]
   [key: string]: unknown
 }
 
@@ -198,6 +245,7 @@ export function QueueCommandCenter({
     emitNotification({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API /api/queue/write-suppression-from-failures', severity: 'warning', sound: 'notification' })
   )
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('')
 
   const tone = toneFor(health)
   const status = health?.status ?? 'unknown'
@@ -209,6 +257,34 @@ export function QueueCommandCenter({
   const candidateSource = displayValue(control?.candidate_source, 'v_sms_ready_contacts_expanded')
   const lastRunStatus = displayValue(control?.last_run?.status, displayValue(control?.queue_last_run_status, 'idle'))
   const lastRunDiagnostics = compactDiagnostics(control?.last_run?.diagnostics ?? control?.queue_last_run_diagnostics)
+  const campaigns = control?.campaigns ?? []
+  const activeCampaign = control?.active_campaign ?? null
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? activeCampaign
+  const depth = control?.campaign_queue_depth_detail ?? {}
+  const nextWindow = control?.next_send_window ?? null
+  const exactBlockers = control?.exact_blockers ?? []
+  const blockedReasonRows = Object.entries(control?.blocked_reason_counts ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 6)
+  const campaignSelected = Boolean(selectedCampaign?.id)
+
+  useEffect(() => {
+    if (!selectedCampaignId && activeCampaign?.id) setSelectedCampaignId(activeCampaign.id)
+  }, [activeCampaign?.id, selectedCampaignId])
+
+  const handleWindowControl = (action: 'open' | 'close') => {
+    if (!campaignSelected) {
+      emitNotification({ title: 'Select a campaign first', detail: 'Send window controls are campaign-scoped.', severity: 'warning', sound: 'notification' })
+      return
+    }
+    emitNotification({
+      title: action === 'open' ? 'Open Window Disabled' : 'Close Window Disabled',
+      detail: 'Phase 1 exposes planned windows only. Use Campaign View to dry-run the queue plan.',
+      severity: 'warning',
+      sound: 'notification',
+    })
+  }
 
   // Derive "needs attention" items from health counts
   const attentionItems = [
@@ -377,6 +453,7 @@ export function QueueCommandCenter({
           <div className="qcc-status-item"><span>Auto Reply</span><strong>{autoReplyMode}</strong></div>
           <div className="qcc-status-item"><span>Campaign Mode</span><strong>{campaignMode}</strong></div>
           <div className="qcc-status-item"><span>Candidate Source</span><strong title={candidateSource}>{candidateSource}</strong></div>
+          <div className="qcc-status-item"><span>Active Campaign</span><strong>{displayValue(activeCampaign?.campaign_name || activeCampaign?.name, 'None')}</strong></div>
         </div>
         <div className="qcc-status-col">
           <p className="qcc-section-label">Caps</p>
@@ -401,6 +478,43 @@ export function QueueCommandCenter({
           <p className="qcc-section-label">Last Run</p>
           <div className="qcc-status-item"><span>Status</span><strong>{lastRunStatus}</strong></div>
           <div className="qcc-status-item"><span>Diagnostics</span><strong title={lastRunDiagnostics}>{lastRunDiagnostics}</strong></div>
+        </div>
+      </div>
+
+      <div className="qcc-status-grid">
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Campaign Queue</p>
+          <div className="qcc-status-item"><span>Selected</span><strong>{displayValue(selectedCampaign?.name || selectedCampaign?.campaign_name, 'None')}</strong></div>
+          <div className="qcc-status-item"><span>Status</span><strong>{displayValue(selectedCampaign?.status)}</strong></div>
+          <div className="qcc-status-item"><span>Ready Targets</span><strong>{displayNumber(depth.ready_targets ?? selectedCampaign?.ready_targets)}</strong></div>
+          <div className="qcc-status-item"><span>Planned Targets</span><strong>{displayNumber(depth.planned_targets ?? selectedCampaign?.scheduled_targets)}</strong></div>
+          <div className="qcc-status-item"><span>Active Queue Rows</span><strong>{displayNumber(depth.active_queue_rows ?? control?.campaign_queue_depth)}</strong></div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Send Window</p>
+          <div className="qcc-status-item"><span>Next</span><strong>{nextWindow?.window_start_utc ? new Date(nextWindow.window_start_utc).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'None'}</strong></div>
+          <div className="qcc-status-item"><span>Market</span><strong>{displayValue(nextWindow?.market)}</strong></div>
+          <div className="qcc-status-item"><span>State</span><strong>{displayValue(nextWindow?.state)}</strong></div>
+          <div className="qcc-status-item"><span>Timezone</span><strong>{displayValue(nextWindow?.timezone)}</strong></div>
+          <div className="qcc-status-item"><span>Window Status</span><strong>{displayValue(nextWindow?.status)}</strong></div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button type="button" className="qcc-btn is-secondary" onClick={() => handleWindowControl('open')} disabled={busy || !campaignSelected}>Open</button>
+            <button type="button" className="qcc-btn is-secondary" onClick={() => handleWindowControl('close')} disabled={busy || !campaignSelected}>Close</button>
+          </div>
+        </div>
+        <div className="qcc-status-col">
+          <p className="qcc-section-label">Campaign Picker</p>
+          <select value={selectedCampaignId} onChange={(event) => setSelectedCampaignId(event.target.value)} disabled={busy || campaigns.length === 0}>
+            <option value="">Select campaign</option>
+            {campaigns.map((campaign) => (
+              <option key={campaign.id} value={campaign.id}>
+                {campaign.name || campaign.id} ({campaign.status || 'draft'})
+              </option>
+            ))}
+          </select>
+          <div className="qcc-status-item"><span>Campaigns</span><strong>{displayNumber(campaigns.length)}</strong></div>
+          <div className="qcc-status-item"><span>Total Targets</span><strong>{displayNumber(depth.total_targets)}</strong></div>
+          <div className="qcc-status-item"><span>Blocked Targets</span><strong>{displayNumber(depth.blocked_targets)}</strong></div>
         </div>
       </div>
 
@@ -435,10 +549,33 @@ export function QueueCommandCenter({
       <div className="qcc-attention">
         <p className="qcc-section-label">Needs Attention</p>
 
-        {attentionItems.length === 0 ? (
-          <div className="qcc-all-clear">All systems clear.</div>
+        {attentionItems.length === 0 && exactBlockers.length === 0 && blockedReasonRows.length === 0 ? (
+          <div className="qcc-all-clear">No campaign blockers reported.</div>
         ) : (
           <div className="qcc-attention-list">
+            {exactBlockers.map((blocker) => (
+              <div key={blocker} className="qcc-attention-row">
+                <div className="qcc-attention-row__info">
+                  <strong>{blocker.replace(/_/g, ' ')}</strong>
+                  <span>Campaign automation blocker</span>
+                </div>
+                <div className="qcc-attention-row__right">
+                  <span className="qcc-attention-row__tag">Blocked</span>
+                </div>
+              </div>
+            ))}
+            {blockedReasonRows.map(([reason, count]) => (
+              <div key={reason} className="qcc-attention-row">
+                <div className="qcc-attention-row__info">
+                  <strong>{reason.replace(/_/g, ' ')}</strong>
+                  <span>Blocked reason count</span>
+                </div>
+                <div className="qcc-attention-row__right">
+                  <b>{count}</b>
+                  <span className="qcc-attention-row__tag">Review</span>
+                </div>
+              </div>
+            ))}
             {attentionItems.map((item) => (
               item.onAction ? (
                 <button

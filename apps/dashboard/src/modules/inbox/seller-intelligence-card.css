@@ -13,9 +13,11 @@
   --seller-red: #ff4d57;
   width: clamp(320px, 24vw, 390px);
   max-width: 400px;
-  max-height: min(72vh, 620px);
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Viewport-safe: never taller than viewport minus top nav + bottom safe zone */
+  max-height: min(680px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-radius: 22px;
   border: 1px solid var(--seller-border);
   background:
@@ -44,9 +46,37 @@
 }
 
 .nx-seller-card.is-selected {
-  width: min(440px, calc(100vw - 24px));
-  max-width: 440px;
-  max-height: min(78vh, 720px);
+  width: min(420px, calc(100vw - 24px));
+  max-width: 420px;
+  /* taller budget for selected mode, but still viewport-safe */
+  max-height: min(72vh, 680px);
+}
+
+/* Hover variant: pointer events are handled at the popup level.
+   The nx-icm-hover-popup--interactive CSS allows the popup content to
+   receive pointer events, and DOM mouseenter/mouseleave on the popup
+   element keep it alive while the cursor is on the card. */
+.nx-seller-card.is-hover {
+  pointer-events: auto;
+  /* Compact: slightly narrower and shorter than selected mode */
+  width: clamp(300px, 24vw, 380px);
+  max-height: min(54vh, 520px);
+  /* Softer glow for hover state — full glow is reserved for selected */
+  box-shadow:
+    0 16px 48px rgba(2, 8, 18, 0.62),
+    0 0 24px rgba(56, 217, 255, 0.1),
+    0 0 48px rgba(59, 167, 255, 0.06),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.026);
+  border-color: rgba(59, 167, 255, 0.22);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 215, 255, 0.18) transparent;
+}
+
+.nx-seller-card.is-hover::-webkit-scrollbar { width: 4px; }
+.nx-seller-card.is-hover::-webkit-scrollbar-thumb {
+  background: rgba(99, 215, 255, 0.18);
+  border-radius: 999px;
 }
 
 .nx-seller-card__image {
@@ -121,6 +151,18 @@
   display: grid;
   gap: 8px;
   padding: 11px 12px 12px;
+  /* Allow body to scroll when content overflows max-height */
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142, 160, 184, 0.22) transparent;
+}
+
+.nx-seller-card__body::-webkit-scrollbar { width: 4px; }
+.nx-seller-card__body::-webkit-scrollbar-thumb {
+  background: rgba(142, 160, 184, 0.22);
+  border-radius: 999px;
 }
 
 .nx-seller-card__identity {
@@ -284,6 +326,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  /* keep actions in view — prevent overflow clip */
+  overflow: visible;
 }
 
 .nx-seller-card__tag,

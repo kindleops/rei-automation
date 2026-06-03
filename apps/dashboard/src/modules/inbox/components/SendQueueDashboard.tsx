@@ -311,6 +311,8 @@ export function SendQueueDashboard({
         i.propertyAddress.toLowerCase().includes(q)  ||
         i.market.toLowerCase().includes(q)           ||
         i.templateName.toLowerCase().includes(q)     ||
+        (i.campaignId ?? '').toLowerCase().includes(q) ||
+        (i.campaignTargetId ?? '').toLowerCase().includes(q) ||
         i.phone.includes(q),
       )
     }

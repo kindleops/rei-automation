@@ -7,13 +7,16 @@ import {
   getDateValue,
   getFirstAppReferenceId,
   getNumberValue,
+  getTextValue,
   isPodioRateLimitError,
   updateItem,
 } from "@/lib/providers/podio.js";
 
 import { info, warn } from "@/lib/logging/logger.js";
+import { resolveCanonicalDeliveryState } from "@/lib/domain/delivery/canonical-delivery-state.js";
 
 const DEFAULT_RETRY_LIMIT = 50;
+const DEFAULT_MAX_RETRY_COUNT = 2;
 
 const RETRY_POLICIES = {
   "network error": {
@@ -59,6 +62,11 @@ function addMinutes(iso, minutes) {
 
 function isFailedStatus(value) {
   return lower(value) === "failed";
+}
+
+function incrementCounter(target, key) {
+  const normalized = clean(key) || "unknown";
+  target[normalized] = Number(target[normalized] || 0) + 1;
 }
 
 export function getRetryPolicy(failed_reason = "") {
@@ -114,12 +122,41 @@ export function buildRetryDecision(item, { now = new Date().toISOString() } = {}
   const queue_item_id = item?.item_id || null;
   const queue_status = getCategoryValue(item, "queue-status", null);
   const failed_reason = getCategoryValue(item, "failed-reason", null);
+  const provider_status =
+    getCategoryValue(item, "provider-delivery-status", null) ||
+    getCategoryValue(item, "delivery-status", null) ||
+    getTextValue(item, "provider-delivery-status", null) ||
+    null;
+  const raw_carrier_status =
+    getTextValue(item, "raw-carrier-status", null) ||
+    getTextValue(item, "error-code", null) ||
+    null;
+  const provider_failure_reason =
+    getTextValue(item, "provider-failure-reason", null) ||
+    getTextValue(item, "failure-reason", null) ||
+    failed_reason;
+  const error_code =
+    getTextValue(item, "error-code", null) ||
+    getTextValue(item, "failure-code", null) ||
+    null;
   const retry_count = Number(getNumberValue(item, "retry-count", 0) || 0);
-  const max_retries = Number(getNumberValue(item, "max-retries", 3) || 3);
+  const configured_max_retries = Number(getNumberValue(item, "max-retries", DEFAULT_MAX_RETRY_COUNT) || DEFAULT_MAX_RETRY_COUNT);
+  const max_retries = Math.max(1, Math.min(configured_max_retries, DEFAULT_MAX_RETRY_COUNT));
   const scheduled_retry_at = getScheduledRetryAt(item);
   const scheduled_retry_ts = toTimestamp(scheduled_retry_at);
   const now_ts = toTimestamp(now) ?? Date.now();
-  const policy = getRetryPolicy(failed_reason);
+  const canonical = resolveCanonicalDeliveryState({
+    queue_status,
+    provider_status,
+    delivery_status: provider_status || queue_status,
+    raw_carrier_status,
+    provider_failure_reason,
+    failed_reason,
+    error_code,
+    retry_count,
+    max_retry_count: max_retries,
+    metadata: {},
+  });
 
   if (!isFailedStatus(queue_status)) {
     return {
@@ -132,12 +169,15 @@ export function buildRetryDecision(item, { now = new Date().toISOString() } = {}
     };
   }
 
-  if (!policy.retryable) {
+  if (canonical.terminal || canonical.suppression_required) {
     return {
       ok: true,
       queue_item_id,
       action: "terminal_non_retryable",
-      reason: policy.terminal_reason,
+      reason: canonical.reason || "terminal_non_retryable",
+      canonical_status: canonical.canonical_status,
+      failure_class: canonical.failure_class,
+      suppression_required: canonical.suppression_required,
       failed_reason,
       retry_count,
       max_retries,
@@ -145,6 +185,21 @@ export function buildRetryDecision(item, { now = new Date().toISOString() } = {}
         "queue-status": "Blocked",
         "delivery-confirmed": "❌ Failed",
       },
+    };
+  }
+
+  if (!canonical.retryable) {
+    return {
+      ok: false,
+      queue_item_id,
+      action: "skip_unclassified_failure",
+      reason: canonical.reason || "not_retryable_until_classified",
+      canonical_status: canonical.canonical_status,
+      failure_class: canonical.failure_class,
+      suppression_required: canonical.suppression_required,
+      failed_reason,
+      retry_count,
+      max_retries,
     };
   }
 
@@ -225,6 +280,7 @@ export async function retrySendQueue({
   limit = DEFAULT_RETRY_LIMIT,
   now = new Date().toISOString(),
   master_owner_id = null,
+  dry_run = false,
 } = {}) {
   const scoped_master_owner_id = Number(master_owner_id || 0) || null;
 
@@ -232,6 +288,7 @@ export async function retrySendQueue({
     limit,
     now,
     master_owner_id: scoped_master_owner_id,
+    dry_run,
   });
 
   const failed_items = await fetchAllItems(
@@ -261,6 +318,11 @@ export async function retrySendQueue({
   let terminal_count = 0;
   let skipped_count = 0;
   let processed_count = 0;
+  let retry_candidates_checked = 0;
+  let retryable_count = 0;
+  let terminal_skipped_count = 0;
+  let blocked_count = 0;
+  const reason_counts = {};
   const results = [];
 
   for (const item of ordered_items) {
@@ -268,6 +330,18 @@ export async function retrySendQueue({
 
     const queue_item_id = item?.item_id || null;
     const decision = buildRetryDecision(item, { now });
+    retry_candidates_checked += 1;
+    incrementCounter(reason_counts, decision.reason);
+
+    if (decision.action === "schedule_retry" || decision.action === "requeue_now") {
+      retryable_count += 1;
+    }
+    if (decision.action === "terminal_non_retryable" || decision.action === "terminal_max_retries_exhausted") {
+      terminal_skipped_count += 1;
+    }
+    if (decision.action === "skip_unclassified_failure") {
+      blocked_count += 1;
+    }
 
     if (!decision.ok) {
       skipped_count += 1;
@@ -277,12 +351,17 @@ export async function retrySendQueue({
         action: decision.action,
         reason: decision.reason,
         scheduled_retry_at: decision.scheduled_retry_at || null,
+        canonical_status: decision.canonical_status || null,
+        failure_class: decision.failure_class || null,
+        suppression_required: decision.suppression_required || false,
       });
       continue;
     }
 
     try {
-      await updateItem(queue_item_id, decision.update);
+      if (!dry_run) {
+        await updateItem(queue_item_id, decision.update);
+      }
       processed_count += 1;
 
       if (decision.action === "requeue_now") retried_count += 1;
@@ -300,6 +379,10 @@ export async function retrySendQueue({
         backoff_minutes: decision.backoff_minutes || null,
         next_retry_at: decision.next_retry_at || null,
         scheduled_retry_at: decision.scheduled_retry_at || null,
+        dry_run,
+        canonical_status: decision.canonical_status || null,
+        failure_class: decision.failure_class || null,
+        suppression_required: decision.suppression_required || false,
       });
     } catch (err) {
       if (isPodioRateLimitError(err)) {
@@ -330,6 +413,12 @@ export async function retrySendQueue({
     skipped_count,
     processed_count,
     scanned_count: ordered_items.length,
+    retry_candidates_checked,
+    retryable_count,
+    terminal_skipped_count,
+    blocked_count,
+    reason_counts,
+    dry_run,
     master_owner_id: scoped_master_owner_id,
     results,
   };

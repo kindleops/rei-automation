@@ -987,3 +987,26 @@
 .icv-btn--xs.is-primary { background: rgba(62,207,142,0.12); border-color: rgba(62,207,142,0.3); color: #3ecf8e; }
 .icv-btn--xs.is-danger  { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.3); color: #f87171; }
 .icv-btn--xs.is-blue    { background: rgba(0,122,255,0.10); border-color: rgba(0,122,255,0.3); color: #007aff; }
+
+/* ── Pane Width Overrides for Campaign Command Center ── */
+
+/* 50% width overrides */
+.ccc.is-pane-50.is-detail-open .ccc__list-panel {
+  display: none !important;
+}
+
+.ccc.is-pane-50.is-detail-open .ccc__detail-panel {
+  width: 100% !important;
+  flex: 1 !important;
+  border-left: none !important;
+}
+
+/* 75% width overrides */
+.ccc.is-pane-75 .ccc__list-panel {
+  width: 240px !important;
+}
+
+.ccc.is-pane-75 .ccc__detail-panel {
+  min-width: 0 !important;
+}
+

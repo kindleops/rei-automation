@@ -37,6 +37,7 @@ import { updateBrainAfterDelivery } from "@/lib/domain/brain/update-brain-after-
 import { info, warn } from "@/lib/logging/logger.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import { normalizeTextgridDeliveryPayload } from "@/lib/webhooks/textgrid-delivery-normalize.js";
+import { normalizeTextGridFailure } from "@/lib/domain/messaging/textgrid-failure-normalization.js";
 
 const QUEUE_FIELDS = {
   queue_status: "queue-status",
@@ -206,6 +207,16 @@ function normalizeDeliveryState(status) {
 }
 
 function mapFailureReasonToQueueCategory({ error_message, error_status }) {
+  const normalized = normalizeTextGridFailure({
+    status: "failed",
+    error_message,
+    error_status,
+  });
+  if (normalized.failure_class === "content_filter_blocked") return "Carrier Block";
+  if (normalized.failure_class === "recipient_opted_out") return "Opt-Out";
+  if (normalized.failure_class === "invalid_to_number") return "Invalid Number";
+  if (normalized.failure_class === "recipient_out_of_credit") return "Network Error";
+
   const bucket = runtimeDeps.mapTextgridFailureBucket({
     ok: false,
     error_message,
@@ -522,6 +533,18 @@ async function updatePhoneComplianceFromDelivery(event_item, failure_bucket) {
 function deriveFailureBucket(extracted, normalized_state) {
   if (normalized_state !== "Failed") return null;
 
+  const normalized = normalizeTextGridFailure({
+    status: extracted.status || "failed",
+    error_message: extracted.error_message,
+    error_status: extracted.error_status,
+    reason: extracted.raw?.reason,
+    raw: extracted.raw,
+  });
+  if (normalized.failure_class === "content_filter_blocked") return "Spam";
+  if (normalized.failure_class === "recipient_opted_out") return "DNC";
+  if (normalized.failure_class === "invalid_to_number") return "Hard Bounce";
+  if (normalized.failure_class === "recipient_out_of_credit") return "Soft Bounce";
+
   return (
     runtimeDeps.mapTextgridFailureBucket({
       ok: false,
@@ -616,6 +639,22 @@ export async function resolveTextgridDeliveryCorrelation(extracted = {}) {
 export async function handleTextgridDeliveryWebhook(payload = {}) {
   const extracted = extractWebhookPayload(payload);
   const normalized_state = normalizeDeliveryState(extracted.status);
+  const normalized_failure = normalizeTextGridFailure({
+    status: extracted.status,
+    error_message: extracted.error_message,
+    error_status: extracted.error_status,
+    reason: extracted.raw?.reason,
+    raw: extracted.raw,
+  });
+  const normalized_failure_fields = normalized_failure.failure_class
+    ? {
+        failure_class: normalized_failure.failure_class,
+        provider_failure_reason: normalized_failure.provider_failure_reason,
+        normalized_reason: normalized_failure.normalized_reason,
+        retry_allowed: normalized_failure.retry_allowed,
+        is_terminal: normalized_failure.is_terminal,
+      }
+    : {};
   const failure_bucket = deriveFailureBucket(extracted, normalized_state);
   const idempotency_key = buildDeliveryIdempotencyKey(extracted);
   const queue_item_id_from_client_reference = parseQueueItemIdFromClientReference(
@@ -761,6 +800,7 @@ export async function handleTextgridDeliveryWebhook(payload = {}) {
             : null,
         failure_code: extracted.error_status,
         failure_reason: extracted.error_message,
+        ...normalized_failure_fields,
       });
     }
 

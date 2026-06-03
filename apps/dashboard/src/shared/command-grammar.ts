@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 // ── Command Grammar Engine ─────────────────────────────────────────────────
 // Vim-inspired multi-key command sequences for NEXUS.
@@ -28,17 +28,24 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
 
   const pendingKeyRef = useRef<string | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bindingsRef = useRef(bindings)
 
-  const clearPending = () => {
+  useEffect(() => {
+    bindingsRef.current = bindings
+  }, [bindings])
+
+  const clearPending = useCallback(() => {
     pendingKeyRef.current = null
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
     setState((prev) => ({ ...prev, pending: null }))
-  }
+  }, [])
 
-  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+  const onKeyDown = useCallback((event: KeyboardEvent) => {
+    const activeBindings = bindingsRef.current
+
     // Skip when user is in an input field
     const target = event.target
     if (
@@ -61,7 +68,7 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
       const firstKey = pendingKeyRef.current
       clearPending()
 
-      const match = bindings.find(
+      const match = activeBindings.find(
         (b) => b.seq.length === 2 && b.seq[0] === firstKey && b.seq[1] === key,
       )
 
@@ -74,10 +81,10 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
     }
 
     // Check if this key is the first key of any two-key binding
-    const isFirstKey = bindings.some((b) => b.seq.length === 2 && b.seq[0] === key)
+    const isFirstKey = activeBindings.some((b) => b.seq.length === 2 && b.seq[0] === key)
 
     // Check if this key is a single-key binding
-    const singleMatch = bindings.find((b) => b.seq.length === 1 && b.seq[0] === key)
+    const singleMatch = activeBindings.find((b) => b.seq.length === 1 && b.seq[0] === key)
 
     if (isFirstKey) {
       event.preventDefault()
@@ -101,7 +108,7 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
       singleMatch.action()
       setState({ pending: null, lastExecuted: singleMatch.keys })
     }
-  })
+  }, [clearPending])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -115,7 +122,7 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
         clearTimeout(timeoutRef.current)
       }
     }
-  }, [])
+  }, [onKeyDown])
 
   return state
 }

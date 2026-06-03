@@ -180,7 +180,7 @@ async function checkJsonEndpoint(label, routePath) {
 
   mark(`${label} API reachable`, true, `status=${response.status}`);
   mark(`${label} returns JSON`, true, `content-type=${contentType || "unknown"}`);
-  return true;
+  return json;
 }
 
 function fileMtimeMs(filePath) {
@@ -242,7 +242,35 @@ async function main() {
   mark("OPS dashboard secret loaded", Boolean(OPS_SECRET), OPS_SECRET ? "present" : "missing", recovery.auth);
   checkNextCache();
   await checkJsonEndpoint("health", "/api/cockpit/health");
-  await checkJsonEndpoint("live inbox", "/api/cockpit/inbox/live?filter=all&limit=1&timeout_mode=initial_boot");
+  const liveJson = await checkJsonEndpoint("live inbox", "/api/cockpit/inbox/live?filter=all&limit=5&map=0&timeout_mode=initial_boot");
+  const liveRows = Array.isArray(liveJson?.threads) ? liveJson.threads : [];
+  const sample = liveRows.find((row) => clean(row.thread_key || row.threadKey || row.id)) || null;
+  if (sample) {
+    const threadKey = clean(sample.thread_key || sample.threadKey || sample.id);
+    const params = new URLSearchParams({ thread_key: threadKey, limit: "50" });
+    for (const [key, value] of Object.entries({
+      canonical_e164: sample.canonical_e164 || sample.canonicalE164,
+      phone_e164: sample.canonical_e164 || sample.canonicalE164,
+      phone: sample.phone,
+      best_phone: sample.best_phone || sample.bestPhone,
+      seller_phone: sample.seller_phone || sample.sellerPhone,
+      property_id: sample.property_id || sample.propertyId,
+      prospect_id: sample.prospect_id || sample.prospectId,
+      master_owner_id: sample.master_owner_id || sample.ownerId,
+    })) {
+      if (clean(value)) params.set(key, clean(value));
+    }
+    await checkJsonEndpoint("thread messages", `/api/cockpit/inbox/thread-messages?${params.toString()}`);
+    await checkJsonEndpoint("thread hydration", `/api/cockpit/inbox/thread-hydration?${params.toString()}`);
+    await checkJsonEndpoint("deal context thread", `/api/cockpit/deal-context/thread/${encodeURIComponent(threadKey)}`);
+    const propertyId = clean(sample.property_id || sample.propertyId || sample.final_property_id);
+    if (propertyId) {
+      await checkJsonEndpoint("valuation snapshot", `/api/cockpit/properties/${encodeURIComponent(propertyId)}/valuation-snapshot`);
+    }
+  } else {
+    mark("sample inbox row for detail routes", true, "skipped because live inbox returned no rows");
+  }
+  await checkJsonEndpoint("ops metrics", "/api/cockpit/ops/metrics?window=today");
 
   if (failures > 0) {
     console.error(`FAIL dev runtime doctor failures=${failures}`);

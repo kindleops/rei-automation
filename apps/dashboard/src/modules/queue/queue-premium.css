@@ -1038,6 +1038,7 @@
 .nx-op-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .nx-seller-name { font-size: 14px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx-seller-address { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-op-campaign-meta { font-family: var(--font-mono, monospace); font-size: 9px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx-op-hover-intel { display: flex; align-items: center; gap: 6px; opacity: 0; height: 0; transition: all 0.2s ease; transform: translateY(-4px); }
 .nx-operational-row:hover .nx-op-hover-intel { opacity: 1; height: auto; transform: translateY(0); margin-top: 4px; }
 .nx-temp-dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -1092,6 +1093,9 @@
 /* List View */
 .nx-queue-table.is-dense th { padding: 10px 14px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
 .nx-queue-table.is-dense td { padding: 8px 14px; font-size: 12px; vertical-align: middle; }
+.nx-cell-owner { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nx-cell-owner small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-cell-owner--metadata small { font-family: var(--font-mono, monospace); font-size: 10px; }
 .nx-cell-preview { max-width: 0; }
 .nx-preview-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 11px; }
 .nx-table-actions-th { text-align: right !important; }

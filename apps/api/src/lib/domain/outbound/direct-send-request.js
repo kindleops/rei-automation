@@ -1,5 +1,6 @@
 import APP_IDS from "@/lib/config/app-ids.js";
 import { deriveContextSummary } from "@/lib/domain/context/derive-context-summary.js";
+import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { buildSendQueueItem } from "@/lib/domain/queue/build-send-queue-item.js";
 import { processSendQueue } from "@/lib/domain/queue/process-send-queue.js";
 import {
@@ -11,6 +12,8 @@ import {
 } from "@/lib/providers/podio.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { findPhoneRecord } from "@/lib/podio/apps/phone-numbers.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -58,6 +61,14 @@ function isDirectSendInputError(message = "") {
     "prospect_item_not_found:",
     "property_item_not_found:",
     "market_item_not_found:",
+  ].some((candidate) => String(message || "").startsWith(candidate));
+}
+
+function isDirectSendRuntimeBrakeError(message = "") {
+  return [
+    "queue_emergency_stop_active",
+    "campaign_paused",
+    "queue_auto_enqueue_disabled",
   ].some((candidate) => String(message || "").startsWith(candidate));
 }
 
@@ -251,6 +262,18 @@ export async function buildAndProcessDirectSend(input, deps = {}) {
     processSendQueueImpl = processSendQueue,
   } = deps;
   const normalized = normalizeDirectSendInput(input);
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    {
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "direct_send_queue_create", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    throw new Error(runtime_brake.reason || "runtime_brake_active");
+  }
 
   if (!normalized.to_number) {
     throw new Error("missing_to_number");
@@ -412,7 +435,11 @@ export async function handleDirectSendRequestData(request, method = "GET", deps 
     });
 
     return {
-      status: isDirectSendInputError(diagnostics.message) ? 400 : 500,
+      status: isDirectSendRuntimeBrakeError(diagnostics.message)
+        ? 423
+        : isDirectSendInputError(diagnostics.message)
+          ? 400
+          : 500,
       payload: {
         ok: false,
         error: "outbound_direct_send_failed",

@@ -76,7 +76,20 @@ export async function GET(request) {
       throw innerErr
     }
 
-    return NextResponse.json({ ok: true, ...data }, { status: 200, headers: cors })
+    return NextResponse.json(
+      {
+        ok: true,
+        degraded: false,
+        ...data,
+        sourceUsed: data?.source || data?.diagnostics?.source || null,
+        queryMs: data?.diagnostics?.queryMs ?? null,
+        diagnostics: {
+          ...(data?.diagnostics || {}),
+          sourceUsed: data?.source || data?.diagnostics?.source || null,
+        },
+      },
+      { status: 200, headers: cors },
+    )
   } catch (error) {
     console.error('[INBOX_LIVE_DEGRADED_ERROR]', {
       message: error?.message || String(error),

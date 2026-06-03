@@ -32,8 +32,10 @@ import { executeAutoReply } from '../../lib/data/inboxAutoReply'
 
 import {
   getQueueProcessorHealth,
-  getThreadIntelligence,
+  getThreadHydrationForThread,
+  getThreadMessagesPageForThread,
   getThreadMessagesForThread,
+  getConversationThreadIdForThread,
   getThreadContext,
   queueReplyFromInbox,
   scheduleReplyFromInbox,
@@ -45,12 +47,14 @@ import {
   dedupeMessages,
   toThreadMessage,
 } from '../../lib/data/inboxData'
-import { getDealContextByThread, normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
+import { normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
+import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
+import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
@@ -78,6 +82,7 @@ import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { InboxCampaignView } from '../campaigns/InboxCampaignView'
+import { EmailCommandCenter } from '../email/EmailCommandCenter'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -130,6 +135,7 @@ import './inbox-premium.css'
 import './inbox-rebuild.css'
 import './inbox-rebuild-v2.css'
 import './inbox-polish.css'
+import './notification-hud.css'
 import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
 import './buyer-intel-upgrade.css'
 import './copilot/copilot.css'
@@ -200,6 +206,7 @@ const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; de
   { key: 'comp_intelligence', label: 'Comp Intelligence View', description: 'Subject property, ARV, offer range, and comp signals.' },
   { key: 'buyer_match', label: 'Buyer Match View', description: 'Buyer demand, dispo fit, and buyer-match readiness.' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
+  { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
 ]
 
 type NexusWorkspaceKey =
@@ -318,6 +325,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
+  { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
 ]
 
 const MAX_TOGGLED_VIEWS = 4
@@ -487,6 +495,7 @@ const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): 
 
 export default function InboxPage() {
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messageRefetchKey, setMessageRefetchKey] = useState(0)
   const {
     data,
     loading: _dataLoading,
@@ -517,6 +526,8 @@ export default function InboxPage() {
   const [selectedBuyerKey, setSelectedBuyerKey] = useState<string | null>(null)
   const [draftText, setDraftText] = useState('')
   const [selectedMessages, setSelectedMessages] = useState<ThreadMessage[]>([])
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false)
   const [pendingMessagesByThread, setPendingMessagesByThread] = useState<Record<string, ThreadMessage[]>>({})
   const [visibleThreadCount, setVisibleThreadCount] = useState(1000)
   const [mapSourceMode, setMapSourceMode] = useState<MapSourceMode>(defaultMapSourceMode)
@@ -556,6 +567,7 @@ export default function InboxPage() {
   const [dossierFull, setDossierFull] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
   const hasLoadedInitialInboxRef = useRef(false)
+  const hasLoggedThemeRef = useRef(false)
   // Tracks whether the live inbox has resolved at least once — gates heavy background queries.
   const heavyQueriesStartedRef = useRef(false)
   const autonomyQueriesStartedRef = useRef(false)
@@ -592,7 +604,16 @@ export default function InboxPage() {
     [threads],
   )
   const threadByKey = useMemo(
-    () => new Map(threads.map((t) => [t.threadKey || t.id, t])),
+    () => {
+      const byKey = new Map<string, InboxWorkflowThread>()
+      for (const thread of threads) {
+        const conversationId = getConversationThreadIdForThread(thread)
+        if (conversationId) byKey.set(conversationId, thread)
+        if (thread.threadKey) byKey.set(thread.threadKey, thread)
+        if (thread.id) byKey.set(thread.id, thread)
+      }
+      return byKey
+    },
     [threads],
   )
 
@@ -814,7 +835,7 @@ export default function InboxPage() {
     const fallback = selectedThreadFallbackRef.current
     if (fallback) {
       if (selectedId && fallback.id === selectedId) return fallback
-      if (selectedThreadKey && (fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
+      if (selectedThreadKey && (getConversationThreadIdForThread(fallback) || fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
     }
     return selectedId ? null : (filtered[0] ?? threads[0] ?? null)
   }, [filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
@@ -823,9 +844,9 @@ export default function InboxPage() {
   selectedRef.current = selected
   // Stable string key — message effect deps on this so it only fires when the thread changes,
   // not on every inbox refresh that produces a new `selected` object reference
-  const selectedKeyForEffect = selected?.threadKey ?? selected?.id ?? null
+  const selectedKeyForEffect = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || selected.id) : null
   // Snapshots for use in useMemo deps — avoids optional-chaining in dep arrays
-  const selectedThreadKeySnapshot = selected?.threadKey ?? null
+  const selectedThreadKeySnapshot = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || null) : null
   const selectedIdSnapshot = selected?.id ?? null
 
   // Phase 1 trace — fires ONLY when the actual thread identity changes (string key, not object ref)
@@ -835,7 +856,11 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (!selected) return
-    const inLoadedThreads = threads.some((thread) => thread.id === selected.id || (thread.threadKey || thread.id) === (selected.threadKey || selected.id))
+    const selectedConversationId = getConversationThreadIdForThread(selected) || selected.threadKey || selected.id
+    const inLoadedThreads = threads.some((thread) => (
+      thread.id === selected.id ||
+      (getConversationThreadIdForThread(thread) || thread.threadKey || thread.id) === selectedConversationId
+    ))
     if (inLoadedThreads) {
       selectedThreadFallbackRef.current = selected
     }
@@ -889,9 +914,10 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (!selected) return
+    const conversationThreadId = getConversationThreadIdForThread(selected) || selected.threadKey || selected.id
     if (selected.id !== selectedId) setSelectedId(selected.id)
-    if ((selected.threadKey || selected.id) !== selectedThreadKey) {
-      setSelectedThreadKey(selected.threadKey || selected.id)
+    if (conversationThreadId !== selectedThreadKey) {
+      setSelectedThreadKey(conversationThreadId)
     }
   }, [selected, selectedId, selectedThreadKey])
 
@@ -1469,6 +1495,8 @@ export default function InboxPage() {
     const thread = selectedRef.current
     if (!thread || !selectedKeyForEffect) {
       setSelectedMessages([])
+      setHasOlderMessages(false)
+      setOlderMessagesLoading(false)
       setThreadContext(null)
       setThreadIntelligence(null)
       setDealContext(null)
@@ -1479,35 +1507,45 @@ export default function InboxPage() {
       return
     }
 
-    const cacheKey = thread.threadKey || thread.id
+    const cacheKey = selectedKeyForEffect
+    // When messageRefetchKey > 0 this is an explicit user-triggered retry — drop the cache so
+    // we don't serve the previous 0-row result while waiting for the fresh fetch.
+    if (messageRefetchKey > 0) delete messageCacheRef.current[cacheKey]
     const cachedMessages = messageCacheRef.current[cacheKey] ?? []
+    const fallbackDealContext = normalizeDealContext(thread as unknown as Record<string, unknown>)
     prevSelectedIdRef.current = thread.id
     const fetchStartTs = performance.now()
 
     setThreadTranslations({})
     setThreadViewMode('original')
     setDetectedThreadLanguage(null)
-    setDealContext(null)
-    // Keep previous messages visible while loading new thread — prevents blank flash.
-    // If we have a cache hit, show it immediately. If not, the prior thread's messages
-    // remain until the fetch commits (messagesLoading=true signals the loading state).
-    if (cachedMessages.length > 0) {
-      setSelectedMessages(cachedMessages)
-    }
-    setMessagesLoading(cachedMessages.length === 0)
+    setDealContext(fallbackDealContext)
+    setSelectedMessages([])
+    setHasOlderMessages(false)
+    setOlderMessagesLoading(false)
+    setMessagesLoading(true)
     setContextLoading(true)
     setThreadIntelligence((thread ?? null) as unknown as ThreadIntelligenceRecord | null)
 
-    if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect })
+    if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0 })
 
     let cancelled = false
     const controller = new AbortController()
+    const hydrationPromise = getThreadHydrationForThread(thread, controller.signal)
+    const contextPromise = getThreadContext(thread, controller.signal).catch((err: unknown) => {
+      console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
+      return null as unknown as ThreadContext
+    })
 
     // ── Messages: fire immediately, commit as soon as done ──────────────────
     console.log('[MESSAGES_FETCH_START]', selectedKeyForEffect)
-    getThreadMessagesForThread(thread, { signal: controller.signal }).then((messages) => {
+    hydrationPromise.then((hydration) => {
       if (cancelled) return
+      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
+      if (activeConversationId !== selectedKeyForEffect) return
       const durationMs = Math.round(performance.now() - fetchStartTs)
+      const messages = hydration.messages
+      const integrityBlocked = Boolean((hydration.diagnostics as Record<string, unknown> | undefined)?.integrity_blocked)
       
       console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, messages.length, `${durationMs}ms`)
       if (durationMs > 1500) {
@@ -1517,12 +1555,13 @@ export default function InboxPage() {
           status: 'completed',
         })
       }
-      const resolvedMessages = messages.length > 0 ? messages : cachedMessages
-      if (messages.length > 0) {
+      const resolvedMessages = integrityBlocked ? [] : messages
+      if (messages.length > 0 && !integrityBlocked) {
         messageCacheRef.current[cacheKey] = messages
       } else if (DEV) {
         console.warn('[InboxPage] message hydration returned 0 rows', {
           threadKey: cacheKey,
+          integrityBlocked,
           ownerId: thread.ownerId,
           propertyId: thread.propertyId,
           phoneNumber: thread.phoneNumber,
@@ -1531,7 +1570,15 @@ export default function InboxPage() {
       }
       console.log('[MESSAGES_COMMIT]', selectedKeyForEffect, resolvedMessages.length)
       setSelectedMessages(resolvedMessages)
+      setHasOlderMessages(Boolean(hydration.pagination?.hasMore))
       setMessagesLoading(false)
+      if (hydration.dealContext) {
+        setDealContext(hydration.dealContext)
+      }
+      setThreadIntelligence({
+        ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+        ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
+      })
 
       const deliveredByBody = new Set(
         messages
@@ -1551,36 +1598,30 @@ export default function InboxPage() {
         console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
       } else {
         console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
+        setSelectedMessages(cachedMessages)
+        setHasOlderMessages(false)
         setMessagesLoading(false)
       }
     })
 
-    // ── Context + Intelligence + DealContext: fetch together, never block messages ────
-    // Enrichment failures are fully isolated — they never affect inbox loading state,
-    // sidebar rows, messages, or map coordinates. On failure, we fall back to thread row data.
+    // ── Context + hydration: fetch together, never block row fallback/messages ────
     const threadKeyForCtx = thread.threadKey || thread.id
     console.log('[THREAD_CONTEXT_START]', { threadKey: threadKeyForCtx, propertyId: thread.propertyId, prospectId: thread.prospectId, ownerId: thread.ownerId })
-    Promise.all([
-      getThreadContext(thread, controller.signal).catch((err: unknown) => {
-        console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', threadKeyForCtx, err)
-        return null as unknown as ThreadContext
-      }),
-      getThreadIntelligence(thread, controller.signal).catch((err: unknown) => {
-        console.warn('[ENRICHMENT_INTELLIGENCE_ERROR_ISOLATED]', threadKeyForCtx, err)
-        return null
-      }),
-      (threadKeyForCtx
-        ? getDealContextByThread(threadKeyForCtx, controller.signal)
-        : Promise.resolve(null)
-      ).catch(() => null),
-    ]).then(([context, intelligence, dc]) => {
+    Promise.allSettled([contextPromise, hydrationPromise]).then((results) => {
       if (cancelled) return
+      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
+      if (activeConversationId !== selectedKeyForEffect) return
+      const context = results[0].status === 'fulfilled' ? results[0].value : null
+      const hydration = results[1].status === 'fulfilled' ? results[1].value : null
       setThreadContext(context)
-      setThreadIntelligence({
-        ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
-        ...((intelligence ?? {}) as ThreadIntelligenceRecord),
-      })
-      if (dc) {
+      if (hydration?.intelligence) {
+        setThreadIntelligence({
+          ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+          ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
+        })
+      }
+      if (hydration?.dealContext) {
+        const dc = hydration.dealContext
         console.log('[THREAD_CONTEXT_DONE]', {
           threadKey: threadKeyForCtx,
           propertyId: dc.propertyId,
@@ -1592,18 +1633,14 @@ export default function InboxPage() {
         setDealContext(dc)
         console.log('[THREAD_CONTEXT_COMMIT]', threadKeyForCtx)
       } else {
-        // Build fallback DealContext from thread row so address/coords/IDs remain visible
-        const fallback = normalizeDealContext(thread as unknown as Record<string, unknown>)
         console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
-        setDealContext(fallback)
+        setDealContext(fallbackDealContext)
       }
     }).catch((err: unknown) => {
       if (!cancelled) {
         console.warn('[ENRICHMENT_BATCH_ERROR_ISOLATED]', threadKeyForCtx, err)
-        // Even on unexpected batch failure, populate fallback so UI is not blank
-        const fallback = normalizeDealContext(thread as unknown as Record<string, unknown>)
         console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
-        setDealContext(fallback)
+        setDealContext(fallbackDealContext)
       }
     }).finally(() => {
       if (!cancelled) setContextLoading(false)
@@ -1614,17 +1651,51 @@ export default function InboxPage() {
       controller.abort()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [DEV, selectedKeyForEffect])
+  }, [DEV, selectedKeyForEffect, messageRefetchKey])
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    const thread = selectedRef.current
+    if (!thread || !selectedKeyForEffect || olderMessagesLoading) return
+    const requestKey = selectedKeyForEffect
+    setOlderMessagesLoading(true)
+    try {
+      const page = await getThreadMessagesPageForThread(thread, {
+        offset: selectedMessages.length,
+        maxMessages: 50,
+      })
+      const activeConversationId = selectedRef.current
+        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
+        : null
+      if (activeConversationId !== requestKey) return
+      setSelectedMessages((current) => dedupeMessages([...page.messages, ...current]))
+      setHasOlderMessages(page.pagination.hasMore)
+      messageCacheRef.current[requestKey] = dedupeMessages([
+        ...page.messages,
+        ...(messageCacheRef.current[requestKey] ?? []),
+      ])
+    } catch (err) {
+      if (DEV) console.warn('[InboxPage load older messages failed]', { threadKey: requestKey, err })
+    } finally {
+      setOlderMessagesLoading(false)
+    }
+  }, [DEV, olderMessagesLoading, selectedKeyForEffect, selectedMessages.length])
 
   useEffect(() => {
-    if (!selected || data.dataMode !== 'live') return
+    if (!selectedKeyForEffect || data.dataMode !== 'live') return
 
-    const selectedKey = selected.threadKey || selected.id
+    const selected = selectedRef.current
+    if (!selected) return
+
+    const selectedKey = selectedKeyForEffect
     const selectedPhone = selected.canonicalE164 || selected.phoneNumber || ''
     const selectedOwnerId = selected.ownerId || ''
     const selectedPropertyId = selected.propertyId || ''
+    const selectedProspectId = selected.prospectId || ''
+    const shouldPollSelectedThread = data.connectionState !== 'live'
     const supabase = getSupabaseClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    let pollController: AbortController | null = null
+    let pollInFlight = false
     const scheduleRefreshInbox = () => {
       if (refreshTimer) return
       refreshTimer = setTimeout(() => {
@@ -1638,6 +1709,9 @@ export default function InboxPage() {
         ...(messageCacheRef.current[selectedKey] ?? []),
         incoming,
       ])
+      commitDashboardMessages(selectedKey, [incoming], {
+        source: 'selected_thread_realtime',
+      })
 
       setSelectedMessages((current) => {
         return dedupeMessages([...current, incoming])
@@ -1645,17 +1719,20 @@ export default function InboxPage() {
     }
 
     const belongsToSelection = (row: Record<string, unknown>) => {
+      const rowConversationThreadId = String(row.conversation_thread_id ?? row.conversationThreadId ?? '').trim()
       const rowThreadKey = String(row.thread_key ?? row.threadKey ?? '').trim()
       const rowFrom = String(row.from_phone_number ?? '').trim()
       const rowTo = String(row.to_phone_number ?? '').trim()
       const rowOwnerId = String(row.master_owner_id ?? '').trim()
       const rowPropertyId = String(row.property_id ?? '').trim()
-      // Strict: exact thread_key match takes priority
+      const rowProspectId = String(row.prospect_id ?? '').trim()
+      const phoneMatches = Boolean(selectedPhone && (rowFrom === selectedPhone || rowTo === selectedPhone || rowThreadKey === selectedPhone))
+      if (rowConversationThreadId && rowConversationThreadId === selectedKey) return true
       if (rowThreadKey && rowThreadKey === selectedKey) return true
-      // Phone match: seller phone appears as sender or recipient
-      if (selectedPhone && (rowFrom === selectedPhone || rowTo === selectedPhone)) return true
-      // Owner+property together — never owner alone to avoid cross-property message leakage
-      if (selectedOwnerId && selectedPropertyId && rowOwnerId === selectedOwnerId && rowPropertyId === selectedPropertyId) return true
+      if (selectedProspectId && phoneMatches && rowProspectId === selectedProspectId) return true
+      if (selectedPropertyId && phoneMatches && rowPropertyId === selectedPropertyId) return true
+      if (selectedOwnerId && phoneMatches && rowOwnerId === selectedOwnerId) return true
+      if (!selectedProspectId && !selectedPropertyId && !selectedOwnerId && phoneMatches) return true
       return false
     }
 
@@ -1678,7 +1755,13 @@ export default function InboxPage() {
         }
         const incoming = toThreadMessage(row)
         mergeRealtimeMessage(incoming)
-        scheduleRefreshInbox()
+        logRealtimePatchApplied({
+          table: 'message_events',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: ['messagesByThreadId'],
+          messageId: incoming.id,
+        })
 
         // Remove any pending optimistic message that this confirmed event supersedes
         const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
@@ -1736,12 +1819,33 @@ export default function InboxPage() {
           })
           return changed ? { ...current, [selected.id]: dedupeMessages(nextPending) } : current
         })
-        scheduleRefreshInbox()
+        patchDashboardThread(selectedKey, {
+          deliveryStatus: nextStatus,
+          latestDeliveryStatus: nextStatus,
+          queueId,
+        }, {
+          source: 'selected_thread_realtime',
+          table: 'send_queue',
+          eventType: payload.eventType,
+        })
+        logRealtimePatchApplied({
+          table: 'send_queue',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: ['deliveryStatus', 'latestDeliveryStatus', 'queueId'],
+          queueId,
+        })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, (payload) => {
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
         if (!belongsToSelection(row)) return
         if (DEV) console.log('[InboxPage realtime dossier update]', { threadKey: selectedKey, eventType: payload.eventType })
+        const patch = {
+          inboxCategory: row.inbox_category,
+          inbox_bucket: row.inbox_category,
+          uiIntent: row.detected_intent || row.ui_intent,
+          workflowStage: row.thread_stage,
+        }
         
         setThreadIntelligence((current) => {
           if (!current) return current
@@ -1754,16 +1858,55 @@ export default function InboxPage() {
             workflowStage: row.thread_stage || current.workflowStage,
           }
         })
-        scheduleRefreshInbox()
+        patchDashboardThread(selectedKey, patch, {
+          source: 'selected_thread_realtime',
+          table: 'operator_thread_state',
+          eventType: payload.eventType,
+        })
+        logRealtimePatchApplied({
+          table: 'operator_thread_state',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: Object.keys(patch),
+        })
       })
       .subscribe()
 
+    const pollSelectedMessages = () => {
+      if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
+      pollInFlight = true
+      pollController = new AbortController()
+      getThreadMessagesForThread(selected, { signal: pollController.signal, maxMessages: 50 }).then((messages) => {
+        if (!messages.length) return
+        commitDashboardMessages(selectedKey, messages, {
+          source: 'selected_thread_polling',
+          connectionState: data.connectionState ?? null,
+        })
+        messageCacheRef.current[selectedKey] = dedupeMessages([
+          ...(messageCacheRef.current[selectedKey] ?? []),
+          ...messages,
+        ])
+        setSelectedMessages((current) => {
+          const merged = dedupeMessages([...current, ...messages])
+          if (merged.length > current.length) scheduleRefreshInbox()
+          return merged
+        })
+      }).catch((err) => {
+        if ((err as { name?: string })?.name === 'AbortError') return
+        if (DEV) console.warn('[InboxPage selected message poll failed]', { threadKey: selectedKey, err })
+      }).finally(() => {
+        pollInFlight = false
+      })
+    }
+    const selectedMessagePollInterval = window.setInterval(pollSelectedMessages, 12_000)
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer)
+      window.clearInterval(selectedMessagePollInterval)
+      pollController?.abort()
       void supabase.removeChannel(channel)
     }
-  }, [DEV, data.dataMode, refreshInbox, selected])
+  }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect])
 
   const handleTranslateThread = useCallback(async () => {
     if (!threadHasInboundMessages) return
@@ -1964,6 +2107,19 @@ export default function InboxPage() {
       setActiveAccentPalette(settings.accentPalette)
       setLayoutState((current) => {
         const nextTheme = resolvedThemeId === 'light' ? 'light' : 'dark'
+        
+        if (!hasLoggedThemeRef.current) {
+          hasLoggedThemeRef.current = true
+          console.log('[InboxTheme] active theme + accent palette + root classes:', {
+            theme: resolvedThemeId,
+            accent: settings.accentPalette,
+            classes: getLayoutClassNames({
+              ...current,
+              theme: nextTheme
+            })
+          })
+        }
+
         return current.theme === nextTheme ? current : { ...current, theme: nextTheme }
       })
     }
@@ -2475,6 +2631,10 @@ export default function InboxPage() {
       mutation = () => cancelQueueItem(queueId!, thread)
       optimistic = { inboxStatus: 'waiting' }
       // Additional logic to focus composer could go here
+    } else if (action === 'refetch') {
+      // Re-trigger message hydration for the selected thread (e.g. after a failed hydration).
+      setMessageRefetchKey((k) => k + 1)
+      return
     } else if (action === 'open_map') {
       setSelectedWorkspaceViews(['command_map'])
       return
@@ -2762,6 +2922,9 @@ export default function InboxPage() {
     if (DEV) console.log(`[OperatorAction] ${action} on ${id.slice(-8)}`)
 
     switch (action) {
+      case 'refetch':
+        setMessageRefetchKey((k) => k + 1)
+        break
       case 'auto_reply':
         await handleWorkflowMutation('Auto-Reply: Queueing...', () => executeAutoReply(thread, null, { dryRun: autonomyControls.dryRun }), { skipRefresh: false })
         break
@@ -3357,6 +3520,9 @@ export default function InboxPage() {
         isTranslatingThread={threadTranslationLoading}
         onTranslateThread={handleTranslateThread}
         backgroundLoading={contextLoading}
+        hasOlderMessages={hasOlderMessages}
+        olderMessagesLoading={olderMessagesLoading}
+        onLoadOlder={handleLoadOlderMessages}
       />
 
       <Composer
@@ -3417,7 +3583,10 @@ export default function InboxPage() {
         sourceMode={sourceMode}
         onSourceModeChange={setSourceMode}
         visibleThreadCount={visibleThreadCount}
-        loadingError={data.liveFetchError && threads.length === 0 ? data.liveFetchError : null}
+        loading={_dataLoading}
+        loadingError={data.liveFetchError}
+        realtimeStatus={data.realtimeStatus}
+        refreshMode={data.refreshMode}
         densityMode={paneMode === 'single' || paneWidth === '75' || paneWidth === '100' ? 'full' : 'compact'}
         inboxMode={paneWidth === '25' ? 'rail25' : paneWidth === '50' ? 'review50' : paneWidth === '75' ? 'ops75' : 'full100'}
       />
@@ -3566,23 +3735,6 @@ export default function InboxPage() {
     if (view === 'metrics') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--metrics">
-          <div className="nx-workspace-card-grid">
-            {[
-              'Templates',
-              'Agents',
-              'Markets',
-              'Campaign Analytics',
-              'Delivery Analytics',
-              'Reply Analytics',
-              'Opt-out Analytics',
-              'Routing Performance',
-            ].map((title) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="stats" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">Analytics section mapped under Analytics view.</p>
-              </div>
-            ))}
-          </div>
           <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
         </section>
       )
@@ -3591,29 +3743,38 @@ export default function InboxPage() {
     if (view === 'comp_intelligence') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
-          <CompIntelligenceWorkspace thread={selected} dealContext={canonicalSelectedContext} paused={heavyLoadPaused} />
+          <CompIntelligenceWorkspace
+            thread={selected}
+            dealContext={canonicalSelectedContext}
+            paused={heavyLoadPaused}
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
+          />
         </section>
       )
     }
 
     if (view === 'buyer_match') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--intel-grid">
+        <section className="nx-workspace-surface nx-workspace-surface--map">
           <BuyerMatchWorkspace
             paused={heavyLoadPaused}
             dealContext={canonicalSelectedContext}
             propertySnapshot={{
               property_id: canonicalSelectedContext?.propertyId || '',
               address: canonicalSelectedContext?.propertyAddress || 'Property Unknown',
-              market: canonicalSelectedContext?.market || 'Market Unknown',
+              market: canonicalSelectedContext?.market || '',
               zip: canonicalSelectedContext?.propertyZip || '',
               state: canonicalSelectedContext?.propertyState || '',
+              county: canonicalSelectedContext?.propertyCounty || '',
               property_type: canonicalSelectedContext?.property_type || '',
+              asset_class: canonicalSelectedContext?.property_type || '',
               beds: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_bedrooms as number | null,
               baths: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_baths as number | null,
               sqft: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.building_square_feet as number | null,
               estimated_value: canonicalSelectedContext?.estimatedValue || null,
               arv: canonicalSelectedContext?.estimated_arv || canonicalSelectedContext?.estimatedValue || null,
+              purchase_price: canonicalSelectedContext?.cashOffer || null,
               dispo_strategy: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.dispo_strategy as string || '',
             }}
             paneWidth={paneWidth}
@@ -3630,6 +3791,16 @@ export default function InboxPage() {
             selectedThread={selected}
             paneWidth={paneWidth}
             layoutMode={layoutMode}
+          />
+        </section>
+      )
+    }
+
+    if (view === 'email') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <EmailCommandCenter
+            paneWidth={paneWidth}
           />
         </section>
       )
@@ -3828,7 +3999,10 @@ export default function InboxPage() {
             sourceMode={sourceMode}
             onSourceModeChange={setSourceMode}
             visibleThreadCount={visibleThreadCount}
-            loadingError={data.liveFetchError && threads.length === 0 ? data.liveFetchError : null}
+            loading={_dataLoading}
+            loadingError={data.liveFetchError}
+            realtimeStatus={data.realtimeStatus}
+            refreshMode={data.refreshMode}
             densityMode={leftPanelMode === 'full' ? 'full' : 'compact'}
             inboxMode="rail25"
           />
@@ -3854,7 +4028,10 @@ export default function InboxPage() {
             sourceMode={sourceMode}
             onSourceModeChange={setSourceMode}
             visibleThreadCount={visibleThreadCount}
-            loadingError={data.liveFetchError && threads.length === 0 ? data.liveFetchError : null}
+            loading={_dataLoading}
+            loadingError={data.liveFetchError}
+            realtimeStatus={data.realtimeStatus}
+            refreshMode={data.refreshMode}
             densityMode="compact"
             inboxMode="review50"
           />
@@ -4012,7 +4189,7 @@ export default function InboxPage() {
         viewFilter={viewFilter}
         setViewFilter={setViewFilter}
         advancedFilters={advancedFilters}
-        onAdvancedFiltersChange={(patch) => setAdvancedFilters((current) => ({ ...current, ...patch }))}
+        onAdvancedFiltersChange={(filters) => setAdvancedFilters(filters)}
         advancedFilterOptions={advancedFilterOptions}
         viewCounts={viewCounts}
         onReset={handleResetFilters}

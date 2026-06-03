@@ -10,6 +10,7 @@
  */
 
 import type { AnyRecord } from '../data/shared'
+import { logDataLayerQueryDone, logDataLayerQueryStart } from '../data/dashboardDataLayer'
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 
 export const getBackendBaseUrl = (): string => {
@@ -157,6 +158,31 @@ function notReady<T = unknown>(message: string): BackendResult<T> {
   }
 }
 
+const getBodyCount = (body: unknown): { bodyCount: number | null; bodyCountPath: string | null } => {
+  if (!body || typeof body !== 'object') return { bodyCount: null, bodyCountPath: null }
+  const record = body as Record<string, unknown>
+  const data = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : null
+  const candidates: Array<[string, unknown]> = [
+    ['threads', record.threads],
+    ['data.threads', data?.threads],
+    ['messages', record.messages],
+    ['data.messages', data?.messages],
+    ['rows', record.rows],
+    ['data.rows', data?.rows],
+    ['items', record.items],
+    ['data.items', data?.items],
+  ]
+
+  for (const [path, value] of candidates) {
+    if (Array.isArray(value)) return { bodyCount: value.length, bodyCountPath: path }
+  }
+
+  const total = record.total ?? record.count ?? record.backend_count ?? data?.total ?? data?.count
+  const numericTotal = Number(total)
+  if (Number.isFinite(numericTotal)) return { bodyCount: numericTotal, bodyCountPath: 'total' }
+  return { bodyCount: null, bodyCountPath: null }
+}
+
 export async function callBackend<T = unknown>(
   path: string,
   options: RequestInit = {}
@@ -196,6 +222,17 @@ export async function callBackend<T = unknown>(
   }
 
   const url = `${base}${path}`
+  const startedAt = performance.now()
+  const dataLayerStartedAt = logDataLayerQueryStart(path, {
+    transport: 'backend',
+    url,
+    method: options.method ?? 'GET',
+  })
+  console.log('[BACKEND_API_CALL]', {
+    url,
+    path,
+    method: options.method ?? 'GET',
+  })
   let response: Response
   try {
     response = await fetch(url, {
@@ -205,6 +242,24 @@ export async function callBackend<T = unknown>(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
     const isCors = errMsg === 'Failed to fetch' || errMsg.includes('NetworkError') || errMsg.includes('CORS')
+    console.warn('[BACKEND_API_RESPONSE]', {
+      status: null,
+      ok: false,
+      bodyCount: null,
+      bodyCountPath: null,
+      durationMs: Math.round(performance.now() - startedAt),
+      url,
+      path,
+      error: errMsg,
+    })
+    logDataLayerQueryDone(path, dataLayerStartedAt, {
+      transport: 'backend',
+      status: null,
+      ok: false,
+      bodyCount: null,
+      bodyCountPath: null,
+      error: errMsg,
+    })
     return {
       ok: false,
       status: 502,
@@ -225,6 +280,25 @@ export async function callBackend<T = unknown>(
     body = null
     parseError = true
   }
+  const { bodyCount, bodyCountPath } = getBodyCount(body)
+  console.log('[BACKEND_API_RESPONSE]', {
+    status: response.status,
+    ok: response.ok,
+    bodyCount,
+    bodyCountPath,
+    durationMs: Math.round(performance.now() - startedAt),
+    url,
+    path,
+    parseError,
+  })
+  logDataLayerQueryDone(path, dataLayerStartedAt, {
+    transport: 'backend',
+    status: response.status,
+    ok: response.ok && !parseError,
+    bodyCount,
+    bodyCountPath,
+    parseError,
+  })
 
   if (!response.ok) {
     const b = (body as Record<string, unknown>) ?? {}
@@ -585,6 +659,13 @@ export function fetchInboxThreadDossier(
   return callBackend(`/api/cockpit/inbox/thread-dossier?${queryString}`, { signal })
 }
 
+export function fetchInboxThreadHydration(
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/thread-hydration?${queryString}`, { signal })
+}
+
 export function fetchDealContextList(
   queryString: string,
   signal?: AbortSignal,
@@ -852,6 +933,57 @@ export function getCampaignFilterOptions(): Promise<BackendResult<CampaignFilter
 }
 
 export interface PreviewTargetsResponse {
+  ok?: boolean
+  dry_run?: boolean
+  total_matched_properties?: number
+  total_matched?: number
+  total_scanned: number
+  clean_targets: number
+  ready_to_queue: number
+  queueable_today?: number
+  linked_prospects?: number | null
+  linked_master_owners?: number | null
+  linked_phones?: number | null
+  matched_properties?: number | null
+  sms_eligible_phones?: number | null
+  sender_covered?: number | null
+  property_best_phone_count?: number | null
+  property_sms_eligible_count?: number | null
+  queue_eligibility_scope?: string
+  queue_eligibility_note?: string
+  current_contact_window_blocks_preview?: boolean
+  blocked_waterfall?: Array<{ key?: string; reason?: string; label?: string; count: number; source?: string; reason_codes?: string[] }>
+  blocked_reason_waterfall?: Array<{ key?: string; reason?: string; label?: string; count: number; source?: string; reason_codes?: string[] }>
+  eligibility_waterfall?: Array<{ key: string; label?: string; count: number; kind?: string; source?: string; description?: string; reason_codes?: string[] }>
+  blocked_counts_by_reason: Record<string, number>
+  candidate_window?: {
+    scanned?: number
+    matched?: number
+    clean_targets?: number
+    ready_to_queue?: number
+    queueable_today?: number
+    blocked_counts_by_reason?: Record<string, number>
+  }
+  full_source_reach?: {
+    matched_properties?: number
+    linked_master_owners?: number | null
+    linked_prospects?: number | null
+    linked_phones?: number | null
+    sms_eligible_phones?: number | null
+    clean_targets?: number | null
+    sender_covered?: number | null
+    ready_to_queue?: number | null
+    queueable_today?: number | null
+    count_source?: string | null
+    graph_source?: string | null
+    join_strategy?: string | null
+  }
+  sender_coverage_counts: Record<string, number>
+  identity_counts: Record<string, number>
+  language_counts: Record<string, number>
+  template_readiness_counts: Record<string, number>
+  sample_targets?: any[]
+  sample_blocks?: any[]
   total_matching_properties: number
   owners_matched: number
   phones_matched: number
@@ -885,27 +1017,193 @@ export function previewCampaignTargets(payload: Record<string, unknown>): Promis
   })
 }
 
+export interface CampaignApiSummary {
+  id: string
+  campaign_name: string
+  name?: string
+  status: string
+  total_targets: number
+  ready_targets: number
+  scheduled_targets: number
+  queued_targets: number
+  sent_count: number
+  delivered_count: number
+  failed_count: number
+  reply_count: number
+  positive_reply_count: number
+  negative_reply_count: number
+  opt_out_count: number
+  delivery_rate: number
+  reply_rate: number
+  positive_rate: number
+  opt_out_rate: number
+  failure_rate: number
+  next_send_at: string | null
+  last_send_at: string | null
+  send_interval_seconds: number
+  send_window_start: string | null
+  send_window_end: string | null
+  auto_queue_enabled?: boolean
+  auto_send_enabled: boolean
+  health_score: number
+  health_status: 'healthy' | 'caution' | 'dangerous'
+  blocked_reason_counts?: Record<string, number>
+}
+
+export interface CampaignListResponse {
+  ok: boolean
+  campaigns: CampaignApiSummary[]
+  kpis?: Record<string, number>
+}
+
+export interface CampaignCreateResponse {
+  ok: boolean
+  campaign_id: string
+  campaign: Record<string, unknown>
+}
+
+export interface CampaignDetailResponse {
+  ok: boolean
+  campaign: Record<string, unknown>
+  summary: CampaignApiSummary
+  filters: any[]
+  targets: any[]
+  send_windows: any[]
+  events: any[]
+}
+
+export function listCampaignsBackend(): Promise<BackendResult<CampaignListResponse>> {
+  return callBackend<CampaignListResponse>('/api/cockpit/campaigns')
+}
+
+export function createCampaignBackend(payload: Record<string, unknown>): Promise<BackendResult<CampaignCreateResponse>> {
+  return callBackend<CampaignCreateResponse>('/api/cockpit/campaigns', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getCampaignBackend(campaignId: string): Promise<BackendResult<CampaignDetailResponse>> {
+  return callBackend<CampaignDetailResponse>(`/api/cockpit/campaigns/${campaignId}`)
+}
+
+export function patchCampaignBackend(campaignId: string, payload: Record<string, unknown>): Promise<BackendResult<CampaignCreateResponse>> {
+  return callBackend<CampaignCreateResponse>(`/api/cockpit/campaigns/${campaignId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export interface BuildTargetsResponse {
+  ok?: boolean
   success: boolean
+  campaign_id?: string
   built_count: number
+  no_send_queue_rows_created?: boolean
+  preview?: Record<string, unknown>
   message?: string
 }
 
-export function buildCampaignTargets(campaignId: string): Promise<BackendResult<BuildTargetsResponse>> {
+export function buildCampaignTargets(campaignId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<BuildTargetsResponse>> {
   return callBackend<BuildTargetsResponse>(`/api/cockpit/campaigns/${campaignId}/build-targets`, {
     method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 
 export interface QueueBatchResponse {
-  success: boolean
-  queued_count: number
+  ok?: boolean
+  success?: boolean
+  dry_run?: boolean
+  no_send?: boolean
+  campaign_id?: string
+  status?: string
+  queued_count?: number
+  planned_target_count?: number
+  total_ready_targets?: number
+  send_windows_created?: number
+  send_queue_rows_created?: number
+  queue_rows_created?: number
+  targets_created?: number
+  skipped_count?: number
+  skipped_counts_by_reason?: Record<string, number>
+  blocked_count?: number
+  sender_distribution?: Array<{ value: string; label: string; count: number }>
+  template_distribution?: Array<{ value: string; label: string; count: number }>
+  first_scheduled_at?: string | null
+  last_scheduled_at?: string | null
+  launch_summary?: Record<string, unknown>
+  planned_windows?: any[]
+  blockers?: string[]
+  exact_blockers?: string[]
+  sample_skips?: Array<Record<string, unknown>>
   message?: string
 }
 
 export function queueCampaignBatch(campaignId: string, limit: number, interval_seconds: number): Promise<BackendResult<QueueBatchResponse>> {
-  return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-batch`, {
+  return queueCampaignPlan(campaignId, {
+    dry_run: true,
+    create_send_queue_rows: false,
+    explicit_operator_action: true,
+    limit,
+    interval_seconds,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Map properties — viewport-aware geographic intelligence layer
+// ---------------------------------------------------------------------------
+
+export interface MapPropertiesData {
+  generated_at: string
+  zoom: number
+  mode: 'clusters' | 'markers'
+  bounds: { lat_min: number | null; lat_max: number | null; lng_min: number | null; lng_max: number | null }
+  features: Array<{
+    type: 'Feature'
+    geometry: { type: 'Point'; coordinates: [number, number] }
+    properties: Record<string, unknown>
+  }>
+  counts: {
+    returned: number
+    clipped: boolean
+    by_asset_type: Record<string, number>
+    by_marker_state: Record<string, number>
+    by_state: Record<string, number>
+  }
+}
+
+export interface MapPropertiesResponse {
+  ok: boolean
+  route: string
+  data: MapPropertiesData
+}
+
+export function fetchMapProperties(params: {
+  lat_min: number
+  lat_max: number
+  lng_min: number
+  lng_max: number
+  zoom: number
+  limit?: number
+  markets?: string
+  states?: string
+}, signal?: AbortSignal): Promise<BackendResult<MapPropertiesResponse>> {
+  const qs = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])
+    )
+  ).toString()
+  return callBackend<MapPropertiesResponse>(`/api/internal/dashboard/ops/map?${qs}`, { signal })
+}
+
+export function queueCampaignPlan(campaignId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<QueueBatchResponse>> {
+  return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-plan`, {
     method: 'POST',
-    body: JSON.stringify({ limit, interval_seconds }),
+    body: JSON.stringify({
+      dry_run: true,
+      create_send_queue_rows: false,
+      ...payload,
+    }),
   })
 }

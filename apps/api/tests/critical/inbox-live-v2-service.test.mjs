@@ -83,6 +83,7 @@ function createCanonicalInboxSupabase(seed = {}) {
   const countRows = seed.countRows ? [...seed.countRows] : null;
 
   function getRowsForTable(table) {
+    if (table === "inbox_threads_view") return [...threadRows];
     if (table === "v_inbox_threads_live_v2") return [...threadRows];
     if (table === "v_inbox_thread_counts_live_v2") return countRows ? [...countRows] : [buildCountRow(threadRows)];
     if (table === "message_events") return [...messageEvents];
@@ -191,7 +192,7 @@ function createCanonicalInboxSupabase(seed = {}) {
 function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
   return {
     from(table) {
-      if (table === "v_inbox_threads_live_v2" || table === "v_inbox_thread_counts_live_v2") {
+      if (table === "inbox_threads_view" || table === "v_inbox_threads_live_v2" || table === "v_inbox_thread_counts_live_v2") {
         return {
           select() {
             return {
@@ -204,6 +205,18 @@ function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
                 }).then(resolve, reject);
               },
             };
+          },
+        };
+      }
+
+      if (table === "message_events" || table === "send_queue") {
+        return {
+          select() { return this; },
+          in() { return this; },
+          order() { return this; },
+          limit() { return this; },
+          then(resolve, reject) {
+            return Promise.resolve({ data: [], count: 0, error: null }).then(resolve, reject);
           },
         };
       }
@@ -525,6 +538,136 @@ test("send event inserted into message_events becomes the latest thread row", as
   assert.equal(after.threads[0].latest_message_body, "Fresh outbound follow-up");
   assert.equal(threadMessages.rows.at(-1)?.message_body, "Fresh outbound follow-up");
   assert.equal(threadMessages.rows.at(-1)?.direction, "outbound");
+});
+
+test("thread messages use property plus phone and do not merge same-phone properties", async () => {
+  const phone = "+15550000999";
+  const supabase = createCanonicalInboxSupabase({
+    messageEvents: [
+      makeEvent({
+        id: "same-phone-prop-a",
+        thread_key: phone,
+        canonical_e164: phone,
+        to_phone_number: phone,
+        direction: "outbound",
+        property_id: "prop-a",
+        master_owner_id: "owner-a",
+        message_body: "Property A message",
+      }),
+      makeEvent({
+        id: "same-phone-prop-b",
+        thread_key: phone,
+        canonical_e164: phone,
+        to_phone_number: phone,
+        direction: "outbound",
+        property_id: "prop-b",
+        master_owner_id: "owner-b",
+        message_body: "Property B message",
+      }),
+    ],
+  });
+
+  const result = await getThreadMessages(
+    {
+      selected_thread_key: "ct:property:prop-a|owner:owner-a|phone:+15550000999",
+      conversation_thread_id: "ct:property:prop-a|owner:owner-a|phone:+15550000999",
+      normalized_phone: phone,
+      property_id: "prop-a",
+      master_owner_id: "owner-a",
+    },
+    { limit: 50 },
+    { supabase },
+  );
+
+  assert.equal(result.integrityBlocked, false);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].message_body, "Property A message");
+  assert.equal(result.rows[0].property_id, "prop-a");
+});
+
+test("thread messages try all strict identities and keep the full selected timeline", async () => {
+  const phone = "+15550000777";
+  const supabase = createCanonicalInboxSupabase({
+    messageEvents: [
+      makeEvent({
+        id: "selected-property-row",
+        thread_key: phone,
+        canonical_e164: phone,
+        to_phone_number: phone,
+        direction: "outbound",
+        property_id: "prop-a",
+        master_owner_id: "owner-a",
+        prospect_id: null,
+        message_body: "Property-linked outbound",
+        event_timestamp: "2026-05-29T12:00:00.000Z",
+      }),
+      makeEvent({
+        id: "selected-owner-row",
+        thread_key: phone,
+        canonical_e164: phone,
+        from_phone_number: phone,
+        direction: "inbound",
+        property_id: null,
+        master_owner_id: "owner-a",
+        prospect_id: null,
+        message_body: "Owner-linked inbound",
+        event_timestamp: "2026-05-29T12:02:00.000Z",
+      }),
+      makeEvent({
+        id: "wrong-property-row",
+        thread_key: phone,
+        canonical_e164: phone,
+        to_phone_number: phone,
+        direction: "outbound",
+        property_id: "prop-b",
+        master_owner_id: "owner-a",
+        prospect_id: null,
+        message_body: "Wrong property outbound",
+        event_timestamp: "2026-05-29T12:03:00.000Z",
+      }),
+    ],
+  });
+
+  const result = await getThreadMessages(
+    {
+      selected_thread_key: "ct:prospect:pros-a|property:prop-a|owner:owner-a|phone:+15550000777",
+      conversation_thread_id: "ct:prospect:pros-a|property:prop-a|owner:owner-a|phone:+15550000777",
+      normalized_phone: phone,
+      prospect_id: "pros-a",
+      property_id: "prop-a",
+      master_owner_id: "owner-a",
+    },
+    { limit: 50 },
+    { supabase },
+  );
+
+  assert.equal(result.integrityBlocked, false);
+  assert.deepEqual(
+    result.rows.map((row) => row.message_body),
+    ["Property-linked outbound", "Owner-linked inbound"],
+  );
+  assert.equal(result.rows.some((row) => row.message_body === "Wrong property outbound"), false);
+  assert.match(result.identityUsed, /property_id\+normalized_phone|master_owner_id\+normalized_phone/);
+});
+
+test("phone-only selected thread blocks integrity conflicts instead of rendering merged messages", async () => {
+  const phone = "+15550000888";
+  const supabase = createCanonicalInboxSupabase({
+    messageEvents: [
+      makeEvent({ id: "conflict-a", thread_key: phone, canonical_e164: phone, to_phone_number: phone, property_id: "prop-a", message_body: "A" }),
+      makeEvent({ id: "conflict-b", thread_key: phone, canonical_e164: phone, to_phone_number: phone, property_id: "prop-b", message_body: "B" }),
+    ],
+  });
+
+  const result = await getThreadMessages(
+    { selected_thread_key: phone, canonical_e164: phone },
+    { limit: 50 },
+    { supabase },
+  );
+
+  assert.equal(result.integrityBlocked, true);
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.diagnostics.error_code, "thread_identity_integrity_violation");
 });
 
 test("counts come from the same canonical v2 source and match filter results", async () => {

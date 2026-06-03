@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../_shared.js'
 import { supabase, hasSupabaseConfig } from '@/lib/supabase/client.js'
 import { getSystemFlags } from '@/lib/system-control.js'
+import { normalizeTextGridFailure } from '@/lib/domain/messaging/textgrid-failure-normalization.js'
+import { buildTextGridSenderHealth } from '@/lib/domain/messaging/textgrid-sender-health.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,6 +34,9 @@ function startOfWindow(window = 'today') {
   }
   if (window === '24h') {
     return { start: new Date(now.getTime() - 24 * 60 * 60 * 1000), end: now }
+  }
+  if (window === '48h') {
+    return { start: new Date(now.getTime() - 48 * 60 * 60 * 1000), end: now }
   }
   if (window === '7d') {
     return { start: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), end: now }
@@ -143,10 +148,16 @@ function classifyQueueRow(row) {
 }
 
 function classifyBlockReason(row) {
+  const normalizedFailure = normalizeTextGridFailure(row)
+  if (normalizedFailure.failure_class === 'content_filter_blocked') return 'content_blocked'
+  if (normalizedFailure.failure_class === 'recipient_opted_out') return 'opted_out'
+  if (normalizedFailure.failure_class === 'invalid_to_number') return 'invalid_number'
+  if (normalizedFailure.failure_class === 'recipient_out_of_credit') return 'recipient_out_of_credit'
+
   const blocked = lower(row.blocked_reason || '')
   const failed = lower(row.failed_reason || '')
   const metadata = row.metadata || {}
-  const meta = lower(metadata.failure_category || metadata.blocked_reason || metadata.block_reason || '')
+  const meta = lower(metadata.failure_class || metadata.provider_failure_reason || metadata.normalized_reason || metadata.failure_category || metadata.blocked_reason || metadata.block_reason || '')
   const combined = blocked || failed || meta
 
   if (combined.includes('content') || combined.includes('filter')) return 'content_blocked'
@@ -314,10 +325,13 @@ function buildNumberOutliers(senderPerformance) {
     sent: s.sent_count,
     delivered: s.delivered_count,
     failed: s.failed_count,
+    content_filter_count: s.content_filter_count || 0,
+    invalid_to_count: s.invalid_to_count || 0,
     replies: s.inbound_reply_count,
     opt_outs: s.opt_out_count,
     delivery_rate: safeRateOrNull(s.delivered_count, s.sent_count),
     failure_rate: safeRateOrNull(s.failed_count, s.sent_count),
+    content_filter_rate: safeRateOrNull(s.content_filter_count || 0, s.sent_count),
     reply_rate: safeRateOrNull(s.inbound_reply_count, s.delivered_count),
     opt_out_rate: safeRateOrNull(s.opt_out_count, s.delivered_count),
   }))
@@ -343,50 +357,71 @@ function deriveQueueProcessorStatus({
   return 'Idle / Needs Run'
 }
 
-function buildSenderPerformance(messageRows = []) {
-  const bySender = new Map()
-  for (const row of messageRows) {
-    if (lower(row.direction) !== 'outbound') continue
-    const sender = clean(row.from_phone_number) || 'unknown'
-    const entry = bySender.get(sender) || {
-      sender,
+function buildSenderPerformance(messageRows = [], queueRows = []) {
+  return buildTextGridSenderHealth(messageRows, queueRows)
+}
+
+function degradedMetricsResponse({ errorCode, message, window = 'today', startedAt, sourceUsed = null }) {
+  const generated_at = new Date().toISOString()
+  return {
+    ok: true,
+    degraded: true,
+    action: 'ops-metrics',
+    error_code: errorCode,
+    error: errorCode,
+    message,
+    diagnostics: {
+      window,
+      generated_at,
       sent_count: 0,
       delivered_count: 0,
       failed_count: 0,
-      inbound_reply_count: 0,
-      opt_out_count: 0,
-    }
-    if (isAcceptedOutbound(row)) entry.sent_count += 1
-    if (isDeliveredStatus(row.provider_delivery_status) || isDeliveredStatus(row.delivery_status)) entry.delivered_count += 1
-    if (isFailedStatus(row.provider_delivery_status) || isFailedStatus(row.delivery_status) || row.is_final_failure === true) entry.failed_count += 1
-    bySender.set(sender, entry)
+      pending_count: 0,
+      queued_count: 0,
+      received_count: 0,
+      reply_rate: 0,
+      positive_rate: 0,
+      negative_rate: 0,
+      delivery_rate: 0,
+      failure_rate: 0,
+      opt_out_rate: 0,
+      queue_processor_status: 'Unknown',
+      queue_last_run_at: null,
+      queue_waiting_count: 0,
+      queue_failed_today_count: 0,
+      automation_hard_failure_count: 0,
+      sender_performance: [],
+      sections: {
+        first_touch: {},
+        auto_replies: { stage_1: {}, stage_2: {}, stage_3: {} },
+        manual_replies: {},
+        follow_up: {},
+        unknown: {},
+        queue_health: {},
+        failure_reasons: { total: 0, by_reason: {} },
+        template_outliers: { top: [] },
+        number_outliers: { top: [] },
+      },
+      metric_source_debug: {
+        transport_source: 'message_events',
+        queue_source: 'send_queue',
+        degraded: true,
+        error_code: errorCode,
+        sourceUsed,
+      },
+      queryMs: Date.now() - startedAt,
+      sourceUsed,
+    },
+    queryMs: Date.now() - startedAt,
+    sourceUsed,
   }
-
-  for (const row of messageRows) {
-    if (lower(row.direction) !== 'inbound') continue
-    const target = clean(row.to_phone_number)
-    if (!target || !bySender.has(target)) continue
-    const entry = bySender.get(target)
-    entry.inbound_reply_count += 1
-    if (row.is_opt_out === true || lower(row.detected_intent) === 'opt_out') entry.opt_out_count += 1
-  }
-
-  return [...bySender.values()]
-    .map((entry) => ({
-      ...entry,
-      delivery_rate: safeRate(entry.delivered_count, entry.sent_count),
-      failure_rate: safeRate(entry.failed_count, entry.sent_count),
-      reply_rate: safeRate(entry.inbound_reply_count, entry.delivered_count),
-      opt_out_rate: safeRate(entry.opt_out_count, entry.delivered_count),
-    }))
-    .filter((entry) => entry.sent_count > 0)
-    .sort((a, b) => b.sent_count - a.sent_count)
 }
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function GET(request) {
   const cors = corsHeaders(request)
+  const startedAt = Date.now()
   const auth = ensureMutationAuth(request)
   if (!auth.ok) {
     return NextResponse.json(
@@ -395,7 +430,14 @@ export async function GET(request) {
     )
   }
   if (!hasSupabaseConfig()) {
-    return NextResponse.json({ ok: false, error: 'supabase_not_configured' }, { status: 500, headers: cors })
+    return NextResponse.json(
+      degradedMetricsResponse({
+        errorCode: 'supabase_not_configured',
+        message: 'Supabase is not configured for ops metrics.',
+        startedAt,
+      }),
+      { status: 200, headers: cors },
+    )
   }
 
   const { searchParams } = new URL(request.url)
@@ -410,12 +452,12 @@ export async function GET(request) {
     getSystemFlags(['queue_runner_enabled']),
     supabase
       .from('message_events')
-      .select('direction, delivery_status, provider_delivery_status, detected_intent, is_opt_out, is_final_failure, from_phone_number, to_phone_number, created_at, thread_key')
+      .select('id, queue_id, direction, delivery_status, provider_delivery_status, raw_carrier_status, failure_bucket, failure_reason, error_message, detected_intent, is_opt_out, is_final_failure, from_phone_number, to_phone_number, message_body, market, metadata, created_at, updated_at, delivered_at, failed_at, thread_key')
       .gte('created_at', startIso)
       .lte('created_at', endIso),
     supabase
       .from('send_queue')
-      .select('queue_status, failed_reason, blocked_reason, metadata, updated_at, created_at, queue_key, message_type, use_case_template, touch_number, current_stage, thread_key, to_phone_number, template_id, scheduled_for')
+      .select('id, queue_status, failed_reason, blocked_reason, blocked_reasons, guard_reason, metadata, updated_at, created_at, queue_key, message_type, use_case_template, touch_number, current_stage, thread_key, to_phone_number, from_phone_number, textgrid_number, textgrid_number_id, message_body, message_text, rendered_message, market, template_id, scheduled_for')
       .gte('created_at', startIso)
       .lte('created_at', endIso),
     supabase
@@ -427,22 +469,55 @@ export async function GET(request) {
   } catch (fetchErr) {
     console.error('[ops-metrics] query failure', fetchErr)
     return NextResponse.json(
-      { ok: false, error: 'METRICS_QUERY_FAILED', message: String(fetchErr?.message ?? fetchErr) },
-      { status: 500, headers: cors },
+      degradedMetricsResponse({
+        errorCode: 'METRICS_QUERY_FAILED',
+        message: String(fetchErr?.message ?? fetchErr),
+        window,
+        startedAt,
+        sourceUsed: 'message_events/send_queue',
+      }),
+      { status: 200, headers: cors },
     )
   }
 
   if (messageRes.error) {
     console.error('[ops-metrics] message_events error', messageRes.error)
-    return NextResponse.json({ ok: false, error: 'MESSAGE_EVENTS_ERROR', message: String(messageRes.error.message) }, { status: 500, headers: cors })
+    return NextResponse.json(
+      degradedMetricsResponse({
+        errorCode: 'MESSAGE_EVENTS_ERROR',
+        message: String(messageRes.error.message),
+        window,
+        startedAt,
+        sourceUsed: 'message_events',
+      }),
+      { status: 200, headers: cors },
+    )
   }
   if (queueRes.error) {
     console.error('[ops-metrics] send_queue error', queueRes.error)
-    return NextResponse.json({ ok: false, error: 'QUEUE_ERROR', message: String(queueRes.error.message) }, { status: 500, headers: cors })
+    return NextResponse.json(
+      degradedMetricsResponse({
+        errorCode: 'QUEUE_ERROR',
+        message: String(queueRes.error.message),
+        window,
+        startedAt,
+        sourceUsed: 'send_queue',
+      }),
+      { status: 200, headers: cors },
+    )
   }
   if (activeQueueRes.error) {
     console.error('[ops-metrics] active_queue error', activeQueueRes.error)
-    return NextResponse.json({ ok: false, error: 'ACTIVE_QUEUE_ERROR', message: String(activeQueueRes.error.message) }, { status: 500, headers: cors })
+    return NextResponse.json(
+      degradedMetricsResponse({
+        errorCode: 'ACTIVE_QUEUE_ERROR',
+        message: String(activeQueueRes.error.message),
+        window,
+        startedAt,
+        sourceUsed: 'send_queue:active',
+      }),
+      { status: 200, headers: cors },
+    )
   }
 
   const messageRows = messageRes.data || []
@@ -517,7 +592,7 @@ export async function GET(request) {
     hasRecentError,
   })
 
-  const senderPerformance = buildSenderPerformance(messageRows)
+  const senderPerformance = buildSenderPerformance(messageRows, queueRows)
 
   // ── Sections ────────────────────────────────────────────────────────────
   const sectionArgs = [queueRows, outboundRows, inboundRows, threadToType]
@@ -571,9 +646,21 @@ export async function GET(request) {
       thread_to_type_entries: threadToType.size,
       queue_runner_enabled: flags.queue_runner_enabled !== false,
     },
+    queryMs: Date.now() - startedAt,
+    sourceUsed: 'message_events/send_queue',
   }
 
-  return NextResponse.json({ ok: true, action: 'ops-metrics', diagnostics: response }, { status: 200, headers: cors })
+  return NextResponse.json(
+    {
+      ok: true,
+      degraded: false,
+      action: 'ops-metrics',
+      diagnostics: response,
+      queryMs: Date.now() - startedAt,
+      sourceUsed: 'message_events/send_queue',
+    },
+    { status: 200, headers: cors },
+  )
 }
 
 export async function OPTIONS(request) {

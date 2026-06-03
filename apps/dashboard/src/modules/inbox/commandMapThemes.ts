@@ -205,7 +205,7 @@ export type CommandMapThemeDefinition = {
 }
 
 const sharedPinPalette = {
-  not_contacted: '#94a3b8',
+  not_contacted: '#a8b8cc',
   contacted: '#4d8fff',
   new_reply: '#62d3ff',
   positive_intent: '#30d5c8',

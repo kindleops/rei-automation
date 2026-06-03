@@ -6,6 +6,7 @@ import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../share
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
 import { NotificationToasts, NotificationCenter } from '../shared/NotificationToast'
 import { playSound } from '../shared/sounds'
+import { ErrorBoundary } from '../shared/ErrorBoundary'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
 import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
@@ -34,7 +35,7 @@ const initialState: RouteLoadState = {
 
 // ── Nav Items ──────────────────────────────────────────────────────────────
 
-type NavIconName = 'radar' | 'inbox' | 'alert' | 'stats' | 'map' | 'users' | 'file-text' | 'settings' | 'bell' | 'star' | 'grid' | 'target' | 'send'
+type NavIconName = 'radar' | 'inbox' | 'alert' | 'stats' | 'map' | 'users' | 'file-text' | 'settings' | 'bell' | 'star' | 'grid' | 'target' | 'send' | 'mail'
 
 interface NavItem {
   path: string
@@ -62,6 +63,7 @@ const navItems: NavItem[] = [
   { path: '/notifications', label: 'Notifications', icon: 'bell', shortcut: 'N', room: 'Notifications' },
   { path: '/settings', label: 'Settings', icon: 'settings', shortcut: 'S', room: 'Settings' },
   { path: '/campaigns', label: 'Campaigns', icon: 'send', shortcut: 'P', room: 'Campaign Command Center' },
+  { path: '/email', label: 'Email', icon: 'mail', shortcut: 'E', room: 'Email Command Center' },
   { path: '/mobile', label: 'Mobile', icon: 'grid', shortcut: 'O', room: 'Mobile Command Center' },
 ]
 
@@ -492,7 +494,9 @@ export const CommandCenterApp = () => {
     return (
       <>
         <main style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
-          {route.render(routeState.data)}
+          <ErrorBoundary label={route.title} resetKey={route.path}>
+            {route.render(routeState.data)}
+          </ErrorBoundary>
         </main>
         <NotificationToasts />
       </>
@@ -510,7 +514,9 @@ export const CommandCenterApp = () => {
 
       {/* Main content — full bleed */}
       <main className="nx-stage">
-        {route.render(routeState.data)}
+        <ErrorBoundary label={route.title} resetKey={route.path}>
+          {route.render(routeState.data)}
+        </ErrorBoundary>
       </main>
 
       <GlobalCommandOverlay

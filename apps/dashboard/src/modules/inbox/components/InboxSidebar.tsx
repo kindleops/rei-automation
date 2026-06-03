@@ -54,6 +54,8 @@ interface InboxSidebarProps {
   sourceMode?: InboxSourceMode
   onSourceModeChange?: (mode: InboxSourceMode) => void
   loading?: boolean
+  realtimeStatus?: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
+  refreshMode?: 'realtime' | 'polling' | 'disabled'
 }
 
 type BucketConfig = {
@@ -635,7 +637,9 @@ export const InboxSidebar = ({
   viewCounts, onOpenAdvancedFilters, onClearFilters, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
-  loading = false
+  loading = false,
+  realtimeStatus = 'connecting',
+  refreshMode = 'realtime',
 }: InboxSidebarProps) => {
   const groupsRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
@@ -644,6 +648,8 @@ export const InboxSidebar = ({
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
   const prevThreadsLengthRef = useRef(threads.length)
   const loadingErrorMessage = formatLoadingError(loadingError)
+  const realtimeDegraded = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
+  const degradedModeMessage = loadingErrorMessage || (realtimeDegraded ? 'Realtime degraded. Using polling mode.' : '')
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
     if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'follow_up'
     if (activeViewFilter === 'dnc_opt_out' || activeViewFilter === 'opt_out') return 'suppressed'
@@ -868,15 +874,20 @@ export const InboxSidebar = ({
   )
 
   const renderSecondaryControls = () => {
-    if (loadingErrorMessage) {
-      console.warn('[TELEMETRY_DEGRADED_BANNER]', { error: loadingErrorMessage, endpoint: '/api/cockpit/inbox/live' })
+    if (degradedModeMessage) {
+      console.warn('[TELEMETRY_DEGRADED_BANNER]', {
+        error: loadingErrorMessage || null,
+        realtimeStatus,
+        refreshMode,
+        endpoint: '/api/cockpit/inbox/live',
+      })
     }
     return (
     <>
       <div className="nx-sidebar-rebuilt__secondary-controls">
-        {loadingErrorMessage && (
-          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={loadingErrorMessage}>
-            <Icon name="alert" /> Telemetry Degraded
+        {degradedModeMessage && (
+          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={degradedModeMessage}>
+            <Icon name="alert" /> Degraded · {refreshMode === 'polling' ? 'Polling' : 'Telemetry'}
           </span>
         )}
         <button type="button" onClick={() => {
@@ -936,7 +947,16 @@ export const InboxSidebar = ({
         const decision = decisionMap.get(thread.id)
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
-      }) : <div className="nx-sidebar-rebuilt__empty">No conversations match this filter.</div>}
+      }) : (
+        <div className={cls('nx-sidebar-rebuilt__empty', degradedModeMessage && 'is-degraded')}>
+          {degradedModeMessage ? (
+            <>
+              <strong>Inbox degraded mode</strong>
+              <span>{degradedModeMessage}</span>
+            </>
+          ) : 'No conversations match this filter.'}
+        </div>
+      )}
       {canLoadMore && (
         <div className="nx-sidebar-rebuilt__load-more">
           <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>

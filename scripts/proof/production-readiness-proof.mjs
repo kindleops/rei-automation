@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -137,7 +137,14 @@ async function checkSupabaseReadiness() {
   const { data, error } = await supabase
     .from("system_control")
     .select("key,value")
-    .in("key", ["queue_processor_mode", "auto_reply_mode", "campaign_mode", "queue_auto_send_enabled"]);
+    .in("key", [
+      "queue_processor_mode",
+      "auto_reply_mode",
+      "campaign_mode",
+      "queue_auto_send_enabled",
+      "queue_auto_enqueue_enabled",
+      "queue_emergency_stop_at",
+    ]);
 
   if (error) {
     mark("system_control safety values readable", false, error.message);
@@ -149,11 +156,15 @@ async function checkSupabaseReadiness() {
   const autoReplyMode = values.auto_reply_mode || "disabled";
   const campaignMode = values.campaign_mode || "paused";
   const autoSend = values.queue_auto_send_enabled || "false";
+  const autoEnqueue = values.queue_auto_enqueue_enabled || "false";
+  const emergencyStopAt = values.queue_emergency_stop_at || "";
 
   mark("runtime queue_processor_mode safe", ["paused", "off", "safe", "dry_run"].includes(queueMode), `value=${queueMode}`);
   mark("runtime auto_reply_mode safe", ["disabled", "dry_run"].includes(autoReplyMode), `value=${autoReplyMode}`);
   mark("runtime campaign_mode safe", ["paused", "dry_run"].includes(campaignMode), `value=${campaignMode}`);
   mark("runtime queue_auto_send_enabled false", !["true", "1", "yes", "on", "enabled"].includes(autoSend), `value=${autoSend}`);
+  mark("runtime queue_auto_enqueue_enabled false", !["true", "1", "yes", "on", "enabled"].includes(autoEnqueue), `value=${autoEnqueue}`);
+  mark("runtime emergency stop readable", true, `set=${Boolean(emergencyStopAt)}`);
 }
 
 function headers() {
@@ -215,6 +226,93 @@ async function checkEmergencyStopLive() {
   }
 }
 
+async function checkRuntimeBrakeInvariants() {
+  const queueSafety = await import(
+    pathToFileURL(path.join(API_ROOT, "src/lib/domain/queue/queue-control-safety.js")).href
+  );
+  const autoReplyMode = await import(
+    pathToFileURL(path.join(API_ROOT, "src/lib/domain/seller-flow/auto-reply-mode.js")).href
+  );
+
+  const permissiveSettings = {
+    queue_processor_mode: "live",
+    campaign_mode: "live_limited",
+    auto_reply_mode: "live_limited",
+    queue_auto_enqueue_enabled: "true",
+    queue_auto_send_enabled: "true",
+    queue_emergency_stop_at: "2026-05-30T00:00:00.000Z",
+  };
+
+  const emergencySend = queueSafety.evaluateQueueSendRuntimeBrakes(permissiveSettings, {
+    action: "proof_send",
+    failClosed: true,
+  });
+  mark(
+    "emergency stop blocks send despite permissive flags",
+    emergencySend.ok === false && emergencySend.reason === "queue_emergency_stop_active",
+    `reason=${emergencySend.reason || "missing"}`,
+  );
+
+  const emergencyCreate = queueSafety.evaluateQueueCreationRuntimeBrakes(permissiveSettings, {
+    action: "proof_queue_create",
+    requireAutoEnqueue: true,
+    failClosed: true,
+  });
+  mark(
+    "emergency stop blocks queue creation despite permissive flags",
+    emergencyCreate.ok === false && emergencyCreate.reason === "queue_emergency_stop_active",
+    `reason=${emergencyCreate.reason || "missing"}`,
+  );
+
+  const pausedSend = queueSafety.evaluateQueueSendRuntimeBrakes(
+    { queue_processor_mode: "off", queue_emergency_stop_at: "" },
+    { action: "proof_send", failClosed: true },
+  );
+  mark(
+    "queue_processor_mode off blocks live send",
+    pausedSend.ok === false && pausedSend.reason === "queue_processor_paused",
+    `reason=${pausedSend.reason || "missing"}`,
+  );
+
+  const pausedCreate = queueSafety.evaluateQueueCreationRuntimeBrakes(
+    { campaign_mode: "paused", queue_auto_enqueue_enabled: "true", queue_emergency_stop_at: "" },
+    { action: "proof_queue_create", requireAutoEnqueue: true, failClosed: true },
+  );
+  mark(
+    "campaign_mode paused blocks queue creation",
+    pausedCreate.ok === false && pausedCreate.reason === "campaign_paused",
+    `reason=${pausedCreate.reason || "missing"}`,
+  );
+
+  const dryRunCreate = queueSafety.evaluateQueueCreationRuntimeBrakes(
+    { campaign_mode: "dry_run", queue_auto_enqueue_enabled: "true", queue_emergency_stop_at: "" },
+    { action: "proof_queue_create", requireAutoEnqueue: true, failClosed: true },
+  );
+  mark(
+    "campaign_mode dry_run blocks live queue creation",
+    dryRunCreate.ok === false && dryRunCreate.reason === "campaign_not_live_limited",
+    `reason=${dryRunCreate.reason || "missing"}`,
+  );
+
+  const disabledAutoReply = autoReplyMode.resolveGuardedAutoReplyMode({
+    requestedMode: "live_limited",
+    env: {
+      AUTO_REPLY_MODE: "live_limited",
+      AUTO_REPLY_ENABLED: "true",
+      AUTO_REPLY_LIVE_ENABLED: "true",
+    },
+    systemMode: "disabled",
+    legacyEnabled: true,
+    legacyDryRun: false,
+    legacyLiveEnabled: true,
+  });
+  mark(
+    "auto_reply_mode disabled beats permissive env booleans",
+    disabledAutoReply.mode === "disabled" && disabledAutoReply.source === "system_control",
+    `mode=${disabledAutoReply.mode || "missing"} source=${disabledAutoReply.source || "missing"}`,
+  );
+}
+
 async function main() {
   console.log("Production readiness proof mode=read-only unless emergency-stop opt-in is set");
 
@@ -253,7 +351,11 @@ async function main() {
   mark("campaign_mode default paused", /campaign_mode:\s*['"]paused['"]/.test(queueControlSource));
   mark("campaign dry-run action exists", queueControlSource.includes("run_dry_run_feeder") && queueControlSource.includes("dry_run: true"));
   mark("emergency stop code path exists", queueControlSource.includes("action === 'emergency_stop'") && queueControlSource.includes("queue_auto_send_enabled: 'false'"));
+  mark("provider send checks runtime brakes", readText(path.join(API_ROOT, "src/lib/providers/textgrid.js")).includes("evaluateQueueSendRuntimeBrakes"));
+  mark("queue creation checks runtime brakes", readText(path.join(API_ROOT, "src/lib/domain/outbound/supabase-candidate-feeder.js")).includes("evaluateQueueCreationRuntimeBrakes"));
+  mark("auto-reply emergency stop path exists", readText(path.join(API_ROOT, "src/lib/flows/handle-textgrid-inbound.js")).includes("queue_emergency_stop"));
 
+  await checkRuntimeBrakeInvariants();
   await checkEmergencyStopLive();
   await checkSupabaseReadiness();
 

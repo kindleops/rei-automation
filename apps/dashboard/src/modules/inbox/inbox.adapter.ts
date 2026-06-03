@@ -2,14 +2,32 @@ import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
 import { inboxReducer, EMPTY_INBOX_STORE_STATE } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
-import { fetchInboxModel, type InboxFetchOptions, type LiveInboxDiagnostics, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
+import { buildConversationThreadIdFromRecord, fetchInboxModel, type InboxFetchOptions, type LiveInboxDiagnostics, type LiveInboxMapPin, type LiveInboxPagination, type InboxSourceMode } from '../../lib/data/inboxData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
+import {
+  patchDashboardThread,
+  setDashboardConnectionState,
+} from '../../lib/data/dashboardEntityStore'
+import {
+  logRealtimeFallbackPolling,
+  logRealtimePatchApplied,
+  type DashboardConnectionState,
+} from '../../lib/data/dashboardDataLayer'
 
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
 type InboxTimeoutMode = NonNullable<InboxFetchOptions['_timeoutMode']>
+export type InboxRealtimeStatus = 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
+
+const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConnectionState => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline'
+  if (status === 'connected') return 'live'
+  if (status === 'connecting') return 'reconnecting'
+  if (status === 'disabled' || status === 'error') return 'degraded_polling'
+  return 'reconnecting'
+}
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
   initial_boot: 30_000,
@@ -33,6 +51,7 @@ const withTimeout = async <T,>(
   timeoutMs: number,
   timeoutMessage: string,
   externalSignal?: AbortSignal,
+  trace: Record<string, unknown> = {},
 ): Promise<T> => {
   const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -50,7 +69,15 @@ const withTimeout = async <T,>(
   }
 
   try {
-    timeoutId = setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs)
+    timeoutId = setTimeout(() => {
+      timedOut = true
+      console.warn('[INBOX_TIMEOUT_FIRED]', {
+        timeoutFired: true,
+        timeoutMs,
+        ...trace,
+      })
+      controller.abort()
+    }, timeoutMs)
     return await run(controller.signal)
   } catch (error) {
     if (timedOut) throw new Error(timeoutMessage)
@@ -59,6 +86,11 @@ const withTimeout = async <T,>(
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
     if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort)
+    console.log('[INBOX_TIMEOUT_SETTLED]', {
+      timeoutFired: timedOut,
+      timeoutMs,
+      ...trace,
+    })
   }
 }
 
@@ -110,6 +142,12 @@ export interface InboxThread {
   aiDraft: string | null
   labels: string[]
   threadKey?: string
+  conversationThreadId?: string
+  conversation_thread_id?: string
+  legacyThreadKey?: string
+  legacy_thread_key?: string
+  normalizedPhone?: string
+  normalized_phone?: string
   ownerId?: string
   prospectId?: string
   propertyId?: string
@@ -135,8 +173,12 @@ export interface InboxThread {
   failureReason?: string
   propertyAddress?: string
   propertyAddressFull?: string
+  propertyCity?: string
   market?: string
   marketName?: string
+  city?: string
+  state?: string
+  zip?: string
   lastInboundAt?: string | null
   lastOutboundAt?: string | null
   needsResponse?: boolean
@@ -455,6 +497,10 @@ export interface InboxModel {
   orphanCount?: number
   latestFetchMs?: number
   realtimeConnected?: boolean
+  realtimeStatus?: InboxRealtimeStatus
+  connectionState?: DashboardConnectionState
+  realtimeDegraded?: boolean
+  refreshMode?: 'realtime' | 'polling' | 'disabled'
   countsDegraded?: boolean
   countsApproximate?: boolean
   countsSource?: string | null
@@ -552,6 +598,12 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
       timeoutMs,
       `Live Inbox request timed out after ${timeoutMs}ms (${timeoutMode})`,
       options.signal,
+      {
+        filterKey,
+        timeoutMode,
+        automatic: options._automatic === true,
+        refreshReason: options._refreshReason ?? null,
+      },
     )
 
     // Save lightweight cache scoped to this filter key so different filters never bleed
@@ -584,6 +636,14 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
       localStorage.removeItem(scopedCacheKey)
     }
 
+    console.log('[INBOX_LOAD_RESPONSE_MODEL]', {
+      filterKey,
+      dataMode: result.dataMode,
+      responseBodyCount: result.threads.length,
+      totalCount: result.totalCount,
+      liveDataSource: result.liveDataSource ?? result.liveDiagnostics?.source ?? null,
+      fallbackUsed: result.fallbackUsed ?? result.liveDiagnostics?.fallbackUsed ?? false,
+    })
     if (isDev) console.log('[dashboard boot] live inbox fetch success', { filterKey, count: result.threads.length })
     return { ...result, _requestedFilter: filterKey }
   } catch (error) {
@@ -629,7 +689,9 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   return {
     ...t,
     threadKey: t.threadKey || t.id,
-    thread_id: t.thread_id || t.threadKey || t.id,
+    conversationThreadId: t.conversationThreadId || t.conversation_thread_id || t.id,
+    conversation_thread_id: t.conversation_thread_id || t.conversationThreadId || t.id,
+    thread_id: t.thread_id || t.conversationThreadId || t.conversation_thread_id || t.threadKey || t.id,
     inboxStatus,
     conversationStage,
     inboxStage: conversationStage,
@@ -734,6 +796,8 @@ const normalizeRealtimeBucket = (value: unknown): string => {
 }
 
 const resolveRealtimeThreadKey = (row: Record<string, unknown>, table: string): string => {
+  const conversationThreadId = String(row.conversation_thread_id ?? row.conversationThreadId ?? '').trim()
+  if (conversationThreadId) return conversationThreadId
   const explicit = String(row.thread_key ?? row.threadKey ?? '').trim()
   if (explicit) return explicit
   const direction = table === 'send_queue' ? 'outbound' : normalizeRealtimeDirection(row.direction)
@@ -833,7 +897,14 @@ const buildRealtimeThreadPatch = (
   const ourNumber = direction === 'inbound'
     ? normalizePhoneLike(row.to_phone_number)
     : normalizePhoneLike(row.from_phone_number)
+  const conversationThreadId = buildConversationThreadIdFromRecord({
+    ...row,
+    seller_phone: sellerPhone,
+    canonical_e164: sellerPhone || row.canonical_e164,
+  })
   return {
+    conversationThreadId,
+    conversation_thread_id: conversationThreadId,
     threadKey,
     thread_key: threadKey,
     preview: body,
@@ -927,10 +998,12 @@ const normalizeBucketKey = (key: string): string => {
 const threadIdentityCandidates = (value: unknown): string[] => {
   const raw = String(value ?? '').trim()
   if (!raw) return []
+  if (raw.toLowerCase().startsWith('ct:')) return [raw]
   const candidates = new Set<string>([raw])
   const withoutPhonePrefix = raw.toLowerCase().startsWith('phone:') ? raw.slice(6).trim() : ''
   if (withoutPhonePrefix) candidates.add(withoutPhonePrefix)
   for (const candidate of [...candidates]) {
+    if (candidate.includes('|')) continue
     const digits = candidate.replace(/\D/g, '')
     if (digits.length === 10) candidates.add(`+1${digits}`)
     else if (digits.length === 11 && digits.startsWith('1')) candidates.add(`+${digits}`)
@@ -940,6 +1013,8 @@ const threadIdentityCandidates = (value: unknown): string[] => {
 }
 
 const rowIdentityValues = (row: Record<string, unknown>): string[] => Array.from(new Set([
+  row.conversationThreadId,
+  row.conversation_thread_id,
   row.threadKey,
   row.thread_key,
   row.id,
@@ -980,6 +1055,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   const lastFetchRef = useRef<InboxFetchOptions>({ sourceMode: initialSourceMode })
   const abortByBucketRef = useRef<Record<string, AbortController>>({})
+  const latestRequestIdByBucketRef = useRef<Record<string, string>>({})
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastRefreshAtRef = useRef<string | null>(null)
   const realtimeBatchRef = useRef<{ tables: Set<string>; threadKeys: Set<string>; eventCount: number }>({
@@ -987,7 +1063,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   })
 
   const realtimeEnabled = String(import.meta.env.VITE_INBOX_REALTIME_ENABLED ?? 'true').toLowerCase() !== 'false'
-  const minRefreshMs = 120_000 // 2 minutes
+  const minRefreshMs = 15_000
 
   if (isDev) {
     // Log on first render only (conditional render logging, not an effect).
@@ -1004,31 +1080,72 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       : options
     const requestId = `${bucketKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    // Never start a new refresh if same bucket fetch is already in flight.
-    if (abortByBucketRef.current[bucketKey] && mode === 'refresh') {
-      if (!options._force) {
-        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'already_in_flight' })
+    const existingController = abortByBucketRef.current[bucketKey]
+    const sameBucketInFlight = Boolean(existingController && !existingController.signal.aborted)
+    if (sameBucketInFlight) {
+      const forceMaySupersede = options._force === true && options._timeoutMode !== 'initial_boot'
+      const appendMaySupersede = mode === 'append'
+      if (!forceMaySupersede && !appendMaySupersede) {
+        console.log('[INBOX_FETCH_SKIPPED]', {
+          bucketKey,
+          mode,
+          refresh_skipped_reason: options._timeoutMode === 'initial_boot' ? 'boot_fetch_already_in_flight' : 'already_in_flight',
+          inFlightRequestId: latestRequestIdByBucketRef.current[bucketKey] ?? null,
+          requestedTimeoutMode: options._timeoutMode ?? null,
+          requestedForce: options._force === true,
+        })
         return null
       }
-      abortByBucketRef.current[bucketKey]?.abort()
-    }
 
-    // Abort previous in-flight request for this specific bucket (only for append, or if we really want to supersede).
-    if (mode === 'append') {
-      abortByBucketRef.current[bucketKey]?.abort()
+      console.log('[INBOX_FETCH_SUPERSEDE]', {
+        bucketKey,
+        mode,
+        previousRequestId: latestRequestIdByBucketRef.current[bucketKey] ?? null,
+        nextRequestId: requestId,
+        reason: appendMaySupersede ? 'append' : 'forced_refresh',
+      })
+      existingController?.abort()
     }
     
     const controller = new AbortController()
     abortByBucketRef.current[bucketKey] = controller
+    latestRequestIdByBucketRef.current[bucketKey] = requestId
 
     dispatch({ type: 'BUCKET_FETCH_START', bucketKey, requestId })
-    console.log('[INBOX_FETCH_START]', bucketKey, requestId)
+    console.log('[INBOX_FETCH_START]', {
+      bucketKey,
+      requestId,
+      mode,
+      timeoutMode: normalizedOptions._timeoutMode ?? null,
+      refreshReason: normalizedOptions._refreshReason ?? null,
+      force: normalizedOptions._force === true,
+    })
 
     const fetchStart = performance.now()
     try {
       const model = await loadInbox({ ...normalizedOptions, signal: controller.signal })
       const fetchMs = Math.round(performance.now() - fetchStart)
-      console.log('[INBOX_FETCH_DONE]', bucketKey, model?.threads?.length ?? 0, `${fetchMs}ms`)
+      console.log('[INBOX_FETCH_DONE]', {
+        bucketKey,
+        requestId,
+        responseBodyCount: model?.threads?.length ?? 0,
+        dataMode: model?.dataMode ?? null,
+        fetchMs,
+      })
+
+      const latestRequestId = latestRequestIdByBucketRef.current[bucketKey] ?? null
+      const staleGuardPassed = latestRequestId === requestId && abortByBucketRef.current[bucketKey] === controller && !controller.signal.aborted
+      console.log('[INBOX_STALE_GUARD]', {
+        bucketKey,
+        requestId,
+        latestRequestId,
+        staleGuardPassed,
+        staleGuardResult: staleGuardPassed ? 'commit_allowed' : 'stale_response_ignored',
+      })
+      if (!staleGuardPassed) {
+        if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
+        return model
+      }
 
       const currentBucket = stateRef.current.buckets[bucketKey]
       const currentRowsCount = currentBucket?.rows?.length ?? 0
@@ -1093,6 +1210,28 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           hasMore: Boolean(model.pagination?.hasMore),
         })
       }
+      console.log('[INBOX_COMMIT_DONE]', {
+        bucketKey,
+        requestId,
+        mode,
+        finalCommittedThreadCount: mode === 'append'
+          ? (() => {
+              const seen = new Set<string>()
+              let count = 0
+              for (const row of [...(currentBucket?.rows ?? []), ...model.threads]) {
+                const record = row as Record<string, unknown>
+                const key = String(record.threadKey ?? record.thread_key ?? record.id ?? '').trim()
+                if (key) {
+                  if (seen.has(key)) continue
+                  seen.add(key)
+                }
+                count += 1
+              }
+              return count
+            })()
+          : model.threads.length,
+        responseThreadCount: model.threads.length,
+      })
 
       // Counts are isolated: SET_VIEW_COUNTS never touches bucket rows.
       // Protection Rule: only update counts when the response includes healthy counts.
@@ -1161,6 +1300,16 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     } catch (err) {
       if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
       if (controller.signal.aborted) return null
+      const latestRequestId = latestRequestIdByBucketRef.current[bucketKey] ?? null
+      const staleGuardPassed = latestRequestId === requestId
+      console.log('[INBOX_STALE_GUARD]', {
+        bucketKey,
+        requestId,
+        latestRequestId,
+        staleGuardPassed,
+        staleGuardResult: staleGuardPassed ? 'error_commit_allowed' : 'stale_error_ignored',
+      })
+      if (!staleGuardPassed) return null
       const errMsg = err instanceof Error ? err.message : String(err)
       dispatch({ type: 'BUCKET_FETCH_ERROR', bucketKey, requestId, error: errMsg })
       setError(err)
@@ -1190,13 +1339,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       const now = Date.now()
       const last = lastRefreshAtRef.current ? new Date(lastRefreshAtRef.current).getTime() : 0
       
-      // Implement 2min minimum interval for auto-refresh
+      // Lightweight polling fallback while the tab is focused.
       if (now - last < minRefreshMs) {
         if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'min_interval_not_met', elapsed: now - last, min: minRefreshMs })
         return null
       }
 
-      // If active bucket already has live rows and last successful live fetch was <2 min ago, skip refresh.
+      // If active bucket already has live rows and last successful live fetch was recent, skip refresh.
       const currentBucket = stateRef.current.buckets[bucketKey]
       if (currentBucket && currentBucket.rows.length > 0 && (now - last < minRefreshMs)) {
          if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'bucket_recently_loaded' })
@@ -1216,14 +1365,29 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       filters: options.filters !== undefined ? options.filters : lastFetchRef.current.filters,
       cursor: options.cursor ?? null,
     }
+    delete lastFetchRef.current._automatic
+    delete lastFetchRef.current._force
+    delete lastFetchRef.current._timeoutMode
+    delete lastFetchRef.current._refreshReason
+    delete lastFetchRef.current.paused
+
+    const requestOptions: InboxFetchOptions = {
+      ...lastFetchRef.current,
+      _automatic: options._automatic,
+      _force: options._force,
+      _timeoutMode: options._timeoutMode,
+      _refreshReason: options._refreshReason,
+      paused: options.paused,
+      signal: options.signal,
+    }
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    const query = lastFetchRef.current.filters?.query ?? ''
+    const query = requestOptions.filters?.query ?? ''
     const delay = query.trim() ? 250 : 0
-    if (delay === 0) return runLoad(lastFetchRef.current, 'refresh')
+    if (delay === 0) return runLoad(requestOptions, 'refresh')
     return await new Promise<InboxModel | null>((resolve) => {
       debounceRef.current = setTimeout(() => {
-        void runLoad(lastFetchRef.current, 'refresh').then(resolve)
+        void runLoad(requestOptions, 'refresh').then(resolve)
       }, delay)
     })
   }, [runLoad, sourceMode, minRefreshMs])
@@ -1250,15 +1414,36 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   useEffect(() => {
     let cancelled = false
-    void refresh({ _timeoutMode: 'initial_boot', _force: true })
+    void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot' })
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
-    let refreshTimeout: ReturnType<typeof setTimeout> | null = null
 
-    const POLL_INTERVAL_MS = realtimeEnabled ? 60_000 : 30_000
+    const POLL_INTERVAL_MS = 15_000
     const pollInterval = window.setInterval(() => {
-      if (!cancelled) void refresh({ _automatic: true })
+      const status = stateRef.current.realtimeStatus
+      const shouldPoll = status === 'error' || status === 'disconnected' || status === 'disabled' || status === 'connecting'
+      if (!cancelled && shouldPoll) {
+        void refresh({
+          _automatic: true,
+          _refreshReason: 'fallback_polling',
+        })
+      }
     }, POLL_INTERVAL_MS)
+
+    const handleOffline = () => {
+      dispatch({ type: 'SET_REALTIME_STATUS', status: 'disconnected' })
+      setDashboardConnectionState('offline', { reason: 'browser_offline' })
+      logRealtimeFallbackPolling('browser_offline', { fallbackMode: 'polling' })
+    }
+
+    const handleOnline = () => {
+      dispatch({ type: 'SET_REALTIME_STATUS', status: 'connecting' })
+      setDashboardConnectionState('reconnecting', { reason: 'browser_online' })
+      void refresh({ _automatic: true, _force: true, _refreshReason: 'browser_online' })
+    }
+
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', handleOnline)
 
     const markRecentlyUpdated = (threadId: string) => {
       setRecentlyUpdatedThreadIds((prev) => new Set([...prev, threadId]))
@@ -1271,8 +1456,23 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       }, 5000)
     }
 
+    const enterPollingMode = (reason: string, detail?: unknown) => {
+      dispatch({ type: 'SET_REALTIME_STATUS', status: 'error' })
+      setDashboardConnectionState('degraded_polling', { reason })
+      logRealtimeFallbackPolling(reason, {
+        detail: detail instanceof Error ? detail.message : detail ?? null,
+        fallbackMode: 'polling',
+      })
+      console.warn('[INBOX_REALTIME_DEGRADED]', {
+        reason,
+        detail: detail instanceof Error ? detail.message : detail ?? null,
+        fallbackMode: 'polling',
+      })
+    }
+
     if (shouldUseSupabase() && realtimeEnabled) {
-      const supabase = getSupabaseClient()
+      dispatch({ type: 'SET_REALTIME_STATUS', status: 'connecting' })
+      setDashboardConnectionState('reconnecting', { reason: 'subscribe_start' })
       const findStoredThread = (threadKey: string): Record<string, unknown> | null => {
         for (const bucket of Object.values(stateRef.current.buckets)) {
           const found = bucket.rows.find((candidate) => {
@@ -1288,6 +1488,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         const table = payload?.table ?? 'unknown'
         const row = (payload?.new ?? payload?.old ?? {}) as Record<string, unknown>
         const threadKey = resolveRealtimeThreadKey(row, table)
+        let patchApplied = false
 
         if (threadKey) {
           markRecentlyUpdated(threadKey)
@@ -1330,6 +1531,19 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
                 bucket_after: afterBucket || null,
               },
             })
+            patchDashboardThread(threadKey, patch, {
+              source: 'realtime',
+              table,
+              eventType: payload.eventType ?? null,
+            })
+            logRealtimePatchApplied({
+              table,
+              eventType: payload.eventType ?? null,
+              threadKey,
+              patchKeys: Object.keys(patch),
+              countDeltas,
+            })
+            patchApplied = true
           }
 
           if (table === 'operator_thread_state' && payload.new) {
@@ -1356,42 +1570,89 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
               countDeltas,
             })
             dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch, targetBucketKey: afterBucket, upsert: false, countDeltas })
+            patchDashboardThread(threadKey, patch, {
+              source: 'realtime',
+              table,
+              eventType: payload.eventType ?? null,
+            })
+            logRealtimePatchApplied({
+              table,
+              eventType: payload.eventType ?? null,
+              threadKey,
+              patchKeys: Object.keys(patch),
+              countDeltas,
+            })
+            patchApplied = true
           }
         }
 
         realtimeBatchRef.current.tables.add(table)
         if (threadKey) realtimeBatchRef.current.threadKeys.add(threadKey)
         realtimeBatchRef.current.eventCount += 1
-
-        if (refreshTimeout) clearTimeout(refreshTimeout)
-        refreshTimeout = setTimeout(() => {
-          if (!cancelled) {
-            if (isDev) {
-              console.log('[useInboxData] background refresh sync', {
-                refreshReason: 'realtime',
-                tables: Array.from(realtimeBatchRef.current.tables),
-                threadKeys: Array.from(realtimeBatchRef.current.threadKeys),
-                eventCount: realtimeBatchRef.current.eventCount,
-              })
-            }
-            realtimeBatchRef.current = { tables: new Set(), threadKeys: new Set(), eventCount: 0 }
-            void refresh({ _automatic: true, _force: true, _refreshReason: 'realtime' })
-          }
-        }, 5000)
+        if (!patchApplied && isDev) {
+          console.log('[INBOX_REALTIME_PATCH_SKIPPED]', {
+            table,
+            eventType: payload.eventType ?? null,
+            threadKey: threadKey || null,
+            reason: threadKey ? 'no_supported_patch' : 'missing_thread_key',
+          })
+        }
       }
 
-      channel = supabase
-        .channel('nexus-inbox-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, triggerRefresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
-        .subscribe((status) => {
-          dispatch({ type: 'SET_REALTIME_STATUS', status: status === 'SUBSCRIBED' ? 'connected' : 'disconnected' })
-        })
+      try {
+        const supabase = getSupabaseClient()
+        channel = supabase
+          .channel('nexus-inbox-realtime')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
+          .subscribe((status) => {
+            if (cancelled) return
+            const normalizedStatus: InboxRealtimeStatus =
+              status === 'SUBSCRIBED' ? 'connected'
+              : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error'
+              : status === 'CLOSED' ? 'disconnected'
+              : 'connecting'
+            dispatch({ type: 'SET_REALTIME_STATUS', status: normalizedStatus })
+            const connectionState = toDashboardConnectionState(normalizedStatus)
+            setDashboardConnectionState(connectionState, {
+              reason: 'subscribe_status',
+              realtimeStatus: normalizedStatus,
+              rawStatus: status,
+            })
+            console.log('[INBOX_REALTIME_STATUS]', {
+              status,
+              normalizedStatus,
+              connectionState,
+              fallbackMode: normalizedStatus === 'connected' || normalizedStatus === 'connecting' ? 'realtime' : 'polling',
+            })
+            if (normalizedStatus === 'error' || normalizedStatus === 'disconnected') {
+              logRealtimeFallbackPolling('subscribe_status', {
+                status,
+                normalizedStatus,
+                connectionState,
+                fallbackMode: 'polling',
+              })
+              console.warn('[INBOX_REALTIME_DEGRADED]', {
+                reason: 'subscribe_status',
+                status,
+                fallbackMode: 'polling',
+              })
+            }
+          })
 
-      if (isDev) console.log('[useInboxData] realtime subscriptions active')
+        if (isDev) console.log('[useInboxData] realtime subscriptions active')
+      } catch (error) {
+        enterPollingMode('realtime_setup_failed', error)
+      }
     } else {
+      dispatch({ type: 'SET_REALTIME_STATUS', status: 'disabled' })
+      setDashboardConnectionState('degraded_polling', { reason: 'realtime_disabled' })
+      logRealtimeFallbackPolling('realtime_disabled', {
+        realtimeEnabled,
+        shouldUseSupabase: shouldUseSupabase(),
+      })
       if (isDev) console.log('[useInboxData] realtime disabled', { realtimeEnabled, shouldUseSupabase: shouldUseSupabase() })
     }
 
@@ -1399,8 +1660,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       cancelled = true
       Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      if (refreshTimeout) clearTimeout(refreshTimeout)
       window.clearInterval(pollInterval)
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('online', handleOnline)
       if (channel) void getSupabaseClient().removeChannel(channel)
     }
   }, [refresh, realtimeEnabled])
@@ -1417,6 +1679,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const activeBucketKey = storeState.activeBucketKey
   const activeBucket = storeState.buckets[activeBucketKey]
   const loading = activeBucket?.loading ?? true
+  const realtimeStatus = storeState.realtimeStatus
+  const realtimeDegraded = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
+  const connectionState = toDashboardConnectionState(realtimeStatus)
 
   const data: InboxModel = {
     // Bucket rows — ONLY from the active bucket, never from another bucket's cache.
@@ -1436,7 +1701,11 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     deadThreadsCount: (storeState.viewCounts.dead ?? null) as number | null,
 
     // Connection status
-    realtimeConnected: storeState.realtimeStatus === 'connected',
+    realtimeConnected: realtimeStatus === 'connected',
+    realtimeStatus,
+    connectionState,
+    realtimeDegraded,
+    refreshMode: realtimeStatus === 'disabled' ? 'disabled' : realtimeDegraded ? 'polling' : 'realtime',
 
     // Metadata from last successful fetch (map pins, pagination, debug fields)
     unreadCount: metaRef.current.unreadCount ?? 0,

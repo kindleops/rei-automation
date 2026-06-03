@@ -502,7 +502,7 @@ async function callMessages(route, label) {
     phone: TEST_PHONE,
     best_phone: TEST_PHONE,
     seller_phone: TEST_PHONE,
-    limit: "300",
+    limit: "50",
   });
   return callRoute(label, route, `/api/cockpit/inbox/thread-messages?${params.toString()}`);
 }
