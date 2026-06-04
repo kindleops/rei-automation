@@ -456,8 +456,12 @@ export function resolveDataThemeAttr(nexusTheme: NexusTheme): string {
   return LEGACY_THEME_MAP[nexusTheme] ?? nexusTheme
 }
 
+function hexToRgb(hex: string): string {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '10, 132, 255';
+}
+
 export function applyThemeToDOM(): void {
-  const theme = getActiveTheme()
   const settings = loadSettings()
   const isLight = resolveDataThemeAttr(settings.nexusTheme) === 'light'
   const paletteMap = isLight ? LIGHT_ACCENT_PALETTES : ACCENT_PALETTES
@@ -468,15 +472,39 @@ export function applyThemeToDOM(): void {
   root.setAttribute('data-nexus-theme', resolveDataThemeAttr(settings.nexusTheme))
   root.setAttribute('data-nexus-accent', settings.accentPalette)
 
-  // Legacy vars still used by components not yet on --nx-* variables
-  root.style.setProperty('--nx-bg', theme.bg)
-  root.style.setProperty('--nx-surface', theme.surface)
-  root.style.setProperty('--nx-elevated', theme.elevated)
-  root.style.setProperty('--nx-border', theme.border)
+  const rgb = hexToRgb(accent.primary);
+
+  // Set ONLY accent variables inline. Light/Dark full themes are managed by CSS classes/selectors.
+  // DO NOT inject --nx-bg / --nx-surface / text tokens inline as it corrupts CSS variable cascades.
   root.style.setProperty('--nx-accent', accent.primary)
-  root.style.setProperty('--nx-accent-glow', accent.glow)
   root.style.setProperty('--nx-accent-soft', accent.soft)
-  root.style.setProperty('--nx-text-primary', theme.textPrimary)
-  root.style.setProperty('--nx-text-secondary', theme.textSecondary)
-  root.style.setProperty('--nx-text-muted', theme.textMuted)
+  root.style.setProperty('--nx-accent-glow', accent.glow)
+  root.style.setProperty('--nx-badge-border', accent.primary)
+  
+  root.style.setProperty('--nexus-accent', accent.primary)
+  root.style.setProperty('--nexus-accent-rgb', rgb)
+  root.style.setProperty('--nexus-accent-soft', accent.soft)
+  root.style.setProperty('--nexus-accent-glow', accent.glow)
+  root.style.setProperty('--nexus-accent-border', accent.primary)
+  
+  root.style.setProperty('--tone-primary', accent.primary)
+  root.style.setProperty('--accent-cyan', accent.primary) // legacy fallback
+
+  // Dev-only visual proof helper for token resolution
+  if (import.meta.env.DEV) {
+    setTimeout(() => {
+      const cs = getComputedStyle(document.body);
+      console.log('--- Light Mode Computed Vars ---');
+      console.log('--nx-bg:', cs.getPropertyValue('--nx-bg'));
+      console.log('--nx-panel-bg:', cs.getPropertyValue('--nx-panel-bg'));
+      console.log('--nx-card-bg:', cs.getPropertyValue('--nx-card-bg'));
+      console.log('--nx-text:', cs.getPropertyValue('--nx-text'));
+      console.log('--bg-0:', cs.getPropertyValue('--bg-0'));
+      console.log('--surface-0:', cs.getPropertyValue('--surface-0'));
+      console.log('--dossier-bg-0:', cs.getPropertyValue('--dossier-bg-0'));
+      console.log('--saas-bg:', cs.getPropertyValue('--saas-bg'));
+      console.log('--aic-bg:', cs.getPropertyValue('--aic-bg'));
+      console.log('--nexus-accent:', cs.getPropertyValue('--nexus-accent'));
+    }, 100);
+  }
 }

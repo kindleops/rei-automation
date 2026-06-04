@@ -6,29 +6,31 @@
 
 /* ── Default (no attribute set falls back to dark) ─────────────────────── */
 :root {
-  --nx-bg:              #030508; /* Extremely deep, premium pitch-black blue */
-  --nx-bg-soft:         #090c12; /* Soft deep container */
-  --nx-panel-bg:        #070a0e; /* Deep panel base */
-  --nx-card-bg:         #0e121a; /* Elevated card surface */
-  --nx-card-border:     rgba(255, 255, 255, 0.06); /* Neutral, subtle borders */
-  --nx-border:          rgba(255, 255, 255, 0.04);
-  --nx-border-strong:   rgba(255, 255, 255, 0.10);
-  --nx-accent:          #00d2ff; /* Crisp, vibrant premium cyan */
-  --nx-accent-soft:     rgba(0, 210, 255, 0.10);
-  --nx-accent-glow:     rgba(0, 210, 255, 0.18);
-  --nx-text:            #f8fafc; /* Ultra-crisp clean white text */
-  --nx-text-muted:      #94a3b8; /* Sleek slate grey for details/hierarchy */
-  --nx-danger:          #ff453a; /* Brighter iOS-like semantic red */
-  --nx-success:         #30d158; /* Brighter iOS-like semantic green */
-  --nx-warning:         #ffd60a; /* Brighter iOS-like semantic yellow */
-  --nx-info:            #0a84ff; /* Brighter iOS-like semantic blue */
-  --nx-shadow:          rgba(0, 0, 0, 0.80); /* Deep shadow definition */
-  --nx-grid:            rgba(255, 255, 255, 0.02); /* Neutral grid opacity */
-  --nx-command-bg:      #05080c; /* Deep command backdrop */
-  --nx-bubble-inbound:  rgba(255, 255, 255, 0.06); /* Neutral clean inbound bubble */
-  --nx-bubble-outbound: #0084ff; /* Deep premium blue outbound bubble */
-  --nx-badge-bg:        rgba(0, 210, 255, 0.06); /* Subtle accent badge bg */
-  --nx-badge-border:    rgba(0, 210, 255, 0.18); /* Subtle accent badge border */
+  --nx-bg:              #050914;
+  --nx-bg-2:            #0b1220;
+  --nx-surface:         #080d18;
+  --nx-panel:           #0b1220;
+  --nx-card:            #101827;
+  --nx-card-strong:     #1f2937;
+  --nx-border:          rgba(148, 163, 184, 0.16);
+  --nx-border-strong:   rgba(148, 163, 184, 0.28);
+  --nx-text:            #e5e7eb;
+  --nx-text-strong:     #f8fafc;
+  --nx-muted:           #94a3b8;
+  --nx-muted-2:         rgba(148, 163, 184, 0.65);
+  --nx-accent:          #38bdf8;
+  --nx-accent-rgb:      56, 189, 248;
+  --nx-accent-soft:     rgba(56, 189, 248, 0.12);
+  --nx-success:         #10b981;
+  --nx-warning:         #f59e0b;
+  --nx-danger:          #ef4444;
+  --nx-shadow:          rgba(0, 0, 0, 0.55);
+  --nx-glass-bg:        linear-gradient(145deg, rgba(6,10,18,0.96), rgba(10,16,28,0.92));
+  --nx-glass-card:      linear-gradient(145deg, rgba(16,24,39,0.96), rgba(10,16,28,0.92));
+  --nx-glass-border:    rgba(148, 163, 184, 0.16);
+  --nx-input-bg:        #0f172a;
+  --nx-button-bg:       #1e293b;
+  --nx-button-text:     #f8fafc;
 
   /* Helper aliases mapping local variables used in component stylesheets to main theme tokens */
   --nx-accent-primary:   var(--nx-accent);
@@ -41,6 +43,31 @@
   --nx-conversation-outbound-bg: var(--nx-bubble-outbound);
   --nx-conversation-outbound-border: var(--nx-accent);
   --nx-conversation-outbound-glow: var(--nx-accent-glow);
+
+  --nx-panel-bg:        var(--nx-panel);
+  --nx-card-bg:         var(--nx-card);
+  --nx-bg-soft:         var(--nx-bg-2);
+  --nx-text-muted:      var(--nx-muted);
+  --nx-command-bg:      var(--nx-panel);
+  --nx-bubble-inbound:  rgba(255, 255, 255, 0.06);
+  --nx-bubble-outbound: #0084ff;
+  --nx-badge-bg:        rgba(0, 210, 255, 0.06);
+  --nx-badge-border:    rgba(0, 210, 255, 0.18);
+  --nx-grid:            rgba(255, 255, 255, 0.02);
+
+  /* Legacy/inbox-specific mapping */
+  --inbox-bg:           var(--nx-bg);
+  --inbox-panel:        var(--nx-panel);
+  --inbox-card:         var(--nx-card);
+  --inbox-text:         var(--nx-text);
+  --inbox-text-strong:  var(--nx-text-strong);
+  --inbox-muted:        var(--nx-muted);
+  --inbox-border:       var(--nx-border);
+  --text:               var(--nx-text);
+  --muted:              var(--nx-muted);
+  --surface:            var(--nx-surface);
+  --panel:              var(--nx-panel);
+  --card:               var(--nx-card);
 
   /* ── --nexus-* aliases: cascade from --nx-* overrides automatically ─── */
   /* Backgrounds */
@@ -57,20 +84,20 @@
   --nexus-text:          var(--nx-text);
   --nexus-muted:         var(--nx-text-muted);
   --nexus-faint:         var(--nx-grid);
-  /* Accent (overridden by [data-nexus-accent] blocks below) */
+  /* Accent */
   --nexus-accent:        var(--nx-accent);
-  --nexus-accent-rgb:    99, 215, 255;
+  --nexus-accent-rgb:    56, 189, 248;
   --nexus-accent-soft:   var(--nx-accent-soft);
   --nexus-accent-glow:   var(--nx-accent-glow);
   --nexus-accent-border: var(--nx-badge-border);
   /* Semantic */
   --nexus-success:       var(--nx-success);
-  --nexus-warning:       var(--nx-warning);
+  --nexus-warning:       var(--nexus-stage-waiting);
   --nexus-danger:        var(--nx-danger);
-  --nexus-info:          var(--nx-info);
+  --nexus-info:          #0a84ff;
   --nexus-shadow:        var(--nx-shadow);
   --nexus-map-pin:       var(--nx-accent);
-  /* Dynamic Surface Overlays (derived from text color to flip correctly in light/dark mode) */
+  /* Dynamic Surface Overlays */
   --nexus-surface-faint:   color-mix(in srgb, var(--nx-text) 3%, transparent);
   --nexus-surface-overlay: color-mix(in srgb, var(--nx-text) 5%, transparent);
   --nexus-surface-hover:   color-mix(in srgb, var(--nx-text) 8%, transparent);
@@ -82,34 +109,84 @@
   --nexus-stage-waiting:   #f59e0b;
   --nexus-stage-priority:  #f97316;
   --nexus-stage-dead:      #ef4444;
-  --nexus-stage-suppressed:#94a3b8;
+  --nexus-stage-suppressed:#aeaeb2;
 }
 
 /* ── dark ───────────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="dark"] {
-  --nx-bg:              #030508; /* Extremely deep, premium pitch-black blue */
-  --nx-bg-soft:         #090c12; /* Soft deep container */
-  --nx-panel-bg:        #070a0e; /* Deep panel base */
-  --nx-card-bg:         #0e121a; /* Elevated card surface */
-  --nx-card-border:     rgba(255, 255, 255, 0.06); /* Neutral, subtle borders */
-  --nx-border:          rgba(255, 255, 255, 0.04);
-  --nx-border-strong:   rgba(255, 255, 255, 0.10);
-  --nx-accent:          #00d2ff; /* Crisp, vibrant premium cyan */
-  --nx-accent-soft:     rgba(0, 210, 255, 0.10);
-  --nx-accent-glow:     rgba(0, 210, 255, 0.18);
-  --nx-text:            #f8fafc; /* Ultra-crisp clean white text */
-  --nx-text-muted:      #94a3b8; /* Sleek slate grey for details/hierarchy */
-  --nx-danger:          #ff453a; /* Brighter iOS-like semantic red */
-  --nx-success:         #30d158; /* Brighter iOS-like semantic green */
-  --nx-warning:         #ffd60a; /* Brighter iOS-like semantic yellow */
-  --nx-info:            #0a84ff; /* Brighter iOS-like semantic blue */
-  --nx-shadow:          rgba(0, 0, 0, 0.80); /* Deep shadow definition */
-  --nx-grid:            rgba(255, 255, 255, 0.02); /* Neutral grid opacity */
-  --nx-command-bg:      #05080c; /* Deep command backdrop */
-  --nx-bubble-inbound:  rgba(255, 255, 255, 0.06); /* Neutral clean inbound bubble */
-  --nx-bubble-outbound: #0084ff; /* Deep premium blue outbound bubble */
-  --nx-badge-bg:        rgba(0, 210, 255, 0.06); /* Subtle accent badge bg */
-  --nx-badge-border:    rgba(0, 210, 255, 0.18); /* Subtle accent badge border */
+:root[data-nexus-theme="dark"],
+[data-nexus-theme="dark"] {
+  --nx-bg:              #050914;
+  --nx-bg-2:            #0b1220;
+  --nx-surface:         #080d18;
+  --nx-panel:           #0b1220;
+  --nx-card:            #101827;
+  --nx-card-strong:     #1f2937;
+  --nx-border:          rgba(148, 163, 184, 0.16);
+  --nx-border-strong:   rgba(148, 163, 184, 0.28);
+  --nx-text:            #e5e7eb;
+  --nx-text-strong:     #f8fafc;
+  --nx-muted:           #94a3b8;
+  --nx-muted-2:         rgba(148, 163, 184, 0.65);
+  --nx-accent:          #38bdf8;
+  --nx-accent-rgb:      56, 189, 248;
+  --nx-accent-soft:     rgba(56, 189, 248, 0.12);
+  --nx-success:         #10b981;
+  --nx-warning:         #f59e0b;
+  --nx-danger:          #ef4444;
+  --nx-shadow:          rgba(0, 0, 0, 0.55);
+  --nx-glass-bg:        linear-gradient(145deg, rgba(6,10,18,0.96), rgba(10,16,28,0.92));
+  --nx-glass-card:      linear-gradient(145deg, rgba(16,24,39,0.96), rgba(10,16,28,0.92));
+  --nx-glass-border:    rgba(148, 163, 184, 0.16);
+  --nx-input-bg:        #0f172a;
+  --nx-button-bg:       #1e293b;
+  --nx-button-text:     #f8fafc;
+
+  --nx-panel-bg:        var(--nx-panel);
+  --nx-card-bg:         var(--nx-card);
+  --nx-bg-soft:         var(--nx-bg-2);
+  --nx-text-muted:      var(--nx-muted);
+  --nx-command-bg:      var(--nx-panel);
+  --nx-bubble-inbound:  rgba(255, 255, 255, 0.06);
+  --nx-bubble-outbound: #0084ff;
+  --nx-badge-bg:        rgba(0, 210, 255, 0.06);
+  --nx-badge-border:    rgba(0, 210, 255, 0.18);
+  --nx-grid:            rgba(255, 255, 255, 0.02);
+
+  --inbox-bg:           var(--nx-bg);
+  --inbox-panel:        var(--nx-panel);
+  --inbox-card:         var(--nx-card);
+  --inbox-text:         var(--nx-text);
+  --inbox-text-strong:  var(--nx-text-strong);
+  --inbox-muted:        var(--nx-muted);
+  --inbox-border:       var(--nx-border);
+  --text:               var(--nx-text);
+  --muted:              var(--nx-muted);
+  --surface:            var(--nx-surface);
+  --panel:              var(--nx-panel);
+  --card:               var(--nx-card);
+
+  --nexus-bg:            var(--nx-bg);
+  --nexus-bg-elevated:   var(--nx-bg-soft);
+  --nexus-panel:         var(--nx-panel-bg);
+  --nexus-panel-strong:  var(--nx-command-bg);
+  --nexus-card:          var(--nx-card-bg);
+  --nexus-card-hover:    color-mix(in srgb, var(--nx-card-bg) 85%, white 15%);
+  --nexus-border:        var(--nx-border);
+  --nexus-border-strong: var(--nx-border-strong);
+  --nexus-text:          var(--nx-text);
+  --nexus-muted:         var(--nx-text-muted);
+  --nexus-faint:         var(--nx-grid);
+  --nexus-accent:        var(--nx-accent);
+  --nexus-accent-rgb:    56, 189, 248;
+  --nexus-accent-soft:   var(--nx-accent-soft);
+  --nexus-accent-glow:   rgba(56, 189, 248, 0.22);
+  --nexus-accent-border: var(--nx-badge-border);
+  --nexus-success:       var(--nx-success);
+  --nexus-warning:       var(--nx-warning);
+  --nexus-danger:        var(--nx-danger);
+  --nexus-info:          #0a84ff;
+  --nexus-shadow:        var(--nx-shadow);
+  --nexus-map-pin:       var(--nx-accent);
 }
 
 /* ── satellite ──────────────────────────────────────────────────────────── */
@@ -169,31 +246,81 @@
 /* ── red_ops ────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="red_ops"],
 [data-nexus-theme="red_ops"] {
-  --nx-bg:              #160305;
-  --nx-bg-soft:         #2c0a0e;
-  --nx-panel-bg:        #200609;
-  --nx-card-bg:         #2a0a0d;
-  --nx-card-border:     rgba(255, 18, 18, 0.24);
-  --nx-border:          rgba(255, 18, 18, 0.18);
-  --nx-border-strong:   rgba(255, 18, 18, 0.32);
-  --nx-accent:          #ff1212;
-  --nx-accent-soft:     rgba(255, 18, 18, 0.15);
-  --nx-accent-glow:     rgba(255, 18, 18, 0.32);
-  --nx-text:            #fff0f1;
-  --nx-text-muted:      #b28a8f;
-  /* semantic colors stay readable — danger is not the same hue as accent */
-  --nx-danger:          #ff2d2d;
-  --nx-success:         #35f28a;
-  --nx-warning:         #ffb547;
-  --nx-info:            #ff6b3d; /* Tactical accent secondary */
-  --nx-shadow:          rgba(6, 2, 3, 0.85);
-  --nx-grid:            rgba(255, 18, 18, 0.04);
-  --nx-command-bg:      #200609;
+  --nx-bg:              #080202;
+  --nx-bg-2:            #100305;
+  --nx-surface:         #120406;
+  --nx-panel:           rgba(18, 4, 6, 0.96);
+  --nx-card:            rgba(28, 8, 10, 0.90);
+  --nx-card-strong:     rgba(38, 10, 12, 0.95);
+  --nx-border:          rgba(248, 113, 113, 0.22);
+  --nx-border-strong:   rgba(248, 113, 113, 0.35);
+  --nx-text:            #fecaca;
+  --nx-text-strong:     #fff7f7;
+  --nx-muted:           #b77979;
+  --nx-muted-2:         #fca5a5;
+  --nx-accent:          #ef4444;
+  --nx-accent-rgb:      239, 68, 68;
+  --nx-accent-soft:     rgba(239, 68, 68, 0.12);
+  --nx-success:         #22c55e;
+  --nx-warning:         #fca5a5;
+  --nx-danger:          #ff3b30;
+  --nx-shadow:          rgba(0, 0, 0, 0.58);
+  --nx-glass-bg:        linear-gradient(145deg, rgba(18, 4, 6, 0.97), rgba(10, 3, 5, 0.94));
+  --nx-glass-card:      linear-gradient(145deg, rgba(18, 4, 6, 0.97), rgba(10, 3, 5, 0.94));
+  --nx-glass-border:    rgba(248, 113, 113, 0.24);
+  --nx-input-bg:        #120406;
+  --nx-button-bg:       #2c0a0e;
+  --nx-button-text:     #fff7f7;
+
+  --nx-panel-bg:        var(--nx-panel);
+  --nx-card-bg:         var(--nx-card);
+  --nx-bg-soft:         var(--nx-bg-2);
+  --nx-text-muted:      var(--nx-muted);
+  --nx-command-bg:      var(--nx-panel);
   --nx-bubble-inbound:  rgba(255, 18, 18, 0.12);
   --nx-bubble-outbound: #ff1212;
   --nx-badge-bg:        rgba(255, 18, 18, 0.10);
   --nx-badge-border:    rgba(255, 18, 18, 0.28);
+  --nx-grid:            rgba(255, 18, 18, 0.04);
+
+  /* Legacy/inbox-specific mapping */
+  --inbox-bg:           var(--nx-bg);
+  --inbox-panel:        var(--nx-panel);
+  --inbox-card:         var(--nx-card);
+  --inbox-text:         var(--nx-text);
+  --inbox-text-strong:  var(--nx-text-strong);
+  --inbox-muted:        var(--nx-muted);
+  --inbox-border:       var(--nx-border);
+  --text:               var(--nx-text);
+  --muted:              var(--nx-muted);
+  --surface:            var(--nx-surface);
+  --panel:              var(--nx-panel);
+  --card:               var(--nx-card);
+
+  --nexus-bg:            var(--nx-bg);
+  --nexus-bg-elevated:   var(--nx-bg-soft);
+  --nexus-panel:         var(--nx-panel-bg);
+  --nexus-panel-strong:  var(--nx-command-bg);
+  --nexus-card:          var(--nx-card-bg);
+  --nexus-card-hover:    color-mix(in srgb, var(--nx-card-bg) 82%, #ff1212 18%);
+  --nexus-border:        var(--nx-border);
+  --nexus-border-strong: var(--nx-border-strong);
+  --nexus-text:          var(--nx-text);
+  --nexus-muted:         var(--nx-text-muted);
+  --nexus-faint:         var(--nx-grid);
+  --nexus-accent:        var(--nx-accent);
+  --nexus-accent-rgb:    239, 68, 68;
+  --nexus-accent-soft:   var(--nx-accent-soft);
+  --nexus-accent-glow:   rgba(239, 68, 68, 0.32);
+  --nexus-accent-border: var(--nx-badge-border);
+  --nexus-success:       var(--nx-success);
+  --nexus-warning:       var(--nx-warning);
+  --nexus-danger:        var(--nx-danger);
+  --nexus-info:          #ff6b3d;
+  --nexus-shadow:        var(--nx-shadow);
+  --nexus-map-pin:       var(--nx-accent);
 }
+
 
 /* ── matrix ─────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="matrix"] {
@@ -315,7 +442,7 @@
   --nx-accent:          #d3dde8;
   --nx-accent-soft:     rgba(211, 221, 232, 0.12);
   --nx-accent-glow:     rgba(148, 163, 184, 0.16);
-  --nx-text:            #f8fafc;
+  --nx-text:            #f9f9fa;
   --nx-text-muted:      rgba(171, 184, 199, 0.65);
   --nx-danger:          #f87171;
   --nx-success:         #34d399;
@@ -331,49 +458,96 @@
 }
 
 /* ── light ──────────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="light"] {
-  --nx-bg:              #f8fbff;
-  --nx-bg-strong:       #ffffff;
-  --nx-bg-soft:         #f8fafc;
-  --nx-surface:         rgba(255,255,255,.94);
-  --nx-surface-2:       rgba(248,251,255,.96);
-  --nx-surface-3:       #ffffff;
-  --nx-panel-bg:        #ffffff;
-  --nx-card-bg:         #ffffff;
-  --nx-card-border:     rgba(15, 23, 42, 0.10);
-  --nx-border:          rgba(15, 23, 42, 0.10);
-  --nx-border-strong:   rgba(15, 23, 42, 0.18);
-  
-  --nx-shadow-soft:     0 12px 34px rgba(15,23,42,.10);
-  --nx-shadow-card:     0 18px 50px rgba(15,23,42,.14);
-  --nx-shadow:          0 12px 34px rgba(15, 23, 42, 0.10);
+:root[data-nexus-theme="light"],
+[data-nexus-theme="light"] {
+  --nx-bg:              #ffffff;
+  --nx-bg-2:            #f8fafc;
+  --nx-surface:         #ffffff;
+  --nx-panel:           rgba(255, 255, 255, 0.96);
+  --nx-card:            #ffffff;
+  --nx-card-strong:     rgba(255, 255, 255, 0.92);
+  --nx-border:          rgba(15, 23, 42, 0.12);
+  --nx-border-strong:   rgba(15, 23, 42, 0.20);
+  --nx-text:            #0f172a;
+  --nx-text-strong:     #020617;
+  --nx-muted:           #475569;
+  --nx-muted-2:         #64748b;
+  --nx-accent:          #2563eb;
+  --nx-accent-rgb:      37, 99, 235;
+  --nx-accent-soft:     rgba(37, 99, 235, 0.08);
+  --nx-success:         #16a34a;
+  --nx-warning:         #d97706;
+  --nx-danger:          #dc2626;
+  --nx-shadow:          rgba(15, 23, 42, 0.15);
+  --nx-glass-bg:        rgba(255, 255, 255, 0.96);
+  --nx-glass-card:      rgba(255, 255, 255, 0.96);
+  --nx-glass-border:    rgba(15, 23, 42, 0.12);
+  --nx-input-bg:        #ffffff;
+  --nx-button-bg:       #f1f5f9;
+  --nx-button-text:     #0f172a;
 
-  --nx-accent:          #007aff;
-  --nx-accent-soft:     rgba(0, 122, 255, 0.10);
-  --nx-accent-glow:     rgba(0, 122, 255, 0.18);
-  
-  --nx-text:            #06111f;
-  --nx-text-soft:       #334155;
-  --nx-text-muted:      #64748b;
-  --nx-text-faint:      #94a3b8;
-  
-  --nx-danger:          #ff3b30;
-  --nx-success:         #14b86a;
-  --nx-warning:         #ffb020;
-  --nx-info:            #00b8ff;
-  
-  --nx-grid:            rgba(15, 23, 42, 0.04);
-  --nx-command-bg:      rgba(255, 255, 255, 0.96);
-  --nx-bubble-inbound:  rgba(15, 23, 42, 0.05);
-  --nx-bubble-outbound: #007aff;
-  --nx-badge-bg:        rgba(15, 23, 42, 0.06);
+  --nx-panel-bg:        var(--nx-panel);
+  --nx-card-bg:         var(--nx-card);
+  --nx-bg-soft:         var(--nx-bg-2);
+  --nx-text-muted:      var(--nx-muted);
+  --nx-command-bg:      var(--nx-panel);
+  --nx-bubble-inbound:  rgba(0, 0, 0, 0.04);
+  --nx-bubble-outbound: #2563eb;
+  --nx-badge-bg:        rgba(0, 0, 0, 0.04);
   --nx-badge-border:    rgba(15, 23, 42, 0.12);
+  --nx-grid:            rgba(0, 0, 0, 0.03);
 
-  /* Override dark-mode-only utility vars that have no light fallback */
-  --nx-bg-glass:        rgba(15, 23, 42, 0.04);
-  --nx-bg-darker:       #ffffff;
-  --nx-bg-hover:        rgba(15, 23, 42, 0.04);
+  /* Legacy/inbox-specific mapping */
+  --inbox-bg:           var(--nx-bg);
+  --inbox-panel:        var(--nx-panel);
+  --inbox-card:         var(--nx-card);
+  --inbox-text:         var(--nx-text);
+  --inbox-text-strong:  var(--nx-text-strong);
+  --inbox-muted:        var(--nx-muted);
+  --inbox-border:       var(--nx-border);
+  --text:               var(--nx-text);
+  --muted:              var(--nx-muted);
+  --surface:            var(--nx-surface);
+  --panel:              var(--nx-panel);
+  --card:               var(--nx-card);
+
+  /* Helper aliases mapping local variables */
+  --nx-bg-hover:        rgba(15, 23, 42, 0.045);
+  --nx-bg-glass:        rgba(255, 255, 255, 0.72);
   --nx-bg-elevated:     #ffffff;
+  --nx-bg-darker:       #ffffff;
+
+  /* ── CRITICAL FIX: Override the color-mix() surface formulas ── */
+  --nexus-surface-faint:          rgba(0, 0, 0, 0.02);
+  --nexus-surface-overlay:        rgba(0, 0, 0, 0.03);
+  --nexus-surface-hover:          rgba(0, 0, 0, 0.05);
+  --nexus-surface-active:         rgba(0, 0, 0, 0.08);
+  --nexus-surface-border:         rgba(0, 0, 0, 0.08);
+  --nexus-surface-border-strong:  rgba(0, 0, 0, 0.15);
+
+  /* ── Light-mode nexus-* alias hard overrides ────────────────────────────
+     These cascade down from :root and must be re-pinned for light mode.
+     ─────────────────────────────────────────────────────────────────────── */
+  --nexus-bg:            #ffffff;
+  --nexus-bg-elevated:   #ffffff;
+  --nexus-panel:         #ffffff;
+  --nexus-panel-strong:  #f9f9fa;
+  --nexus-card:          #ffffff;
+  --nexus-card-hover:    #f4f5f7;
+  --nexus-border:        rgba(0, 0, 0, 0.08);
+  --nexus-border-strong: rgba(0, 0, 0, 0.15);
+  --nexus-text:          #000000;
+  --nexus-muted:         #636366;
+  --nexus-faint:         rgba(0, 0, 0, 0.04);
+  --nexus-accent:        #0055ff;
+  --nexus-accent-rgb:    0, 85, 255;
+  --nexus-accent-soft:   rgba(0, 85, 255, 0.10);
+  --nexus-accent-glow:   rgba(0, 85, 255, 0.25);
+  --nexus-accent-border: rgba(0, 85, 255, 0.35);
+  --nexus-success:       #34c759;
+  --nexus-warning:       #ff9f0a;
+  --nexus-danger:        #ff3b30;
+  --nexus-shadow:        0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -558,46 +732,70 @@
 /* ── Light-mode accent palette overrides (higher contrast on white) ─────── */
 /* These come AFTER the generic accent blocks so they win in light mode.      */
 :root[data-nexus-theme="light"][data-nexus-accent="cyan"] {
-  --nx-accent:        #00b8ff;
-  --nx-accent-glow:   rgba(0, 184, 255, 0.20);
-  --nx-accent-soft:   rgba(0, 184, 255, 0.10);
-  --nx-badge-border:  rgba(0, 184, 255, 0.28);
-  --nexus-accent-rgb: 0, 184, 255;
+  --nx-accent:          #06b6d4;
+  --nx-accent-glow:     rgba(6, 182, 212, 0.22);
+  --nx-accent-soft:     rgba(6, 182, 212, 0.13);
+  --nx-badge-border:    rgba(6, 182, 212, 0.36);
+  --nexus-accent:       #06b6d4;
+  --nexus-accent-rgb:   6, 182, 212;
+  --nexus-accent-soft:  rgba(6, 182, 212, 0.13);
+  --nexus-accent-glow:  rgba(6, 182, 212, 0.22);
+  --nexus-accent-border: rgba(6, 182, 212, 0.36);
 }
 :root[data-nexus-theme="light"][data-nexus-accent="emerald"] {
-  --nx-accent:        #14b86a;
-  --nx-accent-glow:   rgba(20, 184, 106, 0.20);
-  --nx-accent-soft:   rgba(20, 184, 106, 0.10);
-  --nx-badge-border:  rgba(20, 184, 106, 0.28);
-  --nexus-accent-rgb: 20, 184, 106;
+  --nx-accent:          #10b981;
+  --nx-accent-glow:     rgba(16, 185, 129, 0.22);
+  --nx-accent-soft:     rgba(16, 185, 129, 0.13);
+  --nx-badge-border:    rgba(16, 185, 129, 0.36);
+  --nexus-accent:       #10b981;
+  --nexus-accent-rgb:   16, 185, 129;
+  --nexus-accent-soft:  rgba(16, 185, 129, 0.13);
+  --nexus-accent-glow:  rgba(16, 185, 129, 0.22);
+  --nexus-accent-border: rgba(16, 185, 129, 0.36);
 }
 :root[data-nexus-theme="light"][data-nexus-accent="amber"] {
-  --nx-accent:        #ffb020;
-  --nx-accent-glow:   rgba(255, 176, 32, 0.20);
-  --nx-accent-soft:   rgba(255, 176, 32, 0.12);
-  --nx-badge-border:  rgba(255, 176, 32, 0.32);
-  --nexus-accent-rgb: 255, 176, 32;
+  --nx-accent:          #f59e0b;
+  --nx-accent-glow:     rgba(245, 158, 11, 0.24);
+  --nx-accent-soft:     rgba(245, 158, 11, 0.15);
+  --nx-badge-border:    rgba(245, 158, 11, 0.40);
+  --nexus-accent:       #f59e0b;
+  --nexus-accent-rgb:   245, 158, 11;
+  --nexus-accent-soft:  rgba(245, 158, 11, 0.15);
+  --nexus-accent-glow:  rgba(245, 158, 11, 0.24);
+  --nexus-accent-border: rgba(245, 158, 11, 0.40);
 }
 :root[data-nexus-theme="light"][data-nexus-accent="violet"] {
-  --nx-accent:        #7c3cff;
-  --nx-accent-glow:   rgba(124, 60, 255, 0.20);
-  --nx-accent-soft:   rgba(124, 60, 255, 0.10);
-  --nx-badge-border:  rgba(124, 60, 255, 0.28);
-  --nexus-accent-rgb: 124, 60, 255;
+  --nx-accent:          #8b5cf6;
+  --nx-accent-glow:     rgba(139, 92, 246, 0.22);
+  --nx-accent-soft:     rgba(139, 92, 246, 0.13);
+  --nx-badge-border:    rgba(139, 92, 246, 0.36);
+  --nexus-accent:       #8b5cf6;
+  --nexus-accent-rgb:   139, 92, 246;
+  --nexus-accent-soft:  rgba(139, 92, 246, 0.13);
+  --nexus-accent-glow:  rgba(139, 92, 246, 0.22);
+  --nexus-accent-border: rgba(139, 92, 246, 0.36);
 }
 :root[data-nexus-theme="light"][data-nexus-accent="rose"] {
-  --nx-accent:        #ff2d75;
-  --nx-accent-glow:   rgba(255, 45, 117, 0.20);
-  --nx-accent-soft:   rgba(255, 45, 117, 0.10);
-  --nx-badge-border:  rgba(255, 45, 117, 0.28);
-  --nexus-accent-rgb: 255, 45, 117;
+  --nx-accent:          #f43f5e;
+  --nx-accent-glow:     rgba(244, 63, 94, 0.22);
+  --nx-accent-soft:     rgba(244, 63, 94, 0.13);
+  --nx-badge-border:    rgba(244, 63, 94, 0.36);
+  --nexus-accent:       #f43f5e;
+  --nexus-accent-rgb:   244, 63, 94;
+  --nexus-accent-soft:  rgba(244, 63, 94, 0.13);
+  --nexus-accent-glow:  rgba(244, 63, 94, 0.22);
+  --nexus-accent-border: rgba(244, 63, 94, 0.36);
 }
 :root[data-nexus-theme="light"][data-nexus-accent="ice"] {
-  --nx-accent:        #0ea5e9;
-  --nx-accent-glow:   rgba(14, 165, 233, 0.20);
-  --nx-accent-soft:   rgba(14, 165, 233, 0.10);
-  --nx-badge-border:  rgba(14, 165, 233, 0.28);
-  --nexus-accent-rgb: 14, 165, 233;
+  --nx-accent:          #2563eb;
+  --nx-accent-glow:     rgba(37, 99, 235, 0.22);
+  --nx-accent-soft:     rgba(37, 99, 235, 0.12);
+  --nx-badge-border:    rgba(37, 99, 235, 0.36);
+  --nexus-accent:       #2563eb;
+  --nexus-accent-rgb:   37, 99, 235;
+  --nexus-accent-soft:  rgba(37, 99, 235, 0.12);
+  --nexus-accent-glow:  rgba(37, 99, 235, 0.22);
+  --nexus-accent-border: rgba(37, 99, 235, 0.36);
 }
 
 /* Map chrome responds to Nexus theme + accent */
@@ -1000,4 +1198,137 @@
 [data-nexus-theme="red_ops"] .icv-linked-chip__status.is-sent {
   color: #ff1212 !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GLOBAL OVERLAY NEUTRALIZATION & contrast RESTORATION
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Neutralize all desaturating background overlay gradients and pseudo-elements */
+[data-nexus-theme="dark"] .nx-premium-inbox::before,
+[data-nexus-theme="dark"] .nx-premium-inbox::after,
+[data-nexus-theme="dark"] .nx-inbox::before,
+[data-nexus-theme="dark"] .nx-inbox::after,
+[data-nexus-theme="dark"] .nx-alerts::before,
+[data-nexus-theme="dark"] .nx-alerts::after,
+[data-nexus-theme="dark"] .nx-stats::before,
+[data-nexus-theme="dark"] .nx-stats::after,
+[data-nexus-theme="dark"] .nx-markets::before,
+[data-nexus-theme="dark"] .nx-markets::after,
+[data-nexus-theme="dark"] .nx-buyer::before,
+[data-nexus-theme="dark"] .nx-buyer::after,
+[data-nexus-theme="dark"] .nx-title::before,
+[data-nexus-theme="dark"] .nx-title::after,
+[data-nexus-theme="dark"] .nx-watchlists::before,
+[data-nexus-theme="dark"] .nx-watchlists::after,
+[data-nexus-theme="dark"] .nx-notifications::before,
+[data-nexus-theme="dark"] .nx-notifications::after,
+[data-nexus-theme="dark"] .nx-settings::before,
+[data-nexus-theme="dark"] .nx-settings::after,
+[data-nexus-theme="dark"] .nx-inbox-loading-state::before,
+[data-nexus-theme="dark"] .nx-inbox-loading-state::after,
+[data-nexus-theme="dark"] .nx-icm::before,
+[data-nexus-theme="dark"] .nx-icm::after,
+
+[data-nexus-theme="red_ops"] .nx-premium-inbox::before,
+[data-nexus-theme="red_ops"] .nx-premium-inbox::after,
+[data-nexus-theme="red_ops"] .nx-inbox::before,
+[data-nexus-theme="red_ops"] .nx-inbox::after,
+[data-nexus-theme="red_ops"] .nx-alerts::before,
+[data-nexus-theme="red_ops"] .nx-alerts::after,
+[data-nexus-theme="red_ops"] .nx-stats::before,
+[data-nexus-theme="red_ops"] .nx-stats::after,
+[data-nexus-theme="red_ops"] .nx-markets::before,
+[data-nexus-theme="red_ops"] .nx-markets::after,
+[data-nexus-theme="red_ops"] .nx-buyer::before,
+[data-nexus-theme="red_ops"] .nx-buyer::after,
+[data-nexus-theme="red_ops"] .nx-title::before,
+[data-nexus-theme="red_ops"] .nx-title::after,
+[data-nexus-theme="red_ops"] .nx-watchlists::before,
+[data-nexus-theme="red_ops"] .nx-watchlists::after,
+[data-nexus-theme="red_ops"] .nx-notifications::before,
+[data-nexus-theme="red_ops"] .nx-notifications::after,
+[data-nexus-theme="red_ops"] .nx-settings::before,
+[data-nexus-theme="red_ops"] .nx-settings::after,
+[data-nexus-theme="red_ops"] .nx-inbox-loading-state::before,
+[data-nexus-theme="red_ops"] .nx-inbox-loading-state::after,
+[data-nexus-theme="red_ops"] .nx-icm::before,
+[data-nexus-theme="red_ops"] .nx-icm::after {
+  content: none !important;
+  opacity: 0 !important;
+  background: none !important;
+  display: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  pointer-events: none !important;
+}
+
+/* Remove/neutralize desaturating & dimming filters on visuals */
+.nx-comp-module__map-iframe,
+.nx-sold-comp__media img,
+.nx-property-hero-shell .nx-property-hero__media img,
+.nx-property-hero-shell .nx-property-hero__media:hover img {
+  filter: none !important;
+}
+
+/* ── Global Typography & Contrast Refinements ── */
+.nx-muted,
+.nx-text-muted,
+.text-muted,
+.muted,
+.opacity-30,
+.opacity-40,
+.opacity-50,
+.opacity-60,
+.opacity-70,
+.opacity-80 {
+  opacity: 1 !important; /* Eliminate faded text opacity filters */
+}
+
+/* Force legible, high-contrast text per theme */
+[data-nexus-theme="dark"] .nx-muted,
+[data-nexus-theme="dark"] .nx-text-muted,
+[data-nexus-theme="dark"] .text-muted,
+[data-nexus-theme="dark"] .muted {
+  color: #94a3b8 !important;
+}
+[data-nexus-theme="dark"] .nx-text-faint,
+[data-nexus-theme="dark"] .text-faint {
+  color: #64748b !important;
+}
+
+[data-nexus-theme="light"] .nx-muted,
+[data-nexus-theme="light"] .nx-text-muted,
+[data-nexus-theme="light"] .text-muted,
+[data-nexus-theme="light"] .muted {
+  color: #475569 !important;
+}
+[data-nexus-theme="light"] .nx-text-faint,
+[data-nexus-theme="light"] .text-faint {
+  color: #64748b !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-muted,
+[data-nexus-theme="red_ops"] .nx-text-muted,
+[data-nexus-theme="red_ops"] .text-muted,
+[data-nexus-theme="red_ops"] .muted {
+  color: #fca5a5 !important;
+}
+[data-nexus-theme="red_ops"] .nx-text-faint,
+[data-nexus-theme="red_ops"] .text-faint {
+  color: #b77979 !important;
+}
+
+/* Badge and Pill Legibility */
+.nx-filter-pill,
+.nx-chip,
+.nx-status-chip,
+.nx-prop-badge,
+.nx-property-tag,
+.nx-prop-type-badge,
+.nx-metric-chip {
+  opacity: 1 !important;
+  font-weight: 700 !important;
+}
+
 

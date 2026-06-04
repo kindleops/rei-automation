@@ -19,6 +19,7 @@ export type InboxWorkspaceView =
   | 'buyer_match'
   | 'campaigns'
   | 'email'
+  | 'workflow_studio'
 
 export type ActiveInboxContextIntent =
   | 'open_thread'

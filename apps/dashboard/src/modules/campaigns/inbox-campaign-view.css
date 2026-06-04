@@ -365,7 +365,7 @@
 }
 
 .icv-status.is-active    { background: rgba(62,207,142,0.10); color: var(--icv-success); }
-.icv-status.is-paused    { background: rgba(148,163,184,0.10); color: #94a3b8; }
+.icv-status.is-paused    { background: rgba(148,163,184,0.10); color: #aeaeb2; }
 .icv-status.is-scheduled { background: var(--icv-blue-s); color: var(--icv-blue); }
 .icv-status.is-draft     { background: rgba(255,255,255,0.06); color: var(--icv-text-2); }
 .icv-status.is-completed { background: rgba(245,184,73,0.10); color: var(--icv-warning); }
@@ -869,7 +869,7 @@
 .icv-linked-chip__status.is-ready     { color: #3ecf8e; }
 .icv-linked-chip__status.is-scheduled { color: #f5b849; }
 .icv-linked-chip__status.is-failed    { color: #f87171; }
-.icv-linked-chip__status.is-opted_out { color: #94a3b8; }
+.icv-linked-chip__status.is-opted_out { color: #aeaeb2; }
 
 .icv-linked-chip__action {
   color: #3ecf8e;
@@ -948,7 +948,7 @@
 }
 
 .icv-compact__dot.is-active    { background: #3ecf8e; animation: ccc-pulse 2s infinite; }
-.icv-compact__dot.is-paused    { background: #94a3b8; }
+.icv-compact__dot.is-paused    { background: #aeaeb2; }
 .icv-compact__dot.is-scheduled { background: #007aff; }
 .icv-compact__dot.is-draft     { background: #71717a; }
 

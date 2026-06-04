@@ -61,6 +61,16 @@ const SOURCE_BY_DOMAIN = {
 
 const FIELD_KEY_ALIASES = Object.freeze({
   'properties.units': 'properties.units_count',
+  // Canonical geography. The bare property_* mirrors are sparse partial columns
+  // (property_state/property_zip ~6.5% populated, property_county_name 0%), while
+  // property_address_* is ~100% populated and is the source of truth. Legacy keys
+  // from saved campaigns or older clients normalize to the canonical address field
+  // so the catalog, options, and preview compiler always resolve canonical columns.
+  'properties.property_state': 'properties.property_address_state',
+  'properties.property_zip': 'properties.property_address_zip',
+  'properties.property_county_name': 'properties.property_address_county_name',
+  'properties.property_county': 'properties.property_address_county_name',
+  'properties.property_city': 'properties.property_address_city',
 })
 
 const CANONICAL_SOURCE_MAPPINGS = Object.freeze({
@@ -298,10 +308,11 @@ const FIELD_GROUPS = [
   {
     domain: 'properties',
     category: 'Location & Market',
+    // Canonical address geography only. The legacy property_state / property_zip /
+    // property_county_name columns are deliberately excluded from the operator-facing
+    // catalog because they are sparse mirrors; their field keys still resolve via
+    // FIELD_KEY_ALIASES for backward compatibility with saved campaigns.
     columns: [
-      'property_county_name',
-      'property_state',
-      'property_zip',
       'market',
       'market_region',
       'property_address_city',

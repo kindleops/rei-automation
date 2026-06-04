@@ -5,6 +5,9 @@ export type CampaignStatus =
   | 'paused'
   | 'scheduled'
   | 'draft'
+  | 'previewed'
+  | 'activating'
+  | 'failed'
   | 'completed'
   | 'archived'
 
@@ -258,6 +261,7 @@ export interface CampaignModel {
 
 export type CampaignDetailTab =
   | 'overview'
+  | 'execution'
   | 'targets'
   | 'queue'
   | 'replies'

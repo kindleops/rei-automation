@@ -17,6 +17,11 @@ import {
 } from "@/lib/providers/textgrid.js";
 import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import {
+  AUTOMATION_LOG_TAGS,
+  logAutomationConsole,
+} from "@/lib/domain/automation/automation-audit.js";
 import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
@@ -350,6 +355,80 @@ function resolveQueueTemplateId(queue_row = null) {
       queue_row?.metadata?.template?.id ||
       queue_row?.metadata?.selected_template?.id
   );
+}
+
+function resolveQueueAutomationEventType(result = {}) {
+  const final_status = lower(result.final_queue_status || result.queue_status || result.status);
+  if (result.sent === true || final_status === "sent" || final_status === "delivered") {
+    return "queue_item_sent";
+  }
+  if (
+    result.ok === false &&
+    !result.skipped &&
+    !["cancelled", "blocked_by_health_guard", "duplicate_blocked"].includes(final_status)
+  ) {
+    return "queue_item_failed";
+  }
+  if (["failed", "failed_transport", "invalid_number", "carrier_blocked"].includes(final_status)) {
+    return "queue_item_failed";
+  }
+  return null;
+}
+
+async function emitQueueAutomationEvent(queue_row = {}, result = {}, deps = {}) {
+  const emitter = deps.emitAutomationEvent || emitAutomationEvent;
+  const event_type = resolveQueueAutomationEventType(result);
+  if (!event_type || typeof emitter !== "function") return null;
+
+  const queue_row_id = getQueueRowId(queue_row) || result.queue_row_id || result.queue_item_id || null;
+  const payload = {
+    provider: "textgrid",
+    queue_row_id,
+    queue_item_id: queue_row_id,
+    queue_key: clean(queue_row?.queue_key || queue_row?.queue_id) || null,
+    queue_status: result.final_queue_status || result.queue_status || null,
+    from_phone_number:
+      clean(result.from_phone_number || queue_row?.from_phone_number || queue_row?.from) || null,
+    to_phone_number:
+      clean(result.to_phone_number || queue_row?.to_phone_number || queue_row?.to) || null,
+    provider_message_sid:
+      clean(result.provider_message_id || result.provider_message_sid || result.message_id) || null,
+    failed_reason: clean(result.failed_reason || result.reason || result.error) || null,
+    template_id: resolveQueueTemplateId(queue_row) || null,
+    routing_tier: resolveQueueRoutingTier(queue_row) || null,
+    raw_result: result,
+  };
+
+  try {
+    return await emitter({
+      event_type,
+      source: "send_queue_processor",
+      dedupe_key: `send-queue:${event_type}:${queue_row_id || "unknown"}:${payload.provider_message_sid || payload.queue_status || "unknown"}`,
+      conversation_thread_id: clean(queue_row?.thread_key || queue_row?.canonical_thread_key) || null,
+      property_id: clean(queue_row?.property_id) || null,
+      prospect_id: clean(queue_row?.prospect_id) || null,
+      master_owner_id: clean(queue_row?.master_owner_id || queue_row?.owner_id) || null,
+      phone_number_id: clean(queue_row?.phone_number_id || queue_row?.phone_id) || null,
+      queue_item_id: queue_row_id,
+      payload,
+    }, {
+      supabaseClient: deps.supabaseClient || deps.supabase,
+      logger: deps.logger,
+    });
+  } catch (error) {
+    logAutomationConsole(AUTOMATION_LOG_TAGS.emit_failed_non_blocking, {
+      source: "send_queue_processor",
+      queue_row_id,
+      event_type,
+      error: error?.message || "automation_emit_failed",
+    });
+    warn("queue.automation_emit_failed", {
+      queue_row_id,
+      event_type,
+      error: error?.message || "automation_emit_failed",
+    });
+    return null;
+  }
 }
 
 function resolveQueueRoutingTier(queue_row = null) {
@@ -1949,11 +2028,12 @@ export async function processSendQueueItem(queue_row, deps = {}) {
     };
   }
 
-  if (isSupabaseQueueRow(resolved_queue_row)) {
-    return processSupabaseQueueItem(resolved_queue_row, deps);
-  }
+  const result = isSupabaseQueueRow(resolved_queue_row)
+    ? await processSupabaseQueueItem(resolved_queue_row, deps)
+    : await processLegacyQueueItem(resolved_queue_row, deps);
 
-  return processLegacyQueueItem(resolved_queue_row, deps);
+  await emitQueueAutomationEvent(resolved_queue_row, result, deps);
+  return result;
 }
 
 export async function processSendQueue(input = {}, deps = {}) {

@@ -1094,6 +1094,114 @@ export function patchCampaignBackend(campaignId: string, payload: Record<string,
   })
 }
 
+type WorkflowBackendResponse = Record<string, unknown>
+
+export function listWorkflowsBackend(): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows')
+}
+
+export function createWorkflowBackend(payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getWorkflowBackend(workflowId: string): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}`)
+}
+
+export function patchWorkflowBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function cloneWorkflowBackend(workflowId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/clone`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function pauseWorkflowBackend(workflowId: string): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/pause`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+export function resumeWorkflowBackend(workflowId: string): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/resume`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+export function dryRunWorkflowBackend(workflowId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/dry-run`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkflowStepBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/steps`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function patchWorkflowStepBackend(stepId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflow-steps/${encodeURIComponent(stepId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkflowTemplateSetBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/template-sets`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkflowTemplateVariantBackend(templateSetId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflow-template-sets/${encodeURIComponent(templateSetId)}/variants`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function renderWorkflowTemplateVariantBackend(variantId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflow-template-variants/${encodeURIComponent(variantId)}/render-test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function upsertWorkflowTemplateTranslationBackend(variantId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflow-template-variants/${encodeURIComponent(variantId)}/translations`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkflowSenderPoolBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}/sender-pools`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkflowSenderPoolMemberBackend(senderPoolId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflow-sender-pools/${encodeURIComponent(senderPoolId)}/members`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export interface BuildTargetsResponse {
   ok?: boolean
   success: boolean
@@ -1205,5 +1313,72 @@ export function queueCampaignPlan(campaignId: string, payload: Record<string, un
       create_send_queue_rows: false,
       ...payload,
     }),
+  })
+}
+
+// ── Phase 2C/2D — campaign execution progress + lifecycle ────────────────────
+export interface CampaignRuntimeSummary {
+  campaign_id: string
+  name?: string | null
+  status: string
+  scheduled_for: string | null
+  activated_at: string | null
+  paused_at: string | null
+  completed_at: string | null
+  failed_at: string | null
+  failure_reason: string | null
+  last_transition_at: string | null
+  activation_attempt_count: number
+  hydration_active: boolean
+  execution_heartbeat_at: string | null
+  hydration_cursor: Record<string, unknown> | null
+  progress_synced_at: string | null
+  queued_count: number
+  sent_count: number
+  delivered_count: number
+  failed_count: number
+  replied_count: number
+  positive_count: number
+  opt_out_count: number
+  total_planned: number
+  delivery_rate_pct: number
+  reply_rate_pct: number
+  positive_rate_pct: number
+  opt_out_rate_pct: number
+  hydration_progress_pct: number
+}
+
+export interface CampaignProgressResponse {
+  ok: boolean
+  summary?: CampaignRuntimeSummary
+  degraded?: boolean
+  error?: string
+}
+
+export function getCampaignProgress(
+  campaignId: string,
+  opts: { recompute?: boolean } = {},
+): Promise<BackendResult<CampaignProgressResponse>> {
+  const query = opts.recompute ? '?recompute=1' : ''
+  return callBackend<CampaignProgressResponse>(`/api/cockpit/campaigns/${campaignId}/progress${query}`)
+}
+
+export interface CampaignLifecycleResponse {
+  ok: boolean
+  action?: string | null
+  from?: string | null
+  to?: string
+  degraded?: boolean
+  error?: string
+}
+
+export function setCampaignLifecycle(
+  campaignId: string,
+  action: 'preview' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive',
+  payload: Record<string, unknown> = {},
+): Promise<BackendResult<CampaignLifecycleResponse>> {
+  return callBackend<CampaignLifecycleResponse>(`/api/cockpit/campaigns/${campaignId}/lifecycle`, {
+    method: 'POST',
+    body: JSON.stringify({ action, ...payload }),
   })
 }

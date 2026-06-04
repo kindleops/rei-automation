@@ -14,6 +14,7 @@ import {
   queueBatch,
 } from './campaigns.adapter'
 import { CreateCampaignModal } from './CreateCampaignModal'
+import { CampaignControlCenter } from './CampaignControlCenter'
 import type {
   CampaignModel,
   CampaignSummary,
@@ -75,13 +76,16 @@ const fmtDate = (iso: string | null | undefined): string => {
 
 const statusOrder: Record<CampaignStatus, number> = {
   active: 0,
-  live_limited: 1,
-  ready: 2,
+  activating: 1,
+  live_limited: 2,
   scheduled: 3,
-  paused: 4,
-  draft: 5,
-  completed: 6,
-  archived: 7,
+  previewed: 4,
+  ready: 5,
+  paused: 6,
+  failed: 7,
+  draft: 8,
+  completed: 9,
+  archived: 10,
 }
 
 // ── Primitive components ──────────────────────────────────────────────────────
@@ -89,7 +93,8 @@ const statusOrder: Record<CampaignStatus, number> = {
 const StatusBadge = ({ status }: { status: CampaignStatus }) => {
   const labels: Record<CampaignStatus, string> = {
     active: 'Active', ready: 'Ready', live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
-    draft: 'Draft', completed: 'Completed', archived: 'Archived',
+    draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
+    completed: 'Completed', archived: 'Archived',
   }
   return (
     <span className={cls('ccc-status', `is-${status}`)}>
@@ -879,6 +884,7 @@ export const DetailPanel = ({
 
   const TABS: Array<{ id: CampaignDetailTab; label: string }> = [
     { id: 'overview',   label: 'Overview' },
+    { id: 'execution',  label: 'Execution' },
     { id: 'targets',    label: 'Targets' },
     { id: 'queue',      label: 'Queue' },
     { id: 'replies',    label: 'Replies' },
@@ -1000,6 +1006,13 @@ export const DetailPanel = ({
 
       <div className="ccc__detail-body">
         {activeTab === 'overview'  && <OverviewTab campaign={campaign} />}
+        {activeTab === 'execution' && (
+          <CampaignControlCenter
+            campaignId={campaign.id}
+            campaign={campaign}
+            onLifecycleChange={() => onAction('refresh', campaign)}
+          />
+        )}
         {activeTab === 'targets'   && <TargetsTab campaignId={campaign.id} />}
         {activeTab === 'queue'     && <QueueTab campaign={campaign} />}
         {activeTab === 'replies'   && <RepliesTab campaign={campaign} />}

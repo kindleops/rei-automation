@@ -46,6 +46,11 @@ import {
 } from "@/lib/domain/events/idempotency-ledger.js";
 import { findLatestOpenOffer } from "@/lib/podio/apps/offers.js";
 import { handleUnknownInboundRouter } from "@/lib/domain/inbound/unknown-inbound-router.js";
+import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import {
+  AUTOMATION_LOG_TAGS,
+  logAutomationConsole,
+} from "@/lib/domain/automation/automation-audit.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import { postInboundSmsDiscordCard } from "@/lib/discord/inbound-sms-card.js";
 import {
@@ -90,6 +95,7 @@ const defaultDeps = {
   hashIdempotencyPayload,
   findLatestOpenOffer,
   handleUnknownInboundRouter,
+  emitAutomationEvent,
   notifyDiscordOps,
   postInboundSmsDiscordCard,
   buildInboundAutopilotSchedule,
@@ -2276,6 +2282,81 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       idempotency_key,
       matched: true,
     };
+
+    try {
+      const automation_supabase_client =
+        runtimeDeps.getSupabaseClient !== defaultDeps.getSupabaseClient
+          ? runtimeDeps.getSupabaseClient?.()
+          : null;
+
+      await runtimeDeps.emitAutomationEvent({
+        event_type: "inbound_message_received",
+        source: "textgrid_inbound",
+        dedupe_key: `textgrid-inbound:${idempotency_key}`,
+        conversation_thread_id:
+          second_pass_supabase_payload?.thread_key ||
+          context?.thread_key ||
+          inbound_from ||
+          null,
+        property_id: property_id || null,
+        prospect_id: prospect_id || null,
+        master_owner_id: master_owner_id || null,
+        phone_number_id: phone_item_id || null,
+        payload: {
+          provider: "textgrid",
+          provider_message_sid: extracted.message_id || null,
+          message_id: extracted.message_id || null,
+          message_body,
+          inbound_from,
+          inbound_to,
+          from_phone_number: inbound_from,
+          to_phone_number: inbound_to,
+          thread_key:
+            second_pass_supabase_payload?.thread_key ||
+            context?.thread_key ||
+            inbound_from ||
+            null,
+          classification,
+          route,
+          detected_intent:
+            second_pass_supabase_payload?.detected_intent ||
+            classification?.detected_intent ||
+            classification?.inbound_intent ||
+            classification?.objection ||
+            seller_stage_reply?.plan?.detected_intent ||
+            null,
+          compliance_flag: classification?.compliance_flag || null,
+          stage_before,
+          stage_after:
+            seller_stage_reply?.brain_stage ||
+            deterministic_state?.conversation_stage ||
+            route?.stage ||
+            null,
+          lead_temperature:
+            classification?.lead_temperature ||
+            second_pass_supabase_payload?.metadata?.lead_temperature ||
+            null,
+          property_address: property_address || null,
+          queue_cancellation,
+          seller_followup_result,
+          seller_stage_use_case: seller_stage_reply?.plan?.selected_use_case || null,
+          auto_reply_status:
+            seller_stage_reply?.queue_status ||
+            second_pass_supabase_payload?.auto_reply_status ||
+            null,
+        },
+      }, automation_supabase_client ? { supabaseClient: automation_supabase_client } : {});
+    } catch (automation_error) {
+      logAutomationConsole(AUTOMATION_LOG_TAGS.emit_failed_non_blocking, {
+        source: "textgrid_inbound",
+        message_id: extracted.message_id,
+        error: automation_error?.message || "automation_emit_failed",
+      });
+      safeWarn("textgrid.inbound_automation_emit_failed", {
+        message_id: extracted.message_id,
+        error: automation_error?.message || "automation_emit_failed",
+      });
+    }
 
     await runtimeDeps.completeIdempotentProcessing({
       record_item_id: idempotency.record_item_id,

@@ -6,7 +6,7 @@
   --nx-neon-red: #d4404c;
   --nx-neon-yellow: #d89530;
   --nx-neon-purple: #9966ff;
-  --nx-text-3: #94a3b8;
+  --nx-text-3: #aeaeb2;
 
   display: flex;
   flex-direction: column;
@@ -47,7 +47,7 @@
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+  background: linear-gradient(135deg, #fff 0%, #aeaeb2 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -63,7 +63,7 @@
 .nx-view-btn {
   background: transparent;
   border: none;
-  color: #64748b;
+  color: #636366;
   padding: 6px 12px;
   font-size: 11px;
   font-weight: 700;
@@ -199,7 +199,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #94a3b8;
+  color: #aeaeb2;
   font-weight: 700;
 }
 
@@ -237,7 +237,7 @@
   font-size: 11px;
 }
 
-.nx-funnel-step__label { color: #94a3b8; font-weight: 500; }
+.nx-funnel-step__label { color: #aeaeb2; font-weight: 500; }
 .nx-funnel-step__count { font-weight: 700; color: #fff; }
 
 .nx-funnel-step__bar-wrap {
@@ -264,7 +264,7 @@
 .nx-leaderboard-table th {
   text-align: left;
   padding: 10px;
-  color: #64748b;
+  color: #636366;
   border-bottom: 1px solid var(--nx-border);
   font-weight: 600;
   text-transform: uppercase;

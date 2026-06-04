@@ -83,6 +83,7 @@ import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { InboxCampaignView } from '../campaigns/InboxCampaignView'
 import { EmailCommandCenter } from '../email/EmailCommandCenter'
+import { WorkflowStudio } from '../workflows/WorkflowStudio'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -207,6 +208,7 @@ const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; de
   { key: 'buyer_match', label: 'Buyer Match View', description: 'Buyer demand, dispo fit, and buyer-match readiness.' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
   { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
+  { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
 ]
 
 type NexusWorkspaceKey =
@@ -326,6 +328,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
   { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
+  { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
 ]
 
 const MAX_TOGGLED_VIEWS = 4
@@ -3806,6 +3809,17 @@ export default function InboxPage() {
       )
     }
 
+    if (view === 'workflow_studio') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--workflow-studio" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <WorkflowStudio
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
+          />
+        </section>
+      )
+    }
+
     if (view === 'closing_desk') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--queue">
@@ -4050,6 +4064,7 @@ export default function InboxPage() {
             activeWorkspaceView === 'comp_intelligence' && 'is-comp-mode',
             activeWorkspaceView === 'buyer_match' && 'is-buyer-mode',
             activeWorkspaceView === 'campaigns' && 'is-campaigns-mode',
+            activeWorkspaceView === 'workflow_studio' && 'is-workflow-studio-mode',
             isCommandMapView && 'is-command-map-mode',
           )}
         >

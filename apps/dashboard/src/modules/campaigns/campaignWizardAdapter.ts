@@ -630,10 +630,10 @@ const FIELD_GROUPS: Array<{
   {
     domain: 'properties',
     category: 'Location & Market',
+    // Canonical address geography only. Legacy property_state / property_zip /
+    // property_county_name are sparse mirrors and are excluded from the builder;
+    // their keys still resolve via FIELD_KEY_ALIASES for saved-campaign compatibility.
     columns: [
-      'property_county_name',
-      'property_state',
-      'property_zip',
       'market',
       'market_region',
       'property_address_city',
@@ -915,6 +915,22 @@ function operatorsForType(type: CampaignFieldType): CampaignOperator[] {
 function descriptionForField(domain: CampaignDomainKey, category: string, label: string): string {
   const domainDef = CAMPAIGN_DOMAIN_DEFINITIONS.find((entry) => entry.key === domain)
   return `${label} filter from ${domainDef?.sourceOfTruth.toLowerCase() ?? category.toLowerCase()}.`
+}
+
+// Legacy geography field keys resolve to their canonical property_address_*
+// equivalents. The bare property_* columns are sparse mirrors and are no longer
+// offered in the builder, but saved campaigns created before the canonical cleanup
+// may still reference them, so they normalize here for backward compatibility.
+export const CAMPAIGN_FIELD_KEY_ALIASES: Record<string, string> = {
+  'properties.property_state': 'properties.property_address_state',
+  'properties.property_zip': 'properties.property_address_zip',
+  'properties.property_county_name': 'properties.property_address_county_name',
+  'properties.property_county': 'properties.property_address_county_name',
+  'properties.property_city': 'properties.property_address_city',
+}
+
+export function normalizeCampaignFieldKey(key: string): string {
+  return CAMPAIGN_FIELD_KEY_ALIASES[key] ?? key
 }
 
 function buildFieldCatalog(): CampaignFieldDefinition[] {
@@ -1416,7 +1432,7 @@ async function previewTargetsLocal(draft: CampaignWizardDraft, meta?: CampaignFa
   const fieldByKey = new Map(FIELD_CATALOG.map((field) => [field.key, field]))
   const validFilters = filters.filter((filter) => hasMeaningfulValue(filter.value, filter.operator))
   const unsupported = validFilters
-    .map((filter) => fieldByKey.get(filter.fieldKey))
+    .map((filter) => fieldByKey.get(normalizeCampaignFieldKey(filter.fieldKey)))
     .filter((field): field is CampaignFieldDefinition => Boolean(field && !field.supported_in_preview))
     .map((field) => ({
       fieldKey: field.key,
@@ -1426,7 +1442,7 @@ async function previewTargetsLocal(draft: CampaignWizardDraft, meta?: CampaignFa
 
   const base = 18420
   const domainWeight = validFilters.reduce((score, filter) => {
-    const field = fieldByKey.get(filter.fieldKey)
+    const field = fieldByKey.get(normalizeCampaignFieldKey(filter.fieldKey))
     const valueSize = Array.isArray(filter.value) ? Math.max(1, filter.value.length) : 1
     const typeFactor = field?.type === 'boolean' ? 0.91 : field?.type === 'number' || field?.type === 'date' ? 0.86 : 0.82
     const valueFactor = Math.max(0.58, typeFactor + Math.min(0.08, valueSize * 0.015))

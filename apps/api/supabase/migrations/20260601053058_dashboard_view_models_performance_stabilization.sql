@@ -84,7 +84,6 @@ WITH (security_invoker = true) AS
 SELECT
   COALESCE(
     NULLIF(me.thread_key, ''),
-    NULLIF(me.canonical_e164, ''),
     CASE
       WHEN lower(COALESCE(me.direction, '')) LIKE 'in%' THEN NULLIF(me.from_phone_number, '')
       ELSE NULLIF(me.to_phone_number, '')
@@ -114,7 +113,10 @@ SELECT
   me.error_message,
   me.from_phone_number,
   me.to_phone_number,
-  me.canonical_e164,
+  CASE
+    WHEN lower(COALESCE(me.direction, '')) LIKE 'in%' THEN me.from_phone_number
+    ELSE me.to_phone_number
+  END AS canonical_e164,
   me.phone_number_id,
   me.prospect_id,
   me.property_id,
@@ -129,7 +131,7 @@ SELECT
   me.metadata,
   jsonb_strip_nulls(jsonb_build_object(
     'id', me.id,
-    'threadKey', COALESCE(NULLIF(me.thread_key, ''), NULLIF(me.canonical_e164, '')),
+    'threadKey', COALESCE(NULLIF(me.thread_key, ''), CASE WHEN lower(COALESCE(me.direction, '')) LIKE 'in%' THEN NULLIF(me.from_phone_number, '') ELSE NULLIF(me.to_phone_number, '') END),
     'direction', me.direction,
     'body', me.message_body,
     'timelineAt', COALESCE(me.event_timestamp, me.received_at, me.sent_at, me.delivered_at, me.created_at),
@@ -316,8 +318,8 @@ SELECT
   n.campaign_key,
   n.status,
   n.metrics,
-  n.dispatched_at,
-  n.expires_at,
+  NULL::timestamptz AS dispatched_at,
+  NULL::timestamptz AS expires_at,
   n.created_at,
   n.updated_at,
   (n.status IN ('acknowledged', 'dispatched', 'expired')) AS read,

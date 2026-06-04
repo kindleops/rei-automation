@@ -3546,7 +3546,7 @@
   height: 20px;
   background: #30d158;
   border-radius: 50%;
-  border: 2px solid #0f172a;
+  border: 2px solid #000000;
   display: grid;
   place-items: center;
   font-size: 12px;
@@ -5327,7 +5327,7 @@
   width: 36px !important;
   height: 36px !important;
   border-radius: 10px !important;
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+  background: linear-gradient(135deg, #1e293b 0%, #000000 100%) !important;
   color: var(--nexus-muted) !important;
   font-size: 11px !important;
   font-weight: 800 !important;
@@ -8648,4 +8648,529 @@
   0% { box-shadow: 0 0 4px rgba(255, 45, 45, 0.2); }
   50% { box-shadow: 0 0 16px rgba(255, 45, 45, 0.6); }
   100% { box-shadow: 0 0 4px rgba(255, 45, 45, 0.2); }
+}
+
+/* ==========================================================================
+   QUEUE & SENDING STATUS Redesign (.nx-queue-status)
+   ========================================================================== */
+
+/* Main Container Override */
+.nx-liquid-popover--processor {
+  width: min(620px, calc(100vw - 32px)) !important;
+  max-height: min(760px, calc(100vh - 110px)) !important;
+  overflow: hidden !important;
+  border-radius: 16px !important;
+  z-index: 13000 !important;
+  
+  /* Dark recipe default */
+  background: linear-gradient(145deg, rgba(6, 10, 18, 0.94), rgba(8, 13, 24, 0.90)) !important;
+  backdrop-filter: blur(30px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(160%) !important;
+  border: 1px solid rgba(148, 163, 184, 0.14) !important;
+  box-shadow:
+    0 30px 90px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.08) !important;
+  isolation: isolate;
+}
+
+/* Sheen */
+.nx-liquid-popover--processor::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(59,130,246,.10), transparent 32%),
+    radial-gradient(circle at 95% 10%, rgba(168,85,247,.08), transparent 34%);
+  z-index: 0;
+}
+
+.nx-queue-status {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: transparent !important; /* Managed by popover shell */
+  color: #e2e8f0;
+  max-height: none !important;
+  overflow: visible !important;
+  position: relative;
+  z-index: 1;
+}
+
+/* Header */
+.nx-queue-status__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 14px 8px; /* reduced vertical padding */
+}
+
+.nx-queue-status__header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nx-queue-status__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.nx-queue-status__subtitle {
+  margin: 0;
+  font-size: 9.5px;
+  color: #94a3b8;
+}
+
+.nx-queue-status__header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Status Badge */
+.nx-queue-status__state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 8px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.nx-queue-status__state.state-live {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+}
+
+.nx-queue-status__state.state-paused {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.nx-queue-status__state.state-degraded {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.nx-queue-status__state.state-blocked {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #fca5a5;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.2);
+}
+
+/* Scroll Body Wrapper */
+.nx-queue-status__body {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Summary Grid */
+.nx-queue-status__summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+/* Cards */
+.nx-queue-status__summary-card {
+  height: 85px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  box-sizing: border-box;
+  
+  /* Dark cards default */
+  background: rgba(15, 23, 42, 0.58) !important;
+  border: 1px solid rgba(148, 163, 184, 0.11) !important;
+}
+
+.nx-queue-status__card-title {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.nx-queue-status__card-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.nx-queue-status__card-value small {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.nx-queue-status__card-meta {
+  font-size: 8.5px;
+  color: #64748b;
+  line-height: 1.25;
+}
+
+/* Health indicators */
+.nx-queue-status__health {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 8.5px;
+  margin-top: 1px;
+}
+
+.nx-queue-status__health-indicator {
+  font-weight: 700;
+}
+
+.nx-queue-status__health-indicator.is-good {
+  color: #34d399;
+}
+
+.nx-queue-status__health-indicator.is-warning {
+  color: #fbbf24;
+}
+
+.nx-queue-status__health-sep {
+  color: rgba(255, 255, 255, 0.15);
+}
+
+/* Active Campaign Card */
+.nx-queue-status__campaign {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.75) !important;
+  border: 1px solid rgba(59, 130, 246, 0.2) !important;
+  border-left: 3px solid #3b82f6 !important; /* thin blue/cyan left rail */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nx-queue-status__campaign-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nx-queue-status__campaign-title {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.nx-queue-status__campaign-select {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 9px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+}
+
+.nx-queue-status__campaign-title-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nx-queue-status__campaign-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.nx-queue-status__campaign-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nx-queue-status__campaign-row {
+  font-size: 9.5px;
+  color: #94a3b8;
+}
+
+.nx-queue-status__campaign-row strong {
+  color: #f1f5f9;
+}
+
+.nx-queue-status__campaign-badge {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fbbf24;
+}
+
+.nx-queue-status__campaign-badge.status-ready,
+.nx-queue-status__campaign-badge.status-live,
+.nx-queue-status__campaign-badge.status-active {
+  color: #34d399;
+}
+
+.nx-queue-status__campaign-badge.status-paused {
+  color: #fbbf24;
+}
+
+.nx-queue-status__campaign-badge.status-blocked {
+  color: #f87171;
+}
+
+/* Next Send Window Card adjustments */
+.nx-queue-status__summary-card.next-window-card {
+  grid-column: span 2;
+  height: auto; /* next window card can auto fit since it contains actions */
+  padding: 10px 12px;
+  justify-content: flex-start;
+}
+
+.nx-queue-status__window-actions .qcc-btn {
+  height: 22px !important;
+  min-height: 22px !important;
+  font-size: 9px !important;
+}
+
+/* Needs Attention Section */
+.nx-queue-status__attention {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nx-queue-status__attention-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  height: 60px; /* height around 56-68px */
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.04);
+  border: 1px solid rgba(239, 68, 68, 0.14);
+  width: 100%;
+}
+
+.nx-queue-status__attention-row.is-warning {
+  background: rgba(245, 158, 11, 0.04);
+  border: 1px solid rgba(245, 158, 11, 0.14);
+}
+
+.nx-queue-status__attention-row.is-actionable {
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.nx-queue-status__attention-row.is-actionable:hover {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.nx-queue-status__attention-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f87171;
+}
+
+.nx-queue-status__attention-row.is-warning .nx-queue-status__attention-icon {
+  color: #fbbf24;
+}
+
+.nx-queue-status__attention-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.nx-queue-status__attention-info strong {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.nx-queue-status__attention-info span {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.nx-queue-status__attention-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-queue-status__attention-right b {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.nx-queue-status__attention-tag {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+.nx-queue-status__attention-action-hint {
+  font-size: 9px;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+/* Actions */
+.nx-queue-status__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nx-queue-status__actions .qcc-btn {
+  flex: 1;
+  min-width: 80px;
+  height: 32px;
+  border-radius: 999px; /* premium pill buttons */
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.nx-queue-status__actions .qcc-btn.is-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  border: none !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important;
+}
+
+.nx-queue-status__actions .qcc-btn.is-primary:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af) !important;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35) !important;
+}
+
+.nx-queue-status__actions .qcc-btn.is-primary.resume-btn {
+  background: linear-gradient(135deg, #059669, #047857) !important;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2) !important;
+}
+
+.nx-queue-status__actions .qcc-btn.is-primary.resume-btn:hover {
+  background: linear-gradient(135deg, #047857, #065f46) !important;
+}
+
+.nx-queue-status__actions .qcc-btn.is-secondary {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.nx-queue-status__actions .qcc-btn.is-secondary:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+.nx-queue-status__actions .qcc-btn.pause-btn {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  color: #f87171 !important;
+}
+
+.nx-queue-status__actions .qcc-btn.pause-btn:hover {
+  background: rgba(239, 68, 68, 0.22) !important;
+  color: #ffffff !important;
+  border-color: #f87171 !important;
+}
+
+/* Advanced Diagnostics */
+.nx-queue-status__advanced {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nx-queue-status__advanced-toggle {
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em !important;
+  height: 28px !important;
+}
+
+/* RED OPS Cockpit Overrides */
+[data-nexus-theme="red_ops"] .nx-liquid-popover--processor {
+  background: linear-gradient(145deg, rgba(18, 4, 6, 0.95), rgba(8, 8, 12, 0.92)) !important;
+  border: 1px solid rgba(239, 68, 68, 0.24) !important;
+  box-shadow:
+    0 30px 90px rgba(0,0,0,0.62),
+    0 0 45px rgba(239,68,68,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-queue-status__title {
+  color: #ef4444 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-queue-status__summary-card {
+  background: rgba(20, 8, 10, 0.64) !important;
+  border: 1px solid rgba(248, 113, 113, 0.14) !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-queue-status__campaign {
+  background: rgba(20, 8, 10, 0.75) !important;
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  border-left-color: #ef4444 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-queue-status__campaign-title {
+  color: #ef4444 !important;
+}
+
+/* Z-Index Ladder stabilization */
+.nx-toast-stack {
+  z-index: 14000 !important;
+}
+.nxhud-panel.nx-notification-center {
+  z-index: 14000 !important;
 }

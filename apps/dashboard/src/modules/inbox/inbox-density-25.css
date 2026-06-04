@@ -528,7 +528,7 @@
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25:hover {
-  background: #f8fafc !important;
+  background: #f9f9fa !important;
   transform: none !important;
   box-shadow: none !important;
 }
@@ -585,7 +585,7 @@
 
 /* Address — tier 2 */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr {
-  color: #334155 !important;
+  color: #1c1c1e !important;
 }
 
 /* Meta text — tier 3, muted but legible */
@@ -626,7 +626,7 @@
 
 /* Message preview — readable medium-dark */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__preview {
-  color: #334155 !important;
+  color: #1c1c1e !important;
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__preview {
@@ -645,14 +645,14 @@
 
 /* Timestamp */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__age {
-  color: #64748b !important;
+  color: #636366 !important;
 }
 
 /* Delivery indicators */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-inbound   { color: #4f46e5; }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-delivered { color: #059669; }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sent      { color: #475569; }
-[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sending   { color: #64748b; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-sending   { color: #636366; }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__delivery.is-failed    { color: #dc2626; }
 
 /* Intel zone — EV / EQ / SCR */
@@ -666,10 +666,10 @@
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-green { color: #059669; }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-amber { color: #d97706; }
-[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-muted { color: #64748b; }
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__v.is-muted { color: #636366; }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v {
-  color: #334155;
+  color: #1c1c1e;
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__kv--score .nx-row25__v.is-green { color: #059669; }
@@ -677,18 +677,18 @@
 
 /* Load more button */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-load-more-btn {
-  border-color: rgba(15, 23, 42, 0.12) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
   color: #475569 !important;
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-load-more-btn:hover:not(:disabled) {
-  background: rgba(15, 23, 42, 0.04) !important;
+  background: rgba(0, 0, 0, 0.04) !important;
   color: #090d16 !important;
 }
 
 /* Empty state */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__empty {
-  color: #64748b;
+  color: #636366;
 }
 
 /* Search bar and chips */

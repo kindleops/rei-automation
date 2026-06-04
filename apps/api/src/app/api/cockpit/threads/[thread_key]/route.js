@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
+import { emitAutomationEvent } from '@/lib/domain/automation/automation-events.js'
+import { AUTOMATION_LOG_TAGS, logAutomationConsole } from '@/lib/domain/automation/automation-audit.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -110,6 +112,40 @@ export async function PATCH(request, { params }) {
       event_type: 'manual_override',
       event_source: 'cockpit_api'
     })
+
+    const eventMap = [
+      ['universal_status', 'status_changed'],
+      ['universal_stage', 'stage_changed'],
+      ['lead_temperature', 'temperature_changed'],
+    ]
+    for (const [field, event_type] of eventMap) {
+      if (!(field in updates)) continue
+      await emitAutomationEvent({
+        event_type,
+        source: 'cockpit_deal_thread_state',
+        dedupe_key: `deal-thread-state:${event_type}:${thread_key}:${updates[field]}`,
+        conversation_thread_id: thread_key,
+        master_owner_id: data?.master_owner_id || null,
+        prospect_id: data?.prospect_id || null,
+        property_id: data?.property_id || null,
+        phone_number_id: data?.phone_id || null,
+        payload: {
+          thread_key,
+          field,
+          value: updates[field],
+          previous_status: currentState.universal_status,
+          previous_stage: currentState.universal_stage,
+        },
+      }).catch((error) => {
+        logAutomationConsole(AUTOMATION_LOG_TAGS.emit_failed_non_blocking, {
+          source: 'cockpit_deal_thread_state',
+          event_type,
+          thread_key,
+          error: error?.message || 'automation_emit_failed',
+        })
+        return null
+      })
+    }
     
     return NextResponse.json({ ok: true, data }, { status: 200, headers: cors })
   } catch (error) {
