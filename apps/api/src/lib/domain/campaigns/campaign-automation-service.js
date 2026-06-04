@@ -25,12 +25,26 @@ import {
   hydrateCampaignCandidateRowsWithCatalogLayers,
   readCampaignFieldValuesFromCandidate,
 } from '@/lib/domain/campaigns/campaign-field-catalog.js'
+import {
+  activateCampaign,
+  CAMPAIGN_STATES,
+  isLiveCampaignStatus,
+  isQueueableStatus,
+  normalizeCampaignStatus,
+  transitionCampaignStatus,
+} from '@/lib/domain/campaigns/campaign-state-machine.js'
+import {
+  acquireCampaignExecutionLock,
+  checkpointCampaignHydration,
+  newExecutionLockToken,
+  releaseCampaignExecutionLock,
+  renewCampaignExecutionLock,
+} from '@/lib/domain/campaigns/campaign-execution-lock.js'
 
 const DEFAULT_CANDIDATE_SOURCE = 'v_feeder_candidates_fast'
 const DEFAULT_SCAN_LIMIT = 1000
 const DEFAULT_TARGET_LIMIT = 5000
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
-const READY_CAMPAIGN_STATUSES = new Set(['ready', 'live_limited'])
 const PREFERRED_PREVIEW_CANDIDATE_SOURCE = 'outbound_feeder_candidates'
 const FALLBACK_PREVIEW_CANDIDATE_SOURCE = 'v_sms_ready_contacts'
 const PREVIEW_CANDIDATE_SOURCES = new Set([
@@ -178,9 +192,11 @@ function normalizeCampaignInput(payload = {}, existing = {}) {
   }
 
   if (!row.name && !existing.id) row.name = `Campaign ${new Date().toISOString().slice(0, 10)}`
-  if (!READY_CAMPAIGN_STATUSES.has(row.status) && !['draft', 'paused', 'completed', 'archived'].includes(row.status)) {
-    row.status = 'draft'
-  }
+  // Lifecycle status is normalized against the canonical state machine. Legacy
+  // readiness markers (ready/live_limited) are mapped onto lifecycle states.
+  // Actual lifecycle transitions must go through transitionCampaignStatus; this
+  // only sanitizes the persisted value on config writes.
+  row.status = normalizeCampaignStatus(row.status)
   return row
 }
 
@@ -5205,7 +5221,7 @@ export async function listCampaigns(deps = {}) {
     ok: true,
     campaigns: summaries,
     kpis: {
-      activeCampaigns: summaries.filter((campaign) => READY_CAMPAIGN_STATUSES.has(campaign.status)).length,
+      activeCampaigns: summaries.filter((campaign) => isLiveCampaignStatus(campaign.status)).length,
       totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),
       readyTargets: summaries.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
       scheduledSends: summaries.reduce((sum, campaign) => sum + campaign.scheduled_targets, 0),
@@ -5999,13 +6015,39 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const readyTargets = targets || []
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
   for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
-  if (!READY_CAMPAIGN_STATUSES.has(clean(campaign.status))) blockers.push(`campaign_status_not_ready:${campaign.status}`)
+  if (!isQueueableStatus(campaign.status)) blockers.push(`campaign_status_not_queueable:${campaign.status}`)
   if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
   if (campaignStop) blockers.push('campaign_emergency_stop_active')
   if (globalStop && !dryRun && !noSend && blockOnGlobalEmergencyStop) blockers.push('global_emergency_stop_active')
   if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
   if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
   if (!dryRun && !noSend && !confirmLive) blockers.push('confirm_live_required')
+
+  // Execution lock (Phase 2B). For a live write request, acquire the campaign
+  // execution lease BEFORE snapshotting active-queue/prior-contact state, so the
+  // entire plan+write runs under the mutex and two concurrent activations cannot
+  // both pass dedup and double-insert. If the lease is held by another worker,
+  // record a blocker so the live write is skipped. Released in `finally`.
+  const isLiveWriteRequest = !dryRun && !noSend && confirmLive && createRows
+  const executionLock = {
+    requested: isLiveWriteRequest,
+    acquired: false,
+    enforced: false,
+    token: null,
+    owner: null,
+  }
+  if (isLiveWriteRequest && blockers.length === 0) {
+    const lockToken = newExecutionLockToken()
+    const lease = await acquireCampaignExecutionLock(supabase, campaignId, {
+      token: lockToken,
+      owner: `queue_plan:${clean(input.campaign_session_id || campaignId)}`,
+    })
+    executionLock.acquired = lease.acquired
+    executionLock.enforced = lease.enforced
+    executionLock.token = lease.acquired ? lease.token : null
+    executionLock.owner = lease.owner
+    if (!lease.acquired) blockers.push('campaign_execution_locked')
+  }
 
   const now = new Date(input.now || Date.now())
   const phones = readyTargets.map((target) => firstNonEmpty(target.to_phone_number, target.metadata?.candidate_snapshot?.to_phone_number))
@@ -6073,8 +6115,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     }
   }
 
+  let planLoopCounter = 0
   for (const target of readyTargets) {
     if (plannedItems.length >= caps.effective_limit) break
+    // Keep the execution lease alive across long planning passes (per-target
+    // routing + template render are async and can exceed the lease TTL).
+    if (executionLock.token && (planLoopCounter++ % 250) === 0) {
+      await renewCampaignExecutionLock(supabase, campaignId, executionLock.token)
+    }
     const candidate = launchCandidateFromTarget(target, campaign)
     const phone = clean(candidate.canonical_e164)
     if (!phone) {
@@ -6304,6 +6352,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
         }))
         targetUpdates.push(item.target.id)
       }
+      const hydrationTotal = queueRows.length
       for (let i = 0; i < queueRows.length; i += 500) {
         const rowChunk = queueRows.slice(i, i + 500)
         const { data, error } = await supabase
@@ -6312,6 +6361,28 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           .select('id,campaign_target_id,from_phone_number,textgrid_number_id,to_phone_number,template_id,queue_status,scheduled_for_utc,metadata')
         if (error) throw error
         insertedQueueRows.push(...(data || []))
+        // Resumable checkpoint + lease heartbeat after each committed chunk.
+        if (executionLock.token) {
+          await renewCampaignExecutionLock(supabase, campaignId, executionLock.token)
+          await checkpointCampaignHydration(supabase, campaignId, {
+            run_id: run?.id || null,
+            phase: 'hydrating',
+            inserted: insertedQueueRows.length,
+            total: hydrationTotal,
+            next_offset: Math.min(i + 500, hydrationTotal),
+            updated_at: new Date().toISOString(),
+          })
+        }
+      }
+      if (executionLock.token) {
+        // Hydration complete — clear the resumable cursor.
+        await checkpointCampaignHydration(supabase, campaignId, {
+          run_id: run?.id || null,
+          phase: 'complete',
+          inserted: insertedQueueRows.length,
+          total: hydrationTotal,
+          completed_at: new Date().toISOString(),
+        })
       }
       if (targetUpdates.length) {
         await supabase
@@ -6319,10 +6390,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           .update({ target_status: 'planned', last_launched_at: new Date().toISOString() })
           .in('id', targetUpdates)
       }
-      await supabase
-        .from('campaigns')
-        .update({ status: 'live_limited' })
-        .eq('id', campaignId)
+      // Drive the campaign to `active` through the concurrency-safe state
+      // machine (walks scheduled -> activating -> active as needed).
+      await activateCampaign(supabase, campaignId, { reason: 'queue_plan_live_write' })
     }
 
     if (run) {
@@ -6380,6 +6450,10 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       }, deps)
     }
     throw error
+  } finally {
+    if (executionLock.token) {
+      await releaseCampaignExecutionLock(supabase, campaignId, executionLock.token)
+    }
   }
 
   const firstScheduledAt = scheduledItems
@@ -6451,6 +6525,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     caps,
     launch_caps: caps,
     live_gate: liveGate,
+    execution_lock: {
+      requested: executionLock.requested,
+      acquired: executionLock.acquired,
+      enforced: executionLock.enforced,
+      owner: executionLock.owner,
+    },
     duplicate_protection: duplicateProtection,
     total_ready_targets: readyTargets.length,
     planned_target_count: scheduledItems.length,
@@ -6482,10 +6562,56 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   }
 }
 
+/**
+ * Operator lifecycle controls. Maps a human action to a canonical state
+ * transition and routes it through the concurrency-safe state machine.
+ * STATE only — does not enqueue or send (that is createCampaignQueuePlan).
+ */
+const CAMPAIGN_LIFECYCLE_ACTIONS = {
+  preview: 'previewed',
+  mark_previewed: 'previewed',
+  schedule: 'scheduled',
+  unschedule: 'draft',
+  begin_activation: 'activating',
+  pause: 'paused',
+  resume: 'active',
+  complete: 'completed',
+  fail: 'failed',
+  archive: 'archived',
+}
+
+export async function applyCampaignLifecycleAction(campaignId, input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  if (!campaignId) return { ok: false, error: 'campaign_id_required' }
+  const action = clean(input.action || input.lifecycle_action)
+  const target = CAMPAIGN_LIFECYCLE_ACTIONS[action] || (CAMPAIGN_STATES.includes(clean(input.to_status)) ? clean(input.to_status) : null)
+  if (!target) return { ok: false, error: `unknown_lifecycle_action:${action || input.to_status || ''}` }
+
+  const reason = clean(input.reason) || `operator:${action || target}`
+  const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
+
+  // `activate` is a higher-level intent that drives all the way to active via
+  // the legal path; the rest are single edges.
+  const result = action === 'activate'
+    ? await activateCampaign(supabase, campaignId, { reason, scheduledFor })
+    : await transitionCampaignStatus(supabase, campaignId, target, { reason, scheduledFor })
+
+  if (!result.ok) return { ok: false, error: result.error, from: result.from || null, to: result.to || target }
+  return {
+    ok: true,
+    campaign_id: campaignId,
+    action: action || null,
+    from: result.from || null,
+    to: result.campaign?.status || result.to || target,
+    campaign: result.campaign || null,
+    degraded: Boolean(result.degraded),
+  }
+}
+
 export async function getCampaignAwareQueueDiagnostics(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const list = await listCampaigns(deps)
-  const activeCampaign = list.campaigns.find((campaign) => READY_CAMPAIGN_STATUSES.has(campaign.status)) || null
+  const activeCampaign = list.campaigns.find((campaign) => isLiveCampaignStatus(campaign.status)) || null
   const campaignIds = list.campaigns.map((campaign) => campaign.id)
   let queueRows = []
   let targetRows = []

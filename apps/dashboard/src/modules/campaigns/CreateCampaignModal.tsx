@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, CreateCampaignPayload } from './campaigns.types'
 import { buildCampaignTargetSnapshots, createCampaign, launchCampaign } from './campaigns.adapter'
 import {
+  CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
   defaultOperatorForField,
   defaultValueForField,
@@ -79,7 +80,7 @@ const FRIENDLY_OPERATORS: Record<string, string> = {
 
 const SUGGESTED_FIELD_KEYS: Record<string, string[]> = {
   'properties.Location & Market': [
-    'properties.market', 'properties.property_state', 'properties.property_zip', 'properties.market_region',
+    'properties.market', 'properties.property_address_state', 'properties.property_address_zip', 'properties.market_region',
   ],
   'properties.Asset Type & Structure': [
     'properties.property_type', 'properties.property_class', 'properties.year_built', 'properties.units_count',
@@ -196,6 +197,77 @@ const parsePositiveInt = (value: string, fallback: number): number => {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
 }
+
+// Blended per-segment SMS cost estimate (carrier + provider). Clearly an estimate;
+// the operator-facing label always reads "Est." so this is never presented as billed truth.
+const ESTIMATED_COST_PER_SMS_USD = 0.0083
+
+const toLocalDateTimeInput = (date: Date): string => {
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16)
+}
+
+const formatDurationApprox = (seconds: number): string => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '—'
+  if (seconds < 90) return `~${Math.round(seconds)}s`
+  const minutes = seconds / 60
+  if (minutes < 90) return `~${Math.round(minutes)} min`
+  const hours = minutes / 60
+  if (hours < 36) return `~${hours < 10 ? hours.toFixed(1) : Math.round(hours)} hr`
+  const days = hours / 24
+  return `~${days < 10 ? days.toFixed(1) : Math.round(days)} days`
+}
+
+const formatUsdApprox = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) return '$0.00'
+  if (value >= 100) return `$${Math.round(value).toLocaleString()}`
+  return `$${value.toFixed(2)}`
+}
+
+interface LaunchEstimates {
+  deliverable: number
+  senderCovered: number
+  senderCoveragePct: number | null
+  effectiveSends: number
+  durationLabel: string
+  spanDays: number
+  cost: number
+}
+
+// All estimates derive from the verified preview funnel (deliverable = ready_to_queue,
+// sender coverage from sender_covered) and the operator's pacing settings. No mock numbers.
+const computeLaunchEstimates = (
+  preview: CampaignPreviewResult | null,
+  settings: LaunchSettings,
+): LaunchEstimates => {
+  const deliverable = Number(preview?.ready_to_queue ?? 0)
+  const senderCovered = Number(preview?.sender_covered ?? 0)
+  const universe = Number(
+    preview?.addressable_properties ?? preview?.total_matched_properties ?? preview?.total_matched ?? 0,
+  )
+  const senderCoveragePct = universe > 0 ? Math.round((senderCovered / universe) * 100) : null
+  const maxTargets = parsePositiveInt(settings.max_targets, 1)
+  const dailyCap = parsePositiveInt(settings.daily_cap, 1)
+  const interval = parsePositiveInt(settings.spread_interval_seconds, 60)
+  const effectiveSends = Math.max(0, Math.min(deliverable, maxTargets))
+  const spanDays = effectiveSends > 0 ? Math.max(1, Math.ceil(effectiveSends / Math.max(1, dailyCap))) : 0
+  const sendsFirstDay = Math.min(effectiveSends, dailyCap)
+  const durationSeconds = spanDays > 1 ? spanDays * 24 * 3600 : Math.max(0, sendsFirstDay - 1) * interval
+  const durationLabel = effectiveSends <= 0
+    ? '—'
+    : spanDays > 1
+      ? `~${spanDays} days`
+      : formatDurationApprox(durationSeconds)
+  const cost = effectiveSends * ESTIMATED_COST_PER_SMS_USD
+  return { deliverable, senderCovered, senderCoveragePct, effectiveSends, durationLabel, spanDays, cost }
+}
+
+const SCHEDULE_PRESETS: Array<{ key: string; label: string; value: () => string }> = [
+  { key: 'in_2h', label: 'In 2 hours', value: () => toLocalDateTimeInput(new Date(Date.now() + 2 * 3_600_000)) },
+  { key: 'tomorrow_9', label: 'Tomorrow 9 AM', value: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return toLocalDateTimeInput(d) } },
+  { key: 'tomorrow_12', label: 'Tomorrow Noon', value: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(12, 0, 0, 0); return toLocalDateTimeInput(d) } },
+  { key: 'next_mon_9', label: 'Next Mon 9 AM', value: () => { const d = new Date(); const add = ((8 - d.getDay()) % 7) || 7; d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0); return toLocalDateTimeInput(d) } },
+]
 
 const formatLabel = (value: string): string => {
   if (SPECIAL_DISPLAY_LABELS[value]) return SPECIAL_DISPLAY_LABELS[value]
@@ -377,15 +449,9 @@ const buildLaunchPayload = (settings: LaunchSettings): CampaignLaunchPayload => 
 }
 
 const launchModeLabel = (mode: CampaignLaunchMode): string => {
-  if (mode === 'dry_run') return 'Test Run'
-  if (mode === 'no_send') return 'Prepare Only'
-  return 'Schedule Live'
-}
-
-const launchButtonLabel = (mode: CampaignLaunchMode): string => {
-  if (mode === 'dry_run') return 'Run Test'
-  if (mode === 'no_send') return 'Prepare Targets'
-  return 'Schedule Live'
+  if (mode === 'dry_run') return 'Preview'
+  if (mode === 'no_send') return 'Schedule'
+  return 'Activation'
 }
 
 const getLaunchSummaryValue = (
@@ -416,6 +482,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null)
   const [launchSettings, setLaunchSettings] = useState<LaunchSettings>(() => createDefaultLaunchSettings())
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
+  const [pendingLaunchIntent, setPendingLaunchIntent] = useState<'schedule' | 'activate'>('schedule')
   const [launchResult, setLaunchResult] = useState<CampaignLaunchResult | null>(null)
   const latestPreviewRequestRef = useRef<string | null>(null)
   const previewSequenceRef = useRef(0)
@@ -519,7 +586,13 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   }, [activePreviewKey])
 
   const fieldsByKey = useMemo(() => {
-    return new Map((catalog?.fields ?? []).map((field) => [field.key, field]))
+    const map = new Map((catalog?.fields ?? []).map((field) => [field.key, field]))
+    // Resolve legacy geography keys from saved campaigns to their canonical field def.
+    for (const [legacyKey, canonicalKey] of Object.entries(CAMPAIGN_FIELD_KEY_ALIASES)) {
+      const canonicalField = map.get(canonicalKey)
+      if (canonicalField && !map.has(legacyKey)) map.set(legacyKey, canonicalField)
+    }
+    return map
   }, [catalog])
 
   const activeDomainDefinition = useMemo(() => {
@@ -773,18 +846,27 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
     }
   }
 
-  const requestLaunch = () => {
+  // Activation flow: Preview runs a plan (no rows); Schedule/Activate are live and
+  // always pass through the launch summary modal before any queue rows are created.
+  const runLaunch = (mode: CampaignLaunchMode, overrides: Partial<LaunchSettings> = {}, intent: 'schedule' | 'activate' = 'schedule') => {
     if (!canRunLaunch) {
-      emitNotification({ title: 'Campaign name required', detail: 'Add a campaign name before launch execution.', severity: 'warning' })
+      emitNotification({ title: 'Campaign name required', detail: 'Add a campaign name before scheduling or activating.', severity: 'warning' })
       return
     }
-    const payload = buildLaunchPayload(launchSettings)
-    if (launchSettings.mode === 'live') {
+    const mergedSettings = { ...launchSettings, ...overrides, mode }
+    if (Object.keys(overrides).length) setLaunchSettings(mergedSettings)
+    const payload = buildLaunchPayload(mergedSettings)
+    if (mode === 'live') {
+      setPendingLaunchIntent(intent)
       setPendingLivePayload(payload)
       return
     }
-    void executeLaunch(payload, launchSettings.mode)
+    void executeLaunch(payload, mode)
   }
+
+  const requestPreview = () => runLaunch('dry_run')
+  const requestSchedule = () => runLaunch('live', {}, 'schedule')
+  const requestActivate = () => runLaunch('live', { first_scheduled_at: toLocalDateTimeInput(new Date(Date.now() + 60_000)) }, 'activate')
 
   const renderValueControl = (filter: CampaignFilterCondition, field: CampaignFieldDefinition) => {
     const options = getCachedOptions(filter)
@@ -1065,12 +1147,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const degradedOptionState = Object.values(optionStatus).find((state) => state.degraded)
   const backendDegraded = Boolean(catalog.degraded || preview?.degraded || degradedOptionState)
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
-  const selectedLaunchCopy =
-    launchSettings.mode === 'dry_run'
-      ? 'Test Run creates no queue rows'
-      : launchSettings.mode === 'no_send'
-        ? 'Prepare Only creates targets without queue rows'
-        : 'Schedule Live creates guarded queue rows'
+  const launchEstimates = computeLaunchEstimates(preview, launchSettings)
 
   const modal = (
     <div className="cmp-studio-overlay">
@@ -1132,27 +1209,33 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
             </div>
           ) : null}
 
-          <div className="cmp-launch-execution cmp-launch-execution--compact">
-            <div className="cmp-launch-compact-bar">
-              <div className="cmp-launch-mode-segment" role="group" aria-label="Launch mode">
-                {([
-                  ['dry_run', 'Test Run'],
-                  ['no_send', 'Prepare Only'],
-                  ['live', 'Schedule Live'],
-                ] as Array<[CampaignLaunchMode, string]>).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`cmp-launch-mode-chip ${launchSettings.mode === mode ? 'is-active' : ''}`}
-                    onClick={() => updateLaunchSetting({ mode })}
-                  >
-                    {label}
-                  </button>
-                ))}
+          <div className="cmp-launch-execution cmp-launch-execution--activation">
+            <div className="cmp-activation-estimates" role="group" aria-label="Launch estimates">
+              <div className="cmp-est-chip">
+                <span className="cmp-est-label">Deliverable</span>
+                <strong className="cmp-est-value is-accent">{formatNumber(launchEstimates.deliverable)}</strong>
+                <span className="cmp-est-sub">ready-to-queue targets</span>
               </div>
+              <div className="cmp-est-chip">
+                <span className="cmp-est-label">Sender Coverage</span>
+                <strong className="cmp-est-value">{launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}</strong>
+                <span className="cmp-est-sub">{formatNumber(launchEstimates.senderCovered)} covered</span>
+              </div>
+              <div className="cmp-est-chip">
+                <span className="cmp-est-label">Est. Send Time</span>
+                <strong className="cmp-est-value">{launchEstimates.durationLabel}</strong>
+                <span className="cmp-est-sub">{formatNumber(launchEstimates.effectiveSends)} sends</span>
+              </div>
+              <div className="cmp-est-chip">
+                <span className="cmp-est-label">Est. Cost</span>
+                <strong className="cmp-est-value">{formatUsdApprox(launchEstimates.cost)}</strong>
+                <span className="cmp-est-sub">~${ESTIMATED_COST_PER_SMS_USD.toFixed(4)}/sms</span>
+              </div>
+            </div>
 
+            <div className="cmp-activation-controls">
               <label className="cmp-launch-mini-field">
-                <span>Target Count</span>
+                <span>Send Cap</span>
                 <input
                   type="number"
                   min={1}
@@ -1162,7 +1245,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
               </label>
 
               <label className="cmp-launch-mini-field cmp-launch-mini-field--time">
-                <span>Start</span>
+                <span>Schedule For</span>
                 <input
                   type="datetime-local"
                   value={launchSettings.first_scheduled_at}
@@ -1170,24 +1253,58 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                 />
               </label>
 
+              <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
+                {SCHEDULE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    className="cmp-schedule-preset"
+                    onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="cmp-launch-pacing">
                 <span>Pacing</span>
                 <strong>{formatNumber(parsePositiveInt(launchSettings.daily_cap, 1))}/day · {parsePositiveInt(launchSettings.spread_interval_seconds, 60)}s spacing</strong>
               </div>
+            </div>
 
+            <div className="cmp-activation-actions">
               <button
-                className="cmp-launch-btn is-accent cmp-launch-primary-cta"
+                type="button"
+                className="cmp-launch-btn cmp-launch-btn--ghost"
                 disabled={isLaunching || !canRunLaunch}
-                title={canRunLaunch ? selectedLaunchCopy : 'Add a campaign name first'}
-                onClick={requestLaunch}
+                title="Plan the send — no queue rows are created"
+                onClick={requestPreview}
               >
-                {isLaunching ? 'Launching...' : launchButtonLabel(launchSettings.mode)}
+                Preview
+              </button>
+              <button
+                type="button"
+                className="cmp-launch-btn cmp-launch-btn--outline"
+                disabled={isLaunching || !canRunLaunch}
+                title="Schedule this campaign for the selected time"
+                onClick={requestSchedule}
+              >
+                Schedule Campaign
+              </button>
+              <button
+                type="button"
+                className="cmp-launch-btn is-accent"
+                disabled={isLaunching || !canRunLaunch}
+                title="Activate now — queueing begins immediately"
+                onClick={requestActivate}
+              >
+                {isLaunching ? 'Working…' : 'Activate Campaign'}
               </button>
             </div>
 
             <details className="cmp-launch-advanced">
               <summary>
-                <span>Advanced Launch Settings</span>
+                <span>Advanced Settings</span>
                 <Icon name="chevron-down" size={12} />
               </summary>
               <div className="cmp-launch-field-grid cmp-launch-field-grid--advanced">
@@ -1425,8 +1542,10 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
 
         {pendingLivePayload && (
           <LaunchConfirmModal
+            intent={pendingLaunchIntent}
             settings={launchSettings}
             payload={pendingLivePayload}
+            estimates={launchEstimates}
             busy={isLaunching}
             onCancel={() => setPendingLivePayload(null)}
             onConfirm={() => executeLaunch(pendingLivePayload, 'live')}
@@ -1448,46 +1567,80 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
 }
 
 const LaunchConfirmModal = ({
-  settings,
+  intent,
   payload,
+  estimates,
   busy,
   onCancel,
   onConfirm,
 }: {
+  intent: 'schedule' | 'activate'
   settings: LaunchSettings
   payload: CampaignLaunchPayload
+  estimates: LaunchEstimates
   busy: boolean
   onCancel: () => void
   onConfirm: () => void
 }) => {
+  const isActivate = intent === 'activate'
+  const title = isActivate ? 'Activate Campaign' : 'Schedule Campaign'
+  const lede = isActivate
+    ? 'Queueing begins immediately within the sending window. Review before going live.'
+    : `Targets will be queued for ${formatDateTime(payload.first_scheduled_at)}. Review before scheduling.`
+  const confirmLabel = busy ? 'Working…' : isActivate ? 'Activate Campaign' : 'Schedule Campaign'
+
   return (
     <div className="cmp-nested-modal">
       <div className="cmp-launch-confirm">
         <div className="cmp-launch-confirm__header">
           <Icon name="shield" size={18} />
           <div>
-            <h3>Confirm Live Queue Creation</h3>
-            <p>Schedule Live creates guarded scheduled queue rows.</p>
+            <h3>{title}</h3>
+            <p>{lede}</p>
           </div>
         </div>
+
+        <div className="cmp-launch-confirm__estimates">
+          <div className="cmp-est-chip">
+            <span className="cmp-est-label">Deliverable</span>
+            <strong className="cmp-est-value is-accent">{formatNumber(estimates.effectiveSends)}</strong>
+            <span className="cmp-est-sub">of {formatNumber(estimates.deliverable)} ready</span>
+          </div>
+          <div className="cmp-est-chip">
+            <span className="cmp-est-label">Sender Coverage</span>
+            <strong className="cmp-est-value">{estimates.senderCoveragePct != null ? `${estimates.senderCoveragePct}%` : formatNumber(estimates.senderCovered)}</strong>
+            <span className="cmp-est-sub">{formatNumber(estimates.senderCovered)} covered</span>
+          </div>
+          <div className="cmp-est-chip">
+            <span className="cmp-est-label">Est. Send Time</span>
+            <strong className="cmp-est-value">{estimates.durationLabel}</strong>
+            <span className="cmp-est-sub">{isActivate ? 'starting now' : formatDateTime(payload.first_scheduled_at)}</span>
+          </div>
+          <div className="cmp-est-chip">
+            <span className="cmp-est-label">Est. Cost</span>
+            <strong className="cmp-est-value">{formatUsdApprox(estimates.cost)}</strong>
+            <span className="cmp-est-sub">~${ESTIMATED_COST_PER_SMS_USD.toFixed(4)}/sms</span>
+          </div>
+        </div>
+
         <div className="cmp-launch-confirm__grid">
-          <div><span>Max Targets</span><strong>{payload.max_targets}</strong></div>
+          <div><span>Send Cap</span><strong>{payload.max_targets}</strong></div>
           <div><span>Daily Cap</span><strong>{payload.daily_cap}</strong></div>
-          <div><span>Sender Cap</span><strong>{payload.per_sender_cap ?? '-'}</strong></div>
-          <div><span>Market Cap</span><strong>{payload.per_market_cap ?? '-'}</strong></div>
-          <div><span>First Scheduled</span><strong>{formatDateTime(payload.first_scheduled_at)}</strong></div>
+          <div><span>Sender Cap</span><strong>{payload.per_sender_cap ?? '—'}</strong></div>
+          <div><span>Market Cap</span><strong>{payload.per_market_cap ?? '—'}</strong></div>
+          <div><span>First Send</span><strong>{isActivate ? 'Now' : formatDateTime(payload.first_scheduled_at)}</strong></div>
           <div><span>Spacing</span><strong>{payload.spread_interval_seconds}s</strong></div>
         </div>
-        <div className="cmp-launch-confirm__copy">
-          <div>Test Run creates no queue rows</div>
-          <div>Prepare Only creates targets without queue rows</div>
-          <div>Schedule Live creates guarded scheduled queue rows</div>
-          <div>confirm_live will be sent as true for this request.</div>
+
+        <div className="cmp-launch-confirm__note">
+          <Icon name="shield" size={12} />
+          <span>Guarded queue: suppression, duplicate prevention, sender balancing, and market-safe routing are enforced on every row.</span>
         </div>
+
         <div className="cmp-launch-confirm__actions">
           <button type="button" className="cmp-btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="button" className="cmp-launch-btn is-accent" onClick={onConfirm} disabled={busy}>
-            {busy ? 'Creating...' : `Confirm ${launchModeLabel(settings.mode)} Launch`}
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -1765,12 +1918,12 @@ const TargetReachPanel = ({
 
       <div className="cmp-summary-body">
         <div className="cmp-reach-grid">
-          <Metric label={preview?.addressable_properties_approximate ? 'Addressable *' : 'Addressable'} value={preview?.addressable_properties} />
-          <Metric label="Reachable" value={preview?.total_matched_properties ?? preview?.total_matched} />
-          <Metric label="Clean Targets" value={preview?.clean_targets} />
-          <Metric label="Sender-Covered" value={preview?.sender_covered} />
-          <Metric label="Ready to Queue" value={preview?.ready_to_queue} variant="success" />
-          <Metric label="Queueable Today" value={preview?.queueable_today} variant="accent" />
+          <Metric label={preview?.addressable_properties_approximate ? 'Addressable *' : 'Addressable'} value={preview?.addressable_properties} hint="Raw matching properties" />
+          <Metric label="Reachable" value={preview?.total_matched_properties ?? preview?.total_matched} hint="Has a contactable prospect" />
+          <Metric label="Clean Targets" value={preview?.clean_targets} hint="SMS-eligible, not suppressed" />
+          <Metric label="Sender-Covered" value={preview?.sender_covered} hint="Has a sending number" />
+          <Metric label="Deliverable" value={preview?.ready_to_queue} variant="success" hint="Ready-to-queue / sendable targets" />
+          <Metric label="Queueable Today" value={preview?.queueable_today} variant="accent" hint="Within today's send window" />
         </div>
 
         {preview && (
@@ -2383,12 +2536,13 @@ const DomainDistList = ({ buckets }: { buckets: Array<{ label: string; count: nu
   </div>
 )
 
-const Metric = ({ label, value, variant }: { label: string; value: number | null | undefined; variant?: 'success' | 'accent' }) => (
-  <div className="cmp-summary-metric">
+const Metric = ({ label, value, variant, hint }: { label: string; value: number | null | undefined; variant?: 'success' | 'accent'; hint?: string }) => (
+  <div className="cmp-summary-metric" title={hint ?? undefined}>
     <div className="cmp-summary-metric-label">{label}</div>
     <div className={`cmp-summary-metric-value ${variant === 'success' ? 'is-success' : variant === 'accent' ? 'is-accent' : ''}`}>
       {value === undefined || value === null ? '—' : formatNumber(value)}
     </div>
+    {hint ? <div className="cmp-summary-metric-hint">{hint}</div> : null}
   </div>
 )
 
