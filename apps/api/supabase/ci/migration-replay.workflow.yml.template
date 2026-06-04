@@ -1,0 +1,34 @@
+# TEMPLATE — move to .github/workflows/migration-replay.yml to ACTIVATE.
+# Kept as a template during cutover planning (no CI activation in this phase).
+#
+# Required-status gate: replays apps/api/supabase/migrations/ from zero on an
+# isolated Supabase preview branch and asserts the schema rebuilds cleanly.
+# This is the control that stops migration drift from recurring.
+name: migration-replay
+on:
+  pull_request:
+    paths:
+      - 'apps/api/supabase/migrations/**'
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - name: Create throwaway branch, replay, validate, teardown
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          BR="ci-replay-${GITHUB_RUN_ID}"
+          supabase branches create "$BR" --project-ref "$SUPABASE_PROJECT_REF" --experimental
+          trap 'supabase branches delete "$BR" --project-ref "$SUPABASE_PROJECT_REF" --experimental || true' EXIT
+          # wait until the branch DB is healthy
+          for i in $(seq 1 30); do
+            st=$(supabase branches get "$BR" --project-ref "$SUPABASE_PROJECT_REF" -o json | jq -r '.STATUS // empty' || true)
+            [ "$st" = "ACTIVE_HEALTHY" ] && break; sleep 10
+          done
+          export DB_URL=$(supabase branches get "$BR" --project-ref "$SUPABASE_PROJECT_REF" -o json | jq -r '.POSTGRES_URL_NON_POOLING')
+          bash apps/api/supabase/ci/replay-validate.sh
