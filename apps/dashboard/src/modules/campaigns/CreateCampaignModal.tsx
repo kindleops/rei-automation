@@ -281,6 +281,7 @@ interface LaunchEstimates {
   senderCoveragePct: number | null
   effectiveSends: number
   durationLabel: string
+  runtimeCapped: boolean
   spanDays: number
   dailyVolume: number
   spacingSeconds: number
@@ -327,8 +328,11 @@ const computeLaunchEstimates = (
     const lastDaySends = effectiveSends - (spanDays - 1) * dailyVolume
     durationSeconds = (spanDays - 1) * windowSeconds + Math.max(0, lastDaySends - 1) * spacing
   }
+  const runtimeCapped = spanDays > 90
   const durationLabel = effectiveSends <= 0
     ? '—'
+    : runtimeCapped
+      ? '90+ days'
     : spanDays > 1
       ? `~${spanDays} day${spanDays > 1 ? 's' : ''}`
       : formatDurationApprox(durationSeconds)
@@ -340,6 +344,7 @@ const computeLaunchEstimates = (
     senderCoveragePct,
     effectiveSends,
     durationLabel,
+    runtimeCapped,
     spanDays,
     dailyVolume,
     spacingSeconds: spacing,
@@ -417,6 +422,44 @@ const formatPreviewWarning = (warning: string): string => {
     return 'Preview source is missing a graph column required by the latest compiler.'
   }
   return warning.replace(/_/g, ' ')
+}
+
+const humanizeLaunchBlocker = (value: unknown): string => {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.toLowerCase()
+  if (!raw) return ''
+  if (normalized.includes('campaign_status_not_queueable') && normalized.includes('draft')) {
+    return 'Save this campaign before scheduling.'
+  }
+  if (
+    normalized.includes('routing_blocked') ||
+    normalized.includes('no_valid_textgrid_number') ||
+    normalized.includes('missing_sender_route') ||
+    normalized.includes('sender_coverage') ||
+    normalized.includes('no_sender')
+  ) {
+    return 'No active sender route covers this audience.'
+  }
+  if (
+    normalized.includes('no_reachable') ||
+    normalized.includes('missing_phone') ||
+    normalized.includes('no_valid_phone') ||
+    normalized.includes('no_best_phone') ||
+    normalized.includes('no_phone') ||
+    normalized.includes('zero_targets') ||
+    normalized.includes('no_targets')
+  ) {
+    return 'No reachable contacts match this filter.'
+  }
+  if (normalized.includes('unsupported')) {
+    return 'This audience uses a field that is not available for launch yet.'
+  }
+  return formatLabel(raw.replace(/[.:]+/g, '_'))
+}
+
+const humanizeLaunchError = (error: unknown): string => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  return humanizeLaunchBlocker(raw) || 'Launch could not be prepared. Review the audience and try again.'
 }
 
 const valueAsArray = (value: unknown): string[] => {
@@ -568,6 +611,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null)
   const [launchSettings, setLaunchSettings] = useState<LaunchSettings>(() => createDefaultLaunchSettings())
+  const [launchPanelExpanded, setLaunchPanelExpanded] = useState(false)
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
   const [pendingLaunchIntent, setPendingLaunchIntent] = useState<'schedule' | 'activate'>('schedule')
   const [launchResult, setLaunchResult] = useState<CampaignLaunchResult | null>(null)
@@ -582,8 +626,6 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const hasMeaningfulFilters = draftHasMeaningfulFilters(activeFilterDraft)
   const activePreviewKey = useMemo(() => {
     const filters = serializeFilterGroups(activeFilterDraft.target_filters)
-    const activeCount = Object.values(filters).reduce((sum, items) => sum + items.length, 0)
-    if (activeCount === 0) return ''
     return JSON.stringify({
       filters,
       template_use_case: activeFilterDraft.template_use_case,
@@ -609,7 +651,6 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   }, [])
 
   const runPreview = useCallback((reason: 'auto' | 'manual' = 'auto') => {
-    if (!activePreviewKey) return
     const sequence = previewSequenceRef.current + 1
     previewSequenceRef.current = sequence
     const requestId = `campaign-preview-${Date.now()}-${sequence}`
@@ -659,14 +700,6 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   }, [activeFilterDraft, activePreviewKey])
 
   useEffect(() => {
-    if (!activePreviewKey) {
-      latestPreviewRequestRef.current = `cleared-${Date.now()}`
-      previewResultRef.current = null
-      setPreview(null)
-      setPreviewMeta(null)
-      setIsPreviewLoading(false)
-      return
-    }
     runPreview('auto')
     // activePreviewKey is the serialized active-filter contract; draft-only edits should not trigger preview.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -953,7 +986,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
         severity: result.ok === false ? 'warning' : 'success',
       })
     } catch (error) {
-      emitNotification({ title: 'Launch execution failed', detail: error instanceof Error ? error.message : String(error), severity: 'critical' })
+      emitNotification({ title: 'Launch execution failed', detail: humanizeLaunchError(error), severity: 'critical' })
     } finally {
       setIsLaunching(false)
       setPendingLivePayload(null)
@@ -1323,177 +1356,191 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
             </div>
           ) : null}
 
-          <div className="cmp-launch-execution cmp-launch-execution--activation">
-            <div className="cmp-activation-estimates" role="group" aria-label="Launch estimates">
-              <div className="cmp-est-chip">
-                <span className="cmp-est-label">Deliverable</span>
-                <strong className="cmp-est-value is-accent">{formatNumber(launchEstimates.deliverable)}</strong>
-                <span className="cmp-est-sub">ready-to-queue targets</span>
-              </div>
-              <div className="cmp-est-chip">
-                <span className="cmp-est-label">Sender Coverage</span>
-                <strong className="cmp-est-value">{launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}</strong>
-                <span className="cmp-est-sub">{formatNumber(launchEstimates.senderCovered)} covered</span>
-              </div>
-              <div className="cmp-est-chip">
-                <span className="cmp-est-label">Estimated Runtime</span>
-                <strong className="cmp-est-value">{launchEstimates.durationLabel}</strong>
-                <span className="cmp-est-sub">{formatNumber(launchEstimates.effectiveSends)} sends @ {formatNumber(launchEstimates.dailyVolume)}/day</span>
-              </div>
-              <div className="cmp-est-chip">
-                <span className="cmp-est-label">Est. Cost</span>
-                <strong className="cmp-est-value">{formatUsdApprox(launchEstimates.cost)}</strong>
-                <span className="cmp-est-sub">~${ESTIMATED_COST_PER_SMS_USD.toFixed(4)}/sms</span>
-              </div>
-            </div>
-
-            <div className="cmp-activation-controls">
-              <label className="cmp-launch-mini-field">
-                <span>Send Cap</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={launchSettings.max_targets}
-                  onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
-                />
-              </label>
-
-              <label className="cmp-launch-mini-field cmp-launch-mini-field--time">
-                <span>Schedule For</span>
-                <input
-                  type="datetime-local"
-                  value={launchSettings.first_scheduled_at}
-                  onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
-                />
-              </label>
-
-              <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
-                {SCHEDULE_PRESETS.map((preset) => (
-                  <button
-                    key={preset.key}
-                    type="button"
-                    className="cmp-schedule-preset"
-                    onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="cmp-pacing-block">
-                <span className="cmp-pacing-block-label">Pacing</span>
-                <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
-                  {PACING_PRESETS.map((preset) => (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
-                      onClick={() => applyPacingPreset(preset.key)}
-                      title={preset.blurb}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="cmp-pacing-readout" role="group" aria-label="Pacing summary">
-                  <span><em>Daily volume</em><strong>{formatNumber(launchEstimates.dailyVolume)}/day</strong></span>
-                  <span><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></span>
-                  <span><em>Sender coverage</em><strong>{launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}</strong></span>
-                  <span><em>Send window</em><strong>{launchEstimates.windowHours}h</strong></span>
-                </div>
-              </div>
-            </div>
-
-            <div className="cmp-activation-actions">
+          <div className={`cmp-launch-execution cmp-launch-execution--activation cmp-launch-execution--polished ${launchPanelExpanded ? 'is-expanded' : ''}`}>
+            <div className="cmp-launch-strip" role="group" aria-label="Launch readiness">
+              <LaunchStripMetric label="Deliverable Targets" value={formatNumber(launchEstimates.deliverable)} accent />
+              <LaunchStripMetric label="Messages/day" value={`${formatNumber(launchEstimates.dailyVolume)}/day`} />
+              <LaunchStripMetric label="Estimated Runtime" value={launchEstimates.durationLabel} muted={launchEstimates.runtimeCapped ? 'Review pacing' : undefined} />
+              <LaunchStripMetric
+                label="Sender Coverage"
+                value={launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}
+                muted={`${formatNumber(launchEstimates.senderCovered)} covered`}
+              />
+              <LaunchStripMetric label="Estimated Cost" value={formatUsdApprox(launchEstimates.cost)} />
+              <LaunchStripMetric label="Schedule" value={formatDateTime(launchSettings.first_scheduled_at)} />
               <button
                 type="button"
-                className="cmp-launch-btn cmp-launch-btn--ghost"
-                disabled={isLaunching || !canRunLaunch}
-                title="Plan the send — no queue rows are created"
-                onClick={requestPreview}
+                className="cmp-launch-advanced-toggle"
+                onClick={() => setLaunchPanelExpanded((value) => !value)}
+                aria-expanded={launchPanelExpanded}
               >
-                Preview
+                Advanced
+                <Icon name="chevron-down" size={12} />
               </button>
               <button
                 type="button"
-                className="cmp-launch-btn cmp-launch-btn--outline"
+                className="cmp-launch-btn is-accent cmp-launch-strip-cta"
                 disabled={isLaunching || !canRunLaunch}
-                title="Schedule this campaign for the selected time"
+                title={canRunLaunch ? 'Schedule this campaign for the selected time' : 'Save this campaign before scheduling.'}
                 onClick={requestSchedule}
               >
-                Schedule Campaign
-              </button>
-              <button
-                type="button"
-                className="cmp-launch-btn is-accent"
-                disabled={isLaunching || !canRunLaunch}
-                title="Activate now — queueing begins immediately"
-                onClick={requestActivate}
-              >
-                {isLaunching ? 'Working…' : 'Activate Campaign'}
+                {isLaunching ? 'Working…' : 'Schedule'}
               </button>
             </div>
 
-            <details className="cmp-launch-advanced" open={launchSettings.pacing === 'custom'}>
-              <summary>
-                <span>Advanced Settings</span>
-                <Icon name="chevron-down" size={12} />
-              </summary>
-              <div className="cmp-launch-field-grid cmp-launch-field-grid--advanced">
-                <label>
-                  <span>Daily Cap</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={launchSettings.daily_cap}
-                    onChange={(event) => updateLaunchSetting({ daily_cap: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Sender Cap</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={launchSettings.per_sender_cap}
-                    onChange={(event) => updateLaunchSetting({ per_sender_cap: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Market Cap</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={launchSettings.per_market_cap}
-                    onChange={(event) => updateLaunchSetting({ per_market_cap: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Spacing Seconds</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={launchSettings.spread_interval_seconds}
-                    onChange={(event) => updateLaunchSetting({ spread_interval_seconds: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Window Start</span>
-                  <input
-                    type="time"
-                    value={launchSettings.contact_window_start}
-                    onChange={(event) => updateLaunchSetting({ contact_window_start: event.target.value })}
-                  />
-                </label>
-                <label>
-                  <span>Window End</span>
-                  <input
-                    type="time"
-                    value={launchSettings.contact_window_end}
-                    onChange={(event) => updateLaunchSetting({ contact_window_end: event.target.value })}
-                  />
-                </label>
+            {launchPanelExpanded && (
+              <div className="cmp-launch-expanded">
+                <div className="cmp-activation-controls">
+                  <label className="cmp-launch-mini-field">
+                    <span>Send Cap</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={launchSettings.max_targets}
+                      onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
+                    />
+                  </label>
+
+                  <label className="cmp-launch-mini-field cmp-launch-mini-field--time">
+                    <span>Schedule</span>
+                    <input
+                      type="datetime-local"
+                      value={launchSettings.first_scheduled_at}
+                      onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
+                    />
+                  </label>
+
+                  <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
+                    {SCHEDULE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        className="cmp-schedule-preset"
+                        onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="cmp-pacing-block">
+                    <span className="cmp-pacing-block-label">Pacing</span>
+                    <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
+                      {PACING_PRESETS.map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
+                          onClick={() => applyPacingPreset(preset.key)}
+                          title={preset.blurb}
+                        >
+                          <strong>{preset.label}</strong>
+                          {preset.key !== 'custom' && <span>{formatNumber(Number(preset.daily_cap))}/day</span>}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="cmp-pacing-readout" role="group" aria-label="Pacing summary">
+                      <span><em>Messages/day</em><strong>{formatNumber(launchEstimates.dailyVolume)}/day</strong></span>
+                      <span><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></span>
+                      <span><em>Sender cap</em><strong>{formatNumber(parsePositiveInt(launchSettings.per_sender_cap, 150))}/day</strong></span>
+                      <span><em>Market cap</em><strong>{formatNumber(parsePositiveInt(launchSettings.per_market_cap, 400))}/day</strong></span>
+                      <span><em>Runtime</em><strong>{launchEstimates.durationLabel}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cmp-activation-actions">
+                  <button
+                    type="button"
+                    className="cmp-launch-btn cmp-launch-btn--ghost"
+                    disabled={isLaunching || !canRunLaunch}
+                    title="Plan the send — no queue rows are created"
+                    onClick={requestPreview}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    className="cmp-launch-btn cmp-launch-btn--outline"
+                    disabled={isLaunching || !canRunLaunch}
+                    title={canRunLaunch ? 'Schedule this campaign for the selected time' : 'Save this campaign before scheduling.'}
+                    onClick={requestSchedule}
+                  >
+                    Schedule Campaign
+                  </button>
+                  <button
+                    type="button"
+                    className="cmp-launch-btn is-accent"
+                    disabled={isLaunching || !canRunLaunch}
+                    title={canRunLaunch ? 'Activate now — queueing begins immediately' : 'Save this campaign before scheduling.'}
+                    onClick={requestActivate}
+                  >
+                    {isLaunching ? 'Working…' : 'Activate Campaign'}
+                  </button>
+                </div>
+
+                <details className="cmp-launch-advanced" open={launchSettings.pacing === 'custom'}>
+                  <summary>
+                    <span>Advanced Settings</span>
+                    <Icon name="chevron-down" size={12} />
+                  </summary>
+                  <div className="cmp-launch-field-grid cmp-launch-field-grid--advanced">
+                    <label>
+                      <span>Daily Cap</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={launchSettings.daily_cap}
+                        onChange={(event) => updateLaunchSetting({ daily_cap: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Sender Cap</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={launchSettings.per_sender_cap}
+                        onChange={(event) => updateLaunchSetting({ per_sender_cap: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Market Cap</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={launchSettings.per_market_cap}
+                        onChange={(event) => updateLaunchSetting({ per_market_cap: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Spacing Seconds</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={launchSettings.spread_interval_seconds}
+                        onChange={(event) => updateLaunchSetting({ spread_interval_seconds: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Window Start</span>
+                      <input
+                        type="time"
+                        value={launchSettings.contact_window_start}
+                        onChange={(event) => updateLaunchSetting({ contact_window_start: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Window End</span>
+                      <input
+                        type="time"
+                        value={launchSettings.contact_window_end}
+                        onChange={(event) => updateLaunchSetting({ contact_window_end: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                </details>
               </div>
-            </details>
+            )}
           </div>
 
           <div className="cmp-domain-tabs">
@@ -1645,17 +1692,16 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
               <div className="cmp-launch-btn-wrap">
                 <button
                   className="cmp-launch-btn"
-                  disabled={isPreviewLoading || !hasMeaningfulFilters}
-                  title={hasMeaningfulFilters ? 'Refresh target reach preview' : totalDraftCount > 0 ? 'Set a draft filter first' : 'Add and set a filter first'}
+                  disabled={isPreviewLoading}
+                  title={hasMeaningfulFilters ? 'Refresh target reach preview' : 'Preview the full property universe'}
                   onClick={() => {
-                    if (!hasMeaningfulFilters) return
                     runPreview('manual')
                   }}
                 >
                   {isPreviewLoading ? 'Updating…' : 'Preview Targets'}
                 </button>
                 {!hasMeaningfulFilters && totalDraftCount > 0 && (
-                  <span className="cmp-launch-btn-reason">Set drafts first</span>
+                  <span className="cmp-launch-btn-reason">Draft filters not included</span>
                 )}
               </div>
             </div>
@@ -1697,6 +1743,24 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
 
   return createPortal(modal, document.body)
 }
+
+const LaunchStripMetric = ({
+  label,
+  value,
+  muted,
+  accent,
+}: {
+  label: string
+  value: string
+  muted?: string
+  accent?: boolean
+}) => (
+  <div className="cmp-launch-strip-metric">
+    <span>{label}</span>
+    <strong className={accent ? 'is-accent' : ''}>{value}</strong>
+    {muted ? <em>{muted}</em> : null}
+  </div>
+)
 
 const LaunchConfirmModal = ({
   intent,
@@ -1799,7 +1863,9 @@ const LaunchSummaryModal = ({
   const templateDistribution = (getLaunchSummaryValue(result, 'template_distribution') ?? []) as NonNullable<CampaignLaunchResult['template_distribution']>
   const firstScheduledAt = getLaunchSummaryValue(result, 'first_scheduled_at') as string | null | undefined
   const lastScheduledAt = getLaunchSummaryValue(result, 'last_scheduled_at') as string | null | undefined
-  const blockers = result.exact_blockers ?? result.blockers ?? []
+  const blockers = Array.from(new Set((result.exact_blockers ?? result.blockers ?? [])
+    .map(humanizeLaunchBlocker)
+    .filter(Boolean)))
 
   return (
     <div className="cmp-nested-modal">
@@ -1817,24 +1883,24 @@ const LaunchSummaryModal = ({
         </div>
 
         <div className="cmp-launch-summary__grid">
-          <Metric label="targets_created" value={targetsCreated} />
-          <Metric label="queue_rows_created" value={queueRowsCreated} />
-          <Metric label="skipped_count" value={skippedCount} />
-          <Metric label="blocked_count" value={blockedCount} />
+          <Metric label="Targets Created" value={targetsCreated} />
+          <Metric label="Queue Rows Created" value={queueRowsCreated} />
+          <Metric label="Skipped" value={skippedCount} />
+          <Metric label="Blocked" value={blockedCount} />
           <div className="cmp-launch-summary__stat">
-            <span>first_scheduled_at</span>
+            <span>First Scheduled</span>
             <strong>{formatDateTime(firstScheduledAt)}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>last_scheduled_at</span>
+            <span>Last Scheduled</span>
             <strong>{formatDateTime(lastScheduledAt)}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>status</span>
+            <span>Status</span>
             <strong>{status.replace(/_/g, ' ')}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>target_build</span>
+            <span>Target Build</span>
             <strong>{formatNumber(result.target_build?.built_count ?? 0)}</strong>
           </div>
         </div>
@@ -1877,7 +1943,7 @@ const DistributionList = ({
 }) => {
   return (
     <div className="cmp-launch-summary__distribution">
-      <span>{title}</span>
+      <span>{formatLabel(title)}</span>
       {items.length === 0 ? (
         <em>No rows</em>
       ) : items.slice(0, 8).map((item) => (
@@ -1997,6 +2063,7 @@ const TargetReachPanel = ({
   filterGroups: CampaignFilterGroups
   totalDraftCount: number
 }) => {
+  const [developerMode, setDeveloperMode] = useState(false)
   const blockedTotal = preview?.blocked_waterfall.reduce((sum, item) => sum + item.count, 0) ?? 0
   const explicitBlockedSteps = preview?.blocked_reason_waterfall ?? []
   const explicitBlockedTotal = explicitBlockedSteps.reduce((sum, item) => sum + item.count, 0)
@@ -2025,6 +2092,75 @@ const TargetReachPanel = ({
     .slice(0, 3)
   const showMatchedNotReady = preview !== null && !loading && preview.total_matched > 0 && preview.ready_to_queue === 0
   const queueScopeIsSample = preview?.queue_eligibility_scope === 'candidate_window'
+  const campaignGraphCount = preview?.matched_properties
+    ?? preview?.full_source_reach?.matched_properties
+    ?? preview?.total_matched_properties
+    ?? preview?.total_matched
+    ?? null
+  const reachableContacts = preview?.linked_phones
+    ?? preview?.full_source_reach?.linked_phones
+    ?? preview?.layer_counts?.phones_matched
+    ?? null
+  const smsEligible = preview?.sms_eligible_phones
+    ?? preview?.sms_eligible_phones_count
+    ?? preview?.property_sms_eligible_count
+    ?? preview?.full_source_reach?.sms_eligible_phones
+    ?? null
+  const senderCovered = preview?.sender_covered ?? preview?.full_source_reach?.sender_covered ?? null
+  const funnelSteps = [
+    {
+      key: 'addressable',
+      label: preview?.addressable_properties_approximate ? 'Addressable Properties *' : 'Addressable Properties',
+      value: preview?.addressable_properties ?? null,
+      hint: 'Rows from public.properties before contact narrowing.',
+    },
+    {
+      key: 'graph',
+      label: 'Campaign Graph',
+      value: campaignGraphCount,
+      hint: 'One campaign graph row per property.',
+    },
+    {
+      key: 'reachable',
+      label: 'Reachable Contacts',
+      value: reachableContacts,
+      hint: 'Properties with a reachable phone path.',
+    },
+    {
+      key: 'sms',
+      label: 'SMS Eligible',
+      value: smsEligible,
+      hint: 'Reachable contacts that can receive SMS.',
+    },
+    {
+      key: 'clean',
+      label: 'Clean Targets',
+      value: preview?.clean_targets ?? null,
+      hint: 'SMS-eligible contacts after suppression and wrong-number checks.',
+    },
+    {
+      key: 'covered',
+      label: 'Sender Covered',
+      value: senderCovered,
+      hint: 'Clean targets with an active sender route.',
+    },
+    {
+      key: 'deliverable',
+      label: 'Deliverable',
+      value: preview?.ready_to_queue ?? null,
+      hint: 'Targets ready for queue creation.',
+      accent: true,
+    },
+    {
+      key: 'queueable',
+      label: 'Queueable Today',
+      value: preview?.queueable_today ?? null,
+      hint: "Deliverable targets inside today's queue policy.",
+      accent: true,
+    },
+  ]
+  const hasNoReachableContacts = preview !== null && !loading && Number(reachableContacts ?? 0) === 0 && activeFilterCount > 0
+  const hasNoSenderRoute = preview !== null && !loading && Number(senderCovered ?? 0) === 0 && Number(smsEligible ?? reachableContacts ?? 0) > 0
 
   return (
     <aside className="cmp-studio-summary cmp-target-reach">
@@ -2047,28 +2183,25 @@ const TargetReachPanel = ({
         backendDegraded={backendDegraded}
         filterGroups={filterGroups}
         totalDraftCount={totalDraftCount}
+        developerMode={developerMode}
+        onDeveloperModeChange={setDeveloperMode}
       />
 
       <div className="cmp-summary-body">
-        <div className="cmp-reach-grid">
-          <Metric label={preview?.addressable_properties_approximate ? 'Addressable *' : 'Addressable'} value={preview?.addressable_properties} hint="Raw matching properties" />
-          <Metric label="Reachable" value={preview?.total_matched_properties ?? preview?.total_matched} hint="Has a contactable prospect" />
-          <Metric label="Clean Targets" value={preview?.clean_targets} hint="SMS-eligible, not suppressed" />
-          <Metric label="Sender-Covered" value={preview?.sender_covered} hint="Has a sending number" />
-          <Metric label="Deliverable" value={preview?.ready_to_queue} variant="success" hint="Ready-to-queue / sendable targets" />
-          <Metric label="Queueable Today" value={preview?.queueable_today} variant="accent" hint="Within today's send window" />
+        <div className="cmp-reach-funnel" role="list" aria-label="Target reach funnel">
+          {funnelSteps.map((step, index) => (
+            <ReachFunnelStep
+              key={step.key}
+              label={step.label}
+              value={step.value}
+              hint={step.hint}
+              accent={step.accent}
+              isLast={index === funnelSteps.length - 1}
+            />
+          ))}
         </div>
 
-        {preview && (
-          <div className="cmp-reach-grid cmp-reach-grid--linked">
-            <Metric label="Linked Prospects" value={preview.linked_prospects} />
-            <Metric label="Linked Owners" value={preview.linked_master_owners} />
-            <Metric label="Linked Phones" value={preview.linked_phones} />
-            <Metric label="SMS Eligible" value={preview.sms_eligible_phones ?? preview.sms_eligible_phones_count ?? preview.property_sms_eligible_count} hint="Phones SMS-capable, no wrong-number flag" />
-          </div>
-        )}
-
-        {preview && queueScopeIsSample && (
+        {developerMode && preview && queueScopeIsSample && (
           <div className="cmp-diag-alert cmp-diag-alert--info">
             <Icon name="alert-circle" size={12} />
             <div>
@@ -2083,7 +2216,7 @@ const TargetReachPanel = ({
         {!preview && !loading && activeFilterCount === 0 && (
           <div className="cmp-diag-alert cmp-diag-alert--info">
             <Icon name="alert-circle" size={12} />
-            Set at least one filter active to see reach estimates.
+            Loading the full property universe.
           </div>
         )}
 
@@ -2098,27 +2231,33 @@ const TargetReachPanel = ({
           <div className="cmp-diag-alert cmp-diag-alert--warn">
             <Icon name="alert-circle" size={12} />
             <div>
-              <div>No matching targets.</div>
-              <div style={{ marginTop: 4, fontSize: 10, opacity: 0.8 }}>
-                Possible causes: filter combination too narrow, filter unsupported in preview, or source has no matching candidates.
-              </div>
-              {unsupportedCount > 0 && (
-                <div style={{ marginTop: 4, fontSize: 10, opacity: 0.7 }}>
-                  {unsupportedCount} filter{unsupportedCount !== 1 ? 's' : ''} unsupported in preview.
-                </div>
-              )}
+              <div>No reachable contacts match this filter.</div>
             </div>
           </div>
         )}
 
-        {showMatchedNotReady && !showZeroMatchWarn && (
-          <div className="cmp-diag-alert cmp-diag-alert--info">
+        {hasNoReachableContacts && !showZeroMatchWarn && (
+          <div className="cmp-diag-alert cmp-diag-alert--warn">
             <Icon name="alert-circle" size={12} />
-            Matched but not queue-ready — check blocked waterfall for likely blockers.
+            No reachable contacts match this filter.
           </div>
         )}
 
-        {!showZeroMatchWarn && unsupportedCount > 0 && (
+        {hasNoSenderRoute && !hasNoReachableContacts && !showZeroMatchWarn && (
+          <div className="cmp-diag-alert cmp-diag-alert--warn">
+            <Icon name="alert-circle" size={12} />
+            No active sender route covers this audience.
+          </div>
+        )}
+
+        {showMatchedNotReady && !hasNoSenderRoute && !hasNoReachableContacts && !showZeroMatchWarn && (
+          <div className="cmp-diag-alert cmp-diag-alert--info">
+            <Icon name="alert-circle" size={12} />
+            Deliverable target count is zero after suppression and queue checks.
+          </div>
+        )}
+
+        {developerMode && !showZeroMatchWarn && unsupportedCount > 0 && (
           <div className="cmp-diag-alert cmp-diag-alert--info">
             <Icon name="alert-circle" size={12} />
             {missingMappingCount > 0 ? 'Filter applied but no graph column mapping found.' : 'Some filters are approved but not available in the active preview source.'}
@@ -2132,7 +2271,7 @@ const TargetReachPanel = ({
           </div>
         )}
 
-        {!loading && previewWarningMessages.length > 0 && (
+        {developerMode && !loading && previewWarningMessages.length > 0 && (
           <div className="cmp-preview-warnings-list">
             {previewWarningMessages.map((warning) => (
               <div key={warning} className="cmp-preview-warning">
@@ -2189,7 +2328,7 @@ const TargetReachPanel = ({
           </div>
         </section>
 
-        {rawBlockers.length > 0 && (
+        {developerMode && rawBlockers.length > 0 && (
           <section className="cmp-reach-section">
             <div className="cmp-reach-section-title">
               <span>Raw Blocker Reasons</span>
@@ -2243,6 +2382,8 @@ const BackendStatusStrip = ({
   backendDegraded,
   filterGroups,
   totalDraftCount,
+  developerMode,
+  onDeveloperModeChange,
 }: {
   activeDomain: CampaignDomainKey
   preview: CampaignPreviewResult | null
@@ -2250,6 +2391,8 @@ const BackendStatusStrip = ({
   backendDegraded: boolean
   filterGroups: CampaignFilterGroups
   totalDraftCount: number
+  developerMode: boolean
+  onDeveloperModeChange: (value: boolean) => void
 }) => {
   const [expanded, setExpanded] = useState(false)
   const source = DOMAIN_SOURCE_VIEWS[activeDomain] ?? 'unknown'
@@ -2313,7 +2456,31 @@ const BackendStatusStrip = ({
 
   return (
     <div className="cmp-backend-strip-wrap">
-      <div className="cmp-backend-strip">
+      <div className="cmp-operator-strip">
+        <span className="cmp-operator-strip__item">
+          {activeFilterCount > 0 ? `${activeFilterCount} active filter${activeFilterCount !== 1 ? 's' : ''}` : 'Full property universe'}
+        </span>
+        {totalDraftCount > 0 && (
+          <span className="cmp-operator-strip__item is-warn">{totalDraftCount} draft filter{totalDraftCount !== 1 ? 's' : ''}</span>
+        )}
+        {previewMeta && (
+          <span className="cmp-operator-strip__item">Updated {previewMeta.ts}</span>
+        )}
+        <button
+          type="button"
+          className={`cmp-developer-toggle ${developerMode ? 'is-active' : ''}`}
+          onClick={() => {
+            const next = !developerMode
+            onDeveloperModeChange(next)
+            if (!next) setExpanded(false)
+          }}
+        >
+          Developer Mode
+        </button>
+      </div>
+
+      {developerMode && (
+        <div className="cmp-backend-strip">
         <span className="cmp-backend-item cmp-backend-source" title="Source view">{source}</span>
         <span className={`cmp-backend-item cmp-backend-mode ${backendDegraded || preview?.degraded ? 'is-degraded' : 'is-live'}`}>
           {modeLabel}
@@ -2352,9 +2519,10 @@ const BackendStatusStrip = ({
           Diagnostics
           <Icon name="chevron-down" size={10} />
         </button>
-      </div>
+        </div>
+      )}
 
-      {expanded && (
+      {developerMode && expanded && (
         <div className="cmp-diag-panel">
           <div className="cmp-diag-grid">
             <div className="cmp-diag-row">
@@ -2666,6 +2834,30 @@ const DomainDistList = ({ buckets }: { buckets: Array<{ label: string; count: nu
         <strong>{formatNumber(b.count)}</strong>
       </div>
     ))}
+  </div>
+)
+
+const ReachFunnelStep = ({
+  label,
+  value,
+  hint,
+  accent,
+  isLast,
+}: {
+  label: string
+  value: number | null | undefined
+  hint?: string
+  accent?: boolean
+  isLast?: boolean
+}) => (
+  <div className={`cmp-reach-funnel-step ${accent ? 'is-accent' : ''}`} role="listitem" title={hint}>
+    <div className="cmp-reach-funnel-node" />
+    <div className="cmp-reach-funnel-content">
+      <span>{label}</span>
+      <strong>{value === undefined || value === null ? '—' : formatNumber(value)}</strong>
+      {hint ? <em>{hint}</em> : null}
+    </div>
+    {!isLast ? <div className="cmp-reach-funnel-connector" /> : null}
   </div>
 )
 
