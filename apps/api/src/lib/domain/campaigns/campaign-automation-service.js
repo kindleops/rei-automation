@@ -1267,7 +1267,7 @@ const ELIGIBILITY_REASON_GROUPS = Object.freeze([
   {
     key: 'missing_phone',
     label: 'Missing phone',
-    reasons: ['NO_BEST_PHONE', 'NO_VALID_PHONE', 'NO_PHONE', 'filter_valid_phone'],
+    reasons: ['NO_BEST_PHONE', 'NO_VALID_PHONE', 'NO_PHONE', 'missing_phone', 'filter_valid_phone'],
   },
   {
     key: 'phone_sms_ineligible',
@@ -1326,7 +1326,7 @@ function buildBlockedSummary(blocked = {}) {
     suppressed: sumBlockedReasons(blocked, ['SUPPRESSED', 'suppression_blocked']),
     dnc: sumBlockedReasons(blocked, ['TRUE_OPT_OUT', 'DNC', 'OPT_OUT']),
     wrongNumber: sumBlockedReasons(blocked, ['wrong_number', 'WRONG_NUMBER', 'PHONE_WRONG_NUMBER']),
-    noPhone: sumBlockedReasons(blocked, ['NO_VALID_PHONE', 'NO_BEST_PHONE', 'NO_PHONE', 'filter_valid_phone']),
+    noPhone: sumBlockedReasons(blocked, ['NO_VALID_PHONE', 'NO_BEST_PHONE', 'NO_PHONE', 'missing_phone', 'filter_valid_phone']),
     noSenderCoverage: sumBlockedReasons(blocked, ['routing_blocked', 'ROUTING_BLOCKED', 'NO_VALID_TEXTGRID_NUMBER']),
     cooldown: sumBlockedReasons(blocked, [
       'OUTSIDE_CONTACT_WINDOW',
@@ -3917,7 +3917,8 @@ const PROPERTY_UNIVERSE_FILTER_COLUMNS = Object.freeze({
 // Top of the funnel: how many rows in public.properties (the canonical source of
 // truth) match the audience's property-level criteria BEFORE any contact /
 // SMS-eligibility / sender-coverage narrowing. This is the "addressable" number the
-// operator expects to see; the graph total below it is the reachable subset.
+// operator expects to see; the graph total below it is the campaign property
+// universe once the property-universe refresh phase has completed.
 // Non-property filters (prospects/phones/outreach/sender_coverage) intentionally do
 // not constrain the universe -- they narrow the funnel further down. Any property
 // attribute we cannot resolve to a concrete properties column flags the result
@@ -3952,12 +3953,15 @@ async function countAddressableProperties({ supabase, options }) {
 async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueueEligibleRows = false }) {
   const [
     total,
+    linkedMasterOwners,
     linkedProspects,
+    reachableContacts,
     smsEligible,
     cleanTargets,
     senderCovered,
     readyToQueue,
     smsBlocked,
+    missingPhone,
     suppressed,
     wrongNumber,
     pendingPriorTouch,
@@ -3967,7 +3971,9 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     addressable,
   ] = await Promise.all([
     countCampaignGraphRows({ supabase, options }),
+    countCampaignGraphRows({ supabase, options, extra: (query) => query.not('master_owner_id', 'is', null) }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.not('prospect_id', 'is', null) }),
+    countCampaignGraphRows({ supabase, options, extra: (query) => query.not('canonical_e164', 'is', null) }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('sms_eligible', true) }),
     countCampaignGraphRows({
       supabase,
@@ -3980,7 +3986,8 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       extra: (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false).eq('sender_covered', true),
     }),
     countCampaignGraphRows({ supabase, options, requireQueueEligible: true }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('sms_eligible', false) }),
+    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('sms_eligible', false).not('canonical_e164', 'is', null) }),
+    countCampaignGraphRows({ supabase, options, extra: (query) => query.is('canonical_e164', null) }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('true_post_contact_suppression', true) }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('wrong_number', true) }),
     countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('pending_prior_touch', true) }),
@@ -4001,12 +4008,15 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
 
   const allResults = [
     total,
+    linkedMasterOwners,
     linkedProspects,
+    reachableContacts,
     smsEligible,
     cleanTargets,
     senderCovered,
     readyToQueue,
     smsBlocked,
+    missingPhone,
     suppressed,
     wrongNumber,
     pendingPriorTouch,
@@ -4018,39 +4028,39 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
 
   // --- Addressable-universe invariant ----------------------------------------
   // "Addressable" is the property universe BEFORE contact / SMS / sender-coverage
-  // narrowing, so it must never be smaller than the reachable graph subset. The
+  // narrowing, so it must never be smaller than the graph's matched property set. The
   // properties-table count (countAddressableProperties) can legitimately diverge
   // from the campaign_target_graph projection because the two stores normalize
   // values differently (metro vs city `market`, raw vs normalized `property_type`,
   // sparse vs canonical geo columns). That divergence previously produced the
   // impossible funnel state "Addressable 0 / Deliverable > 0". We clamp to the
-  // reachable floor and emit a developer-only diagnostic; operators never see a
+  // matched-property floor and emit a developer-only diagnostic; operators never see a
   // funnel that goes back up.
-  const reachableCount = Number(total.count || 0)
+  const matchedPropertyCount = Number(total.count || 0)
   const rawAddressable = addressable.ok === false ? null : Number(addressable.count || 0)
   const addressableInvariantWarnings = []
   let addressableProperties = rawAddressable
   let addressableSource = 'properties_universe'
   if (rawAddressable === null) {
-    addressableProperties = reachableCount
-    addressableSource = 'graph_reachable_fallback'
-    addressableInvariantWarnings.push('addressable_universe_fallback:source_unavailable_using_graph_reachable')
-  } else if (rawAddressable < reachableCount) {
+    addressableProperties = matchedPropertyCount
+    addressableSource = 'graph_matched_property_fallback'
+    addressableInvariantWarnings.push('addressable_universe_fallback:source_unavailable_using_graph_matched_properties')
+  } else if (rawAddressable < matchedPropertyCount) {
     addressableInvariantWarnings.push(
-      `addressable_universe_clamped:properties_count=${rawAddressable}:reachable_floor=${reachableCount}:reason=source_normalization_mismatch`,
+      `addressable_universe_clamped:properties_count=${rawAddressable}:matched_property_floor=${matchedPropertyCount}:reason=source_normalization_mismatch`,
     )
-    addressableProperties = reachableCount
-    addressableSource = 'graph_reachable_floor'
+    addressableProperties = matchedPropertyCount
+    addressableSource = 'graph_matched_property_floor'
   }
-  // When we fall back / clamp to the reachable floor the true universe is unknown
-  // (>= reachable), so the figure is approximate. When the properties count stands
+  // When we fall back / clamp to the matched-property floor the true universe is unknown
+  // (>= matched properties), so the figure is approximate. When the properties count stands
   // on its own, preserve its own approximate flag.
   const addressableApproximate = addressableSource === 'properties_universe'
     ? Boolean(addressable.approximate)
     : true
 
   // Developer-mode funnel monotonicity invariants. The funnel must be
-  // non-increasing: addressable >= reachable >= sms_eligible >= clean >=
+  // non-increasing: addressable >= matched >= reachable >= sms_eligible >= clean >=
   // sender_covered. ready_to_queue uses an independent queue-eligibility rule so
   // it is reported, not asserted. Violations are surfaced as diagnostics only.
   const invariantWarnings = []
@@ -4061,8 +4071,9 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       invariantWarnings.push(`funnel_invariant_violation:${lowerLabel}(${l})>${upperLabel}(${u})`)
     }
   }
-  checkMonotonic('addressable', addressableProperties, 'reachable', reachableCount)
-  checkMonotonic('reachable', reachableCount, 'sms_eligible', smsEligible.count)
+  checkMonotonic('addressable', addressableProperties, 'matched_properties', matchedPropertyCount)
+  checkMonotonic('matched_properties', matchedPropertyCount, 'reachable_phones', reachableContacts.count)
+  checkMonotonic('reachable_phones', reachableContacts.count, 'sms_eligible', smsEligible.count)
   checkMonotonic('sms_eligible', smsEligible.count, 'clean', cleanTargets.count)
   checkMonotonic('clean', cleanTargets.count, 'sender_covered', senderCovered.count)
 
@@ -4080,12 +4091,15 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     addressableProperties,
     addressableApproximate,
     addressableSource,
+    linkedMasterOwners: linkedMasterOwners.count,
     linkedProspects: linkedProspects.count,
+    reachableContacts: reachableContacts.count,
     smsEligible: smsEligible.count,
     cleanTargets: cleanTargets.count,
     senderCovered: senderCovered.count,
     readyToQueue: readyToQueue.count,
     blockedCounts: {
+      NO_PHONE: missingPhone.count,
       SMS_INELIGIBLE: smsBlocked.count,
       suppression_blocked: suppressed.count,
       wrong_number: wrongNumber.count,
@@ -4464,7 +4478,8 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const queueableToday = dailyCap ? Math.min(graph.readyToQueue, dailyCap) : graph.readyToQueue
   const audienceFunnel = [
     { key: 'addressable', label: 'Addressable properties', count: graph.addressableProperties, approximate: Boolean(graph.addressableApproximate) },
-    { key: 'reachable', label: 'With reachable contact', count: graph.totalMatched },
+    { key: 'matched_properties', label: 'Matched properties', count: graph.totalMatched },
+    { key: 'reachable', label: 'With reachable phone', count: graph.reachableContacts },
     { key: 'sms_eligible', label: 'SMS-eligible', count: graph.smsEligible },
     { key: 'clean', label: 'Clean (not suppressed / wrong number)', count: graph.cleanTargets },
     { key: 'sender_covered', label: 'Sender-covered', count: graph.senderCovered },
@@ -4509,9 +4524,9 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     totalReachMatched: graph.totalMatched,
     fullReach: {
       countSource: CAMPAIGN_TARGET_GRAPH_TABLE,
-      linked_master_owners_count: graph.totalMatched,
+      linked_master_owners_count: graph.linkedMasterOwners,
       linked_prospects_count: graph.linkedProspects,
-      linked_phones_count: graph.totalMatched,
+      linked_phones_count: graph.reachableContacts,
       sms_eligible_phones_count: graph.smsEligible,
       clean_targets_count: graph.cleanTargets,
       sender_covered_count: graph.senderCovered,
@@ -4523,8 +4538,8 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
       layerCounts: {
         propertiesMatched: graph.totalMatched,
         prospectsMatched: graph.linkedProspects,
-        masterOwnersMatched: graph.totalMatched,
-        phonesMatched: graph.totalMatched,
+        masterOwnersMatched: graph.linkedMasterOwners,
+        phonesMatched: graph.reachableContacts,
         outreachEligible: graph.cleanTargets,
         senderCoverageEligible: graph.senderCovered,
       },
@@ -4563,8 +4578,8 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     layerCounts: {
       propertiesMatched: graph.totalMatched,
       prospectsMatched: graph.linkedProspects,
-      masterOwnersMatched: graph.totalMatched,
-      phonesMatched: graph.totalMatched,
+      masterOwnersMatched: graph.linkedMasterOwners,
+      phonesMatched: graph.reachableContacts,
       outreachEligible: graph.cleanTargets,
       senderCoverageEligible: graph.senderCovered,
     },
@@ -4576,6 +4591,9 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
       addressableProperties: graph.addressableProperties,
       addressableApproximate: Boolean(graph.addressableApproximate),
       totalMatched: graph.totalMatched,
+      linkedMasterOwners: graph.linkedMasterOwners,
+      linkedProspects: graph.linkedProspects,
+      reachableContacts: graph.reachableContacts,
       cleanTargets: graph.cleanTargets,
       readyToQueue: graph.readyToQueue,
       queueableToday,
@@ -4606,20 +4624,22 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     dropped_filters: (options.catalog_filters.dropped || []).map(publicFilter),
     graph_join_key_report: {
       graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-      row_rule: '1 row = 1 reachable seller/phone path',
+      row_rule: '1 row = 1 campaign property; seller/phone fields may be null until reachable',
       property_id_values: graph.totalMatched,
-      master_owner_id_values: graph.totalMatched,
+      master_owner_id_values: graph.linkedMasterOwners,
       prospect_id_values: graph.linkedProspects,
-      phone_id_values: graph.totalMatched,
-      canonical_e164_values: graph.totalMatched,
+      phone_id_values: graph.reachableContacts,
+      canonical_e164_values: graph.reachableContacts,
       filter_compiler: 'campaign_target_graph_shared_filter_compiler',
     },
     graph_source_coverage: {
       graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
+      total_properties: graph.totalMatched,
       total_paths: graph.totalMatched,
-      linked_master_owners: graph.totalMatched,
+      linked_master_owners: graph.linkedMasterOwners,
       linked_prospects: graph.linkedProspects,
-      linked_phones: graph.totalMatched,
+      linked_phones: graph.reachableContacts,
+      reachable_contacts: graph.reachableContacts,
       sms_eligible_phones: graph.smsEligible,
       sender_covered: graph.senderCovered,
       queue_eligible: graph.readyToQueue,
@@ -4632,7 +4652,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     candidate_window_matched: graph.totalMatched,
     full_reach_count: graph.totalMatched,
     full_reach_count_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-    full_reach_join_strategy: 'precomputed_target_graph',
+    full_reach_join_strategy: 'precomputed_property_universe_target_graph',
     full_reach_owner_filter_count: null,
     queue_eligibility_scope: CAMPAIGN_TARGET_GRAPH_TABLE,
     queue_eligibility_note: 'Preview reads only the precomputed campaign target graph. Graph refresh is asynchronous and outside the request path.',
@@ -4642,11 +4662,11 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     ready_to_queue_source: CAMPAIGN_TARGET_GRAPH_TABLE,
     queueable_today_source: CAMPAIGN_TARGET_GRAPH_TABLE,
     total_matching_properties: graph.totalMatched,
-    owners_matched: graph.totalMatched,
-    phones_matched: graph.totalMatched,
+    owners_matched: graph.linkedMasterOwners,
+    phones_matched: graph.reachableContacts,
     linked_prospects: graph.linkedProspects,
-    linked_master_owners: graph.totalMatched,
-    linked_phones: graph.totalMatched,
+    linked_master_owners: graph.linkedMasterOwners,
+    linked_phones: graph.reachableContacts,
     sms_eligible_phones: graph.smsEligible,
     sender_covered: graph.senderCovered,
     suppressed_count: blockedSummary.suppressed,
@@ -4673,18 +4693,20 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
       matched_properties: graph.totalMatched,
       count_source: CAMPAIGN_TARGET_GRAPH_TABLE,
       graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-      join_strategy: 'precomputed_target_graph',
+      join_strategy: 'precomputed_property_universe_target_graph',
       graph_join_key_report: {
         graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-        row_rule: '1 row = 1 reachable seller/phone path',
+        row_rule: '1 row = 1 campaign property; seller/phone fields may be null until reachable',
       },
       graph_source_coverage: {
+        total_properties: graph.totalMatched,
         total_paths: graph.totalMatched,
+        reachable_contacts: graph.reachableContacts,
         queue_eligible: graph.readyToQueue,
       },
-      linked_master_owners: graph.totalMatched,
+      linked_master_owners: graph.linkedMasterOwners,
       linked_prospects: graph.linkedProspects,
-      linked_phones: graph.totalMatched,
+      linked_phones: graph.reachableContacts,
       sms_eligible_phones: graph.smsEligible,
       clean_targets: graph.cleanTargets,
       sender_covered: graph.senderCovered,

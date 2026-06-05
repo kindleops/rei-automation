@@ -125,6 +125,13 @@ const config = {
         process.env.CAMPAIGN_TARGET_GRAPH_FALLBACK_ENABLED,
         process.env.CAMPAIGN_TARGET_GRAPH_RUN_FALLBACK
       ), true),
+  universeEnabled: hasFlag("no-universe")
+    ? false
+    : boolSetting(firstSetting(
+        argValue("universe-enabled"),
+        process.env.CAMPAIGN_TARGET_GRAPH_UNIVERSE_ENABLED,
+        process.env.CAMPAIGN_TARGET_GRAPH_RUN_UNIVERSE
+      ), true),
   resume: hasFlag("fresh")
     ? false
     : boolSetting(firstSetting(
@@ -263,11 +270,13 @@ function scopeLabel(scope) {
 }
 
 function phasePrefix(phase) {
+  if (phase === "universe") return "property_universe_offset:";
   return phase === "fallback" ? "fallback_property_offset:" : "property_offset:";
 }
 
 function rowPhase(row) {
   const key = clean(row.batch_key);
+  if (key.startsWith("property_universe_offset:")) return "universe";
   if (key.startsWith("fallback_property_offset:")) return "fallback";
   if (key.startsWith("property_offset:")) return "direct";
   return "unknown";
@@ -436,6 +445,7 @@ async function startRun(client) {
       market_filter: config.market,
       scope_level: config.scopeLevel,
       fallback_enabled: config.fallbackEnabled,
+      property_universe_enabled: config.universeEnabled,
     });
     console.log(`resume_run_id=${existing.id} started_at=${existing.started_at}`);
     return existing.id;
@@ -455,7 +465,9 @@ async function startRun(client) {
     completed_all_batches: false,
     production_direct_complete: false,
     production_fallback_complete: false,
+    production_universe_complete: false,
     fallback_enabled: config.fallbackEnabled,
+    property_universe_enabled: config.universeEnabled,
     batch_limit: config.batchLimit,
     state_filter: config.state,
     market_filter: config.market,
@@ -489,9 +501,11 @@ async function counts(client) {
 }
 
 async function runBatch(client, phase, runId, scope, offset) {
-  const fn = phase === "fallback"
-    ? "public.refresh_campaign_target_graph_fallback_batch"
-    : "public.refresh_campaign_target_graph_stage_batch";
+  const fn = phase === "universe"
+    ? "public.refresh_campaign_target_graph_property_universe_batch"
+    : phase === "fallback"
+      ? "public.refresh_campaign_target_graph_fallback_batch"
+      : "public.refresh_campaign_target_graph_stage_batch";
   const { rows } = await client.query(
     `select * from ${fn}($1::uuid, $2::integer, $3::integer, $4::text, $5::text)`,
     [runId, config.batchLimit, offset, scope.state, scope.market]
@@ -504,6 +518,7 @@ async function runBatch(client, phase, runId, scope, offset) {
     completed_all_batches: false,
     current_phase: phase,
     fallback_enabled: config.fallbackEnabled,
+    property_universe_enabled: config.universeEnabled,
     stage_rows: Number(row.stage_rows || 0),
   });
   return row;
@@ -525,7 +540,7 @@ async function runPhase(client, runId, phase, scopes, startedBatches) {
       continue;
     }
 
-    let offset = progress.nextOffset;
+    let offset = phase === "universe" ? 0 : progress.nextOffset;
     for (;;) {
       if (budgetExhausted(startedBatches)) {
         console.log(`[${phase}] paused max_batches=${config.maxBatches} next ${scopeLabel(scope)} offset=${offset}`);
@@ -564,7 +579,10 @@ async function runPhase(client, runId, phase, scopes, startedBatches) {
         scopesCompleted += 1;
         break;
       }
-      if (phase === "fallback" && config.fallbackCursor === "front" && Number(row.rows_inserted || 0) > 0) {
+      if (
+        (phase === "universe" || (phase === "fallback" && config.fallbackCursor === "front")) &&
+        Number(row.rows_inserted || 0) > 0
+      ) {
         offset = 0;
         continue;
       }
@@ -620,6 +638,7 @@ async function commitRun(client, runId, beforeGraphRows) {
       graph_refresh_scope: "full",
       full_refresh_complete: true,
       fallback_enabled: config.fallbackEnabled,
+      property_universe_enabled: config.universeEnabled,
       committed_by: RUNNER_SOURCE,
     });
     const { rows } = await client.query(
@@ -633,6 +652,7 @@ async function commitRun(client, runId, beforeGraphRows) {
       graph_refresh_scope: "full",
       full_refresh_complete: true,
       fallback_enabled: config.fallbackEnabled,
+      property_universe_enabled: config.universeEnabled,
       committed_by: RUNNER_SOURCE,
     });
     await client.query("commit");
@@ -878,6 +898,7 @@ async function main() {
         ` state=${config.state || "all"}` +
         ` market=${config.market || "all"}` +
         ` fallback_enabled=${config.fallbackEnabled}` +
+        ` universe_enabled=${config.universeEnabled}` +
         ` scope_level=${config.scopeLevel}` +
         ` fallback_cursor=${config.fallbackCursor}` +
         ` resume=${config.resume}` +
@@ -894,8 +915,10 @@ async function main() {
 
     const directScopes = await discoverScopes(client, "direct");
     const fallbackScopes = config.fallbackEnabled ? await discoverScopes(client, "fallback") : [];
+    const universeScopes = config.universeEnabled ? await discoverScopes(client, "universe") : [];
     console.log(`[direct] scopes=${directScopes.length}`);
     console.log(`[fallback] scopes=${fallbackScopes.length} enabled=${config.fallbackEnabled}`);
+    console.log(`[universe] scopes=${universeScopes.length} enabled=${config.universeEnabled}`);
 
     if (runMetadata.production_direct_complete === true) {
       console.log("[direct] skip phase production_direct_complete=true");
@@ -947,6 +970,33 @@ async function main() {
           graph_refresh_scope: "partial",
           completed_all_batches: false,
           last_targeted_fallback_complete: true,
+        });
+      }
+    }
+
+    if (runMetadata.production_universe_complete === true) {
+      console.log("[universe] skip phase production_universe_complete=true");
+    } else if (config.universeEnabled) {
+      const universe = await runPhase(client, runId, "universe", universeScopes, startedBatches);
+      startedBatches = universe.startedBatches;
+      if (!universe.allComplete) {
+        await patchRunMetadata(client, runId, {
+          source: RUNNER_SOURCE,
+          graph_refresh_scope: "partial",
+          completed_all_batches: false,
+          pause_reason: "max_batches",
+        });
+        console.log(`PAUSED run_id=${runId} after_batches=${startedBatches}`);
+        return;
+      }
+      if (isFullTraversal) {
+        await markPhaseComplete(client, runId, "universe", { universe_scope_count: universeScopes.length });
+      } else {
+        await patchRunMetadata(client, runId, {
+          source: RUNNER_SOURCE,
+          graph_refresh_scope: "partial",
+          completed_all_batches: false,
+          last_targeted_universe_complete: true,
         });
       }
     }
