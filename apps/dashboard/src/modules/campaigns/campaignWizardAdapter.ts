@@ -156,6 +156,7 @@ export interface CampaignPreviewResult {
   linked_phones?: number | null
   matched_properties?: number | null
   sms_eligible_phones?: number | null
+  sms_eligible_phones_count?: number | null
   sender_covered?: number | null
   property_best_phone_count?: number | null
   property_sms_eligible_count?: number | null
@@ -560,7 +561,8 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set<string>([
   'properties.equity_amount',
   'properties.equity_percent',
   'properties.seller_tags_text',
-  'properties.seller_tags_json',
+  // seller_tags_json has no campaign_target_graph column; seller_tags_text covers
+  // tag filtering. Keeping it unsupported prevents a silently-skipped active filter.
   'properties.structured_motivation_score',
   'properties.deal_strength_score',
   'properties.tag_distress_score',
@@ -1062,6 +1064,34 @@ function buildFieldsByDomain(fields: CampaignFieldDefinition[]): Record<Campaign
   return groups
 }
 
+// Campaign Builder only surfaces fields that are fully supported end-to-end in
+// preview/build/launch (i.e. they resolve to a campaign_target_graph column). Any
+// field flagged supported_in_preview === false (e.g. master_owner portfolio
+// financials/distress/scores, or unmapped JSON mirrors) is hidden entirely rather
+// than shown disabled, so an operator can never apply a filter that the backend
+// would silently skip. Categories left with no supported fields are pruned too.
+function restrictCatalogToSupported(catalog: CampaignFieldCatalog): CampaignFieldCatalog {
+  const supportedFields = catalog.fields.filter((field) => field.supported_in_preview)
+  const categoriesByDomain = new Map<CampaignDomainKey, Set<string>>()
+  for (const field of supportedFields) {
+    if (!categoriesByDomain.has(field.domain)) categoriesByDomain.set(field.domain, new Set())
+    categoriesByDomain.get(field.domain)!.add(field.category)
+  }
+  const domains = catalog.domains
+    .map((domain) => ({
+      ...domain,
+      categories: domain.categories.filter((category) => categoriesByDomain.get(domain.key)?.has(category)),
+    }))
+    .filter((domain) => domain.categories.length > 0)
+  return {
+    ...catalog,
+    domains,
+    fields: supportedFields,
+    fieldsByDomain: buildFieldsByDomain(supportedFields),
+    totalFields: supportedFields.length,
+  }
+}
+
 function getLocalFieldCatalog(meta?: CampaignFallbackReason): CampaignFieldCatalog {
   return {
     domains: CAMPAIGN_DOMAIN_DEFINITIONS,
@@ -1212,18 +1242,18 @@ export function createEmptyFilterGroups(): CampaignFilterGroups {
 
 export async function getFieldCatalog(): Promise<CampaignFieldCatalog> {
   if (explicitDevMockModeEnabled()) {
-    return getLocalFieldCatalog(fallbackMeta('explicit dev mock flag enabled'))
+    return restrictCatalogToSupported(getLocalFieldCatalog(fallbackMeta('explicit dev mock flag enabled')))
   }
 
   const result = await callBackend('/api/cockpit/campaigns/field-catalog')
   if (!result.ok) {
     if (shouldFallbackFromBackendError(result)) {
-      return getLocalFieldCatalog(fallbackMeta(result.message))
+      return restrictCatalogToSupported(getLocalFieldCatalog(fallbackMeta(result.message)))
     }
     throw new Error(result.message)
   }
 
-  return normalizeFieldCatalogResponse(result.data)
+  return restrictCatalogToSupported(normalizeFieldCatalogResponse(result.data))
 }
 
 export async function searchFieldOptions(fieldKey: string, search = ''): Promise<CampaignFieldOption[]> {

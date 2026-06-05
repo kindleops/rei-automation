@@ -1,0 +1,100 @@
+/*
+ * Campaign Builder — pacing presets + runtime readout.
+ * Self-contained so it does not depend on cascade order with campaigns.css.
+ * Part of the Production Lock-In correctness pass (Phase 3).
+ */
+
+.cmp-pacing-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  grid-column: 1 / -1;
+}
+
+.cmp-pacing-block-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.cmp-pacing-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.cmp-pacing-preset {
+  appearance: none;
+  cursor: pointer;
+  padding: 6px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-1, #c8c8cd);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.cmp-pacing-preset:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-0, #f4f4f5);
+}
+
+.cmp-pacing-preset.is-active {
+  border-color: var(--accent, #6366f1);
+  background: color-mix(in srgb, var(--accent, #6366f1) 18%, transparent);
+  color: var(--text-0, #f4f4f5);
+}
+
+.cmp-pacing-readout {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.cmp-pacing-readout span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cmp-pacing-readout em {
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-pacing-readout strong {
+  color: var(--text-0, #f4f4f5);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+[data-nexus-theme='light'] .cmp-pacing-block {
+  border-color: var(--border);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-nexus-theme='light'] .cmp-pacing-preset {
+  border-color: var(--border);
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--text-1);
+}
+
+[data-nexus-theme='light'] .cmp-pacing-preset.is-active {
+  border-color: var(--accent);
+  color: var(--text-0);
+}

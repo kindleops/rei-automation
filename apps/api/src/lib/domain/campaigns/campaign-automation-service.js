@@ -4016,17 +4016,70 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
   ]
   const graphRefreshStatus = await readCampaignGraphRefreshStatus(supabase)
 
+  // --- Addressable-universe invariant ----------------------------------------
+  // "Addressable" is the property universe BEFORE contact / SMS / sender-coverage
+  // narrowing, so it must never be smaller than the reachable graph subset. The
+  // properties-table count (countAddressableProperties) can legitimately diverge
+  // from the campaign_target_graph projection because the two stores normalize
+  // values differently (metro vs city `market`, raw vs normalized `property_type`,
+  // sparse vs canonical geo columns). That divergence previously produced the
+  // impossible funnel state "Addressable 0 / Deliverable > 0". We clamp to the
+  // reachable floor and emit a developer-only diagnostic; operators never see a
+  // funnel that goes back up.
+  const reachableCount = Number(total.count || 0)
+  const rawAddressable = addressable.ok === false ? null : Number(addressable.count || 0)
+  const addressableInvariantWarnings = []
+  let addressableProperties = rawAddressable
+  let addressableSource = 'properties_universe'
+  if (rawAddressable === null) {
+    addressableProperties = reachableCount
+    addressableSource = 'graph_reachable_fallback'
+    addressableInvariantWarnings.push('addressable_universe_fallback:source_unavailable_using_graph_reachable')
+  } else if (rawAddressable < reachableCount) {
+    addressableInvariantWarnings.push(
+      `addressable_universe_clamped:properties_count=${rawAddressable}:reachable_floor=${reachableCount}:reason=source_normalization_mismatch`,
+    )
+    addressableProperties = reachableCount
+    addressableSource = 'graph_reachable_floor'
+  }
+  // When we fall back / clamp to the reachable floor the true universe is unknown
+  // (>= reachable), so the figure is approximate. When the properties count stands
+  // on its own, preserve its own approximate flag.
+  const addressableApproximate = addressableSource === 'properties_universe'
+    ? Boolean(addressable.approximate)
+    : true
+
+  // Developer-mode funnel monotonicity invariants. The funnel must be
+  // non-increasing: addressable >= reachable >= sms_eligible >= clean >=
+  // sender_covered. ready_to_queue uses an independent queue-eligibility rule so
+  // it is reported, not asserted. Violations are surfaced as diagnostics only.
+  const invariantWarnings = []
+  const checkMonotonic = (upperLabel, upper, lowerLabel, lower) => {
+    const u = Number(upper)
+    const l = Number(lower)
+    if (Number.isFinite(u) && Number.isFinite(l) && l > u) {
+      invariantWarnings.push(`funnel_invariant_violation:${lowerLabel}(${l})>${upperLabel}(${u})`)
+    }
+  }
+  checkMonotonic('addressable', addressableProperties, 'reachable', reachableCount)
+  checkMonotonic('reachable', reachableCount, 'sms_eligible', smsEligible.count)
+  checkMonotonic('sms_eligible', smsEligible.count, 'clean', cleanTargets.count)
+  checkMonotonic('clean', cleanTargets.count, 'sender_covered', senderCovered.count)
+
   return {
     ok: allResults.every((result) => result.ok !== false),
     warnings: uniqueClean([
       ...allResults.flatMap((result) => result.warnings || []),
       ...(addressable.warnings || []),
+      ...addressableInvariantWarnings,
+      ...invariantWarnings,
       ...(graphRefreshStatus.warnings || []),
     ]),
     graphRefreshStatus,
     totalMatched: total.count,
-    addressableProperties: addressable.ok === false ? null : addressable.count,
-    addressableApproximate: Boolean(addressable.approximate),
+    addressableProperties,
+    addressableApproximate,
+    addressableSource,
     linkedProspects: linkedProspects.count,
     smsEligible: smsEligible.count,
     cleanTargets: cleanTargets.count,
@@ -4529,6 +4582,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     },
     addressable_properties: graph.addressableProperties,
     addressable_properties_approximate: Boolean(graph.addressableApproximate),
+    addressable_source: graph.addressableSource || 'properties_universe',
     funnel: audienceFunnel,
     headline_metric: 'ready_to_queue',
     headline_count: graph.readyToQueue,

@@ -745,7 +745,10 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'properties.equity_amount',
   'properties.equity_percent',
   'properties.seller_tags_text',
-  'properties.seller_tags_json',
+  // properties.seller_tags_json intentionally NOT preview-supported: it is a JSON
+  // mirror of seller_tags_text with no campaign_target_graph column of its own, so
+  // applying it would be silently skipped ("no graph column mapping found").
+  // seller_tags_text -> graph.podio_tags already covers tag filtering in preview.
   'properties.structured_motivation_score',
   'properties.deal_strength_score',
   'properties.tag_distress_score',

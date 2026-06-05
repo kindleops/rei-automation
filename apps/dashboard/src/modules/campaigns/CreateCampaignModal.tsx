@@ -23,6 +23,7 @@ import {
 } from './campaignWizardAdapter'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
+import './campaign-pacing.css'
 
 interface CreateCampaignModalProps {
   onClose: () => void
@@ -35,8 +36,11 @@ const EMPTY_VALUE_OPERATORS = new Set(['is_empty', 'is_not_empty'])
 const OPTION_OPERATORS = new Set(['is_any_of', 'is_not_any_of'])
 const ALL_DOMAIN_KEYS: CampaignDomainKey[] = ['properties', 'prospects', 'master_owners', 'phones', 'outreach', 'sender_coverage']
 
+type PacingMode = 'conservative' | 'normal' | 'aggressive' | 'custom'
+
 interface LaunchSettings {
   mode: CampaignLaunchMode
+  pacing: PacingMode
   max_targets: string
   daily_cap: string
   per_sender_cap: string
@@ -46,6 +50,29 @@ interface LaunchSettings {
   contact_window_start: string
   contact_window_end: string
 }
+
+// Operator-facing pacing presets. Each preset sets the throttles that govern how
+// fast a campaign drains: daily cap, per-message spacing, per-sender cap and
+// per-market cap. "Custom" leaves the operator in full control via Advanced
+// Settings. Values are tuned for compliant SMS land-and-expand outreach.
+interface PacingPresetConfig {
+  key: PacingMode
+  label: string
+  blurb: string
+  daily_cap: string
+  spread_interval_seconds: string
+  per_sender_cap: string
+  per_market_cap: string
+}
+
+const PACING_PRESETS: PacingPresetConfig[] = [
+  { key: 'conservative', label: 'Conservative', blurb: 'Slow & safe', daily_cap: '250', spread_interval_seconds: '90', per_sender_cap: '75', per_market_cap: '150' },
+  { key: 'normal', label: 'Normal', blurb: 'Balanced cadence', daily_cap: '750', spread_interval_seconds: '45', per_sender_cap: '150', per_market_cap: '400' },
+  { key: 'aggressive', label: 'Aggressive', blurb: 'Max throughput', daily_cap: '2000', spread_interval_seconds: '20', per_sender_cap: '300', per_market_cap: '1000' },
+  { key: 'custom', label: 'Custom', blurb: 'Advanced controls', daily_cap: '', spread_interval_seconds: '', per_sender_cap: '', per_market_cap: '' },
+]
+
+const PACING_PRESET_BY_KEY = new Map(PACING_PRESETS.map((preset) => [preset.key, preset]))
 
 interface OptionLoadState {
   loading: boolean
@@ -170,17 +197,41 @@ const getDefaultFutureDateTimeLocal = (): string => {
   return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16)
 }
 
-const createDefaultLaunchSettings = (): LaunchSettings => ({
-  mode: 'dry_run',
-  max_targets: '1',
-  daily_cap: '1',
-  per_sender_cap: '1',
-  per_market_cap: '1',
-  first_scheduled_at: getDefaultFutureDateTimeLocal(),
-  spread_interval_seconds: '60',
-  contact_window_start: '09:00',
-  contact_window_end: '20:00',
-})
+const DEFAULT_PACING: PacingMode = 'normal'
+
+const createDefaultLaunchSettings = (): LaunchSettings => {
+  const preset = PACING_PRESET_BY_KEY.get(DEFAULT_PACING)!
+  return {
+    mode: 'dry_run',
+    pacing: DEFAULT_PACING,
+    max_targets: '1000',
+    daily_cap: preset.daily_cap,
+    per_sender_cap: preset.per_sender_cap,
+    per_market_cap: preset.per_market_cap,
+    first_scheduled_at: getDefaultFutureDateTimeLocal(),
+    spread_interval_seconds: preset.spread_interval_seconds,
+    contact_window_start: '09:00',
+    contact_window_end: '20:00',
+  }
+}
+
+// Minutes between two "HH:MM" local clock times, clamped to a sane send window.
+const sendWindowHours = (start: string, end: string): number => {
+  const parse = (value: string): number | null => {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim())
+    if (!match) return null
+    const h = Number(match[1])
+    const m = Number(match[2])
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+    return h * 60 + m
+  }
+  const startMin = parse(start)
+  const endMin = parse(end)
+  if (startMin == null || endMin == null) return 11
+  const span = (endMin - startMin) / 60
+  if (!Number.isFinite(span) || span <= 0) return 11
+  return Math.min(24, span)
+}
 
 const formatNumber = (value: number | undefined | null): string => {
   return Number(value || 0).toLocaleString()
@@ -231,11 +282,20 @@ interface LaunchEstimates {
   effectiveSends: number
   durationLabel: string
   spanDays: number
+  dailyVolume: number
+  spacingSeconds: number
+  windowHours: number
   cost: number
 }
 
 // All estimates derive from the verified preview funnel (deliverable = ready_to_queue,
 // sender coverage from sender_covered) and the operator's pacing settings. No mock numbers.
+//
+// Runtime is modelled from the real throttles, not a naïve sends/daily_cap. Daily
+// throughput is bounded by BOTH the daily cap AND how many spaced messages physically
+// fit inside the send window (window_hours * 3600 / spacing). Calendar days to drain =
+// ceil(sends / daily_throughput). This is why a 1/day default no longer reports an
+// absurd ~1000-day runtime: the floor is a realistic daily volume.
 const computeLaunchEstimates = (
   preview: CampaignPreviewResult | null,
   settings: LaunchSettings,
@@ -246,20 +306,46 @@ const computeLaunchEstimates = (
     preview?.addressable_properties ?? preview?.total_matched_properties ?? preview?.total_matched ?? 0,
   )
   const senderCoveragePct = universe > 0 ? Math.round((senderCovered / universe) * 100) : null
-  const maxTargets = parsePositiveInt(settings.max_targets, 1)
-  const dailyCap = parsePositiveInt(settings.daily_cap, 1)
-  const interval = parsePositiveInt(settings.spread_interval_seconds, 60)
+
+  const maxTargets = parsePositiveInt(settings.max_targets, deliverable || 1)
+  const dailyCap = parsePositiveInt(settings.daily_cap, 750)
+  const spacing = Math.max(1, parsePositiveInt(settings.spread_interval_seconds, 45))
+  const windowHours = sendWindowHours(settings.contact_window_start, settings.contact_window_end)
+  const windowSeconds = windowHours * 3600
+
+  // Send cap governs total volume; deliverable is the hard ceiling.
   const effectiveSends = Math.max(0, Math.min(deliverable, maxTargets))
-  const spanDays = effectiveSends > 0 ? Math.max(1, Math.ceil(effectiveSends / Math.max(1, dailyCap))) : 0
-  const sendsFirstDay = Math.min(effectiveSends, dailyCap)
-  const durationSeconds = spanDays > 1 ? spanDays * 24 * 3600 : Math.max(0, sendsFirstDay - 1) * interval
+  // Physical capacity of one send window given spacing, then the operator's daily cap.
+  const sendsPerWindow = Math.max(1, Math.floor(windowSeconds / spacing))
+  const dailyVolume = Math.max(1, Math.min(dailyCap, sendsPerWindow))
+  const spanDays = effectiveSends > 0 ? Math.max(1, Math.ceil(effectiveSends / dailyVolume)) : 0
+
+  let durationSeconds: number
+  if (spanDays <= 1) {
+    durationSeconds = Math.max(0, effectiveSends - 1) * spacing
+  } else {
+    const lastDaySends = effectiveSends - (spanDays - 1) * dailyVolume
+    durationSeconds = (spanDays - 1) * windowSeconds + Math.max(0, lastDaySends - 1) * spacing
+  }
   const durationLabel = effectiveSends <= 0
     ? '—'
     : spanDays > 1
-      ? `~${spanDays} days`
+      ? `~${spanDays} day${spanDays > 1 ? 's' : ''}`
       : formatDurationApprox(durationSeconds)
+
   const cost = effectiveSends * ESTIMATED_COST_PER_SMS_USD
-  return { deliverable, senderCovered, senderCoveragePct, effectiveSends, durationLabel, spanDays, cost }
+  return {
+    deliverable,
+    senderCovered,
+    senderCoveragePct,
+    effectiveSends,
+    durationLabel,
+    spanDays,
+    dailyVolume,
+    spacingSeconds: spacing,
+    windowHours,
+    cost,
+  }
 }
 
 const SCHEDULE_PRESETS: Array<{ key: string; label: string; value: () => string }> = [
@@ -437,12 +523,13 @@ const buildLaunchPayload = (settings: LaunchSettings): CampaignLaunchPayload => 
     confirm_live: isLive,
     create_send_queue_rows: isLive,
     explicit_operator_action: true,
+    pacing: settings.pacing,
     max_targets: parsePositiveInt(settings.max_targets, 1),
-    daily_cap: parsePositiveInt(settings.daily_cap, 1),
-    per_sender_cap: parsePositiveInt(settings.per_sender_cap, 1),
-    per_market_cap: parsePositiveInt(settings.per_market_cap, 1),
+    daily_cap: parsePositiveInt(settings.daily_cap, 750),
+    per_sender_cap: parsePositiveInt(settings.per_sender_cap, 150),
+    per_market_cap: parsePositiveInt(settings.per_market_cap, 400),
     first_scheduled_at: firstScheduledAt,
-    spread_interval_seconds: parsePositiveInt(settings.spread_interval_seconds, 60),
+    spread_interval_seconds: parsePositiveInt(settings.spread_interval_seconds, 45),
     contact_window_start: settings.contact_window_start,
     contact_window_end: settings.contact_window_end,
   }
@@ -801,7 +888,34 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   }
 
   const updateLaunchSetting = (patch: Partial<LaunchSettings>) => {
-    setLaunchSettings((prev) => ({ ...prev, ...patch }))
+    setLaunchSettings((prev) => {
+      const next = { ...prev, ...patch }
+      // Hand-editing a throttle drops the campaign into Custom pacing unless the
+      // patch itself set the pacing mode (i.e. a preset was just applied).
+      if (
+        patch.pacing === undefined &&
+        ('daily_cap' in patch || 'spread_interval_seconds' in patch || 'per_sender_cap' in patch || 'per_market_cap' in patch)
+      ) {
+        next.pacing = 'custom'
+      }
+      return next
+    })
+  }
+
+  const applyPacingPreset = (key: PacingMode) => {
+    const preset = PACING_PRESET_BY_KEY.get(key)
+    if (!preset) return
+    if (key === 'custom') {
+      updateLaunchSetting({ pacing: 'custom' })
+      return
+    }
+    updateLaunchSetting({
+      pacing: key,
+      daily_cap: preset.daily_cap,
+      spread_interval_seconds: preset.spread_interval_seconds,
+      per_sender_cap: preset.per_sender_cap,
+      per_market_cap: preset.per_market_cap,
+    })
   }
 
   const ensureCampaignForLaunch = async (): Promise<string | null> => {
@@ -1222,9 +1336,9 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                 <span className="cmp-est-sub">{formatNumber(launchEstimates.senderCovered)} covered</span>
               </div>
               <div className="cmp-est-chip">
-                <span className="cmp-est-label">Est. Send Time</span>
+                <span className="cmp-est-label">Estimated Runtime</span>
                 <strong className="cmp-est-value">{launchEstimates.durationLabel}</strong>
-                <span className="cmp-est-sub">{formatNumber(launchEstimates.effectiveSends)} sends</span>
+                <span className="cmp-est-sub">{formatNumber(launchEstimates.effectiveSends)} sends @ {formatNumber(launchEstimates.dailyVolume)}/day</span>
               </div>
               <div className="cmp-est-chip">
                 <span className="cmp-est-label">Est. Cost</span>
@@ -1266,9 +1380,27 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                 ))}
               </div>
 
-              <div className="cmp-launch-pacing">
-                <span>Pacing</span>
-                <strong>{formatNumber(parsePositiveInt(launchSettings.daily_cap, 1))}/day · {parsePositiveInt(launchSettings.spread_interval_seconds, 60)}s spacing</strong>
+              <div className="cmp-pacing-block">
+                <span className="cmp-pacing-block-label">Pacing</span>
+                <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
+                  {PACING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
+                      onClick={() => applyPacingPreset(preset.key)}
+                      title={preset.blurb}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="cmp-pacing-readout" role="group" aria-label="Pacing summary">
+                  <span><em>Daily volume</em><strong>{formatNumber(launchEstimates.dailyVolume)}/day</strong></span>
+                  <span><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></span>
+                  <span><em>Sender coverage</em><strong>{launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}</strong></span>
+                  <span><em>Send window</em><strong>{launchEstimates.windowHours}h</strong></span>
+                </div>
               </div>
             </div>
 
@@ -1302,7 +1434,7 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
               </button>
             </div>
 
-            <details className="cmp-launch-advanced">
+            <details className="cmp-launch-advanced" open={launchSettings.pacing === 'custom'}>
               <summary>
                 <span>Advanced Settings</span>
                 <Icon name="chevron-down" size={12} />
@@ -1612,9 +1744,9 @@ const LaunchConfirmModal = ({
             <span className="cmp-est-sub">{formatNumber(estimates.senderCovered)} covered</span>
           </div>
           <div className="cmp-est-chip">
-            <span className="cmp-est-label">Est. Send Time</span>
+            <span className="cmp-est-label">Estimated Runtime</span>
             <strong className="cmp-est-value">{estimates.durationLabel}</strong>
-            <span className="cmp-est-sub">{isActivate ? 'starting now' : formatDateTime(payload.first_scheduled_at)}</span>
+            <span className="cmp-est-sub">{isActivate ? 'starting now' : formatDateTime(payload.first_scheduled_at)} · {formatNumber(estimates.dailyVolume)}/day</span>
           </div>
           <div className="cmp-est-chip">
             <span className="cmp-est-label">Est. Cost</span>
@@ -1624,6 +1756,7 @@ const LaunchConfirmModal = ({
         </div>
 
         <div className="cmp-launch-confirm__grid">
+          <div><span>Pacing</span><strong>{PACING_PRESET_BY_KEY.get(payload.pacing ?? 'custom')?.label ?? 'Custom'}</strong></div>
           <div><span>Send Cap</span><strong>{payload.max_targets}</strong></div>
           <div><span>Daily Cap</span><strong>{payload.daily_cap}</strong></div>
           <div><span>Sender Cap</span><strong>{payload.per_sender_cap ?? '—'}</strong></div>
@@ -1931,7 +2064,7 @@ const TargetReachPanel = ({
             <Metric label="Linked Prospects" value={preview.linked_prospects} />
             <Metric label="Linked Owners" value={preview.linked_master_owners} />
             <Metric label="Linked Phones" value={preview.linked_phones} />
-            <Metric label="SMS Eligible" value={preview.property_sms_eligible_count} />
+            <Metric label="SMS Eligible" value={preview.sms_eligible_phones ?? preview.sms_eligible_phones_count ?? preview.property_sms_eligible_count} hint="Phones SMS-capable, no wrong-number flag" />
           </div>
         )}
 
