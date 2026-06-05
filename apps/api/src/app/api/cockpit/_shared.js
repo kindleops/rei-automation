@@ -6,12 +6,18 @@ const ALLOWED_ORIGINS = new Set([
   'https://nexus-dashboard.vercel.app',
   'http://localhost:5173',
   'http://localhost:5174',
+  'http://localhost:5180',
 ])
+
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/,
+  /^https:\/\/rei-automation-dashboard-[a-z0-9-]+\.vercel\.app$/,
+]
 
 function resolveAllowedOrigin(origin) {
   if (!origin) return null
   if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
+  if (ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin))) return origin
   return null
 }
 
