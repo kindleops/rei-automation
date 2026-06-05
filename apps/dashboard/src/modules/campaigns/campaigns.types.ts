@@ -155,6 +155,7 @@ export interface CampaignLaunchPayload {
   confirm_live: boolean
   create_send_queue_rows: boolean
   explicit_operator_action: boolean
+  pacing?: 'conservative' | 'normal' | 'aggressive' | 'custom'
   max_targets: number
   daily_cap: number
   per_sender_cap?: number
