@@ -23,6 +23,10 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
 
+    // Option C: Fast list rows first (Skip heavy aggregations and delivery queues)
+    params.skip_counts = 'true'
+    params.skip_delivery = 'true'
+
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
       ? params.timeout_mode
       : 'manual_bucket_switch'
