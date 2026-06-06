@@ -149,6 +149,105 @@ export interface BackendResultSuccess<T = unknown> {
 
 export type BackendResult<T = unknown> = BackendResultSuccess<T> | BackendClientError
 
+export interface BackendCircuitSnapshot {
+  isOpen: boolean
+  failures: number
+  blockedUntil: number
+  retryInMs: number
+  lastError: string | null
+  lastStatus: number | null
+  lastFailureAt: number | null
+  lastSuccessAt: number | null
+}
+
+const BACKEND_BACKOFF_BASE_MS = 2_500
+const BACKEND_BACKOFF_MAX_MS = 60_000
+
+const backendCircuit = {
+  failures: 0,
+  blockedUntil: 0,
+  lastError: null as string | null,
+  lastStatus: null as number | null,
+  lastFailureAt: null as number | null,
+  lastSuccessAt: null as number | null,
+  lastNoticeAt: 0,
+}
+
+const backendNow = (): number => Date.now()
+
+const isBackendHealthPath = (path: string): boolean =>
+  path.startsWith('/api/cockpit/health') || path.startsWith('/api/health/')
+
+const backendCircuitSnapshot = (): BackendCircuitSnapshot => {
+  const retryInMs = Math.max(0, backendCircuit.blockedUntil - backendNow())
+  return {
+    isOpen: retryInMs > 0,
+    failures: backendCircuit.failures,
+    blockedUntil: backendCircuit.blockedUntil,
+    retryInMs,
+    lastError: backendCircuit.lastError,
+    lastStatus: backendCircuit.lastStatus,
+    lastFailureAt: backendCircuit.lastFailureAt,
+    lastSuccessAt: backendCircuit.lastSuccessAt,
+  }
+}
+
+export const getBackendCircuitState = (): BackendCircuitSnapshot => backendCircuitSnapshot()
+export const isBackendCircuitOpen = (): boolean => backendCircuitSnapshot().isOpen
+
+function emitBackendCircuitEvent(type: 'open' | 'closed', detail: Record<string, unknown>): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(`nexus:backend-circuit:${type}`, { detail }))
+}
+
+function recordBackendSuccess(path: string): void {
+  const wasOpen = backendCircuitSnapshot().isOpen || backendCircuit.failures > 0
+  backendCircuit.failures = 0
+  backendCircuit.blockedUntil = 0
+  backendCircuit.lastError = null
+  backendCircuit.lastStatus = 200
+  backendCircuit.lastSuccessAt = backendNow()
+  if (wasOpen) {
+    console.log('[BACKEND_API_RECOVERED]', { path })
+    emitBackendCircuitEvent('closed', { path, state: backendCircuitSnapshot() })
+  }
+}
+
+function recordBackendFailure(path: string, status: number | null, error: string): void {
+  const now = backendNow()
+  backendCircuit.failures += 1
+  backendCircuit.lastError = error
+  backendCircuit.lastStatus = status
+  backendCircuit.lastFailureAt = now
+  const backoffMs = Math.min(
+    BACKEND_BACKOFF_MAX_MS,
+    BACKEND_BACKOFF_BASE_MS * Math.pow(2, Math.min(backendCircuit.failures - 1, 5)),
+  )
+  backendCircuit.blockedUntil = now + backoffMs
+
+  if (now - backendCircuit.lastNoticeAt > 5_000) {
+    backendCircuit.lastNoticeAt = now
+    console.warn('[BACKEND_API_DEGRADED]', {
+      path,
+      status,
+      error,
+      retryInMs: backoffMs,
+      failures: backendCircuit.failures,
+    })
+  }
+  emitBackendCircuitEvent('open', { path, state: backendCircuitSnapshot() })
+}
+
+function isBackendRequestAbort(error: unknown, options: RequestInit): boolean {
+  const err = error instanceof Error ? error : null
+  if (err?.name === 'AbortError') return true
+  if (options.signal?.aborted) return true
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && err?.message === 'Failed to fetch') {
+    return true
+  }
+  return false
+}
+
 function notReady<T = unknown>(message: string): BackendResult<T> {
   return {
     ok: false,
@@ -189,6 +288,7 @@ export async function callBackend<T = unknown>(
 ): Promise<BackendResult<T>> {
   const base = getBackendBaseUrl()
   const isBrowser = typeof window !== 'undefined'
+  const method = String(options.method ?? 'GET').toUpperCase()
   
   // If NO base URL is set AND we are not in a browser (or dev proxy not likely), block.
   // In dev browser mode, empty base is OK because it uses the Vite proxy.
@@ -199,6 +299,21 @@ export async function callBackend<T = unknown>(
       status: 503,
       error: 'BACKEND_NOT_CONFIGURED',
       message: 'VITE_BACKEND_API_URL is not set. Configure it to point to real-estate-automation.',
+    }
+  }
+
+  const circuit = backendCircuitSnapshot()
+  if (!isBackendHealthPath(path) && circuit.isOpen) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'API_OFFLINE_DEGRADED',
+      message: `API offline / degraded. Backing off ${method} ${path} for ${Math.ceil(circuit.retryInMs / 1000)}s after ${circuit.lastStatus ?? 'network'} failure: ${circuit.lastError ?? 'backend unavailable'}`,
+      upstream: {
+        circuit,
+        path,
+        method,
+      },
     }
   }
 
@@ -241,8 +356,11 @@ export async function callBackend<T = unknown>(
     })
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
+    const isAbort = isBackendRequestAbort(err, options)
+    if (!isAbort) recordBackendFailure(path, 502, errMsg)
     const isCors = errMsg === 'Failed to fetch' || errMsg.includes('NetworkError') || errMsg.includes('CORS')
-    console.warn('[BACKEND_API_RESPONSE]', {
+    const logBackendFetchFailure = isAbort ? console.debug : console.warn
+    logBackendFetchFailure('[BACKEND_API_RESPONSE]', {
       status: null,
       ok: false,
       bodyCount: null,
@@ -262,9 +380,11 @@ export async function callBackend<T = unknown>(
     })
     return {
       ok: false,
-      status: 502,
-      error: 'BACKEND_NETWORK_ERROR',
-      message: isCors
+      status: isAbort ? 499 : 502,
+      error: isAbort ? 'BACKEND_REQUEST_ABORTED' : 'BACKEND_NETWORK_ERROR',
+      message: isAbort
+        ? `Request aborted while calling ${url}`
+        : isCors
         ? `CORS or network error calling ${url} — check that the API allows origin ${typeof window !== 'undefined' ? window.location.origin : 'unknown'} and that VITE_BACKEND_API_URL is correct. Raw: ${errMsg}`
         : `Network error calling ${url}: ${errMsg}`,
     }
@@ -306,6 +426,9 @@ export async function callBackend<T = unknown>(
     const error = b['error']
     const message = b['message']
     const canonical = [reason, error, message].find((value) => typeof value === 'string' && value.trim().length > 0)
+    if (response.status >= 500) {
+      recordBackendFailure(path, response.status, String(canonical ?? response.statusText ?? 'BACKEND_ERROR'))
+    }
     return {
       ok: false,
       status: response.status,
@@ -326,6 +449,7 @@ export async function callBackend<T = unknown>(
     }
   }
 
+  recordBackendSuccess(path)
   return { ok: true, status: response.status, data: body as T }
 }
 
@@ -345,6 +469,10 @@ export function getBackendHealth(): Promise<BackendResult<HealthResponse>> {
 
 export function getBackendReadiness(): Promise<BackendResult<HealthResponse>> {
   return callBackend<HealthResponse>('/api/cockpit/health')
+}
+
+export function getBackendFullHealth(): Promise<BackendResult<HealthResponse>> {
+  return callBackend<HealthResponse>('/api/health/full')
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +822,13 @@ export function fetchDealContextCounts(
   return callBackend(`/api/cockpit/deal-context/counts${queryString ? `?${queryString}` : ''}`, { signal })
 }
 
+export function fetchLiveInboxCounts(
+  source: string = 'primary',
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/inbox/live/counts?source=${source}`, { signal })
+}
+
 // GET /api/internal/dashboard/nexus — live dashboard model.
 // Routes through callBackend so the secret header is never set outside this file.
 export function fetchNexusDashboard(signal?: AbortSignal): Promise<BackendResult<unknown>> {
@@ -870,6 +1005,10 @@ export interface QueueControlSettings {
 
 export function getQueueControlSettings(): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {
   return callBackend('/api/cockpit/queue/control')
+}
+
+export function getQueueDiagnostics(): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: any }>> {
+  return callBackend('/api/cockpit/queue/diagnostics')
 }
 
 export function updateQueueControlSettings(payload: Partial<QueueControlSettings>): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {

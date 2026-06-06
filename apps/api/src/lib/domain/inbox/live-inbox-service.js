@@ -1,10 +1,12 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
+import { resolveCanonicalBucket } from "@/lib/domain/inbox/canonical-bucket-resolver.js";
 
-const PRIMARY_THREAD_SOURCE = "inbox_threads_view";
-const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
-const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
-const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
+const PRIMARY_THREAD_SOURCE = "inbox_threads_hydrated";
+const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_fast";
+const LEGACY_THREAD_SOURCE = "nexus_inbox_threads_v";
+const LEGACY_COUNT_SOURCE = "v_nexus_inbox_thread_counts";
+const FALLBACK_THREAD_SOURCE = "inbox_threads_view";
 const DEFAULT_LIMIT = 100;
 const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
@@ -148,7 +150,7 @@ const THREAD_SOURCE_CONFIGS = [
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+      return "*";
     },
     searchColumns: [
       "thread_key",
@@ -166,7 +168,7 @@ const THREAD_SOURCE_CONFIGS = [
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+      return "*";
     },
     searchColumns: [
       "thread_key",
@@ -184,7 +186,7 @@ const THREAD_SOURCE_CONFIGS = [
     directionColumn: "latest_direction",
     countFallbackFields: ENRICHED_COUNT_FALLBACK_FIELDS,
     getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? ENRICHED_THREAD_INITIAL_BOOT_FIELDS : "*";
+      return "*";
     },
     searchColumns: [
       "thread_key",
@@ -725,18 +727,22 @@ function getThreadSourceCandidates(preferredName = null) {
 }
 
 function bucketFromEnrichedRow(row = {}) {
-  const category = lower(row.inbox_category);
-  const stage = lower(row.stage || row.queue_stage);
-  const detectedIntent = lower(row.detected_intent);
-
-  if (row.is_suppressed === true || category === "dnc_opt_out") return "suppressed";
-  if (category === "hot_leads" || row.show_in_priority_inbox === true) return "priority";
-  if (category === "new_inbound") return "new_replies";
-  if (category === "automated") return "needs_review";
-  if (category === "outbound_active") return "follow_up";
-  if (category === "cold_no_response") return "cold";
-  if (stage === "dead" || ["wrong_number", "not_interested"].includes(detectedIntent)) return "dead";
-  return "cold";
+  const direction = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction) || "inbound";
+  
+  return resolveCanonicalBucket({
+    threadState: {
+      primary_intent: row.detected_intent || row.ui_intent || row.reply_intent,
+      objection: row.objection,
+      universal_status: row.universal_status || row.stage || row.queue_stage,
+      inbox_bucket: row.inbox_category || row.inbox_bucket,
+      opt_out: row.opt_out === true || row.is_suppressed === true,
+      wrong_number: row.wrong_number === true,
+      not_interested: row.not_interested === true
+    },
+    classification: {}, // The enriched row already contains the rolled-up intent
+    direction,
+    nowMs: Date.now()
+  });
 }
 
 function normalizeThreadRow(row = {}, query = {}) {
@@ -1453,11 +1459,13 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const { options, deps } = splitOptionsAndDeps(optionsOrDeps, maybeDeps);
   const supabase = deps.supabase || defaultSupabase;
   const timeoutMode = lower(params.timeout_mode || params.timeoutMode);
+  const isAutoRefresh = timeoutMode === "auto_refresh" || lower(params.refresh_reason) === "fallback_polling";
   const initialBootMode = timeoutMode === "initial_boot" || options.selectMode === "initial_boot_safe";
-  const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : DEFAULT_LIMIT);
+  const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : (isAutoRefresh ? 25 : DEFAULT_LIMIT));
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
-  const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
+  const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true || isAutoRefresh;
+  const skipDeliveryHydration = bool(params.skip_delivery) || isAutoRefresh;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);

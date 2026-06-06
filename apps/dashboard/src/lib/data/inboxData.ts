@@ -120,6 +120,7 @@ export interface LiveInboxFetchParams {
   q?: string
   keywordGroup?: string
   cursor?: string | null
+  offset?: number
   limit?: number
   map?: boolean
   timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
@@ -344,6 +345,26 @@ export const INBOX_DEBUG_LOOKUPS = INBOX_DEBUG_VERBOSE || (DEV && String(import.
 const MESSAGE_EVENTS_THREAD_PAGE_SIZE = 50
 export const HYDRATED_INBOX_PAGE_SIZE = 100
 const INITIAL_BOOT_LIVE_LIMIT = 25
+const LIVE_INBOX_DEGRADED_RETRY_DELAY_MS = 1_500
+
+const delayWithAbort = (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError')
+  }
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null
+    const abort = () => {
+      if (timeoutId) window.clearTimeout(timeoutId)
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    timeoutId = window.setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_universal_inbox_threads'
 export const HYDRATED_INBOX_COUNTS_VIEW = 'inbox_category_counts'
 
@@ -1019,7 +1040,11 @@ export const getConversationThreadIdForThread = (thread: Partial<InboxThread> | 
   return buildConversationThreadIdFromRecord(thread as AnyRecord)
 }
 
-const safeFilterValue = (value: string): string => `"${value.replace(/"/g, '""')}"`
+const safeFilterValue = (value: string | number): string => {
+  const strVal = String(value)
+  if (/^\d+$/.test(strVal)) return strVal
+  return `"${strVal.replace(/"/g, '""')}"`
+}
 
 /**
  * Build phone number variants for broad field matching.
@@ -1306,12 +1331,12 @@ const FILTER_COLUMNS_BY_ALIAS: Record<string, readonly string[]> = {
     'property_id',
   ],
   // Only allow indexed ID lookups on properties — address-based OR queries cause statement timeouts
-  properties: ['property_id', 'id', 'owner_id', 'master_owner_id'],
+  properties: ['property_id', 'owner_id', 'master_owner_id'],
 }
 
 // Minimal column sets to avoid select=* on large tables
 const SELECT_COLUMNS_BY_ALIAS: Record<string, string> = {
-  properties: 'property_id,id,master_owner_id,owner_id,property_address,property_address_full,market,market_id',
+  properties: 'property_id,master_owner_id,owner_id,property_address,property_address_full,market,market_id',
 }
 
 /** Returns the first existing table for an alias key, or the raw key if not a known alias. */
@@ -1385,7 +1410,7 @@ const NESTED_BLOB_KEYS = [
  * nested keys found in known JSON blob fields (up to depth 2).
  */
 export const inspectMessageEventShape = (row: AnyRecord): void => {
-  if (!DEV) return
+  if (!INBOX_DEBUG_VERBOSE) return
   const topLevelKeys = Object.keys(row)
   const nestedKeyMap: Record<string, string[]> = {}
   for (const blobKey of NESTED_BLOB_KEYS) {
@@ -1593,34 +1618,118 @@ export const getMessageTimestamp = (row: AnyRecord): string => {
   return asIso(value) ?? new Date().toISOString()
 }
 
-export const getMessageBody = (row: AnyRecord): string => {
-  return asString(
-    getFirstDeep(
-      row,
-      ['message_body', 'body', 'text', 'message', 'content', 'rendered_message', 'template_text'],
-      [
-        'metadata.payload.message', 'metadata.payload.message_body', 'metadata.payload.raw.Body',
-        'payload.body', 'payload.message', 'payload.text', 'payload.content',
-        'raw_payload.body', 'raw_payload.message', 'raw_payload.text',
-        'raw_payload.data.body', 'raw_payload.data.message', 'raw_payload.data.text',
-        'event.body', 'event.message', 'event.text',
-        'data.body', 'data.message', 'data.text',
-        'textgrid_payload.body', 'textgrid_payload.message', 'textgrid_payload.text',
-        'webhook_payload.body', 'webhook_payload.message', 'webhook_payload.text',
-        'request_body.body', 'request_body.message', 'request_body.text',
-        'details.body', 'details.message', 'details.text',
-      ],
-    ),
-    '',
-  )
+const MESSAGE_BODY_TOP_LEVEL_FIELDS = [
+  'latestMessageBody',
+  'latest_message_body',
+  'lastMessageBody',
+  'last_message_body',
+  'preview',
+  'message_body',
+  'message_text',
+  'rendered_message',
+  'rendered_message_text',
+  'text_body',
+  'sms_body',
+  'body',
+  'text',
+  'message',
+  'content',
+  'template_text',
+] as const
+
+const MESSAGE_BODY_NESTED_PATHS = [
+  'latestMessageEvent.body',
+  'latestMessageEvent.message_body',
+  'latestMessageEvent.message_text',
+  'latestMessageEvent.rendered_message',
+  'latestMessageEvent.rendered_message_text',
+  'latestMessageEventData.body',
+  'latestMessageEventData.message_body',
+  'latestMessageEventData.message_text',
+  'latest_message_event.body',
+  'latest_message_event.message_body',
+  'latest_message_event.message_text',
+  'latest_message_event_data.body',
+  'latest_message_event_data.message_body',
+  'latest_message_event_data.message_text',
+  'threadState.latestMessageBody',
+  'threadState.latest_message_body',
+  'threadState.lastMessageBody',
+  'threadState.last_message_body',
+  'thread_state.latest_message_body',
+  'thread_state.last_message_body',
+  'thread_state_data.latest_message_body',
+  'thread_state_data.last_message_body',
+  'queue.body',
+  'queue.message_body',
+  'queue.message_text',
+  'queue.rendered_message',
+  'queue.rendered_message_text',
+  'queueData.body',
+  'queueData.message_body',
+  'queueData.message_text',
+  'queue_data.body',
+  'queue_data.message_body',
+  'queue_data.message_text',
+  'metadata.payload.message',
+  'metadata.payload.message_body',
+  'metadata.payload.message_text',
+  'metadata.payload.raw.Body',
+  'payload.body',
+  'payload.message',
+  'payload.text',
+  'payload.content',
+  'raw_payload.body',
+  'raw_payload.message',
+  'raw_payload.text',
+  'raw_payload.data.body',
+  'raw_payload.data.message',
+  'raw_payload.data.text',
+  'event.body',
+  'event.message',
+  'event.text',
+  'data.body',
+  'data.message',
+  'data.text',
+  'textgrid_payload.body',
+  'textgrid_payload.message',
+  'textgrid_payload.text',
+  'webhook_payload.body',
+  'webhook_payload.message',
+  'webhook_payload.text',
+  'request_body.body',
+  'request_body.message',
+  'request_body.text',
+  'details.body',
+  'details.message',
+  'details.text',
+] as const
+
+export const getMessageBody = (row: AnyRecord): string => (
+  asString(getFirstDeep(row, MESSAGE_BODY_TOP_LEVEL_FIELDS, MESSAGE_BODY_NESTED_PATHS), '')
+)
+
+const resolveLatestMessageBody = (...sources: Array<AnyRecord | null | undefined>): string => {
+  for (const source of sources) {
+    if (!source) continue
+    const body = getMessageBody(source)
+    if (body) return body
+  }
+  return ''
 }
 
 export const normalizeMessageDirection = (row: AnyRecord): 'inbound' | 'outbound' | 'unknown' => {
   const direction = normalizeStatus(
     getFirstDeep(
       row,
-      ['direction', 'message_direction'],
+      ['direction', 'message_direction', 'latestMessageDirection', 'latest_message_direction', 'latestDirection', 'latest_direction', 'lastDirection', 'last_direction'],
       [
+        'latestMessageEvent.direction', 'latestMessageEvent.message_direction',
+        'latest_message_event.direction', 'latest_message_event.message_direction',
+        'threadState.latestMessageDirection', 'threadState.latest_message_direction',
+        'thread_state.latest_message_direction', 'thread_state_data.latest_message_direction',
+        'queue.direction', 'queue.message_direction',
+        'queue_data.direction', 'queue_data.message_direction',
         'metadata.payload.direction', 'metadata.payload.raw.SmsStatus', 'metadata.payload.type',
         'payload.direction', 'payload.type', 'payload.event_type', 'payload.status',
         'raw_payload.direction', 'raw_payload.type', 'raw_payload.event_type', 'raw_payload.status',
@@ -1830,6 +1939,7 @@ export const fetchLiveInbox = async ({
   q = '',
   keywordGroup = '',
   cursor = null,
+  offset = 0,
   limit = 200,
   map = true,
   timeoutMode,
@@ -1843,6 +1953,7 @@ export const fetchLiveInbox = async ({
     q,
     keywordGroup,
     cursor,
+    offset,
     limit,
     map: map ? '1' : '0',
     timeout_mode: timeoutMode,
@@ -1854,50 +1965,71 @@ export const fetchLiveInbox = async ({
   })
 
   const queryString = params.toString()
-  console.log('[INBOX_API_REQUEST]', {
+  if (INBOX_DEBUG_VERBOSE) console.log('[INBOX_API_REQUEST]', {
     url: `/api/cockpit/inbox/live?${queryString}`,
     filter,
     timeoutMode: timeoutMode ?? null,
     refreshReason: refreshReason ?? null,
   })
-  const result = await backendClient.fetchLiveInbox(queryString, signal)
-  const responsePayload = result.ok ? result.data as AnyRecord : null
-  const responseData = responsePayload?.data && typeof responsePayload.data === 'object'
-    ? responsePayload.data as AnyRecord
-    : null
-  const responseThreads = safeArray(
-    (responsePayload?.threads ?? responseData?.threads ?? responsePayload?.messages ?? responseData?.messages ?? []) as AnyRecord[],
-  )
-  console.log('[INBOX_API_RESPONSE]', {
-    url: `/api/cockpit/inbox/live?${queryString}`,
-    status: result.status,
-    ok: result.ok,
-    responseBodyCount: responseThreads.length,
-    responseBodyPath: responsePayload?.threads ? 'threads' : responseData?.threads ? 'data.threads' : responsePayload?.messages ? 'messages' : responseData?.messages ? 'data.messages' : null,
-  })
-  if (!result.ok) {
-    const errorMsg = result.message || result.error || 'Unknown API error'
-    throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
-  }
-  const payload = result.data as AnyRecord
-  const nestedData = ((payload['data'] && typeof payload['data'] === 'object') ? payload['data'] : null) as AnyRecord | null
-  const hasNestedLivePayload = Boolean(
-    nestedData &&
-    (
-      Array.isArray(nestedData['threads']) ||
-      Array.isArray(nestedData['messages']) ||
-      typeof nestedData['pagination'] === 'object' ||
-      typeof nestedData['counts'] === 'object'
+  const fetchOnce = async (attempt: number) => {
+    const result = await backendClient.fetchLiveInbox(queryString, signal)
+    const responsePayload = result.ok ? result.data as AnyRecord : null
+    const responseData = responsePayload?.data && typeof responsePayload.data === 'object'
+      ? responsePayload.data as AnyRecord
+      : null
+    const responseThreads = safeArray(
+      (responsePayload?.threads ?? responseData?.threads ?? responsePayload?.messages ?? responseData?.messages ?? []) as AnyRecord[],
     )
-  )
-  const normalizedPayload = hasNestedLivePayload ? { ...payload, ...nestedData } : payload
-  const degradedThreads = safeArray((normalizedPayload['threads'] ?? []) as AnyRecord[])
-  if (payload['degraded'] && degradedThreads.length === 0) {
+    if (INBOX_DEBUG_VERBOSE) console.log('[INBOX_API_RESPONSE]', {
+      url: `/api/cockpit/inbox/live?${queryString}`,
+      status: result.status,
+      ok: result.ok,
+      attempt,
+      responseBodyCount: responseThreads.length,
+      responseBodyPath: responsePayload?.threads ? 'threads' : responseData?.threads ? 'data.threads' : responsePayload?.messages ? 'messages' : responseData?.messages ? 'data.messages' : null,
+    })
+    if (!result.ok) {
+      const errorMsg = result.message || result.error || 'Unknown API error'
+      throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
+    }
+    const payload = result.data as AnyRecord
+    const nestedData = ((payload['data'] && typeof payload['data'] === 'object') ? payload['data'] : null) as AnyRecord | null
+    const hasNestedLivePayload = Boolean(
+      nestedData &&
+      (
+        Array.isArray(nestedData['threads']) ||
+        Array.isArray(nestedData['messages']) ||
+        typeof nestedData['pagination'] === 'object' ||
+        typeof nestedData['counts'] === 'object'
+      )
+    )
+    const normalizedPayload = hasNestedLivePayload ? { ...payload, ...nestedData } : payload
+    const degradedThreads = safeArray((normalizedPayload['threads'] ?? []) as AnyRecord[])
+    return { payload, normalizedPayload, degradedThreads }
+  }
+
+  let liveResult = await fetchOnce(1)
+  if (
+    timeoutMode === 'initial_boot' &&
+    liveResult.payload['degraded'] &&
+    liveResult.degradedThreads.length === 0 &&
+    !signal?.aborted
+  ) {
+    console.warn('[INBOX_API_DEGRADED_RETRY]', {
+      url: `/api/cockpit/inbox/live?${queryString}`,
+      reason: liveResult.payload['reason'] ?? liveResult.payload['error'] ?? 'empty_degraded_initial_boot',
+      retryDelayMs: LIVE_INBOX_DEGRADED_RETRY_DELAY_MS,
+    })
+    await delayWithAbort(LIVE_INBOX_DEGRADED_RETRY_DELAY_MS, signal)
+    liveResult = await fetchOnce(2)
+  }
+
+  if (liveResult.payload['degraded'] && liveResult.degradedThreads.length === 0) {
     // Backend hit its internal timeout — throw so the adapter falls back to cache
     // rather than overwriting good cached rows with an empty degraded response.
     throw new Error(`Live inbox API degraded (backend timeout)`)
   }
-  return normalizeLiveInboxResponse(normalizedPayload, limit)
+  return normalizeLiveInboxResponse(liveResult.normalizedPayload, limit)
 }
 
 const runFilteredQuery = async (
@@ -1963,6 +2095,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   
   const latestMessageAt = asIso(dc.latestActivityAt || dc.latest_message_at || row.latest_message_at || row.last_message_at) || new Date().toISOString()
   const latestMessageDirection = normalizeMessageDirection({ direction: dc.latestMessageDirection || dc.latest_message_direction || row.latest_message_direction || row.direction })
+  const latestMessageBody = resolveLatestMessageBody(row, dc as unknown as AnyRecord)
   
   const unreadCount = asNumber(row.unread_count ?? row.unread, 0)
   const needsReply = unreadCount > 0 || (latestMessageDirection === 'inbound' && !row.queue_status)
@@ -2043,7 +2176,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     ownerName: dc.ownerName || asString(row.ownerName || row.owner_name),
     sellerName: dc.sellerDisplayName || dc.ownerName || asString(row.sellerName || row.seller_name),
     subject: dc.propertyAddress || asString(row.propertyAddress || row.property_address || row.subject),
-    preview: dc.latestMessageBody || asString(row.latestMessageBody || row.latest_message_body || row.preview),
+    preview: latestMessageBody,
     status: (row.isArchived || row.is_archived) ? 'archived' : (needsReply ? 'unread' : 'read'),
     priority: (category === 'hot_leads' || category === 'new_inbound') ? 'urgent' : 'normal',
     sentiment: (dc.reply_intent === 'potential_interest' || dc.reply_intent === 'price_anchor') ? 'hot' : 'neutral',
@@ -2062,8 +2195,9 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     canonicalE164: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
     
     latestDirection: latestMessageDirection,
-    latestMessage: dc.latestMessageBody,
-    latestMessageBody: dc.latestMessageBody,
+    latestMessage: latestMessageBody,
+    latestMessageBody,
+    latest_message_body: latestMessageBody,
     latestMessageId: asString(getFirst(row, ['latest_message_id', 'latestMessageId', 'latest_message_event_id', 'latestMessageEventId', 'message_event_id', 'messageEventId']), '') || undefined,
     latest_message_id: asString(getFirst(row, ['latest_message_id', 'latestMessageId', 'latest_message_event_id', 'latestMessageEventId', 'message_event_id', 'messageEventId']), '') || undefined,
     latestMessageEventId: asString(getFirst(row, ['latest_message_event_id', 'latestMessageEventId', 'latest_message_id', 'latestMessageId', 'message_event_id', 'messageEventId']), '') || undefined,
@@ -2237,7 +2371,8 @@ export const getInboxRowsForView = async (
     () => fetchLiveInbox({
       filter: liveFilter,
       q: options.filters?.query || '',
-      cursor: rawCursor ?? String(numericOffset),
+      cursor: rawCursor,
+      offset: numericOffset,
       limit: page_size,
       map: false,
       timeoutMode: options._timeoutMode,
@@ -2262,7 +2397,8 @@ export const getInboxRowsForView = async (
       view,
       filter: liveFilter,
       limit: page_size,
-      cursor: rawCursor ?? String(numericOffset),
+      cursor: rawCursor,
+      offset: numericOffset,
       timeoutMode: options._timeoutMode ?? null,
       refreshReason: options._refreshReason ?? null,
     },
@@ -2285,14 +2421,14 @@ export const getInboxRowsForView = async (
     rows: normalizedRows.length,
     source: live.source ?? live.diagnostics?.source ?? null,
   })
-  if (DEV) console.log('[Inbox] live inbox success', { threads: normalizedRows.length, counts: live.counts })
+  if (INBOX_DEBUG_VERBOSE) console.log('[Inbox] live inbox success', { threads: normalizedRows.length, counts: live.counts })
 
   const finalCounts = (live.counts as AnyRecord) || null
   const finalPagination = (live.pagination as unknown as AnyRecord) || {}
   const backendCount = asNumber(live.pagination?.total, normalizedRows.length)
   const nextCursor = asString(finalPagination.next_cursor ?? finalPagination.nextCursor, '') || null
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[Inbox] source endpoint', endpoint)
     console.log('[Inbox] raw sample', rawRows[0])
     console.log('[Inbox] normalized sample', normalizedRows[0])
@@ -2335,7 +2471,7 @@ export const getInboxThreads = async (
   const supabase = getSupabaseClient()
   const supabaseEnabled = hasSupabaseEnv && shouldUseSupabase()
   
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[getInboxThreads] supabaseEnabled=', supabaseEnabled, {
       hasSupabaseEnv,
       shouldUseSupabase: shouldUseSupabase(),
@@ -2444,7 +2580,7 @@ export const getInboxThreads = async (
 
   const rows = safeArray(data as AnyRecord[])
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[getInboxThreads] rawHydratedRows', {
       count: rows.length,
       totalAvailable,
@@ -2466,7 +2602,7 @@ export const getInboxThreads = async (
     ].find((value) => Boolean(value && String(value).trim()))
     const threadKey = derivedThreadKey || `hydrated-thread:${startOffset + index}`
     
-    if (DEV && index === 0) {
+    if (INBOX_DEBUG_VERBOSE && index === 0) {
       console.log('[getInboxThreads] normalizing row[0]:', {
         thread_key: row.thread_key,
         prospect_name: row.prospect_name,
@@ -2554,7 +2690,7 @@ export const getInboxThreads = async (
     const market = asString(row.filter_market ?? (row.market !== 'unknown' ? row.market : null), '') || asString(row.market, '')
     const marketLabel = (market && market !== 'unknown' && market !== 'Unknown') ? market : ''
     
-    const latestBody = asString(row.latest_message_body, '') || 'No recent message'
+    const latestBody = resolveLatestMessageBody(row) || 'No recent message'
     const propertyType = asString(row.property_type, '')
     const propertyClass = asString(row.property_class, '')
     const queueStatus = normalizeStatus(row.queue_status ?? '')
@@ -2703,7 +2839,7 @@ export const getInboxThreads = async (
       filterPriorityTier: row.filter_priority_tier,
     }
 
-    if (DEV && index === 0) {
+    if (INBOX_DEBUG_VERBOSE && index === 0) {
       console.log('[getInboxThreads] normalized thread[0]:', {
         id: normalized.id,
         ownerName: normalized.ownerName,
@@ -2722,7 +2858,7 @@ export const getInboxThreads = async (
   const dedupedThreads = dedupeThreadsByKey(threads)
   const duplicateCount = threads.length - dedupedThreads.length
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[NexusInboxFilterQuery]', {
       source: HYDRATED_INBOX_THREADS_VIEW,
       mode: filterState.view || 'all',
@@ -2785,7 +2921,7 @@ export const fetchInboxMapPins = async (
     latestMessageBody: asString(row.latest_message_body ?? row.latestMessageBody, ''),
   }))
   const deduped = dedupeMapPinsByThreadKey(pins)
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[NexusInboxMapHydration]', {
       sourceRows: rows.length,
       dedupedPins: deduped.length,
@@ -2811,7 +2947,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   try {
     const tLiveFetchStart = Date.now()
     viewResult = await getInboxRowsForView((filterState.view || 'all_messages') as InboxViewSelectValue, options)
-    if (DEV) {
+    if (INBOX_DEBUG_VERBOSE) {
       const liveFetchMs = Date.now() - tLiveFetchStart
       console.log(`[InboxTiming] live_fetch_ms: ${liveFetchMs}ms`)
       console.log(`[InboxTiming] lightweight_normalize_ms: 0ms (built-in)`)
@@ -2860,13 +2996,13 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     options._timeoutMode !== 'initial_boot'
   if (!hasEmbeddedCounts && shouldBlockOnBackgroundCounts) {
     const countsRace = Promise.race([
-      backendClient.fetchDealContextCounts('', options.signal).catch(() => null),
+      backendClient.fetchLiveInboxCounts(undefined, options.signal).catch(() => null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), COUNTS_TIMEOUT_MS)),
     ])
 
     const tCountsStart = Date.now()
     const countsRes = await countsRace
-    if (DEV) console.log(`[InboxTiming] counts_ms: ${Date.now() - tCountsStart}ms`)
+    if (INBOX_DEBUG_VERBOSE) console.log(`[InboxTiming] counts_ms: ${Date.now() - tCountsStart}ms`)
     if (countsRes && countsRes.ok) {
       const payloadRecord = countsRes.data as AnyRecord
       const dataRecord = (payloadRecord?.data as AnyRecord) || {}
@@ -2890,17 +3026,17 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
         dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
         all_inbound: allInboundCount,
       }
-      if (DEV) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
-    } else if (countsRes === null && DEV) {
-      console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
+      if (INBOX_DEBUG_VERBOSE) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
+    } else if (countsRes === null && INBOX_DEBUG_VERBOSE) {
+      console.log('[fetchInboxModel] counts timed out or failed - using live response counts')
     }
-  } else if (!hasEmbeddedCounts && DEV) {
+  } else if (!hasEmbeddedCounts && INBOX_DEBUG_VERBOSE) {
     console.log('[fetchInboxModel] skipping blocking count enrichment', {
       timeoutMode: options._timeoutMode ?? null,
       countsDegraded,
       source: viewResult?.liveDataSource ?? viewResult?.source ?? liveDiagnostics.source ?? null,
     })
-  } else if (DEV) {
+  } else if (INBOX_DEBUG_VERBOSE) {
     console.log('[fetchInboxModel] using counts embedded in live response')
   }
 
@@ -2924,7 +3060,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const partiallyHydratedCount = threadList.filter((t) => !t.propertyId).length
   const orphanCount = threadList.filter((t) => !t.propertyId && !t.ownerId && !t.prospectId).length
   const latestFetchMs = Date.now() - tStart
-  if (DEV) console.log(`[InboxTiming] total_fetch_model_ms: ${latestFetchMs}ms`)
+  if (INBOX_DEBUG_VERBOSE) console.log(`[InboxTiming] total_fetch_model_ms: ${latestFetchMs}ms`)
 
   const pageSize = options.limit ?? options.maxRows ?? HYDRATED_INBOX_PAGE_SIZE
   // Use the backend-provided cursor and has_more — never recalculate with parseInt
@@ -3073,7 +3209,7 @@ export const toThreadMessage = (row: AnyRecord): ThreadMessage => {
     conversationThreadId,
     conversation_thread_id: conversationThreadId,
     direction,
-    body: asString(row['body'] ?? row['message_body'] ?? row['rendered_message'], '') || getMessageBody(row),
+    body: getMessageBody(row),
     createdAt,
     timelineAt,
     sentAt: asIso(row['sent_at']),
@@ -3349,7 +3485,7 @@ export const mergeOutboundLifecycleMessages = (existing: ThreadMessage, incoming
   const mergedDeveloperMeta = { ...(existing.developerMeta ?? {}), ...(incoming.developerMeta ?? {}) }
   const mergedMetadata = { ...(existing.metadata ?? {}), ...(incoming.metadata ?? {}) }
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     const key = normalizeOutboundMessageIdentity(existing)
     if (canonical.deliveryStatus === 'delivered') {
       console.log('[MessageLifecycle] delivered merged', { key, existingStatus: existing.deliveryStatus, incomingStatus: incoming.deliveryStatus })
@@ -3410,7 +3546,7 @@ export const toThreadMessageFromQueue = (row: AnyRecord): ThreadMessage => {
     id: asString(row['id'], `queue-${createdAt}`),
     threadKey: asString(row['queue_key'], ''),
     direction: 'outbound',
-    body: asString(row['message_body'] ?? row['message_text'], ''),
+    body: getMessageBody(row),
     createdAt,
     timelineAt: scheduledAt,
     sentAt: asIso(row['sent_at']),
@@ -3455,6 +3591,125 @@ const emptyThreadMessagePage = (
   diagnostics,
 })
 
+const buildRecoveredPreviewMessage = (
+  thread: InboxThread | InboxWorkflowThread,
+): ThreadMessage | null => {
+  const threadRecord = thread as unknown as AnyRecord
+  const body = resolveLatestMessageBody(threadRecord)
+  if (!body) return null
+
+  const direction = normalizeMessageDirection(threadRecord)
+  const createdAt = asIso(getFirstDeep(
+    threadRecord,
+    [
+      'latestMessageAt',
+      'latest_message_at',
+      'latestActivityAt',
+      'latest_activity_at',
+      'lastMessageIso',
+      'last_message_at',
+      'event_timestamp',
+      'created_at',
+      'updated_at',
+    ],
+    [
+      'latestMessageEvent.event_timestamp',
+      'latestMessageEvent.created_at',
+      'latest_message_event.event_timestamp',
+      'latest_message_event.created_at',
+      'threadState.latest_message_at',
+      'thread_state.latest_message_at',
+      'thread_state_data.latest_message_at',
+      'queue.created_at',
+      'queue_data.created_at',
+    ],
+  )) ?? new Date().toISOString()
+
+  const conversationThreadId = getConversationThreadIdForThread(threadRecord)
+  const threadKey = conversationThreadId ||
+    asString(threadRecord.threadKey ?? threadRecord.thread_key ?? threadRecord.id, '')
+  const sellerPhone = normalizePhone(
+    threadRecord.sellerPhone ??
+    threadRecord.seller_phone ??
+    threadRecord.canonicalE164 ??
+    threadRecord.canonical_e164 ??
+    threadRecord.phoneNumber ??
+    threadRecord.phone_number ??
+    threadRecord.bestPhone ??
+    threadRecord.best_phone,
+  )
+  const ourNumber = normalizePhone(
+    threadRecord.ourNumber ??
+    threadRecord.our_number ??
+    threadRecord.senderPhone ??
+    threadRecord.sender_phone,
+  )
+  const fromNumber = direction === 'outbound' ? ourNumber : sellerPhone
+  const toNumber = direction === 'outbound' ? sellerPhone : ourNumber
+
+  return {
+    id: `recovered-preview:${threadKey || createdAt}`,
+    threadKey,
+    conversationThreadId,
+    conversation_thread_id: conversationThreadId,
+    direction,
+    body,
+    createdAt,
+    timelineAt: createdAt,
+    sentAt: direction === 'outbound' ? createdAt : null,
+    deliveredAt: null,
+    deliveryStatus: direction === 'outbound' ? 'sent' : 'sent',
+    deliveryStatusDisplay: direction === 'outbound' ? 'sent' : undefined,
+    fromNumber,
+    toNumber,
+    ownerId: asString(threadRecord.ownerId ?? threadRecord.master_owner_id ?? threadRecord.masterOwnerId, ''),
+    prospectId: asString(threadRecord.prospectId ?? threadRecord.prospect_id, ''),
+    propertyId: asString(threadRecord.propertyId ?? threadRecord.property_id, ''),
+    phoneNumber: sellerPhone,
+    canonicalE164: sellerPhone,
+    templateId: null,
+    templateName: null,
+    agentId: null,
+    source: 'recovered_preview',
+    rawStatus: 'recovered_preview',
+    error: null,
+    eventType: 'recovered_preview',
+    metadata: {
+      recovered_preview: true,
+      recovered_preview_reason: 'empty_timeline_with_latest_preview',
+      original_thread_key: asString(threadRecord.threadKey ?? threadRecord.thread_key ?? '', ''),
+    },
+    developerMeta: {
+      recovered_preview: 'true',
+    },
+  }
+}
+
+const recoveredPreviewPage = (
+  thread: InboxThread | InboxWorkflowThread,
+  offset: number,
+  limit: number,
+  diagnostics: AnyRecord = {},
+): ThreadMessagePageResult | null => {
+  const recovered = buildRecoveredPreviewMessage(thread)
+  if (!recovered) return null
+  return {
+    messages: [recovered],
+    pagination: {
+      offset,
+      limit,
+      total: 1,
+      hasMore: false,
+      nextOffset: null,
+    },
+    diagnostics: {
+      ...diagnostics,
+      recovered_preview: true,
+      recovered_preview_reason: 'empty_timeline_with_latest_preview',
+    },
+  }
+}
+
 export const getThreadMessagesPageForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   options: ThreadMessageFetchOptions = {},
@@ -3464,7 +3719,10 @@ export const getThreadMessagesPageForThread = async (
   const offset = Math.max(0, Number(options.offset ?? 0) || 0)
   const pageSize = MESSAGE_EVENTS_THREAD_PAGE_SIZE
   const limit = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : pageSize
-  if (!threadKey) return emptyThreadMessagePage(offset, limit, { error_code: 'missing_thread_key' })
+  if (!threadKey) {
+    return recoveredPreviewPage(thread, offset, limit, { error_code: 'missing_thread_key', degraded: true }) ??
+      emptyThreadMessagePage(offset, limit, { error_code: 'missing_thread_key' })
+  }
 
   try {
     const params = new URLSearchParams()
@@ -3512,30 +3770,37 @@ export const getThreadMessagesPageForThread = async (
         []
       ) as AnyRecord[]
       const mappedMessages = applyDeliveryStatusDisplay(dedupeMessages(safeArray(rawMessages).map(toThreadMessage)))
+      const recoveredPage = mappedMessages.length === 0
+        ? recoveredPreviewPage(thread, offset, limit, diagnostics)
+        : null
+      const resolvedMessages = recoveredPage?.messages ?? mappedMessages
       const rawPagination = asRecord(payload.pagination ?? diagnostics.pagination)
-      const total = Number(rawPagination.total ?? mappedMessages.length)
-      const hasMore = Boolean(rawPagination.has_more ?? rawPagination.hasMore ?? (Number.isFinite(total) ? offset + mappedMessages.length < total : false))
+      const total = recoveredPage ? 1 : Number(rawPagination.total ?? resolvedMessages.length)
+      const hasMore = recoveredPage
+        ? false
+        : Boolean(rawPagination.has_more ?? rawPagination.hasMore ?? (Number.isFinite(total) ? offset + resolvedMessages.length < total : false))
       const nextOffset = rawPagination.next_offset ?? rawPagination.nextOffset
-      if (DEV) {
+      if (INBOX_DEBUG_VERBOSE) {
         console.log('[THREAD_MESSAGE_LOOKUP]', {
           selected_thread_key: asString(diagnostics.selected_thread_key ?? threadKey, ''),
           conversation_thread_id: asString(diagnostics.conversation_thread_id ?? lookup.conversationThreadId, ''),
           canonical_e164: asString(diagnostics.canonical_e164 ?? lookup.canonicalE164, ''),
           lookup_strategy_used: asString(diagnostics.lookup_strategy_used, 'not_reported'),
-          message_count: Number(diagnostics.message_count ?? mappedMessages.length),
+          message_count: Number(diagnostics.message_count ?? resolvedMessages.length),
           fallback_used: Boolean(diagnostics.fallback_used),
+          recovered_preview: Boolean(recoveredPage),
         })
       }
       return {
-        messages: mappedMessages,
+        messages: resolvedMessages,
         pagination: {
           offset,
           limit,
           total: Number.isFinite(total) ? total : null,
           hasMore,
-          nextOffset: Number.isFinite(Number(nextOffset)) ? Number(nextOffset) : (hasMore ? offset + mappedMessages.length : null),
+          nextOffset: Number.isFinite(Number(nextOffset)) ? Number(nextOffset) : (hasMore ? offset + resolvedMessages.length : null),
         },
-        diagnostics,
+        diagnostics: recoveredPage?.diagnostics ?? diagnostics,
       }
     }
   } catch (err) {
@@ -3543,7 +3808,8 @@ export const getThreadMessagesPageForThread = async (
     if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages degraded; preserving empty messages', err)
   }
 
-  return emptyThreadMessagePage(offset, limit, { degraded: true })
+  return recoveredPreviewPage(thread, offset, limit, { degraded: true, sourceUsed: 'frontend_recovered_preview' }) ??
+    emptyThreadMessagePage(offset, limit, { degraded: true })
 }
 
 export const getThreadMessagesForThread = async (
@@ -3603,14 +3869,27 @@ export const getThreadHydrationForThread = async (
       })
     }
     const rawMessages = safeArray(payload.messages as AnyRecord[])
-    const messages = integrityBlocked ? [] : applyDeliveryStatusDisplay(dedupeMessages(rawMessages.map(toThreadMessage)))
+    const mappedMessages = applyDeliveryStatusDisplay(dedupeMessages(rawMessages.map(toThreadMessage)))
+    const recoveredMessage = !integrityBlocked && mappedMessages.length === 0
+      ? buildRecoveredPreviewMessage(thread)
+      : null
+    const messages = integrityBlocked ? [] : (recoveredMessage ? [recoveredMessage] : mappedMessages)
     const rawPagination = asRecord(payload.pagination ?? asRecord(payload.diagnostics).pagination)
-    const total = Number(rawPagination.total ?? rawMessages.length)
-    const hasMore = Boolean(rawPagination.has_more ?? rawPagination.hasMore ?? (Number.isFinite(total) ? messages.length < total : false))
+    const total = recoveredMessage ? 1 : Number(rawPagination.total ?? messages.length)
+    const hasMore = recoveredMessage
+      ? false
+      : Boolean(rawPagination.has_more ?? rawPagination.hasMore ?? (Number.isFinite(total) ? messages.length < total : false))
     const nextOffset = rawPagination.next_offset ?? rawPagination.nextOffset
+    const hydrationDiagnostics = {
+      ...asRecord(payload.diagnostics),
+      ...(recoveredMessage ? {
+        recovered_preview: true,
+        recovered_preview_reason: 'empty_timeline_with_latest_preview',
+      } : {}),
+    }
     commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
       phase: 'messages',
-      source: 'thread_hydration',
+      source: recoveredMessage ? 'thread_hydration_recovered_preview' : 'thread_hydration',
       integrityBlocked,
       replace: true,
     })
@@ -3678,7 +3957,7 @@ export const getThreadHydrationForThread = async (
       },
       dealContext,
       intelligence,
-      diagnostics: asRecord(payload.diagnostics),
+      diagnostics: hydrationDiagnostics,
       degradedParts: safeArray(payload.degradedParts as string[]),
       raw: payload,
     }
@@ -3686,9 +3965,10 @@ export const getThreadHydrationForThread = async (
     if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') throw err
     if (DEV) console.warn('[ThreadHydration] unified hydration failed; falling back to split endpoints', err)
     const messages = await getThreadMessagesForThread(thread, { signal }).catch(() => [])
+    const recoveredPreview = messages.some((message) => message.source === 'recovered_preview')
     commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
       phase: 'messages',
-      source: 'thread_hydration_fallback',
+      source: recoveredPreview ? 'thread_hydration_fallback_recovered_preview' : 'thread_hydration_fallback',
       replace: true,
     })
     logHydrationPhaseDone('messages', hydrationStartedAt, {
@@ -3707,7 +3987,15 @@ export const getThreadHydrationForThread = async (
       },
       dealContext: fallbackDealContext,
       intelligence: threadRecord as ThreadIntelligenceRecord,
-      diagnostics: { degraded: true, error: err instanceof Error ? err.message : String(err), sourceUsed: 'frontend_fallback' },
+      diagnostics: {
+        degraded: true,
+        error: err instanceof Error ? err.message : String(err),
+        sourceUsed: recoveredPreview ? 'frontend_recovered_preview' : 'frontend_fallback',
+        ...(recoveredPreview ? {
+          recovered_preview: true,
+          recovered_preview_reason: 'empty_timeline_with_latest_preview',
+        } : {}),
+      },
       degradedParts: ['thread_hydration'],
       raw: {},
     }
@@ -3793,7 +4081,7 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread, signal?
     if (DEV) console.warn('[getThreadIntelligence] deal-context/thread failed; using selected thread', err)
   }
 
-  if (DEV) console.log('[getThreadIntelligence] Falling back to thread row', { threadKey })
+  if (INBOX_DEBUG_VERBOSE) console.log('[getThreadIntelligence] Falling back to thread row', { threadKey })
   return baseRecord
 }
 
@@ -3922,7 +4210,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
 
     // ── Phase 1b: optional debug-only client-side broad scan ─────────────
     if (phoneRows.length === 0 && searchPhone && INBOX_DEBUG_LOOKUPS) {
-      if (DEV) console.log('[Inbox phones] direct filter returned 0 — attempting broad client-side scan')
+      if (INBOX_DEBUG_VERBOSE) console.log('[Inbox phones] direct filter returned 0 - attempting broad client-side scan')
       const phonesTable = await resolveTable('phones')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let broadData: any = null
@@ -3935,7 +4223,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
       }
       if (!broadFailed && broadData) {
         const broadRows = safeArray(broadData as AnyRecord[])
-        if (DEV && broadRows.length > 0 && !_loggedPhoneSampleKeys) {
+        if (INBOX_DEBUG_VERBOSE && broadRows.length > 0 && !_loggedPhoneSampleKeys) {
           _loggedPhoneSampleKeys = true
           console.log('[Inbox phones sample keys]', Object.keys(broadRows[0]!))
         }
@@ -3946,7 +4234,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
           }
           return false
         })
-        if (DEV) {
+        if (INBOX_DEBUG_VERBOSE) {
           if (phoneRows.length > 0) {
             console.log(`[Inbox phones] client-side matched ${phoneRows.length} rows for ${searchPhone}`)
           } else {
@@ -3991,7 +4279,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
         bridgedPropertyId = bridgedProperty
         if (!propertyId) propertyId = bridgedProperty
       }
-      if (DEV) {
+      if (INBOX_DEBUG_VERBOSE) {
         console.log('[Inbox phones bridge]', {
           matchedPhoneBy,
           matchedPhoneRowId,
@@ -4322,7 +4610,7 @@ export const queueReplyFromInbox = async (
 
   const insertPayloadKeys = Object.keys(payload)
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[queueReplyFromInbox] routing to backend', { keys: insertPayloadKeys, toPhone, queue_status: 'approval', queueKey })
   }
 
@@ -4334,7 +4622,7 @@ export const queueReplyFromInbox = async (
   }
 
   const queueId = asString((result.data as AnyRecord)?.queueId || (result.data as AnyRecord)?.queue_id || queueKey, '')
-  if (DEV) console.log('[queueReplyFromInbox] success via backend', { queueId })
+  if (INBOX_DEBUG_VERBOSE) console.log('[queueReplyFromInbox] success via backend', { queueId })
 
   return { ok: true, queueId, status: 'approval', errorMessage: null, insertPayloadKeys }
 }
@@ -4697,7 +4985,7 @@ export const sendInboxMessageNow = async (
     } catch {
       // ignore window proof persistence failures
     }
-    console.log('[ManualSendProof]', proof)
+    if (INBOX_DEBUG_VERBOSE) console.log('[ManualSendProof]', proof)
   }
 
   const trimmedText = messageText.trim()
@@ -4888,15 +5176,13 @@ export const sendInboxMessageNow = async (
 
   const insertPayloadKeys = Object.keys(insertPayload)
 
-  if (DEV) {
+  if (INBOX_DEBUG_VERBOSE) {
     console.log('[sendInboxMessageNow] routing to backend', { keys: insertPayloadKeys, toPhone, fromPhone, queueKey })
-  } else {
-    console.log('[sendInboxMessageNow] routing to backend | toPhone:', toPhone, '| fromPhone:', fromPhone)
   }
 
   // Log safe secret debug before delegating — confirms secret path is backendClient only.
   const { debug: secretDebug } = backendClient.getBackendApiSecretDebugSafe()
-  console.log('[sendInboxMessageNow] using backendClient.sendInboxMessageNow', { secretDebug })
+  if (INBOX_DEBUG_VERBOSE) console.log('[sendInboxMessageNow] using backendClient.sendInboxMessageNow', { secretDebug })
 
   // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
   // Backend is responsible for creating message_events row — no optimistic insert from dashboard.
@@ -4962,8 +5248,7 @@ export const sendInboxMessageNow = async (
   const providerMessageSid = asString((queueData as AnyRecord)?.provider_message_id || (queueData as AnyRecord)?.provider_message_sid || null, '') || null
   const deliveryStatus = asString((queueData as AnyRecord)?.delivery_status_display || (queueData as AnyRecord)?.deliveryStatus || 'sent', 'sent') || 'sent'
 
-  if (DEV) console.log('[sendInboxMessageNow] success via backend', { queueId, messageEventId, providerMessageSid, deliveryStatus, queueKey })
-  else console.log('[sendInboxMessageNow] SUCCESS via backend - queueId:', queueId)
+  if (INBOX_DEBUG_VERBOSE) console.log('[sendInboxMessageNow] success via backend', { queueId, messageEventId, providerMessageSid, deliveryStatus, queueKey })
 
   return {
     ok: true,
@@ -5078,7 +5363,7 @@ export const scheduleReplyFromInbox = async (
   Object.assign(payload, buildQueueRoutingColumns(thread))
 
   const insertPayloadKeys = Object.keys(payload)
-  if (DEV) console.log('[scheduleReplyFromInbox] routing to backend queue_status=scheduled', { toPhone, scheduledAt: scheduledIso, queueKey })
+  if (INBOX_DEBUG_VERBOSE) console.log('[scheduleReplyFromInbox] routing to backend queue_status=scheduled', { toPhone, scheduledAt: scheduledIso, queueKey })
 
   // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
   const result = await backendClient.scheduleInboxReply(payload)
@@ -5088,7 +5373,7 @@ export const scheduleReplyFromInbox = async (
   }
 
   const queueId = asString((result.data as AnyRecord)?.queueId || (result.data as AnyRecord)?.queue_id || queueKey, '')
-  if (DEV) console.log('[scheduleReplyFromInbox] success via backend', { queueId, scheduledAt: scheduledIso })
+  if (INBOX_DEBUG_VERBOSE) console.log('[scheduleReplyFromInbox] success via backend', { queueId, scheduledAt: scheduledIso })
 
   return { ok: true, queueId, status: 'scheduled', errorMessage: null, insertPayloadKeys }
 }

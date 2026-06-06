@@ -6,7 +6,8 @@ import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { warn, info } from "@/lib/logging/logger.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
-import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { evaluateComplianceHardStop } from "@/lib/domain/compliance/suppression-guard.js";
 import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
 
 // Pre-send content guard patterns.
@@ -531,6 +532,27 @@ export async function sendTextgridSMS({
           from: normalized_from,
           body: trimmed_body,
         }
+      );
+    }
+
+    // ── Hard Compliance Guard ──────────────────────────────────────────
+    // Ensure we NEVER send to a suppressed/opt-out user under any circumstance.
+    const thread_key = clean(metadata?.thread_key || metadata?.conversation_thread_id || null);
+    const compliance = await evaluateComplianceHardStop({
+      thread_key,
+      to_phone_number: normalized_to,
+      supabase: defaultSupabase,
+    });
+    
+    if (compliance.blocked) {
+      info("send.blocked_compliance_hard_stop", {
+        reason: compliance.reason,
+        client_reference_id,
+        to: normalized_to,
+      });
+      throw new TextGridError(
+        `sendTextgridSMS: compliance hard stop — ${compliance.reason}`,
+        { to: normalized_to, from: normalized_from, body: trimmed_body }
       );
     }
 

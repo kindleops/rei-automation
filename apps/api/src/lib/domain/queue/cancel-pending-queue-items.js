@@ -14,6 +14,8 @@ import {
   updateItem,
 } from "@/lib/providers/podio.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { normalizePhone } from "@/lib/utils/phones.js";
 
 const CANCELABLE_STATUSES = new Set(["queued", "sending"]);
 
@@ -40,14 +42,16 @@ function extractItems(response) {
 export async function cancelPendingQueueItemsForOwner({
   master_owner_id = null,
   phone_item_id = null,
+  phone_number = null,
   reason = "inbound_negative_reply",
 } = {}, deps = {}) {
   const {
     filterAppItemsImpl = filterAppItems,
     updateItemImpl = updateItem,
+    supabase = defaultSupabase,
   } = deps;
 
-  if (!master_owner_id && !phone_item_id) {
+  if (!master_owner_id && !phone_item_id && !phone_number) {
     return {
       ok: true,
       canceled_count: 0,
@@ -130,11 +134,37 @@ export async function cancelPendingQueueItemsForOwner({
     }
   }
 
+  let supabase_canceled_count = 0;
+  if (phone_number && supabase) {
+    const normalized = normalizePhone(phone_number);
+    if (normalized) {
+      try {
+        const { data, error } = await supabase
+          .from("send_queue")
+          .update({
+            queue_status: "failed",
+            failed_reason: "Opt-Out",
+          })
+          .eq("to_phone_number", normalized)
+          .in("queue_status", ["queued", "sending"])
+          .select("id");
+          
+        if (!error && data) {
+          supabase_canceled_count = data.length;
+        }
+      } catch (err) {
+        warn("queue.cancel_pending_supabase_failed", { phone_number, message: err?.message });
+      }
+    }
+  }
+
   info("queue.pending_items_canceled_after_negative_reply", {
     master_owner_id: master_owner_id ?? null,
     phone_item_id: phone_item_id ?? null,
+    phone_number: phone_number ?? null,
     reason,
     canceled_count,
+    supabase_canceled_count,
     items_checked: all_items.length,
     cancelable_count: cancelable.length,
     error_count: cancel_errors.length,
@@ -143,6 +173,7 @@ export async function cancelPendingQueueItemsForOwner({
   return {
     ok: cancel_errors.length === 0,
     canceled_count,
+    supabase_canceled_count,
     items_checked: all_items.length,
     cancelable_count: cancelable.length,
     errors: cancel_errors.length ? cancel_errors : undefined,

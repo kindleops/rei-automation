@@ -1168,13 +1168,15 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       });
 
       inbound_is_negative = runtimeDeps.isNegativeReply(message_body);
+      const is_opt_out = classification?.is_opt_out || classification?.detected_intent === "opt_out";
       queue_cancellation = null;
 
-      if (inbound_is_negative && (master_owner_id || phone_item_id)) {
+      if ((inbound_is_negative || is_opt_out) && (master_owner_id || phone_item_id || inbound_from)) {
         queue_cancellation = await runtimeDeps.cancelPendingQueueItemsForOwner({
           master_owner_id,
           phone_item_id,
-          reason: "inbound_negative_reply",
+          phone_number: inbound_from,
+          reason: is_opt_out ? "inbound_opt_out" : "inbound_negative_reply",
         });
 
         safeInfo("textgrid.inbound_negative_reply_queue_canceled", {
