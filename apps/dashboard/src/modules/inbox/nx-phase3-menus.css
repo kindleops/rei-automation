@@ -1,0 +1,702 @@
+/* ============================================================================
+ * nx-phase3-menus.css — Workspace menu rebuild (Map Command glass pattern)
+ * ----------------------------------------------------------------------------
+ * SINGLE SOURCE OF TRUTH for the workspace command menu.
+ * 
+ * We explicitly define --nx-menu-glass-* variables to prevent the cascade 
+ * from polluting this menu.
+ * ========================================================================== */
+
+:root {
+  --nx-menu-glass-bg: rgba(6, 10, 18, 0.65);
+  --nx-menu-glass-border: rgba(255, 255, 255, 0.08);
+  --nx-menu-glass-text: #eaf7ff;
+  --nx-menu-glass-muted: rgba(234, 247, 255, 0.65);
+  --nx-menu-glass-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+[data-nexus-theme="light"] {
+  --nx-menu-glass-bg: rgba(255, 255, 255, 0.85);
+  --nx-menu-glass-border: rgba(15, 23, 42, 0.16);
+  --nx-menu-glass-text: #020617;
+  --nx-menu-glass-muted: rgba(2, 6, 23, 0.65);
+  --nx-menu-glass-shadow: 0 24px 80px rgba(15, 23, 42, 0.14);
+}
+
+[data-nexus-theme="dark"],
+[data-nexus-theme="satellite"],
+[data-nexus-theme="monochrome"],
+[data-nexus-theme="blueprint"],
+[data-nexus-theme="executive"],
+[data-nexus-theme="night_vision"] {
+  --nx-menu-glass-bg: rgba(15, 23, 42, 0.8);
+  --nx-menu-glass-border: rgba(255, 255, 255, 0.08);
+  --nx-menu-glass-text: #eaf7ff;
+  --nx-menu-glass-muted: rgba(234, 247, 255, 0.65);
+  --nx-menu-glass-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+[data-nexus-theme="red_ops"] {
+  --nx-menu-glass-bg: rgba(32, 6, 9, 0.85);
+  --nx-menu-glass-border: rgba(255, 18, 18, 0.22);
+  --nx-menu-glass-text: #fff0f1;
+  --nx-menu-glass-muted: rgba(255, 240, 241, 0.65);
+  --nx-menu-glass-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+/* ── SHELL ─────────────────────────────────────────────────────────────────
+   We apply the glass explicitly to override any global .nx-liquid-popover. */
+
+/* Apply the custom glass tokens with maximum specificity to beat nx-ui-foundation-final.css */
+html[data-nexus-theme] .nx-premium-inbox .nx-liquid-popover.nx-topbar-workspace-menu {
+  display: flex;
+  align-items: stretch;
+  min-width: 500px;
+  max-width: 680px;
+  padding: 0;
+  background: var(--nx-menu-glass-bg) !important;
+  border: 1px solid var(--nx-menu-glass-border) !important;
+  box-shadow: var(--nx-menu-glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  color: var(--nx-menu-glass-text) !important;
+  backdrop-filter: blur(24px) saturate(1.7) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.7) !important;
+  border-radius: 16px;
+  overflow: hidden;
+  
+  /* Layout attributes moved from inbox-polish.css */
+  position: absolute;
+  z-index: 12150;
+  top: calc(100% + 8px);
+  left: 0;
+}
+
+@media (max-width: 1024px) {
+  .nx-topbar-workspace-menu {
+    display: none !important;
+  }
+}
+
+.nx-topbar-workspace-menu.is-submenu-left {
+  left: auto;
+  right: 0;
+}
+
+/* ── LEFT RAIL ─────────────────────────────────────────────────────────────
+   Transparent — inherits the single glass shell. Only the seam divider stays. */
+.nx-topbar-workspace-menu .nx-workspace-menu-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 180px;
+  width: 180px;
+  padding: 10px 8px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--nx-menu-glass-border);
+  border-radius: 0;
+}
+
+/* Rail nav items */
+.nx-topbar-workspace-menu .nx-workspace-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nx-menu-glass-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+  font-family: inherit;
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item > span {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  opacity: 0.45;
+  transition: opacity 130ms, transform 130ms;
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item:hover {
+  background: rgba(var(--nx-accent-rgb), 0.12);
+  color: var(--nx-menu-glass-text);
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item:hover svg {
+  opacity: 0.8;
+  transform: translateX(1px);
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item:focus-visible {
+  outline: none;
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 2px rgba(var(--nx-accent-rgb), 0.14);
+}
+/* Active rail item: accent wash + left indicator bar + glow ring */
+.nx-topbar-workspace-menu .nx-workspace-menu-item.is-active {
+  background: rgba(var(--nx-accent-rgb), 0.14);
+  border-color: rgba(var(--nx-accent-rgb), 0.38);
+  color: var(--nx-menu-glass-text);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--nx-accent-rgb), 0.28),
+    0 0 12px rgba(var(--nx-accent-rgb), 0.12);
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 7px; bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--nx-accent);
+  box-shadow: 0 0 8px rgba(var(--nx-accent-rgb), 0.26);
+}
+.nx-topbar-workspace-menu .nx-workspace-menu-item.is-active svg {
+  opacity: 1;
+  color: var(--nx-accent);
+}
+
+/* ── RIGHT CONTENT PANEL ───────────────────────────────────────────────────
+   Transparent — inherits the single glass shell. */
+.nx-topbar-workspace-menu .nx-workspace-submenu-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 280px;
+  padding: 10px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Scrollable submenu area */
+.nx-topbar-workspace-menu .nx-workspace-submenu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nx-menu-glass-border) transparent;
+}
+
+/* Section labels */
+.nx-topbar-workspace-menu .nx-workspace-submenu-title {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--nx-menu-glass-muted);
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-note {
+  padding: 0 10px 8px;
+  font-size: 11px;
+  color: var(--nx-menu-glass-muted);
+}
+
+/* ── GENERIC SUBMENU ROWS (workspaces / theme / accent / manage) ───────────
+   Simple flex rows. No column stacking, no pills. */
+.nx-topbar-workspace-menu .nx-workspace-submenu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nx-menu-glass-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item:hover {
+  background: rgba(var(--nx-accent-rgb), 0.12);
+  color: var(--nx-menu-glass-text);
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item:focus-visible {
+  outline: none;
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 2px rgba(var(--nx-accent-rgb), 0.14);
+}
+/* Active generic row: accent wash only — NO heavy box-shadow outline */
+.nx-topbar-workspace-menu .nx-workspace-submenu-item.is-active {
+  background: rgba(var(--nx-accent-rgb), 0.14);
+  border-color: rgba(var(--nx-accent-rgb), 0.38);
+  color: var(--nx-menu-glass-text);
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item.is-active > svg {
+  color: var(--nx-accent);
+}
+
+/* Row text block */
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__text strong {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--nx-menu-glass-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__text small {
+  font-size: 10.5px;
+  color: var(--nx-menu-glass-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__meta svg {
+  color: var(--nx-accent);
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item__badge {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--nx-menu-glass-border);
+  color: var(--nx-menu-glass-muted);
+}
+
+/* Theme/accent dot rows */
+.nx-topbar-workspace-menu .nx-workspace-submenu-item .nx-theme-dot,
+.nx-topbar-workspace-menu .nx-workspace-submenu-item .nx-accent-dot {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--nx-menu-glass-border), 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--nx-menu-glass-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-topbar-workspace-menu .nx-workspace-submenu-item > svg:last-child {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--nx-accent);
+}
+
+/* ── ACTIVE VIEW CHIPS (top of views panel) ────────────────────────────── */
+.nx-topbar-workspace-menu .nx-workspace-active-view-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 2px 10px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid var(--nx-menu-glass-border);
+}
+.nx-topbar-workspace-menu .nx-active-view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid rgba(var(--nx-accent-rgb), 0.38);
+  background: rgba(var(--nx-accent-rgb), 0.14);
+  color: var(--nx-menu-glass-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 130ms, border-color 130ms;
+  font-family: inherit;
+}
+.nx-topbar-workspace-menu .nx-active-view-chip svg {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  opacity: 0.65;
+}
+.nx-topbar-workspace-menu .nx-active-view-chip:hover {
+  background: rgba(var(--nx-accent-rgb), 0.20);
+  border-color: var(--nx-accent);
+}
+.nx-topbar-workspace-menu .nx-active-view-chip.is-active {
+  background: rgba(var(--nx-accent-rgb), 0.24);
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 8px rgba(var(--nx-accent-rgb), 0.26);
+}
+
+/* ── VIEW ROWS (nx-wsv-row) — single horizontal layout ────────────────────
+   Each row is ONE flex line: toggle button on the left (stretches), pill
+   strip on the right (hidden by default, revealed on hover/focus-within).
+   Pills are always in the DOM at full height — no max-height animation,
+   no overflow toggle. Just opacity + pointer-events. */
+.nx-topbar-workspace-menu .nx-wsv-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 0 0 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nx-menu-glass-text);
+  transition: background 130ms ease, border-color 130ms ease;
+  position: relative;
+}
+.nx-topbar-workspace-menu .nx-wsv-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+/* Active view row: clean accent wash, thin left indicator, no heavy outline */
+.nx-topbar-workspace-menu .nx-wsv-row.is-active {
+  background: rgba(var(--nx-accent-rgb), 0.14);
+  border-color: rgba(var(--nx-accent-rgb), 0.38);
+}
+.nx-topbar-workspace-menu .nx-wsv-row.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--nx-accent);
+  box-shadow: 0 0 6px rgba(var(--nx-accent-rgb), 0.26);
+  pointer-events: none;
+}
+
+/* Toggle button (left side) — occupies all remaining space */
+.nx-topbar-workspace-menu .nx-wsv-row__toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 150px 8px 10px; /* 150px buffer zone for the absolute pills! */
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.nx-topbar-workspace-menu .nx-wsv-row__toggle:focus-visible {
+  outline: none;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(var(--nx-accent-rgb), 0.14);
+}
+
+/* Label: name (strong) + description (small) stacked vertically */
+.nx-topbar-workspace-menu .nx-wsv-row__label {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.nx-topbar-workspace-menu .nx-wsv-row__label strong {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--nx-menu-glass-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+.nx-topbar-workspace-menu .nx-wsv-row__label small {
+  font-size: 10.5px;
+  color: var(--nx-menu-glass-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+/* Check icon inside toggle */
+.nx-topbar-workspace-menu .nx-wsv-row__toggle > svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--nx-accent);
+}
+
+/* Pill strip — right side of each view row.
+   Hidden by default; appears on hover/focus-within of the WHOLE row.
+   Positioned absolutely so they don't squish the view name text. */
+.nx-topbar-workspace-menu .nx-wsv-row__pills {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 10px;
+  background: transparent; /* No nested glass cards! */
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+.nx-topbar-workspace-menu .nx-wsv-row:hover .nx-wsv-row__pills,
+.nx-topbar-workspace-menu .nx-wsv-row:focus-within .nx-wsv-row__pills {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Individual width pills */
+.nx-topbar-workspace-menu .nx-wsv-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-width: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--nx-menu-glass-border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--nx-menu-glass-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.nx-topbar-workspace-menu .nx-wsv-pill:hover {
+  background: rgba(var(--nx-accent-rgb), 0.12);
+  border-color: rgba(var(--nx-accent-rgb), 0.38);
+  color: var(--nx-menu-glass-text);
+}
+.nx-topbar-workspace-menu .nx-wsv-pill:focus-visible {
+  outline: none;
+  border-color: rgba(var(--nx-accent-rgb), 0.38);
+  box-shadow: 0 0 0 2px rgba(var(--nx-accent-rgb), 0.14);
+}
+.nx-topbar-workspace-menu .nx-wsv-pill.is-active {
+  background: var(--nx-accent);
+  border-color: var(--nx-accent);
+  color: #02060d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 10px rgba(var(--nx-accent-rgb), 0.26);
+}
+
+/* ==========================================================================
+ * TASK 5 — Accent palette propagation across the inbox
+ * Consume accent vars only — never hardcode blue/green. Rules here load after
+ * all inbox sheets, so well-targeted selectors win; !important is used ONLY
+ * where a later same/higher-specificity sheet (inbox-density-25.css) forces it.
+ * ========================================================================== */
+
+/* ---- Outbound message bubble: .nx-bubble-wrap.is-outbound .nx-chat-bubble ----
+ * (verified in ChatThread.tsx: wrapper gets is-outbound, inner is nx-chat-bubble) */
+.nx-bubble-wrap.is-outbound .nx-chat-bubble {
+  background: linear-gradient(
+    180deg,
+    var(--nx-accent) 0%,
+    var(--nx-accent-2, var(--nx-accent)) 100%
+  );
+  border-color: var(--nx-accent-border);
+  color: #04121d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 14px var(--nx-accent-glow);
+}
+
+.nx-bubble-wrap.is-outbound .nx-chat-bubble:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 20px var(--nx-accent-glow);
+}
+
+/* Don't accent-tint failed outbound bubbles — let the failed state sheet win.
+ * (Failed bubbles carry .is-failed on the wrapper.) */
+.nx-bubble-wrap.is-failed.is-outbound .nx-chat-bubble {
+  background: inherit;
+}
+
+/* ---- Selected inbox rows ----
+ * inbox-density-25.css sets hardcoded blue with !important on these selectors,
+ * so we must match its specificity and use !important to repaint with accent. */
+.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected {
+  background: var(--nx-accent-soft) !important;
+}
+
+.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected::before {
+  background: var(--nx-accent) !important;
+  box-shadow: 2px 0 6px var(--nx-accent-glow) !important;
+}
+
+.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-selected:hover {
+  background: rgba(var(--nx-accent-rgb), 0.12) !important;
+}
+
+.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-thread-card-rebuilt.is-selected {
+  background: var(--nx-accent-soft) !important;
+  box-shadow: inset 2px 0 0 var(--nx-accent) !important;
+}
+
+/* Rebuilt thread card selected state (non-density path) */
+.nx-thread-card-rebuilt.is-selected {
+  border-color: var(--nx-accent-border);
+  box-shadow: inset 2px 0 0 var(--nx-accent), 0 0 0 1px var(--nx-accent-border);
+}
+
+/* Hover rows (sidebar lists) get an accent-tinted wash + focus ring */
+.nx-premium-inbox .nx-row25:hover:not(.is-selected) {
+  background: rgba(var(--nx-accent-rgb), 0.06);
+}
+
+.nx-thread-card-rebuilt:focus-visible,
+.nx-row25:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--nx-accent-soft), inset 2px 0 0 var(--nx-accent-border);
+}
+
+/* ---- Generic active pills / buttons across the inbox ---- */
+.nx-premium-inbox .nx-topbar-width-pill.is-active {
+  background: var(--nx-accent);
+  border-color: var(--nx-accent);
+  color: #02060d;
+}
+
+/* ---- Search result dropdown selected item (uses accent) ---- */
+.nx-search-results-popover .nx-search-result-item.is-active {
+  background: var(--nx-accent-soft);
+  border-color: var(--nx-accent-border);
+}
+
+.nx-search-results-popover .nx-search-result-item.is-active strong {
+  color: var(--nx-accent);
+}
+
+/* ---- Quick-menu / tasks popover hover uses accent ---- */
+.nx-quick-menu-popover button:hover {
+  background: var(--nx-accent-soft);
+}
+
+/* ==========================================================================
+ * UNIFIED GLASS PANEL — collapse the workspace menu into ONE liquid surface
+ * --------------------------------------------------------------------------
+ * inbox-polish.css gave .nx-workspace-menu-root AND .nx-workspace-submenu-panel
+ * their own border + opaque background, producing a "two boxes inside a box"
+ * look (the stray outline / "green debug outline" some themes showed). The
+ * outer .nx-topbar-workspace-menu already carries the glass; the inner panels
+ * must be transparent — only the rail keeps a hairline theme divider.
+ * ========================================================================== */
+.nx-premium-inbox .nx-topbar-workspace-menu .nx-workspace-menu-root,
+.nx-premium-inbox .nx-topbar-workspace-menu .nx-workspace-submenu-panel {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* Keep ONLY the rail/content seam — a hairline that reads as one panel split */
+.nx-premium-inbox .nx-topbar-workspace-menu .nx-workspace-menu-root {
+  border-right: 1px solid var(--nx-glass-divider);
+}
+
+/* The popover surface itself: ensure the reference radius + clipped corners */
+.nx-premium-inbox .nx-topbar-workspace-menu.nx-liquid-popover {
+  border-radius: var(--nx-glass-radius-menu, 16px);
+  overflow: hidden;
+}
+
+/* ==========================================================================
+ * THEME DOSSIER / PROPERTY PANEL — Deal Intelligence must track the theme.
+ * These were authored with dark literals; in light mode they showed as dark
+ * panels with low-contrast text (#8 / #9 / #10). Re-skin to glass tokens.
+ * Scoped to /inbox so nothing else is touched.
+ * ========================================================================== */
+.nx-premium-inbox .nx-deal-command-dossier,
+.nx-premium-inbox .nx-property-command-panel {
+  background: var(--nx-glass-bg-strong);
+  border: 1px solid var(--nx-glass-border-strong);
+  color: var(--nx-glass-text);
+  box-shadow: var(--nx-glass-inner-highlight), var(--nx-glass-shadow-sm);
+}
+
+/* Light mode: hard-stop any leftover dark panel + unreadable text inside the
+ * dossier / property intelligence surfaces. */
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-command-dossier,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-property-command-panel {
+  background: var(--nx-glass-bg-strong);
+  border-color: var(--nx-glass-border-strong);
+  color: var(--nx-glass-text);
+}
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-command-dossier *,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-property-command-panel * {
+  border-color: var(--nx-glass-border);
+}
+
+/* ==========================================================================
+ * CONVERSATION EMPTY / LOADING — no black box in light mode (#12).
+ * The center pane empty + messages-empty states inherit the deep app bg;
+ * pin them to the theme surface so light mode shows a frosted white, not black.
+ * ========================================================================== */
+.nx-premium-inbox .nx-chat-container.is-empty,
+.nx-premium-inbox .nx-inbox__workspace-empty,
+.nx-premium-inbox .nx-inbox__messages-empty {
+  background: var(--nx-glass-bg);
+  color: var(--nx-glass-muted);
+}
+[data-nexus-theme="light"] .nx-premium-inbox .nx-chat-container.is-empty,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox__workspace-empty,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox__messages-empty {
+  background: var(--nx-surface, #ffffff);
+  color: var(--nx-glass-muted);
+}
+
+/* ==========================================================================
+ * FILTER MODAL — adopt the same liquid-glass language (was a flat sheet)
+ * ========================================================================== */
+.nx-premium-inbox .nx-icf-modal {
+  position: relative;
+  background: var(--nx-glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur, 24px)) saturate(var(--nx-glass-saturate, 1.6)) !important;
+  backdrop-filter: blur(var(--nx-glass-blur, 24px)) saturate(var(--nx-glass-saturate, 1.6)) !important;
+  border: 1px solid var(--nx-glass-border-strong) !important;
+  border-radius: var(--nx-glass-radius-panel, 20px) !important;
+  box-shadow: var(--nx-glass-inner-highlight), var(--nx-glass-shadow) !important;
+  color: var(--nx-glass-text) !important;
+}
+.nx-premium-inbox .nx-icf-header { border-bottom-color: var(--nx-glass-divider) !important; }
+.nx-premium-inbox .nx-icf-field .nx-icf-label { color: var(--nx-glass-faint); }
+.nx-premium-inbox .nx-filter-overlay {
+  background: rgba(2, 6, 18, 0.46);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+[data-nexus-theme="light"] .nx-premium-inbox .nx-filter-overlay {
+  background: rgba(15, 23, 42, 0.28);
+}

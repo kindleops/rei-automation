@@ -79,14 +79,7 @@ interface NexusTopBarProps {
 
 const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
   { id: 'dark', label: 'Dark' },
-  { id: 'satellite', label: 'Satellite' },
-  { id: 'terrain', label: 'Terrain' },
   { id: 'red_ops', label: 'RedOps' },
-  { id: 'matrix', label: 'Matrix' },
-  { id: 'blueprint', label: 'Blueprint' },
-  { id: 'executive', label: 'Executive' },
-  { id: 'night_vision', label: 'Night Vision' },
-  { id: 'monochrome', label: 'Monochrome' },
   { id: 'light', label: 'Light' },
 ]
 
@@ -97,6 +90,11 @@ const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
   { id: 'violet', label: 'Violet' },
   { id: 'rose', label: 'Rose' },
   { id: 'ice', label: 'Ice' },
+  { id: 'blue', label: 'Blue' },
+  { id: 'teal', label: 'Teal' },
+  { id: 'orange', label: 'Orange' },
+  { id: 'pink', label: 'Pink' },
+  { id: 'gold', label: 'Gold' },
 ]
 
 type WorkspaceSubmenu = null | 'workspaces' | 'views' | 'theme' | 'accent' | 'manage'
@@ -159,6 +157,7 @@ export const NexusTopBar = ({
   onExecuteTopSearchResult,
 }: NexusTopBarProps) => {
   const DEV = Boolean(import.meta.env.DEV)
+  const DEBUG_INBOX = DEV && String(import.meta.env.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [openControlMenu, setOpenControlMenu] = useState<null | 'workspace'>(null)
   const [activeSubmenu, setActiveSubmenu] = useState<WorkspaceSubmenu>(null)
@@ -180,10 +179,10 @@ export const NexusTopBar = ({
   }, [])
 
   useEffect(() => {
-    if (DEV && activeOverlay) {
+    if (DEBUG_INBOX && activeOverlay) {
       console.log(`[NexusPopover]`, { name: activeOverlay, action: 'open', open: true })
     }
-  }, [activeOverlay, DEV])
+  }, [activeOverlay, DEBUG_INBOX])
 
   useEffect(() => {
     const focusSearch = () => {
@@ -194,13 +193,21 @@ export const NexusTopBar = ({
   }, [])
 
   useEffect(() => {
-    const handleWindowClick = () => {
+    const closeAllMenus = () => {
       setOpenControlMenu(null)
       setActiveSubmenu(null)
       setOpenQuickMenu(null)
     }
+    const handleWindowClick = () => closeAllMenus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeAllMenus()
+    }
     window.addEventListener('click', handleWindowClick)
-    return () => window.removeEventListener('click', handleWindowClick)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('click', handleWindowClick)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
   }, [])
 
   useEffect(() => {
@@ -286,7 +293,7 @@ export const NexusTopBar = ({
         <div className="nx-workspace-submenu-scroll" role="menu">
           {workspaceOptions.map((workspace) => (
             <button key={workspace.key} type="button" className={cls('nx-workspace-submenu-item', activeWorkspaceKey === workspace.key && 'is-active')} onClick={() => selectAndClose(() => onSelectWorkspace?.(workspace.key))}>
-              <span className="nx-workspace-submenu-item__text" title={workspace.description || ''}><strong>{workspace.label}</strong><small>{workspace.description || ''}</small></span>
+              <span className="nx-workspace-submenu-item__text"><strong>{workspace.label}</strong><small>{workspace.description || ''}</small></span>
               <span className="nx-workspace-submenu-item__meta">
                 {workspace.statusLabel ? <em className="nx-workspace-submenu-item__badge">{workspace.statusLabel}</em> : null}
                 {activeWorkspaceKey === workspace.key ? <Icon name="check" /> : null}
@@ -300,34 +307,50 @@ export const NexusTopBar = ({
     if (activeSubmenu === 'views') {
       return (
         <div className="nx-workspace-submenu-scroll" role="menu">
-          {viewOptions.map((view) => (
-            <div key={view.key} className={cls('nx-workspace-submenu-item nx-workspace-submenu-item--view', activeViewKey === view.key && 'is-active')}>
-              <button
-                type="button"
-                className="nx-workspace-submenu-item__select"
-                onClick={() => selectAndClose(() => onSelectView?.(view.key))}
+          {viewOptions.map((view) => {
+            const isActiveView = activeViewKeys.includes(view.key)
+            const widthKey = view.key === 'analytics' ? 'metrics' : view.key
+            return (
+              <div
+                key={view.key}
+                className={cls('nx-wsv-row', isActiveView && 'is-active')}
+                role="menuitemcheckbox"
+                aria-checked={isActiveView}
               >
-                <span className="nx-workspace-submenu-item__text" title={view.description || ''}><strong>{view.label}</strong><small>{view.description || ''}</small></span>
-                <span className="nx-workspace-submenu-item__meta">
-                  {view.statusLabel ? <em className="nx-workspace-submenu-item__badge">{view.statusLabel}</em> : null}
-                  {activeViewKeys.includes(view.key) ? <Icon name="check" /> : null}
-                </span>
-              </button>
-              <div className="nx-workspace-view-widths" aria-label={`${view.label} width`}>
-                {(['25', '50', '75', '100'] as ViewWidthPercent[]).map((width) => (
-                  <button
-                    key={width}
-                    type="button"
-                    className={cls('nx-topbar-width-pill', activeViewWidths[view.key] === width && 'is-active')}
-                    onClick={() => selectAndClose(() => onSelectViewWidth?.(view.key, width))}
-                    title={width === '100' ? 'Fullscreen' : `${width}% width`}
-                  >
-                    {width === '100' ? 'Full' : `${width}%`}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  className="nx-wsv-row__toggle"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onSelectView?.(view.key)
+                  }}
+                >
+                  <span className="nx-wsv-row__label">
+                    <strong>{view.label}</strong>
+                    {view.description ? <small>{view.description}</small> : null}
+                  </span>
+                  {isActiveView ? <Icon name="check" /> : null}
+                </button>
+                <div className="nx-wsv-row__pills" aria-label={`${view.label} width`}>
+                  {(['25', '50', '75', '100'] as ViewWidthPercent[]).map((width) => (
+                    <button
+                      key={width}
+                      type="button"
+                      className={cls('nx-wsv-pill', activeViewWidths[widthKey] === width && 'is-active')}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onSelectViewWidth?.(view.key, width)
+                      }}
+                    >
+                      {width === '100' ? 'Full' : `${width}%`}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )
     }
@@ -366,22 +389,6 @@ export const NexusTopBar = ({
 
     return (
       <div className="nx-workspace-submenu-scroll" role="menu">
-        <div className="nx-workspace-submenu-title">Layout Size</div>
-        <div className="nx-workspace-view-widths" aria-label="Active view width">
-          {(['25', '50', '75', '100'] as ViewWidthPercent[]).map((width) => (
-            <button
-              key={width}
-              type="button"
-              className={cls('nx-topbar-width-pill', activeViewKey && activeViewWidths[activeViewKey] === width && 'is-active')}
-              onClick={() => selectAndClose(() => {
-                if (activeViewKey && onSelectViewWidth) onSelectViewWidth(activeViewKey, width)
-              })}
-              title={width === '100' ? 'Fullscreen' : `${width}% width`}
-            >
-              {width === '100' ? 'Full' : `${width}%`}
-            </button>
-          ))}
-        </div>
         <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}><strong>Save Current Layout</strong></button>
         <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onResetLayout())}><strong>Reset Layout</strong></button>
         <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}><strong>Workspace Settings</strong></button>
