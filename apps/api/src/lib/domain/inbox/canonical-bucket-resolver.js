@@ -65,7 +65,8 @@ export function resolveCanonicalBucket({
     "ownership_confirmed", 
     "need_time", 
     "not_interested", 
-    "not_for_sale"
+    "not_for_sale",
+    "negative"
   ];
   if (follow_up_intents.includes(primary) || follow_up_intents.includes(objection) || threadState.not_interested === true) {
     return "follow_up";
