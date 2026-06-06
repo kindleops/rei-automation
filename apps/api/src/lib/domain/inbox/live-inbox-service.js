@@ -3,7 +3,7 @@ import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib
 import { resolveCanonicalBucket } from "@/lib/domain/inbox/canonical-bucket-resolver.js";
 
 const PRIMARY_THREAD_SOURCE = "inbox_threads_hydrated";
-const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_fast";
+const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const LEGACY_THREAD_SOURCE = "nexus_inbox_threads_v";
 const LEGACY_COUNT_SOURCE = "v_nexus_inbox_thread_counts";
 const FALLBACK_THREAD_SOURCE = "inbox_threads_view";
@@ -519,7 +519,7 @@ function buildEmptyCounts() {
   };
 }
 
-function buildNullCounts() {
+export function buildNullCounts() {
   return Object.fromEntries(CANONICAL_COUNT_KEYS.map((key) => [key, null]));
 }
 
