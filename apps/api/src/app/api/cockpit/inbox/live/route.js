@@ -6,10 +6,11 @@ import { getLiveInbox } from '@/lib/domain/inbox/live-inbox-service.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const BACKEND_GRACE_PERIOD = 1500;
 const TIMEOUT_MS_BY_MODE = {
-  initial_boot: 30_000,
-  manual_bucket_switch: 15_000,
-  auto_refresh: 10_000,
+  initial_boot: 30_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 15_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 10_000 - BACKEND_GRACE_PERIOD,
 }
 const INITIAL_BOOT_DEFAULT_LIMIT = 25
 
