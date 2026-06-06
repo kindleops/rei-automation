@@ -23,7 +23,7 @@ export type NexusTheme =
   | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
-export type AccentPalette = 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'ice'
+export type AccentPalette = 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'ice' | 'blue' | 'teal' | 'orange' | 'pink' | 'gold'
 
 export interface NexusSettings {
   // Map
@@ -423,6 +423,11 @@ export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: str
   violet:  { primary: '#9966ff', glow: 'rgba(153,102,255,0.25)', soft: 'rgba(153,102,255,0.14)' },
   rose:    { primary: '#e85080', glow: 'rgba(232,80,128,0.25)', soft: 'rgba(232,80,128,0.14)' },
   ice:     { primary: '#a0d8f0', glow: 'rgba(160,216,240,0.22)', soft: 'rgba(160,216,240,0.12)' },
+  blue:    { primary: '#0ea5e9', glow: 'rgba(14,165,233,0.25)', soft: 'rgba(14,165,233,0.14)' },
+  teal:    { primary: '#14b8a6', glow: 'rgba(20,184,166,0.25)', soft: 'rgba(20,184,166,0.14)' },
+  orange:  { primary: '#f97316', glow: 'rgba(249,115,22,0.25)', soft: 'rgba(249,115,22,0.14)' },
+  pink:    { primary: '#ec4899', glow: 'rgba(236,72,153,0.25)', soft: 'rgba(236,72,153,0.14)' },
+  gold:    { primary: '#eab308', glow: 'rgba(234,179,8,0.25)', soft: 'rgba(234,179,8,0.14)' },
 }
 
 // Higher-contrast accent values for white/light-mode backgrounds
@@ -433,6 +438,11 @@ export const LIGHT_ACCENT_PALETTES: Record<AccentPalette, { primary: string; glo
   violet:  { primary: '#7c3cff', glow: 'rgba(124,60,255,0.20)',  soft: 'rgba(124,60,255,0.10)'  },
   rose:    { primary: '#ff2d75', glow: 'rgba(255,45,117,0.20)',  soft: 'rgba(255,45,117,0.10)'  },
   ice:     { primary: '#0ea5e9', glow: 'rgba(14,165,233,0.20)',  soft: 'rgba(14,165,233,0.10)'  },
+  blue:    { primary: '#0284c7', glow: 'rgba(2,132,199,0.20)',   soft: 'rgba(2,132,199,0.10)'   },
+  teal:    { primary: '#0d9488', glow: 'rgba(13,148,136,0.20)',  soft: 'rgba(13,148,136,0.10)'  },
+  orange:  { primary: '#ea580c', glow: 'rgba(234,88,12,0.20)',   soft: 'rgba(234,88,12,0.10)'   },
+  pink:    { primary: '#db2777', glow: 'rgba(219,39,119,0.20)',  soft: 'rgba(219,39,119,0.10)'  },
+  gold:    { primary: '#ca8a04', glow: 'rgba(202,138,4,0.20)',   soft: 'rgba(202,138,4,0.10)'   },
 }
 
 export function getActiveTheme(): ThemeTokens {

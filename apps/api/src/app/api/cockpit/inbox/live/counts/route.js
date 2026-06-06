@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLiveCounts, buildNullCounts } from "@/lib/domain/inbox/live-inbox-service.js";
+import { getLiveCounts } from "@/lib/domain/inbox/live-inbox-service.js";
 import { ensureMutationAuth, corsHeaders } from "../../../_shared.js";
 import { warn } from "@/lib/logging/logger.js";
 
