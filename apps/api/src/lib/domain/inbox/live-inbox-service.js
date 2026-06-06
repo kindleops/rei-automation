@@ -1,124 +1,17 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
-import { resolveCanonicalBucket } from "@/lib/domain/inbox/canonical-bucket-resolver.js";
 
-const PRIMARY_THREAD_SOURCE = "inbox_threads_hydrated";
-const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
-const LEGACY_THREAD_SOURCE = "nexus_inbox_threads_v";
-const LEGACY_COUNT_SOURCE = "v_nexus_inbox_thread_counts";
+// P0 SINGLE SOURCE OF TRUTH (launch-stabilization-20260606).
+// One canonical view computes inbox_bucket once; counts aggregate the same view.
+// There is no thread-source fallback ladder and no JS bucket resolver anymore.
+const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
+const PRIMARY_COUNT_SOURCE = "canonical_inbox_counts";
+// Retained only for the message-identity resolution helpers in getThreadMessages
+// (these resolve which thread a message belongs to; they are NOT a bucket source).
 const FALLBACK_THREAD_SOURCE = "inbox_threads_view";
 const DEFAULT_LIMIT = 100;
 const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
-const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
-  "thread_key",
-  "canonical_thread_key",
-  "canonical_e164",
-  "seller_phone",
-  "display_phone",
-  "best_phone",
-  "direction",
-  "conversation_stage",
-  "owner_name",
-  "seller_display_name",
-  "seller_first_name",
-  "property_address_full",
-  "property_address_city",
-  "property_state",
-  "property_zip",
-  "market",
-  "property_type",
-  "latest_message_at",
-  "latest_message_event_id",
-  "latest_message_body",
-  "latest_message_direction",
-  "delivery_status",
-  "latest_delivery_status",
-  "provider_delivery_status",
-  "latest_provider_delivery_status",
-  "latest_delivered_at",
-  "latest_failed_at",
-  "latest_failure_reason",
-  "queue_status",
-  "inbox_bucket",
-  "universal_status",
-  "universal_stage",
-  "property_id",
-  "prospect_id",
-  "master_owner_id",
-  "selected_property_id",
-  "thread_property_id",
-  "thread_master_owner_id",
-  "thread_prospect_id",
-  "last_message_at",
-  "lead_temperature",
-  "reply_intent",
-  "message_count",
-  "inbound_count",
-  "outbound_count",
-  "suppression_status",
-  "unread_count",
-  "wrong_number",
-  "opt_out",
-  "not_interested",
-  "needs_review",
-  "created_at",
-  "updated_at",
-].join(",");
-const ENRICHED_THREAD_INITIAL_BOOT_FIELDS = [
-  "thread_key",
-  "best_phone",
-  "seller_phone",
-  "display_phone",
-  "latest_direction",
-  "latest_message_at",
-  "latest_message_body",
-  "preview",
-  "inbox_category",
-  "stage",
-  "property_id",
-  "final_property_id",
-  "master_owner_id",
-  "final_master_owner_id",
-  "final_prospect_id",
-  "owner_display_name",
-  "event_seller_display_name",
-  "display_name",
-  "property_address_full",
-  "display_address",
-  "market",
-  "display_market",
-  "property_type",
-  "filter_property_type",
-  "show_in_priority_inbox",
-  "is_suppressed",
-  "detected_intent",
-  "ui_intent",
-  "is_read",
-  "latitude",
-  "longitude",
-].join(",");
-const PRIMARY_COUNT_FALLBACK_FIELDS = [
-  "thread_key",
-  "inbox_bucket",
-  "latest_message_direction",
-  "property_id",
-  "wrong_number",
-  "not_interested",
-  "opt_out",
-  "suppression_status",
-  "needs_review",
-].join(",");
-const ENRICHED_COUNT_FALLBACK_FIELDS = [
-  "thread_key",
-  "inbox_category",
-  "latest_direction",
-  "property_id",
-  "is_suppressed",
-  "show_in_priority_inbox",
-  "stage",
-  "detected_intent",
-].join(",");
 const CANONICAL_COUNT_KEYS = [
   "priority",
   "new_replies",
@@ -142,14 +35,14 @@ const CANONICAL_COUNT_KEYS = [
   "waiting_on_seller",
   "automated",
 ];
+// P0: exactly ONE thread source. No fallback ladder.
 const THREAD_SOURCE_CONFIGS = [
   {
     key: "primary",
     name: PRIMARY_THREAD_SOURCE,
     countSource: PRIMARY_COUNT_SOURCE,
     directionColumn: "latest_message_direction",
-    countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
-    getSelectColumns(selectMode) {
+    getSelectColumns() {
       return "*";
     },
     searchColumns: [
@@ -158,45 +51,6 @@ const THREAD_SOURCE_CONFIGS = [
       "seller_phone",
       "owner_name",
       "property_address_full",
-      "latest_message_body",
-    ],
-  },
-  {
-    key: "legacy_primary",
-    name: LEGACY_THREAD_SOURCE,
-    countSource: PRIMARY_COUNT_SOURCE,
-    directionColumn: "latest_message_direction",
-    countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
-    getSelectColumns(selectMode) {
-      return "*";
-    },
-    searchColumns: [
-      "thread_key",
-      "canonical_e164",
-      "seller_phone",
-      "owner_name",
-      "property_address_full",
-      "latest_message_body",
-    ],
-  },
-  {
-    key: "enriched",
-    name: FALLBACK_THREAD_SOURCE,
-    countSource: null,
-    directionColumn: "latest_direction",
-    countFallbackFields: ENRICHED_COUNT_FALLBACK_FIELDS,
-    getSelectColumns(selectMode) {
-      return "*";
-    },
-    searchColumns: [
-      "thread_key",
-      "best_phone",
-      "seller_phone",
-      "owner_display_name",
-      "event_seller_display_name",
-      "display_name",
-      "property_address_full",
-      "display_address",
       "latest_message_body",
     ],
   },
@@ -523,12 +377,6 @@ export function buildNullCounts() {
   return Object.fromEntries(CANONICAL_COUNT_KEYS.map((key) => [key, null]));
 }
 
-function removeZeroApproximateCounts(counts = {}) {
-  return Object.fromEntries(
-    Object.entries(counts).filter(([, value]) => Number(value) > 0)
-  );
-}
-
 function hasConcreteCountRow(row = {}) {
   return [
     "all",
@@ -569,67 +417,6 @@ function countFromRow(row = {}) {
   counts.dnc_opt_out = counts.suppressed;
   counts.waiting_on_seller = counts.waiting;
   return counts;
-}
-
-function computeCountsFromThreads(rows = []) {
-  const counts = buildEmptyCounts();
-  for (const row of rows) {
-    const bucket = lower(row.inbox_bucket);
-    counts.all += 1;
-    if (bucket === "priority") counts.priority += 1;
-    if (bucket === "new_replies") counts.new_replies += 1;
-    if (bucket === "needs_review") counts.needs_review += 1;
-    if (bucket === "follow_up") counts.follow_up += 1;
-    if (bucket === "cold") counts.cold += 1;
-    if (bucket === "dead") counts.dead += 1;
-    if (bucket === "suppressed") counts.suppressed += 1;
-    if (["priority", "new_replies", "needs_review", "follow_up"].includes(bucket)) counts.active += 1;
-    if (normalizeDirection(row.latest_message_direction || row.direction) === "outbound" && !["dead", "suppressed"].includes(bucket)) counts.waiting += 1;
-    if (!row.property_id) counts.unlinked += 1;
-  }
-  counts.all_messages = counts.all;
-  counts.hot_leads = counts.priority;
-  counts.new_inbound = counts.new_replies;
-  counts.needs_reply = counts.new_replies;
-  counts.manual_review = counts.needs_review;
-  counts.outbound_active = counts.follow_up;
-  counts.cold_no_response = counts.cold;
-  counts.dnc_opt_out = counts.suppressed;
-  counts.waiting_on_seller = counts.waiting;
-  return counts;
-}
-
-function computeApproximateCountsFromVisibleRows(rows = [], filter = "all") {
-  const counts = computeCountsFromThreads(rows);
-  const approximate = removeZeroApproximateCounts(counts);
-  const normalizedFilter = normalizeLiveFilter(filter);
-  if (rows.length > 0 && normalizedFilter !== "all" && approximate[normalizedFilter] == null) {
-    approximate[normalizedFilter] = rows.length;
-  }
-  if (rows.length > 0 && approximate.all == null && normalizedFilter === "all") {
-    approximate.all = rows.length;
-    approximate.all_messages = rows.length;
-  }
-  return approximate;
-}
-
-function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
-  const approximate = computeApproximateCountsFromVisibleRows(rows, filter);
-  if (Object.keys(approximate).length === 0) return { counts, applied: false, approximate };
-
-  let applied = false;
-  const next = { ...counts };
-  for (const [key, value] of Object.entries(approximate)) {
-    const numericValue = Number(value);
-    const currentValue = Number(next[key]);
-    if (!Number.isFinite(numericValue) || numericValue <= 0) continue;
-    if (!Number.isFinite(currentValue) || currentValue <= 0) {
-      next[key] = numericValue;
-      applied = true;
-    }
-  }
-
-  return { counts: next, applied, approximate };
 }
 
 function threadMatchesFilter(thread = {}, filter = "all") {
@@ -726,25 +513,6 @@ function getThreadSourceCandidates(preferredName = null) {
   ];
 }
 
-function bucketFromEnrichedRow(row = {}) {
-  const direction = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction) || "inbound";
-  
-  return resolveCanonicalBucket({
-    threadState: {
-      primary_intent: row.detected_intent || row.ui_intent || row.reply_intent,
-      objection: row.objection,
-      universal_status: row.universal_status || row.stage || row.queue_stage,
-      inbox_bucket: row.inbox_category || row.inbox_bucket,
-      opt_out: row.opt_out === true || row.is_suppressed === true,
-      wrong_number: row.wrong_number === true,
-      not_interested: row.not_interested === true
-    },
-    classification: {}, // The enriched row already contains the rolled-up intent
-    direction,
-    nowMs: Date.now()
-  });
-}
-
 function normalizeThreadRow(row = {}, query = {}) {
   const normalizedDirection = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);
   const latestMessageAt = latestAt(row);
@@ -758,7 +526,8 @@ function normalizeThreadRow(row = {}, query = {}) {
     direction: normalizedDirection,
     canonical_e164: normalizedPhone || row.canonical_e164,
   }) || canonicalThreadKey;
-  const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
+  // P0: trust the ONE canonical SQL bucket. No JS re-derivation, no fallback.
+  const computedBucket = lower(row.inbox_bucket);
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
   const latestDeliveryStatus =
     clean(row.latest_delivery_status) ||
@@ -1225,78 +994,32 @@ function messageBelongsToLookup(row = {}, lookup = {}) {
   return false;
 }
 
-function toSupabaseBoolean(value) {
-  return value ? "true" : "false";
-}
-
-function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]) {
-  if (sourceConfig.key === "enriched") {
-    switch (filter) {
-      case "priority":
-        return typeof query.or === "function"
-          ? query.or("inbox_category.eq.hot_leads,show_in_priority_inbox.eq.true")
-          : query.eq("inbox_category", "hot_leads");
-      case "new_replies":
-        return query.eq("inbox_category", "new_inbound");
-      case "needs_review":
-        return query.eq("inbox_category", "automated");
-      case "follow_up":
-        return query.eq("inbox_category", "outbound_active");
-      case "cold":
-        return query.eq("inbox_category", "cold_no_response");
-      case "dead":
-        return typeof query.or === "function"
-          ? query.or("stage.eq.dead,detected_intent.eq.wrong_number,detected_intent.eq.not_interested")
-          : query.eq("stage", "dead");
-      case "suppressed":
-        return typeof query.or === "function"
-          ? query.or("inbox_category.eq.dnc_opt_out,is_suppressed.eq.true")
-          : query.eq("inbox_category", "dnc_opt_out");
-      case "active":
-        return typeof query.in === "function"
-          ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
-          : query;
-      case "waiting":
-        return query.eq("latest_direction", "outbound");
-      case "unlinked":
-        return typeof query.is === "function" ? query.is("property_id", null) : query;
-      default:
-        return query;
-    }
-  }
-
+// P0: filters key STRICTLY on the canonical inbox_bucket column so the list for a
+// bucket always equals that bucket's count. No multi-column OR clauses (those would
+// place a thread in two tabs and break counts==rows).
+function applyQueryFilter(query, filter) {
   switch (filter) {
     case "priority":
-      return query.eq("inbox_bucket", "priority");
     case "new_replies":
-      return query.eq("inbox_bucket", "new_replies");
     case "needs_review":
-      return typeof query.or === "function"
-        ? query.or(`inbox_bucket.eq.needs_review,needs_review.eq.${toSupabaseBoolean(true)}`)
-        : query.eq("inbox_bucket", "needs_review");
     case "follow_up":
-      return query.eq("inbox_bucket", "follow_up");
     case "cold":
-      return query.eq("inbox_bucket", "cold");
     case "dead":
-      return typeof query.or === "function"
-        ? query.or(`inbox_bucket.eq.dead,wrong_number.eq.${toSupabaseBoolean(true)},not_interested.eq.${toSupabaseBoolean(true)}`)
-        : query.eq("inbox_bucket", "dead");
     case "suppressed":
-      return typeof query.or === "function"
-        ? query.or(`inbox_bucket.eq.suppressed,opt_out.eq.${toSupabaseBoolean(true)},suppression_status.eq.suppressed`)
-        : query.eq("inbox_bucket", "suppressed");
+      return query.eq("inbox_bucket", filter);
     case "active":
-      if (typeof query.in === "function") {
-        return query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
-      }
-      return typeof query.or === "function"
-        ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
-        : query;
+      return typeof query.in === "function"
+        ? query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"])
+        : query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up");
     case "waiting":
-      return query.eq("latest_message_direction", "outbound");
+      // mirrors canonical_inbox_counts.waiting exactly
+      return typeof query.not === "function"
+        ? query.eq("latest_message_direction", "outbound").not("inbox_bucket", "in", "(dead,suppressed)")
+        : query.eq("latest_message_direction", "outbound");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
+    case "all":
+    case "all_messages":
     default:
       return query;
   }
@@ -1396,62 +1119,33 @@ export async function getLiveCounts(params = {}, deps = {}) {
   return result.counts;
 }
 
-async function getLiveCountsWithMeta(params = {}, deps = {}) {
+// P0: counts come from exactly one source — canonical_inbox_counts — which
+// aggregates canonical_inbox_threads. No full-scan fallback, no approximation.
+// If the canonical counts source fails, we throw (the caller surfaces a real
+// error) rather than fabricating numbers.
+async function getLiveCountsWithMeta(_params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
-  const disableCountFullScan = deps.disableCountFullScan === true;
 
-  for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
-    if (sourceConfig.countSource) {
-      try {
-        const { data, error } = await supabase
-          .from(sourceConfig.countSource)
-          .select("*")
-          .limit(1);
+  const { data, error } = await supabase
+    .from(PRIMARY_COUNT_SOURCE)
+    .select("*")
+    .limit(1);
 
-        if (error) throw error;
+  if (error) throw error;
 
-        const row = Array.isArray(data) ? data[0] : null;
-        if (row && hasConcreteCountRow(row)) {
-          const counts = countFromRow(row);
-          console.log("[INBOX_COUNTS_UPDATED]", counts);
-          return {
-            counts,
-            source: sourceConfig.countSource,
-            approximate: false,
-            degraded: false,
-          };
-        }
-      } catch (error) {
-        if (!isMissingSourceError(error)) {
-          console.warn("[INBOX_COUNTS_FALLBACK]", error?.message || error);
-        }
-      }
-    }
-
-    if (disableCountFullScan) {
-      continue;
-    }
-
-    const { data: fallbackRows, error: fallbackError } = await supabase
-      .from(sourceConfig.name)
-      .select(sourceConfig.countFallbackFields);
-
-    if (fallbackError) {
-      if (isMissingSourceError(fallbackError)) continue;
-      throw fallbackError;
-    }
-
-    const counts = computeCountsFromThreads((fallbackRows || []).map((row) => normalizeThreadRow(row, params)));
-    console.log("[INBOX_COUNTS_UPDATED]", counts);
-    return {
-      counts,
-      source: `${sourceConfig.name}:full_scan`,
-      approximate: false,
-      degraded: false,
-    };
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row || !hasConcreteCountRow(row)) {
+    throw new Error("live_inbox_counts_unavailable");
   }
 
-  throw new Error("live_inbox_counts_unavailable");
+  const counts = countFromRow(row);
+  console.log("[INBOX_COUNTS_UPDATED]", counts);
+  return {
+    counts,
+    source: PRIMARY_COUNT_SOURCE,
+    approximate: false,
+    degraded: false,
+  };
 }
 
 export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = {}) {
@@ -1464,7 +1158,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : (isAutoRefresh ? 25 : DEFAULT_LIMIT));
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
-  const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true || isAutoRefresh;
+  // P0: counts always load from canonical_inbox_counts. Auto-refresh no longer
+  // skips counts (that produced "preserved counts" on the client, which §C forbids).
+  const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
   const skipDeliveryHydration = bool(params.skip_delivery) || isAutoRefresh;
 
   let cursor = params.cursor || null;
@@ -1505,70 +1201,23 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const hasMore = postFiltered.length > limit;
   let finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
+
+  // P0: counts come ONLY from canonical_inbox_counts (which aggregates the same
+  // canonical view the rows come from). No approximate, no floor, no preserved,
+  // no degraded counts. If the count source errors, getLiveCountsWithMeta throws.
   let liveCounts = buildNullCounts();
   let countQueryMs = 0;
-  let countsDegraded = false;
-  let countsApproximate = false;
   let countsSource = skipCounts ? "skipped" : null;
-  let countPreservedReason = null;
+  const countsDegraded = false;
+  const countsApproximate = false;
+  const countPreservedReason = skipCounts ? "counts_skipped_by_request" : null;
 
   if (!skipCounts) {
-    if (sourceConfig.key === "primary" || sourceConfig.key === "legacy_primary") {
-      const countQueryStartedAt = nowMs();
-      try {
-        const countResult = await getLiveCountsWithMeta({}, {
-          ...deps,
-          preferredThreadSource: sourceConfig.name,
-          disableCountFullScan: true,
-        });
-        liveCounts = countResult.counts;
-        countsSource = countResult.source;
-        countsApproximate = countResult.approximate === true;
-        countsDegraded = countResult.degraded === true;
-      } catch (error) {
-        countsDegraded = true;
-        countsApproximate = true;
-        countsSource = "visible_rows_approximate";
-        liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
-        countPreservedReason = Object.keys(liveCounts).length > 0
-          ? "count_views_failed_visible_rows_approximate"
-          : "count_views_failed_preserve_client_counts";
-        console.warn("[INBOX_COUNTS_DEGRADED]", {
-          source: sourceConfig.name,
-          message: error?.message || String(error),
-          derived_visible_counts: liveCounts,
-        });
-      } finally {
-        countQueryMs = elapsedMs(countQueryStartedAt);
-      }
-    } else {
-      countsDegraded = true;
-      countsApproximate = true;
-      countsSource = "visible_rows_approximate";
-      liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
-      countPreservedReason = Object.keys(liveCounts).length > 0
-        ? "fallback_thread_source_visible_rows_approximate"
-        : "fallback_thread_source_preserve_client_counts";
-    }
-  } else {
-    countPreservedReason = "counts_skipped_by_request";
-  }
-
-  if (!skipCounts) {
-    const countFloor = applyVisibleRowsCountFloor(liveCounts, finalRows, filter);
-    if (countFloor.applied) {
-      liveCounts = countFloor.counts;
-      countsDegraded = true;
-      countsApproximate = true;
-      countsSource = countsSource ? `${countsSource}:visible_rows_floor` : "visible_rows_floor";
-      countPreservedReason = countPreservedReason || "count_view_zero_visible_rows_floor";
-      console.warn("[INBOX_COUNTS_VISIBLE_ROWS_FLOOR]", {
-        source: sourceConfig.name,
-        bucket: filter,
-        rows: finalRows.length,
-        derived_visible_counts: countFloor.approximate,
-      });
-    }
+    const countQueryStartedAt = nowMs();
+    const countResult = await getLiveCountsWithMeta({}, deps);
+    liveCounts = countResult.counts;
+    countsSource = countResult.source;
+    countQueryMs = elapsedMs(countQueryStartedAt);
   }
 
   const deliveryHydrationStartedAt = nowMs();
