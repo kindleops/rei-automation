@@ -23,8 +23,10 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
 
-    // Option C: Fast list rows first (Skip heavy aggregations and delivery queues)
-    params.skip_counts = 'true'
+    // Option C: Fast list rows first.
+    // Keep delivery hydration skipped on the list route, but do NOT force-skip counts.
+    // Counts must load for manual bucket switches and initial load so inbox badges stay accurate.
+    // Auto-refresh can still skip counts inside getLiveInbox via isAutoRefresh.
     params.skip_delivery = 'true'
 
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
