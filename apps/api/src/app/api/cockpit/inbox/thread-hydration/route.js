@@ -94,7 +94,15 @@ async function queryThreadRow({ thread_key, conversation_thread_id, legacy_threa
     normalizePhone(canonical_e164 || phone_e164 || phone || best_phone || seller_phone),
   ].filter(Boolean)
   const idValues = [resolvedPropertyId, resolvedProspectId, resolvedMasterOwnerId].filter(Boolean)
+  // P0: canonical_inbox_threads is the single source of truth and carries the full
+  // deal-intelligence projection, so the dossier resolves from the SAME view as the
+  // list. The legacy views are kept only as last-resort identity fallbacks.
   const sources = [
+    {
+      name: 'canonical_inbox_threads',
+      columns: ['canonical_thread_key', 'thread_key', 'canonical_e164', 'best_phone', 'seller_phone', 'display_phone'],
+      idColumns: ['property_id', 'prospect_id', 'master_owner_id', 'thread_property_id', 'thread_prospect_id', 'thread_master_owner_id'],
+    },
     {
       name: 'inbox_threads_view',
       columns: ['canonical_thread_key', 'thread_key', 'canonical_e164', 'best_phone', 'seller_phone', 'display_phone'],
@@ -104,11 +112,6 @@ async function queryThreadRow({ thread_key, conversation_thread_id, legacy_threa
       name: 'v_inbox_threads_live_v2',
       columns: ['thread_key', 'canonical_thread_key', 'canonical_e164', 'best_phone', 'seller_phone'],
       idColumns: ['property_id', 'prospect_id', 'master_owner_id'],
-    },
-    {
-      name: 'v_inbox_enriched',
-      columns: ['thread_key', 'best_phone', 'seller_phone', 'display_phone'],
-      idColumns: ['property_id', 'final_property_id', 'final_prospect_id', 'master_owner_id', 'final_master_owner_id'],
     },
   ]
   const diagnostics = []

@@ -35,6 +35,7 @@ import {
 import { updateMasterOwnerAfterInbound } from "@/lib/domain/master-owners/update-master-owner-after-inbound.js";
 import { isNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
 import { cancelPendingQueueItemsForOwner } from "@/lib/domain/queue/cancel-pending-queue-items.js";
+import { suppressContactOnStop } from "@/lib/domain/compliance/suppress-contact.js";
 import { isEmergencyStopActive } from "@/lib/domain/queue/queue-control-safety.js";
 import { extractUnderwritingSignals } from "@/lib/domain/underwriting/extract-underwriting-signals.js";
 import { buildInboundConversationState } from "@/lib/domain/communications-engine/state-machine.js";
@@ -87,6 +88,7 @@ const defaultDeps = {
   updateMasterOwnerAfterInbound,
   isNegativeReply,
   cancelPendingQueueItemsForOwner,
+  suppressContactOnStop,
   extractUnderwritingSignals,
   buildInboundConversationState,
   beginIdempotentProcessing,
@@ -1186,6 +1188,24 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           phone_item_id,
           canceled_count: queue_cancellation?.canceled_count ?? 0,
           items_checked: queue_cancellation?.items_checked ?? 0,
+        });
+      }
+
+      // P0 §E: a STOP / opt-out must immediately + deterministically suppress.
+      // Writing the canonical sms_suppression_list here makes the inbox show the
+      // contact as Suppressed AND blocks every future outbound (campaigns
+      // included) at the textgrid compliance hard-stop. Idempotent.
+      if (is_opt_out && inbound_from) {
+        const suppression_result = await runtimeDeps.suppressContactOnStop({
+          phone_number: inbound_from,
+          reason: "inbound_opt_out",
+          source: "textgrid_inbound",
+        });
+        safeInfo("textgrid.inbound_opt_out_suppressed", {
+          message_id: extracted.message_id,
+          inbound_from,
+          ok: suppression_result?.ok === true,
+          already_suppressed: suppression_result?.already_suppressed === true,
         });
       }
 
