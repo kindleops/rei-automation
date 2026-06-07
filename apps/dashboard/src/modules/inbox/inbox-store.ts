@@ -217,7 +217,10 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
     case 'BUCKET_FETCH_DONE': {
       const bucket = getBucket(state, action.bucketKey)
       // Stale guard: only the latest requestId for this bucket may commit rows.
-      if (bucket.lastRequestId !== action.requestId) return state
+      if (bucket.lastRequestId !== action.requestId) {
+        console.log('[INBOX_STORE_STALE_GUARD_BLOCKED]', { bucketKey: action.bucketKey, expected: bucket.lastRequestId, actual: action.requestId })
+        return state
+      }
       return {
         ...state,
         buckets: {
@@ -250,7 +253,15 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
 
     case 'BUCKET_APPEND_ROWS': {
       const bucket = getBucket(state, action.bucketKey)
-      if (bucket.lastRequestId !== action.requestId) return state
+      // Requirement: Every load-more request must verify active bucket before commit.
+      if (state.activeBucketKey !== action.bucketKey) {
+        console.log('[INBOX_STORE_APPEND_BLOCKED_INACTIVE]', { active: state.activeBucketKey, actual: action.bucketKey })
+        return state
+      }
+      if (bucket.lastRequestId !== action.requestId) {
+        console.log('[INBOX_STORE_APPEND_STALE_GUARD_BLOCKED]', { bucketKey: action.bucketKey, expected: bucket.lastRequestId, actual: action.requestId })
+        return state
+      }
       // Deduplicate by (threadKey || id) so Load More never creates duplicate rows.
       const existingKeys = new Set(
         bucket.rows.map((r) => {
@@ -263,6 +274,7 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
         const key = (row.threadKey as string) || (row.id as string) || ''
         return key ? !existingKeys.has(key) : true
       })
+      if (fresh.length === 0 && action.hasMore === bucket.hasMore && action.cursor === bucket.cursor) return state
       return {
         ...state,
         buckets: {
@@ -320,15 +332,29 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
 
       const bucketEntries = Object.entries(state.buckets)
       for (const [key, bucket] of bucketEntries) {
-        const withoutThread = bucket.rows.filter((r) => !rowMatchesThread(r as Record<string, unknown>, threadKey))
+        const originalRows = bucket.rows
+        const withoutThread = originalRows.filter((r) => !rowMatchesThread(r as Record<string, unknown>, threadKey))
         const shouldInclude = shouldMoveBuckets
           ? rowBelongsToBucket(patchedRow, key)
           : existingBucketKeys.has(key) || rowBelongsToBucket(patchedRow, key)
-        const nextRows = shouldInclude
-          ? sortRowsNewestFirst([patchedRow, ...withoutThread])
-          : withoutThread
-        newBuckets[key] = nextRows === bucket.rows ? bucket : { ...bucket, rows: nextRows }
-        if (nextRows.length !== bucket.rows.length || nextRows[0] !== bucket.rows[0]) changed = true
+        
+        let nextRows: unknown[]
+        if (shouldInclude) {
+          nextRows = sortRowsNewestFirst([patchedRow, ...withoutThread])
+        } else {
+          nextRows = withoutThread
+        }
+
+        // Deep equality check for the specific row or position
+        const rowsChanged = nextRows.length !== originalRows.length || 
+          nextRows.some((row, idx) => row !== originalRows[idx])
+
+        if (rowsChanged) {
+          newBuckets[key] = { ...bucket, rows: nextRows }
+          changed = true
+        } else {
+          newBuckets[key] = bucket
+        }
       }
 
       if (action.upsert === true && targetBucketKey && !newBuckets[targetBucketKey]) {
