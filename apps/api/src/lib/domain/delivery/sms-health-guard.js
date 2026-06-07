@@ -74,6 +74,17 @@ export function getDefaultSmsHealthGuardConfig(env = process.env, system_control
   };
 }
 
+export function isSmsSenderHealthBlocked(
+  sender_number,
+  { env = process.env, system_control = {} } = {}
+) {
+  const normalized_sender = normalizePhone(sender_number);
+  if (!normalized_sender) return false;
+  return getDefaultSmsHealthGuardConfig(env, system_control)
+    .blocked_sender_numbers
+    .includes(normalized_sender);
+}
+
 export function evaluateSmsHealthGuard({
   from_phone_number = null,
   sender_number = null,
@@ -145,7 +156,7 @@ export function evaluateSmsHealthGuard({
   }
 
   if (
-    tier === "approved_regional_fallback" &&
+    ["approved_regional_fallback", "approved_state_fallback"].includes(tier) &&
     (local_required || (is_first_touch && !allow_first_touch_regional))
   ) {
     return {

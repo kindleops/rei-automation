@@ -240,6 +240,47 @@ describe("Supabase send_queue auto-queue", () => {
     assert.strictEqual(inserted.payload.rendered_message, payload.rendered_message);
   });
 
+  it("should reject an active queue row with a health-blocked sender", async () => {
+    const result = await insertSupabaseSendQueueRow(
+      {
+        queue_status: "queued",
+        to_phone_number: "+15551234567",
+        from_phone_number: "+14693131600",
+        message_body: "Health guard proof",
+      },
+      { supabase: mockSupabase }
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, "blocked_sender_number");
+    assert.strictEqual(result.error, "health_blocked_sender_cannot_be_queued");
+    assert.strictEqual(mockSupabase._inserted.length, 0);
+  });
+
+  it("should reject graph fallback coverage without a runtime sender", async () => {
+    const result = await insertSupabaseSendQueueRow(
+      {
+        queue_status: "scheduled",
+        campaign_id: "campaign-mismatch",
+        touch_number: 1,
+        to_phone_number: "+15551234567",
+        message_body: "Graph/runtime mismatch proof",
+        metadata: {
+          source: "campaign_launch_execution",
+          campaign_target_metadata: {
+            routing_tier: "approved_state_fallback",
+            blocker_flags: { fallback_covered: true },
+          },
+        },
+      },
+      { supabase: mockSupabase }
+    );
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, "GRAPH_RUNTIME_SENDER_ROUTE_MISMATCH");
+    assert.strictEqual(mockSupabase._inserted.length, 0);
+  });
+
   it("should include textgrid_message_id after send", async () => {
     const payload = {
       thread_key: "owner:123:phone:456",

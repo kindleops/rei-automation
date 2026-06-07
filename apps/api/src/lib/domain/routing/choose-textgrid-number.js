@@ -1,9 +1,12 @@
 // ─── choose-textgrid-number.js ────────────────────────────────────────────
 import APP_IDS from "@/lib/config/app-ids.js";
 import {
-  normalizeMarketLabel,
   resolveMarketSendingProfile,
 } from "@/lib/config/market-sending-zones.js";
+import { getDefaultSmsHealthGuardConfig } from "@/lib/domain/delivery/sms-health-guard.js";
+import {
+  buildSafeTextgridRouteTiers,
+} from "@/lib/domain/routing/textgrid-routing-policy.js";
 import { TEXTGRID_NUMBER_FIELDS } from "@/lib/podio/apps/textgrid-numbers.js";
 
 import {
@@ -390,6 +393,7 @@ export async function chooseTextgridNumber({
   first_touch = null,
   require_local_routing = null,
   allow_regional_fallback_for_first_touch = null,
+  sms_blocked_sender_numbers = null,
 } = {}) {
   const market_id =
     context?.ids?.market_id ||
@@ -423,7 +427,9 @@ export async function chooseTextgridNumber({
       process.env.ALLOW_REGIONAL_FALLBACK_FOR_FIRST_TOUCH,
     false
   );
-  const exact_market_required = local_routing_required || first_touch_required;
+  const exact_market_required =
+    local_routing_required ||
+    (first_touch_required && !first_touch_regional_override);
 
   info("routing.choose_textgrid_number_started", {
     phone_item_id: context?.ids?.phone_item_id || null,
@@ -483,66 +489,49 @@ export async function chooseTextgridNumber({
       preferred_area_code: market_area_code,
     }),
   }));
-
-  const normalizedExact = lower(normalizeMarketLabel(resolution.normalized_raw_market));
-  const normalizedAlias = lower(normalizeMarketLabel(resolution.normalized_market));
-  const clusterMarkets = resolution.allowed_phone_markets.map((market_name) =>
-    lower(normalizeMarketLabel(market_name))
-  );
-  const allowed_candidates = scored.filter((record) => {
-    const key = lower(normalizeMarketLabel(record.market_name));
-    return key === normalizedExact || key === normalizedAlias || clusterMarkets.includes(key);
+  const health_guard_config = getDefaultSmsHealthGuardConfig(process.env, {
+    sms_blocked_sender_numbers,
   });
-  const allowed_market_counts = resolution.priority_chain.map((entry) => ({
-    tier: entry.tier,
-    market_name: entry.market || null,
-    candidate_count:
-      entry.tier === "regional_cluster_fallback"
-        ? scored.filter((record) =>
-            clusterMarkets.includes(lower(normalizeMarketLabel(record.market_name)))
-          ).length
-        : scored.filter(
-            (record) =>
-              lower(normalizeMarketLabel(record.market_name)) ===
-              lower(normalizeMarketLabel(entry.market))
-          ).length,
+  const safe_route = buildSafeTextgridRouteTiers({
+    market: raw_seller_market,
+    state: resolution.normalized_raw_market?.split(",").at(-1),
+    numbers: scored,
+    blocked_sender_numbers: health_guard_config.blocked_sender_numbers,
+    target_market_aliases: [resolution.normalized_market],
+    allow_regional_fallback: !exact_market_required,
+  });
+  const deterministic_tiers = safe_route.tiers.map((tier) => ({
+    tier:
+      tier.route_type === "approved_state_fallback"
+        ? "regional_cluster_fallback"
+        : tier.route_type === "approved_alias_match"
+          ? "alias_market_match"
+          : tier.route_type,
+    reason:
+      tier.route_type === "approved_state_fallback"
+        ? "regional_cluster_fallback"
+        : tier.route_type === "approved_alias_match"
+          ? "alias_market_match"
+          : tier.route_type,
+    candidates: tier.candidates,
+    target_market: tier.target_market,
+  }));
+  const allowed_candidates = [
+    ...new Map(
+      deterministic_tiers
+        .flatMap((tier) => tier.candidates)
+        .map((record) => [record.item_id || record.normalized_phone, record])
+    ).values(),
+  ];
+  const allowed_market_counts = deterministic_tiers.map((tier) => ({
+    tier: tier.tier,
+    market_name: tier.target_market || null,
+    candidate_count: tier.candidates.length,
   }));
 
   let selected = null;
   let selection_reason = "routing_unmapped";
   let fallback_reason = null;
-  const deterministic_tiers = [
-    {
-      tier: "exact_market_match",
-      reason: "exact_market_match",
-      candidates: scored.filter(
-        (record) => lower(normalizeMarketLabel(record.market_name)) === normalizedExact
-      ),
-    },
-    ...(
-      exact_market_required
-        ? []
-        : [
-            {
-              tier: "alias_market_match",
-              reason: "alias_market_match",
-              candidates:
-                normalizedAlias === normalizedExact
-                  ? []
-                  : scored.filter(
-                      (record) => lower(normalizeMarketLabel(record.market_name)) === normalizedAlias
-                    ),
-            },
-            {
-              tier: "regional_cluster_fallback",
-              reason: "regional_cluster_fallback",
-              candidates: scored.filter((record) =>
-                clusterMarkets.includes(lower(normalizeMarketLabel(record.market_name)))
-              ),
-            },
-          ]
-    ),
-  ];
 
   for (const tier of deterministic_tiers) {
     if (!tier.candidates.length) continue;
@@ -564,9 +553,12 @@ export async function chooseTextgridNumber({
   }
 
   if (!selected) {
-    const no_selection_reason = exact_market_required
-      ? "NO_VALID_LOCAL_TEXTGRID_NUMBER"
-      : selection_reason;
+    const no_selection_reason =
+      safe_route.active_numbers.length > 0 && safe_route.safe_numbers.length === 0
+        ? "ALL_ACTIVE_TEXTGRID_NUMBERS_HEALTH_BLOCKED"
+        : exact_market_required
+          ? "NO_VALID_LOCAL_TEXTGRID_NUMBER"
+          : "NO_APPROVED_ROUTING_PATH";
     warn("routing.choose_textgrid_number_no_match", {
       market_id,
       raw_seller_market,

@@ -1,0 +1,536 @@
+[
+  {
+    "key": "workspace-menu",
+    "label": "Workspace menu container",
+    "selector": ".nx-topbar-workspace-menu",
+    "available": true,
+    "className": "nx-liquid-popover nx-topbar-workspace-menu",
+    "winners": [
+      {
+        "property": "background-color",
+        "computed": "rgba(0, 0, 0, 0)",
+        "winningSelector": ".nx-liquid-popover",
+        "winningValue": " !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": " !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "border-top-color",
+        "computed": "rgba(148, 163, 184, 0.16)",
+        "winningSelector": ".nx-liquid-popover",
+        "winningValue": " !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "rgba(255, 255, 255, 0.14)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "rgba(255, 255, 255, 0.12)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": " !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "box-shadow",
+        "computed": "none",
+        "winningSelector": ".nx-liquid-popover",
+        "winningValue": "var(--nx-glass-shadow-sm), var(--nx-glass-inner-highlight) !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "0 32px 80px #000000b3,0 0 0 1px #ffffff0d",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "rgba(0, 0, 0, 0.7) 0px 32px 80px, rgba(255, 255, 255, 0.05) 0px 0px 0px 1px",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "0 24px 64px -12px #000000a6,inset 0 0 0 1px #ffffff0d",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "rgba(0, 0, 0, 0.65) 0px 24px 64px -12px, rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "var(--glass-shadow)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "var(--glass-shadow)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "var(--nx-glass-shadow-sm), var(--nx-glass-inner-highlight)!important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-popover",
+            "value": "var(--nx-glass-shadow-sm), var(--nx-glass-inner-highlight) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "submenu-panel",
+    "label": "Workspace submenu panel",
+    "selector": ".nx-topbar-workspace-menu .nx-workspace-submenu-panel",
+    "available": true,
+    "className": "nx-workspace-submenu-panel",
+    "winners": [
+      {
+        "property": "background-color",
+        "computed": "rgba(0, 0, 0, 0)",
+        "winningSelector": null,
+        "winningValue": null,
+        "important": false,
+        "styleSheet": null,
+        "ordered": []
+      },
+      {
+        "property": "border-top-color",
+        "computed": "rgb(229, 231, 235)",
+        "winningSelector": null,
+        "winningValue": null,
+        "important": false,
+        "styleSheet": null,
+        "ordered": []
+      },
+      {
+        "property": "box-shadow",
+        "computed": "none",
+        "winningSelector": null,
+        "winningValue": null,
+        "important": false,
+        "styleSheet": null,
+        "ordered": []
+      }
+    ]
+  },
+  {
+    "key": "accent-row",
+    "label": "Accent palette row (active)",
+    "selector": ".nx-topbar-workspace-menu .nx-workspace-submenu-item.is-active",
+    "available": true,
+    "className": "nx-workspace-submenu-item is-active",
+    "winners": [
+      {
+        "property": "background-color",
+        "computed": "rgba(0, 0, 0, 0)",
+        "winningSelector": "button",
+        "winningValue": "initial",
+        "important": false,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": "input[type=\"button\" i], input[type=\"submit\" i], input[type=\"reset\" i], input[type=\"file\" i]::-webkit-file-upload-button, button",
+            "value": "buttonface",
+            "important": false,
+            "styleSheet": "sheet#undefined",
+            "overridden": true
+          },
+          {
+            "selector": "button",
+            "value": "initial",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "border-top-color",
+        "computed": "rgb(229, 231, 235)",
+        "winningSelector": "button",
+        "winningValue": "currentcolor",
+        "important": false,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": "input[type=\"button\" i], input[type=\"submit\" i], input[type=\"reset\" i], input[type=\"file\" i]::-webkit-file-upload-button, button",
+            "value": "buttonborder",
+            "important": false,
+            "styleSheet": "sheet#undefined",
+            "overridden": true
+          },
+          {
+            "selector": "button",
+            "value": "currentcolor",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "box-shadow",
+        "computed": "none",
+        "winningSelector": null,
+        "winningValue": null,
+        "important": false,
+        "styleSheet": null,
+        "ordered": []
+      }
+    ]
+  },
+  {
+    "key": "notification-center",
+    "label": "Notification center panel",
+    "selector": ".nxhud-panel.nx-notification-center",
+    "available": true,
+    "className": "nx-notification-center nx-liquid-panel nxhud-panel",
+    "winners": [
+      {
+        "property": "background-color",
+        "computed": "rgba(8, 10, 18, 0.88)",
+        "winningSelector": ".nxhud-panel.nx-notification-center",
+        "winningValue": "rgba(8, 10, 18, 0.88) !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-notification-center",
+            "value": " !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-panel",
+            "value": " !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-notification-center",
+            "value": "initial !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nxhud-panel.nx-notification-center",
+            "value": "rgba(8, 10, 18, 0.88) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "border-top-color",
+        "computed": "rgba(255, 255, 255, 0.13)",
+        "winningSelector": ".nxhud-panel.nx-notification-center",
+        "winningValue": "rgba(255, 255, 255, 0.13) !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-notification-center",
+            "value": "rgba(255, 255, 255, 0.16) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-panel",
+            "value": " !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-notification-center",
+            "value": "rgba(173, 190, 220, 0.15) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nxhud-panel.nx-notification-center",
+            "value": "rgba(255, 255, 255, 0.13) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "box-shadow",
+        "computed": "rgba(255, 255, 255, 0.06) 0px 0px 0px 0.5px inset, rgba(255, 255, 255, 0.09) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.82) 0px 48px 100px 0px, rgba(0, 0, 0, 0.5) 0px 12px 32px 0px",
+        "winningSelector": ".nxhud-panel.nx-notification-center",
+        "winningValue": "rgba(255, 255, 255, 0.06) 0px 0px 0px 0.5px inset, rgba(255, 255, 255, 0.09) 0px 1px inset, rgba(0, 0, 0, 0.82) 0px 48px 100px, rgba(0, 0, 0, 0.5) 0px 12px 32px !important",
+        "important": true,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-notification-center",
+            "value": "0 42px 90px #000c,inset 0 0 0 1px #ffffff0d!important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-notification-center",
+            "value": "rgba(0, 0, 0, 0.8) 0px 42px 90px, rgba(255, 255, 255, 0.05) 0px 0px 0px 1px inset !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-panel",
+            "value": "var(--nx-glass-shadow), var(--nx-glass-inner-highlight)!important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-liquid-panel",
+            "value": "var(--nx-glass-shadow), var(--nx-glass-inner-highlight) !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nxhud-panel.nx-notification-center",
+            "value": "inset 0 0 0 .5px #ffffff0f,inset 0 1px #ffffff17,0 48px 100px #000000d1,0 12px 32px #00000080!important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nxhud-panel.nx-notification-center",
+            "value": "rgba(255, 255, 255, 0.06) 0px 0px 0px 0.5px inset, rgba(255, 255, 255, 0.09) 0px 1px inset, rgba(0, 0, 0, 0.82) 0px 48px 100px, rgba(0, 0, 0, 0.5) 0px 12px 32px !important",
+            "important": true,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "thread-bubble",
+    "label": "Thread bubble (outbound)",
+    "selector": ".nx-bubble-wrap.is-outbound .nx-chat-bubble",
+    "available": false,
+    "note": "element not present in no-backend sandbox (requires live data) — not audited"
+  },
+  {
+    "key": "filter-pill",
+    "label": "Active filter pill",
+    "selector": ".nx-inbox-chip-v2.is-active",
+    "available": true,
+    "className": "nx-inbox-chip-v2 is-active is-neutral",
+    "winners": [
+      {
+        "property": "background-color",
+        "computed": "rgba(255, 149, 0, 0.15)",
+        "winningSelector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+        "winningValue": "rgba(255, 149, 0, 0.15)",
+        "important": false,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": "input[type=\"button\" i], input[type=\"submit\" i], input[type=\"reset\" i], input[type=\"file\" i]::-webkit-file-upload-button, button",
+            "value": "buttonface",
+            "important": false,
+            "styleSheet": "sheet#undefined",
+            "overridden": true
+          },
+          {
+            "selector": "button",
+            "value": "initial",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-inbox-chip-v2",
+            "value": "rgba(255, 255, 255, 0.03)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-inbox-chip-v2.is-active",
+            "value": "rgba(255, 255, 255, 0.12)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+            "value": "rgba(255, 149, 0, 0.15)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "border-top-color",
+        "computed": "rgba(255, 149, 0, 0.3)",
+        "winningSelector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+        "winningValue": "rgba(255, 149, 0, 0.3)",
+        "important": false,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": "input[type=\"button\" i], input[type=\"submit\" i], input[type=\"reset\" i], input[type=\"file\" i]::-webkit-file-upload-button, button",
+            "value": "buttonborder",
+            "important": false,
+            "styleSheet": "sheet#undefined",
+            "overridden": true
+          },
+          {
+            "selector": "button",
+            "value": "currentcolor",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-inbox-chip-v2",
+            "value": "rgba(255, 255, 255, 0.06)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-inbox-chip-v2.is-active",
+            "value": "",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+            "value": "rgba(255, 149, 0, 0.3)",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      },
+      {
+        "property": "box-shadow",
+        "computed": "rgba(255, 149, 0, 0.2) 0px 0px 12px 0px",
+        "winningSelector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+        "winningValue": "rgba(255, 149, 0, 0.2) 0px 0px 12px",
+        "important": false,
+        "styleSheet": "index-uDMgdZD-.css",
+        "ordered": [
+          {
+            "selector": ".nx-inbox-chip-v2.is-active",
+            "value": "0 2px 10px #0003",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-inbox-chip-v2.is-active",
+            "value": "rgba(0, 0, 0, 0.2) 0px 2px 10px",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+            "value": "0 0 12px #ff950033",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": true
+          },
+          {
+            "selector": ".nx-sidebar--active-neutral .nx-inbox-chip-v2.is-active",
+            "value": "rgba(255, 149, 0, 0.2) 0px 0px 12px",
+            "important": false,
+            "styleSheet": "index-uDMgdZD-.css",
+            "overridden": false
+          }
+        ]
+      }
+    ]
+  }
+]

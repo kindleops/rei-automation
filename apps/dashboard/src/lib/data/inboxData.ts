@@ -20,7 +20,7 @@ import {
 } from './shared'
 import { emitNotification } from '../../shared/NotificationToast'
 import { normalizeDealContext, type DealContext } from './dealContext'
-import { commitDashboardMessages, commitDashboardThreads } from './dashboardEntityStore'
+import { commitDashboardThreads } from './dashboardEntityStore'
 import { dataLayerNow, loadDashboardViewModel, logHydrationPhaseDone } from './dashboardDataLayer'
 
 const TEXTGRID_NUMBERS = new Set([
@@ -3887,12 +3887,6 @@ export const getThreadHydrationForThread = async (
         recovered_preview_reason: 'empty_timeline_with_latest_preview',
       } : {}),
     }
-    commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
-      phase: 'messages',
-      source: recoveredMessage ? 'thread_hydration_recovered_preview' : 'thread_hydration',
-      integrityBlocked,
-      replace: true,
-    })
     logHydrationPhaseDone('messages', hydrationStartedAt, {
       threadKey,
       messages: messages.length,
@@ -3966,11 +3960,6 @@ export const getThreadHydrationForThread = async (
     if (DEV) console.warn('[ThreadHydration] unified hydration failed; falling back to split endpoints', err)
     const messages = await getThreadMessagesForThread(thread, { signal }).catch(() => [])
     const recoveredPreview = messages.some((message) => message.source === 'recovered_preview')
-    commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
-      phase: 'messages',
-      source: recoveredPreview ? 'thread_hydration_fallback_recovered_preview' : 'thread_hydration_fallback',
-      replace: true,
-    })
     logHydrationPhaseDone('messages', hydrationStartedAt, {
       threadKey,
       messages: messages.length,

@@ -13,7 +13,6 @@ import {
 
 export interface DashboardEntityState {
   threadsById: Record<string, AnyRecord>
-  messagesByThreadId: Record<string, AnyRecord[]>
   prospectsById: Record<string, AnyRecord>
   propertiesById: Record<string, AnyRecord>
   ownersById: Record<string, AnyRecord>
@@ -29,7 +28,6 @@ type DashboardEntityListener = (state: DashboardEntityState) => void
 
 const cloneState = (state: DashboardEntityState): DashboardEntityState => ({
   threadsById: { ...state.threadsById },
-  messagesByThreadId: { ...state.messagesByThreadId },
   prospectsById: { ...state.prospectsById },
   propertiesById: { ...state.propertiesById },
   ownersById: { ...state.ownersById },
@@ -43,7 +41,6 @@ const cloneState = (state: DashboardEntityState): DashboardEntityState => ({
 
 const initialState: DashboardEntityState = {
   threadsById: {},
-  messagesByThreadId: {},
   prospectsById: {},
   propertiesById: {},
   ownersById: {},
@@ -228,32 +225,6 @@ const commitRowEntities = (next: DashboardEntityState, row: AnyRecord): {
   }
 }
 
-const normalizeMessageEntity = (message: unknown): AnyRecord => {
-  const row = asRecord(message)
-  const entity = nestedOrEmpty(row, 'message_entity')
-  const id = firstEntityId(entity, ['id', 'messageId', 'message_id', 'message_event_key']) ||
-    firstEntityId(row, ['id', 'messageId', 'message_id', 'message_event_key'])
-  return {
-    ...row,
-    ...entity,
-    id: id || `${asString(row.threadKey ?? row.thread_key, 'thread')}:${asString(row.createdAt ?? row.created_at, String(dataLayerNow()))}`,
-  }
-}
-
-const mergeMessages = (current: AnyRecord[], incoming: AnyRecord[]): AnyRecord[] => {
-  const byId = new Map<string, AnyRecord>()
-  for (const message of [...current, ...incoming]) {
-    const id = asString(message.id, '')
-    if (!id) continue
-    byId.set(id, { ...(byId.get(id) ?? {}), ...message })
-  }
-  return [...byId.values()].sort((left, right) => {
-    const leftTime = new Date(asString(left.createdAt ?? left.created_at ?? left.timelineAt ?? left.timeline_at, '')).getTime()
-    const rightTime = new Date(asString(right.createdAt ?? right.created_at ?? right.timelineAt ?? right.timeline_at, '')).getTime()
-    return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0)
-  })
-}
-
 export const getDashboardEntitySnapshot = (): DashboardEntityState => cloneState(state)
 
 export const subscribeDashboardEntityStore = (listener: DashboardEntityListener): (() => void) => {
@@ -295,33 +266,6 @@ export const commitDashboardThreads = (
     ...meta,
   })
   return summary.threads
-}
-
-export const commitDashboardMessages = (
-  threadId: string,
-  messages: unknown[],
-  meta: AnyRecord = {},
-): number => {
-  const normalizedThreadId = asString(threadId, '').trim()
-  if (!normalizedThreadId) return 0
-
-  const startedAt = dataLayerNow()
-  const next = cloneState(state)
-  const incoming = safeArray(messages as AnyRecord[]).map(normalizeMessageEntity)
-  next.messagesByThreadId[normalizedThreadId] = meta.replace === true
-    ? mergeMessages([], incoming)
-    : mergeMessages(
-      next.messagesByThreadId[normalizedThreadId] ?? [],
-      incoming,
-    )
-  bumpState(next)
-  logCacheCommitDone('dashboard_messages', startedAt, {
-    threadId: normalizedThreadId,
-    incoming: incoming.length,
-    total: next.messagesByThreadId[normalizedThreadId].length,
-    ...meta,
-  })
-  return next.messagesByThreadId[normalizedThreadId].length
 }
 
 export const commitDashboardDealIntel = (

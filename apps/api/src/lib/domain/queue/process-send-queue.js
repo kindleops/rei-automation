@@ -1399,7 +1399,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       to_phone_number: destination.phone,
     });
 
-    const number_selection = await selectAvailableTextgridNumber(queue_row, deps);
+    const sms_health_system_control = await loadSmsHealthGuardSystemControl(deps);
+    const number_selection = await selectAvailableTextgridNumber(queue_row, {
+      ...deps,
+      sms_health_system_control,
+    });
     if (!number_selection?.ok) {
       throw new Error(number_selection?.reason || "missing_from_phone_number");
     }
@@ -1642,7 +1646,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       routing_tier: resolveQueueRoutingTier(queue_row),
       first_touch: isQueueFirstTouch(queue_row),
       metadata: queue_row.metadata || {},
-      system_control: await loadSmsHealthGuardSystemControl(deps),
+      system_control: sms_health_system_control,
       now,
     });
 

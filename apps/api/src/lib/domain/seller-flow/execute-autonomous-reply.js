@@ -5,6 +5,7 @@ import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/c
 import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { isSmsSenderHealthBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 import {
   insertSupabaseSendQueueRow,
   writeOutboundSuccessMessageEvent,
@@ -73,6 +74,21 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
       reason: runtime_brake.reason,
       error: runtime_brake.error,
       diagnostics: runtime_brake.diagnostics,
+    };
+  }
+  const sms_health_system_control = {
+    sms_blocked_sender_numbers: await get_system_value("sms_blocked_sender_numbers"),
+  };
+  if (
+    isSmsSenderHealthBlocked(from_phone, {
+      system_control: sms_health_system_control,
+    })
+  ) {
+    return {
+      ok: false,
+      status: 423,
+      reason: "blocked_sender_number",
+      error: "health_blocked_sender_cannot_be_queued",
     };
   }
 
@@ -176,6 +192,10 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
         stage,
         template_id,
       }
+    }, {
+      ...deps,
+      supabase,
+      sms_health_system_control,
     });
   } catch (err) {
     logger.error("auto_reply.queue_insert_error", { error: err.message });

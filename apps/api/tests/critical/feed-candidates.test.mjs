@@ -903,7 +903,70 @@ test("chooseTextgridNumber routes Tulsa, OK to Dallas or Houston per approved re
   assert.equal(result.ok, true);
   assert.equal(result.routing_tier, "approved_regional_fallback");
   assert.ok(["Dallas, TX", "Houston, TX"].includes(result.selected_textgrid_market));
-  assert.equal(result.routing_rule_name, "southern_plains_to_dallas");
+  assert.equal(result.routing_rule_name, "southern_plains_to_dallas_then_houston");
+});
+
+test("chooseTextgridNumber routes Dallas to Houston when the Dallas sender is health-blocked", async () => {
+  const result = await chooseTextgridNumber(
+    { market: "Dallas, TX", state: "TX", touch_number: 1, is_first_touch: true },
+    {
+      routing_safe_only: true,
+      first_touch: true,
+      allow_regional_fallback_for_first_touch: true,
+    },
+    {
+      supabase: makeTextgridSupabase([
+        makeTextgridNumber(1, "Dallas, TX", { phone_number: "+14693131600" }),
+        makeTextgridNumber(2, "Houston, TX"),
+      ]),
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.selected_textgrid_market, "Houston, TX");
+  assert.equal(result.routing_tier, "approved_regional_fallback");
+  assert.equal(result.routing_rule_name, "texas_to_dallas_then_houston");
+});
+
+test("chooseTextgridNumber keeps first-touch fallback disabled before migration controls flip", async () => {
+  const result = await chooseTextgridNumber(
+    { market: "Dallas, TX", state: "TX", touch_number: 1, is_first_touch: true },
+    {
+      routing_safe_only: true,
+      first_touch: true,
+      allow_regional_fallback_for_first_touch: false,
+    },
+    {
+      supabase: makeTextgridSupabase([
+        makeTextgridNumber(1, "Dallas, TX", { phone_number: "+14693131600" }),
+        makeTextgridNumber(2, "Houston, TX"),
+      ]),
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.routing_block_reason, "NO_VALID_LOCAL_TEXTGRID_NUMBER");
+});
+
+test("chooseTextgridNumber leaves Georgia uncovered without a safe Atlanta sender", async () => {
+  const result = await chooseTextgridNumber(
+    { market: "Atlanta, GA", state: "GA", touch_number: 1, is_first_touch: true },
+    {
+      routing_safe_only: true,
+      first_touch: true,
+      allow_regional_fallback_for_first_touch: true,
+    },
+    {
+      supabase: makeTextgridSupabase([
+        makeTextgridNumber(1, "Atlanta, GA", { phone_number: "+14704920588" }),
+        makeTextgridNumber(2, "Houston, TX"),
+      ]),
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.routing_block_reason, "NO_APPROVED_ROUTING_PATH");
+  assert.equal(result.routing_rule_name, "georgia_to_atlanta");
 });
 
 test("chooseTextgridNumber routes Illinois to Minneapolis", async () => {

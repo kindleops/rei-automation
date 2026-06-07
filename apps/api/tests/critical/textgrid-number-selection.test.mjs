@@ -60,7 +60,7 @@ test("TextGrid number selection uses exact market match first", async () => {
     candidate_records: [
       createCandidateRecord({
         item_id: 11,
-        normalized_phone: "+14693131600",
+        normalized_phone: "+14693131601",
         market_name: "Dallas, TX",
         priority: 8,
         area_code: "469",
@@ -86,7 +86,7 @@ test("TextGrid number selection uses alias match when exact market has no number
     candidate_records: [
       createCandidateRecord({
         item_id: 21,
-        normalized_phone: "+14693131600",
+        normalized_phone: "+14693131601",
         market_name: "Dallas, TX",
       }),
     ],
@@ -135,7 +135,7 @@ test("TextGrid number selection excludes hard-paused numbers", async () => {
       }),
       createCandidateRecord({
         item_id: 42,
-        normalized_phone: "+14693131600",
+        normalized_phone: "+14693131601",
         market_name: "Dallas, TX",
       }),
     ],
@@ -190,4 +190,57 @@ test("TextGrid number selection safely returns routing_unmapped when unresolved"
 
   assert.equal(selected.item_id, null);
   assert.equal(selected.selection_reason, "routing_unmapped");
+});
+
+test("TextGrid number selection never selects a health-blocked exact sender", async () => {
+  const selected = await chooseTextgridNumber({
+    context: {
+      ids: { phone_item_id: 9007 },
+      summary: { market_name: "Dallas, TX", touch_number: 1 },
+    },
+    first_touch: true,
+    allow_regional_fallback_for_first_touch: true,
+    candidate_records: [
+      createCandidateRecord({
+        item_id: 71,
+        normalized_phone: "+14693131600",
+        market_name: "Dallas, TX",
+      }),
+      createCandidateRecord({
+        item_id: 72,
+        normalized_phone: "+12818458577",
+        market_name: "Houston, TX",
+      }),
+    ],
+  });
+
+  assert.equal(selected.item_id, 72);
+  assert.equal(selected.selection_reason, "regional_cluster_fallback");
+  assert.equal(selected.selection_diagnostics.selected_phone_market, "Houston, TX");
+});
+
+test("TextGrid first-touch fallback stays blocked until the rollout control is enabled", async () => {
+  const selected = await chooseTextgridNumber({
+    context: {
+      ids: { phone_item_id: 9008 },
+      summary: { market_name: "Dallas, TX", touch_number: 1 },
+    },
+    first_touch: true,
+    allow_regional_fallback_for_first_touch: false,
+    candidate_records: [
+      createCandidateRecord({
+        item_id: 81,
+        normalized_phone: "+14693131600",
+        market_name: "Dallas, TX",
+      }),
+      createCandidateRecord({
+        item_id: 82,
+        normalized_phone: "+12818458577",
+        market_name: "Houston, TX",
+      }),
+    ],
+  });
+
+  assert.equal(selected.item_id, null);
+  assert.equal(selected.selection_reason, "NO_VALID_LOCAL_TEXTGRID_NUMBER");
 });

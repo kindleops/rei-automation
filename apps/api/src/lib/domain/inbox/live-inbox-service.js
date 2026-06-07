@@ -802,7 +802,15 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
   }
 
   const latestDeliveryByThread = new Map();
-  const sortedDeliveryRows = [...(messageRows || [])].sort((a, b) => deliveryEventTime(b) - deliveryEventTime(a));
+  // Order by MESSAGE recency (event_timestamp, then created_at) so the "latest
+  // outbound" matches what the conversation view considers latest. Ordering by
+  // delivery-callback time instead let a previously-delivered message outrank a
+  // more recent failed one, so the inbox row disagreed with the conversation.
+  const sortedDeliveryRows = [...(messageRows || [])].sort(
+    (a, b) =>
+      (asTime(b.event_timestamp) - asTime(a.event_timestamp)) ||
+      (asTime(b.created_at) - asTime(a.created_at))
+  );
   for (const row of sortedDeliveryRows) {
     const threadKey = clean(row.thread_key);
     if (threadKey && !latestDeliveryByThread.has(threadKey)) {
@@ -863,9 +871,12 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
 
   return rows.map((row) => {
     const threadKey = clean(row.thread_key || row.canonical_thread_key);
-    const hasStrongIdentity = Boolean(clean(row.prospect_id || row.final_prospect_id || row.property_id || row.final_property_id || row.master_owner_id || row.final_master_owner_id || row.owner_id));
-    const delivery = sortedDeliveryRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || (!hasStrongIdentity ? latestDeliveryByThread.get(threadKey) : null) || null;
-    const queue = queueById.get(clean(delivery?.queue_id)) || sortedQueueRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || (!hasStrongIdentity ? latestQueueByThread.get(threadKey) : null) || null;
+    // message_events keyed by thread_key is the authoritative delivery source —
+    // the SAME source the conversation view reads. Always allow the thread_key
+    // match (canonical thread_key is one-per-phone), so the latest outbound's
+    // real status (e.g. failed) is never masked by a stale send_queue row.
+    const delivery = latestDeliveryByThread.get(threadKey) || sortedDeliveryRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || null;
+    const queue = queueById.get(clean(delivery?.queue_id)) || latestQueueByThread.get(threadKey) || sortedQueueRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || null;
     if (!delivery && !queue) return row;
     return applyDeliverySnapshot(row, delivery, queue);
   });
@@ -894,6 +905,28 @@ function normalizeDeliveryStatusValue(...values) {
   if (statuses.some((status) => status.includes("queue") || status.includes("pending") || status.includes("schedul") || status.includes("approval"))) return "queued";
   if (statuses.some((status) => status.includes("sent") || status === "success" || status === "accepted")) return "sent";
   return statuses[0] || null;
+}
+
+// P0.5 Fix 1: the inbox row delivery badge. Uses the SAME field priority order as
+// the conversation view and normalizes to Failed/Delivered/Sent/Queued.
+// Priority: latest_provider_delivery_status > latest_delivery_status >
+//           provider_delivery_status > delivery_status > queue_status.
+export function resolveDeliveryBadge(row = {}) {
+  const raw = firstClean(
+    row.latest_provider_delivery_status,
+    row.latest_delivery_status,
+    row.provider_delivery_status,
+    row.delivery_status,
+    row.queue_status,
+  );
+  const s = lower(raw);
+  if (!s) return null;
+  // failed family first (note: "undelivered" contains "deliver")
+  if (/fail|undeliv|reject|block/.test(s)) return "failed";
+  if (s.includes("deliver")) return "delivered";
+  if (/\b(sent|submitted|accepted|success)\b/.test(s) || s === "sent") return "sent";
+  if (/queue|pending/.test(s)) return "queued";
+  return null;
 }
 
 function normalizeMessageRow(row = {}) {
@@ -1222,6 +1255,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const deliveryHydrationStartedAt = nowMs();
   finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
+  // P0.5 Fix 1: stamp the normalized delivery badge (post-hydration) so the row
+  // shows the same status as the conversation view.
+  finalRows = finalRows.map((row) => ({ ...row, delivery_badge: resolveDeliveryBadge(row) }));
   const deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
 
   console.log("[INBOX_BUCKET_ROWS]", {

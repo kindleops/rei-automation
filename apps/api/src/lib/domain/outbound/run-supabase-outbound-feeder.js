@@ -7,6 +7,16 @@ import {
   REASON_CODES 
 } from "./supabase-candidate-feeder.js";
 import { insertSupabaseSendQueueRow } from "../../supabase/sms-engine.js";
+import { hasSupabaseConfig } from "../../supabase/client.js";
+import { getSystemValue } from "../../system-control.js";
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
 
 /**
  * runSupabaseOutboundFeeder
@@ -14,6 +24,8 @@ import { insertSupabaseSendQueueRow } from "../../supabase/sms-engine.js";
  */
 export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
 
   const limit = Math.max(1, Math.min(Number(input.limit) || 25, 500));
   const scan_limit = Math.max(limit, Math.min(Number(input.scan_limit ?? input.candidate_fetch_limit) || 500, 5000));
@@ -34,6 +46,18 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
     touch_number: Number(input.touch_number) || 1,
     campaign_session_id: input.campaign_session_id || `session-${now.slice(0, 10)}`,
     within_contact_window_now: input.within_contact_window_now !== undefined ? Boolean(input.within_contact_window_now) : true,
+    require_local_routing: asBoolean(
+      input.require_local_routing ?? await get_system_value("require_local_routing"),
+      false
+    ),
+    allow_regional_fallback_for_first_touch: asBoolean(
+      input.allow_regional_fallback_for_first_touch ??
+        await get_system_value("allow_regional_fallback_for_first_touch"),
+      false
+    ),
+    sms_blocked_sender_numbers:
+      input.sms_blocked_sender_numbers ??
+      await get_system_value("sms_blocked_sender_numbers"),
     now,
   };
 
@@ -234,8 +258,40 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
 
       const queue_payload = {
         ...rendered.queue_payload,
+        queue_key:
+          rendered.queue_payload?.queue_key ||
+          `supabase-feeder:${activeCandidate.master_owner_id}:${activeCandidate.property_id}:${activeCandidate.touch_number}:${options.campaign_session_id}`,
+        master_owner_id: activeCandidate.master_owner_id || null,
+        prospect_id: activeCandidate.prospect_id || activeCandidate.canonical_prospect_id || null,
+        property_id: activeCandidate.property_id || null,
+        phone_id: activeCandidate.phone_id || activeCandidate.best_phone_id || null,
+        to_phone_number: activeCandidate.canonical_e164 || null,
+        from_phone_number:
+          routing.selected_textgrid_number || routing.selected?.phone_number || null,
+        textgrid_number_id:
+          routing.selected_textgrid_number_id || routing.selected?.id || null,
+        market: activeCandidate.market || null,
+        property_address_state: activeCandidate.state || null,
+        routing_tier: routing.routing_tier || null,
+        touch_number: activeCandidate.touch_number,
+        use_case_template: activeCandidate.template_use_case,
+        template_id,
+        message_body:
+          rendered.queue_payload?.message_body || rendered.rendered_message_body || null,
+        metadata: {
+          ...(rendered.queue_payload?.metadata || {}),
+          source: "run_supabase_outbound_feeder",
+          is_first_touch: activeCandidate.is_first_touch,
+          routing_tier: routing.routing_tier || null,
+          selected_sender_diagnostics: routing.diagnostics || null,
+          candidate_snapshot: {
+            market: activeCandidate.market || null,
+            state: activeCandidate.state || null,
+            touch_number: activeCandidate.touch_number,
+          },
+        },
         scheduled_for: eligibility.scheduled_for || now,
-        status: "queued"
+        queue_status: "queued"
       };
 
       if (debug && summary.first_10_would_queue.length < 10) {
@@ -248,7 +304,15 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
 
       // Write to Send Queue
       if (!dry_run) {
-        const queueResult = await insertSupabaseSendQueueRow(queue_payload, deps);
+        const queueResult = await insertSupabaseSendQueueRow(queue_payload, {
+          ...deps,
+          sms_health_system_control: {
+            sms_blocked_sender_numbers: options.sms_blocked_sender_numbers,
+            require_local_routing: options.require_local_routing,
+            allow_regional_fallback_for_first_touch:
+              options.allow_regional_fallback_for_first_touch,
+          },
+        });
 
         if (!queueResult.ok) {
           recordSkip("QUEUE_INSERT_FAILED", {

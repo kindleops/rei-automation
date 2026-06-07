@@ -15,6 +15,8 @@ import {
   getSupabaseFeederCandidates,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { getDefaultSmsHealthGuardConfig } from '@/lib/domain/delivery/sms-health-guard.js'
+import { selectSafeTextgridRoute } from '@/lib/domain/routing/textgrid-routing-policy.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
 import {
   ageBucketFromMob,
@@ -3154,18 +3156,17 @@ async function buildFullReachGraphScope({ supabase, grouped = {}, propertyCount 
   }
 }
 
-async function fetchActiveTextgridMarkets({ supabase }) {
+async function fetchActiveTextgridNumbers({ supabase }) {
   const { data, error } = await supabase
     .from('textgrid_numbers')
-    .select('market,status')
+    .select('*')
     .limit(200)
   if (error) {
-    return { ok: false, markets: [], warnings: [`full_reach_sender_coverage_unavailable:${errorMessage(error)}`] }
+    return { ok: false, numbers: [], warnings: [`full_reach_sender_coverage_unavailable:${errorMessage(error)}`] }
   }
-  const markets = uniqueClean((Array.isArray(data) ? data : [])
+  const numbers = (Array.isArray(data) ? data : [])
     .filter((row) => !clean(row.status) || lower(row.status) === 'active')
-    .map((row) => row.market))
-  return { ok: true, markets, warnings: [] }
+  return { ok: true, numbers, warnings: [] }
 }
 
 async function computeFullCatalogReachCount(catalogFilters = {}, deps = {}) {
@@ -3289,15 +3290,46 @@ async function computeFullCatalogReachCount(catalogFilters = {}, deps = {}) {
     warnings,
   })
   markGraphTiming('suppression_fetch')
-  const activeMarkets = await fetchActiveTextgridMarkets({ supabase })
+  const activeNumbers = await fetchActiveTextgridNumbers({ supabase })
   markGraphTiming('sender_market_fetch')
-  warnings.push(...(activeMarkets.warnings || []))
-  const activeMarketSet = new Set(activeMarkets.markets || [])
+  warnings.push(...(activeNumbers.warnings || []))
+  const [
+    requireLocalRoutingValue,
+    allowFirstTouchFallbackValue,
+    blockedSenderNumbersValue,
+  ] = await Promise.all([
+    getSystemValue('require_local_routing', deps).catch(() => null),
+    getSystemValue('allow_regional_fallback_for_first_touch', deps).catch(() => null),
+    getSystemValue('sms_blocked_sender_numbers', deps).catch(() => null),
+  ])
+  const healthConfig = getDefaultSmsHealthGuardConfig(process.env, {
+    sms_blocked_sender_numbers: blockedSenderNumbersValue,
+    require_local_routing: requireLocalRoutingValue,
+    allow_regional_fallback_for_first_touch: allowFirstTouchFallbackValue,
+  })
+  const allowRegionalFallback =
+    !healthConfig.require_local_routing &&
+    healthConfig.allow_regional_fallback_for_first_touch
   const prospectByCanonical = new Map(prospectRows.map((row) => [clean(row.canonical_prospect_id), row]).filter(([key]) => key))
   const prospectById = new Map(prospectRows.map((row) => [clean(row.prospect_id), row]).filter(([key]) => key))
   const cleanPhoneRows = smsEligiblePhoneRows.filter((row) => !suppressedPhoneNumbers.has(clean(row.canonical_e164)))
-  const senderCoveredRows = activeMarketSet.size
-    ? cleanPhoneRows.filter((row) => activeMarketSet.has(phoneMarket(row, prospectByCanonical, prospectById)))
+  const senderCoveredRows = activeNumbers.numbers.length
+    ? cleanPhoneRows.filter((row) => {
+        const market = phoneMarket(row, prospectByCanonical, prospectById)
+        const state = firstNonEmpty(
+          row.property_address_state,
+          row.state,
+          prospectByCanonical.get(clean(row.canonical_prospect_id))?.property_address_state,
+          prospectById.get(clean(row.prospect_id))?.property_address_state,
+        )
+        return selectSafeTextgridRoute({
+          market,
+          state,
+          numbers: activeNumbers.numbers,
+          blocked_sender_numbers: healthConfig.blocked_sender_numbers,
+          allow_regional_fallback: allowRegionalFallback,
+        }).ok
+      })
     : []
   const coverage = await computeGraphSourceCoverage({
     supabase,
@@ -5852,6 +5884,30 @@ function routeSenderId(routing = {}) {
   return clean(routing.selected_textgrid_number_id || routing.selected?.id) || null
 }
 
+function graphClaimsFallbackCoverage(target = {}) {
+  const metadata = metadataObject(target.metadata)
+  const blockerFlags = metadataObject(metadata.blocker_flags)
+  const routingTier = lower(metadata.routing_tier || target.routing_tier)
+  return (
+    blockerFlags.fallback_covered === true ||
+    ['approved_state_fallback', 'approved_regional_fallback'].includes(routingTier)
+  )
+}
+
+export function classifyCampaignRuntimeRouteFailure(target = {}, routing = {}) {
+  if (routing.ok) return null
+  if (graphClaimsFallbackCoverage(target)) {
+    return {
+      blocker: 'graph_runtime_sender_route_mismatch',
+      reason: 'GRAPH_RUNTIME_SENDER_ROUTE_MISMATCH',
+    }
+  }
+  return {
+    blocker: null,
+    reason: routing.reason_code || routing.routing_block_reason || 'routing_blocked',
+  }
+}
+
 async function fetchActiveQueueRowsByPhone(supabase, phones = []) {
   const rows = []
   const phoneValues = uniqueClean(phones)
@@ -6150,6 +6206,15 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     input.spread_interval_seconds ?? input.interval_seconds ?? input.send_interval_seconds ?? campaign.send_interval_seconds,
     60
   )
+  const [
+    configuredRequireLocalRouting,
+    configuredAllowRegionalFallback,
+    configuredBlockedSenderNumbers,
+  ] = await Promise.all([
+    getSystemValue('require_local_routing', deps).catch(() => null),
+    getSystemValue('allow_regional_fallback_for_first_touch', deps).catch(() => null),
+    getSystemValue('sms_blocked_sender_numbers', deps).catch(() => null),
+  ])
   const launchOptions = {
     ...input,
     now: now.toISOString(),
@@ -6160,6 +6225,16 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     routing_safe_only: input.routing_safe_only !== false,
     allow_phone_fallback: false,
     first_touch: input.first_touch ?? true,
+    require_local_routing: asBoolean(
+      input.require_local_routing ?? configuredRequireLocalRouting,
+      false
+    ),
+    allow_regional_fallback_for_first_touch: asBoolean(
+      input.allow_regional_fallback_for_first_touch ?? configuredAllowRegionalFallback,
+      false
+    ),
+    sms_blocked_sender_numbers:
+      input.sms_blocked_sender_numbers ?? configuredBlockedSenderNumbers,
   }
   const plannedItems = []
   const sampleSkips = []
@@ -6251,7 +6326,19 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
 
     const routing = await chooseTextgridNumber(candidate, launchOptions, deps)
     if (!routing.ok) {
-      recordSkip(routing.reason_code || routing.routing_block_reason || 'routing_blocked', target, {
+      const routeFailure = classifyCampaignRuntimeRouteFailure(target, routing)
+      if (routeFailure.blocker) {
+        if (!blockers.includes(routeFailure.blocker)) {
+          blockers.push(routeFailure.blocker)
+        }
+        recordSkip(routeFailure.reason, target, {
+          graph_routing_tier: target.metadata?.routing_tier || null,
+          graph_fallback_covered: target.metadata?.blocker_flags?.fallback_covered === true,
+          runtime_routing_block_reason: routing.routing_block_reason || null,
+        })
+        continue
+      }
+      recordSkip(routeFailure.reason, target, {
         routing_block_reason: routing.routing_block_reason || null,
       })
       continue

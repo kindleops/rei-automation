@@ -428,6 +428,108 @@ test("selectAvailableTextgridNumber prefers the row linked on textgrid_number_id
   assert.equal(selection.from_phone_number, "+16128060002");
 });
 
+test("selectAvailableTextgridNumber rejects a health-blocked reply-affinity sender", async () => {
+  const selection = await selectAvailableTextgridNumber({
+    id: 2,
+    queue_status: "queued",
+    to_phone_number: "+16127433952",
+    from_phone_number: "+14693131600",
+  });
+
+  assert.equal(selection.ok, false);
+  assert.equal(selection.reason, "blocked_sender_number");
+});
+
+test("selectAvailableTextgridNumber re-resolves a blocked campaign sender through Houston", async () => {
+  const selection = await selectAvailableTextgridNumber(
+    {
+      id: 3,
+      queue_status: "scheduled",
+      campaign_id: "campaign-1",
+      touch_number: 1,
+      market: "Dallas, TX",
+      property_address_state: "TX",
+      to_phone_number: "+16127433952",
+      from_phone_number: "+14693131600",
+      metadata: {
+        source: "campaign_launch_execution",
+        campaign_id: "campaign-1",
+        routing_snapshot: {
+          routing_tier: "approved_regional_fallback",
+          seller_market: "Dallas, TX",
+          seller_state: "TX",
+        },
+      },
+    },
+    {
+      sms_health_system_control: {
+        require_local_routing: false,
+        allow_regional_fallback_for_first_touch: true,
+      },
+      supabase: makeNumbersSupabase([
+        {
+          id: 31,
+          phone_number: "+14693131600",
+          market: "Dallas, TX",
+          status: "active",
+          messages_sent_today: 0,
+        },
+        {
+          id: 32,
+          phone_number: "+12818458577",
+          market: "Houston, TX",
+          status: "active",
+          messages_sent_today: 0,
+        },
+      ]),
+    }
+  );
+
+  assert.equal(selection.ok, true);
+  assert.equal(selection.from_phone_number, "+12818458577");
+  assert.equal(selection.routing.route_type, "approved_state_fallback");
+});
+
+test("selectAvailableTextgridNumber fails closed when graph fallback has no runtime route", async () => {
+  const selection = await selectAvailableTextgridNumber(
+    {
+      id: 4,
+      queue_status: "scheduled",
+      campaign_id: "campaign-2",
+      touch_number: 1,
+      market: "Atlanta, GA",
+      property_address_state: "GA",
+      to_phone_number: "+16127433952",
+      metadata: {
+        source: "campaign_launch_execution",
+        campaign_id: "campaign-2",
+        campaign_target_metadata: {
+          routing_tier: "approved_state_fallback",
+          blocker_flags: { fallback_covered: true },
+        },
+      },
+    },
+    {
+      sms_health_system_control: {
+        require_local_routing: false,
+        allow_regional_fallback_for_first_touch: true,
+      },
+      supabase: makeNumbersSupabase([
+        {
+          id: 41,
+          phone_number: "+14704920588",
+          market: "Atlanta, GA",
+          status: "active",
+          messages_sent_today: 0,
+        },
+      ]),
+    }
+  );
+
+  assert.equal(selection.ok, false);
+  assert.equal(selection.reason, "GRAPH_RUNTIME_SENDER_ROUTE_MISMATCH");
+});
+
 test("writeOutboundSuccessMessageEvent builds the canonical outbound_send payload", async () => {
   let captured = null;
 

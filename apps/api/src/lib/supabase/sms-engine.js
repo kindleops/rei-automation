@@ -16,6 +16,11 @@ import {
   normalizeTextGridFailure,
   textGridFailureMetadata,
 } from "@/lib/domain/messaging/textgrid-failure-normalization.js";
+import {
+  getDefaultSmsHealthGuardConfig,
+  isSmsSenderHealthBlocked,
+} from "@/lib/domain/delivery/sms-health-guard.js";
+import { selectSafeTextgridRoute } from "@/lib/domain/routing/textgrid-routing-policy.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -356,6 +361,8 @@ export function normalizeSendQueueRow(row) {
     stage_after: safe_row.stage_after || null,
     textgrid_message_id: safe_row.textgrid_message_id || null,
     market: safe_row.market || null,
+    property_address_state: safe_row.property_address_state || safe_row.seller_state || null,
+    routing_tier: safe_row.routing_tier || null,
     offer_podio_item_id:       safe_row.offer_podio_item_id       || null,
     offer_record_sync_status:  safe_row.offer_record_sync_status  || null,
     offer_record_sync_error:   safe_row.offer_record_sync_error   || null,
@@ -1080,18 +1087,88 @@ export function evaluateContactWindow(row, deps = {}) {
   };
 }
 
+function isCampaignFirstTouchQueueRow(row = {}) {
+  const metadata = ensureObject(row.metadata);
+  const source = lower(metadata.source || metadata.send_source || metadata.created_from);
+  const touch_number = asNumber(
+    row.touch_number ??
+      metadata.touch_number ??
+      metadata.target_snapshot?.touch_number ??
+      metadata.candidate_snapshot?.touch_number,
+    0
+  );
+  return Boolean(
+    (row.campaign_id || metadata.campaign_id || source.includes("campaign")) &&
+    touch_number === 1
+  );
+}
+
+function queueRowMarket(row = {}) {
+  const metadata = ensureObject(row.metadata);
+  return clean(
+    row.market ||
+      metadata.routing_snapshot?.seller_market ||
+      metadata.target_snapshot?.market ||
+      metadata.candidate_snapshot?.market ||
+      metadata.campaign_target_metadata?.market
+  );
+}
+
+function queueRowState(row = {}) {
+  const metadata = ensureObject(row.metadata);
+  return clean(
+    row.property_address_state ||
+      metadata.routing_snapshot?.seller_state ||
+      metadata.target_snapshot?.state ||
+      metadata.candidate_snapshot?.state ||
+      metadata.campaign_target_metadata?.state
+  );
+}
+
+function queueRowGraphClaimsFallbackCoverage(row = {}) {
+  const metadata = ensureObject(row.metadata);
+  const target_metadata = ensureObject(metadata.campaign_target_metadata);
+  const blocker_flags = ensureObject(target_metadata.blocker_flags);
+  const routing_tier = lower(
+    row.routing_tier ||
+      metadata.routing_snapshot?.routing_tier ||
+      target_metadata.routing_tier
+  );
+  return (
+    blocker_flags.fallback_covered === true ||
+    ["approved_state_fallback", "approved_regional_fallback"].includes(routing_tier)
+  );
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
+  const system_control = ensureObject(deps.sms_health_system_control);
+  const health_config = getDefaultSmsHealthGuardConfig(process.env, system_control);
+  const campaign_first_touch = isCampaignFirstTouchQueueRow(normalized);
+  const row_sender = normalizePhone(normalized.from_phone_number);
 
-  if (clean(normalized.from_phone_number)) {
+  if (
+    row_sender &&
+    !campaign_first_touch &&
+    isSmsSenderHealthBlocked(row_sender, { system_control })
+  ) {
+    return {
+      ok: false,
+      selected: null,
+      from_phone_number: null,
+      reason: "blocked_sender_number",
+    };
+  }
+
+  if (row_sender && !campaign_first_touch) {
     return {
       ok: true,
       selected: {
         id: normalized.textgrid_number_id || null,
-        phone_number: normalizePhone(normalized.from_phone_number),
+        phone_number: row_sender,
         metadata: {},
       },
-      from_phone_number: normalizePhone(normalized.from_phone_number),
+      from_phone_number: row_sender,
       reason: "queue_row_from_phone_number_present",
     };
   }
@@ -1122,11 +1199,49 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
     return Boolean(normalizePhone(candidate?.phone_number));
   });
 
+  if (campaign_first_touch) {
+    const allow_regional_fallback =
+      !health_config.require_local_routing &&
+      health_config.allow_regional_fallback_for_first_touch;
+    const route = selectSafeTextgridRoute({
+      market: queueRowMarket(normalized),
+      state: queueRowState(normalized),
+      numbers: active_rows,
+      blocked_sender_numbers: health_config.blocked_sender_numbers,
+      allow_regional_fallback,
+    });
+
+    if (!route.ok) {
+      return {
+        ok: false,
+        reason: queueRowGraphClaimsFallbackCoverage(normalized)
+          ? "GRAPH_RUNTIME_SENDER_ROUTE_MISMATCH"
+          : route.routing_block_reason || "no_available_textgrid_numbers",
+        selected: null,
+        from_phone_number: null,
+        routing: route,
+      };
+    }
+
+    return {
+      ok: true,
+      reason: "safe_campaign_sender_route_selected",
+      selected: route.selected,
+      from_phone_number: normalizePhone(route.selected_textgrid_number),
+      routing: route,
+    };
+  }
+
+  const safe_active_rows = active_rows.filter(
+    (candidate) =>
+      !isSmsSenderHealthBlocked(candidate.phone_number, { system_control })
+  );
   const preferred = active_rows.find(
     (candidate) =>
-      String(candidate?.id || "") === String(normalized.textgrid_number_id || "")
+      String(candidate?.id || "") === String(normalized.textgrid_number_id || "") &&
+      safe_active_rows.includes(candidate)
   );
-  const selected = preferred || active_rows[0] || null;
+  const selected = preferred || safe_active_rows[0] || null;
 
   if (!selected) {
     return {
@@ -1149,6 +1264,7 @@ export async function reserveFromPhoneNumber(row, lock_token, selection, deps = 
   const normalized = normalizeSendQueueRow(row);
   const from_phone_number = normalizePhone(selection?.from_phone_number);
   const textgrid_number_id = selection?.selected?.id || null;
+  const routing = ensureObject(selection?.routing);
   const now = deps.now || nowIso();
 
   if (!from_phone_number) {
@@ -1161,6 +1277,24 @@ export async function reserveFromPhoneNumber(row, lock_token, selection, deps = 
     {
       from_phone_number,
       textgrid_number_id,
+      ...(clean(routing.route_type)
+        ? {
+            routing_tier: routing.route_type,
+            metadata: {
+              ...normalized.metadata,
+              routing_snapshot: {
+                ...ensureObject(normalized.metadata?.routing_snapshot),
+                selected_textgrid_number_id: textgrid_number_id,
+                selected_textgrid_number: from_phone_number,
+                selected_textgrid_market:
+                  routing.selected_textgrid_market || selection?.selected?.market || null,
+                routing_tier: routing.route_type,
+                routing_rule_name: routing.routing_rule_name || null,
+                runtime_reselected_at: now,
+              },
+            },
+          }
+        : {}),
       updated_at: now,
     },
     deps
@@ -1170,6 +1304,24 @@ export async function reserveFromPhoneNumber(row, lock_token, selection, deps = 
     ...normalized,
     from_phone_number,
     textgrid_number_id,
+    ...(clean(routing.route_type)
+      ? {
+          routing_tier: routing.route_type,
+          metadata: {
+            ...normalized.metadata,
+            routing_snapshot: {
+              ...ensureObject(normalized.metadata?.routing_snapshot),
+              selected_textgrid_number_id: textgrid_number_id,
+              selected_textgrid_number: from_phone_number,
+              selected_textgrid_market:
+                routing.selected_textgrid_market || selection?.selected?.market || null,
+              routing_tier: routing.route_type,
+              routing_rule_name: routing.routing_rule_name || null,
+              runtime_reselected_at: now,
+            },
+          },
+        }
+      : {}),
   };
 }
 
@@ -3151,6 +3303,44 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   });
 
   const row = normalizeSendQueueRow(sanitized);
+  const active_queue_statuses = new Set([
+    "queued",
+    "pending",
+    "approval",
+    "scheduled",
+    "processing",
+    "sending",
+  ]);
+  const active_queue_insert = active_queue_statuses.has(
+    normalizeQueueStatusValue(row.queue_status)
+  );
+  const system_control = ensureObject(deps.sms_health_system_control);
+
+  if (
+    active_queue_insert &&
+    row.from_phone_number &&
+    isSmsSenderHealthBlocked(row.from_phone_number, { system_control })
+  ) {
+    return {
+      ok: false,
+      reason: "blocked_sender_number",
+      error: "health_blocked_sender_cannot_be_queued",
+      queue_inserted: false,
+    };
+  }
+
+  if (
+    active_queue_insert &&
+    queueRowGraphClaimsFallbackCoverage(row) &&
+    !row.from_phone_number
+  ) {
+    return {
+      ok: false,
+      reason: "GRAPH_RUNTIME_SENDER_ROUTE_MISMATCH",
+      error: "graph_fallback_coverage_has_no_runtime_sender_route",
+      queue_inserted: false,
+    };
+  }
 
   // ── Inbox send-now validation guard ────────────────────────────────
   const is_inbox_send_now =

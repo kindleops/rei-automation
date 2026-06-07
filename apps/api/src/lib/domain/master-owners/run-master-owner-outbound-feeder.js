@@ -52,6 +52,7 @@ import {
   chooseTextgridNumber,
   loadUsableTextgridNumbers,
 } from "@/lib/domain/routing/choose-textgrid-number.js";
+import { isSmsSenderHealthBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 import { resolveMarketSendingProfile } from "@/lib/config/market-sending-zones.js";
 import {
   buildSendQueueItem,
@@ -92,6 +93,7 @@ import { parseMessageEventMetadata } from "@/lib/domain/events/message-event-met
 import { isNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
 import { acquireRunLock } from "@/lib/domain/runs/run-locks.js";
 import { child, info, warn } from "@/lib/logging/logger.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 const DEFAULT_BATCH_SIZE = DEFAULT_FEEDER_BATCH_SIZE;
 const DEFAULT_SCAN_LIMIT = DEFAULT_FEEDER_SCAN_LIMIT;
@@ -254,6 +256,31 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = lower(value);
+  if (["1", "true", "yes", "on", "enabled"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) return false;
+  return fallback;
+}
+
+async function loadTextgridRoutingControls() {
+  const [require_local_routing, allow_regional_fallback_for_first_touch, sms_blocked_sender_numbers] =
+    await Promise.all([
+      getSystemValue("require_local_routing").catch(() => null),
+      getSystemValue("allow_regional_fallback_for_first_touch").catch(() => null),
+      getSystemValue("sms_blocked_sender_numbers").catch(() => null),
+    ]);
+  return {
+    require_local_routing: asBoolean(require_local_routing, false),
+    allow_regional_fallback_for_first_touch: asBoolean(
+      allow_regional_fallback_for_first_touch,
+      false
+    ),
+    sms_blocked_sender_numbers,
+  };
 }
 
 function uniq(values = []) {
@@ -2837,6 +2864,9 @@ async function queueOwnerFallbackMinimal({
     template_item: null,
     defer_message_resolution: true,
     textgrid_number_item_id: outbound_number?.textgrid_number_item_id ?? null,
+    textgrid_phone_number: outbound_number?.phone_number || null,
+    textgrid_routing_tier: outbound_number?.routing_tier || null,
+    textgrid_routing_diagnostics: outbound_number?.diagnostics || null,
     scheduled_for_local: { start: schedule.scheduled_for_local },
     scheduled_for_utc: { start: schedule.scheduled_for_utc },
     timezone: resolved_timezone,
@@ -2962,6 +2992,8 @@ async function resolveOutboundNumber({
   route,
   rotation_key,
   now_ts,
+  first_touch = false,
+  routing_policy = {},
   runtime = null,
   log = logger,
 }) {
@@ -2972,7 +3004,7 @@ async function resolveOutboundNumber({
   );
   const market_resolution = resolveMarketSendingProfile(context?.summary?.market_name || null);
 
-  if (explicit_outbound_number_id) {
+  if (explicit_outbound_number_id && !first_touch) {
     const explicit_item = await safeGetItem(explicit_outbound_number_id, {
       runtime,
       log,
@@ -2982,13 +3014,20 @@ async function resolveOutboundNumber({
       },
     });
 
-    if (isExplicitOutboundNumberUsable(explicit_item, now_ts)) {
-      const explicit_phone =
-        getPhoneValue(explicit_item, TEXTGRID_NUMBER_FIELDS.title, "") ||
-        getTextValue(explicit_item, TEXTGRID_NUMBER_FIELDS.title, "");
+    const explicit_phone =
+      getPhoneValue(explicit_item, TEXTGRID_NUMBER_FIELDS.title, "") ||
+      getTextValue(explicit_item, TEXTGRID_NUMBER_FIELDS.title, "");
+    const explicit_sender_blocked = isSmsSenderHealthBlocked(explicit_phone, {
+      system_control: {
+        sms_blocked_sender_numbers: routing_policy.sms_blocked_sender_numbers,
+      },
+    });
 
+    if (isExplicitOutboundNumberUsable(explicit_item, now_ts) && !explicit_sender_blocked) {
       return {
         textgrid_number_item_id: explicit_outbound_number_id,
+        phone_number: normalizePhone(explicit_phone) || null,
+        routing_tier: "explicit_outbound_number_override",
         source: "master_owner.outbound-number",
         diagnostics: {
           raw_seller_market: context?.summary?.market_name || null,
@@ -3006,7 +3045,9 @@ async function resolveOutboundNumber({
     warn("master_owner_feeder.outbound_number_fallback", {
       master_owner_id: owner_item?.item_id ?? null,
       explicit_outbound_number_id,
-      reason: "explicit_outbound_number_unusable",
+      reason: explicit_sender_blocked
+        ? "explicit_outbound_number_health_blocked"
+        : "explicit_outbound_number_unusable",
     });
   }
 
@@ -3022,6 +3063,11 @@ async function resolveOutboundNumber({
     preferred_language: context?.summary?.language_preference || "English",
     rotation_key,
     candidate_records,
+    first_touch,
+    require_local_routing: routing_policy.require_local_routing,
+    allow_regional_fallback_for_first_touch:
+      routing_policy.allow_regional_fallback_for_first_touch,
+    sms_blocked_sender_numbers: routing_policy.sms_blocked_sender_numbers,
   });
 
   return {
@@ -3030,6 +3076,13 @@ async function resolveOutboundNumber({
       selected?.textgrid_number_item_id ||
       selected?.id ||
       null,
+    phone_number:
+      normalizePhone(
+        selected?.normalized_phone ||
+          selected?.phone_number ||
+          selected?.selection_diagnostics?.selected_phone_number
+      ) || null,
+    routing_tier: selected?.routing_tier || selected?.selection_reason || null,
     source:
       selected?.item_id ||
       selected?.textgrid_number_item_id ||
@@ -3056,6 +3109,7 @@ async function evaluateOwner({
   now = nowIso(),
   runtime = null,
   evaluation_depth = "full",
+  routing_policy = {},
 }) {
   const master_owner_id = owner_item?.item_id ?? null;
   const log = child({
@@ -3798,6 +3852,8 @@ async function evaluateOwner({
         route: effective_route,
         rotation_key,
         now_ts,
+        first_touch: template_stage_lock,
+        routing_policy,
         runtime,
         log,
       })
@@ -4271,6 +4327,9 @@ async function evaluateOwner({
       expected_template_message_text: rendered_message_text,
       defer_message_resolution: false,
       textgrid_number_item_id: outbound_number.textgrid_number_item_id,
+      textgrid_phone_number: outbound_number.phone_number || null,
+      textgrid_routing_tier: outbound_number.routing_tier || null,
+      textgrid_routing_diagnostics: outbound_number.diagnostics || null,
       scheduled_for_local: { start: schedule.scheduled_for_local },
       scheduled_for_utc: { start: schedule.scheduled_for_utc },
       timezone: resolved_timezone,
@@ -4807,6 +4866,7 @@ export async function diagnoseMasterOwnerOutboundFeeder({
     test_mode: true,
     page_size,
   });
+  const routing_policy = await loadTextgridRoutingControls();
 
   const exclusion_counts = new Map();
   const closest_candidates = [];
@@ -4867,6 +4927,7 @@ export async function diagnoseMasterOwnerOutboundFeeder({
             now,
             runtime,
             evaluation_depth: "light",
+            routing_policy,
           });
 
           if (light_result?.ok && !light_result?.skipped) {
@@ -4877,6 +4938,7 @@ export async function diagnoseMasterOwnerOutboundFeeder({
               now,
               runtime,
               evaluation_depth: "full",
+              routing_policy,
             });
           } else {
             result = light_result;
@@ -5146,6 +5208,7 @@ export async function runMasterOwnerOutboundFeeder({
   let source = null;
 
   try {
+    const routing_policy = await loadTextgridRoutingControls();
     source = await resolveMasterOwnerSource({
       source_view_id,
       source_view_name,
@@ -5229,6 +5292,7 @@ export async function runMasterOwnerOutboundFeeder({
           now,
           runtime,
           evaluation_depth: "full",
+          routing_policy,
         });
 
         results.push(result);
@@ -5287,6 +5351,7 @@ export async function runMasterOwnerOutboundFeeder({
               now,
               runtime,
               evaluation_depth: "light",
+              routing_policy,
             });
 
             results.push(result);
@@ -5364,6 +5429,7 @@ export async function runMasterOwnerOutboundFeeder({
           now,
           runtime,
           evaluation_depth: "full",
+          routing_policy,
         });
       } catch (error) {
         executed = buildOwnerErrorResult(

@@ -82,6 +82,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+export function normalizeSelectedQueueSender({
+  phone_number = null,
+  routing_tier = null,
+  routing_diagnostics = null,
+} = {}) {
+  return {
+    from_phone_number: normalizeUsPhoneToE164(phone_number) || null,
+    routing_tier: clean(routing_tier) || null,
+    routing_diagnostics:
+      routing_diagnostics &&
+      typeof routing_diagnostics === "object" &&
+      !Array.isArray(routing_diagnostics)
+        ? routing_diagnostics
+        : null,
+  };
+}
+
 function countCharacters(value) {
   return String(value || "").length;
 }
@@ -575,6 +592,9 @@ export async function buildSendQueueItem({
   expected_template_message_text = null,
   defer_message_resolution = false,
   textgrid_number_item_id,
+  textgrid_phone_number = null,
+  textgrid_routing_tier = null,
+  textgrid_routing_diagnostics = null,
   scheduled_for_local,
   scheduled_for_utc = null,
   timezone = null,
@@ -728,6 +748,11 @@ export async function buildSendQueueItem({
     context.summary?.market_name ||
     getTextValue(market_item, "title", "") ||
     "";
+  const selected_queue_sender = normalizeSelectedQueueSender({
+    phone_number: textgrid_phone_number,
+    routing_tier: textgrid_routing_tier,
+    routing_diagnostics: textgrid_routing_diagnostics,
+  });
 
   const personalization_tags_used = Array.isArray(explicit_personalization_tags_used)
     ? unique(explicit_personalization_tags_used.map((tag) => clean(tag)).filter(Boolean))
@@ -1091,7 +1116,7 @@ export async function buildSendQueueItem({
       message_body: message_text || "",
       message_text: message_text || "",
       to_phone_number: normalized_target,
-      from_phone_number: null,
+      from_phone_number: selected_queue_sender.from_phone_number,
       property_address: property_address || null,
       property_type: resolved_property_type || null,
       owner_type: resolved_owner_type || null,
@@ -1117,6 +1142,10 @@ export async function buildSendQueueItem({
       character_count: message_text ? countCharacters(message_text) : 0,
       // Top-level visibility columns
       market: market_name || null,
+      property_address_state:
+        context.summary?.market_state ||
+        context.summary?.property_state ||
+        null,
       thread_key: normalized_target || null,
       agent_name: agent_name || null,
       template_key: String(
@@ -1134,6 +1163,10 @@ export async function buildSendQueueItem({
         market_id,
         sms_agent_id: assigned_agent_id || null,
         textgrid_number_id: textgrid_number_item_id || null,
+        selected_textgrid_number:
+          selected_queue_sender.from_phone_number,
+        selected_sender_diagnostics: selected_queue_sender.routing_diagnostics,
+        routing_tier: selected_queue_sender.routing_tier,
         template_id:
           template_reference.selected_template_id ??
           template_reference.selected_template_item_id ??

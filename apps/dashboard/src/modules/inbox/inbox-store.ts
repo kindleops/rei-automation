@@ -24,7 +24,6 @@ export interface MessagesSlice {
 export interface InboxStoreState {
   activeBucketKey: string
   buckets: Record<string, BucketSlice>
-  messagesByThreadKey: Record<string, MessagesSlice>
   selectedThreadKey: string | null
   realtimeStatus: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
   viewCounts: Record<string, number>
@@ -39,9 +38,6 @@ export type InboxStoreAction =
   | { type: 'BUCKET_FETCH_ERROR'; bucketKey: string; requestId: string; error: string }
   | { type: 'BUCKET_APPEND_ROWS'; bucketKey: string; requestId: string; rows: unknown[]; cursor: string | null; hasMore: boolean }
   | { type: 'SELECT_THREAD'; threadKey: string | null }
-  | { type: 'MESSAGES_FETCH_START'; threadKey: string; requestId: string }
-  | { type: 'MESSAGES_FETCH_DONE'; threadKey: string; requestId: string; messages: unknown[] }
-  | { type: 'MESSAGES_FETCH_ERROR'; threadKey: string; requestId: string; error: string }
   | { type: 'REALTIME_PATCH_THREAD'; threadKey: string; patch: Record<string, unknown>; targetBucketKey?: string | null; upsert?: boolean; countDeltas?: Record<string, number>; diagnostics?: Record<string, unknown> }
   | { type: 'SET_BUCKET_SCROLL'; bucketKey: string; scrollTop: number }
   | { type: 'SET_VIEW_COUNTS'; counts: Record<string, number>; preserveExisting?: boolean; reason?: string }
@@ -60,19 +56,8 @@ export const emptyBucket = (): BucketSlice => ({
   hasMore: false,
 })
 
-export const emptyMessages = (): MessagesSlice => ({
-  messages: [],
-  loading: false,
-  error: null,
-  lastRequestId: null,
-  lastLoadedAt: null,
-})
-
 const getBucket = (state: InboxStoreState, key: string): BucketSlice =>
   state.buckets[key] ?? emptyBucket()
-
-const getMessages = (state: InboxStoreState, key: string): MessagesSlice =>
-  state.messagesByThreadKey[key] ?? emptyMessages()
 
 const BUCKET_ALIASES: Record<string, string> = {
   all: 'all_messages',
@@ -202,7 +187,6 @@ const applyCountDeltas = (current: Record<string, number>, deltas: Record<string
 export const EMPTY_INBOX_STORE_STATE: InboxStoreState = {
   activeBucketKey: 'all_messages',
   buckets: {},
-  messagesByThreadKey: {},
   selectedThreadKey: null,
   realtimeStatus: 'connecting',
   viewCounts: {},
@@ -299,48 +283,6 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
       return { ...state, selectedThreadKey: action.threadKey }
     }
 
-    case 'MESSAGES_FETCH_START': {
-      const msgs = getMessages(state, action.threadKey)
-      return {
-        ...state,
-        messagesByThreadKey: {
-          ...state.messagesByThreadKey,
-          [action.threadKey]: { ...msgs, loading: true, error: null, lastRequestId: action.requestId },
-        },
-      }
-    }
-
-    case 'MESSAGES_FETCH_DONE': {
-      const msgs = getMessages(state, action.threadKey)
-      // Stale guard: only commit if requestId still matches (newer open replaces it).
-      if (msgs.lastRequestId !== action.requestId) return state
-      return {
-        ...state,
-        messagesByThreadKey: {
-          ...state.messagesByThreadKey,
-          [action.threadKey]: {
-            ...msgs,
-            messages: action.messages,
-            loading: false,
-            error: null,
-            lastLoadedAt: new Date().toISOString(),
-          },
-        },
-      }
-    }
-
-    case 'MESSAGES_FETCH_ERROR': {
-      const msgs = getMessages(state, action.threadKey)
-      if (msgs.lastRequestId !== action.requestId) return state
-      return {
-        ...state,
-        messagesByThreadKey: {
-          ...state.messagesByThreadKey,
-          [action.threadKey]: { ...msgs, loading: false, error: action.error },
-        },
-      }
-    }
-
     case 'REALTIME_PATCH_THREAD': {
       const { threadKey, patch } = action
       let changed = false
@@ -416,7 +358,7 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
 
     case 'SET_VIEW_COUNTS': {
       // Counts are fully isolated from bucket rows — a counts fetch failure
-      // only affects this field, never touches buckets or messagesByThreadKey.
+      // only affects this field, never touches buckets.
       if (!action.preserveExisting) return { ...state, viewCounts: action.counts }
       const next = { ...state.viewCounts }
       for (const [key, value] of Object.entries(action.counts)) {

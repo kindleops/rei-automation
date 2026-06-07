@@ -10,6 +10,7 @@
  */
 
 import { normalizePhone } from "@/lib/utils/phones.js";
+import { isSmsSenderHealthBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 import { clean } from "@/lib/utils/strings.js";
 import { nowIso } from "@/lib/utils/dates.js";
 
@@ -313,6 +314,14 @@ export async function validateFromPhoneIsOurs(
         reason: "textgrid_number_not_active",
         message: `TextGrid number ${phone} is not active (status: ${status})`,
         status,
+      };
+    }
+
+    if (isSmsSenderHealthBlocked(phone)) {
+      return {
+        valid: false,
+        reason: "blocked_sender_number",
+        message: `TextGrid number ${phone} is blocked by the sender health guard`,
       };
     }
 

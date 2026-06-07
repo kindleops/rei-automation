@@ -12,6 +12,11 @@ import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-con
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import {
+  getDefaultSmsHealthGuardConfig,
+  isSmsSenderHealthBlocked,
+} from "@/lib/domain/delivery/sms-health-guard.js";
+import { selectSafeTextgridRoute } from "@/lib/domain/routing/textgrid-routing-policy.js";
+import {
   insertSupabaseSendQueueRow,
   checkBlacklistPriorFailure,
   normalizeSendQueueRow,
@@ -101,6 +106,8 @@ export async function resolveFromPhoneNumber({
   to_phone_number = null,
   textgrid_number_id = null,
   market = null,
+  state = null,
+  sms_health_system_control = {},
   supabase = defaultSupabase,
 } = {}) {
   if (!thread_key) return null;
@@ -108,6 +115,16 @@ export async function resolveFromPhoneNumber({
   const isRecipientPhone = (value) => {
     const normalized = normalizePhone(value);
     return Boolean(normalized && normalized_to && normalized === normalized_to);
+  };
+  const isUsableSender = (value) => {
+    const normalized = normalizePhone(value);
+    return Boolean(
+      normalized &&
+      !isRecipientPhone(normalized) &&
+      !isSmsSenderHealthBlocked(normalized, {
+        system_control: sms_health_system_control,
+      })
+    );
   };
 
   // Priority 0: direct textgrid number assignment
@@ -122,7 +139,7 @@ export async function resolveFromPhoneNumber({
 
       if (textgridRow?.phone_number) {
         const normalized = normalizePhone(textgridRow.phone_number);
-        if (normalized && !isRecipientPhone(normalized)) return normalized;
+        if (isUsableSender(normalized)) return normalized;
       }
     } catch {
       // Non-fatal, continue to next priority
@@ -139,7 +156,7 @@ export async function resolveFromPhoneNumber({
 
     if (threadState?.our_number) {
       const normalized = normalizePhone(threadState.our_number);
-      if (normalized && !isRecipientPhone(normalized)) return normalized;
+      if (isUsableSender(normalized)) return normalized;
     }
   } catch {
     // Non-fatal, continue to next priority
@@ -155,7 +172,7 @@ export async function resolveFromPhoneNumber({
 
     if (legacyThreadState?.our_number) {
       const normalized = normalizePhone(legacyThreadState.our_number);
-      if (normalized && !isRecipientPhone(normalized)) return normalized;
+      if (isUsableSender(normalized)) return normalized;
     }
   } catch {
     // Non-fatal, continue to next priority
@@ -175,7 +192,7 @@ export async function resolveFromPhoneNumber({
 
     if (latestOutbound?.from_phone_number) {
       const normalized = normalizePhone(latestOutbound.from_phone_number);
-      if (normalized && !isRecipientPhone(normalized)) return normalized;
+      if (isUsableSender(normalized)) return normalized;
     }
   } catch {
     // Non-fatal
@@ -196,7 +213,7 @@ export async function resolveFromPhoneNumber({
 
       if (latestOutboundByPhone?.from_phone_number) {
         const normalized = normalizePhone(latestOutboundByPhone.from_phone_number);
-        if (normalized && !isRecipientPhone(normalized)) return normalized;
+        if (isUsableSender(normalized)) return normalized;
       }
     } catch {
       // Non-fatal
@@ -217,7 +234,7 @@ export async function resolveFromPhoneNumber({
 
     if (latestEvent?.from_phone_number) {
       const normalized = normalizePhone(latestEvent.from_phone_number);
-      if (normalized && !isRecipientPhone(normalized)) return normalized;
+      if (isUsableSender(normalized)) return normalized;
     }
   } catch {
     // Non-fatal
@@ -238,7 +255,7 @@ export async function resolveFromPhoneNumber({
 
       if (outboundEventByPhone?.from_phone_number) {
         const normalized = normalizePhone(outboundEventByPhone.from_phone_number);
-        if (normalized && !isRecipientPhone(normalized)) return normalized;
+        if (isUsableSender(normalized)) return normalized;
       }
     } catch {
       // Non-fatal
@@ -257,7 +274,7 @@ export async function resolveFromPhoneNumber({
 
       if (inboundEventByPhone?.to_phone_number) {
         const normalized = normalizePhone(inboundEventByPhone.to_phone_number);
-        if (normalized && !isRecipientPhone(normalized)) return normalized;
+        if (isUsableSender(normalized)) return normalized;
       }
     } catch {
       // Non-fatal
@@ -283,28 +300,34 @@ export async function resolveFromPhoneNumber({
             ? normalizePhone(event?.from_phone_number)
             : normalizePhone(event?.from_phone_number) || normalizePhone(event?.to_phone_number);
 
-      if (candidate && !isRecipientPhone(candidate)) return candidate;
+      if (isUsableSender(candidate)) return candidate;
     }
   } catch {
     // Non-fatal
   }
 
-  // Priority 4: textgrid_numbers by market
+  // Priority 4: shared exact-market and approved regional routing.
   if (market) {
     try {
       const { data: numbers } = await supabase
         .from("textgrid_numbers")
-        .select("phone_number")
-        .eq("market", market)
+        .select("*")
         .eq("status", "active")
-        .limit(5);
+        .limit(100);
+      const health_config = getDefaultSmsHealthGuardConfig(
+        process.env,
+        sms_health_system_control
+      );
+      const route = selectSafeTextgridRoute({
+        market,
+        state,
+        numbers: Array.isArray(numbers) ? numbers : [],
+        blocked_sender_numbers: health_config.blocked_sender_numbers,
+        allow_regional_fallback: !health_config.require_local_routing,
+      });
 
-      if (numbers && numbers.length > 0) {
-        const firstNumber = numbers[0];
-        if (firstNumber?.phone_number) {
-          const normalized = normalizePhone(firstNumber.phone_number);
-          if (normalized && !isRecipientPhone(normalized)) return normalized;
-        }
+      if (route.ok && isUsableSender(route.selected_textgrid_number)) {
+        return normalizePhone(route.selected_textgrid_number);
       }
     } catch {
       // Non-fatal
@@ -706,16 +729,32 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     asBoolean(input.bypassed_queue_emergency_stop, false) ||
     asBoolean(input_metadata.bypassed_queue_emergency_stop, false);
   const metadata_source = clean(input.source) || clean(input_metadata.source) || "manual_inbox";
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const sms_health_system_control = {
+    sms_blocked_sender_numbers: await get_system_value("sms_blocked_sender_numbers"),
+    require_local_routing: await get_system_value("require_local_routing"),
+    allow_regional_fallback_for_first_touch:
+      await get_system_value("allow_regional_fallback_for_first_touch"),
+  };
 
   // ── Step 1: Resolve from_phone_number ──────────────────────────────
   const normalized_to = normalizePhone(clean(input.to_phone_number));
   let resolved_from = normalizePhone(clean(input.from_phone_number));
-  if (!resolved_from || (normalized_to && resolved_from === normalized_to)) {
+  if (
+    !resolved_from ||
+    (normalized_to && resolved_from === normalized_to) ||
+    isSmsSenderHealthBlocked(resolved_from, {
+      system_control: sms_health_system_control,
+    })
+  ) {
     resolved_from = await resolveFromImpl({
       thread_key: clean(input.thread_key),
       to_phone_number: normalized_to,
       textgrid_number_id: clean(input.textgrid_number_id) || null,
       market: clean(input.market) || null,
+      state: clean(input.state || input.property_address_state) || null,
+      sms_health_system_control,
       supabase,
     });
   }
@@ -1012,6 +1051,10 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         manual_send_warning_codes: warning_codes,
         client_send_id: clean(input.client_send_id || input.metadata?.client_send_id) || null,
       },
+    }, {
+      ...deps,
+      supabase,
+      sms_health_system_control,
     });
   } catch (insert_error) {
     const proof = buildManualSendProof({
@@ -1047,8 +1090,9 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     null;
 
   if (queue_result?.ok === false) {
-    const reason = clean(queue_result?.reason) === "duplicate_blocked"
-      ? "duplicate_blocked"
+    const queue_reason = clean(queue_result?.reason);
+    const reason = ["duplicate_blocked", "blocked_sender_number"].includes(queue_reason)
+      ? queue_reason
       : "queue_insert_failure";
     const detail_reason = clean(queue_result?.reason) || null;
     const proof = buildManualSendProof({
@@ -1070,7 +1114,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     });
     return {
       ok: false,
-      status: reason === "duplicate_blocked" ? 423 : 500,
+      status: ["duplicate_blocked", "blocked_sender_number"].includes(reason) ? 423 : 500,
       error: reason,
       reason,
       detail_reason,

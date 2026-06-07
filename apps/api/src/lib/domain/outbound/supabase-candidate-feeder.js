@@ -9,10 +9,17 @@ import {
   blockedRuntimeBrakeResult,
   evaluateQueueCreationRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
-import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import {
+  evaluateSmsHealthGuard,
+  getDefaultSmsHealthGuardConfig,
+} from "@/lib/domain/delivery/sms-health-guard.js";
 import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
+import {
+  normalizeRoutingMarketKey as normalizeMarket,
+  selectSafeTextgridRoute,
+} from "@/lib/domain/routing/textgrid-routing-policy.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -443,75 +450,6 @@ function getSupabase(deps = {}) {
     throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
   return defaultSupabase;
-}
-
-function normalizeMarket(value) {
-  return lower(value)
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-const REGIONAL_ROUTING_RULES = [
-  {
-    name: "ca_to_los_angeles",
-    states: ["ca"],
-    target_markets: ["Los Angeles, CA"],
-  },
-  {
-    name: "west_mountain_to_los_angeles",
-    states: ["or", "wa", "nv", "az", "id", "ut"],
-    target_markets: ["Los Angeles, CA"],
-  },
-  {
-    name: "midwest_to_minneapolis",
-    states: ["mn", "wi", "ia", "nd", "sd", "ne", "il", "in", "mi", "oh", "mo"],
-    target_markets: ["Minneapolis, MN"],
-  },
-  {
-    name: "southern_plains_to_dallas",
-    states: ["ok", "ar", "ks"],
-    target_markets: ["Dallas, TX"],
-  },
-  {
-    name: "louisiana_to_houston",
-    states: ["la"],
-    target_markets: ["Houston, TX"],
-  },
-  {
-    name: "texas_to_dallas_then_houston",
-    states: ["tx"],
-    target_markets: ["Dallas, TX", "Houston, TX"],
-  },
-  {
-    name: "georgia_to_atlanta",
-    states: ["ga"],
-    target_markets: ["Atlanta, GA"],
-  },
-  {
-    name: "carolinas_to_charlotte",
-    states: ["nc", "sc"],
-    target_markets: ["Charlotte, NC"],
-  },
-  {
-    name: "florida_to_jacksonville_then_miami",
-    states: ["fl"],
-    target_markets: ["Jacksonville, FL", "Miami, FL"],
-  },
-  {
-    name: "northeast_to_miami",
-    states: ["ny", "nj", "pa", "md", "va", "dc", "de", "ct", "ri", "ma", "nh", "vt", "me"],
-    target_markets: ["Miami, FL"],
-  },
-  {
-    name: "southeast_inland_to_atlanta_then_charlotte",
-    states: ["al", "ms", "tn", "ky"],
-    target_markets: ["Atlanta, GA", "Charlotte, NC"],
-  },
-];
-
-function findRegionalRoutingRule(state) {
-  const normalized_state = lower(state);
-  return REGIONAL_ROUTING_RULES.find((rule) => rule.states.includes(normalized_state)) || null;
 }
 
 function buildIdempotencyKey({
@@ -2763,152 +2701,92 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
     .map(normalizeTextgridNumberRow)
     .filter((row) => row.id && row.phone_number && (!row.status || row.status === "active"));
 
-  if (!numbers.length) {
-    return {
-      ok: false,
-      reason_code: REASON_CODES.NO_VALID_TEXTGRID_NUMBER,
-      routing_allowed: false,
-      routing_tier: "none",
-      selection_reason: null,
-      routing_rule_name: null,
-      selected_textgrid_market: null,
-      selected_textgrid_number: null,
-      seller_market: candidate.market || null,
-      seller_state: candidate.state || null,
-      routing_block_reason: "NO_ACTIVE_TEXTGRID_NUMBERS",
-      selected: null,
-    };
-  }
-
-  const seller_market = normalizeMarket(candidate.market);
-  const seller_state = lower(candidate.state);
   const first_touch = asBoolean(
     options.first_touch ?? candidate.is_first_touch,
-    Number(candidate.touch_number || 1) === 1
+    Number(candidate.touch_number || 0) === 1
   );
   const require_local_routing = asBoolean(options.require_local_routing, false);
   const allow_regional_fallback_for_first_touch = asBoolean(
     options.allow_regional_fallback_for_first_touch,
     false
   );
-  const exact_market_required =
-    require_local_routing || (first_touch && !allow_regional_fallback_for_first_touch);
+  const allow_regional_fallback =
+    !require_local_routing &&
+    (!first_touch || allow_regional_fallback_for_first_touch);
+  const health_guard_config = getDefaultSmsHealthGuardConfig(process.env, {
+    sms_blocked_sender_numbers: options.sms_blocked_sender_numbers,
+  });
+  const safe_route = selectSafeTextgridRoute({
+    market: candidate.market,
+    state: candidate.state,
+    numbers,
+    blocked_sender_numbers: health_guard_config.blocked_sender_numbers,
+    allow_regional_fallback,
+    choose_candidate: (candidates) => [...candidates].sort(byUsageThenRecency)[0] || null,
+  });
 
-  const exact = numbers.filter((row) => row.market_normalized === seller_market).sort(byUsageThenRecency);
-  const alias = numbers
-    .filter((row) => row.aliases.includes(seller_market) && row.market_normalized !== seller_market)
-    .sort(byUsageThenRecency);
-  const regional_rule = findRegionalRoutingRule(seller_state);
-  const regional = regional_rule
-    ? regional_rule.target_markets
-        .map((target_market) => {
-          const target_market_normalized = normalizeMarket(target_market);
-          const candidates = numbers
-            .filter((row) => row.market_normalized === target_market_normalized)
-            .sort(byUsageThenRecency);
-          return candidates.length
-            ? {
-                target_market,
-                selected: candidates[0],
-              }
-            : null;
-        })
-        .filter(Boolean)
-    : [];
-  const nationwide = numbers
-    .filter((row) => row.is_nationwide && row.allow_nationwide_fallback)
-    .sort(byUsageThenRecency);
-
-  if (exact.length) {
-    return buildRoutingSelection({
-      selected: exact[0],
-      routing_tier: "exact_market_match",
-      selection_reason: "exact_market_match",
-      routing_rule_name: "exact_market_match",
-      seller_market: candidate.market,
-      seller_state: candidate.state,
-      rejected_candidate_count: Math.max(0, numbers.length - 1),
-    });
-  }
-
-  if (exact_market_required) {
+  if (!safe_route.ok) {
     return {
       ok: false,
-      reason_code: REASON_CODES.ROUTING_BLOCKED,
+      reason_code:
+        safe_route.routing_block_reason === "NO_ACTIVE_TEXTGRID_NUMBERS"
+          ? REASON_CODES.NO_VALID_TEXTGRID_NUMBER
+          : REASON_CODES.ROUTING_BLOCKED,
       routing_allowed: false,
       routing_tier: "blocked",
       selection_reason: null,
-      routing_rule_name: regional_rule?.name || null,
+      routing_rule_name: safe_route.routing_rule_name || null,
       selected_textgrid_market: null,
       selected_textgrid_number: null,
       seller_market: candidate.market || null,
       seller_state: candidate.state || null,
       rejected_candidate_count: numbers.length,
-      routing_block_reason: "NO_VALID_LOCAL_TEXTGRID_NUMBER",
+      routing_block_reason: safe_route.routing_block_reason,
       selected: null,
       diagnostics: {
         require_local_routing,
         first_touch,
         allow_regional_fallback_for_first_touch,
-        exact_market_required,
+        allow_regional_fallback,
         seller_market: candidate.market || null,
+        seller_state: candidate.state || null,
         selected_textgrid_market: null,
         rejected_candidate_count: numbers.length,
+        health_blocked_sender_count: safe_route.health_blocked_sender_count,
+        safe_number_count: safe_route.safe_number_count,
       },
     };
   }
 
-  if (alias.length) {
-    return buildRoutingSelection({
-      selected: alias[0],
-      routing_tier: "approved_alias_match",
-      selection_reason: "approved_alias_match",
-      routing_rule_name: "approved_alias_match",
-      seller_market: candidate.market,
-      seller_state: candidate.state,
-      rejected_candidate_count: Math.max(0, numbers.length - 1),
-    });
-  }
-
-  if (regional.length) {
-    return buildRoutingSelection({
-      selected: regional[0].selected,
-      routing_tier: "approved_regional_fallback",
-      selection_reason: `approved_regional_fallback:${regional[0].target_market}`,
-      routing_rule_name: regional_rule?.name || null,
-      seller_market: candidate.market,
-      seller_state: candidate.state,
-      rejected_candidate_count: Math.max(0, numbers.length - 1),
-    });
-  }
-
-  if (!options.routing_safe_only && nationwide.length) {
-    return buildRoutingSelection({
-      selected: nationwide[0],
-      routing_tier: "approved_nationwide_fallback",
-      selection_reason: "approved_nationwide_fallback",
-      routing_rule_name: "approved_nationwide_fallback",
-      seller_market: candidate.market,
-      seller_state: candidate.state,
-      rejected_candidate_count: Math.max(0, numbers.length - 1),
-    });
-  }
-
+  const routing_tier =
+    safe_route.route_type === "approved_state_fallback"
+      ? "approved_regional_fallback"
+      : safe_route.route_type;
+  const selection_reason =
+    safe_route.route_type === "approved_state_fallback"
+      ? `approved_regional_fallback:${safe_route.target_market}`
+      : safe_route.route_type;
   return {
-      ok: false,
-      reason_code: REASON_CODES.ROUTING_BLOCKED,
-      routing_allowed: false,
-      routing_tier: "blocked",
-      selection_reason: null,
-      routing_rule_name: regional_rule?.name || null,
-      selected_textgrid_market: null,
-      selected_textgrid_number: null,
-      seller_market: candidate.market || null,
-      seller_state: candidate.state || null,
-      rejected_candidate_count: numbers.length,
-      routing_block_reason: "NO_APPROVED_ROUTING_PATH",
-      selected: null,
-    };
+    ...buildRoutingSelection({
+      selected: safe_route.selected,
+      routing_tier,
+      selection_reason,
+      routing_rule_name: safe_route.routing_rule_name,
+      seller_market: candidate.market,
+      seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
+    }),
+    route_type: safe_route.route_type,
+    health_blocked_sender_count: safe_route.health_blocked_sender_count,
+    diagnostics: {
+      require_local_routing,
+      first_touch,
+      allow_regional_fallback_for_first_touch,
+      allow_regional_fallback,
+      health_blocked_sender_count: safe_route.health_blocked_sender_count,
+      safe_number_count: safe_route.safe_number_count,
+    },
+  };
 }
 
 export async function renderOutboundTemplate(candidate = {}, options = {}, deps = {}) {
@@ -4264,6 +4142,9 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         await get_system_value("allow_regional_fallback_for_first_touch"),
       false
     ),
+    sms_blocked_sender_numbers:
+      input.sms_blocked_sender_numbers ??
+      await get_system_value("sms_blocked_sender_numbers"),
     allow_phone_fallback: asBoolean(input.allow_phone_fallback, false),
     within_contact_window_now: asBoolean(input.within_contact_window_now, true),
     template_use_case: clean(input.template_use_case) || "ownership_check",

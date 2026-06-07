@@ -529,6 +529,33 @@ test("createInboxSendNowQueueRow passes recipient phone into resolver repair", a
   assert.equal(resolverArgs.to_phone_number, "+13235589881");
 });
 
+test("createInboxSendNowQueueRow reroutes a health-blocked manual sender", async () => {
+  let resolverCalls = 0;
+  let insertedRow = null;
+  const result = await createInboxSendNowQueueRow({
+    ...VALID_PAYLOAD,
+    from_phone_number: "+14693131600",
+  }, {
+    getSystemValue: async () => null,
+    insertImpl: async (row) => {
+      insertedRow = row;
+      return { ok: true, queue_row_id: "blocked-reroute-row", queue_id: row.queue_key };
+    },
+    resolveFromImpl: async () => {
+      resolverCalls += 1;
+      return "+12818458577";
+    },
+    hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
+    checkBlacklistPriorFailureImpl: async () => ({ blocked: false, reason: null }),
+    recentDeliveryFailuresImpl: async () => ({ suppress: false, reason: null }),
+    supabase: makeDuplicateGuardSupabase(0),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(resolverCalls, 1);
+  assert.equal(insertedRow.from_phone_number, "+12818458577");
+});
+
 test("resolveFromPhoneNumber uses inbound event recipient as our number fallback", async () => {
   const supabase = {
     from(table) {
@@ -633,4 +660,67 @@ test("resolveFromPhoneNumber falls back to send_queue by recipient phone when th
   });
 
   assert.equal(result, "+18885551212");
+});
+
+test("resolveFromPhoneNumber skips blocked affinity and uses the shared Dallas-to-Houston fallback", async () => {
+  const supabase = {
+    from(table) {
+      const state = { filters: [] };
+      const api = {
+        select() { return api; },
+        eq(col, val) { state.filters.push({ col, val }); return api; },
+        not() { return api; },
+        order() { return api; },
+        maybeSingle: async () => {
+          if (
+            table === "textgrid_numbers" &&
+            state.filters.some((filter) => filter.col === "id")
+          ) {
+            return { data: { phone_number: "+14693131600" } };
+          }
+          return { data: null };
+        },
+        limit(limit) {
+          if (table === "textgrid_numbers" && limit === 100) {
+            return Promise.resolve({
+              data: [
+                {
+                  id: "dallas-blocked",
+                  phone_number: "+14693131600",
+                  market: "Dallas, TX",
+                  status: "active",
+                },
+                {
+                  id: "houston-safe",
+                  phone_number: "+12818458577",
+                  market: "Houston, TX",
+                  status: "active",
+                },
+              ],
+              error: null,
+            });
+          }
+          return api;
+        },
+        then(resolve) {
+          return resolve({ data: [], error: null });
+        },
+      };
+      return api;
+    },
+  };
+
+  const result = await resolveFromPhoneNumber({
+    thread_key: "missing-thread-key",
+    to_phone_number: "+13235589881",
+    textgrid_number_id: "dallas-blocked",
+    market: "Dallas, TX",
+    state: "TX",
+    sms_health_system_control: {
+      require_local_routing: false,
+    },
+    supabase,
+  });
+
+  assert.equal(result, "+12818458577");
 });

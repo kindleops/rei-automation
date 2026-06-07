@@ -231,3 +231,54 @@ test("Supabase outbound feeder dry-run includes progression previews", async () 
   assert.equal(result.first_10_would_queue[0].payload.template_use_case, "consider_selling");
   assert.equal(result.first_10_would_queue[0].payload.touch_number, 2);
 });
+
+test("Supabase outbound feeder forwards the coordinated safe-routing controls", async () => {
+  let routingOptions = null;
+  const candidateRows = [
+    { ...baseCandidate, master_owner_id: "mo_route", property_id: "prop_route" }
+  ];
+
+  const result = await runSupabaseOutboundFeeder({
+    dry_run: true,
+    debug: true,
+    limit: 1,
+    scan_limit: 1,
+    within_contact_window_now: false,
+    require_local_routing: false,
+    allow_regional_fallback_for_first_touch: true,
+    sms_blocked_sender_numbers: ["+14693131600"],
+  }, {
+    supabase: createMockSupabase({ candidateRows }),
+    evaluateCandidateEligibility: async () => ({
+      ok: true,
+      scheduled_for: "2026-06-07T15:00:00.000Z",
+    }),
+    chooseTextgridNumber: async (_candidate, options) => {
+      routingOptions = options;
+      return {
+        ok: true,
+        routing_tier: "approved_regional_fallback",
+        selected_textgrid_number: "+12818458577",
+        selected: {
+          id: "houston-safe",
+          phone_number: "+12818458577",
+          market: "Houston, TX",
+        },
+      };
+    },
+    renderOutboundTemplate: async () => ({
+      ok: true,
+      selected_template: { id: "tmpl_1", source: "supabase" },
+      rendered_message_body: "Safe route proof",
+    }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queued_count, 1);
+  assert.equal(routingOptions.allow_regional_fallback_for_first_touch, true);
+  assert.deepEqual(routingOptions.sms_blocked_sender_numbers, ["+14693131600"]);
+  assert.equal(
+    result.first_10_would_queue[0].payload.from_phone_number,
+    "+12818458577"
+  );
+});

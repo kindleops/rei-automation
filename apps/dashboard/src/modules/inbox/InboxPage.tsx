@@ -53,7 +53,7 @@ import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
-import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
+import { patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
@@ -591,6 +591,7 @@ export default function InboxPage() {
   const messageCacheRef = useRef<Record<string, ThreadMessage[]>>({})
   const optimisticMessageMapRef = useRef<Map<string, string>>(new Map()) // clientSendId → optimisticMessage.id
   const inFlightSendMapRef = useRef<Set<string>>(new Set()) // clientSendIds currently in-flight
+  const loadMoreAbortControllerRef = useRef<AbortController | null>(null)
   const prevThreadsRef = useRef<InboxWorkflowThread[]>([])
   useEffect(() => {
     console.log('[InboxPage] mounted')
@@ -1503,7 +1504,13 @@ export default function InboxPage() {
       setThreadContext(null)
       setThreadIntelligence(null)
       setDealContext(null)
-      setThreadTranslations({})
+      if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort()
+      loadMoreAbortControllerRef.current = null
+      setOlderMessagesLoading(false)
+    }
+
+    setThreadTranslations({})
       setThreadViewMode('original')
       setDetectedThreadLanguage(null)
       prevSelectedIdRef.current = null
@@ -1518,6 +1525,12 @@ export default function InboxPage() {
     const fallbackDealContext = normalizeDealContext(thread as unknown as Record<string, unknown>)
     prevSelectedIdRef.current = thread.id
     const fetchStartTs = performance.now()
+
+    if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort()
+      loadMoreAbortControllerRef.current = null
+      setOlderMessagesLoading(false)
+    }
 
     setThreadTranslations({})
     setThreadViewMode('original')
@@ -1572,7 +1585,7 @@ export default function InboxPage() {
         })
       }
       console.log('[MESSAGES_COMMIT]', selectedKeyForEffect, resolvedMessages.length)
-      setSelectedMessages(resolvedMessages)
+      setSelectedMessages((current) => current.length > 0 ? dedupeMessages([...resolvedMessages, ...current]) : resolvedMessages)
       setHasOlderMessages(Boolean(hydration.pagination?.hasMore))
       setMessagesLoading(false)
       if (hydration.dealContext) {
@@ -1601,7 +1614,7 @@ export default function InboxPage() {
         console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
       } else {
         console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
-        setSelectedMessages(cachedMessages)
+        setSelectedMessages([])
         setHasOlderMessages(false)
         setMessagesLoading(false)
       }
@@ -1652,6 +1665,9 @@ export default function InboxPage() {
     return () => {
       cancelled = true
       controller.abort()
+      if (loadMoreAbortControllerRef.current) {
+        loadMoreAbortControllerRef.current.abort()
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [DEV, selectedKeyForEffect, messageRefetchKey])
@@ -1708,14 +1724,6 @@ export default function InboxPage() {
     }
 
     const mergeRealtimeMessage = (incoming: ThreadMessage) => {
-      messageCacheRef.current[selectedKey] = dedupeMessages([
-        ...(messageCacheRef.current[selectedKey] ?? []),
-        incoming,
-      ])
-      commitDashboardMessages(selectedKey, [incoming], {
-        source: 'selected_thread_realtime',
-      })
-
       setSelectedMessages((current) => {
         return dedupeMessages([...current, incoming])
       })
@@ -1762,7 +1770,7 @@ export default function InboxPage() {
           table: 'message_events',
           eventType: payload.eventType,
           threadKey: selectedKey,
-          patchKeys: ['messagesByThreadId'],
+          patchKeys: [],
           messageId: incoming.id,
         })
 
@@ -1876,21 +1884,16 @@ export default function InboxPage() {
       .subscribe()
 
     const pollSelectedMessages = () => {
+      if (data.connectionState === 'live') return
       if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
       pollInFlight = true
       pollController = new AbortController()
       getThreadMessagesForThread(selected, { signal: pollController.signal, maxMessages: 50 }).then((messages) => {
         if (!messages.length) return
-        commitDashboardMessages(selectedKey, messages, {
-          source: 'selected_thread_polling',
-          connectionState: data.connectionState ?? null,
-        })
-        messageCacheRef.current[selectedKey] = dedupeMessages([
-          ...(messageCacheRef.current[selectedKey] ?? []),
-          ...messages,
-        ])
+        const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
+        if (activeConversationId !== selectedKey) return
         setSelectedMessages((current) => {
-          const merged = dedupeMessages([...current, ...messages])
+          const merged = dedupeMessages([...messages, ...current])
           if (merged.length > current.length) scheduleRefreshInbox()
           return merged
         })
