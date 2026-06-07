@@ -23,12 +23,6 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
 
-    // Option C: Fast list rows first.
-    // Keep delivery hydration skipped on the list route, but do NOT force-skip counts.
-    // Counts must load for manual bucket switches and initial load so inbox badges stay accurate.
-    // Auto-refresh can still skip counts inside getLiveInbox via isAutoRefresh.
-    params.skip_delivery = 'true'
-
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
       ? params.timeout_mode
       : 'manual_bucket_switch'
@@ -74,8 +68,9 @@ export async function GET(request) {
             timeoutMode,
             error: 'live_inbox_timeout',
             reason: 'live_timeout_preserve_client_counts',
-            dataMode: 'timeout_preserved',
+            dataMode: 'fallback_error',
             countsSource: 'timeout',
+            message: `Live inbox exceeded the ${timeoutMs}ms ${timeoutMode} timeout.`,
           }),
           { status: 200, headers: cors }
         )
@@ -100,6 +95,9 @@ export async function GET(request) {
   } catch (error) {
     console.error('[INBOX_LIVE_DEGRADED_ERROR]', {
       message: error?.message || String(error),
+      code: error?.code || null,
+      details: error?.details || null,
+      hint: error?.hint || null,
       stack: error?.stack || null,
     })
     return NextResponse.json(
@@ -107,8 +105,13 @@ export async function GET(request) {
         timeoutMode: 'unknown',
         error: 'live_inbox_failed_degraded',
         reason: 'live_error_preserve_client_counts',
-        dataMode: 'error_preserved',
+        dataMode: 'fallback_error',
         countsSource: 'error',
+        message: error?.message || String(error),
+        details: error?.details || null,
+        hint: error?.hint || null,
+        code: error?.code || null,
+        stack: error?.stack || null,
       }),
       { status: 200, headers: cors }
     )

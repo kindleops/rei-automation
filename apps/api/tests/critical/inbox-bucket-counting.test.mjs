@@ -16,11 +16,11 @@ function buildLiveCountRow(rows = []) {
     new_replies: byBucket('new_replies'),
     needs_review: byBucket('needs_review'),
     follow_up: byBucket('follow_up'),
-    cold: byBucket('cold'),
+    cold: rows.filter((row) => row.inbox_bucket === 'waiting' && row.inbox_category === 'cold_no_response').length,
     dead: byBucket('dead'),
     suppressed: byBucket('suppressed'),
-    active: rows.filter((row) => ['priority', 'new_replies', 'needs_review', 'follow_up'].includes(row.inbox_bucket)).length,
-    waiting: rows.filter((row) => row.latest_message_direction === 'outbound' && !['dead', 'suppressed'].includes(row.inbox_bucket)).length,
+    active: rows.filter((row) => ['priority', 'new_replies', 'needs_review', 'follow_up', 'waiting'].includes(row.inbox_bucket)).length,
+    waiting: byBucket('waiting'),
     unlinked: rows.filter((row) => row.property_id == null).length,
   };
 }
@@ -43,13 +43,14 @@ function makeSupabaseStub(rows = []) {
           return api; 
         },
         eq(col, val) { state.filters.push({ type: 'eq', col, val }); return api; },
+        in(col, values) { state.filters.push({ type: 'in', col, values }); return api; },
         not(col, op, val) { state.filters.push({ type: 'not', col, op, val }); return api; },
         or(val) { state.or = val; return api; },
         order() { return api; },
         range(start, end) { state.range = [start, end]; return api; },
         limit(n) { state.limit = n; return api; },
         async then(resolve) {
-          let data = table === 'v_inbox_thread_counts_live_v2'
+          let data = table === 'canonical_inbox_counts'
             ? [buildLiveCountRow(rows)]
             : [...rows];
           
@@ -57,6 +58,8 @@ function makeSupabaseStub(rows = []) {
           for (const f of state.filters) {
             if (f.type === 'eq') {
               data = data.filter(r => clean(r[f.col]) === clean(f.val));
+            } else if (f.type === 'in') {
+              data = data.filter(r => f.values.map(clean).includes(clean(r[f.col])));
             } else if (f.type === 'not') {
               if (f.op === 'eq') {
                 data = data.filter(r => clean(r[f.col]) !== clean(f.val));

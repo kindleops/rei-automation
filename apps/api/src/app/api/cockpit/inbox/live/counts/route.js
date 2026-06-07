@@ -24,16 +24,41 @@ export async function GET(request) {
       }
     );
 
-    return NextResponse.json({ ok: true, data: counts, counts }, { status: 200, headers: cors });
-  } catch (error) {
-    if (error?.message === "live_inbox_counts_unavailable") {
-      const emptyCounts = buildNullCounts();
-      return NextResponse.json({ ok: true, data: emptyCounts, counts: emptyCounts, degraded: true }, { status: 200, headers: cors });
-    }
-    warn("inbox.live_counts_failed", { message: error?.message || "unknown" });
     return NextResponse.json(
-      { error: "Failed to fetch live counts", message: error?.message },
-      { status: 500, headers: cors }
+      {
+        ok: true,
+        degraded: false,
+        dataMode: "live",
+        data: counts,
+        counts,
+        diagnostics: { countsSource: "canonical_inbox_counts" },
+      },
+      { status: 200, headers: cors }
+    );
+  } catch (error) {
+    const emptyCounts = buildNullCounts();
+    warn("inbox.live_counts_failed", {
+      message: error?.message || "unknown",
+      code: error?.code || null,
+      details: error?.details || null,
+      hint: error?.hint || null,
+      stack: error?.stack || null,
+    });
+    return NextResponse.json(
+      {
+        ok: false,
+        degraded: true,
+        dataMode: "fallback_error",
+        error: "live_inbox_counts_unavailable",
+        message: error?.message || "Failed to fetch live counts",
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+        data: emptyCounts,
+        counts: emptyCounts,
+        diagnostics: { countsSource: "error" },
+      },
+      { status: 200, headers: cors }
     );
   }
 }

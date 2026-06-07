@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { degradedLiveResponse, degradedThreadMessagesPayload } from "../../src/lib/domain/inbox/degraded-read-responses.js";
-import { getLiveInbox, getThreadMessages } from "../../src/lib/domain/inbox/live-inbox-service.js";
+import { getLiveInbox, getThreadMessages, resolveDeliveryBadge } from "../../src/lib/domain/inbox/live-inbox-service.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -51,11 +51,11 @@ function buildCountRow(rows = []) {
     new_replies: byBucket("new_replies"),
     needs_review: byBucket("needs_review"),
     follow_up: byBucket("follow_up"),
-    cold: byBucket("cold"),
+    cold: rows.filter((row) => row.inbox_bucket === "waiting" && row.inbox_category === "cold_no_response").length,
     dead: byBucket("dead"),
     suppressed: byBucket("suppressed"),
-    active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up"].includes(row.inbox_bucket)).length,
-    waiting: rows.filter((row) => row.latest_message_direction === "outbound" && !["dead", "suppressed"].includes(row.inbox_bucket)).length,
+    active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up", "waiting"].includes(row.inbox_bucket)).length,
+    waiting: byBucket("waiting"),
     unlinked: rows.filter((row) => row.property_id == null).length,
   };
 }
@@ -83,9 +83,8 @@ function createCanonicalInboxSupabase(seed = {}) {
   const countRows = seed.countRows ? [...seed.countRows] : null;
 
   function getRowsForTable(table) {
-    if (table === "inbox_threads_view") return [...threadRows];
-    if (table === "v_inbox_threads_live_v2") return [...threadRows];
-    if (table === "v_inbox_thread_counts_live_v2") return countRows ? [...countRows] : [buildCountRow(threadRows)];
+    if (table === "canonical_inbox_threads") return [...threadRows];
+    if (table === "canonical_inbox_counts") return countRows ? [...countRows] : [buildCountRow(threadRows)];
     if (table === "message_events") return [...messageEvents];
     return [];
   }
@@ -141,7 +140,7 @@ function createCanonicalInboxSupabase(seed = {}) {
         },
         then(resolve, reject) {
           return Promise.resolve().then(() => {
-            if (state.table === "v_inbox_thread_counts_live_v2" && seed.countError) {
+            if (state.table === "canonical_inbox_counts" && seed.countError) {
               return { data: null, count: null, error: { message: seed.countError } };
             }
 
@@ -311,7 +310,8 @@ function makeThread(overrides = {}) {
     latest_message_direction: "outbound",
     latest_message_at: "2026-05-29T12:00:00.000Z",
     last_message_at: "2026-05-29T12:00:00.000Z",
-    inbox_bucket: "cold",
+    inbox_bucket: "waiting",
+    inbox_category: "cold_no_response",
     property_id: `prop-${threadKey}`,
     master_owner_id: `owner-${threadKey}`,
     duplicate_property_count: 1,
@@ -346,17 +346,18 @@ function makeEvent(overrides = {}) {
   };
 }
 
-test("degraded read-route payloads preserve 200-compatible inbox state", () => {
+test("degraded live payloads are explicit fallback errors", () => {
   const livePayload = degradedLiveResponse({
     timeoutMode: "manual_bucket_switch",
     error: "live_inbox_failed_degraded",
     reason: "live_error_preserve_client_counts",
-    dataMode: "error_preserved",
+    dataMode: "fallback_error",
     countsSource: "error",
   });
 
-  assert.equal(livePayload.ok, true);
+  assert.equal(livePayload.ok, false);
   assert.equal(livePayload.degraded, true);
+  assert.equal(livePayload.dataMode, "fallback_error");
   assert.deepEqual(livePayload.threads, []);
   assert.equal(livePayload.countsDegraded, true);
   assert.equal(livePayload.diagnostics.count_preserved_reason, "live_error_preserve_client_counts");
@@ -465,6 +466,21 @@ test("live inbox rows preserve latest delivery fields", async () => {
   assert.equal(thread.latest_provider_delivery_status, "delivered");
   assert.equal(thread.latest_delivered_at, "2026-05-29T12:11:30.000Z");
   assert.equal(thread.queue_status, "delivered");
+  assert.equal(thread.delivery_badge, "delivered");
+});
+
+test("delivery badge gives explicit failure evidence strict priority", () => {
+  assert.equal(resolveDeliveryBadge({
+    latest_provider_delivery_status: "delivered",
+    latest_delivery_status: "delivered",
+    latest_failure_reason: "carrier rejected",
+  }), "failed");
+  assert.equal(resolveDeliveryBadge({ latest_provider_delivery_status: "undelivered" }), "failed");
+  assert.equal(resolveDeliveryBadge({ latest_delivery_status: "rejected" }), "failed");
+  assert.equal(resolveDeliveryBadge({ latest_delivery_status: "delivered" }), "delivered");
+  assert.equal(resolveDeliveryBadge({ latest_delivery_status: "sent" }), "sent");
+  assert.equal(resolveDeliveryBadge({ queue_status: "active" }), "queued");
+  assert.equal(resolveDeliveryBadge({}), "unknown");
 });
 
 test("send event inserted into message_events becomes the latest thread row", async () => {
@@ -695,7 +711,8 @@ test("counts come from the same canonical v2 source and match filter results", a
     makeThread({
       thread_key: "+15550000034",
       latest_message_direction: "outbound",
-      inbox_bucket: "cold",
+      inbox_bucket: "waiting",
+      inbox_category: "cold_no_response",
       latest_message_at: "2026-05-29T12:00:00.000Z",
       property_id: null,
     }),
@@ -735,8 +752,8 @@ test("counts come from the same canonical v2 source and match filter results", a
   assert.equal(allResult.counts.cold, 1);
   assert.equal(allResult.counts.dead, 1);
   assert.equal(allResult.counts.suppressed, 1);
-  assert.equal(allResult.counts.active, 4);
-  assert.equal(allResult.counts.waiting, 2);
+  assert.equal(allResult.counts.active, 5);
+  assert.equal(allResult.counts.waiting, 1);
   assert.equal(allResult.counts.unlinked, 3);
 
   const expectations = [
@@ -747,8 +764,8 @@ test("counts come from the same canonical v2 source and match filter results", a
     ["cold", 1],
     ["dead", 1],
     ["suppressed", 1],
-    ["active", 4],
-    ["waiting", 2],
+    ["active", 5],
+    ["waiting", 1],
     ["unlinked", 3],
   ];
 
@@ -762,7 +779,7 @@ test("counts come from the same canonical v2 source and match filter results", a
   }
 });
 
-test("visible thread rows floor stale zero count rows", async () => {
+test("canonical count rows are not fabricated from the visible page", async () => {
   const threadRows = [
     makeThread({
       thread_key: "+15550000041",
@@ -797,59 +814,22 @@ test("visible thread rows floor stale zero count rows", async () => {
   const result = await getLiveInbox({ filter: "new_replies", limit: 20 }, { supabase });
 
   assert.equal(result.threads.length, 2);
-  assert.equal(result.counts.new_replies, 2);
-  assert.equal(result.counts.needs_reply, 2);
-  assert.equal(result.counts.active, 2);
-  assert.equal(result.counts.all, 2);
-  assert.equal(result.countsDegraded, true);
-  assert.equal(result.countsApproximate, true);
-  assert.match(result.diagnostics?.countsSource || "", /visible_rows_floor/);
+  assert.equal(result.counts.new_replies, 0);
+  assert.equal(result.counts.needs_reply, 0);
+  assert.equal(result.counts.active, 0);
+  assert.equal(result.counts.all, 0);
+  assert.equal(result.countsDegraded, false);
+  assert.equal(result.countsApproximate, false);
+  assert.equal(result.diagnostics?.countsSource, "canonical_inbox_counts");
 });
 
-test("initial boot fallback returns threads without exact-counting v_inbox_enriched and marks counts degraded", async () => {
-  const trackers = {
-    fallbackExactCountRequested: false,
-    fallbackCountQueryRequested: false,
-  };
-  const supabase = createFallbackEnrichedSupabase([
-    {
-      thread_key: "+15550000099",
-      best_phone: "+15550000099",
-      seller_phone: "+15550000099",
-      display_phone: "+15550000099",
-      latest_direction: "inbound",
-      latest_message_at: "2026-05-29T12:45:00.000Z",
-      latest_message_body: "Interested in selling",
-      inbox_category: "hot_leads",
-      stage: "needs_response",
-      owner_display_name: "Fallback Seller",
-      display_name: "Fallback Seller",
-      property_address_full: "99 Fallback Ave",
-      display_address: "99 Fallback Ave",
-      market: "Dallas",
-      display_market: "Dallas",
-      property_type: "SFR",
-      show_in_priority_inbox: true,
-      is_suppressed: false,
-      is_read: false,
-      unread_count: 1,
-      created_at: "2026-05-29T12:40:00.000Z",
-      updated_at: "2026-05-29T12:45:00.000Z",
-    },
-  ], trackers);
+test("canonical source errors do not fall back to legacy inbox rows", async () => {
+  const supabase = createCanonicalInboxSupabase({
+    countError: "canonical counts unavailable",
+  });
 
-  const result = await getLiveInbox(
-    { filter: "all", timeout_mode: "initial_boot" },
-    { selectMode: "initial_boot_safe" },
-    { supabase },
+  await assert.rejects(
+    getLiveInbox({ filter: "all", timeout_mode: "initial_boot" }, { supabase }),
+    (error) => error?.message === "canonical counts unavailable",
   );
-
-  assert.equal(result.threads.length, 1);
-  assert.equal(result.pagination.limit, 25);
-  assert.equal(result.source, "v_inbox_enriched");
-  assert.equal(result.fallback_used, true);
-  assert.equal(result.countsDegraded, true);
-  assert.equal(result.diagnostics?.countsDegraded, true);
-  assert.equal(trackers.fallbackExactCountRequested, false);
-  assert.equal(trackers.fallbackCountQueryRequested, false);
 });

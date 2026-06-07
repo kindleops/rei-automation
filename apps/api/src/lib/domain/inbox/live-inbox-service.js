@@ -421,7 +421,7 @@ function countFromRow(row = {}) {
 
 function threadMatchesFilter(thread = {}, filter = "all") {
   const bucket = lower(thread.inbox_bucket);
-  const direction = normalizeDirection(thread.latest_message_direction || thread.direction);
+  const category = lower(thread.inbox_category);
   switch (filter) {
     case "all":
       return true;
@@ -434,15 +434,15 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "follow_up":
       return bucket === "follow_up";
     case "cold":
-      return bucket === "cold";
+      return bucket === "waiting" && category === "cold_no_response";
     case "dead":
       return bucket === "dead" || thread.wrong_number === true || thread.not_interested === true;
     case "suppressed":
       return bucket === "suppressed" || thread.opt_out === true || lower(thread.suppression_status) === "suppressed";
     case "active":
-      return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
+      return ["priority", "new_replies", "needs_review", "follow_up", "waiting"].includes(bucket);
     case "waiting":
-      return direction === "outbound" && !["dead", "suppressed"].includes(bucket);
+      return bucket === "waiting";
     case "unlinked":
       return !thread.property_id;
     default:
@@ -593,6 +593,8 @@ function normalizeThreadRow(row = {}, query = {}) {
     inbox_status: row.inbox_status || row.universal_status || row.display_status || row.status || computedBucket || "cold",
     conversation_stage: row.conversation_stage || row.current_stage || row.universal_stage || row.stage || row.queue_stage || null,
     current_stage: row.current_stage || row.conversation_stage || row.universal_stage || row.stage || row.queue_stage || null,
+    deal_status: row.deal_status || row.universal_status || row.display_status || row.status || computedBucket || null,
+    deal_stage: row.deal_stage || row.current_stage || row.conversation_stage || row.universal_stage || row.stage || row.queue_stage || null,
     universal_status: row.universal_status || row.display_status || row.status || null,
     universal_stage: row.universal_stage || row.stage || row.queue_stage || null,
     detected_intent: row.detected_intent || row.reply_intent || row.ui_intent || null,
@@ -907,26 +909,48 @@ function normalizeDeliveryStatusValue(...values) {
   return statuses[0] || null;
 }
 
-// P0.5 Fix 1: the inbox row delivery badge. Uses the SAME field priority order as
-// the conversation view and normalizes to Failed/Delivered/Sent/Queued.
-// Priority: latest_provider_delivery_status > latest_delivery_status >
-//           provider_delivery_status > delivery_status > queue_status.
+// Explicit failure evidence wins, followed by provider/delivery failure statuses,
+// then delivered, sent, queued, and finally unknown.
 export function resolveDeliveryBadge(row = {}) {
-  const raw = firstClean(
+  if (firstClean(
+    row.latest_failure_reason,
+    row.latest_failed_at,
+    row.failure_reason,
+    row.failed_at,
+  )) {
+    return "failed";
+  }
+
+  const providerStatus = lower(firstClean(
     row.latest_provider_delivery_status,
-    row.latest_delivery_status,
     row.provider_delivery_status,
+  ));
+  const deliveryStatus = lower(firstClean(
+    row.latest_delivery_status,
     row.delivery_status,
-    row.queue_status,
-  );
-  const s = lower(raw);
-  if (!s) return null;
-  // failed family first (note: "undelivered" contains "deliver")
-  if (/fail|undeliv|reject|block/.test(s)) return "failed";
-  if (s.includes("deliver")) return "delivered";
-  if (/\b(sent|submitted|accepted|success)\b/.test(s) || s === "sent") return "sent";
-  if (/queue|pending/.test(s)) return "queued";
-  return null;
+  ));
+  const queueStatus = lower(row.queue_status);
+  const isFailed = (status) => ["failed", "undelivered", "rejected"].some((value) => status.includes(value));
+
+  if (isFailed(providerStatus)) return "failed";
+  if (isFailed(deliveryStatus)) return "failed";
+  if (providerStatus.includes("deliver") || deliveryStatus.includes("deliver")) return "delivered";
+  if (
+    /\b(sent|submitted|accepted|success)\b/.test(providerStatus) ||
+    /\b(sent|submitted|accepted|success)\b/.test(deliveryStatus)
+  ) {
+    return "sent";
+  }
+  if (
+    ["queued", "pending", "active"].some((value) =>
+      providerStatus.includes(value) ||
+      deliveryStatus.includes(value) ||
+      queueStatus.includes(value)
+    )
+  ) {
+    return "queued";
+  }
+  return "unknown";
 }
 
 function normalizeMessageRow(row = {}) {
@@ -1036,19 +1060,18 @@ function applyQueryFilter(query, filter) {
     case "new_replies":
     case "needs_review":
     case "follow_up":
-    case "cold":
     case "dead":
     case "suppressed":
+    case "waiting":
       return query.eq("inbox_bucket", filter);
+    case "cold":
+      return query
+        .eq("inbox_bucket", "waiting")
+        .eq("inbox_category", "cold_no_response");
     case "active":
       return typeof query.in === "function"
-        ? query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"])
-        : query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up");
-    case "waiting":
-      // mirrors canonical_inbox_counts.waiting exactly
-      return typeof query.not === "function"
-        ? query.eq("latest_message_direction", "outbound").not("inbox_bucket", "in", "(dead,suppressed)")
-        : query.eq("latest_message_direction", "outbound");
+        ? query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up", "waiting"])
+        : query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up,inbox_bucket.eq.waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     case "all":
@@ -1194,7 +1217,6 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   // P0: counts always load from canonical_inbox_counts. Auto-refresh no longer
   // skips counts (that produced "preserved counts" on the client, which §C forbids).
   const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
-  const skipDeliveryHydration = bool(params.skip_delivery) || isAutoRefresh;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -1215,17 +1237,31 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
-  const threadQueryStartedAt = nowMs();
-  const { data: rawRows, count, sourceConfig } = await queryThreadSource(params, {
-    supabase,
-    limit,
-    filter,
-    selectMode: options.selectMode,
-    cursorKeyset,
-    offset,
-    preferredThreadSource: deps.preferredThreadSource,
-  });
-  const threadQueryMs = elapsedMs(threadQueryStartedAt);
+  const threadQueryPromise = (async () => {
+    const queryStartedAt = nowMs();
+    const result = await queryThreadSource(params, {
+      supabase,
+      limit,
+      filter,
+      selectMode: options.selectMode,
+      cursorKeyset,
+      offset,
+      preferredThreadSource: deps.preferredThreadSource,
+    });
+    return { result, queryMs: elapsedMs(queryStartedAt) };
+  })();
+
+  const countQueryPromise = skipCounts
+    ? Promise.resolve(null)
+    : (async () => {
+        const queryStartedAt = nowMs();
+        const result = await getLiveCountsWithMeta({}, deps);
+        return { result, queryMs: elapsedMs(queryStartedAt) };
+      })();
+
+  const [threadQuery, countQuery] = await Promise.all([threadQueryPromise, countQueryPromise]);
+  const { data: rawRows, count, sourceConfig } = threadQuery.result;
+  const threadQueryMs = threadQuery.queryMs;
 
   const rows = (rawRows || []).map((row) => normalizeThreadRow(row, params));
   const postFiltered = sortThreads(rows)
@@ -1239,18 +1275,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   // canonical view the rows come from). No approximate, no floor, no preserved,
   // no degraded counts. If the count source errors, getLiveCountsWithMeta throws.
   let liveCounts = buildNullCounts();
-  let countQueryMs = 0;
+  let countQueryMs = countQuery?.queryMs || 0;
   let countsSource = skipCounts ? "skipped" : null;
   const countsDegraded = false;
   const countsApproximate = false;
   const countPreservedReason = skipCounts ? "counts_skipped_by_request" : null;
 
-  if (!skipCounts) {
-    const countQueryStartedAt = nowMs();
-    const countResult = await getLiveCountsWithMeta({}, deps);
-    liveCounts = countResult.counts;
-    countsSource = countResult.source;
-    countQueryMs = elapsedMs(countQueryStartedAt);
+  if (countQuery) {
+    liveCounts = countQuery.result.counts;
+    countsSource = countQuery.result.source;
   }
 
   const deliveryHydrationStartedAt = nowMs();
@@ -1298,10 +1331,25 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       .map((row) => ({
         id: row.thread_key,
         thread_key: row.thread_key || null,
+        canonical_e164: row.canonical_e164 || null,
+        property_id: row.property_id || null,
+        prospect_id: row.prospect_id || null,
+        master_owner_id: row.master_owner_id || null,
         latitude: Number(row.latitude),
         longitude: Number(row.longitude),
-        status: row.universal_status || null,
-        stage: row.universal_stage || null,
+        status: row.deal_status || row.universal_status || null,
+        stage: row.deal_stage || row.current_stage || row.universal_stage || null,
+        deal_status: row.deal_status || row.universal_status || null,
+        deal_stage: row.deal_stage || row.current_stage || row.universal_stage || null,
+        current_stage: row.current_stage || null,
+        conversation_stage: row.conversation_stage || null,
+        inbox_bucket: row.inbox_bucket || null,
+        inbox_category: row.inbox_category || null,
+        latest_delivery_status: row.latest_delivery_status || null,
+        latest_provider_delivery_status: row.latest_provider_delivery_status || null,
+        latest_failed_at: row.latest_failed_at || null,
+        latest_failure_reason: row.latest_failure_reason || null,
+        delivery_badge: row.delivery_badge || resolveDeliveryBadge(row),
         owner_name: row.owner_name || null,
         property_address: row.property_address_full || null,
         latest_message_body: row.latest_message_body || null,
@@ -1309,6 +1357,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     : [];
 
   return {
+    dataMode: "live",
     threads: finalRows,
     messages: finalRows,
     counts: liveCounts,
