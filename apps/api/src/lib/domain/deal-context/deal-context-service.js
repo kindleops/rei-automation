@@ -1,6 +1,6 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 
-const DEAL_CONTEXT_SOURCE = 'v_deal_context_cards'
+const DEAL_CONTEXT_SOURCE = 'deal_context_index'
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 500
 const COUNT_SCAN_CHUNK = 5000
@@ -214,17 +214,18 @@ function hydrateDealContextRow(row) {
   const buyerMatch = object(row.buyer_match_data)
   const threadState = object(row.thread_state_data)
   const prospect = object(row.prospect_data)
+  const phoneData = object(row.phone_data)
   
   // Strict seller phone: must not be a TextGrid number
   const bestSeller = seller_phone || 
     (!isTextGridNumber(row.canonical_e164) ? normalizePhone(row.canonical_e164) : null) ||
-    (!isTextGridNumber(row.best_phone) ? normalizePhone(row.best_phone) : null) ||
+    (!isTextGridNumber(phoneData.best_phone) ? normalizePhone(phoneData.best_phone) : null) ||
     (!isTextGridNumber(row.thread_key) ? normalizePhone(row.thread_key) : null)
 
   // Strict sender phone: must be a TextGrid number if possible
   const bestSender = isTextGridNumber(sender_phone) ? sender_phone : (
     isTextGridNumber(row.our_number) ? normalizePhone(row.our_number) : (
-      isTextGridNumber(row.sender_phone) ? normalizePhone(row.sender_phone) : null
+      isTextGridNumber(phoneData.sender_phone) ? normalizePhone(phoneData.sender_phone) : null
     )
   )
 
@@ -234,8 +235,8 @@ function hydrateDealContextRow(row) {
     sender_phone: bestSender,
     our_number: bestSender,
     canonical_e164: bestSeller || normalizePhone(row.canonical_e164) || null,
-    best_phone: bestSeller || normalizePhone(row.best_phone) || null,
-    phone: bestSeller || normalizePhone(row.phone) || null,
+    best_phone: bestSeller || normalizePhone(phoneData.best_phone) || null,
+    phone: bestSeller || normalizePhone(phoneData.phone) || null,
     
     // Hydrate missing top-levels from JSON if needed, or ensure they exist
     display_name: row.owner_name || property.seller_name || null,

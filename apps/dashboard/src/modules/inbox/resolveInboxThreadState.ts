@@ -147,15 +147,20 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   const isLowConfidence = Number(getAny(thread, 'classification_confidence', 'confidence', 'ai_confidence') ?? 1) < 0.55
   const missingClassificationInbound = direction === 'inbound' && isUnread && !intent
 
+  const bucketValue = str(getAny(thread, 'inbox_bucket', 'inboxBucket', 'status_bucket', 'priority_bucket', 'priorityBucket'))
+  const categoryValue = str(getAny(thread, 'inbox_category', 'inboxCategory'))
+
   const bucketFromBackend = (() => {
-    if (!statusBucket) return null
-    if (hasAny(statusBucket, ['priority', 'hot_leads', 'hot'])) return 'priority'
-    if (hasAny(statusBucket, ['new_reply', 'new_replies', 'new_inbound', 'needs_reply'])) return 'new_replies'
-    if (hasAny(statusBucket, ['needs_review', 'manual_review'])) return 'needs_review'
-    if (hasAny(statusBucket, ['follow_up', 'follow_up_due', 'waiting_on_seller', 'waiting'])) return 'follow_up'
-    if (hasAny(statusBucket, ['dead', 'wrong_number'])) return 'dead'
-    if (hasAny(statusBucket, ['suppressed', 'dnc_opt_out', 'dnc', 'opt_out'])) return 'suppressed'
-    if (hasAny(statusBucket, ['cold', 'cold_no_response', 'not_contacted'])) return 'cold'
+    if (categoryValue === 'cold_no_response' || (bucketValue === 'waiting' && categoryValue === 'cold_no_response') || bucketValue === 'cold') return 'cold'
+
+    const checkValue = bucketValue || categoryValue
+    if (!checkValue) return null
+    if (hasAny(checkValue, ['priority', 'hot_leads', 'hot'])) return 'priority'
+    if (hasAny(checkValue, ['new_reply', 'new_replies', 'new_inbound', 'needs_reply'])) return 'new_replies'
+    if (hasAny(checkValue, ['needs_review', 'manual_review'])) return 'needs_review'
+    if (hasAny(checkValue, ['follow_up', 'follow_up_due', 'waiting_on_seller', 'waiting'])) return 'follow_up'
+    if (hasAny(checkValue, ['dead', 'wrong_number'])) return 'dead'
+    if (hasAny(checkValue, ['suppressed', 'dnc_opt_out', 'dnc', 'opt_out'])) return 'suppressed'
     return null
   })()
 

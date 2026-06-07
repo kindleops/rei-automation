@@ -434,7 +434,7 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "follow_up":
       return bucket === "follow_up";
     case "cold":
-      return bucket === "waiting" && category === "cold_no_response";
+      return category === "cold_no_response" || bucket === "cold" || bucket === "waiting";
     case "dead":
       return bucket === "dead" || thread.wrong_number === true || thread.not_interested === true;
     case "suppressed":
@@ -953,6 +953,13 @@ export function resolveDeliveryBadge(row = {}) {
   return "unknown";
 }
 
+async function hydrateDealIntelligence(rows = [], supabase) {
+  // Disabled by default: raw entity queries (properties, prospects, master_owners) 
+  // cause postgres schema errors due to legacy ID columns.
+  // The Deal Context Index already contains these fields natively.
+  return rows;
+}
+
 function normalizeMessageRow(row = {}) {
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
   const messageAt = toMessageAt(row);
@@ -1189,10 +1196,10 @@ async function getLiveCountsWithMeta(_params = {}, deps = {}) {
 
   if (error) throw error;
 
-  const row = Array.isArray(data) ? data[0] : null;
-  if (!row || !hasConcreteCountRow(row)) {
-    throw new Error("live_inbox_counts_unavailable");
-  }
+  const row = Array.isArray(data) && data.length > 0 ? data[0] : {};
+
+  // We should not throw an error if the counts view is just empty (e.g. 0 threads).
+  // An empty DB means 0 counts, not a failure.
 
   const counts = countFromRow(row);
   console.log("[INBOX_COUNTS_UPDATED]", counts);
@@ -1291,6 +1298,10 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   // P0.5 Fix 1: stamp the normalized delivery badge (post-hydration) so the row
   // shows the same status as the conversation view.
   finalRows = finalRows.map((row) => ({ ...row, delivery_badge: resolveDeliveryBadge(row) }));
+  
+  // Patch: deal intelligence hydration
+  finalRows = await hydrateDealIntelligence(finalRows, supabase);
+  
   const deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
 
   console.log("[INBOX_BUCKET_ROWS]", {
@@ -1830,11 +1841,28 @@ function auditThreadIdentity({ lookup = {}, rows = [], conversationThreadId = nu
       explicit_thread_ids: explicitThreadIds.length,
     },
   };
-  audit.integrity_blocked =
-    distinctProspectIds.length > 1 ||
-    distinctPropertyIds.length > 1 ||
-    distinctOwnerIds.length > 1 ||
-    explicitThreadIds.length > 1;
+  const lookupPropertyId = clean(lookup.propertyId);
+  const lookupOwnerId = clean(lookup.masterOwnerId || lookup.ownerId);
+  const lookupPhone = getLookupNormalizedPhone(lookup);
+
+  let integrity_blocked = false;
+  for (const row of normalizedRows) {
+    const rowProp = clean(row.property_id) || clean(row.final_property_id);
+    const rowOwner = clean(row.master_owner_id) || clean(row.owner_id) || clean(row.final_master_owner_id);
+    const rowPhoneFrom = normalizePhone(row.from_phone_number);
+    const rowPhoneTo = normalizePhone(row.to_phone_number);
+
+    const propConflict = lookupPropertyId && rowProp && rowProp !== lookupPropertyId;
+    const ownerConflict = lookupOwnerId && rowOwner && rowOwner !== lookupOwnerId;
+    const phoneConflict = lookupPhone && rowPhoneFrom && rowPhoneTo && rowPhoneFrom !== lookupPhone && rowPhoneTo !== lookupPhone;
+
+    if (propConflict && ownerConflict && phoneConflict) {
+      integrity_blocked = true;
+      break;
+    }
+  }
+
+  audit.integrity_blocked = integrity_blocked;
   return audit;
 }
 

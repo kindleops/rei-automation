@@ -184,16 +184,12 @@ const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
 }
 
 const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
-  const raw = readString(
-    thread,
-    'inbox_bucket',
-    'inboxBucket',
-    'status_bucket',
-    'inbox_category',
-    'inboxCategory',
-    'priority_bucket',
-    'priorityBucket',
-  ).toLowerCase()
+  const bucketRaw = readString(thread, 'inbox_bucket', 'inboxBucket', 'status_bucket', 'priority_bucket', 'priorityBucket').toLowerCase()
+  const categoryRaw = readString(thread, 'inbox_category', 'inboxCategory').toLowerCase()
+
+  if (categoryRaw === 'cold_no_response' || (bucketRaw === 'waiting' && categoryRaw === 'cold_no_response') || bucketRaw === 'cold') return 'cold'
+
+  const raw = bucketRaw || categoryRaw
   if (!raw) return null
   if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
@@ -201,7 +197,6 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated') || raw.includes('waiting_on_seller') || raw.includes('waiting')) return 'follow_up'
   if (raw.includes('dead') || raw.includes('wrong_number') || raw.includes('not_interested')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
-  if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
   if (raw === 'all' || raw === 'all_messages' || raw === 'all_conversations') return 'all'
   return null
 }
@@ -705,7 +700,30 @@ export const InboxSidebar = ({
       : searchableThreads.filter((thread) => {
           const stateBucket = resolveBucketFromThreadState(thread)
           const resolvedBucket = stateBucket || classifyInboxBucket(thread, now).bucket
-          if (resolvedBucket !== activeBucket) {
+          
+          const threadAny = thread as any
+          const bucket =
+            threadAny.inbox_bucket ??
+            threadAny.inboxBucket ??
+            threadAny.bucket ??
+            threadAny.statusBucket
+
+          const category =
+            threadAny.inbox_category ??
+            threadAny.inboxCategory ??
+            threadAny.category ??
+            threadAny.inboxCategoryRaw
+
+          const isCold =
+            category === 'cold_no_response' ||
+            category === 'cold' ||
+            bucket === 'cold' ||
+            bucket === 'cold_no_response' ||
+            bucket === 'waiting'
+
+          const isColdWaiting = activeBucket === 'cold' && isCold
+
+          if (resolvedBucket !== activeBucket && !isColdWaiting) {
             console.log(
               '[VISIBLE_THREAD_REJECT]',
               thread.threadKey || thread.id,

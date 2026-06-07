@@ -1151,11 +1151,11 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       const currentRowsCount = currentBucket?.rows?.length ?? 0
       const hasThreadRows = (model.threads?.length ?? 0) > 0
 
-      // Protection Rule: only block a degraded response when it has no rows to show.
-      // If threads exist, commit them and preserve the last good counts instead.
-      if (model.dataMode !== 'live' && !hasThreadRows) {
+      // Protection Rule: Never commit degraded/fallback/error rows on bucket switch.
+      // If API fails, keep previous data or empty loading state, but do not commit degraded rows.
+      if (model.dataMode !== 'live') {
         if (currentRowsCount === 0) {
-          console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads.length, dataMode: model.dataMode })
+          console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads?.length ?? 0, dataMode: model.dataMode })
         } else {
           console.warn(`[Inbox Protection] Ignoring degraded/fallback response. Preserving ${currentRowsCount} existing rows.`)
         }
@@ -1167,15 +1167,6 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         })
         if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
-      }
-
-      if (model.dataMode !== 'live' && hasThreadRows) {
-        console.warn('[INBOX_DEGRADED_ROWS_COMMITTED]', {
-          bucketKey,
-          rowCount: model.threads.length,
-          dataMode: model.dataMode,
-          liveFetchError: model.liveFetchError ?? null,
-        })
       }
 
       if (mode === 'append') {

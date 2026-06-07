@@ -13,6 +13,15 @@ function clean(value) {
 }
 
 function object(value) {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
@@ -112,6 +121,11 @@ async function queryThreadRow({ thread_key, conversation_thread_id, legacy_threa
   // deal-intelligence projection, so the dossier resolves from the SAME view as the
   // list. The legacy views are kept only as last-resort identity fallbacks.
   const sources = [
+    {
+      name: 'deal_context_index',
+      columns: ['thread_key', 'canonical_e164'],
+      idColumns: ['property_id', 'prospect_id', 'master_owner_id'],
+    },
     {
       name: 'canonical_inbox_threads',
       columns: ['canonical_thread_key', 'thread_key', 'canonical_e164', 'best_phone', 'seller_phone', 'display_phone'],
@@ -329,6 +343,8 @@ export async function GET(request) {
 
     const resolvedThreadKey = thread.thread_key || thread_key || null
 
+    // Remove redundant getDealContextByThread call if deal_context_index already hydrated it
+    const hasDealContextData = threadRowResult.source === 'deal_context_index' && (nonEmptyObject(thread.property_data) || nonEmptyObject(thread.valuation_data) || thread.deal_context_id)
     const [messagesPayloadResult, contextPayloadResult, dealContextResult] = await Promise.all([
       getThreadMessages({
         selected_thread_key: thread_key || thread.thread_key,
@@ -365,11 +381,11 @@ export async function GET(request) {
         failedParts.push('context')
         return { source_health: [{ table: 'thread_context', ok: false, error: error?.message || String(error), count: 0 }] }
       }) : Promise.resolve(null),
-      resolvedThreadKey ? getDealContextByThread(resolvedThreadKey).catch((error) => {
+      hasDealContextData ? Promise.resolve(thread) : (resolvedThreadKey ? getDealContextByThread(resolvedThreadKey).catch((error) => {
         partHealth.dealContextOk = false
         failedParts.push('dealContext')
         return { _partial: true, thread_key: resolvedThreadKey, error: error?.message || String(error) }
-      }) : Promise.resolve(null),
+      }) : Promise.resolve(null)),
     ])
 
     const messagesPayload = messagesPayloadResult
@@ -506,7 +522,9 @@ export async function GET(request) {
     }
     const propertyIdForValuation = clean(property?.property_id || property?.id || dealContext?.property_id || thread.property_id || effective_property_id)
 
-    const valuationResult = propertyIdForValuation ? await fetchValuation(propertyIdForValuation) : { data: null, source: null, error: null }
+    // Remove redundant fetchValuation if deal_context_index already hydrated it
+    const hasValuationData = nonEmptyObject(thread.valuation_data) || nonEmptyObject(fetchedDealContext.valuation_data)
+    const valuationResult = hasValuationData ? { data: null, source: 'deal_context_index', error: null } : (propertyIdForValuation ? await fetchValuation(propertyIdForValuation) : { data: null, source: null, error: null })
     if (valuationResult.error) {
       partHealth.valuationOk = false
       failedParts.push('valuation')
@@ -554,6 +572,7 @@ export async function GET(request) {
       valuation: valuationSnapshot,
     })
     const uniqueFailedParts = [...new Set(failedParts)]
+    const criticalFailedParts = uniqueFailedParts.filter(p => ['messages', 'dealContext', 'threadIdentityIntegrity', 'thread', 'identity'].includes(p))
     const diagnosticsHealth = {
       messagesOk: partHealth.messagesOk,
       propertyOk: Boolean(property),
@@ -565,10 +584,48 @@ export async function GET(request) {
       failedParts: uniqueFailedParts,
     }
 
+    // Resilience Check: if major deal parts are missing entirely, gracefully degrade
+    if (Object.keys(fieldMissing).length >= 4 && !property && !prospect && !dealContext?.inbox_bucket) {
+      return NextResponse.json(
+        {
+          ok: true,
+          degraded: criticalFailedParts.length > 0,
+          error_code: 'hydration_incomplete',
+          error: 'Required thread context subsections missing (returning null)',
+          thread: null,
+          messages: messagesPayload.rows,
+          property: null,
+          prospect: null,
+          owner: null,
+          masterOwner: null,
+          master_owner: null,
+          phone: null,
+          dealContext: null,
+          deal_context: null,
+          deal_intelligence: null,
+          valuationSnapshot: null,
+          valuation: null,
+          routing: null,
+          outreach: null,
+          pagination: messagePagination,
+          failedParts: uniqueFailedParts,
+          degradedParts: uniqueFailedParts,
+          diagnostics: {
+            ...diagnosticsHealth,
+            queryMs: Date.now() - startedAt,
+            sourceUsed: { thread: threadRowResult.source },
+            threadKey: resolvedThreadKey,
+            field_missing: fieldMissing,
+          },
+        },
+        { status: 200, headers },
+      )
+    }
+
     return NextResponse.json(
       {
         ok: true,
-        degraded: uniqueFailedParts.length > 0,
+        degraded: criticalFailedParts.length > 0,
         integrity_blocked: messagesPayload.integrityBlocked === true,
         integrityBlocked: messagesPayload.integrityBlocked === true,
         thread,
@@ -588,7 +645,7 @@ export async function GET(request) {
         outreach,
         pagination: messagePagination,
         failedParts: uniqueFailedParts,
-        degradedParts: uniqueFailedParts,
+        degradedParts: criticalFailedParts,
         diagnostics: {
           ...diagnosticsHealth,
           queryMs: Date.now() - startedAt,

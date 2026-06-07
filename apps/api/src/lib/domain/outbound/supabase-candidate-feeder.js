@@ -3497,7 +3497,7 @@ export async function hydratePropertyForCandidate(candidate = {}, deps = {}) {
       const { data, error } = await supabase
         .from("properties")
         .select("*")
-        .eq("id", property_id)
+        .eq("property_id", property_id)
         .maybeSingle();
       if (!error && data) return buildPropertyHydrationPayload(data, "property_id_match");
     } catch { /* fall through */ }
@@ -3540,7 +3540,7 @@ export async function hydratePropertyForCandidate(candidate = {}, deps = {}) {
       const { data: moData, error: moError } = await supabase
         .from("master_owners")
         .select("joined_property_ids_json")
-        .eq("id", master_owner_id)
+        .eq("master_owner_id", master_owner_id)
         .maybeSingle();
 
       if (!moError && moData?.joined_property_ids_json) {

@@ -11,14 +11,13 @@ import { supabase } from "@/lib/supabase/client.js";
 const CATEGORIES = ["all", "priority", "new_replies", "needs_review", "follow_up", "cold", "dead", "suppressed"];
 
 function intel(row = {}) {
+  const prop = row.property_data || {};
   return {
-    property_address: row.property_address_full || row.property_address || null,
-    market: row.market || null,
-    asset_type: row.property_type || null,
-    estimated_value: row.estimated_value ?? null,
-    equity_percent: row.equity_percent ?? null,
-    owner: row.owner_name || row.owner_display_name || row.seller_display_name || null,
-    phone: row.best_phone || row.canonical_e164 || row.seller_phone || null,
+    property: row.property_id || row.property_address_full || row.property_address || prop.property_id || prop.property_address_full || prop.property_address || null,
+    owner: row.owner_name || row.master_owner_id || row.owner_display_name || row.seller_display_name || null,
+    phone: row.canonical_e164 || row.phone || row.best_phone || row.seller_phone || null,
+    asset_type: row.property_type || row.asset_type || prop.property_type || prop.asset_type || null,
+    estimated_value: (row.estimated_value !== null && row.estimated_value !== undefined) ? row.estimated_value : (prop.estimated_value !== null && prop.estimated_value !== undefined ? prop.estimated_value : null),
   };
 }
 
@@ -44,7 +43,14 @@ for (const cat of CATEGORIES) {
   const badge = cat === "all" ? counts.all : counts[cat];
 
   // every returned row must carry the requested canonical bucket (single source)
-  const offBucket = cat === "all" ? [] : rows.filter((r) => String(r.inbox_bucket).toLowerCase() !== cat);
+  const offBucket = cat === "all" ? [] : rows.filter((r) => {
+    const bucket = String(r.inbox_bucket).toLowerCase();
+    const category = String(r.inbox_category).toLowerCase();
+    if (cat === "cold") {
+      return !(category === "cold_no_response" || bucket === "waiting");
+    }
+    return bucket !== cat;
+  });
   const sample = rows[0] ? { thread_key: rows[0].thread_key, bucket: rows[0].inbox_bucket, ...intel(rows[0]) } : null;
   const intelComplete = sample ? Object.values(intel(rows[0])).every((v) => v !== null && v !== undefined) : null;
 

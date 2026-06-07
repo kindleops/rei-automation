@@ -104,11 +104,11 @@ export async function enrichMessageEventContext(eventOrPayload = {}, supabase) {
 
   let enriched = merge(base, ...sources);
   if (enriched.property_id) {
-    const property = await latestFrom("properties", supabase, (q) => q.eq("id", enriched.property_id).limit(1));
+    const property = await latestFrom("properties", supabase, (q) => q.eq("property_id", enriched.property_id).limit(1));
     if (property) enriched = merge(enriched, { property_address: property.address || property.property_address, property_city: property.city, property_state: property.state, property_zip: property.zip, market: property.market, timezone: property.timezone, latitude: property.latitude, longitude: property.longitude });
   }
   if (enriched.master_owner_id) {
-    const owner = await latestFrom("master_owners", supabase, (q) => q.eq("id", enriched.master_owner_id).limit(1));
+    const owner = await latestFrom("master_owners", supabase, (q) => q.eq("master_owner_id", enriched.master_owner_id).limit(1));
     if (owner) enriched = merge(enriched, { seller_display_name: owner.seller_display_name || owner.owner_display_name || owner.name, owner_display_name: owner.owner_display_name || owner.name, owner_type: owner.owner_type });
   }
 

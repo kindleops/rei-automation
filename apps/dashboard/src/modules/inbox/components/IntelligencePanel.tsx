@@ -6136,6 +6136,105 @@ export const IntelligencePanel = ({
     )
   }
 
+  const hydration = (threadContext || {}) as any
+  const threadAny = thread as any
+  const dc = hydration.dealContext || dealContext || {}
+
+  const property =
+    hydration.propertyData ??
+    hydration.property_data ??
+    dc.propertyData ??
+    dc.property_data ??
+    threadAny.propertyData ??
+    threadAny.property_data ??
+    {}
+
+  const masterOwner =
+    hydration.masterOwnerData ??
+    hydration.master_owner_data ??
+    dc.masterOwnerData ??
+    dc.master_owner_data ??
+    threadAny.masterOwnerData ??
+    threadAny.master_owner_data ??
+    {}
+
+  const prospect =
+    hydration.prospectData ??
+    hydration.prospect_data ??
+    dc.prospectData ??
+    dc.prospect_data ??
+    threadAny.prospectData ??
+    threadAny.prospect_data ??
+    {}
+
+  const phone =
+    hydration.phoneData ??
+    hydration.phone_data ??
+    dc.phoneData ??
+    dc.phone_data ??
+    threadAny.phoneData ??
+    threadAny.phone_data ??
+    {}
+
+  console.log('[INTELLIGENCE_BINDING_AUDIT]', {
+    propertyKeys: Object.keys(property),
+    masterOwnerKeys: Object.keys(masterOwner),
+    prospectKeys: Object.keys(prospect),
+    phoneKeys: Object.keys(phone),
+    sample: {
+      baths: property.total_baths ?? property.bathrooms ?? property.baths,
+      sqft: property.building_square_feet ?? property.building_sqft ?? property.square_feet ?? property.living_area_sqft,
+      yearBuilt: property.year_built ?? property.effective_year_built,
+      equity: property.equity_amount,
+      tags: property.property_flags_json ?? property.property_flags_text ?? property.podio_tags,
+      contactWindow: phone.contact_window ?? prospect.contact_window
+    }
+  })
+
+  const normalizedThread = {
+    ...threadAny,
+    total_bedrooms: property.total_bedrooms ?? property.bedrooms ?? property.beds ?? threadAny.total_bedrooms,
+    total_baths: property.total_baths ?? property.bathrooms ?? property.baths ?? threadAny.total_baths,
+    building_square_feet: property.building_square_feet ?? property.building_sqft ?? property.square_feet ?? property.living_area_sqft ?? threadAny.building_square_feet,
+    year_built: property.year_built ?? property.effective_year_built ?? threadAny.year_built,
+    lot_square_feet: property.lot_square_feet ?? property.lot_sqft ?? property.lot_acreage ?? threadAny.lot_square_feet,
+    tax_amt: property.tax_amt ?? property.annual_tax ?? property.tax_amount ?? threadAny.tax_amt,
+    assd_total_value: property.assd_total_value ?? property.assessed_total ?? property.assessed_value ?? property.calculated_total_value ?? threadAny.assd_total_value,
+    total_loan_amt: property.total_loan_amt ?? property.loan_amount ?? threadAny.total_loan_amt,
+    total_loan_balance: property.total_loan_balance ?? property.estimated_balance ?? threadAny.total_loan_balance,
+    total_loan_payment: property.total_loan_payment ?? property.monthly_payment ?? threadAny.total_loan_payment,
+    equityAmount: property.equity_amount ?? threadAny.equityAmount,
+    equityPercent: property.equity_percent ?? threadAny.equityPercent,
+    property_flags_json: property.property_flags_json ?? property.property_flags_text ?? property.podio_tags ?? threadAny.property_flags_json,
+    estimatedRepairCost: property.estimated_repair_cost ?? threadAny.estimatedRepairCost,
+    building_condition: property.building_condition ?? property.rehab_level ?? threadAny.building_condition,
+    
+    property_count: masterOwner.property_count ?? threadAny.property_count,
+    portfolio_total_value: masterOwner.portfolio_total_value ?? threadAny.portfolio_total_value,
+    portfolio_total_equity: masterOwner.portfolio_total_equity ?? threadAny.portfolio_total_equity,
+    portfolio_total_loan_balance: masterOwner.portfolio_total_loan_balance ?? threadAny.portfolio_total_loan_balance,
+
+    est_household_income: prospect.est_household_income ?? threadAny.est_household_income,
+    language: prospect.language ?? prospect.language_preference ?? threadAny.language,
+    language_preference: prospect.language_preference ?? threadAny.language_preference,
+    buying_power: prospect.buying_power ?? threadAny.buying_power,
+    education_model: prospect.education_model ?? threadAny.education_model,
+    occupation_group: prospect.occupation_group ?? threadAny.occupation_group,
+    contact_window: prospect.contact_window ?? phone.contact_window ?? threadAny.contact_window,
+
+    best_phone_score: phone.best_phone_score ?? threadAny.best_phone_score,
+    prospect_phone_score: phone.best_phone_score ?? threadAny.prospect_phone_score,
+    contact_score_final: phone.contact_score_final ?? threadAny.contact_score_final,
+    phone_owner: phone.phone_owner ?? threadAny.phone_owner,
+    carrier: phone.carrier ?? threadAny.carrier,
+    activity_status: phone.activity_status ?? threadAny.activity_status,
+    usage_12_months: phone.usage_12_months ?? threadAny.usage_12_months,
+    usage_2_months: phone.usage_2_months ?? threadAny.usage_2_months,
+    best_phone: phone.best_phone ?? threadAny.best_phone,
+    seller_phone: phone.seller_phone ?? threadAny.seller_phone,
+    canonical_e164: phone.canonical_e164 ?? threadAny.canonical_e164,
+  } as WorkflowThread
+
   const panelClassMode = layoutMode === 'compact'
     ? 'compact'
     : layoutMode === 'medium'
@@ -6154,12 +6253,12 @@ export const IntelligencePanel = ({
 
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
-          <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} onOpenComps={onOpenComps} />
+          <CompactDealIntelligenceCapsule thread={normalizedThread} snapshot={snapshot} messages={messages} onOpenComps={onOpenComps} />
         ) : layoutMode === 'medium' ? (
-          <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} onOpenComps={onOpenComps} />
+          <MediumDealWorkspace thread={normalizedThread} snapshot={snapshot} messages={messages} phase3={phase3} onOpenComps={onOpenComps} />
         ) : (
           <DealCommandDossier
-            thread={thread}
+            thread={normalizedThread}
             snapshot={snapshot}
             messages={messages}
             phase3={phase3}
