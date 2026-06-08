@@ -57,6 +57,7 @@ import type { AgentsModel } from '../modules/agents/agents.adapter'
 import { MobileCommandCenter } from '../modules/mobile/MobileCommandCenter'
 import { CampaignsPage } from '../modules/campaigns/CampaignsPage'
 import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
+import { WorkflowStudio } from '../modules/workflows/WorkflowStudio'
 
 interface AppRoute<TData> {
   path: string
@@ -318,6 +319,13 @@ const mobileRoute = defineRoute<null>({
   render: () => <MobileCommandCenter />,
 })
 
+const workflowsRoute = defineRoute<null>({
+  path: '/workflows',
+  title: 'NEXUS | Workflow Automation',
+  loader: async () => null,
+  render: () => <WorkflowStudio />,
+})
+
 const routes = [
   homeRoute,
   agentsRoute,
@@ -352,6 +360,7 @@ const routes = [
   campaignsRoute,
   emailRoute,
   mobileRoute,
+  workflowsRoute,
 ]
 
 export const resolveRoute = (path: string) =>

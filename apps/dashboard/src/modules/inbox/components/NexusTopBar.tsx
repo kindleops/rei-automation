@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { pushRoutePath } from '../../../app/router'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
@@ -316,7 +317,7 @@ export const NexusTopBar = ({
             <button
               type="button"
               className="nx-workspace-submenu-item__select"
-              onClick={() => selectAndClose(() => onSelectView?.('workflow_studio'))}
+              onClick={() => selectAndClose(() => pushRoutePath('/workflows'))}
             >
               <span className="nx-workspace-submenu-item__text">
                 <strong>Workflow Automation</strong>

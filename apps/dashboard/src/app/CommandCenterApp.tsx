@@ -65,6 +65,7 @@ const navItems: NavItem[] = [
   { path: '/campaigns', label: 'Campaigns', icon: 'send', shortcut: 'P', room: 'Campaign Command Center' },
   { path: '/email', label: 'Email', icon: 'mail', shortcut: 'E', room: 'Email Command Center' },
   { path: '/mobile', label: 'Mobile', icon: 'grid', shortcut: 'O', room: 'Mobile Command Center' },
+  { path: '/workflows', label: 'Workflows', icon: 'grid', shortcut: 'F', room: 'Workflow Automation' },
 ]
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
