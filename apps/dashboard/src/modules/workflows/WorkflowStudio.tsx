@@ -39,6 +39,13 @@ const friendlyWorkflowError = (err: unknown) => {
   return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw
 }
 
+const isApiUnavailableError = (err: unknown): boolean => {
+  const raw = err instanceof Error ? err.message : String(err || '')
+  return raw.includes('/api/cockpit/workflows') || raw.includes('<!DOCTYPE') || raw.includes('<html')
+}
+
+type StudioStatus = 'loading' | 'ready' | 'schema_not_ready' | 'api_unavailable' | 'error'
+
 interface WorkflowStudioProps {
   data?: { workflows?: Workflow[] } | null
   paneWidth?: ViewWidthPercent
@@ -61,6 +68,7 @@ export const WorkflowStudio = ({
   const [notice, setNotice] = useState('')
   const [utilityDrawerOpen, setUtilityDrawerOpen] = useState(false)
   const [utilityDrawerTab, setUtilityDrawerTab] = useState<UtilityDrawerTab>('Dry Run')
+  const [studioStatus, setStudioStatus] = useState<StudioStatus>('loading')
 
   const selectedId = selected?.workflow.id ?? null
   const draftCount = useMemo(
@@ -94,11 +102,14 @@ export const WorkflowStudio = ({
     refreshList()
       .then((rows) => {
         if (cancelled) return
+        setStudioStatus(rows.length === 0 ? 'schema_not_ready' : 'ready')
         const first = rows[0]
         if (first && !selected) void loadSelected(first.id)
       })
       .catch((err) => {
-        if (!cancelled) setError(friendlyWorkflowError(err))
+        if (cancelled) return
+        setError(friendlyWorkflowError(err))
+        setStudioStatus(isApiUnavailableError(err) ? 'api_unavailable' : 'error')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -176,6 +187,12 @@ export const WorkflowStudio = ({
         <div className={cls('wfs-banner', error && 'is-error')}>
           <Icon name={error ? 'alert' : 'check'} />
           <span>{error || notice}</span>
+        </div>
+      )}
+      {studioStatus === 'schema_not_ready' && !loading && !error && !notice && (
+        <div className="wfs-banner">
+          <Icon name="activity" />
+          <span>No workflows configured — Studio is in guarded preview mode. Dry-run protection is active.</span>
         </div>
       )}
 
