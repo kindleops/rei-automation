@@ -1026,12 +1026,22 @@ export const buildConversationThreadIdFromRecord = (row: AnyRecord): string => {
   const ownerId = firstNonEmptyString(row.master_owner_id, row.masterOwnerId, row.owner_id, row.ownerId, row.final_master_owner_id, row.thread_master_owner_id)
   const phone = normalizedPhoneForThreadIdentity(row)
   const campaignOrSequence = firstNonEmptyString(row.campaign_id, row.campaignId, row.sequence_id, row.sequenceId)
+  
   const parts: string[] = []
-  if (prospectId) parts.push(`prospect:${prospectId}`)
-  if (propertyId) parts.push(`property:${propertyId}`)
-  if (ownerId) parts.push(`owner:${ownerId}`)
-  if (phone) parts.push(`phone:${phone}`)
-  if (!prospectId && !propertyId && !ownerId && campaignOrSequence) parts.push(`campaign:${campaignOrSequence}`)
+  
+  if (propertyId && ownerId) {
+    parts.push(`property:${propertyId}`)
+    parts.push(`owner:${ownerId}`)
+  } else if (!propertyId && prospectId && phone) {
+    parts.push(`prospect:${prospectId}`)
+    parts.push(`phone:${phone}`)
+  } else if (phone) {
+    parts.push(`phone:${phone}`)
+  } else if (prospectId) {
+    parts.push(`prospect:${prospectId}`)
+  }
+
+  if (parts.length === 0 && campaignOrSequence) parts.push(`campaign:${campaignOrSequence}`)
   return parts.length ? `ct:${parts.join('|')}` : firstNonEmptyString(row.threadKey, row.thread_key, row.id)
 }
 

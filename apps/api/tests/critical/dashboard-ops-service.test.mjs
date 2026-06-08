@@ -55,6 +55,11 @@ function makeLiveInboxSupabaseStub(rows = []) {
           state.searchClause = clause;
           return api;
         },
+        in(column, values) {
+          const uniqueValues = Array.isArray(values) ? values : [];
+          state.filters.push((row) => uniqueValues.includes(clean(row?.[column])));
+          return api;
+        },
         order(column, options = {}) {
           state.orders.push({ column, ascending: options.ascending !== false });
           return api;
