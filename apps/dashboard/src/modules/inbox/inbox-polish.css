@@ -1477,6 +1477,9 @@
 
 .nx-topbar {
   z-index: 12050 !important;
+  /* Break parent stacking context so child .nx-liquid-popover backdrop-filter reaches page content */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .nx-topbar__actions,
@@ -9050,3 +9053,567 @@
   color: #475569 !important;
 }
 
+
+/* ============================================================
+   === ACTIVE LIQUID GLASS TOPBAR + MENUS ===
+   Real glass. Real DOM selectors. Real CSS variables.
+   --nx-accent-rgb is now set by applyThemeToDOM() in settings.ts.
+   ============================================================ */
+
+/* ------------------------------------------------------------------
+   GLASS BASE — override .nx-liquid-popover with direct values
+   (inbox-premium.css line 9544 uses dead var() chains; these win
+   because inbox-polish.css is later in the bundle)
+------------------------------------------------------------------ */
+.nx-liquid-popover {
+  background: linear-gradient(
+    150deg,
+    rgba(20, 42, 80, 0.76) 0%,
+    rgba(10, 22, 52, 0.84) 60%,
+    rgba(6, 14, 36, 0.90) 100%
+  ) !important;
+  backdrop-filter: blur(32px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow:
+    0 32px 80px rgba(0, 0, 0, 0.80),
+    0 8px 24px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  color: #e2f4ff !important;
+}
+
+/* ------------------------------------------------------------------
+   POP-IN ANIMATION (shared by all popovers)
+------------------------------------------------------------------ */
+@keyframes nx-glass-appear {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+@keyframes nx-pulse-accent {
+  0%, 100% { opacity: 0.65; transform: scale(1);    }
+  50%       { opacity: 0.25; transform: scale(1.08); }
+}
+
+/* ------------------------------------------------------------------
+   WORKSPACE MENU SHELL
+   CRITICAL: must be display:flex so root + submenu panel sit
+   side-by-side instead of stacking vertically.
+------------------------------------------------------------------ */
+.nx-topbar-workspace-menu {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  padding: 0 !important;
+  min-width: 460px !important;
+  left: 0 !important;
+  right: auto !important;
+  top: calc(100% + 6px) !important;
+  animation: nx-glass-appear 160ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+  z-index: 13000 !important;
+}
+
+.nx-topbar-workspace-menu.is-submenu-left {
+  left: auto !important;
+  right: 0 !important;
+}
+
+/* ------------------------------------------------------------------
+   WORKSPACE MENU ROOT (left nav rail)
+------------------------------------------------------------------ */
+.nx-workspace-menu-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  min-width: 150px;
+  flex-shrink: 0;
+}
+
+.nx-workspace-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(226, 244, 255, 0.72);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.nx-workspace-menu-item:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.16);
+  color: var(--nx-accent, #38bdf8);
+}
+
+.nx-workspace-menu-item.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.22);
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.36);
+  border-left-color: var(--nx-accent, #38bdf8);
+  color: var(--nx-accent, #38bdf8);
+}
+
+/* ------------------------------------------------------------------
+   WORKSPACE SUBMENU PANEL (right content area)
+------------------------------------------------------------------ */
+.nx-workspace-submenu-panel {
+  padding: 8px;
+  min-width: 280px;
+  max-width: 320px;
+}
+
+.nx-workspace-submenu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(72vh, 480px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.16) transparent;
+}
+
+.nx-workspace-submenu-title {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--nx-accent, #38bdf8);
+  padding: 6px 10px 2px;
+}
+
+.nx-workspace-submenu-note {
+  font-size: 10px;
+  color: rgba(186, 213, 240, 0.50);
+  padding: 0 10px 6px;
+}
+
+.nx-workspace-submenu-divider {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.10);
+  margin: 4px 10px;
+}
+
+.nx-workspace-submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(226, 244, 255, 0.82);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  text-align: left;
+}
+
+.nx-workspace-submenu-item:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.16);
+  color: var(--nx-accent, #38bdf8);
+}
+
+.nx-workspace-submenu-item.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.22);
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.36);
+  border-left-color: var(--nx-accent, #38bdf8);
+  color: var(--nx-accent, #38bdf8);
+}
+
+.nx-workspace-submenu-item strong { color: inherit; }
+.nx-workspace-submenu-item small  { font-size: 10px; color: rgba(186, 213, 240, 0.55); }
+
+.nx-workspace-submenu-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.nx-workspace-submenu-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nx-workspace-submenu-item__badge {
+  font-size: 9px;
+  font-style: normal;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14);
+  color: var(--nx-accent, #38bdf8);
+}
+
+/* ------------------------------------------------------------------
+   VIEWS SUBMENU — view rows with hover-reveal width pills
+   Pills are INSIDE the row so :hover stays active while clicking.
+------------------------------------------------------------------ */
+.nx-workspace-submenu-item--view {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding-bottom: 2px;
+}
+
+.nx-workspace-submenu-item__select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px 6px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms ease;
+}
+
+.nx-workspace-submenu-item--view:hover .nx-workspace-submenu-item__select {
+  color: var(--nx-accent, #38bdf8);
+}
+
+.nx-workspace-view-widths {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px 6px;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 130ms ease, max-height 130ms ease;
+}
+
+/* Width pills reveal on hover/focus ONLY — .is-active must NOT trigger this */
+.nx-workspace-submenu-item--view:hover .nx-workspace-view-widths,
+.nx-workspace-submenu-item--view:focus-within .nx-workspace-view-widths {
+  opacity: 1;
+  max-height: 40px;
+  pointer-events: auto;
+}
+
+/* ------------------------------------------------------------------
+   LAYOUT SUBMENU — large pills
+------------------------------------------------------------------ */
+.nx-workspace-layout-pills {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+}
+
+.nx-topbar-width-pill--lg {
+  min-height: 36px !important;
+  padding: 0 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  flex: 1;
+}
+
+/* ------------------------------------------------------------------
+   WIDTH PILLS — accent-driven active (override hardcoded blue)
+------------------------------------------------------------------ */
+.nx-topbar-width-pill {
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 244, 255, 0.60);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.nx-topbar-width-pill:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.30) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+.nx-topbar-width-pill.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.22) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.44) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+/* ------------------------------------------------------------------
+   MISSING ACCENT DOTS (cyan/emerald/amber/violet/rose already exist)
+------------------------------------------------------------------ */
+.nx-accent-dot[data-accent='blue']   { background: #0ea5e9; }
+.nx-accent-dot[data-accent='teal']   { background: #14b8a6; }
+.nx-accent-dot[data-accent='orange'] { background: #f97316; }
+.nx-accent-dot[data-accent='pink']   { background: #ec4899; }
+.nx-accent-dot[data-accent='gold']   { background: #eab308; }
+
+/* light theme dot was missing */
+.nx-theme-dot[data-theme='light']    { background: #e0f0fc; }
+
+/* ------------------------------------------------------------------
+   QUICK MENU POPOVER (Tasks) — glass header + accent hover
+------------------------------------------------------------------ */
+.nx-quick-menu-popover {
+  animation: nx-glass-appear 140ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.nx-quick-menu-popover::before {
+  content: 'TASKS';
+  display: block;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  color: var(--nx-accent, #38bdf8);
+  opacity: 0.75;
+  padding: 8px 12px 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+  margin-bottom: 2px;
+}
+
+.nx-quick-menu-popover button {
+  transition: background 120ms ease, color 120ms ease !important;
+}
+
+.nx-quick-menu-popover button:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+/* ------------------------------------------------------------------
+   AVATAR / PROFILE POPOVER — pop-in + accent hover + bottom divider
+------------------------------------------------------------------ */
+.nx-avatar-popover {
+  animation: nx-glass-appear 140ms cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+
+.nx-avatar-popover button {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  padding: 9px 12px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: rgba(226, 244, 255, 0.84) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  text-align: left !important;
+}
+
+.nx-avatar-popover button:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+.nx-avatar-popover button:disabled {
+  opacity: 0.36 !important;
+  cursor: not-allowed !important;
+}
+
+.nx-avatar-popover button:last-child {
+  margin-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.10) !important;
+  border-radius: 0 0 10px 10px !important;
+  padding-top: 10px !important;
+}
+
+/* ------------------------------------------------------------------
+   NOTIFICATION BUTTON — accent badge replaces hardcoded red
+------------------------------------------------------------------ */
+.nx-notification-button.has-alerts {
+  color: var(--nx-accent, #38bdf8) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.36) !important;
+}
+
+.nx-notification-button.has-alerts::before {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.16) !important;
+  animation: nx-pulse-accent 1.8s ease-out infinite !important;
+}
+
+.nx-notification-button.has-alerts span {
+  background: var(--nx-accent, #38bdf8) !important;
+  color: #000 !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.36) !important;
+}
+
+/* ------------------------------------------------------------------
+   NOTIFICATION CENTER — pop-in
+------------------------------------------------------------------ */
+.nxhud-panel.nx-notification-center {
+  animation: nx-glass-appear 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ------------------------------------------------------------------
+   LIGHT MODE OVERRIDES
+------------------------------------------------------------------ */
+[data-nexus-theme="light"] .nx-liquid-popover {
+  background: linear-gradient(
+    150deg,
+    rgba(250, 253, 255, 0.92) 0%,
+    rgba(236, 246, 255, 0.95) 100%
+  ) !important;
+  border: 1px solid rgba(56, 189, 248, 0.22) !important;
+  box-shadow:
+    0 24px 64px -8px rgba(15, 23, 42, 0.20),
+    0 4px 16px rgba(15, 23, 42, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 1.0),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.60) !important;
+  color: #0f172a !important;
+}
+
+[data-nexus-theme="light"] .nx-workspace-menu-root {
+  border-right-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+[data-nexus-theme="light"] .nx-workspace-menu-item {
+  color: #0f172a !important;
+}
+[data-nexus-theme="light"] .nx-workspace-menu-item:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.10) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+[data-nexus-theme="light"] .nx-workspace-menu-item.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.24) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+[data-nexus-theme="light"] .nx-workspace-submenu-item {
+  color: #0f172a !important;
+}
+[data-nexus-theme="light"] .nx-workspace-submenu-item small {
+  color: #64748b !important;
+}
+[data-nexus-theme="light"] .nx-workspace-submenu-item:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.10) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+[data-nexus-theme="light"] .nx-workspace-submenu-item.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.14) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.22) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+[data-nexus-theme="light"] .nx-workspace-submenu-title { color: var(--nx-accent, #38bdf8) !important; }
+[data-nexus-theme="light"] .nx-workspace-submenu-note  { color: #64748b !important; }
+[data-nexus-theme="light"] .nx-workspace-submenu-divider { background: rgba(15, 23, 42, 0.08) !important; }
+
+[data-nexus-theme="light"] .nx-topbar-width-pill {
+  color: #334155 !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  background: rgba(15, 23, 42, 0.04) !important;
+}
+[data-nexus-theme="light"] .nx-topbar-width-pill:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.12) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.28) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+[data-nexus-theme="light"] .nx-topbar-width-pill.is-active {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.18) !important;
+  border-color: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.38) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+[data-nexus-theme="light"] .nx-avatar-popover button { color: #0f172a !important; }
+[data-nexus-theme="light"] .nx-avatar-popover button:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.10) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+[data-nexus-theme="light"] .nx-quick-menu-popover button { color: #0f172a !important; }
+[data-nexus-theme="light"] .nx-quick-menu-popover button:hover {
+  background: rgba(var(--nx-accent-rgb, 56, 189, 248), 0.10) !important;
+  color: var(--nx-accent, #38bdf8) !important;
+}
+
+[data-nexus-theme="light"] .nx-theme-dot,
+[data-nexus-theme="light"] .nx-accent-dot {
+  border-color: rgba(15, 23, 42, 0.20) !important;
+}
+
+[data-nexus-theme="light"] .nx-notification-button.has-alerts span {
+  color: #fff !important;
+}
+
+/* ------------------------------------------------------------------
+   RED OPS OVERRIDES
+------------------------------------------------------------------ */
+[data-nexus-theme="red_ops"] .nx-liquid-popover {
+  background: rgba(18, 3, 3, 0.94) !important;
+  border-color: rgba(239, 68, 68, 0.22) !important;
+  box-shadow:
+    0 24px 64px -8px rgba(180, 10, 10, 0.40),
+    0 4px 16px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(255, 80, 80, 0.09) !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-workspace-menu-item:hover,
+[data-nexus-theme="red_ops"] .nx-workspace-menu-item.is-active {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #fca5a5 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-workspace-submenu-item:hover,
+[data-nexus-theme="red_ops"] .nx-workspace-submenu-item.is-active {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #fca5a5 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-workspace-submenu-title { color: #f87171 !important; }
+[data-nexus-theme="red_ops"] .nx-workspace-submenu-item__badge {
+  background: rgba(239, 68, 68, 0.14) !important;
+  color: #f87171 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-topbar-width-pill:hover {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.30) !important;
+  color: #fca5a5 !important;
+}
+[data-nexus-theme="red_ops"] .nx-topbar-width-pill.is-active {
+  background: rgba(239, 68, 68, 0.22) !important;
+  border-color: rgba(239, 68, 68, 0.44) !important;
+  color: #fca5a5 !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-quick-menu-popover button:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #fca5a5 !important;
+}
+[data-nexus-theme="red_ops"] .nx-avatar-popover button:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #fca5a5 !important;
+}
+[data-nexus-theme="red_ops"] .nx-notification-button.has-alerts {
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.44) !important;
+}
+[data-nexus-theme="red_ops"] .nx-notification-button.has-alerts::before {
+  background: rgba(239, 68, 68, 0.16) !important;
+}
+[data-nexus-theme="red_ops"] .nx-notification-button.has-alerts span {
+  background: #ef4444 !important;
+  color: #fff !important;
+}

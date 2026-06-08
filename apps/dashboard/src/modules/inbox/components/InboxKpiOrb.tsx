@@ -43,10 +43,10 @@ function fmtN(n: number | undefined | null): string {
 type Tone = 'good' | 'warn' | 'bad' | 'dim'
 
 const TONE_COLOR: Record<Tone, string> = {
-  good: 'var(--nx-kpi-good, #00e87a)',
-  warn: 'var(--nx-kpi-warn, #f97316)',
-  bad:  'var(--nx-kpi-bad, #ff4466)',
-  dim:  'var(--nx-kpi-dim, rgba(255,255,255,0.3))',
+  good: '#00e87a',
+  warn: '#f97316',
+  bad:  '#ff4466',
+  dim:  'rgba(255,255,255,0.3)',
 }
 
 function MCard({ label, value, tone, span2 }: {
@@ -55,11 +55,11 @@ function MCard({ label, value, tone, span2 }: {
   tone?: Tone
   span2?: boolean
 }) {
-  const color = tone ? TONE_COLOR[tone] : 'var(--nx-kpi-card-value, rgba(255,255,255,0.92))'
+  const color = tone ? TONE_COLOR[tone] : 'rgba(255,255,255,0.92)'
   return (
     <div style={{
-      background: 'var(--nx-kpi-card-bg, rgba(255,255,255,0.04))',
-      border: '1px solid var(--nx-kpi-card-border, rgba(255,255,255,0.06))',
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.06)',
       borderRadius: '8px',
       padding: '9px 11px',
       display: 'flex',
@@ -67,7 +67,7 @@ function MCard({ label, value, tone, span2 }: {
       gap: '3px',
       gridColumn: span2 ? 'span 2' : undefined,
     }}>
-      <div style={{ fontSize: '9px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+      <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.32)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         {label}
       </div>
       <div style={{ fontSize: '17px', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
@@ -87,7 +87,7 @@ function Grid({ children, cols = 3 }: { children: React.ReactNode; cols?: number
 
 function SubLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: '9px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
+    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.28)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
       {children}
     </div>
   )
@@ -95,7 +95,7 @@ function SubLabel({ children }: { children: React.ReactNode }) {
 
 function Empty() {
   return (
-    <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--nx-kpi-empty, rgba(255,255,255,0.22))', fontSize: '12px', fontStyle: 'italic' }}>
+    <div style={{ textAlign: 'center', padding: '24px 0', color: 'rgba(255,255,255,0.22)', fontSize: '12px', fontStyle: 'italic' }}>
       No activity in this window
     </div>
   )
@@ -107,20 +107,18 @@ function HighlightCard({ tone, eyebrow, title, detail }: {
   title: string
   detail: string
 }) {
-  const c = tone === 'good' ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)'
-  const bg = tone === 'good' ? 'var(--nx-kpi-good-bg, rgba(0, 232, 122, 0.05))' : 'var(--nx-kpi-bad-bg, rgba(255, 68, 102, 0.05))'
-  const border = tone === 'good' ? 'var(--nx-kpi-good-border, rgba(0, 232, 122, 0.15))' : 'var(--nx-kpi-bad-border, rgba(255, 68, 102, 0.15))'
+  const c = tone === 'good' ? '#00e87a' : '#ff4466'
   return (
     <div style={{
       padding: '9px 12px',
-      background: bg,
-      border: `1px solid ${border}`,
+      background: `${c}0d`,
+      border: `1px solid ${c}26`,
       borderRadius: '8px',
       fontSize: '11px',
     }}>
       <div style={{ fontSize: '8px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
-      <div style={{ fontWeight: 600, marginBottom: '2px', color: 'var(--nx-kpi-highlight-title, rgba(255,255,255,0.85))' }}>{title}</div>
-      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '10px' }}>{detail}</div>
+      <div style={{ fontWeight: 600, marginBottom: '2px', color: 'rgba(255,255,255,0.85)' }}>{title}</div>
+      <div style={{ color: 'rgba(255,255,255,0.38)', fontSize: '10px' }}>{detail}</div>
     </div>
   )
 }
@@ -226,9 +224,9 @@ function AutoRepliesSection({ sections, stage, onStage }: {
               flex: 1,
               padding: '5px 6px',
               borderRadius: '6px',
-              border: `1px solid ${stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-border, rgba(255,255,255,0.08))'}`,
-              background: stage === d.id ? `${d.color}1a` : 'var(--nx-kpi-tab-inactive-bg, rgba(255,255,255,0.03))',
-              color: stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-text, rgba(255,255,255,0.38))',
+              border: `1px solid ${stage === d.id ? d.color : 'rgba(255,255,255,0.08)'}`,
+              background: stage === d.id ? `${d.color}1a` : 'rgba(255,255,255,0.03)',
+              color: stage === d.id ? d.color : 'rgba(255,255,255,0.38)',
               fontSize: '10px',
               fontWeight: stage === d.id ? 700 : 400,
               cursor: 'pointer',
@@ -326,8 +324,8 @@ function QueueSection({ q }: { q: OpsQueueHealthSection | undefined }) {
       </Grid>
 
       {topReason && (
-        <div style={{ fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.38))', padding: '7px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px' }}>
-          Top failure: <span style={{ color: 'var(--nx-kpi-warn, #f97316)', fontWeight: 600 }}>{topReason[0]}</span>
+        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.38)', padding: '7px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
+          Top failure: <span style={{ color: '#f97316', fontWeight: 600 }}>{topReason[0]}</span>
           {' '}({fmtN(topReason[1])})
         </div>
       )}
@@ -378,10 +376,10 @@ function DeliverabilitySection({ kpis, sections }: { kpis: KpiData; sections: Co
             {sorted.map(([reason, count]) => (
               <div key={reason} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px',
+                padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px',
               }}>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.5))', fontFamily: 'monospace' }}>{reason}</span>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: count > 5 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-warn, #f97316)' }}>{fmtN(count)}</span>
+                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace' }}>{reason}</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: count > 5 ? '#ff4466' : '#f97316' }}>{fmtN(count)}</span>
               </div>
             ))}
           </div>
@@ -424,14 +422,14 @@ function TemplatesSection({ sections, outliers }: { sections: CockpitOpsSections
             {top.slice(0, 6).map(t => (
               <div key={t.template_id} style={{
                 display: 'grid', gridTemplateColumns: '1fr auto auto auto',
-                gap: '10px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
+                gap: '10px', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', alignItems: 'center',
               }}>
-                <span style={{ fontFamily: 'monospace', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.68))' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.68)' }}>
                   {t.template_id}
                 </span>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-label, rgba(255,255,255,0.35))' }}>{fmtN(t.sent)} sent</span>
-                <span style={{ fontSize: '10px', color: t.failed > 0 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.22))' }}>{fmtN(t.failed)} fail</span>
-                <span style={{ fontSize: '10px', color: t.failure_rate !== null && t.failure_rate > 10 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-label, rgba(255,255,255,0.32))' }}>
+                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.35)' }}>{fmtN(t.sent)} sent</span>
+                <span style={{ fontSize: '10px', color: t.failed > 0 ? '#ff4466' : 'rgba(255,255,255,0.22)' }}>{fmtN(t.failed)} fail</span>
+                <span style={{ fontSize: '10px', color: t.failure_rate !== null && t.failure_rate > 10 ? '#ff4466' : 'rgba(255,255,255,0.32)' }}>
                   {fmtRate(t.failure_rate)}
                 </span>
               </div>
@@ -474,16 +472,16 @@ function NumbersSection({ sections, outliers }: { sections: CockpitOpsSections |
           {top.slice(0, 7).map(n => (
             <div key={n.number} style={{
               display: 'grid', gridTemplateColumns: '1fr auto auto auto auto',
-              gap: '8px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
+              gap: '8px', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', alignItems: 'center',
             }}>
-              <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.65))' }}>{n.number}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.3))' }}>{fmtN(n.sent)}</span>
-              <span style={{ fontSize: '10px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)' }}>{fmtRate(n.delivery_rate)}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-text, rgba(255,255,255,0.42))' }}>{fmtRate(n.reply_rate)}</span>
-              <span style={{ fontSize: '10px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? 'var(--nx-kpi-warn, #f97316)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.28))' }}>{fmtRate(n.opt_out_rate)}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'rgba(255,255,255,0.65)' }}>{n.number}</span>
+              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>{fmtN(n.sent)}</span>
+              <span style={{ fontSize: '10px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? '#00e87a' : '#ff4466' }}>{fmtRate(n.delivery_rate)}</span>
+              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.42)' }}>{fmtRate(n.reply_rate)}</span>
+              <span style={{ fontSize: '10px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? '#f97316' : 'rgba(255,255,255,0.28)' }}>{fmtRate(n.opt_out_rate)}</span>
             </div>
           ))}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '8px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.2))', letterSpacing: '0.05em' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '8px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.05em' }}>
             <span />
             <span>SENT</span><span>DEL%</span><span>REP%</span><span>OPT%</span>
           </div>
@@ -610,17 +608,17 @@ export const InboxKpiOrb = () => {
           {/* Header */}
           <div style={{
             padding: '11px 14px 10px',
-            borderBottom: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             flexShrink: 0,
           }}>
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.03em', color: 'var(--nx-kpi-title, rgba(255,255,255,0.9))' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.03em', color: 'rgba(255,255,255,0.9)' }}>
                 Operational Intelligence
               </div>
-              <div style={{ fontSize: '9px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', marginTop: '1px' }}>
                 {isLive ? '⚡ Live' : 'System telemetry'}
               </div>
             </div>
@@ -634,8 +632,8 @@ export const InboxKpiOrb = () => {
                     padding: '3px 7px',
                     borderRadius: '5px',
                     border: 'none',
-                    background: timeWindow === w ? 'var(--nx-kpi-active-btn-bg, rgba(56,208,240,0.14))' : 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
-                    color: timeWindow === w ? 'var(--nx-kpi-active-btn-color, #38d0f0)' : 'var(--nx-kpi-btn-color, rgba(255,255,255,0.38))',
+                    background: timeWindow === w ? 'rgba(56,208,240,0.14)' : 'rgba(255,255,255,0.06)',
+                    color: timeWindow === w ? '#38d0f0' : 'rgba(255,255,255,0.38)',
                     fontSize: '9px',
                     fontWeight: timeWindow === w ? 700 : 400,
                     cursor: 'pointer',
@@ -652,8 +650,8 @@ export const InboxKpiOrb = () => {
                   padding: '3px 5px',
                   borderRadius: '5px',
                   border: 'none',
-                  background: 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
-                  color: 'var(--nx-kpi-btn-color, rgba(255,255,255,0.35))',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.35)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -669,7 +667,7 @@ export const InboxKpiOrb = () => {
             display: 'flex',
             gap: '4px',
             padding: '7px 10px',
-            borderBottom: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
             overflowX: 'auto',
             flexShrink: 0,
             scrollbarWidth: 'none',
@@ -681,9 +679,9 @@ export const InboxKpiOrb = () => {
                 style={{
                   padding: '3px 9px',
                   borderRadius: '20px',
-                  border: `1px solid ${section === s.id ? 'var(--nx-kpi-active-pill-border, #38d0f0)' : 'var(--nx-kpi-pill-border, rgba(255,255,255,0.08))'}`,
-                  background: section === s.id ? 'var(--nx-kpi-active-pill-bg, rgba(56,208,240,0.1))' : 'transparent',
-                  color: section === s.id ? 'var(--nx-kpi-active-pill-color, #38d0f0)' : 'var(--nx-kpi-pill-color, rgba(255,255,255,0.38))',
+                  border: `1px solid ${section === s.id ? '#38d0f0' : 'rgba(255,255,255,0.08)'}`,
+                  background: section === s.id ? 'rgba(56,208,240,0.1)' : 'transparent',
+                  color: section === s.id ? '#38d0f0' : 'rgba(255,255,255,0.38)',
                   fontSize: '10px',
                   fontWeight: section === s.id ? 700 : 400,
                   cursor: 'pointer',
@@ -701,11 +699,11 @@ export const InboxKpiOrb = () => {
             <div style={{
               margin: '8px 12px 0',
               padding: '7px 10px',
-              background: 'var(--nx-kpi-error-bg, rgba(255,0,0,0.08))',
-              border: '1px solid var(--nx-kpi-error-border, rgba(255,0,0,0.2))',
+              background: 'rgba(255,0,0,0.08)',
+              border: '1px solid rgba(255,0,0,0.2)',
               borderRadius: '6px',
               fontSize: '11px',
-              color: 'var(--nx-kpi-error-text, #ff6b6b)',
+              color: '#ff6b6b',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -727,7 +725,7 @@ export const InboxKpiOrb = () => {
             overflowY: 'auto',
             padding: '10px 12px',
             scrollbarWidth: 'thin',
-            scrollbarColor: 'var(--nx-kpi-scrollbar, rgba(255,255,255,0.08)) transparent',
+            scrollbarColor: 'rgba(255,255,255,0.08) transparent',
           }}>
             {!kpis ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
@@ -751,15 +749,15 @@ export const InboxKpiOrb = () => {
           {/* AI Recommendation strip */}
           {recommendations.length > 0 && (
             <div style={{
-              borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
+              borderTop: '1px solid rgba(255,255,255,0.06)',
               padding: '7px 12px',
               flexShrink: 0,
-              background: 'var(--nx-kpi-rec-bg, rgba(99,102,241,0.05))',
+              background: 'rgba(99,102,241,0.05)',
             }}>
-              <div style={{ fontSize: '8px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
+              <div style={{ fontSize: '8px', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
                 AI Rec
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.52)', lineHeight: 1.4 }}>
                 {recommendations[0]}
               </div>
             </div>
@@ -767,18 +765,18 @@ export const InboxKpiOrb = () => {
 
           {/* Footer */}
           <div style={{
-            borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
             padding: '5px 12px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
-              <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: kpiError ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-good, #00e87a)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'rgba(255,255,255,0.28)' }}>
+              <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: kpiError ? '#ff4466' : '#00e87a' }} />
               {kpiError ? 'Error' : 'Nominal'}
             </div>
-            <div style={{ fontSize: '9px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
+            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.22)' }}>
               {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>

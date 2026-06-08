@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
@@ -30,9 +30,6 @@ interface ChatThreadProps {
   onTranslateThread?: () => void
   backgroundLoading?: boolean
   isRecovered?: boolean
-  hasOlderMessages?: boolean
-  olderMessagesLoading?: boolean
-  onLoadOlder?: () => void
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -56,17 +53,8 @@ const highlightText = (text: string, terms: string[]) => {
   ))
 }
 
-const messageTimestampIso = (message: ThreadMessage): string =>
-  message.createdAt || message.sentAt || message.timelineAt || new Date().toISOString()
-
-const messageTimestampMs = (message: ThreadMessage): number => {
-  const ts = new Date(messageTimestampIso(message)).getTime()
-  return Number.isFinite(ts) ? ts : 0
-}
-
-const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | 'sent' | 'delivered' => {
-  // Precedence: delivered > failed > queued > sent. Backend reconciliation
-  // already downgrades disputed failure records with success evidence to sent.
+const normalizeDeliveryBadge = (message: ThreadMessage): 'failed' | 'sent' | 'delivered' | 'sending' | 'unknown' => {
+  // Precedence: delivered > sent > failed
   if (message.deliveredAt) return 'delivered'
   
   const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
@@ -75,11 +63,15 @@ const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | '
   const raw = String(message.rawStatus || '').toLowerCase()
   if (raw.includes('delivered')) return 'delivered'
   
-  if (status === 'failed' || raw.includes('fail') || raw.includes('error') || raw.includes('undeliver')) return 'failed'
-  if (status === 'queued' || status === 'pending' || status === 'sending' || raw.includes('queue') || raw.includes('pending') || raw.includes('schedule') || raw.includes('approval') || raw.includes('sending')) return 'queued'
   if (status === 'sent' || raw.includes('sent') || raw === 'success') return 'sent'
+  if (status === 'failed' || raw.includes('fail') || raw.includes('error') || raw.includes('undeliver')) return 'failed'
+  if (status === 'sending' || raw.includes('sending')) return 'sending'
   
-  return 'sent'
+  // Requirement: No queued / processing / status disputed labels in conversation UI.
+  // Map any other queue-like state to 'sent' for a smooth UI, though ideally they aren't in this list.
+  if (raw.includes('queue') || raw.includes('pending') || raw.includes('schedule') || raw.includes('approval')) return 'sent'
+  
+  return 'unknown'
 }
 
 const getDeliveryPillStyle = (badge: string) => {
@@ -87,7 +79,7 @@ const getDeliveryPillStyle = (badge: string) => {
     case 'delivered': return { color: '#30d158', background: 'rgba(48, 209, 88, 0.12)', borderColor: 'rgba(48, 209, 88, 0.25)' }
     case 'sent': return { color: '#64d2ff', background: 'rgba(100, 210, 255, 0.12)', borderColor: 'rgba(100, 210, 255, 0.25)' }
     case 'failed': return { color: '#ff453a', background: 'rgba(255, 69, 58, 0.12)', borderColor: 'rgba(255, 69, 58, 0.25)' }
-    case 'queued': return { color: '#ffd60a', background: 'rgba(255, 214, 10, 0.12)', borderColor: 'rgba(255, 214, 10, 0.25)' }
+    case 'sending': return { color: '#ffd60a', background: 'rgba(255, 214, 10, 0.12)', borderColor: 'rgba(255, 214, 10, 0.25)', fontStyle: 'italic' }
     default: return { color: 'rgba(155, 168, 192, 0.5)', background: 'transparent', borderColor: 'transparent' }
   }
 }
@@ -235,9 +227,6 @@ export const ChatThread = ({
   onTranslateThread,
   backgroundLoading = false,
   isRecovered = false,
-  hasOlderMessages = false,
-  olderMessagesLoading = false,
-  onLoadOlder,
 }: ChatThreadProps) => {
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -267,31 +256,6 @@ export const ChatThread = ({
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }
   }
-
-  const timelineMessages = useMemo(() => (
-    [...messages].sort((left, right) => (
-      messageTimestampMs(left) - messageTimestampMs(right) ||
-      String(left.id || '').localeCompare(String(right.id || ''))
-    ))
-  ), [messages])
-
-  useEffect(() => {
-    const outboundMessages = timelineMessages.filter((message) => message.direction === 'outbound')
-    const deliveredCount = outboundMessages.filter((message) => normalizeDeliveryBadge(message) === 'delivered').length
-    const failedCount = outboundMessages.filter((message) => normalizeDeliveryBadge(message) === 'failed').length
-    const lastMessage = timelineMessages[timelineMessages.length - 1] ?? null
-    console.log('[THREAD_MESSAGES_RENDER_AUDIT]', {
-      selectedConversationThreadId: thread ? ((thread as any).conversationThreadId || (thread as any).conversation_thread_id || thread.threadKey || thread.id) : null,
-      messagesReceived: messages.length,
-      inboundCount: timelineMessages.filter((message) => message.direction === 'inbound').length,
-      outboundCount: outboundMessages.length,
-      deliveredCount,
-      failedCount,
-      firstMessageAt: timelineMessages[0] ? messageTimestampIso(timelineMessages[0]) : null,
-      lastMessageAt: lastMessage ? messageTimestampIso(lastMessage) : null,
-      renderedMessageCount: timelineMessages.length,
-    })
-  }, [messages.length, thread, timelineMessages])
 
   if (!thread) return (
     <div className="nx-chat-container is-empty">
@@ -389,17 +353,8 @@ export const ChatThread = ({
 
       {/* ── MESSAGE TIMELINE ──────────────────────────────────────────── */}
       <div className="nx-message-list" ref={listRef} onScroll={handleScroll}>
-        {hasOlderMessages && (
-          <div className="nx-load-older-row">
-            <button type="button" className="nx-btn nx-btn--secondary" onClick={onLoadOlder} disabled={olderMessagesLoading}>
-              <Icon name="chevron-up" />
-              <span>{olderMessagesLoading ? 'Loading older' : 'Load Older'}</span>
-            </button>
-          </div>
-        )}
         {(() => {
-          const hasRowLatestActivity = Boolean(String((thread as any).latestMessageBody || (thread as any).latest_message_body || '').trim())
-          const isUncontacted = !thread || ((thread as any).is_uncontacted && !hasRowLatestActivity) || thread.threadKey?.startsWith('property:') || (thread.inbound_count === 0 && thread.outbound_count === 0 && messages.length === 0 && !hasRowLatestActivity)
+          const isUncontacted = !thread || (thread as any).is_uncontacted || thread.threadKey?.startsWith('property:') || (thread.inbound_count === 0 && thread.outbound_count === 0 && messages.length === 0)
           if (isUncontacted && !loading) {
             return (
               <div className="nx-uncontacted-state">
@@ -420,7 +375,7 @@ export const ChatThread = ({
             )
           }
 
-          return timelineMessages.map(msg => {
+          return messages.map(msg => {
             const isOutbound = msg.direction === 'outbound'
             const deliveryBadge = normalizeDeliveryBadge(msg)
             const isFailed = deliveryBadge === 'failed'
@@ -456,7 +411,7 @@ export const ChatThread = ({
                 </div>
 
                 <div className="nx-bubble-footer">
-                  <time className="nx-bubble-time">{formatMessageDateTime(messageTimestampIso(msg))}</time>
+                  <time className="nx-bubble-time">{formatMessageDateTime(msg.createdAt)}</time>
 
                   {isOutbound && (
                     <div className="nx-delivery-row">
@@ -515,40 +470,27 @@ export const ChatThread = ({
           })
         })()}
 
-        {messages.length === 0 && !loading && (() => {
-          const latestBody = String((thread as any)?.latestMessageBody || (thread as any)?.latest_message_body || '').trim()
-          if (latestBody) {
-            return (
-              <div className="nx-hydration-failed">
-                {import.meta.env.DEV && (
-                  <div className="nx-hydration-failed__dev-banner">
-                    ⚠ message hydration returned 0 rows — thread has preview but no timeline
-                  </div>
-                )}
-                <div className="nx-hydration-failed__body">
-                  <Icon name="message" style={{ opacity: 0.25, width: 28, height: 28, marginBottom: 8 }} />
-                  <p>Messages unavailable</p>
-                  <p className="nx-hydration-failed__sub">Timeline could not be loaded. The conversation exists but message history failed to hydrate.</p>
-                  <button
-                    type="button"
-                    className="nx-btn nx-btn--secondary"
-                    style={{ marginTop: 10 }}
-                    onClick={() => onThreadAction?.(thread.id, 'refetch', { threadKey: thread.threadKey || thread.id })}
-                  >
-                    <Icon name="refresh-cw" style={{ width: 13, height: 13 }} />
-                    <span>Retry</span>
-                  </button>
-                </div>
+        {messages.length === 0 && thread && ((thread as any).latestMessageBody || (thread as any).latest_message_body) ? (
+          <div className="nx-synthetic-fallback-wrap" style={{ padding: '20px 20px 0' }}>
+            <div className={cls('nx-bubble-wrap', ((thread as any).latestMessageDirection || (thread as any).latest_message_direction) === 'outbound' ? 'is-outbound' : 'is-inbound')}>
+              <div className="nx-chat-bubble">
+                {thread.latestMessageBody || (thread as any).latest_message_body}
               </div>
-            )
-          }
-          return (
-            <div className="nx-inbox__messages-empty">
-              <Icon name="message" style={{ opacity: 0.08, width: 36, height: 36, marginBottom: 10 }} />
-              <p>No messages in this thread.</p>
+              <div className="nx-bubble-footer">
+                {import.meta.env.DEV && (
+                  <span className="nx-synthetic-label" style={{ fontSize: '10px', color: 'var(--nexus-muted)', fontStyle: 'italic' }}>
+                    Latest Activity (Recovered from row fallback)
+                  </span>
+                )}
+              </div>
             </div>
-          )
-        })()}
+          </div>
+        ) : messages.length === 0 && !loading && (
+          <div className="nx-inbox__messages-empty">
+            <Icon name="message" style={{ opacity: 0.08, width: 36, height: 36, marginBottom: 10 }} />
+            <p>No messages in this thread.</p>
+          </div>
+        )}
       </div>
 
     </div>

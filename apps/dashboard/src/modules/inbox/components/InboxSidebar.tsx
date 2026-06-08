@@ -54,8 +54,6 @@ interface InboxSidebarProps {
   sourceMode?: InboxSourceMode
   onSourceModeChange?: (mode: InboxSourceMode) => void
   loading?: boolean
-  realtimeStatus?: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
-  refreshMode?: 'realtime' | 'polling' | 'disabled'
 }
 
 type BucketConfig = {
@@ -184,12 +182,16 @@ const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
 }
 
 const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
-  const bucketRaw = readString(thread, 'inbox_bucket', 'inboxBucket', 'status_bucket', 'priority_bucket', 'priorityBucket').toLowerCase()
-  const categoryRaw = readString(thread, 'inbox_category', 'inboxCategory').toLowerCase()
-
-  if (categoryRaw === 'cold_no_response' || (bucketRaw === 'waiting' && categoryRaw === 'cold_no_response') || bucketRaw === 'cold') return 'cold'
-
-  const raw = bucketRaw || categoryRaw
+  const raw = readString(
+    thread,
+    'inbox_bucket',
+    'inboxBucket',
+    'status_bucket',
+    'inbox_category',
+    'inboxCategory',
+    'priority_bucket',
+    'priorityBucket',
+  ).toLowerCase()
   if (!raw) return null
   if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
@@ -197,6 +199,7 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated') || raw.includes('waiting_on_seller') || raw.includes('waiting')) return 'follow_up'
   if (raw.includes('dead') || raw.includes('wrong_number') || raw.includes('not_interested')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
+  if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
   if (raw === 'all' || raw === 'all_messages' || raw === 'all_conversations') return 'all'
   return null
 }
@@ -632,9 +635,7 @@ export const InboxSidebar = ({
   viewCounts, onOpenAdvancedFilters, onClearFilters, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
-  loading = false,
-  realtimeStatus = 'connecting',
-  refreshMode = 'realtime',
+  loading = false
 }: InboxSidebarProps) => {
   const groupsRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
@@ -643,8 +644,6 @@ export const InboxSidebar = ({
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
   const prevThreadsLengthRef = useRef(threads.length)
   const loadingErrorMessage = formatLoadingError(loadingError)
-  const realtimeDegraded = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
-  const degradedModeMessage = loadingErrorMessage || (realtimeDegraded ? 'Realtime degraded. Using polling mode.' : '')
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
     if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'follow_up'
     if (activeViewFilter === 'dnc_opt_out' || activeViewFilter === 'opt_out') return 'suppressed'
@@ -700,30 +699,7 @@ export const InboxSidebar = ({
       : searchableThreads.filter((thread) => {
           const stateBucket = resolveBucketFromThreadState(thread)
           const resolvedBucket = stateBucket || classifyInboxBucket(thread, now).bucket
-          
-          const threadAny = thread as any
-          const bucket =
-            threadAny.inbox_bucket ??
-            threadAny.inboxBucket ??
-            threadAny.bucket ??
-            threadAny.statusBucket
-
-          const category =
-            threadAny.inbox_category ??
-            threadAny.inboxCategory ??
-            threadAny.category ??
-            threadAny.inboxCategoryRaw
-
-          const isCold =
-            category === 'cold_no_response' ||
-            category === 'cold' ||
-            bucket === 'cold' ||
-            bucket === 'cold_no_response' ||
-            bucket === 'waiting'
-
-          const isColdWaiting = activeBucket === 'cold' && isCold
-
-          if (resolvedBucket !== activeBucket && !isColdWaiting) {
+          if (resolvedBucket !== activeBucket) {
             console.log(
               '[VISIBLE_THREAD_REJECT]',
               thread.threadKey || thread.id,
@@ -892,20 +868,15 @@ export const InboxSidebar = ({
   )
 
   const renderSecondaryControls = () => {
-    if (degradedModeMessage) {
-      console.warn('[TELEMETRY_DEGRADED_BANNER]', {
-        error: loadingErrorMessage || null,
-        realtimeStatus,
-        refreshMode,
-        endpoint: '/api/cockpit/inbox/live',
-      })
+    if (loadingErrorMessage) {
+      console.warn('[TELEMETRY_DEGRADED_BANNER]', { error: loadingErrorMessage, endpoint: '/api/cockpit/inbox/live' })
     }
     return (
     <>
       <div className="nx-sidebar-rebuilt__secondary-controls">
-        {degradedModeMessage && (
-          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={degradedModeMessage}>
-            <Icon name="alert" /> Degraded · {refreshMode === 'polling' ? 'Polling' : 'Telemetry'}
+        {loadingErrorMessage && (
+          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={loadingErrorMessage}>
+            <Icon name="alert" /> Telemetry Degraded
           </span>
         )}
         <button type="button" onClick={() => {
@@ -965,16 +936,7 @@ export const InboxSidebar = ({
         const decision = decisionMap.get(thread.id)
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
-      }) : (
-        <div className={cls('nx-sidebar-rebuilt__empty', degradedModeMessage && 'is-degraded')}>
-          {degradedModeMessage ? (
-            <>
-              <strong>Inbox degraded mode</strong>
-              <span>{degradedModeMessage}</span>
-            </>
-          ) : 'No conversations match this filter.'}
-        </div>
-      )}
+      }) : <div className="nx-sidebar-rebuilt__empty">No conversations match this filter.</div>}
       {canLoadMore && (
         <div className="nx-sidebar-rebuilt__load-more">
           <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>

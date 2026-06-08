@@ -37,11 +37,20 @@ export interface DealContext {
   textgrid_number_id: string | null
 
   property: AnyRecord
+  property_data: AnyRecord
+  propertyData: AnyRecord
   masterOwner: AnyRecord
+  master_owner_data: AnyRecord
+  masterOwnerData: AnyRecord
   prospect: AnyRecord
+  prospect_data: AnyRecord
+  prospectData: AnyRecord
   phone: AnyRecord
+  phone_data: AnyRecord
   phoneData: AnyRecord
   email: AnyRecord
+  email_data: AnyRecord
+  emailData: AnyRecord
   threadState: AnyRecord
   campaign: AnyRecord
   queue: AnyRecord
@@ -441,11 +450,20 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     textgrid_number_id: textgridNumberId,
 
     property,
+    property_data: property,
+    propertyData: property,
     masterOwner,
+    master_owner_data: masterOwner,
+    masterOwnerData: masterOwner,
     prospect,
+    prospect_data: prospect,
+    prospectData: prospect,
     phone: phoneData,
+    phone_data: phoneData,
     phoneData,
     email,
+    email_data: email,
+    emailData: email,
     threadState,
     campaign,
     queue,

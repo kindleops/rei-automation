@@ -1020,29 +1020,54 @@ const normalizedPhoneForThreadIdentity = (row: AnyRecord): string => {
 
 export const buildConversationThreadIdFromRecord = (row: AnyRecord): string => {
   const explicit = firstNonEmptyString(row.conversation_thread_id, row.conversationThreadId)
-  if (explicit) return explicit
   const prospectId = firstNonEmptyString(row.prospect_id, row.prospectId, row.final_prospect_id, row.canonical_prospect_id)
   const propertyId = firstNonEmptyString(row.property_id, row.propertyId, row.final_property_id, row.selected_property_id, row.thread_property_id)
   const ownerId = firstNonEmptyString(row.master_owner_id, row.masterOwnerId, row.owner_id, row.ownerId, row.final_master_owner_id, row.thread_master_owner_id)
   const phone = normalizedPhoneForThreadIdentity(row)
+  const legacyThreadKey = firstNonEmptyString(row.threadKey, row.thread_key)
   const campaignOrSequence = firstNonEmptyString(row.campaign_id, row.campaignId, row.sequence_id, row.sequenceId)
+
+  let generated = ''
+  let method = ''
   
-  const parts: string[] = []
-  
-  if (propertyId && ownerId) {
-    parts.push(`property:${propertyId}`)
-    parts.push(`owner:${ownerId}`)
-  } else if (!propertyId && prospectId && phone) {
-    parts.push(`prospect:${prospectId}`)
-    parts.push(`phone:${phone}`)
-  } else if (phone) {
-    parts.push(`phone:${phone}`)
-  } else if (prospectId) {
-    parts.push(`prospect:${prospectId}`)
+  if (explicit) {
+    generated = explicit
+    method = 'explicit'
+  } else if (propertyId && ownerId) {
+    generated = `ct:property:${propertyId}|owner:${ownerId}`
+    method = 'property+owner'
+  } else if (legacyThreadKey) {
+    generated = legacyThreadKey
+    method = 'legacy_thread_key'
+  } else {
+    method = 'fallback'
+    const parts: string[] = []
+    if (!propertyId && prospectId && phone) {
+      parts.push(`prospect:${prospectId}`)
+      parts.push(`phone:${phone}`)
+    } else if (phone) {
+      parts.push(`phone:${phone}`)
+    } else if (prospectId) {
+      parts.push(`prospect:${prospectId}`)
+    }
+    if (parts.length === 0 && campaignOrSequence) parts.push(`campaign:${campaignOrSequence}`)
+    generated = parts.length ? `ct:${parts.join('|')}` : firstNonEmptyString(row.id)
   }
 
-  if (parts.length === 0 && campaignOrSequence) parts.push(`campaign:${campaignOrSequence}`)
-  return parts.length ? `ct:${parts.join('|')}` : firstNonEmptyString(row.threadKey, row.thread_key, row.id)
+  if (INBOX_DEBUG_VERBOSE) {
+    console.log('[THREAD_IDENTITY_CONTRACT_AUDIT]', {
+      selected_conversation_thread_id: explicit,
+      property_id: propertyId,
+      master_owner_id: ownerId,
+      prospect_id: prospectId,
+      canonical_e164: phone,
+      fallbackUsed: method === 'legacy_thread_key' || method === 'fallback',
+      method,
+      generated,
+    })
+  }
+
+  return generated
 }
 
 export const getConversationThreadIdForThread = (thread: Partial<InboxThread> | Partial<InboxWorkflowThread> | AnyRecord | null | undefined): string => {
@@ -1346,7 +1371,7 @@ const FILTER_COLUMNS_BY_ALIAS: Record<string, readonly string[]> = {
 
 // Minimal column sets to avoid select=* on large tables
 const SELECT_COLUMNS_BY_ALIAS: Record<string, string> = {
-  properties: 'property_id,master_owner_id,owner_id,property_address,property_address_full,market,market_id',
+  properties: 'property_id,master_owner_id,owner_id,property_address,property_address_full,market',
 }
 
 /** Returns the first existing table for an alias key, or the raw key if not a known alias. */
@@ -2091,7 +2116,16 @@ const fillEmptyFields = (target: AnyRecord, source: AnyRecord): AnyRecord => {
 
 export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): InboxThread => {
   const dc = normalizeDealContext(row)
+  
+  // PRESERVE FULL RAW PAYLOAD FOR INTELLIGENCE PANEL
+  const dcRaw = (row.dealContext || {}) as AnyRecord
+  const rawPropertyData = row.propertyData ?? row.property_data ?? dcRaw.propertyData ?? dcRaw.property_data ?? dc.property ?? {}
+  const rawMasterOwnerData = row.masterOwnerData ?? row.master_owner_data ?? dcRaw.masterOwnerData ?? dcRaw.master_owner_data ?? dc.masterOwner ?? {}
+  const rawProspectData = row.prospectData ?? row.prospect_data ?? dcRaw.prospectData ?? dcRaw.prospect_data ?? dc.prospect ?? {}
+  const rawPhoneData = row.phoneData ?? row.phone_data ?? dcRaw.phoneData ?? dcRaw.phone_data ?? dc.phoneData ?? {}
+
   const legacyThreadKey = dc.thread_key || asString(row.legacyThreadKey || row.legacy_thread_key || row.threadKey || row.thread_key, '')
+
   const conversationThreadId = buildConversationThreadIdFromRecord({
     ...row,
     thread_key: legacyThreadKey || row.thread_key || row.threadKey,
@@ -2296,10 +2330,14 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     },
     
     // Nested DealContext objects for IntelligencePanel
-    property_data: dc.property,
-    master_owner_data: dc.masterOwner,
-    prospect_data: dc.prospect,
-    phone_data: dc.phoneData,
+    propertyData: rawPropertyData,
+    property_data: rawPropertyData,
+    masterOwnerData: rawMasterOwnerData,
+    master_owner_data: rawMasterOwnerData,
+    prospectData: rawProspectData,
+    prospect_data: rawProspectData,
+    phoneData: rawPhoneData,
+    phone_data: rawPhoneData,
     email_data: dc.email,
     thread_state_data: dc.threadState,
     campaign_data: dc.campaign,
