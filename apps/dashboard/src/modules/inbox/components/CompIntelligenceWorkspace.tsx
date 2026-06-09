@@ -1052,10 +1052,12 @@ function ValuationAgentRail({ comps, arvStats, loading, subject }: {
       score: arvStats ? arvStats.confidence : null
     },
     {
-      name: 'Buyer Agent',
-      status: 'idle' as const,
-      output: 'Buyer demand pending',
-      outputCls: '',
+      name: 'Value Stack Agent',
+      status: arvStats ? 'complete' : 'idle',
+      output: arvStats
+      ? `Retail ${fmtK(arvStats.arv)} · Investor ${fmtK(arvStats.buyerExitPrice)}`
+      : 'Waiting for valuation stack',
+      outputCls: arvStats ? 'is-info' : '',
       score: null
     },
     {
@@ -1349,23 +1351,23 @@ function CompEvidenceCard({ comp, arvStats, isHovered, isExpanded, onEnter, onLe
   )
 }
 
-function DemandPanel() {
-  const demandMetrics = [
-    { label: 'Buyer Heat Score', value: 'Pending' },
-    { label: 'Liquidity Score', value: 'Pending' },
-    { label: 'Purchase Count', value: 'Pending' },
-    { label: 'Active Buyers', value: 'Pending' },
-    { label: 'Dominant Buyer Type', value: 'Pending' },
-    { label: 'Avg Investor Price', value: 'Pending' },
-    { label: 'Institutional Activity', value: 'Pending' },
-    { label: 'Days on Market Avg', value: 'Pending' },
+function MarketEvidencePanel() {
+  const evidenceMetrics = [
+    { label: 'MLS Evidence', value: 'Pending' },
+    { label: 'Public Record Evidence', value: 'Pending' },
+    { label: 'Buyer Purchase Evidence', value: 'Pending' },
+    { label: 'Institutional Sale Evidence', value: 'Pending' },
+    { label: 'Retail Ceiling', value: 'Pending' },
+    { label: 'Investor Reality', value: 'Pending' },
+    { label: 'Value Spread', value: 'Pending' },
+    { label: 'Market Confidence', value: 'Pending' },
   ]
 
   return (
     <div className="ci-demand-panel">
-      <div className="ci-demand-panel__head">Zip Demand Intelligence</div>
+      <div className="ci-demand-panel__head">Market Evidence Intelligence</div>
       <div className="ci-demand-grid">
-        {demandMetrics.map(m => (
+        {evidenceMetrics.map(m => (
           <div key={m.label} className="ci-demand-metric">
             <div className="ci-demand-metric__label">{m.label}</div>
             <div className="ci-demand-metric__value is-pending">{m.value}</div>

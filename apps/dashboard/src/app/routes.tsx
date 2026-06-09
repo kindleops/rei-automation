@@ -57,6 +57,7 @@ import type { AgentsModel } from '../modules/agents/agents.adapter'
 import { MobileCommandCenter } from '../modules/mobile/MobileCommandCenter'
 import { CampaignsPage } from '../modules/campaigns/CampaignsPage'
 import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
+import WorkflowStudioV2 from '../modules/workflows/v2/WorkflowStudioV2'
 
 interface AppRoute<TData> {
   path: string
@@ -213,6 +214,17 @@ const inboxRoute = defineRoute<null>({
   render: () => <InboxPage />,
 })
 
+const workflowsV2Route = defineRoute<null>({
+  path: '/workflows-v2',
+  title: 'NEXUS | Workflow Studio V2',
+  loader: async () => null,
+  render: () => (
+    <div className="nx-premium-inbox" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <WorkflowStudioV2 />
+    </div>
+  ),
+})
+
 const alertsRoute = defineRoute<AlertsModel>({
   path: '/alerts',
   title: 'NEXUS | Alerts',
@@ -338,6 +350,7 @@ const routes = [
   commandStoreRoute,
   liveDashboardRoute,
   inboxRoute,
+  workflowsV2Route,
   alertsRoute,
   statsRoute,
   kpiRoute,

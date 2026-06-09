@@ -90,11 +90,6 @@ const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
   { id: 'violet', label: 'Violet' },
   { id: 'rose', label: 'Rose' },
   { id: 'ice', label: 'Ice' },
-  { id: 'blue', label: 'Blue' },
-  { id: 'teal', label: 'Teal' },
-  { id: 'orange', label: 'Orange' },
-  { id: 'pink', label: 'Pink' },
-  { id: 'gold', label: 'Gold' },
 ]
 
 type WorkspaceSubmenu = null | 'workspaces' | 'views' | 'theme' | 'accent' | 'manage'

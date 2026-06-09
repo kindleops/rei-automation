@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { ViewLayoutMode, ViewWidthPercent } from '../inbox/view-layout'
+import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from './v2/WorkflowStudioV2'
 import {
   cloneWorkflowDraft,
   createWorkflowDraft,
@@ -47,7 +48,7 @@ interface WorkflowStudioProps {
 
 type UtilityDrawerTab = 'Dry Run' | 'Run Log' | 'Audit'
 
-export const WorkflowStudio = ({
+const WorkflowStudioLegacy = ({
   data,
   paneWidth = '100',
   layoutMode = 'full',
@@ -279,6 +280,20 @@ export const WorkflowStudio = ({
       </div>
     </section>
   )
+}
+
+export const WorkflowStudio = (props: WorkflowStudioProps) => {
+  const [useV2, setUseV2] = useState(isWorkflowStudioV2Enabled)
+
+  useEffect(() => {
+    setUseV2(isWorkflowStudioV2Enabled())
+  }, [])
+
+  if (useV2) {
+    return <WorkflowStudioV2 {...props} />
+  }
+
+  return <WorkflowStudioLegacy {...props} />
 }
 
 export default WorkflowStudio

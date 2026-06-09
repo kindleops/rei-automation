@@ -84,6 +84,7 @@ import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { InboxCampaignView } from '../campaigns/InboxCampaignView'
 import { EmailCommandCenter } from '../email/EmailCommandCenter'
 import { WorkflowStudio } from '../workflows/WorkflowStudio'
+import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from '../workflows/v2/WorkflowStudioV2'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -3810,9 +3811,10 @@ export default function InboxPage() {
     }
 
     if (view === 'workflow_studio') {
+      const Studio = isWorkflowStudioV2Enabled() ? WorkflowStudioV2 : WorkflowStudio
       return (
         <section className="nx-workspace-surface nx-workspace-surface--workflow-studio" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <WorkflowStudio
+          <Studio
             paneWidth={paneWidth}
             layoutMode={layoutMode}
           />
