@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import type { CommandResult, GlobalCommandSearchContext } from './command.types'
+import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useGlobalCommandSearch } from './useGlobalCommandSearch'
 import './global-command.css'
 

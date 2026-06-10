@@ -142,7 +142,7 @@ import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 m
 import '../../views/buyer-match/buyer-intel-upgrade.css'
 import './copilot/copilot.css'
 import './conversation-redesign.css'
-import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../command-center/command.types'
+import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'

@@ -1,4 +1,4 @@
-import type { CommandResult, GlobalCommandProvider } from '../command.types'
+import type { CommandResult, GlobalCommandProvider } from '.../../domain/command-center/command.types'
 import { canUseSupabaseSearch, getSupabaseSearchClient, limitResults, sanitizeIlike, withScoredResult } from './providerUtils'
 
 type PropertyRow = Record<string, unknown>

@@ -61,7 +61,7 @@ import {
   PRIORITY_ASSET_TYPES,
 } from './map-theme-tokens'
 import { fetchMapProperties } from '../../lib/api/backendClient'
-import type { LocationResult } from '../../modules/command-center/command.types'
+import type { LocationResult } from '../../domain/command-center/command.types'
 
 export type { MapStyleMode } from './commandMapThemes'
 

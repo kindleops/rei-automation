@@ -1,5 +1,5 @@
-import type { CommandResult, GlobalCommandSearchContext } from './command.types'
-import { GLOBAL_COMMAND_ACTION_EVENT } from './command.types'
+import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
+import { GLOBAL_COMMAND_ACTION_EVENT } from '../../domain/command-center/command.types'
 
 const buildStatic = (input: Omit<CommandResult, 'score' | 'action'> & {
   score?: number

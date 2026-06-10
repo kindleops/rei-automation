@@ -15,7 +15,7 @@ import {
   GLOBAL_COMMAND_OPEN_EVENT,
   type CommandResult,
   type GlobalCommandSearchContext,
-} from '../modules/command-center/command.types'
+} from '../domain/command-center/command.types'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

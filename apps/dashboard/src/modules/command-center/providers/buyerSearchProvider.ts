@@ -1,5 +1,5 @@
 import type { PostgrestError } from '@supabase/supabase-js'
-import type { CommandResult, GlobalCommandProvider } from '../command.types'
+import type { CommandResult, GlobalCommandProvider } from '.../../domain/command-center/command.types'
 import { canUseSupabaseSearch, getSupabaseSearchClient, limitResults, sanitizeIlike, withScoredResult } from './providerUtils'
 
 type BuyerRow = Record<string, unknown>
