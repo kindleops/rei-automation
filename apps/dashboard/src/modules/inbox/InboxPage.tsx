@@ -3939,7 +3939,7 @@ export default function InboxPage() {
         onOpenKpis={() => pushRoutePath('/analytics')}
         onOpenActivity={() => setActiveOverlay('activity')}
         onOpenTasks={() => emitNotification({ title: 'Tasks', detail: 'Tasks menu is coming soon.', severity: 'warning' })}
-        onOpenSettings={() => pushRoutePath('/settings')}
+        onOpenSettings={undefined}
         onResetLayout={handleResetWorkspaceLayout}
         dryRun={autonomyControls.dryRun}
         onToggleDryRun={() => setAutonomyControls(prev => ({ ...prev, dryRun: !prev.dryRun }))}
