@@ -19,7 +19,7 @@ import {
   type ExecutionSummaryCard,
 } from '../../lib/data/calendarData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import type { ViewLayoutMode } from '../../modules/inbox/view-layout'
+import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { formatCurrency, formatRelativeTime } from '../../shared/formatters'
 import { Icon } from '../../shared/icons'
 import { CalendarHeader } from './CalendarHeader'

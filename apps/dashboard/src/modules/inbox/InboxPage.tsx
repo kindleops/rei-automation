@@ -132,7 +132,7 @@ import {
   type InboxViewSelectValue,
 } from './inbox-ui-helpers'
 import { buildConversationDecision } from './inbox-decisioning'
-import { getViewLayoutMode, type ViewWidthPercent } from './view-layout'
+import { getViewLayoutMode, type ViewWidthPercent } from '../../domain/inbox/view-layout'
 import './inbox-premium.css'
 import './inbox-rebuild.css'
 import './inbox-rebuild-v2.css'

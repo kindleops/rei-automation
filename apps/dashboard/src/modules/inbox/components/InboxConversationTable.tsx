@@ -3,7 +3,7 @@ import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { formatInboxThreadTimestamp } from '../../../shared/formatters'
 import { resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import { buildConversationDecision, type ConversationDecision } from '../inbox-decisioning'
-import type { ViewLayoutMode } from '../view-layout'
+import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 

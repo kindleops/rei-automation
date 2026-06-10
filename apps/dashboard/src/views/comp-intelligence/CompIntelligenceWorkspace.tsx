@@ -6,7 +6,7 @@ import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps }
 import { buildStreetViewUrl } from '../../modules/inbox/inbox-normalization'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
-import type { ViewWidthPercent, ViewLayoutMode } from '../../modules/inbox/view-layout'
+import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
 import './comp-intelligence.css'
 
 // ── Sound Event Hooks ──────────────────────────────────────────────────────

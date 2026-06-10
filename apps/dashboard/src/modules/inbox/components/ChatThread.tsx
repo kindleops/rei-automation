@@ -6,7 +6,7 @@ import { formatMessageDateTime } from '../../../shared/formatters'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
-import type { ViewLayoutMode } from '../view-layout'
+import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')

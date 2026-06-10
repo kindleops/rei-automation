@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo, useId } from 'react'
-import type { ViewLayoutMode, ViewWidthPercent } from '../view-layout'
+import type { ViewLayoutMode, ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import {
   loadKpiDashboardSummary,
   loadKpiTimeSeries,

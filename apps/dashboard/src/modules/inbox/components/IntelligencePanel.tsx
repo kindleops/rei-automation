@@ -34,7 +34,7 @@ import {
 
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { Phase3Intelligence } from '../../../lib/data/inboxIntelligencePhase3'
-import type { ViewLayoutMode } from '../view-layout'
+import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
