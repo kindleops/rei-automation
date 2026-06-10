@@ -3,7 +3,7 @@ import {
   resolveInboxThreadState,
   type CanonicalBucket,
   type BucketClassification,
-} from './resolveInboxThreadState'
+} from '../../domain/inbox/resolveInboxThreadState'
 
 export type { CanonicalBucket, BucketClassification }
 

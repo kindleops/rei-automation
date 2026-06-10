@@ -11,7 +11,7 @@ import {
   isActiveCanonicalBucket,
   isWaitingInboxState,
   resolveInboxThreadState,
-} from './resolveInboxThreadState'
+} from '../../domain/inbox/resolveInboxThreadState'
 
 export type InboxStageSelectValue =
   | 'all_stages'
