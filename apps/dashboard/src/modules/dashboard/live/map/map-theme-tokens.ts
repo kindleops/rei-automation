@@ -9,8 +9,8 @@
 
 import { commandMapThemes } from '../../../../views/map/commandMapThemes'
 import type { CommandMapThemeId } from '../../../../views/map/commandMapThemes'
-import { nexusGlobalThemes } from '../../../theme/nexusThemes'
-import type { NexusGlobalThemeId } from '../../../theme/nexusThemes'
+import { nexusGlobalThemes } from '../../../../domain/theme/nexusThemes'
+import type { NexusGlobalThemeId } from '../../../../domain/theme/nexusThemes'
 
 export interface PropertyLayerTokens {
   // Cluster ring glow

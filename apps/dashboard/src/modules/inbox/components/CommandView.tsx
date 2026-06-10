@@ -13,7 +13,7 @@ import { InboxConversationTable, type ConversationTableSort } from './InboxConve
 import type { InboxMapActivityMode, MapFilterState, MapOverlayToggles } from '../../../views/map/InboxCommandMap'
 import { COMMAND_MAP_THEME_OPTIONS, type MapStyleMode } from '../../../views/map/commandMapThemes'
 import { updateSetting, applyThemeToDOM } from '../../../shared/settings'
-import { MAP_THEME_TO_NEXUS_GLOBAL } from '../../theme/nexusThemes'
+import { MAP_THEME_TO_NEXUS_GLOBAL } from '../../../domain/theme/nexusThemes'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
