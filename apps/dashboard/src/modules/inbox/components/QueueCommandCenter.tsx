@@ -627,7 +627,7 @@ export function QueueCommandCenter({
             type="button"
             className="qcc-btn is-primary"
             onClick={() => {
-              pushRoutePath('/campaigns')
+              pushRoutePath('/campaign-command')
               if (onClose) onClose()
             }}
           >
