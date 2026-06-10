@@ -83,7 +83,7 @@ const mapPath = (property: PropertyRecord) => {
     params.set('lng', String(property.lng))
   }
   params.set('propertyId', property.propertyId ?? property.id)
-  return `/acquisition/map?${params.toString()}`
+  return `/map?${params.toString()}`
 }
 
 const inboxPath = (property: PropertyRecord, compose = false) => {
@@ -92,7 +92,7 @@ const inboxPath = (property: PropertyRecord, compose = false) => {
   if (property.propertyId) params.set('property_id', property.propertyId)
   if (compose) params.set('compose', 'sms')
   const query = params.toString()
-  return query ? `/acquisition/inbox?${query}` : '/acquisition/inbox'
+  return query ? `/inbox?${query}` : '/inbox'
 }
 
 const saveViews = (views: SavedPropertyView[]) => {
@@ -299,7 +299,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
   const actionHandlers = (property: PropertyRecord): PropertyActionHandlers => ({
     openInbox: () => pushRoutePath(inboxPath(property)),
     sendSms: () => pushRoutePath(inboxPath(property, true)),
-    createOffer: () => pushRoutePath('/acquisition/offers'),
+    createOffer: () => pushRoutePath('/closing-desk'),
     generateContract: () => flashNotice('Contract flow routed from Offer Studio'),
     viewOnMap: () => pushRoutePath(mapPath(property)),
     addToCampaign: () => flashNotice('Campaign handoff is pending integration'),
@@ -395,15 +395,15 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
               placeholder="Search address, owner, market, tags"
             />
           </label>
-          <button type="button" onClick={() => pushRoutePath('/acquisition/inbox')}>
+          <button type="button" onClick={() => pushRoutePath('/inbox')}>
             <Icon name="inbox" />
             Inbox
           </button>
-          <button type="button" onClick={() => pushRoutePath('/acquisition/queue')}>
+          <button type="button" onClick={() => pushRoutePath('/queue')}>
             <Icon name="send" />
             Queue
           </button>
-          <button type="button" onClick={() => pushRoutePath('/acquisition/offers')}>
+          <button type="button" onClick={() => pushRoutePath('/closing-desk')}>
             <Icon name="trending-up" />
             Offers
           </button>
