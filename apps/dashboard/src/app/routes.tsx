@@ -20,7 +20,7 @@ import { TitleWarRoomPage } from '../modules/title/TitleWarRoomPage'
 import { loadTitle } from '../modules/title/title.adapter'
 import type { TitleModel } from '../modules/title/title.adapter'
 
-import { CampaignsPage } from '../modules/campaigns/CampaignsPage'
+import { CampaignsPage } from '../views/campaign-command/CampaignsPage'
 import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
 import WorkflowStudioV2 from '../modules/workflows/v2/WorkflowStudioV2'
 
