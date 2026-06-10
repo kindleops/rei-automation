@@ -66,31 +66,7 @@ export type InboxViewSelectValue =
   | 'all_messages'
 
 
-export type InboxSavedFilterPreset =
-  | 'my_priority'
-  | 'new_inbounds'
-  | 'offer_needed'
-  | 'review_required'
-  | 'wrong_numbers'
-  | 'suppressed'
-  | 'language_focus'
-  | 'high_motivation'
-  | 'starred'
-  | 'pinned'
-  | 'unassigned'
-  | 'all_messages'
-  | 'inbound_only'
-  | 'outbound_only'
-  | 'needs_reply'
-  | 'auto_replied'
-  | 'auto_reply_failed'
-  | 'positive_hot'
-  | 'offer_requested'
-  | 'opt_out'
-  | 'manual_review'
-  | 'missing_context'
-  | 'all_inbound'
-  | 'inbound_all'
+export type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
 
 export interface InboxAdvancedFilters {
   // A) WORKFLOW
