@@ -7,18 +7,18 @@ import './map-intelligence-cards.css'
 import type { FeatureCollection, GeoJsonProperties, LineString, Point, Polygon } from 'geojson'
 import { getThreadMessages, type ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import type { MapSourceMode } from './inbox-layout-state'
-import { buildConversationDecision } from './inbox-decisioning'
-import { buildStreetViewUrl } from './inbox-normalization'
-import type { ViewLayoutMode } from './view-layout'
-import { SellerIntelligenceCard } from './components/SellerIntelligenceCard'
+import type { MapSourceMode } from '../../modules/inbox/inbox-layout-state'
+import { buildConversationDecision } from '../../modules/inbox/inbox-decisioning'
+import { buildStreetViewUrl } from '../../modules/inbox/inbox-normalization'
+import type { ViewLayoutMode } from '../../modules/inbox/view-layout'
+import { SellerIntelligenceCard } from '../../modules/inbox/components/SellerIntelligenceCard'
 import {
   defaultBuyerMapFilters,
   type BuyerCommandData,
   type BuyerMapFilters,
   type BuyerProfilePoint,
   type BuyerRecentPurchase,
-} from '../../views/buyer-match/buyerCommandData'
+} from '../buyer-match/buyerCommandData'
 import { loadBuyerDemandLayerPoints, type BuyerDemandMetric, type BuyerDemandLayerPoint, formatShortPrice } from '../../lib/data/buyerActivityMapData'
 import { loadCensusForProperty, calculateInvestorOpportunityScore, type CensusData } from '../../lib/data/censusData'
 import { loadSoldCompsInBounds, type RecentSoldComp, loadCommandMapSellerPinDetail, loadCommandMapSellerPins, type CommandMapSellerPin } from '../../lib/data/commandMapData'
@@ -50,7 +50,7 @@ import {
   type CommandMapThemeDefinition,
   type MapStyleMode,
 } from './commandMapThemes'
-import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from '../dashboard/live/map/pin-icons'
+import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from '../../modules/dashboard/live/map/pin-icons'
 import {
   getMapThemeTokens,
   buildClusterRingExpr,
@@ -61,7 +61,7 @@ import {
   PRIORITY_ASSET_TYPES,
 } from './map-theme-tokens'
 import { fetchMapProperties } from '../../lib/api/backendClient'
-import type { LocationResult } from '../command-center/command.types'
+import type { LocationResult } from '../../modules/command-center/command.types'
 
 export type { MapStyleMode } from './commandMapThemes'
 

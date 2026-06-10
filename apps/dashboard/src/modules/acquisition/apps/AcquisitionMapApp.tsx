@@ -3,7 +3,7 @@ import { AcquisitionAppShell } from '../components/AcquisitionAppShell'
 import { EmptyState } from '../components/AcquisitionComponents'
 import type { AcquisitionWorkspaceModel } from '../acquisition.types'
 import { useInboxData, toWorkflowThread } from '../../inbox/inbox.adapter'
-import { InboxCommandMap } from '../../inbox/InboxCommandMap'
+import { InboxCommandMap } from '../../../views/map/InboxCommandMap'
 import { pushRoutePath } from '../../../app/router'
 
 interface AcquisitionMapAppProps {

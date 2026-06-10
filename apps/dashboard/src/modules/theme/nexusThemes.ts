@@ -1,4 +1,4 @@
-import type { CommandMapThemeId } from '../inbox/commandMapThemes'
+import type { CommandMapThemeId } from '../../views/map/commandMapThemes'
 
 export type NexusGlobalThemeId =
   | 'dark'

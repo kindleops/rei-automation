@@ -7,8 +7,8 @@
  * (hot = red, positive = green) so operators can read state at a glance.
  */
 
-import { commandMapThemes } from '../../../inbox/commandMapThemes'
-import type { CommandMapThemeId } from '../../../inbox/commandMapThemes'
+import { commandMapThemes } from '../../../../views/map/commandMapThemes'
+import type { CommandMapThemeId } from '../../../../views/map/commandMapThemes'
 import { nexusGlobalThemes } from '../../../theme/nexusThemes'
 import type { NexusGlobalThemeId } from '../../../theme/nexusThemes'
 

@@ -74,7 +74,7 @@ import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import { MetricsWarRoom } from './components/MetricsWarRoom'
 import type { TemplateActionPayload } from './components/TemplatePopover'
 import { InboxActivityPanel } from './components/InboxActivityPanel'
-import { InboxCommandMap, type MapStyleMode } from './InboxCommandMap'
+import { InboxCommandMap, type MapStyleMode } from '../../views/map/InboxCommandMap'
 import { InboxUtilityDrawer, MapDossierDrawer } from './components/InboxUtilityDrawer'
 import { LiveCopilotChat } from '../copilot/components/LiveCopilotChat'
 import { AdvancedFiltersPopover } from './components/AdvancedFiltersPopover'
@@ -3191,7 +3191,7 @@ export default function InboxPage() {
     }
   }, [setActiveContext, threads])
 
-  const handleActivityNavigation = useCallback((event: import('./commandMapLiveActivity').CommandMapActivityEvent) => {
+  const handleActivityNavigation = useCallback((event: import('../../views/map/commandMapLiveActivity').CommandMapActivityEvent) => {
     const openThread = event.targetView === 'thread' || event.type === 'new_reply' || event.type === 'positive_reply'
     const focusView: InboxWorkspaceView =
       event.targetView === 'queue'

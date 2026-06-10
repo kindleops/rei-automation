@@ -2,7 +2,7 @@ import type { CalendarEvent } from '../../lib/data/calendarData'
 import type { ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { QueueItem } from '../../lib/data/queueData'
-import type { CommandMapActivityEvent } from './commandMapLiveActivity'
+import type { CommandMapActivityEvent } from '../../views/map/commandMapLiveActivity'
 
 export type InboxWorkspaceView =
   | 'thread'
