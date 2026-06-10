@@ -3,7 +3,7 @@ import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../../lib/data/dealContext'
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
-import type { PanelMode } from '../inbox-layout-state'
+import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
 import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,

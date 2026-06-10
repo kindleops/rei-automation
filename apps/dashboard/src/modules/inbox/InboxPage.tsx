@@ -109,7 +109,7 @@ import {
   type ActiveOverlay,
   type InboxLayoutState,
   type MapSourceMode,
-} from './inbox-layout-state'
+} from '../../domain/inbox/inbox-layout-state'
 import {
   buildContextFromActivityEvent,
   buildContextFromCalendarEvent,
