@@ -554,7 +554,7 @@ export const CommandCenterApp = () => {
   // ── Ready State — Command-First Layout ─────────────────────────────────
 
   return (
-    <div className={`nx-os ${route.path === '/inbox' ? 'is-home-route' : ''}`}>
+    <div className="nx-os">
       {route.path !== '/map' && activeNav && (
         <div className="nx-room-label">
           <span className="nx-room-label__name">{activeNav.room}</span>
