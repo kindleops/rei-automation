@@ -66,7 +66,7 @@ import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
-import { CompIntelligenceWorkspace } from './components/CompIntelligenceWorkspace'
+import { CompIntelligenceWorkspace } from '../../views/comp-intelligence/CompIntelligenceWorkspace'
 import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
 import { SendQueueDashboard } from './components/SendQueueDashboard'
 import { InboxPipelineView } from '../../views/pipeline/InboxPipelineView'
