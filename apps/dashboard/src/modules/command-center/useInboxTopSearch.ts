@@ -69,7 +69,7 @@ export const useInboxTopSearch = (query: string, context: GlobalCommandSearchCon
         subtitle: `Recent Location`,
         icon: 'clock' as const,
         score: 100 - i,
-        route: '/dashboard/live',
+        route: '/map',
         action: {
           id: 'fly-to',
           kind: 'dispatch_event' as const,

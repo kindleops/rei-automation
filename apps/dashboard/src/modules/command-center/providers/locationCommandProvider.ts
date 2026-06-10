@@ -123,7 +123,7 @@ export const locationCommandProvider: GlobalCommandProvider = {
           subtitle: `Navigate to ${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`,
           icon: 'pin',
           score: isTop ? 100 : 80 - index,
-          route: '/dashboard/live',
+          route: '/map',
           action: {
             id: 'fly-to',
             kind: 'dispatch_event',

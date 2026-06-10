@@ -97,7 +97,7 @@ export const useGlobalCommandSearch = (query: string, context: GlobalCommandSear
           subtitle: `Recent Location`,
           icon: 'clock' as const,
           score: 100 - i,
-          route: '/dashboard/live',
+          route: '/map',
           action: {
             id: 'fly-to',
             kind: 'dispatch_event' as const,

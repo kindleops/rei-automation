@@ -50,7 +50,7 @@ export const contextBoost = (result: CommandResult, context: GlobalCommandSearch
   let boost = 0
   if (context.routePath === '/inbox' && (result.type === 'seller' || result.type === 'conversation' || result.type === 'filter')) boost += 14
   if ((context.routePath === '/queue' || context.currentView === 'queue') && (result.type === 'queue' || result.meta?.provider === 'queue')) boost += 16
-  if ((context.routePath === '/buyer' || context.currentView === 'buyer_match') && result.type === 'buyer') boost += 16
+  if ((context.routePath === '/buyer-match' || context.currentView === 'buyer_match') && result.type === 'buyer') boost += 16
   if (context.currentView === 'command_map' && (result.type === 'property' || result.type === 'market' || result.type === 'map_action')) boost += 18
   if (context.selectedMarket && normalizeCommandQuery(result.subtitle).includes(normalizeCommandQuery(context.selectedMarket))) boost += 8
   return boost
