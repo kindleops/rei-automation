@@ -1,5 +1,5 @@
-import { InboxPage } from '../../modules/inbox/InboxPage'
+import { InboxView } from '../inbox/InboxView'
 
 export function ConversationView() {
-  return <InboxPage />
+  return <InboxView />
 }
