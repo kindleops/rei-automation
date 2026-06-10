@@ -18,3 +18,6 @@ apps/api/live_batch_dry_run.txt
 apps/api/audit_report.txt
 apps/api/audit_results.txt
 apps/api/classify_tail.txt
+
+# Local/generated audit outputs
+audits/
