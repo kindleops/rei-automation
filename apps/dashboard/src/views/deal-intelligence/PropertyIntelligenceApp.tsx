@@ -1,5 +1,5 @@
-import { PropertiesPage } from '../../properties/PropertiesPage'
-import type { AcquisitionWorkspaceModel } from '../acquisition.types'
+import { PropertiesPage } from '../../modules/properties/PropertiesPage'
+import type { AcquisitionWorkspaceModel } from '../../modules/acquisition/acquisition.types'
 
 interface PropertyIntelligenceAppProps {
   data: AcquisitionWorkspaceModel

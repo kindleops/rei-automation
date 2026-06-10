@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import InboxPage from '../modules/inbox/InboxPage'
 
-import { PropertyIntelligenceApp } from '../modules/acquisition/apps/PropertyIntelligenceApp'
+import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
 
