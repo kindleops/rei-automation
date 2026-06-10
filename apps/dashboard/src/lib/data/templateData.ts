@@ -1,4 +1,4 @@
-import type { InboxThread } from '../../modules/inbox/inbox.adapter'
+import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import type { ThreadContext } from './inboxData'
 import { getSupabaseClient } from '../supabaseClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'

@@ -1,5 +1,5 @@
 import { formatRelativeTime } from '../../shared/formatters'
-import type { InboxModel, InboxThread } from '../../modules/inbox/inbox.adapter'
+import type { InboxModel, InboxThread } from '../../domain/inbox/inbox-model-types'
 import type { InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 import type { InboxWorkflowThread } from './inboxWorkflowData'
 import type { SmsTemplate } from './templateData'
