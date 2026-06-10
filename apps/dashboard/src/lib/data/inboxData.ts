@@ -1,6 +1,6 @@
 import { formatRelativeTime } from '../../shared/formatters'
 import type { InboxModel, InboxThread } from '../../modules/inbox/inbox.adapter'
-import type { InboxViewSelectValue } from '../../modules/inbox/inbox-ui-helpers'
+import type { InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 import type { InboxWorkflowThread } from './inboxWorkflowData'
 import type { SmsTemplate } from './templateData'
 import { resolveOutboundTextgridNumber } from './textgridRouting'
