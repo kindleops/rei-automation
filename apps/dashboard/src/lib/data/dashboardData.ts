@@ -1,4 +1,4 @@
-import type { HomeActivityItem, HomeBriefingInsight } from '../../modules/home/home.types'
+import type { HomeActivityItem, HomeBriefingInsight } from '../../shared/home/home.types'
 import { getSupabaseClient } from '../supabaseClient'
 import {
   asNumber,

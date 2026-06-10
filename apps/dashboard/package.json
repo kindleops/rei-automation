@@ -40,7 +40,8 @@
     "proof:deal-command-header-no-overflow": "node scripts/proof/deal-command-header-no-overflow.mjs",
     "proof:ui": "playwright test",
     "proof:deal": "playwright test tests/ui/deal-intelligence.spec.ts",
-    "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed"
+    "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

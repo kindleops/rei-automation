@@ -35,7 +35,21 @@ const initialState: RouteLoadState = {
 
 // ── Nav Items ──────────────────────────────────────────────────────────────
 
-type NavIconName = 'radar' | 'inbox' | 'alert' | 'stats' | 'map' | 'users' | 'file-text' | 'settings' | 'bell' | 'star' | 'grid' | 'target' | 'send' | 'mail'
+type NavIconName =
+  | 'radar'
+  | 'inbox'
+  | 'alert'
+  | 'stats'
+  | 'map'
+  | 'users'
+  | 'file-text'
+  | 'settings'
+  | 'bell'
+  | 'star'
+  | 'grid'
+  | 'target'
+  | 'send'
+  | 'mail'
 
 interface NavItem {
   path: string
@@ -46,29 +60,23 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { path: '/', label: 'Home', icon: 'radar', shortcut: 'H', room: 'Home' },
-  { path: '/acquisition', label: 'Acquisition', icon: 'target', shortcut: 'R', room: 'Acquisition Command' },
-  { path: '/command-store', label: 'Command Store', icon: 'grid', shortcut: 'C', room: 'Command Store' },
   { path: '/inbox', label: 'Inbox', icon: 'inbox', shortcut: 'I', room: 'Inbox' },
-  { path: '/queue', label: 'Queue', icon: 'inbox', shortcut: 'Q', room: 'Queue' },
-  { path: '/dossier', label: 'Dossier', icon: 'users', shortcut: 'D', room: 'Dossier' },
-  { path: '/alerts', label: 'Alerts', icon: 'alert', shortcut: 'A', room: 'Alerts' },
-  { path: '/stats', label: 'Intelligence', icon: 'stats', shortcut: 'G', room: 'Intelligence' },
-  { path: '/agents', label: 'AI Agents', icon: 'users', shortcut: 'X', room: 'AI Agent Performance' },
-  { path: '/dashboard/kpis', label: 'KPIs', icon: 'stats', shortcut: 'K', room: 'KPI Intelligence' },
-  { path: '/markets', label: 'Markets', icon: 'map', shortcut: 'M', room: 'Markets' },
-  { path: '/buyer', label: 'Buyers', icon: 'users', shortcut: 'B', room: 'Buyers' },
-  { path: '/title', label: 'Title', icon: 'file-text', shortcut: 'T', room: 'Title' },
-  { path: '/watchlists', label: 'Watchlists', icon: 'star', shortcut: 'W', room: 'Watchlists' },
-  { path: '/notifications', label: 'Notifications', icon: 'bell', shortcut: 'N', room: 'Notifications' },
-  { path: '/settings', label: 'Settings', icon: 'settings', shortcut: 'S', room: 'Settings' },
-  { path: '/campaigns', label: 'Campaigns', icon: 'send', shortcut: 'P', room: 'Campaign Command Center' },
-  { path: '/email', label: 'Email', icon: 'mail', shortcut: 'E', room: 'Email Command Center' },
-  { path: '/mobile', label: 'Mobile', icon: 'grid', shortcut: 'O', room: 'Mobile Command Center' },
+  { path: '/conversation', label: 'Conversation', icon: 'inbox', shortcut: 'C', room: 'Conversation' },
+  { path: '/deal-intelligence', label: 'Deal Intelligence', icon: 'target', shortcut: 'D', room: 'Deal Intelligence' },
+  { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'stats', shortcut: 'O', room: 'Comp Intelligence' },
+  { path: '/buyer-match', label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match' },
+  { path: '/queue', label: 'Queue', icon: 'send', shortcut: 'Q', room: 'Queue' },
+  { path: '/pipeline', label: 'Pipeline', icon: 'radar', shortcut: 'P', room: 'Pipeline' },
+  { path: '/calendar', label: 'Calendar', icon: 'bell', shortcut: 'L', room: 'Calendar' },
+  { path: '/map', label: 'Map', icon: 'map', shortcut: 'M', room: 'Map' },
+  { path: '/analytics', label: 'Analytics', icon: 'stats', shortcut: 'A', room: 'Analytics' },
+  { path: '/closing-desk', label: 'Closing Desk', icon: 'file-text', shortcut: 'K', room: 'Closing Desk' },
+  { path: '/campaign-command', label: 'Campaign Command', icon: 'send', shortcut: 'G', room: 'Campaign Command' },
+  { path: '/email-command', label: 'Email Command', icon: 'mail', shortcut: 'E', room: 'Email Command' },
+  { path: '/workflow-studio', label: 'Workflow Studio', icon: 'grid', shortcut: 'W', room: 'Workflow Studio' },
 ]
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
-  // New global themes
   light: 'light',
   dark: 'dark',
   satellite: 'satellite',
@@ -83,7 +91,7 @@ const THEME_ALIASES: Record<string, NexusTheme> = {
   'night-vision': 'night_vision',
   night_vision: 'night_vision',
   monochrome: 'monochrome',
-  // Legacy aliases
+
   'dark-matter': 'dark-matter',
   'dark matter': 'dark-matter',
   'midnight-glass': 'midnight-glass',
@@ -101,35 +109,83 @@ const THEME_ALIASES: Record<string, NexusTheme> = {
   'operator black': 'operator-black',
 }
 
+const canonicalizeRoutePath = (target?: string) => {
+  switch (target) {
+    case '/':
+      return '/inbox'
+    case '/dashboard/live':
+    case '/markets':
+      return '/map'
+    case '/dashboard/kpis':
+    case '/stats':
+    case '/alerts':
+    case '/agents':
+      return '/analytics'
+    case '/buyer':
+      return '/buyer-match'
+    case '/title':
+      return '/closing-desk'
+    case '/campaigns':
+      return '/campaign-command'
+    case '/email':
+      return '/email-command'
+    case '/workflows-v2':
+    case '/acquisition/automations':
+      return '/workflow-studio'
+    case '/properties':
+    case '/acquisition':
+    case '/acquisition/owners':
+    case '/acquisition/properties':
+    case '/acquisition/prospects':
+    case '/acquisition/contacts':
+    case '/acquisition/underwriting':
+    case '/dossier':
+    case '/watchlists':
+      return '/deal-intelligence'
+    case '/acquisition/inbox':
+    case '/mobile':
+    case '/notifications':
+    case '/settings':
+    case '/command-store':
+      return '/inbox'
+    case '/acquisition/queue':
+      return '/queue'
+    case '/acquisition/offers':
+      return '/closing-desk'
+    case '/acquisition/ai-brain':
+      return '/analytics'
+    case '/acquisition/map':
+    case '/acquisitions/map':
+      return '/map'
+    default:
+      return target || '/inbox'
+  }
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const CommandCenterApp = () => {
   const path = useRoutePath()
-
-  // On first load on a mobile viewport, redirect to /mobile if not already there
-  useEffect(() => {
-    if (path === '/mobile') return
-    const isMobileViewport = window.matchMedia('(max-width: 768px)').matches
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-    if (isMobileViewport && isTouchDevice && path === '/') {
-      pushRoutePath('/mobile')
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   const route = resolveRoute(path)
+
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
     path: route.path,
   })
+
   const [cmdOpen, setCmdOpen] = useState(false)
   const [cmdInitialQuery, setCmdInitialQuery] = useState('')
-  const [commandContext, setCommandContext] = useState<GlobalCommandSearchContext>({ routePath: route.path })
+  const [commandContextOverrides, setCommandContextOverrides] = useState<Partial<GlobalCommandSearchContext>>({})
 
-  // New Phase 4 systems
   const [copilotOpen, setCopilotOpen] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
   const [briefingDigest, setBriefingDigest] = useState<BriefingDigest | null>(null)
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
+
+  const commandContext = useMemo<GlobalCommandSearchContext>(() => ({
+    ...commandContextOverrides,
+    routePath: route.path,
+  }), [commandContextOverrides, route.path])
 
   // ── Theme system — apply on mount + subscribe to changes ──
   useEffect(() => {
@@ -139,6 +195,7 @@ export const CommandCenterApp = () => {
 
   // ── Room transition sound ──
   const prevPathRef = useRef(route.path)
+
   useEffect(() => {
     if (prevPathRef.current !== route.path) {
       playSound('room-enter')
@@ -147,11 +204,9 @@ export const CommandCenterApp = () => {
   }, [route.path])
 
   // Command grammar bindings — single-key navigation
-  // Exclude the binding for the currently active route so pressing its shortcut
-  // while already on that page doesn't trigger a loader re-run / remount.
   const bindings = useMemo<CommandBinding[]>(() => [
     ...navItems
-      .filter((item) => item.path !== path)
+      .filter((item) => item.path !== route.path)
       .map((item) => ({
         keys: item.shortcut,
         seq: [item.shortcut.toLowerCase()],
@@ -159,11 +214,10 @@ export const CommandCenterApp = () => {
         category: 'Navigation',
         action: () => pushRoutePath(item.path),
       })),
-  ], [path])
+  ], [route.path])
 
   const grammarState = useCommandGrammar(bindings)
 
-  // Briefing digest builder
   const openBriefing = useCallback(() => {
     const digest = buildBriefingDigest({
       hotLeadCount: 0,
@@ -178,6 +232,7 @@ export const CommandCenterApp = () => {
       autopilotActions: 0,
       unreadInbox: 0,
     })
+
     setBriefingDigest(digest)
     setBriefingOpen(true)
     playSound('briefing-open')
@@ -194,30 +249,29 @@ export const CommandCenterApp = () => {
   }, [])
 
   useEffect(() => {
-    setCommandContext((current) => ({ ...current, routePath: route.path }))
-  }, [route.path])
-
-  useEffect(() => {
     const handleOpen = (event: Event) => {
       const detail = (event as CustomEvent<{ initialQuery?: string }>).detail
       openCmd(detail?.initialQuery || '')
     }
+
     const handleContext = (event: Event) => {
       const detail = (event as CustomEvent<Partial<GlobalCommandSearchContext>>).detail
       if (!detail) return
-      setCommandContext((current) => ({
+
+      setCommandContextOverrides((current) => ({
         ...current,
         ...detail,
-        routePath: route.path,
       }))
     }
+
     window.addEventListener(GLOBAL_COMMAND_OPEN_EVENT, handleOpen as EventListener)
     window.addEventListener(GLOBAL_COMMAND_CONTEXT_EVENT, handleContext as EventListener)
+
     return () => {
       window.removeEventListener(GLOBAL_COMMAND_OPEN_EVENT, handleOpen as EventListener)
       window.removeEventListener(GLOBAL_COMMAND_CONTEXT_EVENT, handleContext as EventListener)
     }
-  }, [openCmd, route.path])
+  }, [openCmd])
 
   const executeGlobalCommand = useCallback((result: CommandResult) => {
     if (result.meta?.confirmRequired && import.meta.env.DEV) {
@@ -228,18 +282,21 @@ export const CommandCenterApp = () => {
       saveRecentCommandLocation(result.location)
     }
 
-    const shouldNavigate = Boolean(result.route && result.route !== route.path)
-    if (shouldNavigate && result.route) {
-      pushRoutePath(result.route)
+    const targetRoute = canonicalizeRoutePath(result.route)
+    const shouldNavigate = Boolean(targetRoute && targetRoute !== route.path)
+
+    if (shouldNavigate && targetRoute) {
+      pushRoutePath(targetRoute)
     }
 
     if (result.action?.kind === 'dispatch_event' && result.action.eventName) {
       const eventName = result.action.eventName
+
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent(eventName, {
           detail: {
             ...result.payload,
-            route: result.route,
+            route: targetRoute,
             resultId: result.id,
             resultType: result.type,
           },
@@ -247,25 +304,25 @@ export const CommandCenterApp = () => {
       }, shouldNavigate ? 80 : 0)
     } else if (result.action?.kind === 'confirm_required' && result.action.eventName) {
       const eventName = result.action.eventName
+
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent(eventName, {
           detail: {
             ...result.payload,
-            route: result.route,
+            route: targetRoute,
             resultId: result.id,
             resultType: result.type,
             confirmRequired: true,
           },
         }))
       }, shouldNavigate ? 80 : 0)
-    } else if (!result.route && import.meta.env.DEV) {
+    } else if (!targetRoute && import.meta.env.DEV) {
       console.warn('[GlobalCommand]', 'No route or executable action registered for result', result)
     }
 
     closeCmd()
   }, [closeCmd, route.path])
 
-  // AI Copilot context — derived from current route
   const copilotContext = useMemo<CopilotContext>(() => ({
     surface: route.path,
     roomPath: route.path,
@@ -284,12 +341,12 @@ export const CommandCenterApp = () => {
 
   const handleCopilotAction = useCallback((intent: ResolvedIntent) => {
     if (intent.domain === 'room' && intent.params.target) {
-      pushRoutePath(intent.params.target)
+      pushRoutePath(canonicalizeRoutePath(intent.params.target))
       return
     }
 
     if (intent.domain === 'map') {
-      pushRoutePath('/dashboard/live')
+      pushRoutePath('/map')
       return
     }
 
@@ -299,37 +356,37 @@ export const CommandCenterApp = () => {
     }
 
     if (intent.domain === 'alerts') {
-      pushRoutePath('/alerts')
+      pushRoutePath('/analytics')
       return
     }
 
     if (intent.domain === 'markets') {
-      pushRoutePath('/markets')
+      pushRoutePath('/map')
       return
     }
 
     if (intent.domain === 'buyers') {
-      pushRoutePath('/buyer')
+      pushRoutePath('/buyer-match')
       return
     }
 
     if (intent.domain === 'title') {
-      pushRoutePath('/title')
+      pushRoutePath('/closing-desk')
       return
     }
 
     if (intent.domain === 'watchlist') {
-      pushRoutePath('/watchlists')
+      pushRoutePath('/deal-intelligence')
       return
     }
 
     if (intent.domain === 'notification') {
-      pushRoutePath('/notifications')
+      pushRoutePath('/inbox')
       return
     }
 
     if (intent.domain === 'autopilot') {
-      pushRoutePath('/dashboard/live')
+      pushRoutePath('/analytics')
       return
     }
 
@@ -340,11 +397,13 @@ export const CommandCenterApp = () => {
 
     if (intent.domain === 'settings' && intent.action === 'set_theme') {
       const nextTheme = resolveThemeAlias(intent.params.theme)
+
       if (nextTheme) {
         updateSetting('nexusTheme', nextTheme)
         applyThemeToDOM()
       }
-      pushRoutePath('/settings')
+
+      pushRoutePath('/inbox')
       return
     }
 
@@ -359,7 +418,8 @@ export const CommandCenterApp = () => {
     }
 
     if (intent.domain === 'split_view') {
-      const targetRoute = route.path === '/dashboard/live' || route.path === '/inbox' ? route.path : '/dashboard/live'
+      const targetRoute = route.path === '/map' || route.path === '/inbox' ? route.path : '/map'
+
       if (route.path !== targetRoute) {
         pushRoutePath(targetRoute)
         window.setTimeout(() => dispatchSplitView(targetRoute, intent.params.target), 60)
@@ -371,52 +431,55 @@ export const CommandCenterApp = () => {
 
   // Global keyboard — ⌘K, ⌘⇧K, ⌘J, ⌘., /, Escape
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      // ⌘⇧K — context-aware command palette for the active screen
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault()
+    const handleKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === 'k' || event.key === 'K')) {
+        event.preventDefault()
         window.dispatchEvent(new CustomEvent('nx:context-palette'))
         return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
+
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault()
         if (cmdOpen) closeCmd()
         else openCmd()
         return
       }
-      // ⌘J — AI Copilot toggle
-      if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
-        e.preventDefault()
-        setCopilotOpen((prev) => {
-          if (!prev) playSound('copilot-wake')
-          return !prev
+
+      if ((event.metaKey || event.ctrlKey) && event.key === 'j') {
+        event.preventDefault()
+        setCopilotOpen((previous) => {
+          if (!previous) playSound('copilot-wake')
+          return !previous
         })
         return
       }
-      // ⌘. — Operator Briefing
-      if ((e.metaKey || e.ctrlKey) && e.key === '.') {
-        e.preventDefault()
+
+      if ((event.metaKey || event.ctrlKey) && event.key === '.') {
+        event.preventDefault()
         if (!briefingOpen) openBriefing()
         else setBriefingOpen(false)
         return
       }
-      // ⌘V — Voice toggle (only activate voice; do not open sidecar)
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
-        e.preventDefault()
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
         window.dispatchEvent(new CustomEvent('nx:copilot-voice-activate'))
         return
       }
-      if (e.key === 'Escape' && cmdOpen) {
+
+      if (event.key === 'Escape' && cmdOpen) {
         closeCmd()
         return
       }
-      // / opens palette when not in an input
-      const tag = (e.target as HTMLElement)?.tagName
-      if (e.key === '/' && !cmdOpen && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
-        e.preventDefault()
+
+      const tag = (event.target as HTMLElement)?.tagName
+
+      if (event.key === '/' && !cmdOpen && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+        event.preventDefault()
         openCmd()
       }
     }
+
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [cmdOpen, openCmd, closeCmd, briefingOpen, openBriefing])
@@ -441,16 +504,22 @@ export const CommandCenterApp = () => {
         if (!active) return
 
         const message = error instanceof Error ? error.message : 'Unknown route loader error'
-        setRouteState({ status: 'error', path: route.path, data: null, message })
+
+        setRouteState({
+          status: 'error',
+          path: route.path,
+          data: null,
+          message,
+        })
       })
 
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [route])
 
   const isRouteLoading = routeState.path !== route.path || routeState.status === 'loading'
-
-  // Current active nav
-  const activeNav = navItems.find((n) => n.path === route.path)
+  const activeNav = navItems.find((item) => item.path === route.path)
 
   // ── Loading State ──────────────────────────────────────────────────────
 
@@ -478,7 +547,7 @@ export const CommandCenterApp = () => {
           <button
             className="app-state__button"
             type="button"
-            onClick={() => replaceRoutePath('/dashboard/live')}
+            onClick={() => replaceRoutePath('/map')}
           >
             Retry live route
           </button>
@@ -489,30 +558,14 @@ export const CommandCenterApp = () => {
 
   // ── Ready State — Command-First Layout ─────────────────────────────────
 
-  // Mobile route gets full-screen treatment — no desktop shell at all
-  if (route.path === '/mobile') {
-    return (
-      <>
-        <main style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
-          <ErrorBoundary label={route.title} resetKey={route.path}>
-            {route.render(routeState.data)}
-          </ErrorBoundary>
-        </main>
-        <NotificationToasts />
-      </>
-    )
-  }
-
   return (
-    <div className={`nx-os ${route.path === '/' ? 'is-home-route' : ''}`}>
-      {/* Room label — non-Home surfaces */}
-      {route.path !== '/dashboard/live' && route.path !== '/command-store' && activeNav && (
+    <div className={`nx-os ${route.path === '/inbox' ? 'is-home-route' : ''}`}>
+      {route.path !== '/map' && activeNav && (
         <div className="nx-room-label">
           <span className="nx-room-label__name">{activeNav.room}</span>
         </div>
       )}
 
-      {/* Main content — full bleed */}
       <main className="nx-stage">
         <ErrorBoundary label={route.title} resetKey={route.path}>
           {route.render(routeState.data)}
@@ -527,7 +580,6 @@ export const CommandCenterApp = () => {
         onExecute={executeGlobalCommand}
       />
 
-      {/* Grammar pending indicator */}
       {grammarState.pending && (
         <div className="nx-grammar-hint">
           <kbd>{grammarState.pending}</kbd>
@@ -535,31 +587,29 @@ export const CommandCenterApp = () => {
         </div>
       )}
 
-      {/* Global notification toasts */}
       <NotificationToasts />
 
-      {/* AI Copilot — multimodal intelligence shell */}
       <CopilotShell
         open={copilotOpen}
         context={copilotContext}
         onClose={() => setCopilotOpen(false)}
-        onToggle={() => setCopilotOpen(p => { if (!p) playSound('copilot-wake'); return !p })}
+        onToggle={() => setCopilotOpen((previous) => {
+          if (!previous) playSound('copilot-wake')
+          return !previous
+        })}
         onAction={handleCopilotAction}
       />
 
-      {/* Operator Briefing panel */}
       <BriefingPanel
         open={briefingOpen}
         digest={briefingDigest}
         onClose={() => setBriefingOpen(false)}
       />
 
-      {/* Notification Center */}
       <NotificationCenter
         open={notifCenterOpen}
         onClose={() => setNotifCenterOpen(false)}
       />
-
     </div>
   )
 }

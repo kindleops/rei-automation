@@ -1,60 +1,29 @@
 import type { ReactNode } from 'react'
+
+import InboxPage from '../modules/inbox/InboxPage'
+
 import { LiveDashboardPage } from '../modules/dashboard/live/LiveDashboardPage'
 import { loadLiveDashboard } from '../modules/dashboard/live/load-live-dashboard'
 import type { LiveDashboardModel } from '../modules/dashboard/live/live-dashboard.adapter'
-import InboxPage from '../modules/inbox/InboxPage'
-import { AlertsPage } from '../modules/alerts/AlertsPage'
-import { loadAlerts } from '../modules/alerts/alerts.adapter'
-import type { AlertsModel } from '../modules/alerts/alerts.adapter'
-import { StatsPage } from '../modules/stats/StatsPage'
-import { loadStats } from '../modules/stats/stats.adapter'
-import type { StatsModel } from '../modules/stats/stats.adapter'
-import { MarketsPage } from '../modules/markets/MarketsPage'
-import { loadMarkets } from '../modules/markets/markets.adapter'
-import type { MarketsModel } from '../modules/markets/markets.adapter'
-import { BuyerIntelPage } from '../modules/buyer/BuyerIntelPage'
-import { loadBuyer } from '../modules/buyer/buyer.adapter'
-import type { BuyerModel } from '../modules/buyer/buyer.adapter'
-import { TitleWarRoomPage } from '../modules/title/TitleWarRoomPage'
-import { loadTitle } from '../modules/title/title.adapter'
-import type { TitleModel } from '../modules/title/title.adapter'
-import { SettingsPage } from '../modules/settings/SettingsPage'
-import { NotificationsPage } from '../modules/notifications/NotificationsPage'
-import { loadNotifications } from '../modules/notifications/notifications.adapter'
-import type { NotificationsModel } from '../modules/notifications/notifications.adapter'
-import { WatchlistsPage } from '../modules/watchlists/WatchlistsPage'
-import { loadWatchlists } from '../modules/watchlists/watchlists.adapter'
-import type { WatchlistsModel } from '../modules/watchlists/watchlists.adapter'
-import { QueuePage } from '../modules/queue/QueuePage'
-import { loadQueue } from '../modules/queue/queue.adapter'
-import type { QueueModel } from '../modules/queue/queue.types'
-import { DossierPage } from '../modules/dossier/DossierPage'
-import { loadDossier } from '../modules/dossier/dossier.adapter'
-import type { DossierModel } from '../modules/dossier/dossier.types'
-import { KpiIntelligencePage } from '../modules/kpis/KpiIntelligencePage'
-import { HomePage } from '../modules/home/HomePage'
-import { loadHome } from '../modules/home/home.adapter'
-import type { HomeModel } from '../modules/home/home.types'
-import { CommandStorePage } from '../modules/command-store/CommandStorePage'
-import { AcquisitionSpaceDashboard } from '../modules/acquisition/AcquisitionSpaceDashboard'
-import { OwnerIntelligenceApp } from '../modules/acquisition/apps/OwnerIntelligenceApp'
+
 import { PropertyIntelligenceApp } from '../modules/acquisition/apps/PropertyIntelligenceApp'
-import { ProspectCommandApp } from '../modules/acquisition/apps/ProspectCommandApp'
-import { ContactStackApp } from '../modules/acquisition/apps/ContactStackApp'
-import { OfferStudioApp } from '../modules/acquisition/apps/OfferStudioApp'
-import { UnderwritingApp } from '../modules/acquisition/apps/UnderwritingApp'
-import { AIBrainApp } from '../modules/acquisition/apps/AIBrainApp'
-import { AcquisitionMapApp } from '../modules/acquisition/apps/AcquisitionMapApp'
-import { AutomationMonitorApp } from '../modules/acquisition/apps/AutomationMonitorApp'
-import { AcquisitionInboxApp } from '../modules/acquisition/apps/AcquisitionInboxApp'
-import { AcquisitionQueueApp } from '../modules/acquisition/apps/AcquisitionQueueApp'
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
 
-import { AgentsPage } from '../modules/agents/AgentsPage'
-import { loadAgents } from '../modules/agents/agents.adapter'
-import type { AgentsModel } from '../modules/agents/agents.adapter'
-import { MobileCommandCenter } from '../modules/mobile/MobileCommandCenter'
+import { BuyerIntelPage } from '../modules/buyer/BuyerIntelPage'
+import { loadBuyer } from '../modules/buyer/buyer.adapter'
+import type { BuyerModel } from '../modules/buyer/buyer.adapter'
+
+import { QueuePage } from '../modules/queue/QueuePage'
+import { loadQueue } from '../modules/queue/queue.adapter'
+import type { QueueModel } from '../modules/queue/queue.types'
+
+import { KpiIntelligencePage } from '../modules/kpis/KpiIntelligencePage'
+
+import { TitleWarRoomPage } from '../modules/title/TitleWarRoomPage'
+import { loadTitle } from '../modules/title/title.adapter'
+import type { TitleModel } from '../modules/title/title.adapter'
+
 import { CampaignsPage } from '../modules/campaigns/CampaignsPage'
 import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
 import WorkflowStudioV2 from '../modules/workflows/v2/WorkflowStudioV2'
@@ -80,131 +49,11 @@ const defineRoute = <TData,>(route: AppRoute<TData>): ResolvedRoute => ({
   render: (data) => route.render(data as TData),
 })
 
-const liveDashboardRoute = defineRoute<LiveDashboardModel>({
-  path: '/dashboard/live',
-  title: 'NEXUS | Live Command Center',
-  loader: loadLiveDashboard,
-  render: (data) => <LiveDashboardPage data={data} />,
-})
-
-const homeRoute = defineRoute<HomeModel>({
+const rootRoute = defineRoute<null>({
   path: '/',
-  title: 'NEXUS | Command Board',
-  loader: loadHome,
-  render: (data) => <HomePage data={data} />,
-})
-
-const commandStoreRoute = defineRoute<null>({
-  path: '/command-store',
-  title: 'NEXUS | Command Store',
+  title: 'NEXUS | Inbox',
   loader: async () => null,
-  render: () => <CommandStorePage />,
-})
-
-const acquisitionRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition',
-  title: 'NEXUS | Acquisition Command',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <AcquisitionSpaceDashboard data={data} />,
-})
-
-const acquisitionOwnersRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/owners',
-  title: 'NEXUS | Owner Intelligence',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <OwnerIntelligenceApp data={data} />,
-})
-
-const acquisitionPropertiesRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/properties',
-  title: 'NEXUS | Property Intelligence',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <PropertyIntelligenceApp data={data} />,
-})
-
-const propertiesRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/properties',
-  title: 'NEXUS | Property Intelligence',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <PropertyIntelligenceApp data={data} />,
-})
-
-const acquisitionProspectsRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/prospects',
-  title: 'NEXUS | Prospect Command',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <ProspectCommandApp data={data} />,
-})
-
-const acquisitionContactsRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/contacts',
-  title: 'NEXUS | Contact Stack',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <ContactStackApp data={data} />,
-})
-
-const acquisitionInboxRoute = defineRoute<null>({
-  path: '/acquisition/inbox',
-  title: 'NEXUS | Seller Inbox',
-  loader: async () => null,
-  render: () => <AcquisitionInboxApp />,
-})
-
-const acquisitionQueueRoute = defineRoute<
-  AcquisitionWorkspaceModel & { queueData: QueueModel }
->({
-  path: '/acquisition/queue',
-  title: 'NEXUS | Outreach Queue',
-  loader: async () => {
-    const [workspaceData, queueData] = await Promise.all([
-      loadAcquisitionWorkspace(),
-      loadQueue(),
-    ])
-    return { ...workspaceData, queueData }
-  },
-  render: (data) => <AcquisitionQueueApp data={data} />,
-})
-
-const acquisitionOffersRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/offers',
-  title: 'NEXUS | Offer Studio',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <OfferStudioApp data={data} />,
-})
-
-const acquisitionUnderwritingRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/underwriting',
-  title: 'NEXUS | Underwriting',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <UnderwritingApp data={data} />,
-})
-
-const acquisitionAIBrainRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/ai-brain',
-  title: 'NEXUS | AI Brain',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <AIBrainApp data={data} />,
-})
-
-const acquisitionMapRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/map',
-  title: 'NEXUS | Acquisition Map',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <AcquisitionMapApp data={data} />,
-})
-
-const acquisitionsMapRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisitions/map',
-  title: 'NEXUS | Acquisitions Command Map',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <AcquisitionMapApp data={data} />,
-})
-
-const acquisitionAutomationsRoute = defineRoute<AcquisitionWorkspaceModel>({
-  path: '/acquisition/automations',
-  title: 'NEXUS | Automation Monitor',
-  loader: loadAcquisitionWorkspace,
-  render: (data) => <AutomationMonitorApp data={data} />,
+  render: () => <InboxPage />,
 })
 
 const inboxRoute = defineRoute<null>({
@@ -214,78 +63,32 @@ const inboxRoute = defineRoute<null>({
   render: () => <InboxPage />,
 })
 
-const workflowsV2Route = defineRoute<null>({
-  path: '/workflows-v2',
-  title: 'NEXUS | Workflow Studio V2',
+const conversationRoute = defineRoute<null>({
+  path: '/conversation',
+  title: 'NEXUS | Conversation',
   loader: async () => null,
-  render: () => (
-    <div className="nx-premium-inbox" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <WorkflowStudioV2 />
-    </div>
-  ),
+  render: () => <InboxPage />,
 })
 
-const alertsRoute = defineRoute<AlertsModel>({
-  path: '/alerts',
-  title: 'NEXUS | Alerts',
-  loader: loadAlerts,
-  render: (data) => <AlertsPage data={data} />,
+const dealIntelligenceRoute = defineRoute<AcquisitionWorkspaceModel>({
+  path: '/deal-intelligence',
+  title: 'NEXUS | Deal Intelligence',
+  loader: loadAcquisitionWorkspace,
+  render: (data) => <PropertyIntelligenceApp data={data} />,
 })
 
-const statsRoute = defineRoute<StatsModel>({
-  path: '/stats',
-  title: 'NEXUS | Intelligence Dashboard',
-  loader: loadStats,
-  render: (data) => <StatsPage data={data} />,
-})
-
-const kpiRoute = defineRoute<null>({
-  path: '/dashboard/kpis',
-  title: 'NEXUS | KPI Intelligence',
+const compIntelligenceRoute = defineRoute<null>({
+  path: '/comp-intelligence',
+  title: 'NEXUS | Comp Intelligence',
   loader: async () => null,
-  render: () => <KpiIntelligencePage />,
+  render: () => <InboxPage />,
 })
 
-const marketsRoute = defineRoute<MarketsModel>({
-  path: '/markets',
-  title: 'NEXUS | Active Markets',
-  loader: loadMarkets,
-  render: (data) => <MarketsPage data={data} />,
-})
-
-const buyerRoute = defineRoute<BuyerModel>({
-  path: '/buyer',
-  title: 'NEXUS | Buyer Intelligence',
+const buyerMatchRoute = defineRoute<BuyerModel>({
+  path: '/buyer-match',
+  title: 'NEXUS | Buyer Match',
   loader: loadBuyer,
   render: (data) => <BuyerIntelPage data={data} />,
-})
-
-const titleRoute = defineRoute<TitleModel>({
-  path: '/title',
-  title: 'NEXUS | Title & Closing',
-  loader: loadTitle,
-  render: (data) => <TitleWarRoomPage data={data} />,
-})
-
-const settingsRoute = defineRoute<null>({
-  path: '/settings',
-  title: 'NEXUS | Settings',
-  loader: async () => null,
-  render: () => <SettingsPage />,
-})
-
-const notificationsRoute = defineRoute<NotificationsModel>({
-  path: '/notifications',
-  title: 'NEXUS | Notifications',
-  loader: loadNotifications,
-  render: (data) => <NotificationsPage data={data} />,
-})
-
-const watchlistsRoute = defineRoute<WatchlistsModel>({
-  path: '/watchlists',
-  title: 'NEXUS | Watchlists',
-  loader: loadWatchlists,
-  render: (data) => <WatchlistsPage data={data} />,
 })
 
 const queueRoute = defineRoute<QueueModel>({
@@ -295,77 +98,136 @@ const queueRoute = defineRoute<QueueModel>({
   render: (data) => <QueuePage data={data} />,
 })
 
-const dossierRoute = defineRoute<DossierModel>({
-  path: '/dossier',
-  title: 'NEXUS | Seller Dossier',
-  loader: loadDossier,
-  render: (data) => <DossierPage data={data} />,
+const pipelineRoute = defineRoute<null>({
+  path: '/pipeline',
+  title: 'NEXUS | Pipeline',
+  loader: async () => null,
+  render: () => <InboxPage />,
 })
 
-const agentsRoute = defineRoute<AgentsModel>({
-  path: '/agents',
-  title: 'NEXUS | AI Agent Performance',
-  loader: loadAgents,
-  render: (data) => <AgentsPage data={data} />,
+const calendarRoute = defineRoute<null>({
+  path: '/calendar',
+  title: 'NEXUS | Calendar',
+  loader: async () => null,
+  render: () => <InboxPage />,
 })
 
-const campaignsRoute = defineRoute<null>({
-  path: '/campaigns',
-  title: 'NEXUS | Campaign Command Center',
+const mapRoute = defineRoute<LiveDashboardModel>({
+  path: '/map',
+  title: 'NEXUS | Map',
+  loader: loadLiveDashboard,
+  render: (data) => <LiveDashboardPage data={data} />,
+})
+
+const analyticsRoute = defineRoute<null>({
+  path: '/analytics',
+  title: 'NEXUS | Analytics',
+  loader: async () => null,
+  render: () => <KpiIntelligencePage />,
+})
+
+const closingDeskRoute = defineRoute<TitleModel>({
+  path: '/closing-desk',
+  title: 'NEXUS | Closing Desk',
+  loader: loadTitle,
+  render: (data) => <TitleWarRoomPage data={data} />,
+})
+
+const campaignCommandRoute = defineRoute<null>({
+  path: '/campaign-command',
+  title: 'NEXUS | Campaign Command',
   loader: async () => null,
   render: () => <CampaignsPage />,
 })
 
-const emailRoute = defineRoute<null>({
-  path: '/email',
-  title: 'NEXUS | Email Command Center',
+const emailCommandRoute = defineRoute<null>({
+  path: '/email-command',
+  title: 'NEXUS | Email Command',
   loader: async () => null,
   render: () => <EmailCommandCenter />,
 })
 
-const mobileRoute = defineRoute<null>({
-  path: '/mobile',
-  title: 'NEXUS | Mobile Command Center',
+const workflowStudioRoute = defineRoute<null>({
+  path: '/workflow-studio',
+  title: 'NEXUS | Workflow Studio',
   loader: async () => null,
-  render: () => <MobileCommandCenter />,
+  render: () => (
+    <div
+      className="nx-premium-inbox"
+      style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <WorkflowStudioV2 />
+    </div>
+  ),
 })
 
 const routes = [
-  homeRoute,
-  agentsRoute,
-  acquisitionRoute,
-  acquisitionOwnersRoute,
-  acquisitionPropertiesRoute,
-  propertiesRoute,
-  acquisitionProspectsRoute,
-  acquisitionContactsRoute,
-  acquisitionInboxRoute,
-  acquisitionQueueRoute,
-  acquisitionOffersRoute,
-  acquisitionUnderwritingRoute,
-  acquisitionAIBrainRoute,
-  acquisitionMapRoute,
-  acquisitionsMapRoute,
-  acquisitionAutomationsRoute,
-  commandStoreRoute,
-  liveDashboardRoute,
+  rootRoute,
   inboxRoute,
-  workflowsV2Route,
-  alertsRoute,
-  statsRoute,
-  kpiRoute,
-  marketsRoute,
-  buyerRoute,
-  titleRoute,
-  settingsRoute,
-  notificationsRoute,
-  watchlistsRoute,
+  conversationRoute,
+  dealIntelligenceRoute,
+  compIntelligenceRoute,
+  buyerMatchRoute,
   queueRoute,
-  dossierRoute,
-  campaignsRoute,
-  emailRoute,
-  mobileRoute,
+  pipelineRoute,
+  calendarRoute,
+  mapRoute,
+  analyticsRoute,
+  closingDeskRoute,
+  campaignCommandRoute,
+  emailCommandRoute,
+  workflowStudioRoute,
 ]
 
-export const resolveRoute = (path: string) =>
-  routes.find((route) => route.path === path) ?? homeRoute
+const legacyRouteAliases: Record<string, string> = {
+  '/dashboard/live': '/map',
+  '/dashboard/kpis': '/analytics',
+  '/stats': '/analytics',
+  '/buyer': '/buyer-match',
+  '/title': '/closing-desk',
+  '/campaigns': '/campaign-command',
+  '/email': '/email-command',
+  '/workflows-v2': '/workflow-studio',
+
+  '/properties': '/deal-intelligence',
+  '/acquisition': '/deal-intelligence',
+  '/acquisition/owners': '/deal-intelligence',
+  '/acquisition/properties': '/deal-intelligence',
+  '/acquisition/prospects': '/deal-intelligence',
+  '/acquisition/contacts': '/deal-intelligence',
+  '/acquisition/inbox': '/inbox',
+  '/acquisition/queue': '/queue',
+  '/acquisition/offers': '/closing-desk',
+  '/acquisition/underwriting': '/deal-intelligence',
+  '/acquisition/ai-brain': '/analytics',
+  '/acquisition/map': '/map',
+  '/acquisitions/map': '/map',
+  '/acquisition/automations': '/workflow-studio',
+
+  '/alerts': '/analytics',
+  '/markets': '/map',
+  '/dossier': '/deal-intelligence',
+  '/agents': '/analytics',
+  '/mobile': '/inbox',
+  '/notifications': '/inbox',
+  '/watchlists': '/deal-intelligence',
+  '/settings': '/inbox',
+  '/command-store': '/inbox',
+}
+
+const normalizePath = (path: string) => {
+  if (!path || path === '/') return '/'
+  return path.endsWith('/') ? path.slice(0, -1) : path
+}
+
+export const resolveRoute = (path: string) => {
+  const normalizedPath = normalizePath(path)
+  const canonicalPath = legacyRouteAliases[normalizedPath] ?? normalizedPath
+
+  return routes.find((route) => route.path === canonicalPath) ?? inboxRoute
+}
