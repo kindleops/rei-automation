@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { formatCurrency, formatPercent, formatPhone, formatRelativeTime } from '../../shared/formatters'
-import { buildConversationDecision } from '../../modules/inbox/inbox-decisioning'
+import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 import './pipeline-view.css'
 

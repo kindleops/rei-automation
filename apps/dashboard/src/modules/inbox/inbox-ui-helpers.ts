@@ -6,7 +6,7 @@ import {
 } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { IconName } from '../../shared/icons'
-import { buildConversationDecision, isHotLeadDecision, type InboxBucket } from './inbox-decisioning'
+import { buildConversationDecision, isHotLeadDecision, type InboxBucket } from '../../domain/inbox/inbox-decisioning'
 import {
   isActiveCanonicalBucket,
   isWaitingInboxState,

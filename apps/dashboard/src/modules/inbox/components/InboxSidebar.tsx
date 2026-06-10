@@ -14,7 +14,7 @@ import {
   buildConversationDecision,
   sortThreadsByDecision,
   type ConversationDecision,
-} from '../inbox-decisioning'
+} from '../../../domain/inbox/inbox-decisioning'
 import { classifyInboxBucket, type CanonicalBucket } from '../classifyInboxBucket'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
