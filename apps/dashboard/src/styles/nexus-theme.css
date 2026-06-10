@@ -111,7 +111,6 @@
   --nexus-stage-dead:      #ef4444;
   --nexus-stage-suppressed:#aeaeb2;
 }
-
 /* ── dark ───────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="dark"],
 [data-nexus-theme="dark"] {
@@ -188,7 +187,6 @@
   --nexus-shadow:        var(--nx-shadow);
   --nexus-map-pin:       var(--nx-accent);
 }
-
 /* ── satellite ──────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="satellite"] {
   --nx-bg:              #0a0d11;
@@ -215,7 +213,6 @@
   --nx-badge-bg:        rgba(229, 237, 248, 0.10);
   --nx-badge-border:    rgba(229, 237, 248, 0.22);
 }
-
 /* ── terrain ────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="terrain"] {
   --nx-bg:              #0d1009;
@@ -242,7 +239,6 @@
   --nx-badge-bg:        rgba(183, 216, 108, 0.10);
   --nx-badge-border:    rgba(183, 216, 108, 0.24);
 }
-
 /* ── red_ops ────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="red_ops"],
 [data-nexus-theme="red_ops"] {
@@ -320,8 +316,6 @@
   --nexus-shadow:        var(--nx-shadow);
   --nexus-map-pin:       var(--nx-accent);
 }
-
-
 /* ── matrix ─────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="matrix"] {
   --nx-bg:              #020805;
@@ -348,7 +342,6 @@
   --nx-badge-bg:        rgba(0, 255, 136, 0.10);
   --nx-badge-border:    rgba(0, 255, 136, 0.26);
 }
-
 /* ── blueprint ──────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="blueprint"] {
   --nx-bg:              #061420;
@@ -375,7 +368,6 @@
   --nx-badge-bg:        rgba(105, 215, 255, 0.10);
   --nx-badge-border:    rgba(105, 215, 255, 0.26);
 }
-
 /* ── executive ──────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="executive"] {
   --nx-bg:              #0a0a06;
@@ -402,7 +394,6 @@
   --nx-badge-bg:        rgba(216, 180, 80, 0.10);
   --nx-badge-border:    rgba(216, 180, 80, 0.24);
 }
-
 /* ── night_vision ───────────────────────────────────────────────────────── */
 :root[data-nexus-theme="night_vision"] {
   --nx-bg:              #06130f;
@@ -429,7 +420,6 @@
   --nx-badge-bg:        rgba(114, 255, 178, 0.10);
   --nx-badge-border:    rgba(114, 255, 178, 0.24);
 }
-
 /* ── monochrome ─────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="monochrome"] {
   --nx-bg:              #060708;
@@ -456,7 +446,6 @@
   --nx-badge-bg:        rgba(211, 221, 232, 0.10);
   --nx-badge-border:    rgba(211, 221, 232, 0.22);
 }
-
 /* ── light ──────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="light"],
 [data-nexus-theme="light"] {
@@ -549,7 +538,6 @@
   --nexus-danger:        #ff3b30;
   --nexus-shadow:        0 8px 24px rgba(0, 0, 0, 0.08);
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    THEME PERSONALITY EFFECTS
    Special effects for overlay themes — applied via CSS class hooks
@@ -562,7 +550,6 @@
     linear-gradient(90deg, rgba(0, 255, 136, 0.04) 1px, transparent 1px);
   background-size: 32px 32px;
 }
-
 /* Matrix: scanline effect on cards */
 :root[data-nexus-theme="matrix"] .matrix-card-scanline::after {
   content: '';
@@ -578,19 +565,16 @@
   pointer-events: none;
   border-radius: inherit;
 }
-
 /* Matrix: command overlay glow */
 :root[data-nexus-theme="matrix"] .matrix-command-glow {
   box-shadow:
     0 0 40px rgba(0, 255, 136, 0.12),
     0 0 80px rgba(0, 255, 136, 0.06);
 }
-
 /* Matrix: message bubble glow */
 :root[data-nexus-theme="matrix"] .matrix-bubble-glow {
   box-shadow: 0 0 12px rgba(0, 255, 136, 0.18);
 }
-
 /* Blueprint: grid lines on schematic surfaces */
 :root[data-nexus-theme="blueprint"] .blueprint-grid {
   background-image:
@@ -598,7 +582,6 @@
     linear-gradient(90deg, rgba(105, 215, 255, 0.05) 1px, transparent 1px);
   background-size: 24px 24px;
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    GLOBAL SURFACE THEMING
    Apply --nx-* vars to structural app shells so every surface responds
@@ -610,14 +593,12 @@
   color: var(--nx-text);
   transition: background 0.3s ease, color 0.3s ease;
 }
-
 /* Command/global overlays */
 .gcc-overlay {
   background:
     radial-gradient(circle at top, var(--nx-accent-glow), transparent 30%),
     linear-gradient(180deg, rgba(0,0,0,0.82), rgba(0,0,0,0.94));
 }
-
 .gcc-shell {
   border-color: var(--nx-border-strong);
   background: var(--nx-command-bg);
@@ -626,14 +607,12 @@
     0 0 0 1px rgba(255,255,255,0.02) inset,
     0 12px 40px var(--nx-accent-glow);
 }
-
 /* Room label bar */
 .nx-room-label {
   background: var(--nx-panel-bg);
   border-bottom: 1px solid var(--nx-border);
   backdrop-filter: blur(12px);
 }
-
 /* Buttons — accent-aware */
 .nx-btn-primary {
   background: var(--nx-accent);
@@ -642,7 +621,6 @@
 .nx-btn-primary:hover {
   box-shadow: 0 0 0 2px var(--nx-accent-glow);
 }
-
 /* Filter pills / chips */
 .nx-filter-pill,
 .nx-chip {
@@ -656,35 +634,30 @@
   border-color: var(--nx-accent);
   color: var(--nx-accent);
 }
-
 /* Status chips — semantic colors preserved */
 .nx-status-chip {
   background: var(--nx-badge-bg);
   border: 1px solid var(--nx-badge-border);
 }
-.nx-status-chip.is-danger  { background: rgba(255,68,68,0.12); border-color: var(--nx-danger);  color: var(--nx-danger);  }
+.nx-status-chip.is-danger { background: rgba(255,68,68,0.12); border-color: var(--nx-danger);  color: var(--nx-danger);  }
 .nx-status-chip.is-success { background: rgba(34,197,94,0.10); border-color: var(--nx-success); color: var(--nx-success); }
 .nx-status-chip.is-warning { background: rgba(245,158,11,0.12); border-color: var(--nx-warning); color: var(--nx-warning); }
-
 /* Seller Intelligence card shell */
 .nx-seller-intel-card {
   background: var(--nx-card-bg);
   border: 1px solid var(--nx-card-border);
   box-shadow: 0 8px 24px var(--nx-shadow);
 }
-
 /* Pipeline cards */
 .nx-pipeline-card,
 .pipeline-card {
   background: var(--nx-card-bg);
   border: 1px solid var(--nx-card-border);
 }
-
 /* Queue row accent */
 .nx-operational-row:hover {
   background: var(--nx-accent-soft);
 }
-
 /* Accent palette overrides */
 :root[data-nexus-accent="cyan"] {
   --nx-accent:          #38d0f0;
@@ -728,7 +701,6 @@
   --nx-badge-border:    rgba(160, 216, 240, 0.24);
   --nexus-accent-rgb:   160, 216, 240;
 }
-
 /* ── Light-mode accent palette overrides (higher contrast on white) ─────── */
 /* These come AFTER the generic accent blocks so they win in light mode.      */
 :root[data-nexus-theme="light"][data-nexus-accent="cyan"] {
@@ -797,7 +769,6 @@
   --nexus-accent-glow:  rgba(37, 99, 235, 0.22);
   --nexus-accent-border: rgba(37, 99, 235, 0.36);
 }
-
 /* Map chrome responds to Nexus theme + accent */
 .nx-map-right-body,
 .nx-map-right-body--workspace,
@@ -810,7 +781,6 @@
   border-color: var(--nx-border);
   color: var(--nx-text);
 }
-
 .nx-icm__chip.is-active,
 .nx-map-chip.is-active,
 .nx-icm__toggle.is-active,
@@ -820,7 +790,6 @@
   color: var(--nx-text);
   box-shadow: 0 0 0 1px var(--nx-accent-glow) inset;
 }
-
 .nx-icm .maplibregl-ctrl-group,
 .nx-icm .maplibregl-ctrl button,
 .nx-map-right-body .maplibregl-ctrl-group,
@@ -829,12 +798,10 @@
   border-color: var(--nx-border);
   color: var(--nx-text);
 }
-
 .nx-icm .maplibregl-ctrl button:hover,
 .nx-map-right-body .maplibregl-ctrl button:hover {
   background: var(--nx-accent-soft);
 }
-
 .nx-map-live-badge,
 .nx-icm__live-pill,
 .nx-icm__status-pill {
@@ -842,7 +809,6 @@
   background: var(--nx-accent-soft);
   color: var(--nx-text);
 }
-
 /* ── DARK MODE REFINEMENT OVERRIDES ───────────────────────────────────────── */
 
 /* Structural layout overrides to achieve deep premium black and neutral borders */
@@ -861,72 +827,59 @@
     radial-gradient(circle at top right, color-mix(in srgb, var(--nx-accent) 4%, transparent), transparent 30%),
     var(--nx-bg) !important;
 }
-
 .nx-topbar:not([data-nexus-theme="light"]) {
   background: color-mix(in srgb, var(--nx-bg) 85%, transparent) !important;
   border-bottom: 1px solid var(--nx-border) !important;
   backdrop-filter: blur(20px) !important;
 }
-
 /* Rebuilt sidebar column surfaces */
 .nx-sidebar-rebuilt:not([data-nexus-theme="light"]) {
   --nx-bg-darker: var(--nx-bg) !important;
   background: var(--nx-bg-darker) !important;
   border-right: 1px solid var(--nx-border) !important;
 }
-
 .nx-review50-left:not([data-nexus-theme="light"]),
 .nx-full100-center:not([data-nexus-theme="light"]),
 .nx-inbox-center:not([data-nexus-theme="light"]) {
   background: var(--nx-bg) !important;
   border-right: 1px solid var(--nx-border) !important;
 }
-
 .nx-full100-left:not([data-nexus-theme="light"]) {
   background: var(--nx-panel-bg) !important;
   border-right: 1px solid var(--nx-border) !important;
 }
-
 .nx-intelligence-panel:not([data-nexus-theme="light"]) {
   background: var(--nx-panel-bg) !important;
   border-left: 1px solid var(--nx-border) !important;
 }
-
 /* Rebuilt card list rows spacing & contrast */
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]) {
   background: var(--nx-card-bg) !important;
   border: 1px solid var(--nx-border) !important;
   transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease !important;
 }
-
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]):hover {
   background: var(--nx-bg-soft) !important;
   border-color: var(--nx-border-strong) !important;
 }
-
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]).is-selected {
   background: var(--nx-accent-soft) !important;
   border-color: var(--nx-accent-glow) !important;
   box-shadow: inset 3px 0 0 var(--nx-accent) !important;
 }
-
 /* Rebuilt cards text hierarchy color locks */
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]) .nx-thread-card-rebuilt__name {
   color: var(--nx-text) !important;
 }
-
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]) .nx-thread-card-rebuilt__address {
   color: var(--nx-text-muted) !important;
 }
-
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]) .nx-thread-card-rebuilt__time {
   color: color-mix(in srgb, var(--nx-text-muted) 70%, transparent) !important;
 }
-
 .nx-thread-card-rebuilt:not([data-nexus-theme="light"]) .nx-thread-card-rebuilt__preview {
   color: var(--nx-text-muted) !important;
 }
-
 /* ── REDOPS EXPLICIT FORCED OVERRIDES & BLUE HIGHLIGHT REMAPPING ── */
 :root[data-nexus-theme="red_ops"],
 [data-nexus-theme="red_ops"] {
@@ -950,7 +903,6 @@
   --nexus-bubble-outbound: #ff1212 !important;
   --nexus-stage-new:     #ff1212 !important;
 }
-
 /* Force elements with hardcoded .is-blue styles to use red in RedOps */
 [data-nexus-theme="red_ops"] .is-blue,
 [data-nexus-theme="red_ops"] .is-blue b,
@@ -989,15 +941,12 @@
   --heat-glow: rgba(255, 18, 18, 0.09) !important;
   --dch-ring-color: #ff1212 !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-snapshot-dashboard__metric.is-blue strong {
   color: #ffd6d9 !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-pi-fin-gauge__fill.is-blue {
   background: linear-gradient(90deg, #ff1212, #ff6b6b) !important;
 }
-
 /* Pipeline-view .is-blue overrides under RedOps */
 [data-nexus-theme="red_ops"] .plv-stage-chip.is-active.is-blue,
 [data-nexus-theme="red_ops"] .plv-lane__count.is-blue,
@@ -1007,11 +956,9 @@
   border-color: rgba(255, 18, 18, 0.28) !important;
   background-color: rgba(255, 18, 18, 0.15) !important;
 }
-
 [data-nexus-theme="red_ops"] .plv-lane.is-blue {
   background: linear-gradient(180deg, rgba(38, 6, 8, 0.6) 0%, rgba(22, 4, 6, 0.5) 100%) !important;
 }
-
 /* KPI Dashboard --kpi-blue variables override under RedOps */
 [data-nexus-theme="red_ops"],
 [data-nexus-theme="red_ops"] .kpi-root,
@@ -1020,7 +967,6 @@
   --kpi-blue-dim: rgba(255, 18, 18, 0.15) !important;
   border-color: rgba(255, 18, 18, 0.28) !important;
 }
-
 /* Send Queue Dashboard overrides under RedOps */
 [data-nexus-theme="red_ops"] .sqd-stage.is-blue .sqd-stage__count,
 [data-nexus-theme="red_ops"] .sqd-rail__mode.is-blue,
@@ -1030,59 +976,48 @@
   border-color: rgba(255, 18, 18, 0.28) !important;
   background-color: rgba(255, 18, 18, 0.15) !important;
 }
-
 [data-nexus-theme="red_ops"] .sqd-hcard.is-blue {
   background: rgba(255, 18, 18, 0.08) !important;
   border-color: rgba(255, 18, 18, 0.24) !important;
 }
-
 [data-nexus-theme="red_ops"] .sqd-tier-bar__fill.is-blue {
   background: linear-gradient(90deg, rgba(255, 18, 18, 0.55), rgba(255, 80, 80, 0.65)) !important;
 }
-
 /* Queue Ops overrides under RedOps */
 [data-nexus-theme="red_ops"] .sqd-status-pill.is-blue {
   background: rgba(255, 18, 18, 0.1) !important;
   border-color: rgba(255, 18, 18, 0.28) !important;
   color: #ff1212 !important;
 }
-
 [data-nexus-theme="red_ops"] .sqd-event-row.is-blue {
   border-left: 2px solid rgba(255, 18, 18, 0.28) !important;
 }
-
 [data-nexus-theme="red_ops"] .sqd-event-row__icon.is-blue {
   color: #ff1212 !important;
 }
-
 /* RedOps overrides for components with hardcoded dark blue backgrounds */
 [data-nexus-theme="red_ops"] .nx-chat-container {
   background: 
     radial-gradient(circle at 50% 0%, rgba(255, 18, 18, 0.06), transparent 45%),
     linear-gradient(180deg, #200609 0%, #160305 100%) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-compact,
 [data-nexus-theme="red_ops"] .nx-workspace-surface--campaigns {
   background: #160305 !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__detail-overlay {
   background: rgba(22, 4, 6, 0.94) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__header {
   background: rgba(32, 6, 9, 0.75) !important;
   border-bottom: 1px solid var(--nx-border) !important;
 }
-
 [data-nexus-theme="red_ops"] .ccc {
   background:
     radial-gradient(circle at 60% -10%, rgba(255, 18, 18, 0.06), transparent 55%),
     radial-gradient(circle at 0% 90%, rgba(255, 18, 18, 0.04), transparent 45%),
     var(--bg-main) !important;
 }
-
 /* RedOps Chat bubble colors (electric blue glass remapped to wine red/crimson) */
 [data-nexus-theme="red_ops"] .nx-bubble-wrap.is-outbound .nx-chat-bubble {
   background: linear-gradient(135deg, rgba(255, 18, 18, 0.45) 0%, rgba(120, 10, 12, 0.85) 100%) !important;
@@ -1092,37 +1027,31 @@
     0 0 0 1px rgba(255, 18, 18, 0.1) inset,
     0 6px 20px rgba(255, 18, 18, 0.16) !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-bubble-wrap.is-outbound .nx-chat-bubble::after {
   background: linear-gradient(135deg, rgba(255, 18, 18, 0.45), rgba(120, 10, 12, 0.85)) !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-bubble-wrap.is-outbound .nx-chat-bubble:hover {
   border-color: rgba(255, 18, 18, 0.88) !important;
   box-shadow:
     0 0 0 1px rgba(255, 18, 18, 0.15) inset,
     0 16px 52px rgba(255, 18, 18, 0.3) !important;
 }
-
 /* RedOps composer suggestion chips */
 [data-nexus-theme="red_ops"] .nx-composer-ai-chip {
   background: rgba(255, 18, 18, 0.12) !important;
   border-color: rgba(255, 18, 18, 0.3) !important;
   color: #ffcbd0 !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-composer-ai-chip:hover {
   background: rgba(255, 18, 18, 0.28) !important;
   border-color: rgba(255, 18, 18, 0.6) !important;
   color: #fff0f1 !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-composer-ai-chip.is-soft,
 [data-nexus-theme="red_ops"] .nx-composer-ai-chip.is-accent {
   background: rgba(255, 18, 18, 0.08) !important;
   border-color: rgba(255, 18, 18, 0.24) !important;
 }
-
 /* RedOps Campaign Command Center local variable mapping */
 [data-nexus-theme="red_ops"] .icv {
   --icv-bg:       #160305 !important;
@@ -1136,121 +1065,55 @@
   --icv-text-1:   #b28a8f !important;
   --icv-text-2:   #8d686d !important;
 }
-
 /* Campaign panel background overlaps (removes hardcoded dark-blue background elements) */
 [data-nexus-theme="red_ops"] .icv__header,
 [data-nexus-theme="red_ops"] .icv-compact__header {
   background: rgba(32, 6, 9, 0.75) !important;
   border-bottom: 1px solid rgba(255, 18, 18, 0.18) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__kpi-strip {
   background: rgba(32, 6, 9, 0.40) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__section-label {
   background: rgba(32, 6, 9, 0.30) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__list-toolbar {
   background: rgba(32, 6, 9, 0.40) !important;
 }
-
 /* Campaign list row active/linked highlights (removes hardcoded green backgrounds/borders) */
 [data-nexus-theme="red_ops"] .icv-row.is-selected {
   background: rgba(255, 18, 18, 0.08) !important;
   border-left: 2px solid #ff1212 !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-row.is-linked {
   background: linear-gradient(90deg, rgba(255, 18, 18, 0.06) 0%, transparent 100%) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-row.is-linked.is-selected {
   background: rgba(255, 18, 18, 0.12) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-compact__row.is-linked {
   border-color: rgba(255, 18, 18, 0.28) !important;
   background: rgba(255, 18, 18, 0.06) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-btn.is-primary {
   background: rgba(255, 18, 18, 0.12) !important;
   border-color: rgba(255, 18, 18, 0.28) !important;
   color: #ff1212 !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-btn.is-primary:hover {
   background: rgba(255, 18, 18, 0.22) !important;
 }
-
 [data-nexus-theme="red_ops"] .icv__brand-icon {
   background: rgba(255, 18, 18, 0.12) !important;
   border: 1px solid rgba(255, 18, 18, 0.28) !important;
 }
-
 /* Campaign status dots mapping for scheduled/sent under RedOps */
 [data-nexus-theme="red_ops"] .icv-compact__dot.is-scheduled {
   background: #ff1212 !important;
 }
-
 [data-nexus-theme="red_ops"] .icv-linked-chip__status.is-sent {
   color: #ff1212 !important;
 }
-
-/* ══════════════════════════════════════════════════════════════════════════
-   GLOBAL OVERLAY NEUTRALIZATION & contrast RESTORATION
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* Neutralize all desaturating background overlay gradients and pseudo-elements */
-[data-nexus-theme="dark"] .nx-premium-inbox::before,
-[data-nexus-theme="dark"] .nx-premium-inbox::after,
-[data-nexus-theme="dark"] .nx-inbox::before,
-[data-nexus-theme="dark"] .nx-inbox::after,
-[data-nexus-theme="dark"] .nx-alerts::before,
-[data-nexus-theme="dark"] .nx-alerts::after,
-[data-nexus-theme="dark"] .nx-markets::before,
-[data-nexus-theme="dark"] .nx-markets::after,
-[data-nexus-theme="dark"] .nx-buyer::before,
-[data-nexus-theme="dark"] .nx-buyer::after,
-[data-nexus-theme="dark"] .nx-watchlists::before,
-[data-nexus-theme="dark"] .nx-watchlists::after,
-[data-nexus-theme="dark"] .nx-notifications::before,
-[data-nexus-theme="dark"] .nx-notifications::after,
-[data-nexus-theme="dark"] .nx-inbox-loading-state::before,
-[data-nexus-theme="dark"] .nx-inbox-loading-state::after,
-[data-nexus-theme="dark"] .nx-icm::before,
-[data-nexus-theme="dark"] .nx-icm::after,
-
-[data-nexus-theme="red_ops"] .nx-premium-inbox::before,
-[data-nexus-theme="red_ops"] .nx-premium-inbox::after,
-[data-nexus-theme="red_ops"] .nx-inbox::before,
-[data-nexus-theme="red_ops"] .nx-inbox::after,
-[data-nexus-theme="red_ops"] .nx-alerts::before,
-[data-nexus-theme="red_ops"] .nx-alerts::after,
-[data-nexus-theme="red_ops"] .nx-markets::before,
-[data-nexus-theme="red_ops"] .nx-markets::after,
-[data-nexus-theme="red_ops"] .nx-buyer::before,
-[data-nexus-theme="red_ops"] .nx-buyer::after,
-[data-nexus-theme="red_ops"] .nx-watchlists::before,
-[data-nexus-theme="red_ops"] .nx-watchlists::after,
-[data-nexus-theme="red_ops"] .nx-notifications::before,
-[data-nexus-theme="red_ops"] .nx-notifications::after,
-[data-nexus-theme="red_ops"] .nx-inbox-loading-state::before,
-[data-nexus-theme="red_ops"] .nx-inbox-loading-state::after,
-[data-nexus-theme="red_ops"] .nx-icm::before,
-[data-nexus-theme="red_ops"] .nx-icm::after {
-  content: none !important;
-  opacity: 0 !important;
-  background: none !important;
-  display: none !important;
-  filter: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  pointer-events: none !important;
-}
-
 /* Remove/neutralize desaturating & dimming filters on visuals */
 .nx-comp-module__map-iframe,
 .nx-sold-comp__media img,
@@ -1258,7 +1121,6 @@
 .nx-property-hero-shell .nx-property-hero__media:hover img {
   filter: none !important;
 }
-
 /* ── Global Typography & Contrast Refinements ── */
 .nx-muted,
 .nx-text-muted,
@@ -1272,8 +1134,8 @@
 .opacity-80 {
   opacity: 1 !important; /* Eliminate faded text opacity filters */
 }
-
-/* Force legible, high-contrast text per theme */
+/* Force legible,
+high-contrast text per theme */
 [data-nexus-theme="dark"] .nx-muted,
 [data-nexus-theme="dark"] .nx-text-muted,
 [data-nexus-theme="dark"] .text-muted,
@@ -1284,7 +1146,6 @@
 [data-nexus-theme="dark"] .text-faint {
   color: #64748b !important;
 }
-
 [data-nexus-theme="light"] .nx-muted,
 [data-nexus-theme="light"] .nx-text-muted,
 [data-nexus-theme="light"] .text-muted,
@@ -1295,7 +1156,6 @@
 [data-nexus-theme="light"] .text-faint {
   color: #64748b !important;
 }
-
 [data-nexus-theme="red_ops"] .nx-muted,
 [data-nexus-theme="red_ops"] .nx-text-muted,
 [data-nexus-theme="red_ops"] .text-muted,
@@ -1306,7 +1166,6 @@
 [data-nexus-theme="red_ops"] .text-faint {
   color: #b77979 !important;
 }
-
 /* Badge and Pill Legibility */
 .nx-filter-pill,
 .nx-chip,
