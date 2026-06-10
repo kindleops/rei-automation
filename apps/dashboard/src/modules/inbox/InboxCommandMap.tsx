@@ -18,7 +18,7 @@ import {
   type BuyerMapFilters,
   type BuyerProfilePoint,
   type BuyerRecentPurchase,
-} from '../buyer/buyerCommandData'
+} from '../../views/buyer-match/buyerCommandData'
 import { loadBuyerDemandLayerPoints, type BuyerDemandMetric, type BuyerDemandLayerPoint, formatShortPrice } from '../../lib/data/buyerActivityMapData'
 import { loadCensusForProperty, calculateInvestorOpportunityScore, type CensusData } from '../../lib/data/censusData'
 import { loadSoldCompsInBounds, type RecentSoldComp, loadCommandMapSellerPinDetail, loadCommandMapSellerPins, type CommandMapSellerPin } from '../../lib/data/commandMapData'

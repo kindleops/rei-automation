@@ -89,7 +89,7 @@ import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
   type BuyerMapFilters,
-} from '../buyer/buyerCommandData'
+} from '../../views/buyer-match/buyerCommandData'
 
 import { translateText } from './translate.api'
 import { buildThreadCommandIntel, type ThreadCommandIntel } from './ai-command-center'
@@ -139,7 +139,7 @@ import './inbox-rebuild-v2.css'
 import './inbox-polish.css'
 import './notification-hud.css'
 import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
-import './buyer-intel-upgrade.css'
+import '../../views/buyer-match/buyer-intel-upgrade.css'
 import './copilot/copilot.css'
 import './conversation-redesign.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../command-center/command.types'

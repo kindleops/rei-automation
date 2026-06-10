@@ -1,5 +1,5 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import type { BuyerRecentPurchase } from '../buyer/buyerCommandData'
+import type { BuyerRecentPurchase } from '../../views/buyer-match/buyerCommandData'
 import type { RecentSoldComp } from '../../lib/data/commandMapData'
 
 export type CommandMapActivityType =
