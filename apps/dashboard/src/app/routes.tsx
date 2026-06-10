@@ -14,7 +14,7 @@ import { QueueView } from '../views/queue/QueueView'
 import { loadQueue } from '../views/queue/queue.adapter'
 import type { QueueModel } from '../domain/queue/queue.types'
 
-import { KpiIntelligencePage } from '../modules/kpis/KpiIntelligencePage'
+import { KpiIntelligencePage } from '../views/analytics/KpiIntelligencePage'
 
 import { TitleWarRoomPage } from '../modules/title/TitleWarRoomPage'
 import { loadTitle } from '../modules/title/title.adapter'
