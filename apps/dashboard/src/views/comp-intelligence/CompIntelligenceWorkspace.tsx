@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../modules/inbox/../lib/data/commandMapData'
+import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../lib/data/commandMapData'
 import { buildStreetViewUrl } from '../../modules/inbox/inbox-normalization'
-import type { InboxWorkflowThread } from '../../modules/inbox/../lib/data/inboxWorkflowData'
-import type { DealContext } from '../../modules/inbox/../lib/data/dealContext'
+import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import type { DealContext } from '../../lib/data/dealContext'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../modules/inbox/view-layout'
-import '../comp-intelligence.css'
+import './comp-intelligence.css'
 
 // ── Sound Event Hooks ──────────────────────────────────────────────────────
 
@@ -251,7 +251,7 @@ function makeStreetviewUrl(lat: number, lng: number, size: string): string {
 
 // ── ARV computation ────────────────────────────────────────────────────────
 
-import { calculateWholesaleDeal } from '../../modules/inbox/../lib/underwriting/calculator'
+import { calculateWholesaleDeal } from '../../lib/underwriting/calculator'
 
 function computeArvStats(comps: CompCandidate[], subject: Partial<CompCandidate>): ArvStats | null {
   const active = comps.filter(c => c.selected && !c.excluded)
