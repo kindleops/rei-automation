@@ -7300,46 +7300,9 @@ center+right hidden */
   font-size: 13px;
 }
 
-/* ─── Advanced Filters Modal ─────────────────────────────────────────── */
-
-.nx-filter-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 12040;
-  display: grid;
-  place-items: center;
-  background: var(--nexus-surface-overlay);
-  backdrop-filter: blur(8px);
-  animation: nx-overlay-in 0.25s ease-out;
-}
-
-.nx-filter-modal {
-  width: min(840px, calc(100vw - 32px));
-  max-height: calc(100vh - 64px);
-  display: flex;
-  flex-direction: column;
-  border-radius: 18px;
-  background: var(--nexus-panel-strong);
-  backdrop-filter: blur(32px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
-  animation: nx-modal-drop 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
-}
-
 @keyframes nx-modal-drop {
   from { opacity: 0; transform: translateY(-30px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.nx-filter-modal__header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px 14px;
-  border-bottom: 1px solid var(--glass-border);
 }
 
 .nx-filter-modal__header > div {
@@ -7372,21 +7335,6 @@ center+right hidden */
   background: transparent;
 }
 
-.nx-filter-modal__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px 20px;
-  display: grid;
-  gap: 16px;
-  scrollbar-width: thin;
-}
-
-.nx-filter-group {
-  display: grid;
-  gap: 10px;
-}
-
 .nx-filter-group > header {
   color: var(--text-secondary);
   font-size: 11px;
@@ -7397,53 +7345,12 @@ center+right hidden */
   border-bottom: 1px solid var(--glass-border);
 }
 
-.nx-filter-group > div {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.nx-filter-group label {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
 .nx-filter-group label > span {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.nx-filter-group input,
-.nx-filter-group select {
-  height: 34px;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  padding: 0 10px;
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-  outline: 0;
-}
-
-.nx-filter-group input:focus,
-.nx-filter-group select:focus {
-  border-color: rgba(10, 132, 255, 0.6);
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
-}
-
-.nx-filter-modal__footer {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--glass-border);
 }
 
 .nx-filter-modal__footer-actions {
@@ -13666,21 +13573,6 @@ center+right hidden */
   margin-top: 4px;
 }
 
-.nx-inbox-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 13px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.035);
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-}
-
 .nx-inbox-badge.is-hot {
   color: #ffb45f;
   border-color: rgba(255, 173, 86, 0.28);
@@ -13697,22 +13589,6 @@ center+right hidden */
   color: #55a7ff;
   border-color: rgba(10, 132, 255, 0.26);
   background: rgba(10, 132, 255, 0.08);
-}
-
-.nx-inbox-badge strong {
-  font-size: 17px;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-}
-
-.nx-inbox-badge.is-selected {
-  border-color: rgba(10, 132, 255, 0.64);
-  background: rgba(10, 132, 255, 0.14);
-  color: #8cc5ff;
-  box-shadow:
-    0 0 0 1px rgba(10, 132, 255, 0.24),
-    0 0 24px rgba(10, 132, 255, 0.22),
-    inset 0 1px 0 rgba(124, 190, 255, 0.12);
 }
 
 .nx-sidebar__total-count {
@@ -14314,19 +14190,6 @@ center+right hidden */
 .nx-sidebar__hero.is-waiting    { --hero-accent: #ffd60a; --hero-rgb: 255,214,10;   }
 .nx-sidebar__hero.is-all        { --hero-accent: #0a84ff; --hero-rgb: 10,132,255;   }
 
-/* Card shell */
-.nx-sidebar__hero {
-  position: relative;
-  margin: 8px 10px 0;
-  border-radius: 22px;
-  border: 1px solid rgba(var(--hero-rgb, 255,255,255), 0.34);
-  background:
-    linear-gradient(135deg, rgba(var(--hero-rgb, 255,255,255), 0.2) 0%, rgba(8,11,18,0.95) 58%),
-    rgba(10, 14, 22, 0.97);
-  overflow: hidden;
-  animation: nx-hero-card-glow 3.5s ease-in-out infinite;
-}
-
 @keyframes nx-hero-card-glow {
   0%, 100% {
     box-shadow:
@@ -14342,31 +14205,9 @@ center+right hidden */
   }
 }
 
-/* Animated radial glow layer */
-.nx-sidebar__hero__glow {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at -5% 50%, rgba(var(--hero-rgb, 255,255,255), 0.42) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% -10%, rgba(var(--hero-rgb, 255,255,255), 0.18) 0%, transparent 48%);
-  animation: nx-hero-breathe 3.5s ease-in-out infinite;
-}
-
 @keyframes nx-hero-breathe {
   0%, 100% { opacity: 0.62; }
   50%       { opacity: 1;    }
-}
-
-/* Inner layout */
-.nx-sidebar__hero__inner {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 18px 18px 12px;
 }
 
 .nx-sidebar__hero__text {
@@ -14374,35 +14215,6 @@ center+right hidden */
   flex-direction: column;
   gap: 3px;
   min-width: 0;
-}
-
-.nx-sidebar__hero__label {
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0.18em;
-  color: var(--nexus-text);
-  text-transform: uppercase;
-}
-
-.nx-sidebar__hero__desc {
-  font-size: 11px;
-  font-weight: 520;
-  color: rgba(var(--hero-rgb, 255,255,255), 0.72);
-  letter-spacing: 0.01em;
-  line-height: 1.3;
-}
-
-/* Large count */
-.nx-sidebar__hero__count {
-  font-size: 66px;
-  font-weight: 900;
-  line-height: 1;
-  color: var(--hero-accent, #fff);
-  text-shadow:
-    0 0 18px rgba(var(--hero-rgb, 255,255,255), 0.55),
-    0 0 40px rgba(var(--hero-rgb, 255,255,255), 0.28);
-  animation: nx-hero-count-pulse 3s ease-in-out infinite;
-  flex-shrink: 0;
 }
 
 @keyframes nx-hero-count-pulse {
@@ -14436,30 +14248,6 @@ center+right hidden */
   letter-spacing: 0.06em;
 }
 
-/* ── Hero MODE tabs (PRIORITY / ACTIVE / WAITING / ALL) ────────── */
-.nx-sidebar__hero__modes {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid rgba(var(--hero-rgb, 255,255,255), 0.1);
-  padding: 10px 12px 12px;
-  gap: 10px;
-}
-
-.nx-hero-mode-tab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 6px 12px;
-  border: 1px solid rgba(var(--hero-rgb, 255,255,255), 0.08);
-  border-radius: 16px;
-  background: var(--nexus-surface-overlay);
-  color: var(--nexus-muted);
-  cursor: pointer;
-  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
-}
-
 .nx-hero-mode-tab:last-child {
   border-right: 1px solid rgba(var(--hero-rgb, 255,255,255), 0.08);
 }
@@ -14469,41 +14257,15 @@ center+right hidden */
   color: var(--nexus-muted);
 }
 
-.nx-hero-mode-tab.is-active {
-  color: var(--hero-accent, #fff);
-  background: rgba(var(--hero-rgb, 255,255,255), 0.13);
-  border-color: rgba(10, 132, 255, 0.52);
-  box-shadow:
-    0 0 0 1px rgba(10, 132, 255, 0.16),
-    0 0 28px rgba(10, 132, 255, 0.18);
-  animation: nx-mode-tab-active 3s ease-in-out infinite;
-}
-
 @keyframes nx-mode-tab-active {
   0%, 100% { background: rgba(var(--hero-rgb, 255,255,255), 0.09); }
   50%       { background: rgba(var(--hero-rgb, 255,255,255), 0.15); }
-}
-
-.nx-hero-mode-tab__count {
-  font-size: 22px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  transition: text-shadow 300ms ease;
 }
 
 .nx-hero-mode-tab.is-active .nx-hero-mode-tab__count {
   text-shadow:
     0 0 10px rgba(var(--hero-rgb, 255,255,255), 0.7),
     0 0 24px rgba(var(--hero-rgb, 255,255,255), 0.4);
-}
-
-.nx-hero-mode-tab__label {
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  opacity: 0.7;
 }
 
 .nx-hero-mode-tab.is-active .nx-hero-mode-tab__label {
