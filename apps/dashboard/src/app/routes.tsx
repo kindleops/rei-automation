@@ -15,10 +15,8 @@ import { loadQueue } from '../views/queue/queue.adapter'
 import type { QueueModel } from '../domain/queue/queue.types'
 
 import { KpiIntelligencePage } from '../views/analytics/KpiIntelligencePage'
+import { ClosingDeskView } from '../views/closing-desk/ClosingDeskView'
 
-import { TitleWarRoomPage } from '../modules/title/TitleWarRoomPage'
-import { loadTitle } from '../modules/title/title.adapter'
-import type { TitleModel } from '../modules/title/title.adapter'
 
 import { CampaignsPage } from '../views/campaign-command/CampaignsPage'
 import { EmailCommandCenter } from '../views/email-command/EmailCommandCenter'
@@ -122,11 +120,11 @@ const analyticsRoute = defineRoute<null>({
   render: () => <KpiIntelligencePage />,
 })
 
-const closingDeskRoute = defineRoute<TitleModel>({
+const closingDeskRoute = defineRoute<null>({
   path: '/closing-desk',
   title: 'NEXUS | Closing Desk',
-  loader: loadTitle,
-  render: (data) => <TitleWarRoomPage data={data} />,
+  loader: async () => null,
+  render: () => <ClosingDeskView />,
 })
 
 const campaignCommandRoute = defineRoute<null>({
