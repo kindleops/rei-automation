@@ -2,10 +2,6 @@ import type { ReactNode } from 'react'
 
 import InboxPage from '../modules/inbox/InboxPage'
 
-import { LiveDashboardPage } from '../modules/dashboard/live/LiveDashboardPage'
-import { loadLiveDashboard } from '../modules/dashboard/live/load-live-dashboard'
-import type { LiveDashboardModel } from '../modules/dashboard/live/live-dashboard.adapter'
-
 import { PropertyIntelligenceApp } from '../modules/acquisition/apps/PropertyIntelligenceApp'
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
@@ -112,11 +108,11 @@ const calendarRoute = defineRoute<null>({
   render: () => <InboxPage />,
 })
 
-const mapRoute = defineRoute<LiveDashboardModel>({
+const mapRoute = defineRoute<null>({
   path: '/map',
   title: 'NEXUS | Map',
-  loader: loadLiveDashboard,
-  render: (data) => <LiveDashboardPage data={data} />,
+  loader: async () => null,
+  render: () => <InboxPage />,
 })
 
 const analyticsRoute = defineRoute<null>({
