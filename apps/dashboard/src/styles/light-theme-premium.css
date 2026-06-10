@@ -5893,17 +5893,6 @@ body[data-nexus-theme="light"],
   --aic-text-muted: rgba(51,65,85,0.72) !important;
   --aic-text-faint: rgba(100,116,139,0.55) !important;
 
-  /* store family */
-  --store-bg-a: #ffffff !important;
-  --store-bg-b: #ffffff !important;
-  --store-bg-c: #f8fafc !important;
-  --store-surface-a: #ffffff !important;
-  --store-surface-b: #f8fafc !important;
-  --store-border: rgba(15,23,42,0.10) !important;
-  --store-text: #0f172a !important;
-  --store-muted: rgba(51,65,85,0.72) !important;
-  --store-soft: rgba(100,116,139,0.60) !important;
-
   /* inbox family */
   --inbox-bg: #ffffff !important;
   --inbox-bg-deep: #ffffff !important;
