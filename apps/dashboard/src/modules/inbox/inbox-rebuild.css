@@ -267,45 +267,6 @@
   align-items: center;
 }
 
-.nx-dev-tooltip {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  right: 0;
-  width: max-content;
-  max-width: 240px;
-  background: var(--nexus-panel-strong);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 10px 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
-  opacity: 0;
-  transform: translateY(8px);
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  pointer-events: none;
-  z-index: 200;
-  display: grid;
-  gap: 6px;
-}
-
-.nx-bubble-meta-badge:hover .nx-dev-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.nx-dev-tooltip span {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 10.5px;
-  color: var(--nexus-muted);
-}
-
-.nx-dev-tooltip b {
-  color: var(--nexus-text);
-  font-weight: 700;
-}
-
 /* Mic / Dictation UI Refinements */
 .nx-voice-button.is-listening {
   color: #ff453a !important;
@@ -421,142 +382,6 @@
 .nx-tpl-header__title { font-size: 20px; font-weight: 800; color: var(--nexus-text); }
 .nx-tpl-header__sub { font-size: 13px; color: var(--op-muted); margin-top: 2px; }
 
-.nx-tpl-search-row {
-  padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.02);
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.nx-tpl-search-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-}
-
-.nx-tpl-search {
-  flex: 1;
-  background: transparent;
-  border: 0;
-  outline: 0;
-  color: var(--nexus-text);
-  font-size: 14px;
-}
-
-.nx-tpl-filters {
-  padding: 16px 32px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.nx-tpl-filter-group { display: flex; flex-direction: column; gap: 8px; }
-.nx-tpl-filter-label { font-size: 10px; font-weight: 800; color: var(--op-muted); text-transform: uppercase; letter-spacing: 0.1em; }
-.nx-tpl-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-
-.nx-tpl-chip {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--nexus-muted);
-  font-size: 11px;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.nx-tpl-chip.is-active {
-  background: rgba(10, 132, 255, 0.15);
-  border-color: rgba(10, 132, 255, 0.4);
-  color: var(--nexus-text);
-}
-
-.nx-tpl-list {
-  padding: 24px 32px;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  align-content: start;
-}
-
-.nx-tpl-card {
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.nx-tpl-card:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: var(--nexus-muted);
-  transform: translateY(-2px);
-}
-
-.nx-tpl-card__title { font-size: 14px; font-weight: 700; color: var(--nexus-text); }
-.nx-tpl-card__preview { font-size: 12px; color: var(--nexus-muted); line-height: 1.5; margin: 0; }
-
-.nx-tpl-card__actions {
-  margin-top: auto;
-  display: flex;
-  gap: 6px;
-}
-
-.nx-tpl-action {
-  flex: 1;
-  height: 28px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--nexus-text);
-}
-
-.nx-tpl-action:hover { background: rgba(255, 255, 255, 0.1); }
-.nx-tpl-action--send { background: rgba(10, 132, 255, 0.1); border-color: rgba(10, 132, 255, 0.3); color: #0a84ff; }
-
-/* Dossier Overhaul Styles */
-.nx-dossier-tabs-mini {
-  display: flex;
-  gap: 4px;
-  padding: 2px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-}
-
-.nx-dossier-tabs-mini button {
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--op-muted);
-  border: 0;
-  background: transparent;
-  transition: all 0.2s ease;
-}
-
-.nx-dossier-tabs-mini button.is-active {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--nexus-text);
-}
-
 .nx-dossier-card {
   border: 1px solid var(--op-border);
   border-radius: 12px;
@@ -650,37 +475,6 @@
   margin-left: 2px;
 }
 
-.nx-dossier-aerial-view {
-  width: 100%;
-  height: 120px;
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.nx-dossier-aerial-view img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.nx-dossier-address-block {
-  margin-bottom: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--op-border);
-}
-
-.nx-dossier-address-block strong {
-  display: block;
-  font-size: 14px;
-  color: var(--nexus-text);
-}
-
-.nx-dossier-address-block span {
-  font-size: 11px;
-  color: var(--op-muted);
-}
-
 .nx-dossier-section-title {
   display: flex;
   align-items: center;
@@ -691,21 +485,6 @@
   text-transform: uppercase;
   color: var(--op-accent);
   letter-spacing: 0.08em;
-}
-
-.nx-dossier-next-action {
-  margin-top: 12px;
-  padding: 10px;
-  border-radius: 8px;
-  background: rgba(104, 217, 196, 0.08);
-  border: 1px solid rgba(104, 217, 196, 0.16);
-}
-
-.nx-dossier-next-action p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--nexus-text);
 }
 
 
@@ -729,51 +508,6 @@
   width: 1px;
   height: 20px;
   background: var(--op-border);
-}
-
-.nx-rail-btn {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--op-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--op-muted);
-  font-size: 10px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.nx-rail-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--nexus-muted);
-  color: var(--nexus-text);
-}
-
-.nx-rail-btn svg {
-  width: 12px;
-  height: 12px;
-}
-
-.nx-rail-btn.is-hot:hover {
-  color: #ff9f0a;
-  background: rgba(255, 159, 10, 0.1);
-  border-color: rgba(255, 159, 10, 0.3);
-}
-
-.nx-rail-btn.is-dnc:hover {
-  color: #ff453a;
-  background: rgba(255, 69, 58, 0.1);
-  border-color: rgba(255, 69, 58, 0.3);
-}
-
-.nx-rail-btn.is-resume {
-  color: #30d158;
-  background: rgba(48, 209, 88, 0.1);
 }
 
 .nx-debug-btn-mini {
@@ -826,36 +560,5 @@
 .nx-retry-btn svg {
   width: 10px;
   height: 10px;
-}
-
-.nx-app-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--op-border);
-  border-radius: 8px;
-  color: var(--nexus-text);
-  font-size: 12px;
-  text-decoration: none;
-  transition: all 0.2s;
-  margin-bottom: 6px;
-}
-
-.nx-app-link:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--nexus-muted);
-}
-
-.nx-app-link.podio {
-  color: #0076b6;
-  border-color: rgba(0, 118, 182, 0.3);
-  background: rgba(0, 118, 182, 0.05);
-}
-
-.nx-dossier-links {
-  display: flex;
-  flex-direction: column;
 }
 
