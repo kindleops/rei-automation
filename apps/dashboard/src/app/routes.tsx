@@ -180,7 +180,6 @@ const routes = [
 ]
 
 const legacyRouteAliases: Record<string, string> = {
-  '/dashboard/live': '/map',
   '/dashboard/kpis': '/analytics',
   '/buyer': '/buyer-match',
   '/campaigns': '/campaign-command',

@@ -113,7 +113,6 @@ const canonicalizeRoutePath = (target?: string) => {
   switch (target) {
     case '/':
       return '/inbox'
-    case '/dashboard/live':
     case '/markets':
       return '/map'
     case '/dashboard/kpis':
