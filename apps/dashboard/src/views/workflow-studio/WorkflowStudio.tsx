@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import type { ViewLayoutMode, ViewWidthPercent } from '../inbox/view-layout'
+import type { ViewLayoutMode, ViewWidthPercent } from '../../modules/inbox/view-layout'
 import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from './v2/WorkflowStudioV2'
 import {
   cloneWorkflowDraft,

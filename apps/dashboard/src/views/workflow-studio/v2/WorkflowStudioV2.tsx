@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import type { ViewLayoutMode, ViewWidthPercent } from '../../inbox/view-layout'
+import type { ViewLayoutMode, ViewWidthPercent } from '../../../modules/inbox/view-layout'
 import { buildWorkflowStepPayload } from '../WorkflowBuilder'
 import type { WorkflowNodeLibraryItem } from '../WorkflowList'
 import type { Workflow, WorkflowDetail, WorkflowDryRunResult } from '../workflow.types'

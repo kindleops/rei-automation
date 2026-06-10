@@ -83,8 +83,8 @@ import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { InboxCampaignView } from '../../views/campaign-command/InboxCampaignView'
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
-import { WorkflowStudio } from '../workflows/WorkflowStudio'
-import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from '../workflows/v2/WorkflowStudioV2'
+import { WorkflowStudio } from '../../views/workflow-studio/WorkflowStudio'
+import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from '../../views/workflow-studio/v2/WorkflowStudioV2'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
