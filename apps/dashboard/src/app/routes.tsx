@@ -49,7 +49,7 @@ const rootRoute = defineRoute<null>({
   path: '/',
   title: 'NEXUS | Inbox',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <ConversationView />,
 })
 
 const inboxRoute = defineRoute<null>({
@@ -63,7 +63,7 @@ const conversationRoute = defineRoute<null>({
   path: '/conversation',
   title: 'NEXUS | Conversation',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <ConversationView />,
 })
 
 const dealIntelligenceRoute = defineRoute<AcquisitionWorkspaceModel>({
