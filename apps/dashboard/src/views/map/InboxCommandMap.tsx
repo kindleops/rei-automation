@@ -9,7 +9,7 @@ import { getThreadMessages, type ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { MapSourceMode } from '../../modules/inbox/inbox-layout-state'
 import { buildConversationDecision } from '../../modules/inbox/inbox-decisioning'
-import { buildStreetViewUrl } from '../../modules/inbox/inbox-normalization'
+import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { SellerIntelligenceCard } from './components/SellerIntelligenceCard'
 import {

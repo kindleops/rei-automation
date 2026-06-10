@@ -9,8 +9,8 @@ import {
   buildPropertyExternalLinks,
   buildAerialViewUrl,
   buildStreetViewUrl,
-} from '../inbox-normalization'
-import type { NormalizedPropertySnapshot } from '../inbox-normalization'
+} from '../../../domain/inbox/inbox-normalization'
+import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
 import { Icon, type IconName } from '../../../shared/icons'
 import { 
   formatCurrency, 
