@@ -11,7 +11,7 @@ import type { MapSourceMode } from '../../modules/inbox/inbox-layout-state'
 import { buildConversationDecision } from '../../modules/inbox/inbox-decisioning'
 import { buildStreetViewUrl } from '../../modules/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../modules/inbox/view-layout'
-import { SellerIntelligenceCard } from '../../modules/inbox/components/SellerIntelligenceCard'
+import { SellerIntelligenceCard } from './components/SellerIntelligenceCard'
 import {
   defaultBuyerMapFilters,
   type BuyerCommandData,
