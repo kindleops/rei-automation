@@ -1521,7 +1521,7 @@ export const LinkedRecordsCard = ({ thread }: { thread: WorkflowThread }) => {
         {offerId && <LinkedRecordButton label="Offer App" url={`${baseUrl}/offers/${offerId}`} icon="zap" variant="internal" />}
         {underwritingId && <LinkedRecordButton label="Underwriting App" url={`${baseUrl}/underwriting/${underwritingId}`} icon="stats" variant="internal" />}
         {contractId && <LinkedRecordButton label="Contract App" url={`${baseUrl}/contracts/${contractId}`} icon="briefing" variant="internal" />}
-        {titleId && <LinkedRecordButton label="Title App" url={`${baseUrl}/title/${titleId}`} icon="briefing" variant="internal" />}
+        {titleId && <LinkedRecordButton label="Closing Desk" url={`/closing-desk`} icon="briefing" variant="internal" />}
       </div>
     </DossierCard>
   )
