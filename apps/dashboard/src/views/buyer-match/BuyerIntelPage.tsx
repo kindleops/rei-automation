@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { BuyerModel, BuyerProfile } from './buyer.adapter'
+import type { BuyerModel, BuyerProfile } from '../../domain/buyer/buyer.adapter'
 import { Icon } from '../../shared/icons'
 
 const classes = (...tokens: Array<string | false | null | undefined>) =>

@@ -6,9 +6,9 @@ import { PropertyIntelligenceApp } from '../modules/acquisition/apps/PropertyInt
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
 
-import { BuyerIntelPage } from '../modules/buyer/BuyerIntelPage'
-import { loadBuyer } from '../modules/buyer/buyer.adapter'
-import type { BuyerModel } from '../modules/buyer/buyer.adapter'
+import { BuyerMatchView } from '../views/buyer-match/BuyerMatchView'
+import { loadBuyer } from '../domain/buyer/buyer.adapter'
+import type { BuyerModel } from '../domain/buyer/buyer.adapter'
 
 import { QueueView } from '../views/queue/QueueView'
 import { loadQueue } from '../views/queue/queue.adapter'
@@ -84,7 +84,7 @@ const buyerMatchRoute = defineRoute<BuyerModel>({
   path: '/buyer-match',
   title: 'NEXUS | Buyer Match',
   loader: loadBuyer,
-  render: (data) => <BuyerIntelPage data={data} />,
+  render: (data) => <BuyerMatchView data={data} />,
 })
 
 const queueRoute = defineRoute<QueueModel>({

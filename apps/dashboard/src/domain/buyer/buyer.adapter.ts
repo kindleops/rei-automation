@@ -1,4 +1,4 @@
-import type { CommandCenterStore } from '../../domain/types'
+import type { CommandCenterStore } from '../types'
 import { formatCurrency, formatRelativeTime } from '../../shared/formatters'
 
 export interface BuyerProfile {
