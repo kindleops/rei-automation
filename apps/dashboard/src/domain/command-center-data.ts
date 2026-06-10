@@ -1086,7 +1086,7 @@ export const referenceCommandCenterData: CommandCenterReferenceDataset = {
       detail: 'Houston hot lead has not received follow-up. Auto-escalation triggered.',
       read: false,
       actionLabel: 'View Lead',
-      actionRoute: '/dashboard/live',
+      actionRoute: '/map',
       timestampIso: minutesAgo(2),
     },
     {
