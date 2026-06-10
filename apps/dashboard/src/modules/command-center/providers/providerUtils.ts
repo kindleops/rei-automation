@@ -1,5 +1,5 @@
 import { getSupabaseClient, hasSupabaseEnv } from '../../../lib/supabaseClient'
-import type { CommandResult, GlobalCommandSearchContext } from '.../../domain/command-center/command.types'
+import type { CommandResult, GlobalCommandSearchContext } from '../../../domain/command-center/command.types'
 
 export const normalizeCommandQuery = (query: string): string =>
   query.trim().toLowerCase().replace(/\s+/g, ' ')

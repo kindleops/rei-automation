@@ -1,4 +1,4 @@
-import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext, LocationResult } from '.../../domain/command-center/command.types'
+import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext, LocationResult } from '../../../domain/command-center/command.types'
 
 const LOCAL_STORAGE_KEY = 'leadcommand.commandBar.recentLocations'
 
