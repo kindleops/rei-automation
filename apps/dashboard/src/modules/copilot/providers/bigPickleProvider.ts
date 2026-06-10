@@ -5,7 +5,7 @@
  * seller communications via the Big Pickle neural engine.
  */
 
-import type { CopilotThreadContext, BigPickleDraft } from '../../inbox/copilot/copilot-context'
+import type { CopilotThreadContext, BigPickleDraft } from '../../../lib/data/copilotContextData'
 
 export type ProviderState = 'connected' | 'mock_mode' | 'offline'
 

@@ -5,8 +5,8 @@
  * that the copilot can display and inject into AI conversations.
  */
 
-import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
-import type { ThreadContext, ThreadIntelligenceRecord } from '../../../lib/data/inboxData'
+import type { InboxWorkflowThread } from './inboxWorkflowData'
+import type { ThreadContext, ThreadIntelligenceRecord } from './inboxData'
 
 export interface CopilotThreadContext {
   sellerName: string

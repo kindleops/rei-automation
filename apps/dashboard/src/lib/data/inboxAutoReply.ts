@@ -12,7 +12,7 @@ import {
   renderTemplate, 
   buildTemplateContextFromThread, 
 } from './templateData'
-import { extractCopilotContext, generateBigPickleDraft } from '../../modules/inbox/copilot/copilot-context'
+import { extractCopilotContext, generateBigPickleDraft } from './copilotContextData'
 import { logInboxActivity } from './inboxActivityData'
 import { asString, normalizeStatus, mapErrorMessage, type AnyRecord } from './shared'
 import * as backendClient from '../api/backendClient'
