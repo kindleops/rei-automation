@@ -2892,7 +2892,7 @@ proportional to heat */
 .maplibregl-ctrl-logo {
   display: none !important;
 }
-/* NexusMap container */
+/* Command map container */
 .cc-nexus-map-wrap {
   position: absolute;
   inset: 0;
