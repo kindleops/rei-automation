@@ -1,4 +1,4 @@
-import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, DeliveryStatus, FailureReason, RiskLevel } from './queue.types'
+import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, DeliveryStatus, FailureReason, RiskLevel } from '../../domain/queue/queue.types'
 import { fetchQueueModel } from '../../lib/data/queueData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 

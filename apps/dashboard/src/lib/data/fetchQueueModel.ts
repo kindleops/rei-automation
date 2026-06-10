@@ -1,7 +1,7 @@
 import { getSupabaseClient } from '../supabaseClient'
 import { asBoolean, asIso, asNumber, asString, getFirst, safeArray, type AnyRecord } from './shared'
-import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason } from '../../views/queue/queue.types'
-import { classifyQueueFailure } from '../../views/queue/classifyFailure'
+import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason } from '../../domain/queue/queue.types'
+import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
 import { getBackendBaseUrl } from '../api/backendClient'
 
 const toQueueStatus = (value: unknown): QueueItemStatus => {

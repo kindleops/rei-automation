@@ -12,7 +12,7 @@ import type { BuyerModel } from '../modules/buyer/buyer.adapter'
 
 import { QueueView } from '../views/queue/QueueView'
 import { loadQueue } from '../views/queue/queue.adapter'
-import type { QueueModel } from '../views/queue/queue.types'
+import type { QueueModel } from '../domain/queue/queue.types'
 
 import { KpiIntelligencePage } from '../modules/kpis/KpiIntelligencePage'
 

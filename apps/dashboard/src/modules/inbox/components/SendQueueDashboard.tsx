@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { QueueItem, QueueModel } from '../../../views/queue/queue.types'
+import type { QueueItem, QueueModel } from '../../../domain/queue/queue.types'
 import type { QueueCommandMode } from './QueueCommandCenter'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
 import type { ViewLayoutMode } from '../view-layout'

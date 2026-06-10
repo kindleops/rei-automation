@@ -1,5 +1,5 @@
 import { QueuePage } from './QueuePage'
-import type { QueueModel } from './queue.types'
+import type { QueueModel } from '../../domain/queue/queue.types'
 
 interface QueueViewProps {
   data: QueueModel

@@ -1,7 +1,7 @@
 import { type FC } from 'react'
 import { emitNotification } from '../../../../shared/NotificationToast'
 
-import type { QueueItem } from '../../../../views/queue/queue.types'
+import type { QueueItem } from '../../../../domain/queue/queue.types'
 
 export interface SenderNumberHealth {
   number: string

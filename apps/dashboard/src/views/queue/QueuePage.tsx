@@ -11,7 +11,7 @@ import {
   type QueueModel,
   type QueueItem,
 } from '../../lib/data/queueData'
-import type { QueueItemStatus } from './queue.types'
+import type { QueueItemStatus } from '../../domain/queue/queue.types'
 import { Icon } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'

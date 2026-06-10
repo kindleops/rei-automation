@@ -5,7 +5,7 @@ import type { QueueCommandMode } from '../QueueCommandCenter'
 interface QueueHealthPanelProps {
   processorHealth: QueueProcessorHealth | null
   queueCommandMode: QueueCommandMode
-  items: import('../../../../views/queue/queue.types').QueueItem[]
+  items: import('../../../../domain/queue/queue.types').QueueItem[]
   readyCount: number
   scheduledCount: number
   sentTodayCount: number
