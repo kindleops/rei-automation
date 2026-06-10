@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import InboxPage from '../modules/inbox/InboxPage'
+import { InboxView } from '../views/inbox/InboxView'
 
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
@@ -56,7 +56,7 @@ const inboxRoute = defineRoute<null>({
   path: '/inbox',
   title: 'NEXUS | Inbox',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <InboxView />,
 })
 
 const conversationRoute = defineRoute<null>({
