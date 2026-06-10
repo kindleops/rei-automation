@@ -17,11 +17,11 @@ import {
   type CalendarScopeMode,
   type CalendarViewMode,
   type ExecutionSummaryCard,
-} from '../../../lib/data/calendarData'
-import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
-import type { ViewLayoutMode } from '../view-layout'
-import { formatCurrency, formatRelativeTime } from '../../../shared/formatters'
-import { Icon } from '../../../shared/icons'
+} from '../../lib/data/calendarData'
+import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import type { ViewLayoutMode } from '../../modules/inbox/view-layout'
+import { formatCurrency, formatRelativeTime } from '../../shared/formatters'
+import { Icon } from '../../shared/icons'
 import { CalendarHeader } from './CalendarHeader'
 import { CalendarModeTabs } from './CalendarModeTabs'
 import { CalendarRightRail } from './CalendarRightRail'

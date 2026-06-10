@@ -1,4 +1,4 @@
-import type { ExecutionSummaryCard } from '../../../lib/data/calendarData'
+import type { ExecutionSummaryCard } from '../../lib/data/calendarData'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 

@@ -1,4 +1,4 @@
-import type { CalendarEvent } from '../../../lib/data/calendarData'
+import type { CalendarEvent } from '../../lib/data/calendarData'
 import { TimelineExecutionFeed } from './TimelineExecutionFeed'
 
 type CalendarRightRailProps = {

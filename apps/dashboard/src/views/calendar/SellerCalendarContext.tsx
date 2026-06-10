@@ -1,4 +1,4 @@
-import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 
 type ContextStat = {
   label: string

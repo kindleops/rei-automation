@@ -1,5 +1,5 @@
-import type { CalendarScopeMode } from '../../../lib/data/calendarData'
-import { Icon } from '../../../shared/icons'
+import type { CalendarScopeMode } from '../../lib/data/calendarData'
+import { Icon } from '../../shared/icons'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 

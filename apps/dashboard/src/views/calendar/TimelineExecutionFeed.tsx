@@ -1,6 +1,6 @@
-import type { CalendarEvent } from '../../../lib/data/calendarData'
-import { formatRelativeTime } from '../../../shared/formatters'
-import { Icon, type IconName } from '../../../shared/icons'
+import type { CalendarEvent } from '../../lib/data/calendarData'
+import { formatRelativeTime } from '../../shared/formatters'
+import { Icon, type IconName } from '../../shared/icons'
 import { CalendarEmptyState } from './CalendarEmptyState'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')

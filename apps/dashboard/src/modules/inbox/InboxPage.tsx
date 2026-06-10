@@ -70,7 +70,7 @@ import { CompIntelligenceWorkspace } from './components/CompIntelligenceWorkspac
 import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
 import { SendQueueDashboard } from './components/SendQueueDashboard'
 import { InboxPipelineView } from '../../views/pipeline/InboxPipelineView'
-import { InboxCalendarView } from './components/InboxCalendarView'
+import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import { MetricsWarRoom } from './components/MetricsWarRoom'
 import type { TemplateActionPayload } from './components/TemplatePopover'
 import { InboxActivityPanel } from './components/InboxActivityPanel'
