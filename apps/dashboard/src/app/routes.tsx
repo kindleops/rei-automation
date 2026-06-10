@@ -10,7 +10,7 @@ import { BuyerIntelPage } from '../modules/buyer/BuyerIntelPage'
 import { loadBuyer } from '../modules/buyer/buyer.adapter'
 import type { BuyerModel } from '../modules/buyer/buyer.adapter'
 
-import { QueuePage } from '../modules/queue/QueuePage'
+import { QueueView } from '../views/queue/QueueView'
 import { loadQueue } from '../modules/queue/queue.adapter'
 import type { QueueModel } from '../modules/queue/queue.types'
 
@@ -91,7 +91,7 @@ const queueRoute = defineRoute<QueueModel>({
   path: '/queue',
   title: 'NEXUS | Queue',
   loader: loadQueue,
-  render: (data) => <QueuePage data={data} />,
+  render: (data) => <QueueView data={data} />,
 })
 
 const pipelineRoute = defineRoute<null>({
