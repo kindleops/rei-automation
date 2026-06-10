@@ -12,7 +12,7 @@ import { emitNotification } from '../../shared/NotificationToast'
 import { loadCampaigns, fetchCampaignTargets } from './campaigns.adapter'
 import type { CampaignModel, CampaignSummary, CampaignTarget, CampaignStatus, CampaignCommandState } from './campaigns.types'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import type { ViewWidthPercent, ViewLayoutMode } from '../inbox/view-layout'
+import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { CreateCampaignModal } from './CreateCampaignModal'
 import {
   cls,

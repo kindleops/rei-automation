@@ -820,7 +820,7 @@ export function CompIntelligenceWorkspace({
         </div>
 
         {mapMode === 'heat_map' ? (
-          <DemandPanel />
+          <MarketEvidencePanel />
         ) : (
           <>
             {/* Valuation Hero */}

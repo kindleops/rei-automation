@@ -71,7 +71,7 @@ interface NexusTopBarProps {
   onOpenKpis: () => void
   onOpenActivity: () => void
   onOpenTasks: () => void
-  onOpenSettings: () => void
+  onOpenSettings?: () => void
   onResetLayout: () => void
   dryRun: boolean
   onToggleDryRun: () => void
@@ -685,7 +685,7 @@ export const NexusTopBar = ({
         {openQuickMenu === 'profile' && (
           <div className="nx-avatar-popover nx-liquid-popover">
             <button type="button" onClick={onOpenDossier}><Icon name="briefing" /> Profile</button>
-            <button type="button" onClick={onOpenSettings}><Icon name="settings" /> Settings</button>
+            {onOpenSettings && <button type="button" onClick={onOpenSettings}><Icon name="settings" /> Settings</button>}
             <button type="button" onClick={() => onWorkspaceSettings?.()}><Icon name="layout-split" /> Workspace Settings</button>
             <button type="button" onClick={onOpenKpis}><Icon name="stats" /> Theme Settings</button>
             <button type="button" onClick={onOpenKeys}><Icon name="key" /> Keyboard Shortcuts</button>

@@ -5,6 +5,7 @@ import { InboxView } from '../views/inbox/InboxView'
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
 import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
+import { ConversationView } from '../views/conversation/ConversationView'
 
 import { BuyerMatchView } from '../views/buyer-match/BuyerMatchView'
 import { loadBuyer } from '../domain/buyer/buyer.adapter'
@@ -75,7 +76,7 @@ const compIntelligenceRoute = defineRoute<null>({
   path: '/comp-intelligence',
   title: 'NEXUS | Comp Intelligence',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <InboxView />,
 })
 
 const buyerMatchRoute = defineRoute<BuyerModel>({
@@ -96,21 +97,21 @@ const pipelineRoute = defineRoute<null>({
   path: '/pipeline',
   title: 'NEXUS | Pipeline',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <InboxView />,
 })
 
 const calendarRoute = defineRoute<null>({
   path: '/calendar',
   title: 'NEXUS | Calendar',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <InboxView />,
 })
 
 const mapRoute = defineRoute<null>({
   path: '/map',
   title: 'NEXUS | Map',
   loader: async () => null,
-  render: () => <InboxPage />,
+  render: () => <InboxView />,
 })
 
 const analyticsRoute = defineRoute<null>({

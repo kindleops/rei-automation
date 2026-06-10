@@ -66,6 +66,7 @@ export type InboxViewSelectValue =
   | 'all_messages'
 
 
+import type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
 export type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
 
 export interface InboxAdvancedFilters {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { Icon } from '../../shared/icons'
-import type { ViewWidthPercent } from '../inbox/view-layout'
+import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
 import {
   getEmailOverview,
   getEmailRecords,

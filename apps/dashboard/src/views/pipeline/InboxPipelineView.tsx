@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { formatCurrency, formatPercent, formatPhone, formatRelativeTime } from '../../shared/formatters'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
-import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
+import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')

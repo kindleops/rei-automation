@@ -748,7 +748,7 @@ export const WorkflowCanvasV2 = ({
             disabled={!selectedNode}
             onClick={zoomToSelected}
           >
-            <Icon name="focus" /> Focus
+            Focus
           </button>
 
           <button
