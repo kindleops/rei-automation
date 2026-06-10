@@ -1607,7 +1607,6 @@
 }
 
 
-
 .nx-utility-btn {
   height: 32px;
   display: inline-flex;
@@ -2207,7 +2206,6 @@
 }
 
 
-
 .nx-liquid-popover {
   position: absolute;
   top: calc(100% + 8px);
@@ -2225,9 +2223,6 @@
   animation: nx-panel-drop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top right;
 }
-
-
-
 
 
 .nx-advanced-grid label {
@@ -2571,8 +2566,6 @@
   from { opacity: 0; transform: translateY(20px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-
-
 
 
 .nx-activity-list {
@@ -3154,7 +3147,6 @@
 }
 
 
-
 /* Premium Chat Bubbles (Phase 3) */
 .nx-bubble-wrap {
   position: relative;
@@ -3236,16 +3228,6 @@
 .nx-delivery-dot.is-delivered { background: #30d158; box-shadow: 0 0 6px #30d158; }
 .nx-delivery-dot.is-failed { background: #ff453a; box-shadow: 0 0 6px #ff453a; }
 .nx-delivery-dot.is-pending { background: #ffd60a; box-shadow: 0 0 6px #ffd60a; }
-
-
-
-
-
-
-
-
-
-
 
 
 .nx-search-results-popover {
@@ -5597,7 +5579,6 @@
 .nx-icm__empty > * {
   pointer-events: auto;
 }
-
 
 
 .nx-icm__toolbar {
@@ -8212,13 +8193,6 @@
 /* ─── Status Menu in Topbar ──────────────────────────────────────────── */
 
 
-
-
-
-
-
-
-
 /* ─── Notification Badge in Topbar ───────────────────────────────────── */
 
 .nx-stage-control {
@@ -9265,7 +9239,6 @@
   box-shadow: var(--nx-glass-shadow-sm), var(--nx-glass-inner-highlight) !important;
   color: var(--nx-glass-text) !important;
 }
-
 
 
 /* ── DEFINITIVE COMPOSER UTILITY ROW (TASK 7 REFINEMENT) ────────────────── */
@@ -19711,7 +19684,6 @@
 
 
 /* Pipeline View — styles moved to pipeline-view.css (plv-* namespace) */
-
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
