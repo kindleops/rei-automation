@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { getThreadMessages, type ThreadMessage } from '../../../lib/data/inboxData'
 import { buildStreetViewUrl } from '../inbox-normalization'
 import '../seller-intelligence-card.css'
-import '../map-intelligence-cards.css'
+import '../../../views/map/map-intelligence-cards.css'
 
 type SellerRecord = Record<string, unknown>
 type DensityMode = 'compact' | 'balanced' | 'expanded' | 'full'
