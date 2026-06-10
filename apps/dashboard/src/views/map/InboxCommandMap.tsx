@@ -50,7 +50,7 @@ import {
   type CommandMapThemeDefinition,
   type MapStyleMode,
 } from './commandMapThemes'
-import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from '../../modules/dashboard/live/map/pin-icons'
+import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from './pin-icons'
 import {
   getMapThemeTokens,
   buildClusterRingExpr,

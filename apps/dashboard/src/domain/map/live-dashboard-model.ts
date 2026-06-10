@@ -1,4 +1,4 @@
-import type { CommandCenterStore, OwnerType, PipelineStage, PropertyType, Sentiment, OperationalRisk, AlertPriority, StageMomentum } from '../../../domain/types'
+import type { CommandCenterStore, OwnerType, PipelineStage, PropertyType, Sentiment, OperationalRisk, AlertPriority, StageMomentum } from '../types'
 
 export interface SystemHealthItem {
   id: string

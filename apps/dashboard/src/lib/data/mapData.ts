@@ -1,4 +1,4 @@
-import type { LiveDashboardModel } from '../../modules/dashboard/live/live-dashboard.adapter'
+import type { LiveDashboardModel } from '../../domain/map/live-dashboard-model'
 import { getSupabaseClient } from '../supabaseClient'
 import { getDealContextList } from './dealContext'
 import {
