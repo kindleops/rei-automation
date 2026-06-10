@@ -6,7 +6,7 @@ import type {
   QueueItemStatus,
   QueueModel,
   RiskLevel,
-} from '../../modules/queue/queue.types'
+} from '../../views/queue/queue.types'
 
 export type {
   DeliveryStatus,
