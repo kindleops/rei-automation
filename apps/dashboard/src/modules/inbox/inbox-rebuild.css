@@ -9,50 +9,6 @@
   background: radial-gradient(1000px 300px at 10% 0%, #12233b 0%, transparent 60%), linear-gradient(180deg, var(--op-bg-1) 0%, var(--op-bg-0) 100%);
 }
 
-.nx-sticky-composer {
-  position: sticky;
-  bottom: 0;
-  width: 100%;
-  padding: 16px 20px 24px;
-  background: linear-gradient(0deg, var(--op-bg) 0%, rgba(8, 11, 18, 0.8) 50%, transparent 100%);
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-/* Removed nx-composer-utility-row styles - moved to premium */
-
-.nx-utility-btn {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--op-muted);
-  font-size: 11px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.nx-utility-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--nexus-muted);
-  color: var(--nexus-text);
-}
-
-.nx-utility-btn.is-active,
-.nx-utility-btn.is-translating-active {
-  background: rgba(10, 132, 255, 0.12);
-  border-color: rgba(10, 132, 255, 0.3);
-  color: #0a84ff;
-}
-
 .nx-composer-input-area {
   width: 100%;
   max-width: 800px;
@@ -259,14 +215,6 @@
   color: #ff453a;
 }
 
-/* Dev Tooltip on Hover */
-.nx-bubble-meta-badge {
-  position: relative;
-  cursor: help;
-  display: inline-flex;
-  align-items: center;
-}
-
 /* Mic / Dictation UI Refinements */
 .nx-voice-button.is-listening {
   color: #ff453a !important;
@@ -390,40 +338,6 @@
   overflow: hidden;
 }
 
-.nx-dossier-card__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid var(--op-border);
-}
-
-.nx-dossier-card__header h3 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--op-muted);
-}
-
-.nx-dossier-card__header svg {
-  width: 14px;
-  height: 14px;
-  color: var(--op-accent);
-}
-
-.nx-dossier-card__body {
-  padding: 12px;
-}
-
-.nx-dossier-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
 .nx-dossier-metric {
   display: flex;
   align-items: center;
@@ -473,41 +387,6 @@
   font-size: 10px;
   color: var(--op-muted);
   margin-left: 2px;
-}
-
-.nx-dossier-section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 14px 0 6px;
-  font-size: 10px;
-  font-weight: 900;
-  text-transform: uppercase;
-  color: var(--op-accent);
-  letter-spacing: 0.08em;
-}
-
-
-/* Operator Rail & Timeline Enhancements */
-.nx-operator-rail {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid var(--op-border);
-  backdrop-filter: blur(8px);
-}
-
-.nx-rail-group {
-  display: flex;
-  gap: 6px;
-}
-
-.nx-rail-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--op-border);
 }
 
 .nx-debug-btn-mini {
