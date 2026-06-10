@@ -133,10 +133,6 @@ const canonicalizeRoutePath = (target?: string) => {
     case '/mobile':
     case '/notifications':
       return '/inbox'
-      return '/queue'
-      return '/closing-desk'
-      return '/analytics'
-      return '/map'
     default:
       return target || '/inbox'
   }
