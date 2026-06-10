@@ -21,7 +21,7 @@ import { loadTitle } from '../modules/title/title.adapter'
 import type { TitleModel } from '../modules/title/title.adapter'
 
 import { CampaignsPage } from '../views/campaign-command/CampaignsPage'
-import { EmailCommandCenter } from '../modules/email/EmailCommandCenter'
+import { EmailCommandCenter } from '../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../modules/workflows/v2/WorkflowStudioV2'
 
 interface AppRoute<TData> {
