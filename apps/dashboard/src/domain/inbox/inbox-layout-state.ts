@@ -1,4 +1,4 @@
-import type { InboxSavedFilterPreset } from '../../modules/inbox/inbox-ui-helpers'
+import type { InboxSavedFilterPreset } from './inbox-filter-types'
 
 export type NexusTheme = 'dark' | 'light'
 export type PanelMode = 'default' | 'hidden' | 'half' | 'full'
