@@ -33,7 +33,7 @@ import type {
   AcquisitionRecordSummary,
   AcquisitionRecordType,
   AcquisitionUnderwriting,
-} from '../../modules/acquisition/acquisition.types'
+} from '../../domain/acquisition/acquisition.types'
 
 export interface AcquisitionFilters {
   market?: string

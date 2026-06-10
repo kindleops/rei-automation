@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 import { InboxView } from '../views/inbox/InboxView'
 
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
-import { loadAcquisitionWorkspace } from '../modules/acquisition/acquisition.adapter'
-import type { AcquisitionWorkspaceModel } from '../modules/acquisition/acquisition.types'
+import { loadAcquisitionWorkspace } from '../domain/acquisition/acquisition.adapter'
+import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
 import { ConversationView } from '../views/conversation/ConversationView'
 
 import { BuyerMatchView } from '../views/buyer-match/BuyerMatchView'
