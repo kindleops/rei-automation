@@ -11,7 +11,7 @@ import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import type { DealContext } from '../../../lib/data/dealContext'
-import '../acquisition-cockpit.css'
+import '../buyer-match-workspace.css'
 
 const IS_DEV = import.meta.env.DEV
 

@@ -120,36 +120,22 @@ const canonicalizeRoutePath = (target?: string) => {
       return '/analytics'
     case '/buyer':
       return '/buyer-match'
-      return '/closing-desk'
     case '/campaigns':
       return '/campaign-command'
     case '/email':
       return '/email-command'
     case '/workflows-v2':
-    case '/acquisition/automations':
       return '/workflow-studio'
     case '/properties':
-    case '/acquisition':
-    case '/acquisition/owners':
-    case '/acquisition/properties':
-    case '/acquisition/prospects':
-    case '/acquisition/contacts':
-    case '/acquisition/underwriting':
     case '/dossier':
     case '/watchlists':
       return '/deal-intelligence'
-    case '/acquisition/inbox':
     case '/mobile':
     case '/notifications':
       return '/inbox'
-    case '/acquisition/queue':
       return '/queue'
-    case '/acquisition/offers':
       return '/closing-desk'
-    case '/acquisition/ai-brain':
       return '/analytics'
-    case '/acquisition/map':
-    case '/acquisitions/map':
       return '/map'
     default:
       return target || '/inbox'
