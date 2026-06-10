@@ -76,7 +76,7 @@ const compIntelligenceRoute = defineRoute<null>({
   path: '/comp-intelligence',
   title: 'NEXUS | Comp Intelligence',
   loader: async () => null,
-  render: () => <InboxView />,
+  render: () => <InboxView initialWorkspaceView="comp_intelligence" />,
 })
 
 const buyerMatchRoute = defineRoute<BuyerModel>({
@@ -97,21 +97,21 @@ const pipelineRoute = defineRoute<null>({
   path: '/pipeline',
   title: 'NEXUS | Pipeline',
   loader: async () => null,
-  render: () => <InboxView />,
+  render: () => <InboxView initialWorkspaceView="pipeline" />,
 })
 
 const calendarRoute = defineRoute<null>({
   path: '/calendar',
   title: 'NEXUS | Calendar',
   loader: async () => null,
-  render: () => <InboxView />,
+  render: () => <InboxView initialWorkspaceView="calendar" />,
 })
 
 const mapRoute = defineRoute<null>({
   path: '/map',
   title: 'NEXUS | Map',
   loader: async () => null,
-  render: () => <InboxView />,
+  render: () => <InboxView initialWorkspaceView="command_map" />,
 })
 
 const analyticsRoute = defineRoute<null>({

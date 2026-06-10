@@ -343,6 +343,16 @@ const DEFAULT_WORKSPACE_WIDTHS: Partial<Record<InboxWorkspaceView, ViewWidthPerc
 const sumWidths = (values: ViewWidthPercent[]) => values.reduce((total, value) => total + Number(value), 0)
 const cloneDefaultWorkspaceViews = (): InboxWorkspaceView[] => [...DEFAULT_WORKSPACE_VIEWS]
 const cloneDefaultWorkspaceWidths = (): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => ({ ...DEFAULT_WORKSPACE_WIDTHS })
+
+type InboxPageProps = {
+  initialWorkspaceView?: InboxWorkspaceView
+}
+
+const getInitialWorkspaceViews = (initialWorkspaceView?: InboxWorkspaceView): InboxWorkspaceView[] =>
+  initialWorkspaceView ? [initialWorkspaceView] : cloneDefaultWorkspaceViews()
+
+const getInitialWorkspaceWidths = (initialWorkspaceView?: InboxWorkspaceView): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> =>
+  initialWorkspaceView ? {} : cloneDefaultWorkspaceWidths()
 const DEFAULT_WORKSPACE_KEY: NexusWorkspaceKey = 'deal_desk'
 const WORKSPACE_VIEWS_STORAGE_KEY = 'nx.inbox.workspace-views-by-key'
 const isDefaultWorkspaceSet = (views: InboxWorkspaceView[]) =>
@@ -497,7 +507,7 @@ const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): 
   return 'assisted'
 }
 
-export default function InboxPage() {
+export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {}) {
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messageRefetchKey, setMessageRefetchKey] = useState(0)
   const {
@@ -520,8 +530,8 @@ export default function InboxPage() {
   const [rightViewFilter, setRightViewFilter] = useState<InboxViewSelectValue>('new_replies')
   const [rightSavedPreset, setRightSavedPreset] = useState<InboxSavedFilterPreset>('new_inbounds')
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<NexusWorkspaceKey>(DEFAULT_WORKSPACE_KEY)
-  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(cloneDefaultWorkspaceViews)
-  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(cloneDefaultWorkspaceWidths)
+  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() => getInitialWorkspaceViews(initialWorkspaceView))
+  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() => getInitialWorkspaceWidths(initialWorkspaceView))
   const [tableSort, setTableSort] = useState<ConversationTableSort>('last_activity_desc')
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
@@ -595,7 +605,7 @@ export default function InboxPage() {
   const prevThreadsRef = useRef<InboxWorkflowThread[]>([])
   useEffect(() => {
     console.log('[InboxPage] mounted')
-  }, [])
+  }, [initialWorkspaceView])
 
   const rawThreads = useMemo(() => (data.threads ?? []).map(toWorkflowThread), [data.threads])
   const threads = useMemo(() => {
@@ -2019,34 +2029,37 @@ export default function InboxPage() {
   useEffect(() => {
     try {
       setSelectedWorkspaceKey(DEFAULT_WORKSPACE_KEY)
-      setSelectedWorkspaceViews(cloneDefaultWorkspaceViews())
-      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
-      let initialViews = cloneDefaultWorkspaceViews()
-      let initialWidths = cloneDefaultWorkspaceWidths()
-      const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
-      let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
-      try {
-        const raw = window.localStorage.getItem(WORKSPACE_VIEWS_STORAGE_KEY)
-        if (raw) savedViewsByWorkspace = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
-      } catch {}
-      if (savedWorkspaceKey) {
-        const preset = NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === savedWorkspaceKey)
-        if (preset) {
-          setSelectedWorkspaceKey(preset.key)
-          const savedViews = savedViewsByWorkspace[preset.key]
-          const nextViews = Array.isArray(savedViews) && savedViews.length > 0
-            ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
-            : [...preset.views]
-          setSelectedWorkspaceViews(nextViews)
-          initialViews = nextViews
-          initialWidths = sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
-          setWorkspaceWidthOverrides(initialWidths)
+      let initialViews = getInitialWorkspaceViews(initialWorkspaceView)
+      let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView)
+      setSelectedWorkspaceViews(initialViews)
+      setWorkspaceWidthOverrides(initialWidths)
+
+      if (initialWorkspaceView === undefined) {
+        const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
+        let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
+        try {
+          const raw = window.localStorage.getItem(WORKSPACE_VIEWS_STORAGE_KEY)
+          if (raw) savedViewsByWorkspace = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
+        } catch {}
+        if (savedWorkspaceKey) {
+          const preset = NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === savedWorkspaceKey)
+          if (preset) {
+            setSelectedWorkspaceKey(preset.key)
+            const savedViews = savedViewsByWorkspace[preset.key]
+            const nextViews = Array.isArray(savedViews) && savedViews.length > 0
+              ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
+              : [...preset.views]
+            setSelectedWorkspaceViews(nextViews)
+            initialViews = nextViews
+            initialWidths = sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
+            setWorkspaceWidthOverrides(initialWidths)
+          }
         }
-      }
-      const savedOverrides = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
-      if (savedOverrides) {
-        const parsed = JSON.parse(savedOverrides) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
-        setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(initialViews, { ...initialWidths, ...parsed }))
+        const savedOverrides = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
+        if (savedOverrides) {
+          const parsed = JSON.parse(savedOverrides) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
+          setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(initialViews, { ...initialWidths, ...parsed }))
+        }
       }
       const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
       const savedCaps = window.localStorage.getItem('nx.queue.caps')

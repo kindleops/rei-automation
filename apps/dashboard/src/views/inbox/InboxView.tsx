@@ -1,5 +1,15 @@
 import InboxPage from '../../modules/inbox/InboxPage'
 
-export function InboxView() {
-  return <InboxPage />
+type InboxInitialWorkspaceView =
+  | 'comp_intelligence'
+  | 'pipeline'
+  | 'calendar'
+  | 'command_map'
+
+interface InboxViewProps {
+  initialWorkspaceView?: InboxInitialWorkspaceView
+}
+
+export function InboxView({ initialWorkspaceView }: InboxViewProps = {}) {
+  return <InboxPage initialWorkspaceView={initialWorkspaceView} />
 }
