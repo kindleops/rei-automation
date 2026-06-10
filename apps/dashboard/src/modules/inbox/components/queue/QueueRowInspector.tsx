@@ -1,5 +1,5 @@
 import { type FC } from 'react'
-import type { QueueItem } from '../../../queue/queue.types'
+import type { QueueItem } from '../../../../views/queue/queue.types'
 
 const relTime = (iso: string | null | undefined): string => {
   if (!iso) return '—'

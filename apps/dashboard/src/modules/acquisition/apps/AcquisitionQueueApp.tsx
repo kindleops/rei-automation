@@ -1,7 +1,7 @@
 import { AcquisitionAppShell } from '../components/AcquisitionAppShell'
-import { QueuePage } from '../../queue/QueuePage'
+import { QueuePage } from '../../../views/queue/QueuePage'
 import type { AcquisitionWorkspaceModel } from '../acquisition.types'
-import type { QueueModel } from '../../queue/queue.types'
+import type { QueueModel } from '../../../views/queue/queue.types'
 
 interface AcquisitionQueueAppProps {
   data: AcquisitionWorkspaceModel & { queueData: QueueModel }
