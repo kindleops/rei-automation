@@ -6,7 +6,7 @@ import type {
   OwnerType,
   SellerDossier,
   Temperature,
-} from '../../modules/dossier/dossier.types'
+} from '../../domain/dossier/dossier.types'
 import { getSupabaseClient } from '../supabaseClient'
 import {
   asIso,
