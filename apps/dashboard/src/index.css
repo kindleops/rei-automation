@@ -9453,14 +9453,14 @@ h3 { font-size: 0.8125rem; }
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Shared room base */
-.nx-inbox, .nx-alerts, .nx-stats, .nx-markets,
-.nx-buyer, .nx-title, .nx-watchlists, .nx-notifications, .nx-settings {
+.nx-inbox, .nx-alerts, .nx-markets,
+.nx-buyer, .nx-watchlists, .nx-notifications {
   --room-accent: var(--tone-primary);
   position: relative;
 }
 
-.nx-inbox::before, .nx-alerts::before, .nx-stats::before, .nx-markets::before,
-.nx-buyer::before, .nx-title::before, .nx-watchlists::before, .nx-notifications::before, .nx-settings::before {
+.nx-inbox::before, .nx-alerts::before, .nx-markets::before,
+.nx-buyer::before, .nx-watchlists::before, .nx-notifications::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -9535,7 +9535,6 @@ h3 { font-size: 0.8125rem; }
 
 
   .nx-alerts__grid,
-  .nx-title__grid,
   .nx-watchlists__grid {
     grid-template-columns: 1fr;
   }
