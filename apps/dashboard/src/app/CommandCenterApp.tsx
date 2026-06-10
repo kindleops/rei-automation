@@ -117,13 +117,10 @@ const canonicalizeRoutePath = (target?: string) => {
     case '/markets':
       return '/map'
     case '/dashboard/kpis':
-    case '/stats':
-    case '/alerts':
     case '/agents':
       return '/analytics'
     case '/buyer':
       return '/buyer-match'
-    case '/title':
       return '/closing-desk'
     case '/campaigns':
       return '/campaign-command'
@@ -145,7 +142,6 @@ const canonicalizeRoutePath = (target?: string) => {
     case '/acquisition/inbox':
     case '/mobile':
     case '/notifications':
-    case '/settings':
     case '/command-store':
       return '/inbox'
     case '/acquisition/queue':

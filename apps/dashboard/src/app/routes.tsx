@@ -181,9 +181,7 @@ const routes = [
 const legacyRouteAliases: Record<string, string> = {
   '/dashboard/live': '/map',
   '/dashboard/kpis': '/analytics',
-  '/stats': '/analytics',
   '/buyer': '/buyer-match',
-  '/title': '/closing-desk',
   '/campaigns': '/campaign-command',
   '/email': '/email-command',
   '/workflows-v2': '/workflow-studio',
@@ -203,14 +201,12 @@ const legacyRouteAliases: Record<string, string> = {
   '/acquisitions/map': '/map',
   '/acquisition/automations': '/workflow-studio',
 
-  '/alerts': '/analytics',
   '/markets': '/map',
   '/dossier': '/deal-intelligence',
   '/agents': '/analytics',
   '/mobile': '/inbox',
   '/notifications': '/inbox',
   '/watchlists': '/deal-intelligence',
-  '/settings': '/inbox',
   '/command-store': '/inbox',
 }
 
