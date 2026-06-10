@@ -201,7 +201,7 @@ export const AcquisitionSpaceDashboard = ({ data }: AcquisitionSpaceDashboardPro
         </div>
 
         <div className="acq-header__actions">
-          <button type="button" onClick={() => pushRoutePath('/command-store')}>
+          <button type="button" onClick={() => pushRoutePath('/workflow-studio')}>
             New Campaign
           </button>
           <button type="button" onClick={() => pushRoutePath('/acquisition/inbox')}>

@@ -208,7 +208,6 @@ const legacyRouteAliases: Record<string, string> = {
   '/mobile': '/inbox',
   '/notifications': '/inbox',
   '/watchlists': '/deal-intelligence',
-  '/command-store': '/inbox',
 }
 
 const normalizePath = (path: string) => {

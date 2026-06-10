@@ -142,7 +142,6 @@ const canonicalizeRoutePath = (target?: string) => {
     case '/acquisition/inbox':
     case '/mobile':
     case '/notifications':
-    case '/command-store':
       return '/inbox'
     case '/acquisition/queue':
       return '/queue'
