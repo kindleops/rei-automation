@@ -140,7 +140,7 @@ export const buildInboxNotifications = ({
       related_contract_id: null,
       source: 'Offer Engine',
       action_label: 'Review Offer',
-      action_href: '/dashboard/kpis',
+      action_href: '/analytics',
     })
   }
 

@@ -3936,7 +3936,7 @@ export default function InboxPage() {
         onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
         onOpenAi={() => setActiveOverlay('ai')}
         onOpenKeys={() => setActiveOverlay('keys')}
-        onOpenKpis={() => pushRoutePath('/dashboard/kpis')}
+        onOpenKpis={() => pushRoutePath('/analytics')}
         onOpenActivity={() => setActiveOverlay('activity')}
         onOpenTasks={() => emitNotification({ title: 'Tasks', detail: 'Tasks menu is coming soon.', severity: 'warning' })}
         onOpenSettings={() => pushRoutePath('/settings')}
