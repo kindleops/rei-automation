@@ -1332,3 +1332,920 @@
 
 .ci-workspace.is-pane-75 .ci-workspace__map-col { flex: 0 0 50% !important; }
 .ci-workspace.is-pane-75 .ci-panel { flex: 0 0 50% !important; }
+
+/* ── Valuation Command Bar ────────────────────────────────────────────── */
+
+.ci-command-bar {
+  padding: 9px 16px;
+  background: rgba(255, 255, 255, 0.008);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ci-command-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ci-command-label {
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.45);
+}
+
+.ci-command-loading {
+  font-size: 8px;
+  font-weight: 800;
+  color: #fcd34d;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  animation: ci-dot-blink 0.9s ease-in-out infinite;
+}
+
+.ci-command-inputs {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ci-select-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 90px;
+}
+
+.ci-select-shell > span {
+  font-size: 7.5px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.42);
+  letter-spacing: 0.1em;
+}
+
+.ci-select-shell > select {
+  background: rgba(8, 14, 28, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 11px;
+  padding: 4px 7px;
+  outline: none;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.ci-select-shell > select:focus {
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+/* ── Evidence Quality Strip ───────────────────────────────────────────── */
+
+.ci-evidence-strip {
+  padding: 8px 16px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.006);
+}
+
+.ci-evidence-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 9px;
+  background: rgba(8, 14, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  min-width: 44px;
+}
+
+.ci-evidence-pill span {
+  font-size: 7px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(100, 116, 139, 0.45);
+}
+
+.ci-evidence-pill strong {
+  font-size: 12px;
+  font-weight: 800;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ci-evidence-pill.is-danger strong { color: #f87171; }
+
+/* ── Dossier Grade Badge ──────────────────────────────────────────────── */
+
+.ci-dossier-grade {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 52px;
+  flex-shrink: 0;
+}
+
+.ci-dossier-grade strong {
+  font-size: 18px;
+  font-weight: 900;
+  color: #e2e8f0;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ci-dossier-grade span {
+  font-size: 7px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(100, 116, 139, 0.45);
+}
+
+.ci-dossier-grade.is-elite { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.07); }
+.ci-dossier-grade.is-elite strong { color: #34d399; }
+.ci-dossier-grade.is-strong { border-color: rgba(16, 185, 129, 0.25); }
+.ci-dossier-grade.is-strong strong { color: #6ee7b7; }
+.ci-dossier-grade.is-building { border-color: rgba(96, 165, 250, 0.22); }
+.ci-dossier-grade.is-building strong { color: #93c5fd; }
+.ci-dossier-grade.is-weak { border-color: rgba(245, 158, 11, 0.22); }
+.ci-dossier-grade.is-weak strong { color: #fcd34d; }
+.ci-dossier-grade.is-locked { border-color: rgba(239, 68, 68, 0.18); }
+.ci-dossier-grade.is-locked strong { color: #f87171; }
+
+/* ── Subject Header Eyebrow ───────────────────────────────────────────── */
+
+.ci-subject-header__eyebrow {
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(100, 116, 139, 0.42);
+  margin-bottom: 2px;
+  display: block;
+}
+
+/* ── Map Controls Topline ─────────────────────────────────────────────── */
+
+.ci-map-control-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(6, 12, 24, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  gap: 8px;
+}
+
+.ci-map-kicker {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.55);
+}
+
+.ci-map-health {
+  font-size: 10px;
+  font-weight: 900;
+  color: rgba(148, 163, 184, 0.5);
+}
+
+.ci-map-health.is-elite { color: #34d399; }
+.ci-map-health.is-strong { color: #6ee7b7; }
+.ci-map-health.is-building { color: #93c5fd; }
+.ci-map-health.is-weak { color: #fcd34d; }
+.ci-map-health.is-locked { color: rgba(100, 116, 139, 0.4); }
+
+/* ── Valuation Model Panel ────────────────────────────────────────────── */
+
+.ci-model-panel {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ci-model-panel__hero {
+  padding: 14px;
+  background: rgba(8, 14, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ci-model-panel__hero strong {
+  font-size: 26px;
+  font-weight: 900;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ci-model-panel__hero p {
+  font-size: 10.5px;
+  color: rgba(100, 116, 139, 0.5);
+  line-height: 1.5;
+}
+
+.ci-model-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.ci-model-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.ci-model-row:last-child { border-bottom: none; }
+
+.ci-model-row span {
+  font-size: 10.5px;
+  color: rgba(100, 116, 139, 0.5);
+}
+
+.ci-model-row strong {
+  font-size: 11px;
+  font-weight: 800;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Warn text ────────────────────────────────────────────────────────── */
+
+.is-warn-text { color: #fcd34d !important; }
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   V2 Elite Hardening Layer — Executive Dark, Responsive, No Light Bleed
+   Drop-in after base rules or keep as full replacement.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --ci-bg-0: #020611;
+  --ci-bg-1: #050a14;
+  --ci-bg-2: #07111f;
+  --ci-bg-3: #0a1424;
+  --ci-card: rgba(8, 14, 28, 0.78);
+  --ci-card-strong: rgba(10, 18, 34, 0.94);
+  --ci-line: rgba(148, 163, 184, 0.10);
+  --ci-line-soft: rgba(148, 163, 184, 0.055);
+  --ci-text: rgba(226, 232, 240, 0.92);
+  --ci-muted: rgba(148, 163, 184, 0.58);
+  --ci-faint: rgba(100, 116, 139, 0.44);
+  --ci-blue: #5ddcff;
+  --ci-blue-2: #60a5fa;
+  --ci-green: #34d399;
+  --ci-gold: #f5c84c;
+  --ci-amber: #f59e0b;
+  --ci-red: #fb7185;
+  --ci-purple: #a78bfa;
+  --ci-radius-xl: 20px;
+  --ci-radius-lg: 16px;
+  --ci-radius-md: 12px;
+  --ci-shadow-deep: 0 30px 100px rgba(0,0,0,0.72);
+  --ci-shadow-card: 0 18px 44px rgba(0,0,0,0.38);
+  --ci-glass: blur(26px) saturate(150%);
+}
+
+/* Force the workspace to stay cinematic even if parent app flips light. */
+.ci-workspace,
+.ci-workspace *,
+.ci-detail-popover,
+.ci-tooltip {
+  box-sizing: border-box;
+}
+
+.ci-workspace {
+  isolation: isolate;
+  color: var(--ci-text);
+  background:
+    radial-gradient(circle at 28% 18%, rgba(93,220,255,0.12), transparent 28%),
+    radial-gradient(circle at 82% 84%, rgba(245,200,76,0.08), transparent 24%),
+    linear-gradient(135deg, var(--ci-bg-0) 0%, var(--ci-bg-1) 45%, #030712 100%);
+}
+
+.ci-workspace::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at 50% 44%, black 0%, transparent 72%);
+  opacity: 0.45;
+}
+
+.ci-workspace__map-col,
+.ci-panel {
+  position: relative;
+  z-index: 2;
+}
+
+/* Map now feels embedded, not pasted in. */
+.ci-workspace__map-col::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at center, transparent 0%, rgba(2,6,17,0.02) 44%, rgba(2,6,17,0.58) 100%),
+    linear-gradient(90deg, rgba(2,6,17,0.08), transparent 22%, transparent 78%, rgba(2,6,17,0.20));
+}
+
+.ci-workspace__map-col::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(2,6,17,0.20), transparent 18%, transparent 78%, rgba(2,6,17,0.32));
+}
+
+.ci-map-canvas .maplibregl-canvas {
+  filter: saturate(0.82) contrast(1.08) brightness(0.76);
+}
+
+.ci-map-canvas .maplibregl-ctrl-group {
+  background: rgba(6,12,24,0.78);
+  border: 1px solid rgba(148,163,184,0.12);
+  box-shadow: var(--ci-shadow-card);
+  overflow: hidden;
+}
+
+/* Floating control cluster */
+.ci-map-controls {
+  top: 18px;
+  right: 18px;
+  gap: 8px;
+  z-index: 30;
+}
+
+.ci-map-control-group,
+.ci-source-chip,
+.ci-run-btn,
+.ci-tooltip,
+.ci-detail-popover {
+  backdrop-filter: var(--ci-glass);
+  -webkit-backdrop-filter: var(--ci-glass);
+}
+
+.ci-map-control-group {
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(15,23,42,0.92), rgba(2,6,17,0.82));
+  border-color: rgba(93,220,255,0.13);
+}
+
+.ci-map-ctrl-btn {
+  min-height: 34px;
+  padding: 9px 14px;
+  font-size: 10px;
+}
+
+.ci-map-ctrl-btn.is-active {
+  color: var(--ci-blue);
+  background:
+    linear-gradient(180deg, rgba(93,220,255,0.18), rgba(37,99,235,0.08));
+  box-shadow: inset 0 0 0 1px rgba(93,220,255,0.16);
+}
+
+.ci-source-chip {
+  border-radius: 999px;
+  background: rgba(6,12,24,0.82);
+  min-height: 28px;
+}
+
+.ci-run-btn {
+  min-height: 38px;
+  border-radius: 14px;
+  border-color: rgba(93,220,255,0.25);
+  background:
+    linear-gradient(180deg, rgba(93,220,255,0.14), rgba(37,99,235,0.07));
+  color: var(--ci-blue);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.45), 0 0 30px rgba(93,220,255,0.08);
+}
+
+/* Subject and comp pins */
+.ci-subject-pin {
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255,255,255,0.22), transparent 25%),
+    linear-gradient(135deg, rgba(245,200,76,0.18), rgba(245,158,11,0.06));
+  border-color: rgba(245,200,76,0.95);
+  box-shadow:
+    0 0 0 5px rgba(245,200,76,0.08),
+    0 0 28px rgba(245,200,76,0.55),
+    0 18px 32px rgba(0,0,0,0.62);
+}
+
+.ci-comp-pin {
+  background:
+    linear-gradient(180deg, rgba(15,23,42,0.92), rgba(6,12,24,0.88));
+  border-color: rgba(148,163,184,0.16);
+  color: rgba(226,232,240,0.74);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.48);
+}
+
+.ci-comp-pin.is-selected {
+  background:
+    radial-gradient(circle at top, rgba(93,220,255,0.38), transparent 70%),
+    linear-gradient(180deg, rgba(37,99,235,0.88), rgba(14,116,144,0.70));
+  border-color: rgba(93,220,255,0.70);
+  color: white;
+}
+
+.ci-comp-pin.is-weak {
+  background: rgba(24,18,8,0.90);
+  border-color: rgba(245,158,11,0.32);
+}
+
+/* Dossier panel */
+.ci-panel {
+  background:
+    radial-gradient(circle at 75% 8%, rgba(93,220,255,0.08), transparent 34%),
+    linear-gradient(180deg, rgba(9,14,28,0.96), rgba(4,8,16,0.985));
+  border-left: 1px solid rgba(93,220,255,0.10);
+  box-shadow: -24px 0 80px rgba(0,0,0,0.38);
+}
+
+.ci-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(93,220,255,0.38), transparent);
+  z-index: 50;
+  pointer-events: none;
+}
+
+/* Header card */
+.ci-subject-header {
+  margin: 14px 14px 0;
+  border: 1px solid rgba(245,200,76,0.13);
+  border-radius: var(--ci-radius-lg);
+  background:
+    radial-gradient(circle at 12% 20%, rgba(245,200,76,0.12), transparent 42%),
+    linear-gradient(135deg, rgba(15,23,42,0.86), rgba(6,12,24,0.62));
+  box-shadow: var(--ci-shadow-card);
+  overflow: hidden;
+}
+
+.ci-subject-header__img {
+  width: 78px;
+  height: 58px;
+  border-radius: 12px;
+  border-color: rgba(245,200,76,0.18);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.35);
+}
+
+.ci-subject-header__addr {
+  color: rgba(245,200,76,0.96);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.ci-subject-header__specs span,
+.ci-subject-header__citystate {
+  color: var(--ci-muted);
+}
+
+/* Filters look like command hardware */
+.ci-filters-bar {
+  margin: 10px 14px 0;
+  padding: 10px;
+  border: 1px solid var(--ci-line-soft);
+  border-radius: var(--ci-radius-lg);
+  background: rgba(8,14,28,0.50);
+}
+
+.ci-filter-group {
+  flex: 1 1 120px;
+}
+
+.ci-filter-group select {
+  width: 100%;
+  min-height: 34px;
+  border-radius: 10px;
+  background: rgba(2,6,17,0.76);
+  border-color: rgba(148,163,184,0.12);
+  color: rgba(226,232,240,0.84);
+}
+
+/* Hero */
+.ci-valuation-hero {
+  margin: 10px 14px 0;
+  padding: 16px;
+  border: 1px solid rgba(93,220,255,0.11);
+  border-radius: var(--ci-radius-lg);
+  background:
+    radial-gradient(circle at 18% 10%, rgba(93,220,255,0.12), transparent 42%),
+    linear-gradient(180deg, rgba(15,23,42,0.72), rgba(6,12,24,0.72));
+  box-shadow: var(--ci-shadow-card);
+}
+
+.ci-arv-value {
+  color: white;
+  text-shadow: 0 0 28px rgba(93,220,255,0.13);
+}
+
+.ci-arv-value.is-pending {
+  color: rgba(148,163,184,0.54);
+}
+
+.ci-valuation-hero__metrics {
+  border-color: rgba(93,220,255,0.10);
+  background: rgba(93,220,255,0.08);
+  border-radius: 14px;
+}
+
+.ci-hero-metric {
+  background: rgba(2,6,17,0.58);
+  min-height: 62px;
+  justify-content: center;
+}
+
+/* Agent rail / waterfall / cards become premium blocks */
+.ci-agent-rail,
+.ci-waterfall,
+.ci-deal-actions,
+.ci-demand-panel {
+  margin: 10px 14px 0;
+  padding: 14px;
+  border: 1px solid var(--ci-line-soft);
+  border-radius: var(--ci-radius-lg);
+  background: rgba(8,14,28,0.52);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.22);
+}
+
+.ci-agent-item {
+  padding: 9px 0;
+}
+
+.ci-agent-name {
+  color: rgba(226,232,240,0.78);
+}
+
+.ci-agent-output {
+  color: rgba(148,163,184,0.56);
+}
+
+.ci-waterfall {
+  background:
+    radial-gradient(circle at 85% 10%, rgba(52,211,153,0.10), transparent 40%),
+    rgba(8,14,28,0.52);
+}
+
+.ci-data-gap {
+  margin: 10px 14px 0;
+  border-radius: var(--ci-radius-lg);
+  background:
+    radial-gradient(circle at 18% 20%, rgba(245,158,11,0.14), transparent 40%),
+    rgba(24,18,8,0.42);
+}
+
+.ci-deal-btn {
+  min-height: 40px;
+  border-radius: 12px;
+  background: rgba(15,23,42,0.58);
+}
+
+.ci-deal-btn.is-primary {
+  min-height: 46px;
+  background:
+    linear-gradient(180deg, rgba(52,211,153,0.20), rgba(16,185,129,0.09));
+}
+
+/* Comp list and cards */
+.ci-nav-strip {
+  margin: 10px 14px 0;
+  padding: 8px;
+  border: 1px solid var(--ci-line-soft);
+  border-radius: 14px;
+  background: rgba(8,14,28,0.54);
+}
+
+.ci-list-section {
+  margin-top: 10px;
+}
+
+.ci-list-head {
+  top: 0;
+  margin: 0 14px;
+  padding: 11px 2px 9px;
+  background: linear-gradient(180deg, rgba(4,8,16,0.96), rgba(4,8,16,0.72));
+  border-bottom-color: rgba(93,220,255,0.08);
+}
+
+.ci-evidence-card {
+  margin: 8px 14px;
+  padding: 14px;
+  border: 1px solid rgba(148,163,184,0.08);
+  border-left: 2px solid rgba(148,163,184,0.10);
+  border-radius: var(--ci-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(15,23,42,0.66), rgba(6,12,24,0.62));
+  box-shadow: 0 10px 26px rgba(0,0,0,0.24);
+}
+
+.ci-evidence-card:hover,
+.ci-evidence-card.is-hover {
+  transform: translateY(-1px);
+  background:
+    radial-gradient(circle at 80% 10%, rgba(93,220,255,0.08), transparent 42%),
+    linear-gradient(180deg, rgba(15,23,42,0.76), rgba(6,12,24,0.68));
+  border-color: rgba(93,220,255,0.16);
+}
+
+.ci-evidence-card.is-included {
+  border-color: rgba(52,211,153,0.16);
+  border-left-color: rgba(52,211,153,0.70);
+  background:
+    radial-gradient(circle at 82% 12%, rgba(52,211,153,0.10), transparent 38%),
+    linear-gradient(180deg, rgba(8,28,24,0.58), rgba(6,12,24,0.62));
+}
+
+.ci-ev-thumb {
+  border-radius: 12px;
+  width: 88px;
+  flex-basis: 88px;
+  height: 64px;
+}
+
+.ci-ev-price {
+  color: rgba(248,250,252,0.96);
+}
+
+.ci-ev-actions {
+  gap: 8px;
+}
+
+.ci-ev-action-btn {
+  min-height: 34px;
+  border-radius: 10px;
+}
+
+/* Demand mode gets useful visual density */
+.ci-demand-grid {
+  gap: 10px;
+}
+
+.ci-demand-metric {
+  min-height: 78px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 80% 18%, rgba(93,220,255,0.08), transparent 42%),
+    rgba(6,12,24,0.62);
+  border-color: rgba(93,220,255,0.08);
+}
+
+/* Popover */
+.ci-detail-popover {
+  right: 24px;
+  bottom: 24px;
+  border-radius: 20px;
+  border-color: rgba(93,220,255,0.20);
+  background:
+    radial-gradient(circle at 80% 0%, rgba(93,220,255,0.10), transparent 42%),
+    rgba(3,7,18,0.96);
+}
+
+.ci-tooltip {
+  border-radius: 18px;
+  border-color: rgba(93,220,255,0.18);
+  background: rgba(3,7,18,0.94);
+}
+
+/* Layout modes */
+.ci-workspace.is-pane-25 {
+  min-height: 100%;
+}
+
+.ci-workspace.is-pane-25 .ci-panel {
+  background:
+    radial-gradient(circle at 90% 0%, rgba(93,220,255,0.10), transparent 42%),
+    linear-gradient(180deg, rgba(5,10,20,0.99), rgba(3,7,18,1));
+}
+
+.ci-workspace.is-pane-25 .ci-subject-header,
+.ci-workspace.is-pane-25 .ci-filters-bar,
+.ci-workspace.is-pane-25 .ci-valuation-hero,
+.ci-workspace.is-pane-25 .ci-agent-rail,
+.ci-workspace.is-pane-25 .ci-waterfall,
+.ci-workspace.is-pane-25 .ci-data-gap,
+.ci-workspace.is-pane-25 .ci-deal-actions,
+.ci-workspace.is-pane-25 .ci-nav-strip,
+.ci-workspace.is-pane-25 .ci-evidence-card {
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+.ci-workspace.is-pane-25 .ci-subject-header__top {
+  flex-direction: column;
+}
+
+.ci-workspace.is-pane-25 .ci-subject-header__img {
+  width: 100%;
+  height: 86px;
+  flex-basis: auto;
+}
+
+.ci-workspace.is-pane-25 .ci-filters-bar {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.ci-workspace.is-pane-25 .ci-arv-value {
+  font-size: 28px;
+}
+
+.ci-workspace.is-pane-25 .ci-ev-main {
+  flex-direction: column;
+}
+
+.ci-workspace.is-pane-25 .ci-ev-thumb {
+  width: 100%;
+  height: 110px;
+  flex: none;
+}
+
+.ci-workspace.is-pane-25 .ci-ev-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.ci-workspace.is-pane-50 {
+  background: #020611;
+}
+
+.ci-workspace.is-pane-50 .ci-workspace__map-col {
+  min-height: 230px !important;
+  height: 32vh !important;
+  flex-basis: 32vh !important;
+}
+
+.ci-workspace.is-pane-50 .ci-map-controls {
+  transform: scale(0.92);
+  transform-origin: top right;
+}
+
+.ci-workspace.is-pane-50 .ci-panel {
+  min-height: 0;
+}
+
+.ci-workspace.is-pane-75 .ci-workspace__map-col {
+  flex-basis: 54% !important;
+}
+
+.ci-workspace.is-pane-75 .ci-panel {
+  flex-basis: 46% !important;
+}
+
+/* Full screen version should feel like a product demo */
+.ci-workspace.is-layout-full .ci-workspace__map-col {
+  flex-basis: 58%;
+}
+
+.ci-workspace.is-layout-full .ci-panel {
+  flex-basis: 42%;
+}
+
+/* Accessibility and reduced motion */
+.ci-workspace button:focus-visible,
+.ci-workspace a:focus-visible,
+.ci-workspace select:focus-visible {
+  outline: 2px solid rgba(93,220,255,0.72);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ci-workspace *,
+  .ci-workspace *::before,
+  .ci-workspace *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 980px) {
+  .ci-workspace {
+    flex-direction: column;
+  }
+
+  .ci-workspace__map-col {
+    flex: 0 0 38vh;
+    width: 100%;
+  }
+
+  .ci-panel {
+    flex: 1;
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid rgba(93,220,255,0.10);
+  }
+
+  .ci-map-controls {
+    transform: scale(0.9);
+    transform-origin: top right;
+  }
+}
+/* ── Isolation Lock — structural constraints only, no color nukes ─────── */
+
+.ci-workspace {
+  height: 100% !important;
+  min-height: 0 !important;
+  color-scheme: dark;
+  background: #030712 !important;
+}
+
+.ci-workspace__map-col {
+  min-width: 0;
+  background: #030712;
+}
+
+.ci-panel {
+  min-width: 0;
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 82% 8%, rgba(93, 220, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(5, 10, 20, 0.99), rgba(3, 7, 18, 1)) !important;
+  color: rgba(226, 232, 240, 0.92) !important;
+}
+
+/* Scoped form-control dark defaults — no blanket star selectors */
+.ci-workspace select,
+.ci-workspace input {
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(2, 6, 17, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.ci-workspace button {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+/* Command bar grid for the 4 selects */
+.ci-filters-bar {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Space for sticky action bar at the bottom of the list */
+.ci-list-section {
+  padding-bottom: 128px;
+}
+
+/* Only the --sticky modifier gets position:sticky — not every deal-actions */
+.ci-deal-actions--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
+  background:
+    linear-gradient(180deg, rgba(3, 7, 18, 0.5), #030712 50%) !important;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.ci-panel::before,
+.ci-panel::after {
+  pointer-events: none;
+}

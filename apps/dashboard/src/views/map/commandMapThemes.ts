@@ -6,33 +6,39 @@ const CARTO_DARK_RASTER_TILES = [
   'https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
   'https://d.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
 ]
+
 const CARTO_LIGHT_RASTER_TILES = [
   'https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png',
   'https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png',
   'https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png',
   'https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png',
 ]
+
 const CARTO_DARK_NOLABELS_RASTER_TILES = [
   'https://a.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png',
   'https://b.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png',
   'https://c.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png',
   'https://d.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}.png',
 ]
+
 const CARTO_LIGHT_NOLABELS_RASTER_TILES = [
   'https://a.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png',
   'https://b.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png',
   'https://c.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png',
   'https://d.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png',
 ]
+
 const CARTO_VOYAGER_NOLABELS_RASTER_TILES = [
   'https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
   'https://b.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
   'https://c.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
   'https://d.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
 ]
+
 const ESRI_SATELLITE_TILES = [
   'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 ]
+
 const OPENTOPO_TILES = [
   'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
   'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -115,7 +121,7 @@ const MAP_STYLES = {
   },
   nightVision: {
     label: 'Night Vision',
-    tileUrl: CARTO_VOYAGER_NOLABELS_RASTER_TILES,
+    tileUrl: CARTO_DARK_NOLABELS_RASTER_TILES,
     attribution: 'CARTO',
   },
   matrix: {
@@ -140,30 +146,26 @@ export type CommandMapThemeId =
   | 'satellite'
   | 'dark_ops'
   | 'red_ops'
-  | 'midnight'
+  | 'executive'
   | 'blueprint'
   | 'light_street'
   | 'terrain'
+  | 'monochrome'
+  | 'night_vision'
+  | 'matrix'
+
+export type LegacyCommandMapThemeId =
+  | 'midnight'
   | 'minimal_black'
   | 'acquisition_radar'
-  | 'matrix'
 
 export type MapStyleMode = CommandMapThemeId
 
-type ThemePaintVariant =
-  | 'satellite'
-  | 'dark_ops'
-  | 'red_ops'
-  | 'midnight'
-  | 'blueprint'
-  | 'light_street'
-  | 'terrain'
-  | 'minimal_black'
-  | 'acquisition_radar'
-  | 'matrix'
-
+type ThemePaintVariant = CommandMapThemeId
 type StyleSource = maplibregl.StyleSpecification
+
 export type CommandMapThemeMode = 'basemap' | 'overlay'
+
 export type CommandMapBaseStyleId =
   | 'satellite'
   | 'terrain'
@@ -244,7 +246,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     supportsTerrain: false,
     supportsSatellite: true,
     isHighContrast: false,
-    fallbackThemeId: 'minimal_black',
+    fallbackThemeId: 'monochrome',
     cardTheme: {
       '--nx-card-accent': '#e5edf8',
       '--nx-card-accent-rgb': '229, 237, 248',
@@ -265,13 +267,14 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#f0b25a',
     baseStyleTone: 'satellite',
   },
+
   dark_ops: {
     id: 'dark_ops',
     label: 'Dark',
     mode: 'overlay',
-    baseStyleId: 'overlay_red_ops',
-    mapStyleObject: RED_OPS_MAP_STYLE,
-    style: RED_OPS_MAP_STYLE,
+    baseStyleId: 'overlay_dark',
+    mapStyleObject: OVERLAY_DARK_MAP_STYLE,
+    style: OVERLAY_DARK_MAP_STYLE,
     pinPalette: {
       ...sharedPinPalette,
       contacted: '#5aa9ff',
@@ -290,7 +293,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
-    fallbackThemeId: 'minimal_black',
+    fallbackThemeId: 'monochrome',
     cardTheme: {
       '--nx-card-accent': '#63d7ff',
       '--nx-card-accent-rgb': '99, 215, 255',
@@ -311,13 +314,14 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#f0b25a',
     baseStyleTone: 'dark_ops',
   },
+
   red_ops: {
     id: 'red_ops',
     label: 'Red Ops',
     mode: 'overlay',
-    baseStyleId: 'overlay_executive',
-    mapStyleObject: EXECUTIVE_MAP_STYLE,
-    style: EXECUTIVE_MAP_STYLE,
+    baseStyleId: 'overlay_red_ops',
+    mapStyleObject: RED_OPS_MAP_STYLE,
+    style: RED_OPS_MAP_STYLE,
     pinPalette: {
       ...sharedPinPalette,
       contacted: '#ff7d72',
@@ -337,7 +341,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
-    fallbackThemeId: 'minimal_black',
+    fallbackThemeId: 'monochrome',
     cardTheme: {
       '--nx-card-accent': '#ff4d4d',
       '--nx-card-accent-rgb': '255, 77, 77',
@@ -358,13 +362,14 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#ff9c6e',
     baseStyleTone: 'red_ops',
   },
-  midnight: {
-    id: 'midnight',
+
+  executive: {
+    id: 'executive',
     label: 'Executive',
     mode: 'overlay',
-    baseStyleId: 'overlay_blueprint',
-    mapStyleObject: BLUEPRINT_MAP_STYLE,
-    style: BLUEPRINT_MAP_STYLE,
+    baseStyleId: 'overlay_executive',
+    mapStyleObject: EXECUTIVE_MAP_STYLE,
+    style: EXECUTIVE_MAP_STYLE,
     pinPalette: {
       ...sharedPinPalette,
       contacted: '#dcbf74',
@@ -374,13 +379,13 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
       hot: '#f5de9c',
     },
     clusterPalette: {
-      glow: 'rgba(109, 147, 255, 0.16)',
-      core: '#09111f',
-      stroke: 'rgba(126, 172, 255, 0.94)',
-      label: '#f5f7ff',
-      halo: 'rgba(6, 9, 18, 0.94)',
+      glow: 'rgba(220, 191, 116, 0.16)',
+      core: '#111014',
+      stroke: 'rgba(220, 191, 116, 0.94)',
+      label: '#fff9e8',
+      halo: 'rgba(6, 6, 10, 0.94)',
     },
-    overlayClassName: 'nx-icm--theme-midnight',
+    overlayClassName: 'nx-icm--theme-executive',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
@@ -389,29 +394,30 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
       '--nx-card-accent': '#dcbf74',
       '--nx-card-accent-rgb': '220, 191, 116',
       '--nx-card-accent-soft': 'rgba(220, 191, 116, 0.18)',
-      '--nx-card-shell-top': 'rgba(8, 18, 42, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(5, 12, 31, 0.95)',
+      '--nx-card-shell-top': 'rgba(16, 15, 18, 0.97)',
+      '--nx-card-shell-bottom': 'rgba(8, 8, 12, 0.95)',
       '--nx-card-border': 'rgba(220, 191, 116, 0.22)',
       '--nx-card-glow': 'rgba(220, 191, 116, 0.18)',
-      '--nx-card-shadow': 'rgba(3, 8, 24, 0.6)',
-      '--nx-card-tile': 'rgba(129, 155, 255, 0.05)',
-      '--nx-card-tile-border': 'rgba(183, 200, 255, 0.08)',
+      '--nx-card-shadow': 'rgba(3, 3, 8, 0.6)',
+      '--nx-card-tile': 'rgba(220, 191, 116, 0.05)',
+      '--nx-card-tile-border': 'rgba(220, 191, 116, 0.1)',
       '--nx-card-message': 'rgba(255, 255, 255, 0.038)',
       '--nx-card-live': '#f3ddb0',
-      '--nx-card-input': 'rgba(7, 16, 38, 0.84)',
+      '--nx-card-input': 'rgba(10, 10, 14, 0.84)',
     },
-    heatmapStops: ['rgba(0,0,0,0)', '#111d4a', '#274e7c', '#4dd2c0', '#f1f6ff'],
+    heatmapStops: ['rgba(0,0,0,0)', '#221c10', '#705f32', '#dcbf74', '#fff4c2'],
     soldCompColor: '#f97316',
-    buyerAccent: '#78c8ff',
-    baseStyleTone: 'midnight',
+    buyerAccent: '#dcbf74',
+    baseStyleTone: 'executive',
   },
+
   blueprint: {
     id: 'blueprint',
     label: 'Blueprint',
     mode: 'overlay',
-    baseStyleId: 'overlay_monochrome',
-    mapStyleObject: OVERLAY_DARK_MAP_STYLE,
-    style: OVERLAY_DARK_MAP_STYLE,
+    baseStyleId: 'overlay_blueprint',
+    mapStyleObject: BLUEPRINT_MAP_STYLE,
+    style: BLUEPRINT_MAP_STYLE,
     pinPalette: {
       ...sharedPinPalette,
       not_contacted: '#5d8f9a',
@@ -452,6 +458,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#83e6ff',
     baseStyleTone: 'blueprint',
   },
+
   light_street: {
     id: 'light_street',
     label: 'Light Street',
@@ -500,6 +507,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#2563eb',
     baseStyleTone: 'light_street',
   },
+
   terrain: {
     id: 'terrain',
     label: 'Terrain',
@@ -547,11 +555,12 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     buyerAccent: '#d4ff7d',
     baseStyleTone: 'terrain',
   },
-  minimal_black: {
-    id: 'minimal_black',
+
+  monochrome: {
+    id: 'monochrome',
     label: 'Monochrome',
     mode: 'overlay',
-    baseStyleId: 'overlay_dark',
+    baseStyleId: 'overlay_monochrome',
     mapStyleObject: MONOCHROME_MAP_STYLE,
     style: MONOCHROME_MAP_STYLE,
     pinPalette: {
@@ -570,7 +579,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
       label: '#f8fafc',
       halo: 'rgba(3, 4, 5, 0.96)',
     },
-    overlayClassName: 'nx-icm--theme-minimal-black',
+    overlayClassName: 'nx-icm--theme-monochrome',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
@@ -593,10 +602,11 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     heatmapStops: ['rgba(0,0,0,0)', '#0b1220', '#1f2937', '#4b5563', '#e5e7eb'],
     soldCompColor: '#f87171',
     buyerAccent: '#d3dde8',
-    baseStyleTone: 'minimal_black',
+    baseStyleTone: 'monochrome',
   },
-  acquisition_radar: {
-    id: 'acquisition_radar',
+
+  night_vision: {
+    id: 'night_vision',
     label: 'Night Vision',
     mode: 'overlay',
     baseStyleId: 'overlay_night_vision',
@@ -616,7 +626,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
       label: '#e8fff2',
       halo: 'rgba(5, 11, 9, 0.94)',
     },
-    overlayClassName: 'nx-icm--theme-acquisition-radar',
+    overlayClassName: 'nx-icm--theme-night-vision',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
@@ -639,8 +649,9 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     heatmapStops: ['rgba(0,0,0,0)', '#113127', '#1f6f5a', '#4cdd9b', '#d8ffe8'],
     soldCompColor: '#f87171',
     buyerAccent: '#72ffb2',
-    baseStyleTone: 'acquisition_radar',
+    baseStyleTone: 'night_vision',
   },
+
   matrix: {
     id: 'matrix',
     label: 'Matrix',
@@ -672,7 +683,7 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
-    fallbackThemeId: 'minimal_black',
+    fallbackThemeId: 'monochrome',
     cardTheme: {
       '--nx-card-accent': '#00ff88',
       '--nx-card-accent-rgb': '0, 255, 136',
@@ -695,16 +706,35 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
   },
 }
 
+export const legacyCommandMapThemeAliases: Record<LegacyCommandMapThemeId, CommandMapThemeId> = {
+  midnight: 'executive',
+  minimal_black: 'monochrome',
+  acquisition_radar: 'night_vision',
+}
+
+export const normalizeCommandMapThemeId = (
+  themeId: CommandMapThemeId | LegacyCommandMapThemeId | string | null | undefined,
+): CommandMapThemeId => {
+  if (!themeId) return 'dark_ops'
+  if (themeId in commandMapThemes) return themeId as CommandMapThemeId
+  if (themeId in legacyCommandMapThemeAliases) return legacyCommandMapThemeAliases[themeId as LegacyCommandMapThemeId]
+  return 'dark_ops'
+}
+
 export const COMMAND_MAP_THEME_OPTIONS = Object.values(commandMapThemes)
 
-export const getCommandMapTheme = (themeId: CommandMapThemeId): CommandMapThemeDefinition =>
-  commandMapThemes[themeId] ?? commandMapThemes.dark_ops
+export const getCommandMapTheme = (
+  themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,
+): CommandMapThemeDefinition => commandMapThemes[normalizeCommandMapThemeId(themeId)]
 
-export const getCommandMapThemeStyle = (themeId: CommandMapThemeId): StyleSource =>
-  getCommandMapTheme(themeId).style
+export const getCommandMapThemeStyle = (
+  themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,
+): StyleSource => getCommandMapTheme(themeId).style
 
-export const getCommandMapBaseStyleId = (themeId: CommandMapThemeId): CommandMapBaseStyleId =>
-  getCommandMapTheme(themeId).baseStyleId
+export const getCommandMapBaseStyleId = (
+  themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,
+): CommandMapBaseStyleId => getCommandMapTheme(themeId).baseStyleId
 
-export const isCommandMapBasemapTheme = (themeId: CommandMapThemeId): boolean =>
-  getCommandMapTheme(themeId).mode === 'basemap'
+export const isCommandMapBasemapTheme = (
+  themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,
+): boolean => getCommandMapTheme(themeId).mode === 'basemap'

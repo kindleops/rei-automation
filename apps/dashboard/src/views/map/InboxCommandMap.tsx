@@ -6516,6 +6516,16 @@ export function InboxCommandMap({
         setMapStyleMode(fallbackTheme.id)
       }, 6500)
       map.setStyle(resolveStyle(nextThemeId))
+      map.once('style.load', () => {
+        try { addMapLayers(map) } catch { /* getSource/getLayer guards handle duplicates */ }
+        void syncBasemapPresentation(map)
+        syncLayerVisibility(map, activityModeRef.current)
+        scheduleMapResize()
+        requestAnimationFrame(() => {
+          map.resize()
+          map.triggerRepaint()
+        })
+      })
       if (import.meta.env.DEV) {
         console.log('[CommandMapTheme]', {
           theme: nextThemeId,

@@ -20,7 +20,7 @@ export async function GET(request) {
     });
   } catch (error) {
     captureRouteException(error, { route: "internal/queue/run", subsystem: "queue_runner" });
-    throw error;
+    return NextResponse.json({ ok: false, error: error?.message || "queue_run_failed" }, { status: 500 });
   }
 }
 
@@ -32,6 +32,6 @@ export async function POST(request) {
     });
   } catch (error) {
     captureRouteException(error, { route: "internal/queue/run", subsystem: "queue_runner" });
-    throw error;
+    return NextResponse.json({ ok: false, error: error?.message || "queue_run_failed" }, { status: 500 });
   }
 }

@@ -18,17 +18,33 @@ function passthroughCache(_key, _ttl, loader) {
 
 function buildLiveInboxCountRow(rows = []) {
   const byBucket = (bucket) => rows.filter((row) => row.inbox_bucket === bucket).length;
+  const cold = rows.filter(
+    (row) => row.inbox_bucket === "waiting" && row.inbox_category === "cold_no_response",
+  ).length;
+  const waiting = byBucket("waiting");
   return {
     all: rows.length,
+    all_messages: rows.length,
     priority: byBucket("priority"),
+    hot_leads: byBucket("priority"),
     new_replies: byBucket("new_replies"),
+    new_inbound: byBucket("new_replies"),
+    needs_reply: byBucket("new_replies"),
     needs_review: byBucket("needs_review"),
+    manual_review: byBucket("needs_review"),
+    automated: byBucket("needs_review"),
     follow_up: byBucket("follow_up"),
-    cold: byBucket("cold"),
+    outbound_active: byBucket("follow_up"),
+    cold,
+    cold_no_response: cold,
     dead: byBucket("dead"),
     suppressed: byBucket("suppressed"),
-    active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up"].includes(row.inbox_bucket)).length,
-    waiting: rows.filter((row) => row.latest_message_direction === "outbound" && !["dead", "suppressed"].includes(row.inbox_bucket)).length,
+    dnc_opt_out: byBucket("suppressed"),
+    active: rows.filter(
+      (row) => ["priority", "new_replies", "needs_review", "follow_up", "waiting"].includes(row.inbox_bucket),
+    ).length,
+    waiting,
+    waiting_on_seller: waiting,
     unlinked: rows.filter((row) => row.property_id == null).length,
   };
 }
@@ -51,6 +67,11 @@ function makeLiveInboxSupabaseStub(rows = []) {
           state.filters.push((row) => clean(row?.[column]) === clean(value));
           return api;
         },
+        in(column, values) {
+          const allowed = new Set((values || []).map(clean));
+          state.filters.push((row) => allowed.has(clean(row?.[column])));
+          return api;
+        },
         or(clause) {
           state.searchClause = clause;
           return api;
@@ -69,9 +90,14 @@ function makeLiveInboxSupabaseStub(rows = []) {
         },
         then(resolve, reject) {
           return Promise.resolve().then(() => {
-            let data = table === "v_inbox_thread_counts_live_v2"
-              ? [buildLiveInboxCountRow(rows)]
-              : [...rows];
+            let data;
+            if (table === "canonical_inbox_counts") {
+              data = [buildLiveInboxCountRow(rows)];
+            } else if (table === "message_events" || table === "send_queue") {
+              data = [];
+            } else {
+              data = [...rows];
+            }
 
             for (const filter of state.filters) {
               data = data.filter((row) => filter(row));
