@@ -636,9 +636,9 @@ const CINEMATIC_THEME_DEFINITIONS: CinematicThemeDef[] = [
   { id: 'blueprint', label: 'Blueprint', description: 'Technical parcel and census analysis', bestFor: 'Analysis' },
   { id: 'light_street', label: 'Light Street', description: 'Bright street-level review mode', bestFor: 'Due Diligence' },
   { id: 'terrain', label: 'Terrain', description: 'Land and geography context', bestFor: 'Land' },
-  { id: 'minimal_black', label: 'Monochrome', description: 'Low-noise neutral analysis', bestFor: 'Stealth' },
-  { id: 'midnight', label: 'Night Vision', description: 'Low-light tactical night mode', bestFor: 'Night Ops' },
-  { id: 'acquisition_radar', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
+  { id: 'monochrome', label: 'Monochrome', description: 'Low-noise neutral analysis', bestFor: 'Stealth' },
+  { id: 'executive', label: 'Night Vision', description: 'Low-light tactical night mode', bestFor: 'Night Ops' },
+  { id: 'night_vision', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
   { id: 'matrix', label: 'Matrix', description: 'High-contrast signal mode', bestFor: 'Signals' },
 ]
 
@@ -818,7 +818,7 @@ const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): s
       contract: '#ff9f8a',
       offer: '#ffba7a',
       overdue: '#ff4d4d',
-    } : styleMode === 'midnight' ? {
+    } : styleMode === 'executive' ? {
       neutral: '#8aa0c9',
       engaged: '#8fb3ff',
       reply: '#7fc8ff',
@@ -862,7 +862,7 @@ const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): s
       contract: '#7fa46b',
       offer: '#9db86f',
       overdue: '#d95b53',
-    } : styleMode === 'minimal_black' ? {
+    } : styleMode === 'monochrome' ? {
       neutral: '#c0c8d2',
       engaged: '#aeb8c6',
       reply: '#d4dbe4',
@@ -873,7 +873,7 @@ const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): s
       contract: '#d7dee8',
       offer: '#d0d8e2',
       overdue: '#ef7f7f',
-    } : styleMode === 'acquisition_radar' ? {
+    } : styleMode === 'night_vision' ? {
       neutral: '#7bc7a2',
       engaged: '#62e0b0',
       reply: '#7cf7cf',
@@ -1030,7 +1030,7 @@ const buyerColorFor = (styleMode: MapStyleMode, category: string): string => {
     if (category === 'landlord') return '#9fd38c'
     return '#9bc3d9'
   }
-  if (styleMode === 'matrix' || styleMode === 'acquisition_radar') {
+  if (styleMode === 'matrix' || styleMode === 'night_vision') {
     if (category === 'institutional') return '#72ffb2'
     if (category === 'builder') return '#c8ff4d'
     if (category === 'flipper') return '#9d7cff'
@@ -1044,7 +1044,7 @@ const buyerColorFor = (styleMode: MapStyleMode, category: string): string => {
     if (category === 'landlord') return '#059669'
     return '#0ea5e9'
   }
-  if (styleMode === 'midnight') {
+  if (styleMode === 'executive') {
     if (category === 'institutional') return '#e2c27a'
     if (category === 'builder') return '#f0d998'
     if (category === 'flipper') return '#b8a77a'
@@ -1058,7 +1058,7 @@ const buyerColorFor = (styleMode: MapStyleMode, category: string): string => {
     if (category === 'landlord') return '#46bcca'
     return '#56d9e8'
   }
-  if (styleMode === 'minimal_black') {
+  if (styleMode === 'monochrome') {
     if (category === 'institutional') return '#d8dee6'
     if (category === 'builder') return '#c8d0db'
     if (category === 'flipper') return '#e3e8ef'
@@ -1888,10 +1888,10 @@ const mapThemeRootClassName = (styleMode: MapStyleMode): string => {
     case 'red_ops': return 'map-theme-red-ops'
     case 'matrix': return 'map-theme-matrix'
     case 'blueprint': return 'map-theme-blueprint'
-    case 'minimal_black': return 'map-theme-monochrome'
-    case 'midnight': return 'map-theme-executive'
+    case 'monochrome': return 'map-theme-monochrome'
+    case 'executive': return 'map-theme-executive'
     case 'terrain': return 'map-theme-terrain'
-    case 'acquisition_radar': return 'map-theme-night-vision'
+    case 'night_vision': return 'map-theme-night-vision'
     case 'light_street': return 'map-theme-light-street'
     default: return `map-theme-${String(styleMode).replace(/_/g, '-')}`
   }
@@ -1899,12 +1899,12 @@ const mapThemeRootClassName = (styleMode: MapStyleMode): string => {
 
 const canvasFilterForTheme = (styleMode: MapStyleMode): string => {
   if (styleMode === 'red_ops') return 'sepia(0.9) hue-rotate(320deg) saturate(3) brightness(0.92) contrast(1.35)'
-  if (styleMode === 'midnight') return 'sepia(0.55) hue-rotate(196deg) saturate(2.2) brightness(0.92) contrast(1.26)'
+  if (styleMode === 'executive') return 'sepia(0.55) hue-rotate(196deg) saturate(2.2) brightness(0.92) contrast(1.26)'
   if (styleMode === 'blueprint') return 'hue-rotate(172deg) saturate(3) brightness(0.96) contrast(1.32)'
   if (styleMode === 'light_street') return 'none'
   if (styleMode === 'terrain') return 'saturate(1.1) contrast(1.05)'
-  if (styleMode === 'minimal_black') return 'grayscale(1) brightness(1.02) contrast(1.28)'
-  if (styleMode === 'acquisition_radar') return 'hue-rotate(94deg) saturate(2.4) brightness(0.95) contrast(1.26)'
+  if (styleMode === 'monochrome') return 'grayscale(1) brightness(1.02) contrast(1.28)'
+  if (styleMode === 'night_vision') return 'hue-rotate(94deg) saturate(2.4) brightness(0.95) contrast(1.26)'
   if (styleMode === 'matrix') return 'hue-rotate(108deg) saturate(3) brightness(0.9) contrast(1.34)'
   if (styleMode === 'satellite') return 'none'
   return 'brightness(0.95) contrast(1.16) saturate(1.15)'
@@ -4961,10 +4961,10 @@ export function InboxCommandMap({
                 : tone === 'terrain' ? '#111613'
                   : tone === 'matrix' ? '#020805'
                     : tone === 'red_ops' ? '#14080a'
-                      : tone === 'midnight' ? '#060b16'
+                      : tone === 'executive' ? '#060b16'
                         : tone === 'blueprint' ? '#071821'
-                          : tone === 'minimal_black' ? '#040506'
-                            : tone === 'acquisition_radar' ? '#071510'
+                          : tone === 'monochrome' ? '#040506'
+                            : tone === 'night_vision' ? '#071510'
                               : '#070d15',
             )
           }
@@ -4978,17 +4978,17 @@ export function InboxCommandMap({
                     ? (token.includes('water') ? '#03120d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#07150f' : '#050a08')
                     : tone === 'red_ops'
                       ? (token.includes('water') ? '#24090d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#1b0d10' : '#18090b')
-                      : tone === 'midnight'
+                      : tone === 'executive'
                         ? (token.includes('water') ? '#09182d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#101628' : '#0b1120')
                         : tone === 'blueprint'
                           ? (token.includes('water') ? '#082538' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0c1f2a' : '#07131d')
-                          : tone === 'minimal_black'
+                          : tone === 'monochrome'
                             ? (token.includes('water') ? '#07090c' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#090c10' : '#040506')
-                            : tone === 'acquisition_radar'
+                            : tone === 'night_vision'
                               ? (token.includes('water') ? '#071f19' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0a1814' : '#07110f')
                               : (token.includes('water') ? '#0e2034' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0d1520' : '#0a1220')
             map.setPaintProperty(typedLayer.id, 'fill-color', fillColor)
-            map.setPaintProperty(typedLayer.id, 'fill-opacity', tone === 'terrain' ? 0.18 : tone === 'light_street' ? 0.84 : tone === 'minimal_black' ? 0.96 : 0.9)
+            map.setPaintProperty(typedLayer.id, 'fill-opacity', tone === 'terrain' ? 0.18 : tone === 'light_street' ? 0.84 : tone === 'monochrome' ? 0.96 : 0.9)
           }
           if (typedLayer.type === 'line') {
             const roadColor =
@@ -5000,17 +5000,17 @@ export function InboxCommandMap({
                     ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#0f7b4f' : '#114733')
                     : tone === 'red_ops'
                       ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#8f2e34' : '#5a1d22')
-                      : tone === 'midnight'
+                      : tone === 'executive'
                         ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#4e6fbf' : '#29375a')
                         : tone === 'blueprint'
                           ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#4cb7df' : '#1f6d87')
-                          : tone === 'minimal_black'
+                          : tone === 'monochrome'
                             ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#58616e' : '#2b3038')
-                            : tone === 'acquisition_radar'
+                            : tone === 'night_vision'
                               ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#26b879' : '#175f45')
                               : '#3a81ae'
             map.setPaintProperty(typedLayer.id, 'line-color', roadColor)
-            map.setPaintProperty(typedLayer.id, 'line-opacity', token.includes('road') || token.includes('highway') ? (tone === 'minimal_black' ? 0.66 : 0.9) : 0.72)
+            map.setPaintProperty(typedLayer.id, 'line-opacity', token.includes('road') || token.includes('highway') ? (tone === 'monochrome' ? 0.66 : 0.9) : 0.72)
           }
           if (typedLayer.type === 'symbol') {
             const textColor =
@@ -5022,55 +5022,55 @@ export function InboxCommandMap({
                     ? (token.includes('postal') || token.includes('zip') ? '#6debb0' : token.includes('poi') ? '#5ccf97' : token.includes('place') || token.includes('city') || token.includes('town') ? '#d8ffe8' : '#8bd6b0')
                     : tone === 'red_ops'
                       ? (token.includes('postal') || token.includes('zip') ? '#ffb7a8' : token.includes('poi') ? '#f28f82' : token.includes('place') || token.includes('city') || token.includes('town') ? '#ffd4c9' : '#d8898d')
-                      : tone === 'midnight'
+                      : tone === 'executive'
                         ? (token.includes('postal') || token.includes('zip') ? '#9cbcff' : token.includes('poi') ? '#8da8de' : token.includes('place') || token.includes('city') || token.includes('town') ? '#eef4ff' : '#b6caef')
                         : tone === 'blueprint'
                           ? (token.includes('postal') || token.includes('zip') ? '#95e5ff' : token.includes('poi') ? '#74d2f7' : token.includes('place') || token.includes('city') || token.includes('town') ? '#dff7ff' : '#9ccce0')
-                          : tone === 'minimal_black'
+                          : tone === 'monochrome'
                             ? (token.includes('postal') || token.includes('zip') ? '#a4b4c7' : token.includes('poi') ? '#8492a6' : token.includes('place') || token.includes('city') || token.includes('town') ? '#e2e8f0' : '#a4b0bf')
-                            : tone === 'acquisition_radar'
+                            : tone === 'night_vision'
                               ? (token.includes('postal') || token.includes('zip') ? '#98f8c6' : token.includes('poi') ? '#7ce9b2' : token.includes('place') || token.includes('city') || token.includes('town') ? '#e6fff0' : '#9fe4c2')
                               : (token.includes('postal') || token.includes('zip') ? '#9edfff' : token.includes('poi') ? '#7ed6ff' : token.includes('place') || token.includes('city') || token.includes('town') ? '#eef8ff' : '#9fbbd7')
             if (typedLayer.paint && 'text-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'text-color', textColor)
             if (typedLayer.paint && 'text-halo-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'text-halo-color', tone === 'light_street' ? 'rgba(255,255,255,0.96)' : tone === 'matrix' ? 'rgba(2,8,5,0.94)' : tone === 'red_ops' ? 'rgba(20,8,10,0.92)' : 'rgba(8,10,15,0.92)')
-            if (typedLayer.paint && 'icon-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'icon-color', tone === 'light_street' ? '#64748b' : tone === 'matrix' ? '#00c46a' : tone === 'red_ops' ? '#ff7a72' : tone === 'blueprint' ? '#57d5ff' : tone === 'acquisition_radar' ? '#6affb7' : '#7ecfff')
+            if (typedLayer.paint && 'icon-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'icon-color', tone === 'light_street' ? '#64748b' : tone === 'matrix' ? '#00c46a' : tone === 'red_ops' ? '#ff7a72' : tone === 'blueprint' ? '#57d5ff' : tone === 'night_vision' ? '#6affb7' : '#7ecfff')
           }
           if (typedLayer.type === 'raster') {
             const saturation =
               tone === 'satellite' ? -0.12
                 : tone === 'light_street' ? 0
                   : tone === 'terrain' ? 0.18
-                    : tone === 'minimal_black' ? -1
+                    : tone === 'monochrome' ? -1
                       : tone === 'blueprint' ? 0.7
-                        : tone === 'acquisition_radar' || tone === 'matrix' ? 0.34
+                        : tone === 'night_vision' || tone === 'matrix' ? 0.34
                           : tone === 'red_ops' ? 0.02 : -0.28
             const contrast =
               tone === 'light_street' ? 0.04
                 : tone === 'terrain' ? 0.12
-                  : tone === 'minimal_black' ? 0.3
+                  : tone === 'monochrome' ? 0.3
                     : tone === 'blueprint' ? 0.38
-                      : tone === 'midnight' ? 0.22
+                      : tone === 'executive' ? 0.22
                         : tone === 'red_ops' ? 0.34 : 0.24
             const brightnessMin =
               tone === 'light_street' ? 0.1
                 : tone === 'satellite' ? 0.05
                   : tone === 'terrain' ? 0.05
                     : tone === 'matrix' ? 0.02
-                      : tone === 'acquisition_radar' ? 0.03
+                      : tone === 'night_vision' ? 0.03
                         : 0.02
             const brightnessMax =
               tone === 'light_street' ? 1
                 : tone === 'satellite' ? 0.92
                   : tone === 'terrain' ? 0.84
                     : tone === 'matrix' ? 0.82
-                      : tone === 'acquisition_radar' ? 0.84
+                      : tone === 'night_vision' ? 0.84
                         : tone === 'blueprint' ? 0.68
-                          : tone === 'minimal_black' ? 0.64
+                          : tone === 'monochrome' ? 0.64
                             : tone === 'red_ops' ? 0.82 : 0.8
             const hueRotate =
               tone === 'red_ops' ? 320
                 : tone === 'blueprint' ? 170
-                  : tone === 'acquisition_radar' ? 100
+                  : tone === 'night_vision' ? 100
                     : tone === 'matrix' ? 112
                       : 0
             map.setPaintProperty(typedLayer.id, 'raster-saturation', saturation)
@@ -5252,21 +5252,21 @@ export function InboxCommandMap({
         tone === 'matrix' ? 'rgba(0, 176, 92, 0.13)'
           : tone === 'red_ops' ? 'rgba(146, 26, 32, 0.18)'
             : tone === 'blueprint' ? 'rgba(24, 120, 182, 0.15)'
-              : tone === 'midnight' ? 'rgba(56, 88, 182, 0.12)'
-                : tone === 'acquisition_radar' ? 'rgba(32, 134, 82, 0.15)'
-                  : tone === 'minimal_black' ? 'rgba(0, 0, 0, 0.14)'
+              : tone === 'executive' ? 'rgba(56, 88, 182, 0.12)'
+                : tone === 'night_vision' ? 'rgba(32, 134, 82, 0.15)'
+                  : tone === 'monochrome' ? 'rgba(0, 0, 0, 0.14)'
                     : tone === 'light_street' ? 'rgba(255, 255, 255, 0.01)'
                       : 'rgba(22, 56, 108, 0.11)'
       const tintOpacity =
         tone === 'light_street' ? 0
-          : tone === 'minimal_black' ? 0.16
-            : tone === 'midnight' ? 0.2
+          : tone === 'monochrome' ? 0.16
+            : tone === 'executive' ? 0.2
               : tone === 'red_ops' ? 0.26
                 : tone === 'blueprint' ? 0.24
-                  : tone === 'acquisition_radar' || tone === 'matrix' ? 0.26
+                  : tone === 'night_vision' || tone === 'matrix' ? 0.26
                     : 0.16
       const showGrid = tone === 'matrix' || tone === 'blueprint'
-      const showRadar = tone === 'matrix' || tone === 'acquisition_radar'
+      const showRadar = tone === 'matrix' || tone === 'night_vision'
 
       if (map.getLayer(THEME_TINT_LAYER_ID)) {
         map.setPaintProperty(THEME_TINT_LAYER_ID, 'fill-color', tintColor)

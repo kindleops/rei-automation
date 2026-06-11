@@ -55,12 +55,12 @@ export interface PropertyLayerTokens {
 // Legacy NexusTheme IDs → CommandMapThemeId
 const LEGACY_MAP: Record<string, CommandMapThemeId> = {
   'dark-matter':     'dark_ops',
-  'midnight-glass':  'midnight',
+  'midnight-glass':  'executive',
   'tactical-blue':   'blueprint',
-  'carbon-gold':     'midnight',
-  'monochrome-ops':  'minimal_black',
+  'carbon-gold':     'executive',
+  'monochrome-ops':  'monochrome',
   'infrared':        'red_ops',
-  'arctic-signal':   'acquisition_radar',
+  'arctic-signal':   'night_vision',
   'operator-black':  'dark_ops',
 }
 
@@ -77,12 +77,12 @@ const REPLY_CORE: Record<CommandMapThemeId, string> = {
   satellite:         'rgba(180,206,230,0.76)',
   dark_ops:          'rgba(56,208,240,0.76)',
   red_ops:           'rgba(255,115,107,0.78)',
-  midnight:          'rgba(126,172,255,0.76)',
+  executive:         'rgba(126,172,255,0.76)',
   blueprint:         'rgba(80,204,255,0.76)',
   light_street:      'rgba(37,99,235,0.80)',
   terrain:           'rgba(166,210,96,0.76)',
-  minimal_black:     'rgba(148,163,184,0.74)',
-  acquisition_radar: 'rgba(72,255,178,0.76)',
+  monochrome:        'rgba(148,163,184,0.74)',
+  night_vision:      'rgba(72,255,178,0.76)',
   matrix:            'rgba(0,255,136,0.76)',
 }
 
@@ -91,12 +91,12 @@ const REPLY_RING: Record<CommandMapThemeId, string> = {
   satellite:         'rgba(180,206,230,0.13)',
   dark_ops:          'rgba(56,208,240,0.13)',
   red_ops:           'rgba(255,115,107,0.14)',
-  midnight:          'rgba(109,147,255,0.14)',
+  executive:         'rgba(109,147,255,0.14)',
   blueprint:         'rgba(80,204,255,0.14)',
   light_street:      'rgba(37,99,235,0.12)',
   terrain:           'rgba(166,210,96,0.13)',
-  minimal_black:     'rgba(148,163,184,0.08)',
-  acquisition_radar: 'rgba(69,255,181,0.13)',
+  monochrome:        'rgba(148,163,184,0.08)',
+  night_vision:      'rgba(69,255,181,0.13)',
   matrix:            'rgba(0,255,136,0.13)',
 }
 

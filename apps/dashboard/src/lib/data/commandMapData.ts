@@ -638,11 +638,9 @@ export const loadCommandMapSellerPinDetail = async (
       return null
     }
 
-    query = query.limit(1).maybeSingle()
-
     if (options.signal) query = query.abortSignal(options.signal)
 
-    const { data, error } = await query
+    const { data, error } = await query.limit(1).maybeSingle()
 
     if (error) {
       if (isAbortError(error)) return null
