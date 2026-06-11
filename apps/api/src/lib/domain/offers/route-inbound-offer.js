@@ -157,9 +157,18 @@ function extractPropertyDescriptor(context = null) {
       getNumberValue(property_item, "number-of-units", null) ??
       getNumberValue(property_item, "units", null) ??
       null,
-    property_id: context?.ids?.property_id ?? null,
+    property_id:
+      context?.ids?.property_id ??
+      property_item?.property_id ??
+      property_item?.id ??
+      property_item?.fields?.property_id ??
+      null,
     podio_property_item_id: property_item?.item_id ?? null,
-    property_address: summary.property_address ?? null,
+    property_address:
+      summary.property_address ??
+      property_item?.property_address_full ??
+      property_item?.address ??
+      null,
   };
 }
 

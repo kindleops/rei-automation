@@ -456,7 +456,7 @@ export async function GET(request) {
   } catch (error) {
     return NextResponse.json(
       {
-        ok: true,
+        ok: false,
         degraded: true,
         error_code: 'thread_hydration_degraded',
         error: error?.message || 'Unknown thread hydration error',
