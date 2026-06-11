@@ -55,21 +55,25 @@ export async function POST(request) {
     return NextResponse.json(blockedSafetyResult(validation, 'queue-run'), { status: validation.status })
   }
 
-  const result = await runSendQueue({ limit: Math.min(runLimit, validation.effective_limit), dry_run: false }, {})
+  try {
+    const result = await runSendQueue({ limit: Math.min(runLimit, validation.effective_limit), dry_run: false }, {})
 
-  return NextResponse.json({
-    ok: result?.ok !== false,
-    action: 'queue-run',
-    diagnostics: {
-      configured_mode: configuredMode,
-      requested_mode: requestedMode,
-      run_limit: runLimit,
-      result,
-      summary: {
-        sent: Number(result?.sent_count || 0),
-        failed: Number(result?.failed_count || 0),
-        blocked: Number(result?.blocked_count || 0),
+    return NextResponse.json({
+      ok: result?.ok !== false,
+      action: 'queue-run',
+      diagnostics: {
+        configured_mode: configuredMode,
+        requested_mode: requestedMode,
+        run_limit: runLimit,
+        result,
+        summary: {
+          sent: Number(result?.sent_count || 0),
+          failed: Number(result?.failed_count || 0),
+          blocked: Number(result?.blocked_count || 0),
+        },
       },
-    },
-  }, { status: result?.ok === false ? 500 : 200 })
+    }, { status: result?.ok === false ? 500 : 200 })
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error?.message || 'queue_run_failed' }, { status: 500 })
+  }
 }
