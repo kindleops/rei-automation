@@ -20,6 +20,7 @@ import {
   writeOutboundSuccessMessageEvent,
   writeOutboundFailureMessageEvent,
 } from "@/lib/supabase/sms-engine.js";
+import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
 
 const logger = child({ module: "domain.inbox.send_now_service" });
 
@@ -80,6 +81,66 @@ function isTransportFailureReason(reason = "") {
     r.includes("unavailable") ||
     r.includes("carrier")
   );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SEND GATE
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * canSend(payload, deps) → { ok, reason }
+ *
+ * Single safety gate every outbound enqueue path must pass.
+ * Returns early on first failure; never reaches the writer when ok:false.
+ *
+ * Checks (in order):
+ *   a) Thread state — blocks paused_review and quarantine
+ *   b) Suppression — sms_suppression_list (ONLY server-side suppression read)
+ *   c) Payload validation — delegates to MessageValidationService
+ */
+export async function canSend(payload = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase;
+  const validate = deps.validate || validateOutboundSmsPayload;
+  const to_phone = normalizePhone(clean(payload.to_phone_number));
+  const thread_key = clean(payload.thread_key);
+
+  // a) Thread state
+  if (thread_key) {
+    try {
+      const { data: ts } = await supabase
+        .from("inbox_thread_state")
+        .select("status,metadata")
+        .eq("thread_key", thread_key)
+        .maybeSingle();
+      if (clean(ts?.status).toLowerCase() === "paused_review")
+        return { ok: false, reason: "thread_paused_review" };
+      if (ts?.metadata?.incident_quarantine === true || ts?.metadata?.quarantine === true)
+        return { ok: false, reason: "thread_quarantined" };
+    } catch {
+      // fail open — DB error must not silently block a send
+    }
+  }
+
+  // b) Suppression — single authority (Rule 11)
+  if (to_phone) {
+    try {
+      const q = quotePostgrestValue(to_phone);
+      const { count } = await supabase
+        .from("sms_suppression_list")
+        .select("id", { count: "exact", head: true })
+        .or(`phone_number.eq.${q},phone_e164.eq.${q}`)
+        .eq("is_active", true);
+      if ((count ?? 0) > 0) return { ok: false, reason: "phone_suppressed" };
+    } catch {
+      // fail open
+    }
+  }
+
+  // c) Payload validation
+  const v = validate(payload);
+  if (!v.ok) return { ok: false, reason: v.reason };
+
+  return { ok: true, reason: null };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -698,6 +759,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     hardComplianceCheckImpl = isHardComplianceBlocked,
     checkBlacklistPriorFailureImpl = checkBlacklistPriorFailure,
     recentDeliveryFailuresImpl = shouldSuppressRecentDeliveryFailuresReconciled,
+    canSendImpl = canSend,
     supabase = defaultSupabase,
   } = deps;
 
@@ -706,6 +768,36 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     asBoolean(input.bypassed_queue_emergency_stop, false) ||
     asBoolean(input_metadata.bypassed_queue_emergency_stop, false);
   const metadata_source = clean(input.source) || clean(input_metadata.source) || "manual_inbox";
+
+  // ── Step 0: canSend gate (thread state + suppression + message validation)
+  const gate = await canSendImpl(
+    {
+      to_phone_number: clean(input.to_phone_number),
+      thread_key: clean(input.thread_key),
+      message_body: clean(input.message_body),
+      message_text: clean(input.message_text),
+      message_type: clean(input.message_type),
+      metadata: input_metadata,
+    },
+    { supabase }
+  );
+  if (!gate.ok) {
+    logger.warn("inbox_send_now.blocked_by_gate", {
+      thread_key: clean(input.thread_key) || null,
+      to_phone_number: normalizePhone(clean(input.to_phone_number)) || null,
+      reason: gate.reason,
+    });
+    const http_status = gate.reason === "phone_suppressed" || gate.reason === "thread_paused_review" || gate.reason === "thread_quarantined" ? 423 : 400;
+    return {
+      ok: false,
+      status: http_status,
+      error: gate.reason,
+      reason: gate.reason,
+      detail_reason: gate.reason,
+      queue_created: false,
+      queue_inserted: false,
+    };
+  }
 
   // ── Step 1: Resolve from_phone_number ──────────────────────────────
   const normalized_to = normalizePhone(clean(input.to_phone_number));

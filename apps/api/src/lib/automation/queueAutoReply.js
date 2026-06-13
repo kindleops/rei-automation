@@ -7,7 +7,11 @@ import {
   renderSafeTemplate as defaultRender,
 } from "./templateSelector.js";
 import { ACTIONS, getIntentRoute } from "./intentMap.js";
-import { evaluateContactWindow as defaultWindowCheck } from "@/lib/supabase/sms-engine.js";
+import {
+  evaluateContactWindow as defaultWindowCheck,
+  enqueueSendQueueItem as defaultEnqueue,
+} from "@/lib/supabase/sms-engine.js";
+import { canSend as defaultCanSendFn } from "@/lib/domain/inbox/send-now-service.js";
 
 import {
   upsertThread,
@@ -20,6 +24,8 @@ import { resolveNextStage, calculateTemperature } from "./negotiationEngine.js";
 
 const defaultDeps = {
   supabase: defaultSupabase,
+  enqueue: defaultEnqueue,
+  canSendFn: defaultCanSendFn,
   classify: defaultClassify,
   selectNextTemplate: defaultSelect,
   validateTemplateForIntent: defaultValidate,
@@ -267,9 +273,23 @@ export async function queueAutoReply(thread_key, inbound_message_id, { dry_run =
     };
   }
 
-  const { data: queued, error: queueError } = await deps.supabase
-    .from("send_queue")
-    .insert({
+  const canSendFn = deps.canSendFn || defaultCanSendFn;
+  const gate = await canSendFn(
+    { to_phone_number: inbound.from_phone_number, thread_key, message_body: render.text, message_type: "auto_reply" },
+    { supabase: deps.supabase }
+  );
+  if (!gate.ok) {
+    return { ok: false, reason: gate.reason, action: "gate_blocked" };
+  }
+
+  const enqueue = deps.enqueue || defaultEnqueue;
+  const queue_key = `auto_reply:${thread_key}:${inbound_message_id}`;
+
+  const enqueue_result = await enqueue(
+    {
+      queue_key,
+      queue_id: queue_key,
+      dedupe_key: queue_key,
       thread_key,
       inbound_message_id,
       message_body: render.text,
@@ -284,7 +304,8 @@ export async function queueAutoReply(thread_key, inbound_message_id, { dry_run =
       stage_before: inbound.current_stage,
       stage_after,
       detected_intent: classification.primary_intent,
-      ai_confidence: classification.confidence,
+      message_type: "auto_reply",
+      type: "auto_reply",
       metadata: {
         classification_snapshot: classification,
         template_selection_reason: template.matches,
@@ -292,22 +313,21 @@ export async function queueAutoReply(thread_key, inbound_message_id, { dry_run =
         seller_temperature,
         memory_used: memory.found,
       },
-    })
-    .select()
-    .single();
+    },
+    { supabase: deps.supabase }
+  );
 
-  if (queueError) {
+  if (!enqueue_result?.ok) {
     return {
       ok: false,
-      reason: "queue_insert_failed",
-      error: queueError.message,
+      reason: enqueue_result?.reason || "queue_insert_failed",
     };
   }
 
   return {
     ok: true,
     action: ACTIONS.QUEUE_REPLY,
-    queue_id: queued.id,
+    queue_id: enqueue_result.queue_row_id,
     use_case: selection.use_case,
     rendered_text: render.text,
   };

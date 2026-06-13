@@ -10,6 +10,7 @@ import {
   writeOutboundSuccessMessageEvent,
   writeOutboundFailureMessageEvent,
 } from "@/lib/supabase/sms-engine.js";
+import { canSend as defaultCanSend } from "@/lib/domain/inbox/send-now-service.js";
 
 const logger = child({ module: "domain.auto_reply.execute_autonomous_reply" });
 
@@ -37,6 +38,7 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
     supabase = defaultSupabase,
     sendTextgridImpl = sendTextgridSMS,
     insertQueueImpl = insertSupabaseSendQueueRow,
+    canSendImpl = defaultCanSend,
   } = deps;
 
   const now = nowIso();
@@ -74,6 +76,16 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
       error: runtime_brake.error,
       diagnostics: runtime_brake.diagnostics,
     };
+  }
+
+  // ── 0. Send gate (thread state + suppression + message validation)
+  const gate = await canSendImpl(
+    { to_phone_number: to_phone, thread_key, message_body },
+    { supabase }
+  );
+  if (!gate.ok) {
+    logger.warn("auto_reply.blocked_by_gate", { reason: gate.reason, thread_key });
+    return { ok: false, reason: gate.reason };
   }
 
   // ── 1. Idempotency Check (inbound_event_id + stage + response_template_id)
@@ -151,7 +163,8 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
   let queue_insert = null;
   try {
     queue_insert = await insertQueueImpl({
-      queue_key: lock_token,
+      queue_key: idempotency_key,
+      dedupe_key: idempotency_key,
       queue_status: "processing",
       scheduled_for: now,
       scheduled_for_utc: now,

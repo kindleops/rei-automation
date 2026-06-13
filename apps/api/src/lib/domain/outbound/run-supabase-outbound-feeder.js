@@ -1,18 +1,45 @@
 import { loadSupabaseOutboundCandidates } from "./load-supabase-outbound-candidates.js";
-import { 
-  evaluateCandidateEligibility, 
+import {
+  evaluateCandidateEligibility,
   chooseTextgridNumber,
   renderOutboundTemplate,
   resolveNextOutboundTouch,
-  REASON_CODES 
+  REASON_CODES
 } from "./supabase-candidate-feeder.js";
 import { insertSupabaseSendQueueRow } from "../../supabase/sms-engine.js";
+import { canSend as defaultCanSend } from "@/lib/domain/inbox/send-now-service.js";
+
+// Module-level advisory lock (process-scoped). Prevents UI + cron concurrent runs
+// from double-enqueuing the same candidates. Injectable via deps for tests.
+let _feeder_lock_active = false;
 
 /**
  * runSupabaseOutboundFeeder
  * Feeds Supabase-native candidates into the send queue.
  */
 export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
+  // RISK-003: Advisory lock — concurrent callers no-op immediately.
+  const _acquire = deps._acquireFeederLock ?? (() => { if (_feeder_lock_active) return false; _feeder_lock_active = true; return true; });
+  const _release = deps._releaseFeederLock ?? (() => { _feeder_lock_active = false; });
+  if (!_acquire()) {
+    return { ok: false, reason: "feeder_already_running", skipped_count: 0, queued_count: 0, scanned_count: 0, eligible_count: 0, errors: [] };
+  }
+  try {
+    return await _runFeeder(input, deps);
+  } finally {
+    _release();
+  }
+}
+
+async function _runFeeder(input, deps) {
+  // Injectable pipeline steps — used by tests to avoid real Supabase calls.
+  const _loadCandidates = deps._loadCandidates || loadSupabaseOutboundCandidates;
+  const _evaluateEligibility = deps._evaluateEligibility || evaluateCandidateEligibility;
+  const _chooseNumber = deps._chooseNumber || chooseTextgridNumber;
+  const _renderTemplate = deps._renderTemplate || renderOutboundTemplate;
+  const _resolveNextTouch = deps._resolveNextTouch || resolveNextOutboundTouch;
+  const _insertRow = deps._insertRow || insertSupabaseSendQueueRow;
+
   const now = input.now || new Date().toISOString();
 
   const limit = Math.max(1, Math.min(Number(input.limit) || 25, 500));
@@ -85,7 +112,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
   };
 
   try {
-    const source = await loadSupabaseOutboundCandidates(options, deps);
+    const source = await _loadCandidates(options, deps);
     summary.scanned_count = source.scanned_count;
     summary.source = source.source;
 
@@ -99,7 +126,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Step 0: Resolve Next Touch Progression
-      const resolved = await resolveNextOutboundTouch(candidate, options, deps);
+      const resolved = await _resolveNextTouch(candidate, options, deps);
       
       if (debug && summary.first_10_candidate_touch_context.length < 10) {
         const hc = resolved.history_context || {};
@@ -153,7 +180,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       };
 
       // Safety Guard 1: Eligibility check (contact window, suppression, duplicates)
-      const eligibility = await evaluateCandidateEligibility(activeCandidate, options, deps);
+      const eligibility = await _evaluateEligibility(activeCandidate, options, deps);
       if (!eligibility.ok) {
         recordSkip(eligibility.reason_code || "INELIGIBLE", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -178,7 +205,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Safety Guard 2: Routing check
-      const routing = await chooseTextgridNumber(activeCandidate, options, deps);
+      const routing = await _chooseNumber(activeCandidate, options, deps);
       if (!routing.ok) {
         recordSkip(routing.reason_code || "ROUTING_BLOCKED", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -195,7 +222,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Safety Guard 3: Template rendering and guards
-      const rendered = await renderOutboundTemplate(activeCandidate, options, deps);
+      const rendered = await _renderTemplate(activeCandidate, options, deps);
       if (!rendered.ok) {
         recordSkip(rendered.reason_code || "TEMPLATE_ERROR", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -246,9 +273,30 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
         });
       }
 
+      // RISK-017: canSend gate before every write
+      if (!dry_run) {
+        const canSendFn = deps.canSend || defaultCanSend;
+        const gate = await canSendFn(
+          {
+            to_phone_number: activeCandidate.to_phone_number,
+            message_body: rendered.rendered_message_body,
+            message_type: "outbound",
+          },
+          deps
+        );
+        if (!gate.ok) {
+          recordSkip(`CAN_SEND_GATE:${gate.reason}`, {
+            master_owner_id: activeCandidate.master_owner_id,
+            property_id: activeCandidate.property_id,
+            gate_reason: gate.reason,
+          });
+          continue;
+        }
+      }
+
       // Write to Send Queue
       if (!dry_run) {
-        const queueResult = await insertSupabaseSendQueueRow(queue_payload, deps);
+        const queueResult = await _insertRow(queue_payload, deps);
 
         if (!queueResult.ok) {
           recordSkip("QUEUE_INSERT_FAILED", {
