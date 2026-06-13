@@ -4230,4 +4230,61 @@ export async function classify(message, brain_item = null) {
   };
 }
 
+// Maps classify() output → canonical inbox_thread_state fields written by classifyToInboxFields.
+// This is the single authority for translating classification results into DB-storable inbox state.
+export function classifyToInboxFields(classifyResult = {}) {
+  const compliance = String(classifyResult.compliance_flag || '').toLowerCase();
+  const intent = String(classifyResult.primary_intent || classifyResult.detected_intent || '').toLowerCase();
+  const autoDecision = classifyResult.automation_decision || {};
+
+  const opt_out = compliance === 'stop_texting' || autoDecision.suppression_action === 'opt_out';
+  const wrong_number = intent === 'wrong_number' || compliance === 'wrong_number';
+  const not_interested = intent === 'not_interested' || intent === 'no_interest' || intent === 'rejection';
+  const needs_review = autoDecision.human_review_required === true || autoDecision.risk_level === 'high';
+
+  const suppression_status = opt_out
+    ? 'opt_out'
+    : wrong_number
+    ? 'wrong_number'
+    : not_interested
+    ? 'not_interested'
+    : null;
+
+  let inbox_bucket;
+  if (opt_out) {
+    inbox_bucket = 'suppressed';
+  } else if (wrong_number || not_interested) {
+    inbox_bucket = 'dead';
+  } else if (needs_review) {
+    inbox_bucket = 'needs_review';
+  } else {
+    const stage = String(classifyResult.stage_hint || '').toLowerCase();
+    const motivation = Number(classifyResult.motivation_score ?? 0);
+    if (intent === 'interested' || intent === 'positive_response' || motivation >= 70) {
+      inbox_bucket = 'priority';
+    } else if (intent === 'inbound_reply' || intent === 'question' || intent === 'request_info') {
+      inbox_bucket = 'new_replies';
+    } else if (stage === 'offer' || stage === 'negotiation' || stage === 'follow_up') {
+      inbox_bucket = 'follow_up';
+    } else if (motivation <= 20) {
+      inbox_bucket = 'cold';
+    } else {
+      inbox_bucket = 'follow_up';
+    }
+  }
+
+  return {
+    inbox_bucket,
+    inbox_category:  classifyResult.primary_intent || null,
+    detected_intent: classifyResult.primary_intent || classifyResult.detected_intent || null,
+    reply_intent:    classifyResult.secondary_intent || null,
+    lead_temperature: classifyResult.seller_state || null,
+    wrong_number,
+    opt_out,
+    not_interested,
+    needs_review,
+    suppression_status,
+  };
+}
+
 export default classify;

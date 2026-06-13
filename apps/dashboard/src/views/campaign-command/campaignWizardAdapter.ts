@@ -221,6 +221,15 @@ export interface CampaignPreviewResult {
   dropped_filters?: Array<Record<string, unknown>>
   graph_join_key_report?: Record<string, unknown>
   graph_source_coverage?: Record<string, unknown>
+  graph_refresh_scope?: 'full' | 'partial' | 'unknown' | 'empty' | null
+  graph_row_count?: number | null
+  graph_freshness?: {
+    latest_generated_at?: string | null
+    latest_facet_updated_at?: string | null
+    refresh_finished_at?: string | null
+    refresh_status?: string | null
+    refresh_run_id?: string | null
+  } | null
   query_ms?: number
   degraded?: boolean
   degradedReason?: string
@@ -2070,6 +2079,18 @@ function normalizePreviewResponse(payload: unknown): CampaignPreviewResult {
     dropped_filters: recordArray(responsePayload.dropped_filters ?? payload.dropped_filters),
     graph_join_key_report: firstRecord(responsePayload.graph_join_key_report, fullSourceReach.graph_join_key_report, payload.graph_join_key_report),
     graph_source_coverage: firstRecord(responsePayload.graph_source_coverage, fullSourceReach.graph_source_coverage, payload.graph_source_coverage),
+    graph_refresh_scope: (asText(responsePayload.graph_refresh_scope ?? payload.graph_refresh_scope) || null) as CampaignPreviewResult['graph_refresh_scope'],
+    graph_row_count: asOptionalNumber(responsePayload.graph_row_count ?? payload.graph_row_count) ?? null,
+    graph_freshness: (() => {
+      const raw = firstRecord(responsePayload.graph_freshness, payload.graph_freshness)
+      return {
+        latest_generated_at: asText(raw.latest_generated_at) || null,
+        latest_facet_updated_at: asText(raw.latest_facet_updated_at) || null,
+        refresh_finished_at: asText(raw.refresh_finished_at) || null,
+        refresh_status: asText(raw.refresh_status) || null,
+        refresh_run_id: asText(raw.refresh_run_id) || null,
+      }
+    })(),
     query_ms: asOptionalNumber(responsePayload.queryMs ?? responsePayload.query_ms ?? reach.queryMs ?? reach.query_ms ?? payload.queryMs ?? payload.query_ms),
     source: 'backend',
     ...(import.meta.env.DEV ? { _raw: payload } : {}),

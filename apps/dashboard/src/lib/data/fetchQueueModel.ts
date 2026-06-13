@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../supabaseClient'
 import { asBoolean, asIso, asNumber, asString, getFirst, safeArray, type AnyRecord } from './shared'
-import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason, QueueFetchOptions } from '../../domain/queue/queue.types'
 import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
 import { getBackendBaseUrl } from '../api/backendClient'
 
@@ -24,7 +24,10 @@ const toQueueStatus = (value: unknown): QueueItemStatus => {
   if (status === 'paused_invalid_queue_row') return 'paused_invalid_queue_row'
   if (status === 'paused_global_lock') return 'paused_global_lock'
   if (status === 'paused_max_retries') return 'paused_max_retries'
-  return 'scheduled'
+  if (status === 'duplicate_blocked') return 'duplicate_blocked'
+  if (status === 'incident_quarantine') return 'incident_quarantine'
+  if (status === 'expired') return 'expired'
+  return 'blocked'
 }
 
 const toPriority = (value: unknown): QueueItemPriority => {
@@ -63,15 +66,34 @@ const asRecord = (value: unknown): AnyRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as AnyRecord : {}
 )
 
-export const fetchQueueModel = async (): Promise<QueueModel> => {
+export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<QueueModel> => {
   const supabase = getSupabaseClient()
+  const pageSize = Math.min(opts.pageSize ?? 500, 1000)
+  const page = Math.max(opts.page ?? 0, 0)
+  const offset = page * pageSize
 
-  // Step 1: Fetch Queue
+  // Default date range: last 7 days if no filter provided
+  const fetchNow = new Date()
+  const defaultFrom = new Date(fetchNow.getTime() - 7 * 86400000).toISOString()
+  const dateFrom = opts.dateFrom ?? defaultFrom
+  const dateTo = opts.dateTo ?? fetchNow.toISOString()
+
+  // Count query
+  const countResult = await supabase
+    .from('send_queue')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo)
+  const totalCount = countResult.count ?? 0
+
+  // Step 1: Fetch Queue with pagination
   const queueResult = await supabase
     .from('send_queue')
     .select('*')
+    .gte('created_at', dateFrom)
+    .lte('created_at', dateTo)
     .order('created_at', { ascending: false })
-    .limit(1200)
+    .range(offset, offset + pageSize - 1)
 
   if (queueResult.error) throw new Error(queueResult.error.message)
   const queueRows = safeArray(queueResult.data as AnyRecord[])
@@ -140,7 +162,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
 
   const [propRes, evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
     fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100),
-    fetchChunked(qArr, async _chunk => ({ data: [] }), 30), // Disabled message_events
+    fetchChunked(qArr, async chunk => await supabase.from('message_events').select('id,queue_id,event_type,delivery_status,delivered_at,provider_message_sid,created_at').in('queue_id', chunk).order('created_at', { ascending: false }).limit(3000), 30),
     (async () => {
       if (qArr.length === 0 && tArr.length === 0) return { data: [] }
       const qChunks = chunkArray(qArr, 30)
@@ -157,7 +179,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       return { data: results.flatMap(r => r.data || []) }
     })(),
     fetchChunked(cArr, async chunk => await supabase.from('sms_campaigns').select('id,campaign_name').in('id', chunk).limit(500), 100),
-    fetchChunked(oArr, async _chunk => ({ data: [] }), 100), // Disabled master_owners
+    fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,entity_name,first_name').in('master_owner_id', chunk).limit(500), 100),
     supabase.from('textgrid_numbers').select('*')
   ])
 
@@ -175,6 +197,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const queueId = asString(getFirst(row, ['queue_id', 'id']), id)
     const md = asRecord(row.metadata)
     const targetSnapshot = asRecord(md.target_snapshot)
+    const candidateSnapshot = asRecord(md.candidate_snapshot)
     const templateSnapshot = asRecord(md.template_snapshot)
 
     const metadataCampaignTargetId = asString(
@@ -200,15 +223,32 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const scheduledIso = asIso(getFirst(row, ['scheduled_for', 'scheduled_at', 'send_at'])) ?? new Date().toISOString()
     const localScheduledIso = asIso(getFirst(row, ['scheduled_for_local'])) || scheduledIso
 
-    const sellerName = asString(
-      getFirst(target || {}, ['seller_name', 'seller_full_name']),
-      asString(getFirst(row, ['full_name', 'entity_name', 'seller_name', 'first_name']),
-      asString(getFirst(owner || {}, ['display_name', 'entity_name', 'first_name']), 'Unknown seller'))
-    )
+    const phone = asString(getFirst(row, ['to_phone_number', 'phone']), '') || 'No phone'
+    const fromPhone = asString(getFirst(row, ['from_phone_number']), '')
+
+    // Full name resolution — prefer full name over first name only
+    const _sd = asString(getFirst(row, ['seller_display_name']), '')
+    const _csFullName = asString(getFirst(candidateSnapshot, ['seller_full_name']), '')
+    const _csOwnerDisp = asString(getFirst(candidateSnapshot, ['owner_display_name', 'owner_name', 'display_name']), '')
+    const _tsFullName = asString(getFirst(targetSnapshot, ['seller_full_name', 'owner_display_name']), '')
+    const _tsSeller = asString(getFirst(targetSnapshot, ['seller_name', 'full_name', 'entity_name']), '')
+    const _ownerDisp = asString(getFirst(owner || {}, ['display_name', 'entity_name']), '')
+    const _tgtSeller = asString(getFirst(target || {}, ['seller_full_name', 'seller_name']), '')
+    const _rowFull = asString(getFirst(row, ['full_name', 'entity_name', 'seller_name']), '')
+    const _firstName = asString(getFirst(row, ['seller_first_name']), '') || asString(getFirst(owner || {}, ['first_name']), '')
+
+    const sellerName =
+      _sd || _csFullName || _csOwnerDisp || _tsFullName || _tsSeller ||
+      _ownerDisp || _tgtSeller || _rowFull ||
+      _firstName || phone || 'Unknown seller'
 
     const propertyAddress = asString(
-      getFirst(target || {}, ['property_address_full', 'address_full']),
-      asString(getFirst(property || row, ['property_address', 'address', 'property']), 'No property linked')
+      getFirst(row, ['property_address']),
+      asString(getFirst(candidateSnapshot, ['property_address_full', 'property_address']),
+      asString(getFirst(targetSnapshot, ['property_address_full', 'address_full', 'property_address']),
+      asString(getFirst(property || {}, ['property_address']),
+      asString(getFirst(row, ['address', 'property']),
+      basePropId || 'No property linked'))))
     )
 
     const market = asString(
@@ -216,8 +256,6 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       asString(getFirst(row, ['market']), asString(getFirst(property || {}, ['market']), 'Market unknown'))
     )
 
-    const phone = asString(getFirst(row, ['to_phone_number', 'phone']), '') || 'No phone'
-    const fromPhone = asString(getFirst(row, ['from_phone_number']), '')
     const retryCount = asNumber(getFirst(row, ['retry_count']), 0)
     const maxRetries = Math.max(asNumber(getFirst(row, ['max_retries']), 3), retryCount || 0)
 
@@ -246,6 +284,22 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     else if (md.auto_reply) rowSource = 'auto_reply'
     else if (md.source === 'manual') rowSource = 'manual'
     else rowSource = 'feeder' // fallback
+
+    // Lineage fields
+    const queueKey = qKey || null
+    const workflowId = asString(getFirst(row, ['workflow_id']), asString(getFirst(md, ['workflow_id']), '')) || null
+    const workflowExecutionId = asString(getFirst(row, ['workflow_execution_id']), asString(getFirst(md, ['workflow_execution_id']), '')) || null
+    let automationSource: string | null = null
+    if (qKey.startsWith('inbox:')) automationSource = 'Inbox Auto-Reply'
+    else if (qKey.startsWith('campaign:')) automationSource = 'Campaign Engine'
+    else if (qKey.startsWith('feed')) automationSource = 'Feeder'
+    else if (qKey.startsWith('manual:')) automationSource = 'Manual Send'
+    else if (md.source === 'campaign_launch_execution') automationSource = 'Campaign Launch'
+    else if (md.source === 'auto_reply' || md.auto_reply) automationSource = 'Auto-Reply'
+    else if (md.source === 'feeder') automationSource = 'Feeder'
+    else if (md.source === 'manual') automationSource = 'Manual Send'
+    else if (rowSource === 'campaign') automationSource = 'Campaign'
+    else if (rowSource === 'feeder') automationSource = 'Feeder'
 
     // Diagnostics
     const flags: string[] = []
@@ -359,7 +413,11 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       lastEventStatus: event ? asString(event.delivery_status, '') || null : null,
       diagnosticFlags: flags,
       rowSource,
-      failureCategory
+      failureCategory,
+      queueKey,
+      workflowId,
+      workflowExecutionId,
+      automationSource,
     }
   })
 
@@ -370,9 +428,9 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
   const retryCount = items.filter((i) => i.status === 'retry').length
   const heldCount = items.filter((i) => i.status === 'held').length
   
-  const now = new Date().toDateString()
-  const sentTodayCount = items.filter((i) => i.sentAt && new Date(i.sentAt).toDateString() === now).length
-  const deliveredTodayCount = items.filter((i) => i.deliveredAt && new Date(i.deliveredAt).toDateString() === now).length
+  const todayStr = new Date().toDateString()
+  const sentTodayCount = items.filter((i) => i.sentAt && new Date(i.sentAt).toDateString() === todayStr).length
+  const deliveredTodayCount = items.filter((i) => i.deliveredAt && new Date(i.deliveredAt).toDateString() === todayStr).length
 
   const apiPressureLevel: 'low' | 'medium' | 'high' =
     failedCount + retryCount > items.length * 0.1
@@ -383,6 +441,8 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
 
   const hasProxyUrl = Boolean(getBackendBaseUrl())
   const engineMode: QueueModel['engineMode'] = hasProxyUrl ? 'proxy' : 'dry-run only'
+
+  const totalPages = Math.ceil(totalCount / pageSize) || 1
 
   return {
     items,
@@ -399,5 +459,11 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     apiPressureLevel,
     sendEngine: 'real-estate-automation',
     engineMode,
+    totalCount,
+    currentPage: page,
+    pageSize,
+    totalPages,
+    hasMore: page < totalPages - 1,
+    fetchOptions: { dateFrom, dateTo, page, pageSize },
   }
 }

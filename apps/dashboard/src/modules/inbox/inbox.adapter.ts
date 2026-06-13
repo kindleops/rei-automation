@@ -1160,16 +1160,29 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             patchApplied = true
           }
 
-          if (table === 'operator_thread_state' && payload.new) {
+          if ((table === 'operator_thread_state' || table === 'inbox_thread_state') && payload.new) {
             if (isDev) console.log('[SMOOTH_REALTIME_PATCH]', { table, threadKey, type: 'thread_state' })
             const row = payload.new as Record<string, unknown>
             const patch: Record<string, unknown> = {}
+            if (row.inbox_bucket != null) patch.inbox_bucket = normalizeRealtimeBucket(String(row.inbox_bucket))
             if (row.inbox_category != null) patch.inboxCategory = row.inbox_category
-            if (row.inbox_category != null) patch.inbox_bucket = normalizeRealtimeBucket(row.inbox_category)
+            if (row.inbox_category != null && row.inbox_bucket == null) patch.inbox_bucket = normalizeRealtimeBucket(row.inbox_category as string)
             if (row.detected_intent != null || row.ui_intent != null) patch.uiIntent = row.detected_intent || row.ui_intent
+            if (row.reply_intent != null) patch.replyIntent = row.reply_intent
+            if (row.lead_temperature != null) patch.leadTemperature = row.lead_temperature
             if (row.thread_stage != null) patch.workflowStage = row.thread_stage
             if (row.is_archived != null) patch.status = row.is_archived ? 'archived' : (row.is_read ? 'read' : undefined)
             if (row.is_read != null) { patch.unreadCount = row.is_read ? 0 : undefined; patch.isRead = row.is_read }
+            if (row.unread_count != null) patch.unreadCount = Number(row.unread_count)
+            if (row.wrong_number != null) patch.wrongNumber = row.wrong_number
+            if (row.opt_out != null) patch.optOut = row.opt_out
+            if (row.not_interested != null) patch.notInterested = row.not_interested
+            if (row.suppression_status != null) patch.suppressionStatus = row.suppression_status
+            // Prefer provider delivery status from canonical field
+            if (row.latest_provider_delivery_status != null) {
+              patch.providerDeliveryStatus = row.latest_provider_delivery_status
+              patch.deliveryStatus = row.latest_provider_delivery_status
+            }
             const before = findStoredThread(threadKey)
             const beforeBucket = rowBucket(before)
             const afterBucket = rowBucket({ ...(before ?? {}), ...patch })
@@ -1221,6 +1234,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
           .subscribe((status) => {
             if (cancelled) return
             const normalizedStatus: InboxRealtimeStatus =

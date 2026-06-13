@@ -1488,14 +1488,11 @@
 .nx-liquid-popover--processor {
   width: 480px !important;
   max-width: calc(100vw - 24px) !important;
-  z-index: 13000 !important;
-  border-radius: 18px !important;
   overflow: hidden !important;
+  padding: 0 !important;
   background:
     radial-gradient(circle at top right, rgba(91, 182, 255, 0.05), transparent 34%),
     linear-gradient(180deg, rgba(9, 13, 22, 0.99), rgba(8, 11, 19, 0.98)) !important;
-  border-color: rgba(173, 190, 220, 0.16) !important;
-  padding: 0 !important;
   backdrop-filter: blur(48px) saturate(180%) !important;
 }
 
@@ -2466,8 +2463,6 @@
   background:
     radial-gradient(circle at top right, rgba(91, 182, 255, 0.05), transparent 40%),
     linear-gradient(180deg, rgba(9, 13, 22, 0.99), rgba(8, 11, 19, 0.98)) !important;
-  backdrop-filter: blur(56px) saturate(200%) !important;
-  border-color: rgba(173, 190, 220, 0.15) !important;
 }
 
 /* Header subtitle */
@@ -6966,9 +6961,6 @@
 .nx-activity-panel {
   width: 460px !important;
   background: var(--nexus-panel-strong) !important;
-  backdrop-filter: blur(48px) saturate(220%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.10) !important;
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.80), 0 0 0 1px rgba(255, 255, 255, 0.04) inset !important;
 }
 
 /* Header */
@@ -9019,12 +9011,7 @@
    ========================================================================== */
 [data-nexus-theme="light"] .nx-queue-status__summary-card,
 [data-nexus-theme="light"] .nx-queue-status__campaign,
-[data-nexus-theme="light"] .nx-queue-status__panel,
-[data-nexus-theme="light"] .nx-liquid-surface,
-[data-nexus-theme="light"] .nx-glass-panel,
-[data-nexus-theme="light"] .nx-glass-dropdown,
-[data-nexus-theme="light"] .nx-glass-menu,
-[data-nexus-theme="light"] .nx-glass-popover {
+[data-nexus-theme="light"] .nx-queue-status__panel {
   background: rgba(255, 255, 255, 0.94) !important;
   color: #020617 !important;
   border: 1px solid rgba(15, 23, 42, 0.12) !important;

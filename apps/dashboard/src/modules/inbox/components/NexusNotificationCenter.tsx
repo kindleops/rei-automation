@@ -168,16 +168,18 @@ export const buildInboxNotifications = ({
   }
 
   if (queueProcessorHealth?.status === 'warning' || queueProcessorHealth?.status === 'critical') {
+    // Health-status indicator: always present when condition is true — use 'read' so it
+    // appears in the notification center without re-triggering the unread badge on each render.
     notifications.push({
       id: queueProcessorHealth.status === 'critical' ? 'queue-critical' : 'queue-delayed',
       command_space: 'Queue',
       type: 'queue_delayed',
-      title: queueProcessorHealth.status === 'critical' ? 'Queue health critical' : 'Queue processor delayed',
+      title: queueProcessorHealth.status === 'critical' ? 'Queue health degraded' : 'Queue processor delayed',
       body: queueProcessorHealth.summary,
       severity: queueProcessorHealth.status === 'critical' ? 'critical' : 'warning',
-      status: 'unread',
+      status: 'read',
       created_at: queueProcessorHealth.checkedAt,
-      read_at: null,
+      read_at: queueProcessorHealth.checkedAt,
       related_thread_id: null,
       related_property_id: null,
       related_owner_id: null,
@@ -191,16 +193,17 @@ export const buildInboxNotifications = ({
   }
 
   if (autonomyModel.emergencyState) {
+    // Health-status indicator: use 'read' to prevent render-loop unread badge spam.
     notifications.push({
       id: 'autonomy-emergency',
       command_space: 'AI',
       type: 'autonomy_emergency_stop',
-      title: 'Autonomous engine in protective posture',
+      title: 'Autonomous engine: protective pause active',
       body: autonomyModel.topDirective,
       severity: 'critical',
-      status: 'unread',
+      status: 'read',
       created_at: queueProcessorHealth?.checkedAt || selectedCreatedAt,
-      read_at: null,
+      read_at: queueProcessorHealth?.checkedAt || selectedCreatedAt,
       related_thread_id: selectedThread?.id ?? null,
       related_property_id: selectedThread?.propertyId ?? null,
       related_owner_id: selectedThread?.ownerId ?? null,
@@ -219,9 +222,9 @@ export const buildInboxNotifications = ({
       title: 'Compliance pressure rising',
       body: `Compliance risk ${Math.round(autonomyModel.complianceRiskScore)}/100. Shift more threads into review-safe paths.`,
       severity: 'warning',
-      status: 'unread',
+      status: 'read',
       created_at: queueProcessorHealth?.checkedAt || selectedCreatedAt,
-      read_at: null,
+      read_at: queueProcessorHealth?.checkedAt || selectedCreatedAt,
       related_thread_id: selectedThread?.id ?? null,
       related_property_id: selectedThread?.propertyId ?? null,
       related_owner_id: selectedThread?.ownerId ?? null,
@@ -551,7 +554,7 @@ export const NexusNotificationCenter = ({
         ? createPortal(
           <section
             ref={panelRef}
-            className="nx-notification-center nx-liquid-panel nxhud-panel"
+            className="nx-notification-center nx-glass-panel nxhud-panel"
             aria-label="Notification command center"
             role="dialog"
             aria-modal="true"

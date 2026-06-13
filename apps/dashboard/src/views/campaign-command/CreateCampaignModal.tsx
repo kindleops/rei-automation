@@ -184,7 +184,7 @@ const SPECIAL_DISPLAY_LABELS: Record<string, string> = {
 const createDefaultDraft = (): CampaignWizardDraft => ({
   name: '',
   description: '',
-  template_use_case: 'cold_outreach',
+  template_use_case: 'ownership_check',
   stage_code: 'first_touch',
   target_filters: createEmptyFilterGroups(),
 })
@@ -351,6 +351,27 @@ const computeLaunchEstimates = (
     windowHours,
     cost,
   }
+}
+
+type LaunchReadiness = 'ready' | 'warning' | 'blocked' | 'loading' | 'no_preview'
+
+const computeLaunchReadiness = (
+  preview: CampaignPreviewResult | null,
+  loading: boolean,
+  draftCount: number,
+  estimates: LaunchEstimates,
+): { status: LaunchReadiness; reasons: string[]; graphPartial: boolean } => {
+  if (loading) return { status: 'loading', reasons: [], graphPartial: false }
+  if (!preview) return { status: 'no_preview', reasons: ['Run a preview to validate targeting counts.'], graphPartial: false }
+  const graphPartial = preview.graph_refresh_scope === 'partial'
+  if (estimates.deliverable === 0) return { status: 'blocked', reasons: ['No contacts match the current targeting.'], graphPartial }
+  const reasons: string[] = []
+  if (graphPartial) reasons.push('Target graph is incomplete — counts reflect a partial market sample, not the full universe')
+  if (draftCount > 0) reasons.push(`${draftCount} filter${draftCount !== 1 ? 's' : ''} edited but not applied`)
+  if (estimates.senderCoveragePct !== null && estimates.senderCoveragePct < 50) {
+    reasons.push(`Low sender coverage (${estimates.senderCoveragePct}%)`)
+  }
+  return { status: reasons.length > 0 ? 'warning' : 'ready', reasons, graphPartial }
 }
 
 const SCHEDULE_PRESETS: Array<{ key: string; label: string; value: () => string }> = [
@@ -1295,6 +1316,10 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const backendDegraded = Boolean(catalog.degraded || preview?.degraded || degradedOptionState)
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
   const launchEstimates = computeLaunchEstimates(preview, launchSettings)
+  const launchReadiness = computeLaunchReadiness(preview, isPreviewLoading, totalDraftCount, launchEstimates)
+  // Schedule/Activate require a live backend preview. Degraded (local-fallback) state or no
+  // preview mean counts are unknown — block the action rather than let operators launch blind.
+  const canScheduleNow = canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
 
   const modal = (
     <div className="cmp-studio-overlay">
@@ -1325,10 +1350,9 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
             <label>
               <span>Scenario</span>
               <select value={draft.template_use_case} onChange={(event) => updateDraftRoot('template_use_case', event.target.value)}>
-                <option value="cold_outreach">Cold Outreach</option>
-                <option value="follow_up_outreach">Follow Up</option>
-                <option value="foreclosure_notice">Foreclosure Notice</option>
-                <option value="probate_outreach">Probate Outreach</option>
+                <option value="ownership_check">Ownership Check</option>
+                <option value="consider_selling">Consider Selling</option>
+                <option value="seller_asking_price">Asking Price</option>
               </select>
             </label>
             <label>
@@ -1357,35 +1381,82 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
           ) : null}
 
           <div className={`cmp-launch-execution cmp-launch-execution--activation cmp-launch-execution--polished ${launchPanelExpanded ? 'is-expanded' : ''}`}>
-            <div className="cmp-launch-strip" role="group" aria-label="Launch readiness">
-              <LaunchStripMetric label="Deliverable Targets" value={formatNumber(launchEstimates.deliverable)} accent />
-              <LaunchStripMetric label="Messages/day" value={`${formatNumber(launchEstimates.dailyVolume)}/day`} />
-              <LaunchStripMetric label="Estimated Runtime" value={launchEstimates.durationLabel} muted={launchEstimates.runtimeCapped ? 'Review pacing' : undefined} />
-              <LaunchStripMetric
-                label="Sender Coverage"
-                value={launchEstimates.senderCoveragePct != null ? `${launchEstimates.senderCoveragePct}%` : formatNumber(launchEstimates.senderCovered)}
-                muted={`${formatNumber(launchEstimates.senderCovered)} covered`}
-              />
-              <LaunchStripMetric label="Estimated Cost" value={formatUsdApprox(launchEstimates.cost)} />
-              <LaunchStripMetric label="Schedule" value={formatDateTime(launchSettings.first_scheduled_at)} />
-              <button
-                type="button"
-                className="cmp-launch-advanced-toggle"
-                onClick={() => setLaunchPanelExpanded((value) => !value)}
-                aria-expanded={launchPanelExpanded}
-              >
-                Advanced
-                <Icon name="chevron-down" size={12} />
-              </button>
-              <button
-                type="button"
-                className="cmp-launch-btn is-accent cmp-launch-strip-cta"
-                disabled={isLaunching || !canRunLaunch}
-                title={canRunLaunch ? 'Schedule this campaign for the selected time' : 'Save this campaign before scheduling.'}
-                onClick={requestSchedule}
-              >
-                {isLaunching ? 'Working…' : 'Schedule'}
-              </button>
+            {launchReadiness.graphPartial && (
+              <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
+                <Icon name="alert-triangle" size={12} />
+                <span>Target graph is incomplete — counts reflect a partial market sample ({preview?.graph_row_count?.toLocaleString() ?? '?'} rows). A full rebuild is required to show the real universe.</span>
+              </div>
+            )}
+            {totalDraftCount > 0 && (
+              <div className="cmp-draft-filter-warn">
+                <Icon name="alert-circle" size={12} />
+                <span>{totalDraftCount} filter{totalDraftCount !== 1 ? 's' : ''} edited but not applied — set them to include in targeting counts</span>
+              </div>
+            )}
+            <div className="cmp-readiness-strip" role="group" aria-label="Launch readiness">
+              <div className="cmp-readiness-hero">
+                <span className="cmp-readiness-label">Ready To Schedule</span>
+                <div className="cmp-readiness-kpi">
+                  <strong className={`cmp-readiness-number${isPreviewLoading ? ' is-loading' : ''}`}>
+                    {formatNumber(launchEstimates.deliverable)}
+                  </strong>
+                  <span className={`cmp-readiness-badge is-${launchReadiness.status}`}>
+                    {launchReadiness.status === 'loading' ? 'Updating'
+                      : launchReadiness.status === 'no_preview' ? 'No Preview'
+                      : launchReadiness.status === 'ready' ? 'Ready'
+                      : launchReadiness.status === 'warning' ? 'Review'
+                      : 'Blocked'}
+                  </span>
+                </div>
+                {launchReadiness.reasons.length > 0 && (
+                  <div className="cmp-readiness-reasons">
+                    {launchReadiness.reasons.map((r) => <span key={r}>{r}</span>)}
+                  </div>
+                )}
+                <div className="cmp-readiness-secondary">
+                  <span>
+                    {launchEstimates.senderCoveragePct != null
+                      ? `${launchEstimates.senderCoveragePct}% sender coverage`
+                      : `${formatNumber(launchEstimates.senderCovered)} covered`}
+                  </span>
+                  <span>{formatNumber(launchEstimates.dailyVolume)}/day</span>
+                  <span>{launchEstimates.durationLabel}</span>
+                  <span>{formatUsdApprox(launchEstimates.cost)} est.</span>
+                </div>
+              </div>
+              <div className="cmp-readiness-actions">
+                <div className="cmp-readiness-sched-wrap">
+                  <span className="cmp-readiness-sched-label">Schedule for</span>
+                  <span className="cmp-readiness-sched-value">{formatDateTime(launchSettings.first_scheduled_at)}</span>
+                </div>
+                <div className="cmp-readiness-actions-row">
+                  <button
+                    type="button"
+                    className="cmp-launch-btn is-accent cmp-launch-strip-cta"
+                    disabled={isLaunching || !canScheduleNow}
+                    title={
+                      !canRunLaunch ? 'Add a campaign name first'
+                        : isPreviewLoading ? 'Wait for targeting count to update'
+                        : backendDegraded ? 'Cannot schedule while backend is degraded — counts are unavailable'
+                        : preview === null ? 'Run a preview first to confirm targeting counts before scheduling'
+                        : 'Schedule this campaign for the selected time'
+                    }
+                    onClick={requestSchedule}
+                  >
+                    {isLaunching ? 'Working…' : 'Schedule'}
+                  </button>
+                  <button
+                    type="button"
+                    className="cmp-launch-advanced-toggle"
+                    onClick={() => setLaunchPanelExpanded((value) => !value)}
+                    aria-expanded={launchPanelExpanded}
+                    title="Advanced settings"
+                  >
+                    Advanced
+                    <Icon name="chevron-down" size={12} />
+                  </button>
+                </div>
+              </div>
             </div>
 
             {launchPanelExpanded && (
@@ -1454,16 +1525,22 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                     type="button"
                     className="cmp-launch-btn cmp-launch-btn--ghost"
                     disabled={isLaunching || !canRunLaunch}
-                    title="Plan the send — no queue rows are created"
+                    title="Run a targeting plan — no queue rows created"
                     onClick={requestPreview}
                   >
-                    Preview
+                    Preview Targeting
                   </button>
                   <button
                     type="button"
                     className="cmp-launch-btn cmp-launch-btn--outline"
-                    disabled={isLaunching || !canRunLaunch}
-                    title={canRunLaunch ? 'Schedule this campaign for the selected time' : 'Save this campaign before scheduling.'}
+                    disabled={isLaunching || !canScheduleNow}
+                    title={
+                      !canRunLaunch ? 'Add a campaign name first'
+                        : isPreviewLoading ? 'Wait for targeting count to update'
+                        : backendDegraded ? 'Cannot schedule while backend is degraded — counts are unavailable'
+                        : preview === null ? 'Run a preview first to confirm targeting counts before scheduling'
+                        : 'Schedule this campaign for the selected time'
+                    }
                     onClick={requestSchedule}
                   >
                     Schedule Campaign
@@ -1471,8 +1548,14 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
                   <button
                     type="button"
                     className="cmp-launch-btn is-accent"
-                    disabled={isLaunching || !canRunLaunch}
-                    title={canRunLaunch ? 'Activate now — queueing begins immediately' : 'Save this campaign before scheduling.'}
+                    disabled={isLaunching || !canScheduleNow}
+                    title={
+                      !canRunLaunch ? 'Add a campaign name first'
+                        : isPreviewLoading ? 'Wait for targeting count to update'
+                        : backendDegraded ? 'Cannot activate while backend is degraded — counts are unavailable'
+                        : preview === null ? 'Run a preview first to confirm targeting counts before activating'
+                        : 'Activate now — send queue starts immediately'
+                    }
                     onClick={requestActivate}
                   >
                     {isLaunching ? 'Working…' : 'Activate Campaign'}
@@ -1883,31 +1966,31 @@ const LaunchSummaryModal = ({
         </div>
 
         <div className="cmp-launch-summary__grid">
-          <Metric label="Targets Created" value={targetsCreated} />
-          <Metric label="Queue Rows Created" value={queueRowsCreated} />
+          <Metric label="Contacts Targeted" value={targetsCreated} />
+          <Metric label="Messages Scheduled" value={queueRowsCreated} variant="success" />
           <Metric label="Skipped" value={skippedCount} />
           <Metric label="Blocked" value={blockedCount} />
           <div className="cmp-launch-summary__stat">
-            <span>First Scheduled</span>
+            <span>First Message</span>
             <strong>{formatDateTime(firstScheduledAt)}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>Last Scheduled</span>
+            <span>Last Message</span>
             <strong>{formatDateTime(lastScheduledAt)}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>Status</span>
+            <span>Campaign Status</span>
             <strong>{status.replace(/_/g, ' ')}</strong>
           </div>
           <div className="cmp-launch-summary__stat">
-            <span>Target Build</span>
+            <span>Snapshots Built</span>
             <strong>{formatNumber(result.target_build?.built_count ?? 0)}</strong>
           </div>
         </div>
 
         <div className="cmp-launch-summary__columns">
-          <DistributionList title="sender_distribution" items={senderDistribution} />
-          <DistributionList title="template_distribution" items={templateDistribution} />
+          <DistributionList title="Sender Distribution" items={senderDistribution} />
+          <DistributionList title="Message Templates" items={templateDistribution} />
         </div>
 
         {blockers.length > 0 && (
@@ -1918,12 +2001,6 @@ const LaunchSummaryModal = ({
             ))}
           </div>
         )}
-
-        <div className="cmp-launch-confirm__copy">
-          <div>Test Run creates no queue rows</div>
-          <div>Prepare Only creates targets without queue rows</div>
-          <div>Schedule Live creates guarded scheduled queue rows</div>
-        </div>
 
         <div className="cmp-launch-confirm__actions">
           <button type="button" className="cmp-btn-ghost" onClick={onClose}>Keep Editing</button>
@@ -1943,7 +2020,7 @@ const DistributionList = ({
 }) => {
   return (
     <div className="cmp-launch-summary__distribution">
-      <span>{formatLabel(title)}</span>
+      <span>{title}</span>
       {items.length === 0 ? (
         <em>No rows</em>
       ) : items.slice(0, 8).map((item) => (
@@ -2110,57 +2187,64 @@ const TargetReachPanel = ({
   const funnelSteps = [
     {
       key: 'addressable',
-      label: preview?.addressable_properties_approximate ? 'Addressable Properties *' : 'Addressable Properties',
+      label: preview?.addressable_properties_approximate ? 'Total Universe *' : 'Total Universe',
       value: preview?.addressable_properties ?? null,
-      hint: 'Rows from public.properties before contact narrowing.',
+      hint: 'All properties in the database before any targeting filters.',
     },
     {
       key: 'graph',
-      label: 'Campaign Graph',
+      label: 'Matched Properties',
       value: campaignGraphCount,
-      hint: 'One campaign graph row per property.',
+      hint: 'Properties that match your active targeting filters.',
     },
     {
       key: 'reachable',
       label: 'Reachable Contacts',
       value: reachableContacts,
-      hint: 'Properties with a reachable phone path.',
+      hint: 'Matched properties with a contactable phone number.',
     },
     {
       key: 'sms',
       label: 'SMS Eligible',
       value: smsEligible,
-      hint: 'Reachable contacts that can receive SMS.',
+      hint: 'Reachable contacts eligible to receive SMS messages.',
     },
     {
       key: 'clean',
-      label: 'Clean Targets',
+      label: 'Compliant Contacts',
       value: preview?.clean_targets ?? null,
-      hint: 'SMS-eligible contacts after suppression and wrong-number checks.',
+      hint: 'After suppression list, opt-outs, and wrong-number checks.',
     },
     {
       key: 'covered',
-      label: 'Sender Covered',
+      label: 'Routable Contacts',
       value: senderCovered,
-      hint: 'Clean targets with an active sender route.',
+      hint: 'Compliant contacts with an active sender route assigned.',
     },
     {
       key: 'deliverable',
-      label: 'Deliverable',
+      label: 'Ready To Schedule',
       value: preview?.ready_to_queue ?? null,
-      hint: 'Targets ready for queue creation.',
+      hint: 'Contacts that will receive messages when you schedule this campaign.',
       accent: true,
     },
     {
       key: 'queueable',
-      label: 'Queueable Today',
+      label: 'Sendable Today',
       value: preview?.queueable_today ?? null,
-      hint: "Deliverable targets inside today's queue policy.",
+      hint: "Ready contacts within today's send window and queue policy.",
       accent: true,
     },
   ]
   const hasNoReachableContacts = preview !== null && !loading && Number(reachableContacts ?? 0) === 0 && activeFilterCount > 0
   const hasNoSenderRoute = preview !== null && !loading && Number(senderCovered ?? 0) === 0 && Number(smsEligible ?? reachableContacts ?? 0) > 0
+
+  const graphScope = preview?.graph_refresh_scope ?? null
+  const graphRowCount = preview?.graph_row_count ?? null
+  const graphIsPartial = graphScope === 'partial'
+  const graphRefreshedAt = preview?.graph_freshness?.refresh_finished_at ?? null
+  const graphAgeMs = graphRefreshedAt ? Date.now() - new Date(graphRefreshedAt).getTime() : null
+  const graphIsStale = graphAgeMs !== null && graphAgeMs > 3_600_000 // >1 hour
 
   return (
     <aside className="cmp-studio-summary cmp-target-reach">
@@ -2168,12 +2252,29 @@ const TargetReachPanel = ({
         <div>
           <div className="cmp-summary-title">Target Reach</div>
           <div className="cmp-summary-subtitle">
-            {loading ? 'Updating reach' : previewMeta ? `Updated ${previewMeta.ts}` : preview?.query_ms !== undefined ? `${preview.query_ms}ms query` : 'Preview estimate'}
+            {loading ? 'Updating reach' : previewMeta ? `Updated ${previewMeta.ts}` : preview?.query_ms !== undefined ? `${preview.query_ms}ms query` : 'No data — apply filters to load'}
           </div>
         </div>
-        <span className={`cmp-summary-status ${loading ? 'is-loading' : backendDegraded || preview?.degraded ? 'is-degraded' : preview ? 'is-ready' : ''}`}>
-          {loading ? 'Updating' : backendDegraded || preview?.degraded ? 'Degraded' : preview ? 'Updated' : 'Standby'}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          <span className={`cmp-summary-status ${loading ? 'is-loading' : backendDegraded || preview?.degraded ? 'is-degraded' : preview ? 'is-ready' : ''}`}>
+            {loading ? 'Updating' : backendDegraded || preview?.degraded ? 'Degraded' : preview ? 'Updated' : 'Standby'}
+          </span>
+          {graphIsPartial && (
+            <span className="cmp-graph-scope-badge cmp-graph-scope-badge--partial">
+              Partial Graph · {graphRowCount?.toLocaleString() ?? '?'} rows
+            </span>
+          )}
+          {graphScope === 'full' && (
+            <span className="cmp-graph-scope-badge cmp-graph-scope-badge--full">
+              Full Universe
+            </span>
+          )}
+          {graphIsStale && (
+            <span className="cmp-graph-scope-badge cmp-graph-scope-badge--stale" title={`Graph last refreshed ${graphRefreshedAt}`}>
+              Graph stale — counts may not reflect recent changes
+            </span>
+          )}
+        </div>
       </div>
 
       <BackendStatusStrip
@@ -2704,19 +2805,21 @@ const DomainFocusSection = ({
   if (!preview) return null
 
   const getDist = (key: string) => preview.distributions.find((d) => d.key === key)
-  const getBlocked = (key: string) => preview.blocked_waterfall.find((b) => b.key === key)?.count ?? 0
-  const total = preview.total_matched
+  const getBlocked = (key: string) => {
+    const count = preview.blocked_waterfall.find((b) => b.key === key)?.count
+    return count !== undefined ? count : null
+  }
 
   if (activeDomain === 'properties') {
     const dist = getDist('property_state')
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Property Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Property Breakdown</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="High Equity" value={Math.round(total * 0.38)} variant="accent" />
-          <DomainKpi label="SFR" value={Math.round(total * 0.68)} />
-          <DomainKpi label="Distressed" value={Math.round(total * 0.24)} variant="warn" />
-          <DomainKpi label="Clean Targets" value={preview.clean_targets} />
+          <DomainKpi label="Matched" value={preview.matched_properties ?? preview.total_matched ?? null} variant="accent" />
+          <DomainKpi label="Compliant Contacts" value={preview.clean_targets ?? null} />
+          <DomainKpi label="Missing Phone" value={getBlocked('missing_clean_phone')} variant="warn" />
+          <DomainKpi label="No Sender Route" value={getBlocked('missing_sender_route')} variant="warn" />
         </div>
         {dist && <DomainDistList buckets={dist.buckets} />}
       </section>
@@ -2725,14 +2828,13 @@ const DomainFocusSection = ({
 
   if (activeDomain === 'prospects') {
     const langDist = getDist('language_preference')
+    const smsEligible = preview.sms_eligible_phones ?? preview.sms_eligible_phones_count ?? preview.property_sms_eligible_count ?? null
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Prospect Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Prospect Breakdown</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="SMS Eligible" value={Math.round(total * 0.88)} variant="accent" />
-          <DomainKpi label="Contact Ready" value={Math.round(total * 0.76)} />
-          <DomainKpi label="With Flags" value={Math.round(total * 0.62)} />
-          <DomainKpi label="Age 45+" value={Math.round(total * 0.85)} />
+          <DomainKpi label="Reachable Contacts" value={preview.linked_phones ?? null} variant="accent" />
+          <DomainKpi label="SMS Eligible" value={smsEligible} />
         </div>
         {langDist && <DomainDistList buckets={langDist.buckets} />}
       </section>
@@ -2743,12 +2845,9 @@ const DomainFocusSection = ({
     const tierDist = getDist('priority_tier')
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Owner Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Owner Breakdown</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="Priority A+B" value={Math.round(total * 0.52)} variant="accent" />
-          <DomainKpi label="Contactable" value={Math.round(total * 0.74)} />
-          <DomainKpi label="High Pressure" value={Math.round(total * 0.28)} variant="warn" />
-          <DomainKpi label="Multi-Property" value={Math.round(total * 0.31)} />
+          <DomainKpi label="Linked Owners" value={preview.linked_master_owners ?? null} variant="accent" />
         </div>
         {tierDist && <DomainDistList buckets={tierDist.buckets.map((b) => ({ ...b, label: `Tier ${b.label}` }))} />}
       </section>
@@ -2757,15 +2856,12 @@ const DomainFocusSection = ({
 
   if (activeDomain === 'phones') {
     const carrierDist = getDist('phone_owner')
-    const missingPhone = getBlocked('missing_clean_phone')
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Phone Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Phone Breakdown</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="Active" value={Math.round(total * 0.72)} variant="accent" />
-          <DomainKpi label="Used 12mo" value={Math.round(total * 0.81)} />
-          <DomainKpi label="Missing Phone" value={missingPhone} variant="warn" />
-          <DomainKpi label="Recently Active" value={Math.round(total * 0.58)} />
+          <DomainKpi label="Reachable" value={preview.linked_phones ?? null} variant="accent" />
+          <DomainKpi label="Missing Phone" value={getBlocked('missing_clean_phone')} variant="warn" />
         </div>
         {carrierDist && <DomainDistList buckets={carrierDist.buckets} />}
       </section>
@@ -2777,15 +2873,14 @@ const DomainFocusSection = ({
     const dupQueue = getBlocked('duplicate_queue')
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Outreach Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Outreach Eligibility</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="Never Contacted" value={Math.round(total * 0.71)} variant="accent" />
-          <DomainKpi label="Pending Touch" value={Math.round(total * 0.08)} />
-          <DomainKpi label="Recent Window" value={recentWindow} variant="warn" />
-          <DomainKpi label="Dup Queue" value={dupQueue} variant="warn" />
+          <DomainKpi label="Ready To Schedule" value={preview.ready_to_queue ?? null} variant="accent" />
+          <DomainKpi label="Recent Window Block" value={recentWindow} variant="warn" />
+          <DomainKpi label="Duplicate Queue" value={dupQueue} variant="warn" />
         </div>
         <div className="cmp-domain-focus-note">
-          Suppression, opt-out, and queue limits applied automatically during send.
+          Suppression, opt-out, and queue limits enforced on every outbound message.
         </div>
       </section>
     )
@@ -2793,15 +2888,12 @@ const DomainFocusSection = ({
 
   if (activeDomain === 'sender_coverage') {
     const coverDist = getDist('sender_coverage_status')
-    const missingRoute = getBlocked('missing_sender_route')
     return (
       <section className="cmp-reach-section cmp-domain-focus">
-        <div className="cmp-reach-section-title"><span>Coverage Focus</span></div>
+        <div className="cmp-reach-section-title"><span>Sender Coverage</span></div>
         <div className="cmp-domain-focus-kpis">
-          <DomainKpi label="Covered" value={Math.round(total * 0.78)} variant="accent" />
-          <DomainKpi label="Limited" value={Math.round(total * 0.14)} variant="warn" />
-          <DomainKpi label="No Route" value={missingRoute} variant="danger" />
-          <DomainKpi label="Primary Tier" value={Math.round(total * 0.62)} />
+          <DomainKpi label="Routable Contacts" value={preview.sender_covered ?? null} variant="accent" />
+          <DomainKpi label="No Sender Route" value={getBlocked('missing_sender_route')} variant="danger" />
         </div>
         {coverDist && <DomainDistList buckets={coverDist.buckets} />}
       </section>
@@ -2817,12 +2909,12 @@ const DomainKpi = ({
   variant,
 }: {
   label: string
-  value: number
+  value: number | null
   variant?: 'accent' | 'warn' | 'danger'
 }) => (
   <div className="cmp-domain-focus-kpi">
     <span>{label}</span>
-    <strong className={variant ? `is-${variant}` : ''}>{formatNumber(value)}</strong>
+    <strong className={variant ? `is-${variant}` : ''}>{value === null ? '—' : formatNumber(value)}</strong>
   </div>
 )
 

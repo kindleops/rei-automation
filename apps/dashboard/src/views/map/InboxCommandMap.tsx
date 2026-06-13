@@ -4933,8 +4933,20 @@ export function InboxCommandMap({
       layers.forEach((layer) => {
         const typedLayer = layer as StyleLayerLike
         if (!typedLayer.id || isCustomLayer(typedLayer.id)) return
+
+        // Never let overlay toggles hide the actual basemap.
+        // Raster/background layers are the map foundation; hiding them creates
+        // blank gray/black themes while pins/overlays still render.
+        if (typedLayer.type === 'raster' || typedLayer.type === 'background') {
+          if (map.getLayer(typedLayer.id)) {
+            map.setLayoutProperty(typedLayer.id, 'visibility', 'visible')
+          }
+          return
+        }
+
         const categories = classifyBaseLayer(typedLayer)
         if (categories.length === 0) return
+
         const visible = categories.every((category) => overlayState[category])
         if (map.getLayer(typedLayer.id)) {
           map.setLayoutProperty(typedLayer.id, 'visibility', visible ? 'visible' : 'none')
@@ -6515,7 +6527,6 @@ export function InboxCommandMap({
         activeBaseStyleIdRef.current = getCommandMapBaseStyleId(fallbackTheme.id)
         setMapStyleMode(fallbackTheme.id)
       }, 6500)
-      map.setStyle(resolveStyle(nextThemeId))
       map.once('style.load', () => {
         try { addMapLayers(map) } catch { /* getSource/getLayer guards handle duplicates */ }
         void syncBasemapPresentation(map)
@@ -6526,6 +6537,7 @@ export function InboxCommandMap({
           map.triggerRepaint()
         })
       })
+      map.setStyle(resolveStyle(nextThemeId))
       if (import.meta.env.DEV) {
         console.log('[CommandMapTheme]', {
           theme: nextThemeId,

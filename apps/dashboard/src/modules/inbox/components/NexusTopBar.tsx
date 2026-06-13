@@ -261,7 +261,7 @@ export const NexusTopBar = ({
   }
 
   const renderWorkspaceRoot = () => (
-    <div className="nx-workspace-menu-root" role="menu">
+    <div className="nx-workspace-menu-root nx-glass-menu" role="menu">
       <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'workspaces' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('workspaces')} onClick={() => setActiveSubmenu('workspaces')}>
         <span>Pinned Workspaces</span><Icon name="chevron-right" />
       </button>
@@ -285,7 +285,7 @@ export const NexusTopBar = ({
 
     if (activeSubmenu === 'workspaces') {
       return (
-        <div className="nx-workspace-submenu-scroll" role="menu">
+        <div className="nx-workspace-submenu-panel nx-glass-dropdown" role="menu">
           {workspaceOptions.map((workspace) => (
             <button key={workspace.key} type="button" className={cls('nx-workspace-submenu-item', activeWorkspaceKey === workspace.key && 'is-active')} onClick={() => selectAndClose(() => onSelectWorkspace?.(workspace.key))}>
               <span className="nx-workspace-submenu-item__text"><strong>{workspace.label}</strong><small>{workspace.description || ''}</small></span>
@@ -474,7 +474,7 @@ export const NexusTopBar = ({
             </span>
           </button>
           {isQueuePanelPinned || isQueuePanelHovered ? (
-            <div className="nx-liquid-popover nx-liquid-popover--processor" role="status" onClick={(e) => e.stopPropagation()}>
+            <div className="nx-glass-popover nx-liquid-popover--processor" role="status" onClick={(e) => e.stopPropagation()}>
               <QueueCommandCenter
                 health={queueProcessorHealth}
                 control={queueControlDiagnostics}

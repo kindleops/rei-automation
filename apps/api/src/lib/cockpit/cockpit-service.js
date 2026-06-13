@@ -538,6 +538,12 @@ const THREAD_STATE_ALLOWED_FIELDS = new Set([
   'seller_stage',
   'temperature',
   'autopilot_mode',
+  // suppression / compliance (operator-triggered, written to canonical state)
+  'wrong_number',
+  'opt_out',
+  'not_interested',
+  'suppression_status',
+  'unread_count',
 ])
 
 const THREAD_STATE_FORBIDDEN_FIELDS = new Set([
@@ -587,10 +593,11 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
   }
 
   const now = new Date().toISOString()
+  const isMarkRead = 'is_read' in allowedPatch && asBoolean(allowedPatch.is_read, false)
   const rowPatch = {
     thread_key: threadKey,
     updated_at: now,
-    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), read_at: asBoolean(allowedPatch.is_read, false) ? now : null } : {}),
+    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), read_at: isMarkRead ? now : null, unread_count: isMarkRead ? 0 : undefined } : {}),
     ...('is_pinned' in allowedPatch ? { is_pinned: asBoolean(allowedPatch.is_pinned, false) } : {}),
     ...('is_archived' in allowedPatch ? { is_archived: asBoolean(allowedPatch.is_archived, false), archived_at: asBoolean(allowedPatch.is_archived, false) ? now : null } : {}),
     ...('assigned_user' in allowedPatch ? { assigned_user: clean(allowedPatch.assigned_user) || null } : {}),
@@ -600,6 +607,12 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     ...('seller_stage' in allowedPatch ? { seller_stage: clean(allowedPatch.seller_stage) } : {}),
     ...('temperature' in allowedPatch ? { temperature: clean(allowedPatch.temperature) } : {}),
     ...('autopilot_mode' in allowedPatch ? { autopilot_mode: clean(allowedPatch.autopilot_mode) } : {}),
+    // Suppression / compliance — update canonical state immediately
+    ...('wrong_number' in allowedPatch ? { wrong_number: asBoolean(allowedPatch.wrong_number, false), suppression_status: asBoolean(allowedPatch.wrong_number, false) ? 'wrong_number' : null } : {}),
+    ...('opt_out' in allowedPatch ? { opt_out: asBoolean(allowedPatch.opt_out, false), suppression_status: asBoolean(allowedPatch.opt_out, false) ? 'opt_out' : null } : {}),
+    ...('not_interested' in allowedPatch ? { not_interested: asBoolean(allowedPatch.not_interested, false) } : {}),
+    ...('suppression_status' in allowedPatch ? { suppression_status: clean(allowedPatch.suppression_status) || null } : {}),
+    ...('unread_count' in allowedPatch ? { unread_count: Math.max(0, Number(allowedPatch.unread_count) || 0) } : {}),
   }
 
   if (dryRun) {
@@ -609,7 +622,7 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
   const { data, error } = await supabase
     .from('inbox_thread_state')
     .upsert(rowPatch, { onConflict: 'thread_key' })
-    .select('thread_key,is_read,is_pinned,is_archived,assigned_user,manual_review,conversation_status,seller_stage,temperature,autopilot_mode,updated_at')
+    .select('thread_key,is_read,is_pinned,is_archived,assigned_user,manual_review,conversation_status,seller_stage,temperature,autopilot_mode,wrong_number,opt_out,not_interested,suppression_status,unread_count,updated_at')
     .maybeSingle()
 
   if (error) {

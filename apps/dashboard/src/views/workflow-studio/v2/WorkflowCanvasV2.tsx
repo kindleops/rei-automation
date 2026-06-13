@@ -20,16 +20,16 @@ import type {
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
-const CANVAS_WIDTH = 6400
-const CANVAS_HEIGHT = 4200
-const NODE_WIDTH = 380
-const NODE_HEIGHT = 160
-const NODE_CENTER_Y = 80
+const CANVAS_WIDTH = 4200
+const CANVAS_HEIGHT = 2600
+const NODE_WIDTH = 460
+const NODE_HEIGHT = 190
+const NODE_CENTER_Y = 95
 const GRID_SIZE = 24
-const LEVEL_GAP = 460
-const LANE_GAP = 160
-const ROOT_X = 960
-const ROOT_Y = 1180
+const LEVEL_GAP = 520
+const LANE_GAP = 220
+const ROOT_X = 240
+const ROOT_Y = 700
 
 type ConnectionKind = 'true' | 'false' | 'next'
 
@@ -458,10 +458,10 @@ function graphBounds(nodes: CanvasNodeV2[]) {
   }
 
   return {
-    minX: Math.max(0, Math.min(...nodes.map((node) => node.x)) - 340),
-    minY: Math.max(0, Math.min(...nodes.map((node) => node.y)) - 340),
-    maxX: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + 380,
-    maxY: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + 420,
+    minX: Math.max(0, Math.min(...nodes.map((node) => node.x)) - 120),
+    minY: Math.max(0, Math.min(...nodes.map((node) => node.y)) - 120),
+    maxX: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + 180,
+    maxY: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + 180,
   }
 }
 
@@ -484,7 +484,7 @@ export const WorkflowCanvasV2 = ({
   onDropNode,
   busy,
 }: WorkflowCanvasV2Props) => {
-  const [zoom, setZoom] = useState(0.78)
+  const [zoom, setZoom] = useState(0.95)
   const [localNodes, setLocalNodes] = useState<CanvasNodeV2[]>(() =>
     buildCanvasNodes(detail),
   )

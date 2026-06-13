@@ -100,7 +100,7 @@ export const InboxActivityPanel = ({
   })
 
   const panel = (
-    <aside className="nx-activity-panel nx-liquid-panel" aria-label="Live activity log">
+    <aside className="nx-activity-panel nx-glass-panel" aria-label="Live activity log">
 
       {/* ── Header ────────────────────────────────────────────────── */}
       <header className="lac-header">

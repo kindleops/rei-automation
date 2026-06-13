@@ -61,6 +61,8 @@ import {
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { getSystemFlags, getSystemValue } from "@/lib/system-control.js";
+import { dispatchInboundAcquisitionSms } from "@/lib/domain/acquisition/inbound-dispatcher.js";
+import { ACQUISITION_RUNTIME_FLAGS } from "@/lib/domain/acquisition/acquisition-runtime-control.js";
 
 const defaultDeps = {
   loadContext,
@@ -110,6 +112,7 @@ const defaultDeps = {
   runOfferStageAI,
   buildOfferStageMetadata,
   shouldSkipOfferStageAI,
+  dispatchInboundAcquisitionSms,
 };
 
 let runtimeDeps = { ...defaultDeps };
@@ -770,8 +773,22 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   // system_control gates — fail-closed: missing flag = disabled.
   // auto_reply_enabled must be true in system_control before any auto-reply is queued.
   // followup_enabled must be true in system_control before any follow-up is queued.
-  const { auto_reply_enabled: system_auto_reply_enabled, followup_enabled: system_followup_enabled } =
-    await runtimeDeps.getSystemFlags(["auto_reply_enabled", "followup_enabled"]);
+  const system_flags = await runtimeDeps.getSystemFlags([
+    "auto_reply_enabled",
+    "followup_enabled",
+    ...Object.values(ACQUISITION_RUNTIME_FLAGS),
+  ]);
+  const {
+    auto_reply_enabled: system_auto_reply_enabled,
+    followup_enabled: system_followup_enabled,
+  } = system_flags;
+  const acquisition_engine_enabled =
+    system_flags[ACQUISITION_RUNTIME_FLAGS.ENGINE] === true;
+  const acquisition_offer_engine_enabled =
+    system_flags[ACQUISITION_RUNTIME_FLAGS.OFFER_ENGINE] === true;
+  const acquisition_offer_automation_enabled = Boolean(
+    acquisition_engine_enabled && acquisition_offer_engine_enabled
+  );
   const system_auto_reply_mode = await runtimeDeps.getSystemValue("auto_reply_mode");
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
@@ -1064,6 +1081,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     const response_to_message_id = prior_message_id;
     const stage_before = context.summary?.conversation_stage || null;
     const inbound_context_match_metadata = buildInboundContextMatchMetadata(context);
+    let offer_stage_ai_result = null;
 
     if (inbound_debug_stage === "after_brain_lookup") {
       return { ok: true, stage: "after_brain_lookup", brain_id, master_owner_id };
@@ -1211,7 +1229,14 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         signals,
       });
 
-      offer_routing = shouldBypassInboundOfferRouting({ classification, route })
+      offer_routing = !acquisition_offer_automation_enabled
+        ? {
+            ok: true,
+            offer_route: "no_offer_signal",
+            reason: "acquisition_offer_engine_disabled",
+            meta: { bypassed: true },
+          }
+        : shouldBypassInboundOfferRouting({ classification, route })
         ? {
             ok: true,
             offer_route: "bypassed_existing_suppression",
@@ -1253,17 +1278,84 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       });
     }
 
+    // Acquisition state and compliance are Supabase-native. The established
+    // seller-flow pipeline below still renders and queues the actual response.
+    let acquisition_dispatch_result = null;
+    try {
+      acquisition_dispatch_result = await runtimeDeps.dispatchInboundAcquisitionSms(
+        {
+          message_id: extracted.message_id,
+          message_body,
+          inbound_from,
+          inbound_to,
+          phone: inbound_from,
+          canonical_e164: inbound_from,
+          thread_id: inbound_from,
+          master_owner_id,
+          property_id,
+          campaign_id:
+            latest_outbound_event?.campaign_id ||
+            latest_outbound_event?.metadata?.campaign_id ||
+            null,
+          current_stage: stage_before || "ownership_check",
+          timezone:
+            context?.summary?.timezone ||
+            context?.summary?.market_timezone ||
+            null,
+          seller_first_name:
+            context?.summary?.seller_first_name ||
+            context?.summary?.owner_first_name ||
+            null,
+          property_address,
+          received_at: new Date().toISOString(),
+        },
+        {
+          classification,
+          route,
+          conversation_context: context,
+          brain_item,
+          response_managed_externally: true,
+          schedule_followup: true,
+        },
+        {
+          supabase: runtimeDeps.getSupabaseClient?.(),
+          acquisitionRuntimeFlags: system_flags,
+        }
+      );
+    } catch (acquisitionError) {
+      safeWarn("textgrid.inbound_acquisition_dispatch_failed", {
+        message_id: extracted.message_id,
+        inbound_from,
+        error: acquisitionError?.message || "unknown",
+      });
+    }
+
     if (inbound_debug_stage === "after_conversation_resolution") {
-      return { ok: true, stage: "after_conversation_resolution", route_stage: route?.stage || null, classification_source: classification?.source || null };
+      return {
+        ok: true,
+        stage: "after_conversation_resolution",
+        route_stage: route?.stage || null,
+        classification_source: classification?.source || null,
+        acquisition_stage: acquisition_dispatch_result?.stage_after || null,
+      };
     }
 
     // ── SEGMENT: offer_stage_ai ──────────────────────────────────────
     // Wire in Offer Stage AI in dry-run mode for price/offer intent.
-    let offer_stage_ai_result = null;
     try {
-      const offerTrigger = runtimeDeps.isOfferStageTrigger
-        ? runtimeDeps.isOfferStageTrigger({ message: message_body, classification, sellerStage: route?.stage || context?.summary?.conversation_stage || null, route })
-        : { triggered: false, reason: "function_not_available" };
+      if (!acquisition_offer_automation_enabled) {
+        offer_stage_ai_result = {
+          ok: true,
+          dry_run: true,
+          skipped: true,
+          skip_reason: "acquisition_offer_engine_disabled",
+        };
+      }
+      const offerTrigger = offer_stage_ai_result
+        ? { triggered: false, reason: "acquisition_offer_engine_disabled" }
+        : runtimeDeps.isOfferStageTrigger
+          ? runtimeDeps.isOfferStageTrigger({ message: message_body, classification, sellerStage: route?.stage || context?.summary?.conversation_stage || null, route })
+          : { triggered: false, reason: "function_not_available" };
 
       if (offerTrigger.triggered) {
         const skipCheck = runtimeDeps.shouldSkipOfferStageAI
@@ -1453,6 +1545,11 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     let maybe_offer_progress, initial_offer, underwriting, seller_stage_reply,
       underwriting_follow_up, maybe_offer, active_offer_item_id,
       contract, pipeline, underwriting_transfer, autopilot_queue_row = null;
+    let seller_followup_result = {
+      ok: false,
+      skipped: true,
+      reason: "not_attempted",
+    };
 
     try {
       const offer_route = offer_routing?.offer_route || null;
@@ -1463,7 +1560,13 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         "manual_review",
       ].includes(offer_route);
 
-      maybe_offer_progress = existing_offer
+      maybe_offer_progress = !acquisition_offer_automation_enabled
+        ? {
+            ok: true,
+            updated: false,
+            reason: "acquisition_offer_engine_disabled",
+          }
+        : existing_offer
         ? await runtimeDeps.maybeProgressOfferStatus({
             offer_item_id: existing_offer.item_id,
             message: message_body,
@@ -1480,6 +1583,12 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             existing_offer_item_id: existing_offer?.item_id || null,
             progress: maybe_offer_progress,
           }
+        : !acquisition_offer_automation_enabled
+          ? {
+              ok: true,
+              created: false,
+              reason: "acquisition_offer_engine_disabled",
+            }
         : defer_immediate_offer_create
           ? {
               ok: true,
@@ -1541,7 +1650,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       // Wire follow-up after safety+classification decision. Gated by system_followup_enabled.
       // Never schedules for: opt_out, wrong_person, hostile_or_legal, timing_complaint.
       // not_interested → 30-day nurture. Active whitelisted intents → no nurture (active workflow).
-      let seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" };
       try {
         if (system_followup_enabled) {
           seller_followup_result = await runtimeDeps.scheduleFollowUp(
@@ -1829,6 +1937,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         underwriting_follow_up?.offer_ready === true;
 
       maybe_offer =
+        !acquisition_offer_automation_enabled ||
         defer_immediate_offer_create ||
         initial_offer?.created ||
         initial_offer?.existing_offer_item_id ||
