@@ -88,7 +88,7 @@
   --nexus-faint:         var(--nx-grid);
   /* Accent */
   --nexus-accent:        var(--nx-accent);
-  --nexus-accent-rgb:    56, 189, 248;
+  --nexus-accent-rgb:    var(--nx-accent-rgb);
   --nexus-accent-soft:   var(--nx-accent-soft);
   --nexus-accent-glow:   var(--nx-accent-glow);
   --nexus-accent-border: var(--nx-badge-border);
@@ -112,6 +112,51 @@
   --nexus-stage-priority:  #f97316;
   --nexus-stage-dead:      #ef4444;
   --nexus-stage-suppressed:#aeaeb2;
+
+  /* Dark-mode defaults for token families only defined in [data-nexus-theme="light"].
+     These prevent empty-string resolution in dark mode (user-confirmed --saas-bg bug). */
+  --saas-bg:             var(--nx-bg);
+  --saas-bg-deep:        var(--nx-bg);
+  --saas-panel:          var(--nx-panel);
+  --saas-panel-2:        var(--nx-bg-2);
+  --saas-panel-3:        var(--nx-card);
+  --saas-card:           var(--nx-card);
+  --saas-card-hover:     var(--nx-card-strong);
+  --saas-card-selected:  rgba(var(--nexus-accent-rgb), 0.10);
+  --saas-border-soft:    rgba(148, 163, 184, 0.08);
+  --saas-border:         var(--nx-border);
+  --saas-border-strong:  var(--nx-border-strong);
+  --saas-text:           var(--nx-text);
+  --saas-text-2:         var(--nx-muted);
+  --saas-text-3:         rgba(148, 163, 184, 0.65);
+  --saas-text-4:         rgba(148, 163, 184, 0.45);
+  --aic-bg:              var(--nx-bg);
+  --aic-panel:           rgba(11, 18, 32, 0.96);
+  --aic-panel-glass:     rgba(11, 18, 32, 0.82);
+  --aic-border:          var(--nx-border);
+  --aic-border-glow:     rgba(var(--nexus-accent-rgb), 0.20);
+  --aic-text:            var(--nx-text);
+  --aic-text-muted:      var(--nx-muted);
+  --aic-text-faint:      rgba(148, 163, 184, 0.45);
+  --bg-0:                var(--nx-bg);
+  --bg-1:                var(--nx-bg-2);
+  --bg-2:                var(--nx-surface);
+  --bg-3:                var(--nx-card);
+  --surface-0:           var(--nx-surface);
+  --surface-1:           var(--nx-panel);
+  --surface-2:           var(--nx-card);
+  --surface-hover:       rgba(255, 255, 255, 0.04);
+  --border-0:            rgba(148, 163, 184, 0.10);
+  --border-1:            var(--nx-border);
+  --border-2:            var(--nx-border-strong);
+  --text-0:              var(--nx-text);
+  --text-1:              var(--nx-text-soft);
+  --text-2:              var(--nx-muted);
+  --text-3:              var(--nx-muted-2);
+  --text-primary:        var(--nx-text);
+  --text-secondary:      var(--nx-muted);
+  --text-tertiary:       rgba(148, 163, 184, 0.65);
+  --text-muted:          var(--nx-muted);
 }
 /* ── dark ───────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="dark"],
@@ -533,11 +578,11 @@
   --nexus-text:          #000000;
   --nexus-muted:         #636366;
   --nexus-faint:         rgba(0, 0, 0, 0.04);
-  --nexus-accent:        #0055ff;
-  --nexus-accent-rgb:    0, 85, 255;
-  --nexus-accent-soft:   rgba(0, 85, 255, 0.10);
-  --nexus-accent-glow:   rgba(0, 85, 255, 0.25);
-  --nexus-accent-border: rgba(0, 85, 255, 0.35);
+  --nexus-accent:        var(--nx-accent);
+  --nexus-accent-rgb:    var(--nx-accent-rgb);
+  --nexus-accent-soft:   var(--nx-accent-soft);
+  --nexus-accent-glow:   var(--nx-accent-glow);
+  --nexus-accent-border: var(--nx-accent-border);
   --nexus-success:       #34c759;
   --nexus-warning:       #ff9f0a;
   --nexus-danger:        #ff3b30;
@@ -748,15 +793,17 @@
   --nx-accent-border: rgba(234, 179, 8, 0.40);
   --nx-accent-glow:   rgba(234, 179, 8, 0.26);
 }
-/* Shared derived tokens — valid for any accent */
+/* Shared derived tokens — valid for any accent.
+   !important overrides the stale --nexus-* inline styles set at mount by applyThemeToDOM().
+   The picker updates --nx-accent inline but not --nexus-accent, so we must force derivation. */
 :root[data-nexus-accent] {
   --nx-accent-2:         color-mix(in srgb, var(--nx-accent) 76%, white 24%);
   --nx-badge-border:     var(--nx-accent-border);
-  --nexus-accent:        var(--nx-accent);
-  --nexus-accent-rgb:    var(--nx-accent-rgb);
-  --nexus-accent-soft:   var(--nx-accent-soft);
-  --nexus-accent-glow:   var(--nx-accent-glow);
-  --nexus-accent-border: var(--nx-accent-border);
+  --nexus-accent:        var(--nx-accent) !important;
+  --nexus-accent-rgb:    var(--nx-accent-rgb) !important;
+  --nexus-accent-soft:   var(--nx-accent-soft) !important;
+  --nexus-accent-glow:   var(--nx-accent-glow) !important;
+  --nexus-accent-border: var(--nx-accent-border) !important;
 }
 /* ── Light-mode accent palette overrides (higher contrast on white) ─────── */
 /* These come AFTER the generic accent blocks so they win in light mode.      */
