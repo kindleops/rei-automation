@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "guard:css-order": "node scripts/check-css-import-order.mjs",
     "setup:inbox": "node scripts/setup-inbox.mjs",
     "proof:queue-recovery": "node scripts/proof/queue-recovery.mjs",
     "proof:inbox": "npx tsx scripts/proof/inbox-store-proof.ts && node scripts/proof/inbox-bucket-resolver-proof.mjs",

@@ -45,13 +45,6 @@
   color: #020617 !important;
 }
 
-[data-nexus-theme="light"] {
-  --nx-text: #020617;
-  --nx-text-muted: #475569;
-  --nx-text-secondary: #334155;
-  --nexus-surface-overlay: rgba(255, 255, 255, 0.94);
-}
-
 /* Panels / surfaces — solid premium white, never gray wash */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-panel,
 [data-nexus-theme="light"] .nx-premium-inbox .nx-surface,
@@ -137,6 +130,11 @@
  *    !important + last-load order guarantees victory over the faint
  *    --nexus-surface-overlay wash used by inbox-polish.css.
  * -------------------------------------------------------------------------- */
+
+/* Ownership: Shared Shell Glass Primitive Primitives 
+ * These classes standardize glass appearance across the dashboard.
+ */
+
 .nx-liquid-popover,
 .nx-workspace-drawer,
 .nx-glass-menu,
@@ -156,17 +154,20 @@
 .nx-command-menu,
 .nx-quick-menu-popover,
 .nx-avatar-popover,
-.nx-search-results-popover {
+.nx-search-results-popover,
+.nx-glass-panel,
+.nx-glass-dropdown,
+.nx-glass-popover {
   background: var(--nx-glass-bg-strong) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(1.7) !important;
-  backdrop-filter: blur(24px) saturate(1.7) !important;
+  -webkit-backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
+  backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
   border: 1px solid var(--nx-glass-border-strong, var(--nx-glass-border)) !important;
   border-radius: 16px !important;
   box-shadow:
     var(--nx-glass-shadow, 0 24px 80px rgba(0, 0, 0, 0.45)),
     var(--nx-glass-inner-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.08)) !important;
   color: var(--nx-glass-text) !important;
-  z-index: 13050 !important;
+  z-index: var(--nx-shell-z-popover) !important;
 }
 
 /* Inner panel glass fallback for the COMPACT DRAWER variant only.
@@ -369,103 +370,7 @@
 .nx-accent-dot[data-accent="pink"]    { background: #ec4899; }
 .nx-accent-dot[data-accent="gold"]    { background: #eab308; }
 
-:root[data-nexus-accent="cyan"] {
-  --nx-accent: #06b6d4;
-  --nx-accent-rgb: 6, 182, 212;
-  --nx-accent-soft: rgba(6, 182, 212, 0.14);
-  --nx-accent-border: rgba(6, 182, 212, 0.38);
-  --nx-accent-glow: rgba(6, 182, 212, 0.26);
-}
-:root[data-nexus-accent="emerald"] {
-  --nx-accent: #10b981;
-  --nx-accent-rgb: 16, 185, 129;
-  --nx-accent-soft: rgba(16, 185, 129, 0.14);
-  --nx-accent-border: rgba(16, 185, 129, 0.38);
-  --nx-accent-glow: rgba(16, 185, 129, 0.26);
-}
-:root[data-nexus-accent="amber"] {
-  --nx-accent: #f59e0b;
-  --nx-accent-rgb: 245, 158, 11;
-  --nx-accent-soft: rgba(245, 158, 11, 0.14);
-  --nx-accent-border: rgba(245, 158, 11, 0.40);
-  --nx-accent-glow: rgba(245, 158, 11, 0.26);
-}
-:root[data-nexus-accent="violet"] {
-  --nx-accent: #7c3aed;
-  --nx-accent-rgb: 124, 58, 237;
-  --nx-accent-soft: rgba(124, 58, 237, 0.14);
-  --nx-accent-border: rgba(124, 58, 237, 0.38);
-  --nx-accent-glow: rgba(124, 58, 237, 0.26);
-}
-:root[data-nexus-accent="rose"] {
-  --nx-accent: #e11d48;
-  --nx-accent-rgb: 225, 29, 72;
-  --nx-accent-soft: rgba(225, 29, 72, 0.14);
-  --nx-accent-border: rgba(225, 29, 72, 0.38);
-  --nx-accent-glow: rgba(225, 29, 72, 0.26);
-}
-:root[data-nexus-accent="ice"] {
-  --nx-accent: #38bdf8;
-  --nx-accent-rgb: 56, 189, 248;
-  --nx-accent-soft: rgba(56, 189, 248, 0.13);
-  --nx-accent-border: rgba(56, 189, 248, 0.36);
-  --nx-accent-glow: rgba(56, 189, 248, 0.24);
-}
-:root[data-nexus-accent="blue"] {
-  --nx-accent: #2563eb;
-  --nx-accent-rgb: 37, 99, 235;
-  --nx-accent-soft: rgba(37, 99, 235, 0.13);
-  --nx-accent-border: rgba(37, 99, 235, 0.36);
-  --nx-accent-glow: rgba(37, 99, 235, 0.24);
-}
-:root[data-nexus-accent="teal"] {
-  --nx-accent: #14b8a6;
-  --nx-accent-rgb: 20, 184, 166;
-  --nx-accent-soft: rgba(20, 184, 166, 0.14);
-  --nx-accent-border: rgba(20, 184, 166, 0.38);
-  --nx-accent-glow: rgba(20, 184, 166, 0.26);
-}
-:root[data-nexus-accent="lime"] {
-  --nx-accent: #84cc16;
-  --nx-accent-rgb: 132, 204, 22;
-  --nx-accent-soft: rgba(132, 204, 22, 0.14);
-  --nx-accent-border: rgba(132, 204, 22, 0.38);
-  --nx-accent-glow: rgba(132, 204, 22, 0.26);
-}
-:root[data-nexus-accent="orange"] {
-  --nx-accent: #f97316;
-  --nx-accent-rgb: 249, 115, 22;
-  --nx-accent-soft: rgba(249, 115, 22, 0.14);
-  --nx-accent-border: rgba(249, 115, 22, 0.40);
-  --nx-accent-glow: rgba(249, 115, 22, 0.26);
-}
-:root[data-nexus-accent="pink"] {
-  --nx-accent: #ec4899;
-  --nx-accent-rgb: 236, 72, 153;
-  --nx-accent-soft: rgba(236, 72, 153, 0.14);
-  --nx-accent-border: rgba(236, 72, 153, 0.38);
-  --nx-accent-glow: rgba(236, 72, 153, 0.26);
-}
-:root[data-nexus-accent="gold"] {
-  --nx-accent: #eab308;
-  --nx-accent-rgb: 234, 179, 8;
-  --nx-accent-soft: rgba(234, 179, 8, 0.14);
-  --nx-accent-border: rgba(234, 179, 8, 0.40);
-  --nx-accent-glow: rgba(234, 179, 8, 0.26);
-}
-
-:root[data-nexus-accent] {
-  /* Secondary accent tone — a lighter sibling of --nx-accent used as the second
-   * stop in accent gradients (message bubbles, primary buttons, active glows).
-   * Derived so it stays correct for every accent without per-color tables. */
-  --nx-accent-2: color-mix(in srgb, var(--nx-accent) 76%, white 24%);
-  --nx-badge-border: var(--nx-accent-border);
-  --nexus-accent: var(--nx-accent);
-  --nexus-accent-rgb: var(--nx-accent-rgb);
-  --nexus-accent-soft: var(--nx-accent-soft);
-  --nexus-accent-glow: var(--nx-accent-glow);
-  --nexus-accent-border: var(--nx-accent-border);
-}
+/* Accent palette is defined in nexus-theme.css — do not redefine here */
 
 /* ----------------------------------------------------------------------------
  * 6. LIGHT-MODE SURFACE LEAK SCRUB (P1)

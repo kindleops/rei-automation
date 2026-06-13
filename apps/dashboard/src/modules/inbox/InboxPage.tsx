@@ -68,7 +68,7 @@ import { Composer } from './components/Composer'
 import { IntelligencePanel } from './components/IntelligencePanel'
 import { CompIntelligenceWorkspace } from '../../views/comp-intelligence/CompIntelligenceWorkspace'
 import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
-import { SendQueueDashboard } from './components/SendQueueDashboard'
+import { QueuePage } from '../../views/queue/QueuePage'
 import { InboxPipelineView } from '../../views/pipeline/InboxPipelineView'
 import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import { MetricsWarRoom } from './components/MetricsWarRoom'
@@ -134,14 +134,15 @@ import {
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
 import { getViewLayoutMode, type ViewWidthPercent } from '../../domain/inbox/view-layout'
 import './inbox-premium.css'
-import './inbox-rebuild.css'
-import './inbox-rebuild-v2.css'
+// inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
 import './inbox-polish.css'
 import './notification-hud.css'
 import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
 import '../../views/buyer-match/buyer-intel-upgrade.css'
-import './copilot/copilot.css'
+import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/copilot.css)
 import './conversation-redesign.css'
+// !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
+import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
@@ -726,12 +727,12 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     }).length
 
     // Category tab counts must be global backend counts (pagination-safe).
+    // Do NOT fall back to visible-row counts when the server returns 0 —
+    // that causes phantom count inflation when counts genuinely drop to zero.
     const srv = data.counts ?? {}
     const sv = (key: string, fallback: number) => {
       const v = srv[key]
-      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
-        return v === 0 && Number.isFinite(fallback) && fallback > 0 ? fallback : v
-      }
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v
       return fallback
     }
 
@@ -2809,6 +2810,14 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     setSelectedId(id)
     setSelectedThreadKey(thread?.threadKey || thread?.id || null)
     setLayoutState((current) => ({ ...current, selectedThreadId: id }))
+    if (thread) selectedThreadFallbackRef.current = thread
+    // Mark thread read and clear unread count in canonical state
+    if (threadKey) {
+      void callBackend('/api/cockpit/inbox/thread-state', {
+        method: 'PATCH',
+        body: JSON.stringify({ thread_key: threadKey, is_read: true, unread_count: 0 }),
+      })
+    }
   }, [setActiveContext, threads, viewFilter])
 
   useEffect(() => {
@@ -3182,16 +3191,6 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     }
   }, [selected, threadContext])
 
-  const handleSelectQueueItem = useCallback((item: import('../../lib/data/queueData').QueueItem) => {
-    setActiveContext(buildContextFromQueueItem(item, 'queue'), { preserveCurrentViews: true })
-    if (item.linkedInboxThreadId) {
-      const match = threads.find((thread) => thread.id === item.linkedInboxThreadId || (thread.threadKey || thread.id) === item.linkedInboxThreadId)
-      if (match) {
-        setSelectedId(match.id)
-        setSelectedThreadKey(match.threadKey || match.id)
-      }
-    }
-  }, [setActiveContext, threads])
 
   const handleSelectCalendarEvent = useCallback((event: import('../../lib/data/calendarData').CalendarEvent) => {
     setActiveContext(buildContextFromCalendarEvent(event), { preserveCurrentViews: true })
@@ -3721,13 +3720,10 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     if (view === 'queue') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--queue">
-          <SendQueueDashboard
-            queueModel={queueModel}
-            processorHealth={queueProcessorHealth}
-            queueCommandMode={queueCommandMode}
-            layoutMode={layoutMode}
-            selectedQueueId={activeContext.queueId ?? null}
-            onSelectItem={handleSelectQueueItem}
+          <QueuePage
+            onSelectItem={queueItem =>
+              setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
+            }
           />
         </section>
       )
@@ -3826,7 +3822,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     if (view === 'workflow_studio') {
       const Studio = isWorkflowStudioV2Enabled() ? WorkflowStudioV2 : WorkflowStudio
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--workflow-studio" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <section className="nx-workspace-surface nx-workspace-surface--workflow-studio wfs2-isolation-root" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Studio
             paneWidth={paneWidth}
             layoutMode={layoutMode}

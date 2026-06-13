@@ -11,13 +11,15 @@ import {
   retryAllFailed,
   runQueueOnce,
 } from '../../lib/data/queueData'
+import { shouldUseSupabase } from '../../lib/data/shared'
+import { adaptQueueModel } from './queue.adapter'
 import type { QueueModel, QueueItem, QueueFetchOptions } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { Icon } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'
 import { buildContextFromQueueItem } from '../../modules/inbox/active-context'
-import './queue-premium.css'
+import '../../modules/inbox/queue-ops.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -934,9 +936,14 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   )
 
   const refreshData = useCallback(async (page = currentPage) => {
-    // Race Supabase against a 6s timeout — if it hangs, keep existing model and clear loading
-    const timeout = new Promise<null>(res => setTimeout(() => res(null), 6000))
     try {
+      if (!shouldUseSupabase()) {
+        // No Supabase credentials — use mock adapter immediately
+        setModel(_ => ({ ...adaptQueueModel(), totalCount: 900, currentPage: page, pageSize: 500, totalPages: 2, hasMore: page === 0, fetchOptions: {} }))
+        return
+      }
+      // Race Supabase against a 6s timeout — if it hangs, keep existing model and clear loading
+      const timeout = new Promise<null>(res => setTimeout(() => res(null), 6000))
       const result = await Promise.race([fetchQueueModel(buildOpts(page)), timeout])
       if (result) setModel(result)
     } catch (err) {
@@ -1279,10 +1286,10 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
           <div className="occ-table-footer">
             <span className="occ-table-footer__count">
               {filteredItems.length !== items.length
-                ? `${filteredItems.length} filtered of `
+                ? `Showing ${filteredItems.length.toLocaleString()} matches • `
                 : ''
               }
-              {rowStart}–{rowEnd} of {totalCount.toLocaleString()} rows
+              Displaying {rowStart}–{rowEnd} of {totalCount.toLocaleString()} total queue items
             </span>
             {totalPages > 1 && (
               <div className="occ-pagination">
