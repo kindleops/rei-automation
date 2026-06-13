@@ -3,6 +3,7 @@ import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-con
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { canSend as defaultCanSend } from "@/lib/domain/inbox/send-now-service.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -86,6 +87,18 @@ export async function buildAndSendNow(
         message: runtime_brake.message,
         diagnostics: runtime_brake.diagnostics,
       },
+      processed: null,
+    };
+  }
+
+  const canSendFn = deps.canSend || defaultCanSend;
+  const gate = await canSendFn(
+    { to_phone_number: phone, message_body: rendered_message_text },
+    deps
+  );
+  if (!gate.ok) {
+    return {
+      queued: { ok: false, stage: "can_send_gate", status: 423, reason: gate.reason },
       processed: null,
     };
   }
