@@ -2,7 +2,6 @@ import React, { useMemo, useState, useEffect } from 'react'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../../lib/data/dealContext'
-import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
 import {
   normalizePropertySnapshot,
@@ -242,6 +241,7 @@ type WorkflowThread = InboxWorkflowThread & Partial<{
   satellite_image: string
   lastMessageBody: string
   aiSummary: string
+  masterOwnerId: string
 }>
 
 // ── Helper Utilities ──────────────────────────────────────────────────────
@@ -547,44 +547,36 @@ const ScoreRing = ({
 }
 
 function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: WorkflowThread; dealContext?: DealContext | null; onOpenComps: () => void }) {
-  const [snapshot, setSnapshot] = useState<any>(null)
-  const [snapshotUnavailable, setSnapshotUnavailable] = useState(false)
+  const [intel, setIntel] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!thread.propertyId) return
     let cancelled = false
-    setSnapshotUnavailable(false)
-    const base = getBackendBaseUrl()
-    const secret = getBackendSecret()
-    fetch(`${base}/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-ops-dashboard-secret': secret,
-      },
-    })
-      .then(res => res.json())
-      .then(res => {
-        if (cancelled) return
-        if (res.ok && res.data) {
-          setSnapshot(res.data)
-        } else {
-          console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: res.error || 'no_data' })
-          setSnapshotUnavailable(true)
+    setLoading(true)
+
+    import('../../../lib/data/dealIntelligenceData').then(({ loadDealIntelligence }) => {
+      loadDealIntelligence({
+        threadKey: thread.threadKey,
+        propertyId: thread.propertyId,
+        canonicalE164: thread.canonicalE164,
+        prospectId: thread.prospectId,
+        masterOwnerId: thread.masterOwnerId,
+      }).then(res => {
+        if (!cancelled) {
+          setIntel(res)
+          setLoading(false)
         }
       })
-      .catch(err => {
-        if (cancelled) return
-        console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: err?.message || 'fetch_failed' })
-        setSnapshotUnavailable(true)
-      })
-    return () => { cancelled = true }
-  }, [thread.propertyId])
+    })
 
-  // Fallback chain: snapshot → dealContext → thread row
-  const arv = snapshot?.estimated_arv || dealContext?.estimated_arv || (thread as any).estimatedValue || (thread as any).arv
-  const offer = snapshot?.target_offer || dealContext?.cashOffer || (thread as any).cashOffer
-  const spread = snapshot ? (snapshot.expected_assignment_low + ' – ' + snapshot.expected_assignment_high) : 'Unknown'
-  const confidence = snapshot?.arv_confidence_score || 0
+    return () => { cancelled = true }
+  }, [thread.threadKey, thread.propertyId, thread.canonicalE164, thread.prospectId, thread.masterOwnerId])
+
+  // @deprecated Fallback chain: v_universal_lead_command -> dealContext -> thread row (Legacy valuation snapshot removed)
+  const arv = intel?.command?.pipeline_summary?.estimated_value || dealContext?.estimated_arv || (thread as any).estimatedValue || (thread as any).arv
+  const offer = intel?.command?.pipeline_summary?.offer_price || dealContext?.cashOffer || (thread as any).cashOffer
+  const spread = intel?.command ? 'Computed internally' : 'Unknown'
+  const confidence = intel?.command?.pipeline_summary?.final_acquisition_score || 0
 
   const handlePushUnderwriting = async () => {
     if (!thread.propertyId) return
@@ -602,10 +594,8 @@ function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: Wo
       <div className="nx-deal-intel-card__head">
         <Icon name="radar" />
         <strong>Deal Intelligence</strong>
-        {snapshot && <span className="nx-deal-intel-card__date">Snapshot: {formatDate(snapshot.created_at)}</span>}
-        {snapshotUnavailable && !snapshot && (
-          <span className="nx-deal-intel-card__fallback-label" title="Valuation snapshot unavailable — showing thread row estimates">Valuation unavailable</span>
-        )}
+        {intel?.command && <span className="nx-deal-intel-card__date">Updated: {formatDate(intel.command.command_updated_at)}</span>}
+        {loading && <span className="nx-deal-intel-card__fallback-label">Loading intelligence...</span>}
       </div>
       
       <div className="nx-deal-intel-card__grid">
@@ -615,7 +605,7 @@ function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: Wo
         </div>
         <div className="nx-deal-intel-item">
           <label>Confidence</label>
-          <strong>{confidence ? confidence + '%' : 'Low'}</strong>
+          <strong>{confidence ? formatScore(confidence) : 'Low'}</strong>
         </div>
         <div className="nx-deal-intel-item is-highlight">
           <label>Suggested Offer</label>
@@ -623,7 +613,7 @@ function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: Wo
         </div>
         <div className="nx-deal-intel-item">
           <label>Exp. Spread</label>
-          <strong>{spread !== 'Unknown' ? '$' + spread : '—'}</strong>
+          <strong>{spread !== 'Unknown' ? spread : '—'}</strong>
         </div>
       </div>
 

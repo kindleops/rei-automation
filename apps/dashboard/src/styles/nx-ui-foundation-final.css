@@ -137,6 +137,11 @@
  *    !important + last-load order guarantees victory over the faint
  *    --nexus-surface-overlay wash used by inbox-polish.css.
  * -------------------------------------------------------------------------- */
+
+/* Ownership: Shared Shell Glass Primitive Primitives 
+ * These classes standardize glass appearance across the dashboard.
+ */
+
 .nx-liquid-popover,
 .nx-workspace-drawer,
 .nx-glass-menu,
@@ -156,17 +161,20 @@
 .nx-command-menu,
 .nx-quick-menu-popover,
 .nx-avatar-popover,
-.nx-search-results-popover {
+.nx-search-results-popover,
+.nx-glass-panel,
+.nx-glass-dropdown,
+.nx-glass-popover {
   background: var(--nx-glass-bg-strong) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(1.7) !important;
-  backdrop-filter: blur(24px) saturate(1.7) !important;
+  -webkit-backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
+  backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
   border: 1px solid var(--nx-glass-border-strong, var(--nx-glass-border)) !important;
   border-radius: 16px !important;
   box-shadow:
     var(--nx-glass-shadow, 0 24px 80px rgba(0, 0, 0, 0.45)),
     var(--nx-glass-inner-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.08)) !important;
   color: var(--nx-glass-text) !important;
-  z-index: 13050 !important;
+  z-index: var(--nx-shell-z-popover) !important;
 }
 
 /* Inner panel glass fallback for the COMPACT DRAWER variant only.

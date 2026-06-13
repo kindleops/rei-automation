@@ -604,7 +604,7 @@ export const InboxKpiOrb = () => {
       {/* ── Intelligence panel ───────────────────────────────────────────── */}
       {(isOpen || isPinned) && (
         <div
-          className="nx-orb-dashboard nx-liquid-popover"
+          className="nx-orb-dashboard nx-glass-popover"
           style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         >
           {/* Header */}

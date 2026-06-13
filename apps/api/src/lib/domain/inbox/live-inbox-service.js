@@ -1,10 +1,10 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 
-const PRIMARY_THREAD_SOURCE = "inbox_threads_view";
-const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
-const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
-const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
+const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
+const PRIMARY_COUNT_SOURCE = "canonical_inbox_counts";
+const LEGACY_THREAD_SOURCE = "inbox_threads_view";
+const FALLBACK_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const DEFAULT_LIMIT = 100;
 const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
@@ -159,10 +159,13 @@ const THREAD_SOURCE_CONFIGS = [
       "latest_message_body",
     ],
   },
+  // Legacy fallbacks — used only when canonical_inbox_threads is unavailable.
+  // Do not promote these back to primary; they have independent classification
+  // CASE expressions that diverge from canonical_inbox_counts.
   {
     key: "legacy_primary",
     name: LEGACY_THREAD_SOURCE,
-    countSource: PRIMARY_COUNT_SOURCE,
+    countSource: null,
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns(selectMode) {
@@ -181,20 +184,17 @@ const THREAD_SOURCE_CONFIGS = [
     key: "enriched",
     name: FALLBACK_THREAD_SOURCE,
     countSource: null,
-    directionColumn: "latest_direction",
-    countFallbackFields: ENRICHED_COUNT_FALLBACK_FIELDS,
+    directionColumn: "latest_message_direction",
+    countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? ENRICHED_THREAD_INITIAL_BOOT_FIELDS : "*";
+      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
     },
     searchColumns: [
       "thread_key",
-      "best_phone",
+      "canonical_e164",
       "seller_phone",
-      "owner_display_name",
-      "event_seller_display_name",
-      "display_name",
+      "owner_name",
       "property_address_full",
-      "display_address",
       "latest_message_body",
     ],
   },
@@ -755,10 +755,10 @@ function normalizeThreadRow(row = {}, query = {}) {
   const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
   const latestDeliveryStatus =
-    clean(row.latest_delivery_status) ||
-    clean(row.delivery_status) ||
-    clean(row.provider_delivery_status) ||
     clean(row.latest_provider_delivery_status) ||
+    clean(row.latest_delivery_status) ||
+    clean(row.provider_delivery_status) ||
+    clean(row.delivery_status) ||
     clean(row.queue_status) ||
     null;
   const latestProviderDeliveryStatus =

@@ -34,6 +34,9 @@ const STATUS_DISTRIBUTION: Record<QueueItemStatus, number> = {
   paused_invalid_queue_row: 2,
   paused_global_lock: 1,
   paused_max_retries: 2,
+  duplicate_blocked: 0,
+  incident_quarantine: 0,
+  expired: 0,
 }
 
 const FAILURE_REASONS: FailureReason[] = [
@@ -149,6 +152,10 @@ const generateQueueItem = (index: number): QueueItem => {
     diagnosticFlags: [],
     rowSource: 'campaign',
     guardReason: null,
+    queueKey: `campaign:mock-${index}`,
+    workflowId: null,
+    workflowExecutionId: null,
+    automationSource: 'Campaign',
   }
 }
 
@@ -190,6 +197,12 @@ export const adaptQueueModel = (): QueueModel => {
     apiPressureLevel: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)] as any,
     sendEngine: 'real-estate-automation',
     engineMode: 'proxy',
+    totalCount: items.length,
+    currentPage: 0,
+    pageSize: items.length,
+    totalPages: 1,
+    hasMore: false,
+    fetchOptions: {},
   }
 }
 

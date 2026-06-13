@@ -37,7 +37,7 @@ export interface TemplateOptimizationSnapshot {
   action: 'promote' | 'watch' | 'suppress'
 }
 
-import { executeAutoReply, type AutoReplyResult } from '../../lib/data/inboxAutoReply'
+import type { AutoReplyResult } from '../../lib/data/inboxAutoReply'
 
 const DEV = Boolean(import.meta.env.DEV)
 
@@ -67,25 +67,13 @@ export interface AutonomousEngineModel {
  * Runs a full autonomous cycle: finds eligible threads and queues auto-replies.
  */
 export const runAutonomousCycle = async (
-  threads: InboxWorkflowThread[],
-  controls: AutonomyControlState
+  _threads: InboxWorkflowThread[],
+  _controls: AutonomyControlState
 ): Promise<AutoReplyResult[]> => {
-  const eligible = threads.filter((t) => (
-    t.automationState === 'active' && 
-    !t.isSuppressed && 
-    !t.isArchived && 
-    t.inboxStatus === 'new_reply'
-  ))
-
-  if (DEV) console.log(`[AutonomyEngine] Starting cycle for ${eligible.length} eligible threads. DryRun: ${controls.dryRun}`)
-  
-  const results: AutoReplyResult[] = []
-  for (const thread of eligible) {
-    const result = await executeAutoReply(thread, null, { dryRun: controls.dryRun }) 
-    results.push(result)
-  }
-
-  return results
+  if (DEV) console.log(`[AutonomyEngine] Cycle requested. Bypassed: backend queue processor is canonical.`)
+  // Backend queue processor is canonical. 
+  // Client-side runAutonomousCycle is disabled and acts only as a display-only model.
+  return []
 }
 
 export const defaultAutonomyControlState: AutonomyControlState = {

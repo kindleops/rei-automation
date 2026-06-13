@@ -2750,24 +2750,30 @@ export function BuyerMatchWorkspace({
 
   const updateCandidateStatus = useCallback(async (id: string | undefined, updates: Record<string, unknown>) => {
     if (!id) return
-    const supabase = getSupabaseClient()
-    const { error } = await supabase.from('buyer_match_candidates').update(updates).eq('buyer_match_candidate_id', id)
-    if (!error) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, ...updates } : c))
+    const res = await callBackend(`/api/cockpit/buyer-match/candidates/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates)
+    })
+    if (res.ok) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, ...updates } : c))
   }, [])
 
   const sendPackage = useCallback(async (id: string | undefined) => {
     if (!id) return
-    const supabase = getSupabaseClient()
     const package_sent_at = new Date().toISOString()
-    const { error } = await supabase.from('buyer_match_candidates').update({ package_sent_at, buyer_response_status: 'package_sent' }).eq('buyer_match_candidate_id', id)
-    if (!error) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, package_sent_at, buyer_response_status: 'package_sent' } : c))
+    const res = await callBackend(`/api/cockpit/buyer-match/candidates/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ package_sent_at, buyer_response_status: 'package_sent' })
+    })
+    if (res.ok) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, package_sent_at, buyer_response_status: 'package_sent' } : c))
   }, [])
 
   const selectBuyer = useCallback(async (id: string | undefined) => {
     if (!id) return
-    const supabase = getSupabaseClient()
-    const { error } = await supabase.from('buyer_match_candidates').update({ selected: true }).eq('buyer_match_candidate_id', id)
-    if (!error) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, selected: true } : c))
+    const res = await callBackend(`/api/cockpit/buyer-match/candidates/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ selected: true })
+    })
+    if (res.ok) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, selected: true } : c))
   }, [])
 
   const filteredCandidates = useMemo(() => {

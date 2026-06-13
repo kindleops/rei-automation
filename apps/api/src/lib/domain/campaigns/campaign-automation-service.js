@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { buildSendQueueDedupeKey } from '@/lib/supabase/sms-engine.js'
 import { getSystemValue } from '@/lib/system-control.js'
+import { getAcquisitionRuntimeControl } from '@/lib/domain/acquisition/acquisition-runtime-control.js'
 import {
   asBoolean,
   asPositiveInteger,
@@ -5391,7 +5392,7 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
   }, deps)
   try {
     const requestedLimit = asPositiveInteger(
-      input.limit || campaign.total_cap || campaign.batch_max || CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT,
+      input.limit || input.max_targets || input.maxTargets || campaign.total_cap || campaign.batch_max || CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT,
       CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT
     )
     const targetLimit = Math.max(1, Math.min(requestedLimit || CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT, CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT))
@@ -5474,32 +5475,38 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
     }
 
     const nextStatus = rows.length > 0 && campaign.status === 'draft' ? 'ready' : campaign.status
-    await supabase.from('campaigns').update({ status: nextStatus }).eq('id', campaignId)
-    await finishCampaignRun(run.id, {
-      status: 'completed',
-      total_scanned: graph.totalMatched,
-      targets_clean: graph.cleanTargets,
-      ready_to_queue: graph.readyToQueue,
-      blocked_counts: graph.blockedCounts,
-      metadata: {
-        readiness_score: readinessScore({ matched: graph.totalMatched, ready: graph.readyToQueue, blockers: graph.blockedCounts }),
-        graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-        graph_warnings: graph.warnings || [],
-      },
-    }, deps)
-    await recordCampaignEvent({
-      campaign_id: campaignId,
-      run_id: run.id,
-      event_type: 'campaign.targets_built',
-      severity: 'success',
-      title: 'Campaign targets built',
-      description: `${inserted} target snapshots written. No send_queue rows created.`,
-      metadata: {
-        inserted,
-        readiness_score: readinessScore({ matched: graph.totalMatched, ready: graph.readyToQueue, blockers: graph.blockedCounts }),
-        graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
-      },
-    }, deps)
+    const { error: statusUpdateError } = await supabase.from('campaigns').update({ status: nextStatus }).eq('id', campaignId)
+    if (statusUpdateError) throw statusUpdateError
+    // Post-insert bookkeeping: failures here must not roll back the successful build.
+    try {
+      await finishCampaignRun(run.id, {
+        status: 'completed',
+        total_scanned: graph.totalMatched,
+        targets_clean: graph.cleanTargets,
+        ready_to_queue: graph.readyToQueue,
+        blocked_counts: graph.blockedCounts,
+        metadata: {
+          readiness_score: readinessScore({ matched: graph.totalMatched, ready: graph.readyToQueue, blockers: graph.blockedCounts }),
+          graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
+          graph_warnings: graph.warnings || [],
+        },
+      }, deps)
+      await recordCampaignEvent({
+        campaign_id: campaignId,
+        run_id: run.id,
+        event_type: 'campaign.targets_built',
+        severity: 'success',
+        title: 'Campaign targets built',
+        description: `${inserted} target snapshots written. No send_queue rows created.`,
+        metadata: {
+          inserted,
+          readiness_score: readinessScore({ matched: graph.totalMatched, ready: graph.readyToQueue, blockers: graph.blockedCounts }),
+          graph_source: CAMPAIGN_TARGET_GRAPH_TABLE,
+        },
+      }, deps)
+    } catch (bookkeepingError) {
+      console.warn(`[build-targets] bookkeeping failed after successful insert (campaign ${campaignId}):`, bookkeepingError?.message)
+    }
     return {
       ok: true,
       success: true,
@@ -5944,6 +5951,8 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
   ].join('|')).digest('hex')}`
   const metadata = {
     source: 'campaign_launch_execution',
+    acquisition_managed: true,
+    default_acquisition_engine: true,
     campaign_id: campaign.id,
     campaign_target_id: target.id,
     campaign_send_window_id: window.id || null,
@@ -6058,7 +6067,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const dryRun = input.dry_run !== false
   const noSend = asBoolean(input.no_send ?? input.noSend, true)
   const confirmLive = asBoolean(input.confirm_live ?? input.confirmLive, false)
-  const createRows = input.create_send_queue_rows === false ? false : true
+  const createRows = input.create_send_queue_rows === true
   const explicitOperatorAction = asBoolean(input.explicit_operator_action || input.operator_action, false)
   const suppressPreviouslyContacted = asBoolean(
     input.suppress_previously_contacted ??
@@ -6078,6 +6087,10 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const blockers = []
   const globalStop = await globalEmergencyStopActive(deps)
   const campaignStop = isEmergencyStopActive(campaign.emergency_stop_at)
+  const isLiveWriteRequest = !dryRun && !noSend && confirmLive && createRows
+  const acquisitionRuntime = isLiveWriteRequest
+    ? await getAcquisitionRuntimeControl('engine', deps)
+    : { enabled: true }
 
   const { data: targets, error: targetError } = await supabase
     .from('campaign_targets')
@@ -6098,13 +6111,13 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
   if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
   if (!dryRun && !noSend && !confirmLive) blockers.push('confirm_live_required')
+  if (!acquisitionRuntime.enabled) blockers.push('acquisition_engine_disabled')
 
   // Execution lock (Phase 2B). For a live write request, acquire the campaign
   // execution lease BEFORE snapshotting active-queue/prior-contact state, so the
   // entire plan+write runs under the mutex and two concurrent activations cannot
   // both pass dedup and double-insert. If the lease is held by another worker,
   // record a blocker so the live write is skipped. Released in `finally`.
-  const isLiveWriteRequest = !dryRun && !noSend && confirmLive && createRows
   const executionLock = {
     requested: isLiveWriteRequest,
     acquired: false,
@@ -6161,6 +6174,24 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     allow_phone_fallback: false,
     first_touch: input.first_touch ?? true,
   }
+
+  // Validate that templates exist for the resolved use_case. An unknown use_case
+  // causes every target to skip with template_render_failed — a silent 0-row launch.
+  // Fall back to ownership_check (4,639 templates) rather than silently do nothing.
+  {
+    const { data: templateProbe } = await supabase
+      .from('sms_templates')
+      .select('id')
+      .eq('use_case', launchOptions.template_use_case)
+      .limit(1)
+    if (!templateProbe?.length) {
+      console.warn(
+        `[campaign-queue-plan] Unknown template_use_case "${launchOptions.template_use_case}" (campaign ${campaignId}) — falling back to ownership_check`
+      )
+      launchOptions.template_use_case = 'ownership_check'
+    }
+  }
+
   const plannedItems = []
   const sampleSkips = []
   const skippedCounts = {}

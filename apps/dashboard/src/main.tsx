@@ -5,7 +5,7 @@ import './dossier.css'
 import './styles/mobile-responsive.css'
 import './styles/light-theme-premium.css'
 import './styles/nx-glass-system.css'
-import './styles/nx-ui-foundation-final.css'
+import './styles/nexus-theme-contract.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

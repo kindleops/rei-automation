@@ -78,7 +78,7 @@ export async function GET(request) {
 
     if (prospects.length === 0 || properties.length === 0 || masterOwners.length === 0) {
       const { data: enrichedRows } = await supabase
-        .from('v_inbox_enriched')
+        .from('canonical_inbox_threads')
         .select('*')
         .eq('thread_key', thread_key)
         .limit(1)

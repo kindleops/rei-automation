@@ -53,6 +53,7 @@ export interface ThreadCommandIntel {
   automationEvents: CommandTimelineEvent[]
   liveEvents: CommandTimelineEvent[]
   agentSignals: AgentSignal[]
+  fallbackDisplayOnly?: boolean
 }
 
 const clamp = (value: number, min = 0, max = 100): number => Math.max(min, Math.min(max, value))
@@ -190,7 +191,11 @@ export const buildThreadCommandIntel = (
   const latestInbound = latestByDirection(orderedMessages, 'inbound')
   const combinedText = inbound.map((message) => asText(message.body).toLowerCase()).join(' \n ')
 
-  const baseMotivation = asNumber(getThreadField(thread, intelligence, ['motivationScore', 'motivation_score', 'finalAcquisitionScore', 'priorityScore'])) ?? 50
+  const backendDncRisk = asNumber(getThreadField(thread, intelligence, ['dncRisk', 'dnc_risk']))
+  const backendHostilityRisk = asNumber(getThreadField(thread, intelligence, ['hostilityRisk', 'hostility_risk']))
+  const backendMotivationScore = asNumber(getThreadField(thread, intelligence, ['motivationScore', 'motivation_score', 'finalAcquisitionScore', 'priorityScore']))
+  const fallbackDisplayOnly = backendDncRisk === null && backendMotivationScore === null
+
   const urgencyKeywordHits = keywordScore(combinedText, ['asap', 'urgent', 'today', 'this week', 'need to sell', 'moving', 'behind on'])
   const distressKeywordHits = keywordScore(combinedText, ['divorce', 'probate', 'inherited', 'foreclosure', 'vacant', 'code violation', 'tenant'])
   const positiveKeywordHits = keywordScore(combinedText, ['interested', 'open', 'yes', 'sure', 'okay', 'works', 'can do'])
@@ -199,7 +204,8 @@ export const buildThreadCommandIntel = (
 
   const recencyHours = hoursSince(thread.lastInboundAt || thread.lastMessageAt)
   const inboundRecencyBoost = recencyHours === null ? 0 : recencyHours <= 2 ? 12 : recencyHours <= 24 ? 6 : 0
-  const motivationScore = clamp(baseMotivation + urgencyKeywordHits * 8 + distressKeywordHits * 6 + positiveKeywordHits * 4 - hostileKeywordHits * 18 + inboundRecencyBoost)
+
+  const motivationScore = backendMotivationScore ?? clamp(50 + urgencyKeywordHits * 8 + distressKeywordHits * 6 + positiveKeywordHits * 4 - hostileKeywordHits * 18 + inboundRecencyBoost)
   const urgencyScore = clamp(35 + urgencyKeywordHits * 14 + distressKeywordHits * 8 + inboundRecencyBoost + (thread.inboxStatus === 'new_reply' ? 18 : 0))
   const sentimentScore = clamp(50 + positiveKeywordHits * 10 - hostileKeywordHits * 20)
   const negotiationFlexibility = clamp(52 + positiveKeywordHits * 6 - anchorKeywordHits * 8 - hostileKeywordHits * 10)
@@ -209,8 +215,8 @@ export const buildThreadCommandIntel = (
   const stalePenalty = recencyHours !== null && recencyHours > 72 ? 24 : recencyHours !== null && recencyHours > 24 ? 12 : 0
   const responsivenessScore = clamp(responsivenessBase - outboundPenalty - stalePenalty)
 
-  const dncRisk = clamp((thread.isOptOut || thread.isSuppressed ? 85 : 8) + hostileKeywordHits * 20 + (combinedText.includes('wrong number') ? 30 : 0))
-  const hostilityRisk = clamp(10 + hostileKeywordHits * 24 + (thread.inboxStatus === 'needs_review' ? 12 : 0))
+  const dncRisk = backendDncRisk ?? clamp((thread.isOptOut || thread.isSuppressed ? 85 : 8) + hostileKeywordHits * 20 + (combinedText.includes('wrong number') ? 30 : 0))
+  const hostilityRisk = backendHostilityRisk ?? clamp(10 + hostileKeywordHits * 24 + (thread.inboxStatus === 'needs_review' ? 12 : 0))
 
   const underwritingFields = [
     getThreadField(thread, intelligence, ['arv', 'afterRepairValue', 'after_repair_value']),
@@ -270,6 +276,8 @@ export const buildThreadCommandIntel = (
   const sellerPsychology = inferPsychology(combinedText, urgencyScore, hostilityRisk, negotiationFlexibility)
 
   const recommendedOfferRange = (() => {
+    const backendRange = asText(getThreadField(thread, intelligence, ['recommendedOfferRange', 'recommended_offer_range']))
+    if (backendRange) return backendRange
     const cashOffer = asNumber(getThreadField(thread, intelligence, ['cashOffer', 'cash_offer', 'mao']))
     const aiOffer = asNumber(getThreadField(thread, intelligence, ['aiRecommendedOffer', 'ai_recommended_opening_offer', 'ai_offer']))
     const walkaway = asNumber(getThreadField(thread, intelligence, ['walkawayPrice', 'walkaway_price', 'walkaway_internal']))
@@ -431,5 +439,6 @@ export const buildThreadCommandIntel = (
     automationEvents,
     liveEvents,
     agentSignals,
+    fallbackDisplayOnly,
   }
 }

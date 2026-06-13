@@ -80,7 +80,7 @@ export async function PATCH(request, { params }) {
   const { candidate_id } = params
   const body = await parseJsonSafe(request)
 
-  const allowedFields = ['notes', 'buyer_response_status', 'selected']
+  const allowedFields = ['notes', 'buyer_response_status', 'selected', 'package_sent_at']
   const updates = {}
   for (const field of allowedFields) {
     if (body[field] !== undefined) updates[field] = body[field]

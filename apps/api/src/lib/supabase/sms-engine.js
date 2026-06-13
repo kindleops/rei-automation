@@ -1726,6 +1726,69 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
 // ─── Delivery-failure safety guards ─────────────────────────────────────────
 
 /**
+ * Cancel all pending (scheduled/queued/ready) queue rows for a blacklisted phone number.
+ * Called immediately after a 21610 error is detected so no future messages attempt to
+ * reach a recipient who has opted out or been carrier-blacklisted.
+ *
+ * Returns { cancelled_count, skipped_id } on success, { cancelled_count: 0 } on error.
+ */
+export async function cancelBlacklistedPhoneQueueRows(
+  { to_phone_number, skip_queue_id },
+  deps = {}
+) {
+  if (!to_phone_number) return { cancelled_count: 0 };
+
+  const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
+  const now = deps.now || nowIso();
+
+  try {
+    let query = supabase_client
+      .from(SEND_QUEUE_TABLE)
+      .update({
+        queue_status: "cancelled",
+        blocked_reason: "blacklist_21610_phone_suppressed",
+        updated_at: now,
+        metadata: supabase_client.rpc ? undefined : undefined, // metadata merge handled below
+      })
+      .eq("to_phone_number", to_phone_number)
+      .in("queue_status", ["scheduled", "queued", "ready"]);
+
+    if (skip_queue_id) {
+      query = query.neq("id", skip_queue_id);
+    }
+
+    const { data, error } = await query.select("id");
+
+    if (error) {
+      warn("blacklist_cancel_future_rows_failed", {
+        to_phone_number,
+        skip_queue_id,
+        message: error.message,
+      });
+      return { cancelled_count: 0 };
+    }
+
+    const cancelled_count = data?.length ?? 0;
+    if (cancelled_count > 0) {
+      info("blacklist_21610_future_rows_cancelled", {
+        to_phone_number,
+        skip_queue_id,
+        cancelled_count,
+        cancelled_ids: data.map((r) => r.id),
+      });
+    }
+
+    return { cancelled_count };
+  } catch (err) {
+    warn("blacklist_cancel_future_rows_exception", {
+      to_phone_number,
+      message: err?.message || "unknown_error",
+    });
+    return { cancelled_count: 0 };
+  }
+}
+
+/**
  * Check whether a given from/to pair has a prior 21610 blacklist failure.
  * Returns { blocked: true, reason, count } or { blocked: false, reason: null }.
  * Non-fatal: any DB error returns blocked=false so sends are never silently lost.
@@ -2997,6 +3060,56 @@ export async function syncDeliveryEvent(payload, options = {}) {
     });
   }
 
+  // Acquisition automation is downstream of canonical receipt reconciliation.
+  // It is best-effort so a follow-up or retry failure never rejects the provider
+  // webhook after delivery state has already been persisted.
+  for (const row of send_queue_data || []) {
+    if (!isAcquisitionManagedQueueRow(row)) continue;
+    try {
+      const handler =
+        options.handleAcquisitionDeliveryReceipt ||
+        (await import("@/lib/domain/acquisition/delivery-receipt-handler.js"))
+          .handleDeliveryReceipt;
+      await handler(
+        {
+          queue_row: row,
+          queue_row_id: row?.id || null,
+          phone: row?.to_phone_number || null,
+          canonical_e164: row?.to_phone_number || null,
+          thread_id: row?.thread_key || null,
+          master_owner_id: row?.master_owner_id || null,
+          property_id: row?.property_id || null,
+          campaign_id: row?.campaign_id || null,
+          current_stage: row?.current_stage || null,
+        },
+        {
+          delivery_status: final_delivery_status,
+          provider_message_id: provider_message_sid,
+          delivered_at:
+            final_delivery_status === "delivered"
+              ? pickFirst(incoming_delivered_at, now)
+              : null,
+          failure_reason:
+            final_delivery_status === "failed" ? provider_failure_reason : null,
+        },
+        {
+          supabase,
+          now,
+          insertQueueRow: insertSupabaseSendQueueRow,
+          getSystemFlags: options.getSystemFlags,
+          acquisitionRuntimeFlags: options.acquisitionRuntimeFlags,
+        }
+      );
+    } catch (acquisitionError) {
+      warn("delivery_webhook.acquisition_receipt_failed", {
+        queue_row_id: row?.id || null,
+        provider_message_sid,
+        delivery_status: final_delivery_status,
+        message: acquisitionError?.message || "unknown_error",
+      });
+    }
+  }
+
   captureSystemEvent("sms_delivery_updated", {
     provider_message_sid: provider_message_sid || null,
     delivery_status: final_delivery_status,
@@ -3013,6 +3126,16 @@ export async function syncDeliveryEvent(payload, options = {}) {
     message_events_count: Array.isArray(message_events_data) ? message_events_data.length : 0,
     send_queue_count: Array.isArray(send_queue_data) ? send_queue_data.length : 0,
   };
+}
+
+export function isAcquisitionManagedQueueRow(row = {}) {
+  const metadata = ensureObject(row.metadata);
+  const source = lower(row.source || metadata.source);
+  return (
+    metadata.acquisition_managed === true ||
+    metadata.default_acquisition_engine === true ||
+    source === "default_acquisition_engine"
+  );
 }
 
 /**

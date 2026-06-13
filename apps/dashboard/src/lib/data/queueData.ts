@@ -74,3 +74,15 @@ export const retryQueueItem = async (item: QueueItem): Promise<QueueActionResult
   if (!result.ok) return { ok: false, errorMessage: result.message }
   return { ok: true, errorMessage: null, updatedItem: { ...item, status: 'retry', retryCount: (item.retryCount || 0) + 1 } }
 }
+
+export const retryAllFailed = async (): Promise<{ ok: boolean; errorMessage: string | null; count?: number }> => {
+  const result = await backendClient.retryFailed({})
+  if (!result.ok) return { ok: false, errorMessage: result.message }
+  return { ok: true, errorMessage: null }
+}
+
+export const runQueueOnce = async (): Promise<{ ok: boolean; errorMessage: string | null }> => {
+  const result = await backendClient.runQueueNow({})
+  if (!result.ok) return { ok: false, errorMessage: result.message }
+  return { ok: true, errorMessage: null }
+}

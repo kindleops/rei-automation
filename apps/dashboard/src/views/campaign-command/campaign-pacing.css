@@ -1,398 +1,224 @@
-/*
- * Campaign Builder — pacing presets + runtime readout.
- * Self-contained so it does not depend on cascade order with campaigns.css.
- * Part of the Production Lock-In correctness pass (Phase 3).
- */
 
-.cmp-pacing-block {
+/* ── Launch Readiness Strip ──────────────────────────────────────────────────── */
+
+.cmp-draft-filter-warn {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.025);
-  grid-column: 1 / -1;
-}
-
-.cmp-pacing-block-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.6;
-}
-
-.cmp-pacing-presets {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-}
-
-.cmp-pacing-preset {
-  appearance: none;
-  cursor: pointer;
-  padding: 6px 4px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-1, #c8c8cd);
-  font-size: 11px;
-  font-weight: 600;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.cmp-pacing-preset:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--text-0, #f4f4f5);
-}
-
-.cmp-pacing-preset.is-active {
-  border-color: var(--accent, #6366f1);
-  background: color-mix(in srgb, var(--accent, #6366f1) 18%, transparent);
-  color: var(--text-0, #f4f4f5);
-}
-
-.cmp-pacing-readout {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-
-.cmp-pacing-readout span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.cmp-pacing-readout em {
-  font-style: normal;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.55;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cmp-pacing-readout strong {
-  color: var(--text-0, #f4f4f5);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-[data-nexus-theme='light'] .cmp-pacing-block {
-  border-color: var(--border);
-  background: rgba(0, 0, 0, 0.03);
-}
-
-[data-nexus-theme='light'] .cmp-pacing-preset {
-  border-color: var(--border);
-  background: rgba(0, 0, 0, 0.02);
-  color: var(--text-1);
-}
-
-[data-nexus-theme='light'] .cmp-pacing-preset.is-active {
-  border-color: var(--accent);
-  color: var(--text-0);
-}
-
-/* Campaign Builder production polish */
-
-.cmp-launch-execution--polished {
-  margin-top: 10px;
-  padding: 8px;
-}
-
-.cmp-launch-strip {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(86px, 1fr)) minmax(88px, auto) minmax(96px, auto);
-  align-items: stretch;
-  gap: 6px;
-}
-
-.cmp-launch-strip-metric {
-  min-width: 0;
-  min-height: 42px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.cmp-launch-strip-metric span {
-  color: var(--text-2, #71717a);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-.cmp-launch-strip-metric strong {
-  min-width: 0;
-  color: var(--text-0, #f4f4f5);
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cmp-launch-strip-metric strong.is-accent {
-  color: var(--accent, #3ecf8e);
-}
-
-.cmp-launch-strip-metric em {
-  min-width: 0;
-  color: var(--text-2, #71717a);
-  font-size: 9px;
-  font-style: normal;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cmp-launch-advanced-toggle {
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--text-1, #a1a1aa);
-  font-size: 10px;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.cmp-launch-advanced-toggle:hover {
-  color: var(--text-0, #f4f4f5);
-  background: rgba(255, 255, 255, 0.065);
-}
-
-.cmp-launch-advanced-toggle[aria-expanded='true'] svg {
-  transform: rotate(180deg);
-}
-
-.cmp-launch-strip-cta {
-  min-height: 42px;
-  justify-content: center;
-  padding-inline: 14px;
-}
-
-.cmp-launch-expanded {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.065);
-}
-
-.cmp-launch-expanded .cmp-activation-controls {
-  grid-template-columns: minmax(96px, 0.45fr) minmax(190px, 0.9fr) minmax(170px, 0.8fr) minmax(260px, 1.4fr);
-}
-
-.cmp-pacing-presets .cmp-pacing-preset {
-  min-height: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
-  text-align: left;
-  padding: 6px 8px;
-}
-
-.cmp-pacing-preset strong {
-  color: inherit;
-  font-size: 11px;
-  line-height: 1.1;
-}
-
-.cmp-pacing-preset span {
-  color: var(--text-2, #71717a);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.cmp-pacing-readout {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.cmp-reach-funnel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 4px 0;
-}
-
-.cmp-reach-funnel-step {
-  position: relative;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 9px;
-  min-width: 0;
-}
-
-.cmp-reach-funnel-node {
-  position: relative;
-  z-index: 1;
-  width: 10px;
-  height: 10px;
-  margin: 16px auto 0;
-  border-radius: 50%;
-  border: 2px solid rgba(62, 207, 142, 0.52);
-  background: rgba(9, 13, 22, 0.96);
-  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.08);
-}
-
-.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-node {
-  border-color: var(--accent, #3ecf8e);
-  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.16);
-}
-
-.cmp-reach-funnel-connector {
-  position: absolute;
-  top: 28px;
-  bottom: -16px;
-  left: 8px;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(62, 207, 142, 0.32), rgba(62, 207, 142, 0.10));
-}
-
-.cmp-reach-funnel-content {
-  min-height: 48px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 10px;
-  align-items: center;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  background: rgba(255, 255, 255, 0.023);
-}
-
-.cmp-reach-funnel-content span {
-  min-width: 0;
-  color: var(--text-0, #f4f4f5);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.cmp-reach-funnel-content strong {
-  color: var(--text-0, #f4f4f5);
-  font-size: 15px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content strong {
-  color: var(--accent, #3ecf8e);
-}
-
-.cmp-reach-funnel-content em {
-  grid-column: 1 / -1;
-  min-width: 0;
-  color: var(--text-2, #71717a);
-  font-size: 10px;
-  font-style: normal;
-  line-height: 1.25;
-}
-
-.cmp-operator-strip {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px 0;
-}
-
-.cmp-operator-strip__item,
-.cmp-developer-toggle {
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--text-2, #71717a);
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.cmp-operator-strip__item.is-warn {
-  color: var(--warning, #f5b849);
-  border-color: rgba(245, 184, 73, 0.20);
+  padding: 5px 14px;
   background: rgba(245, 184, 73, 0.07);
+  border-bottom: 1px solid rgba(245, 184, 73, 0.18);
+  font-size: 11px;
+  color: var(--nx-warning, #f5b849);
+  flex-shrink: 0;
 }
 
-.cmp-developer-toggle {
-  margin-left: auto;
-  cursor: pointer;
-  color: var(--text-2, #71717a);
+.cmp-graph-stale-warn {
+  background: rgba(248, 113, 113, 0.07);
+  border-bottom-color: rgba(248, 113, 113, 0.22);
+  color: var(--nx-danger, #f87171);
 }
 
-.cmp-developer-toggle:hover,
-.cmp-developer-toggle.is-active {
-  color: var(--accent, #3ecf8e);
+/* Graph scope provenance badge in Target Reach header */
+.cmp-graph-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  line-height: 1.5;
+}
+
+.cmp-graph-scope-badge--partial {
+  color: var(--nx-danger, #f87171);
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.cmp-graph-scope-badge--full {
+  color: var(--nx-success, #3ecf8e);
+  border-color: rgba(62, 207, 142, 0.2);
+  background: rgba(62, 207, 142, 0.05);
+}
+
+.cmp-graph-scope-badge--stale {
+  color: var(--nx-warning, #f59e0b);
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.cmp-readiness-strip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 20px;
+  align-items: center;
+  padding: 12px 14px 10px;
+}
+
+.cmp-readiness-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cmp-readiness-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-muted, #a1a1aa);
+}
+
+.cmp-readiness-kpi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cmp-readiness-number {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--nx-text, #f4f4f5);
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+
+.cmp-readiness-number.is-loading {
+  opacity: 0.35;
+}
+
+.cmp-readiness-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid;
+  line-height: 1.5;
+}
+
+.cmp-readiness-badge.is-ready {
+  color: var(--nx-success, #3ecf8e);
   border-color: rgba(62, 207, 142, 0.28);
   background: rgba(62, 207, 142, 0.08);
 }
 
-[data-nexus-theme='light'] .cmp-launch-strip-metric,
-[data-nexus-theme='light'] .cmp-reach-funnel-content,
-[data-nexus-theme='light'] .cmp-operator-strip__item,
-[data-nexus-theme='light'] .cmp-developer-toggle {
-  border-color: var(--border);
-  background: rgba(0, 0, 0, 0.025);
+.cmp-readiness-badge.is-warning {
+  color: var(--nx-warning, #f5b849);
+  border-color: rgba(245, 184, 73, 0.28);
+  background: rgba(245, 184, 73, 0.08);
 }
 
-[data-nexus-theme='light'] .cmp-reach-funnel-node {
-  background: var(--surface-0, #fff);
+.cmp-readiness-badge.is-blocked {
+  color: var(--nx-danger, #f87171);
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(248, 113, 113, 0.08);
 }
 
-@media (max-width: 1180px) {
-  .cmp-launch-strip {
-    grid-template-columns: repeat(3, minmax(96px, 1fr)) minmax(88px, auto) minmax(96px, auto);
-  }
-
-  .cmp-launch-expanded .cmp-activation-controls {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.cmp-readiness-badge.is-loading,
+.cmp-readiness-badge.is-no_preview {
+  color: var(--nx-text-muted, #a1a1aa);
+  border-color: rgba(161, 161, 170, 0.2);
+  background: transparent;
 }
 
-@media (max-width: 720px) {
-  .cmp-launch-strip,
-  .cmp-pacing-readout {
-    grid-template-columns: 1fr 1fr;
-  }
+.cmp-readiness-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
 
-  .cmp-launch-advanced-toggle,
-  .cmp-launch-strip-cta {
-    min-height: 36px;
-  }
+.cmp-readiness-reasons > span {
+  font-size: 10px;
+  color: var(--nx-warning, #f5b849);
+  background: rgba(245, 184, 73, 0.06);
+  border: 1px solid rgba(245, 184, 73, 0.16);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
 
-  .cmp-launch-expanded .cmp-activation-controls {
-    grid-template-columns: 1fr;
-  }
+.cmp-readiness-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 3px;
+}
+
+.cmp-readiness-secondary > span {
+  font-size: 11px;
+  color: var(--nx-text-muted, #a1a1aa);
+}
+
+.cmp-readiness-secondary > span + span::before {
+  content: ' · ';
+  opacity: 0.4;
+  margin: 0 4px;
+}
+
+.cmp-readiness-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.cmp-readiness-sched-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.cmp-readiness-sched-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--nx-text-muted, #71717a);
+  font-weight: 600;
+}
+
+.cmp-readiness-sched-value {
+  font-size: 11px;
+  color: var(--nx-text-muted, #a1a1aa);
+}
+
+.cmp-readiness-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Funnel step accent override for "Ready To Schedule" */
+.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content > strong {
+  color: var(--nx-accent, #3ecf8e);
+  font-size: 14px;
+}
+
+.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content > span {
+  font-weight: 600;
+  color: var(--nx-text, #f4f4f5);
+}
+
+/* Launch readiness note below blocked-reason warning in confirm modal */
+.cmp-launch-confirm__stale-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(245, 184, 73, 0.07);
+  border: 1px solid rgba(245, 184, 73, 0.18);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--nx-warning, #f5b849);
+  margin-bottom: 8px;
 }

@@ -17,6 +17,7 @@
     "proof:sms-retry-safety": "node scripts/proof/sms-retry-safety-proof.mjs",
     "proof:sms-autopilot-dry-run": "node scripts/proof/sms-autopilot-dry-run-proof.mjs",
     "proof:sms-health-guard": "node scripts/proof/sms-health-guard-proof.mjs",
+    "proof:default-acquisition-engine": "npm --workspace apps/api run proof:default-acquisition-engine",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
     "build:safe": "npm run boundary:audit && npm run build"
   }

@@ -139,7 +139,7 @@ export async function setSystemValues(pairs = {}, opts = {}) {
  * @returns {Promise<Record<string, boolean>>}
  */
 export async function getSystemFlags(keys, opts = {}) {
-  const { supabase = defaultSupabase } = opts;
+  const { supabase = defaultSupabase, bypassCache = false } = opts;
   const normalized_keys = keys.map(clean).filter(Boolean);
   if (!normalized_keys.length) return {};
 
@@ -148,7 +148,7 @@ export async function getSystemFlags(keys, opts = {}) {
   const to_fetch = [];
 
   for (const key of normalized_keys) {
-    const cached = getCachedFlag(key);
+    const cached = bypassCache ? null : getCachedFlag(key);
     if (cached !== null) {
       result[key] = cached;
     } else {

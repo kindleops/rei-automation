@@ -106,9 +106,9 @@ async function queryThreadRow({ thread_key, conversation_thread_id, legacy_threa
       idColumns: ['property_id', 'prospect_id', 'master_owner_id'],
     },
     {
-      name: 'v_inbox_enriched',
-      columns: ['thread_key', 'best_phone', 'seller_phone', 'display_phone'],
-      idColumns: ['property_id', 'final_property_id', 'final_prospect_id', 'master_owner_id', 'final_master_owner_id'],
+      name: 'canonical_inbox_threads',
+      columns: ['thread_key', 'best_phone', 'seller_phone', 'display_phone', 'canonical_e164'],
+      idColumns: ['property_id', 'prospect_id', 'master_owner_id'],
     },
   ]
   const diagnostics = []

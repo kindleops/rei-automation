@@ -17,6 +17,9 @@ export type QueueItemStatus =
   | 'paused_invalid_queue_row'
   | 'paused_global_lock'
   | 'paused_max_retries'
+  | 'duplicate_blocked'
+  | 'incident_quarantine'
+  | 'expired'
 export type QueueItemPriority = 'P0' | 'P1' | 'P2' | 'P3'
 export type DeliveryStatus = 'pending' | 'sent' | 'delivered' | 'failed' | 'bounced' | 'rejected'
 export type FailureReason =
@@ -131,6 +134,19 @@ export interface QueueItem {
   diagnosticFlags: string[]
   rowSource: 'campaign' | 'feeder' | 'manual' | 'auto_reply' | 'unknown'
   guardReason: string | null
+
+  // Lineage fields
+  queueKey: string | null
+  workflowId: string | null
+  workflowExecutionId: string | null
+  automationSource: string | null
+}
+
+export interface QueueFetchOptions {
+  dateFrom?: string
+  dateTo?: string
+  page?: number
+  pageSize?: number
 }
 
 export interface QueueModel {
@@ -148,6 +164,12 @@ export interface QueueModel {
   apiPressureLevel: 'low' | 'medium' | 'high'
   sendEngine: string
   engineMode: 'proxy' | 'disabled' | 'dry-run only'
+  totalCount: number
+  currentPage: number
+  pageSize: number
+  totalPages: number
+  hasMore: boolean
+  fetchOptions: QueueFetchOptions
 }
 
 export interface QueueFilters {

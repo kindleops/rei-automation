@@ -28,6 +28,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import {
+  cancelBlacklistedPhoneQueueRows,
   claimSendQueueRow,
   evaluateContactWindow,
   finalizeSendQueueFailure,
@@ -48,6 +49,11 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
 import { isManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import {
+  acquisitionQueueOperation,
+  acquisitionRuntimeDisabled,
+  getAcquisitionRuntimeControl,
+} from "@/lib/domain/acquisition/acquisition-runtime-control.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -1915,6 +1921,18 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
     if (is_blacklist_error) {
         addSentryBreadcrumb("queue_failure", "provider_blacklist_21610_terminal", { queue_row_id, error: error?.message });
+        // Cancel all pending rows for this recipient — a 21610 means the number is
+        // blacklisted/opted-out. Future sends to this phone must never be attempted.
+        cancelBlacklistedPhoneQueueRows(
+          { to_phone_number: queue_row.to_phone_number, skip_queue_id: queue_row_id },
+          deps
+        ).catch((cancel_err) => {
+          warn("queue.blacklist_cancel_future_rows_failed", {
+            queue_row_id,
+            to_phone_number: queue_row.to_phone_number,
+            message: cancel_err?.message,
+          });
+        });
     }
 
     try {
@@ -2026,6 +2044,22 @@ export async function processSendQueueItem(queue_row, deps = {}) {
       queue_row_id: getQueueRowId(resolved_queue_row),
       queue_item_id: getQueueRowId(resolved_queue_row),
     };
+  }
+
+  const acquisitionOperation = acquisitionQueueOperation(resolved_queue_row);
+  if (acquisitionOperation) {
+    const acquisitionRuntime = await getAcquisitionRuntimeControl(
+      acquisitionOperation,
+      deps
+    );
+    if (!acquisitionRuntime.enabled) {
+      return {
+        ...acquisitionRuntimeDisabled(acquisitionRuntime),
+        sent: false,
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        queue_item_id: getQueueRowId(resolved_queue_row),
+      };
+    }
   }
 
   const result = isSupabaseQueueRow(resolved_queue_row)

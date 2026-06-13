@@ -92,7 +92,7 @@ export const GlobalCommandOverlay = ({
 
   return (
     <div className={cls('gcc-overlay', themeClassFor(context.activeMapTheme))} onClick={onClose}>
-      <div className="gcc-shell" role="dialog" aria-modal aria-label="Global command center" onClick={(event) => event.stopPropagation()}>
+      <div className="gcc-shell nx-glass-panel" role="dialog" aria-modal aria-label="Global command center" onClick={(event) => event.stopPropagation()}>
         <div className="gcc-shell__chrome" />
         <div className="gcc-search">
           <div className="gcc-search__icon"><Icon name="command" /></div>

@@ -208,7 +208,7 @@ const addNodeFromPalette = (item: WorkflowNodeLibraryItem, position?: { x: numbe
   }
 
   return (
-    <section className={cls('wfs2', `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+    <section className={cls('wfs2', 'wfs2-isolation-root', `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
       <WorkflowCommandBarV2
         detail={selected}
         busy={busy}

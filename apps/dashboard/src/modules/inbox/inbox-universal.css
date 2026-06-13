@@ -6,8 +6,8 @@
   display: flex;
   padding: 8px 12px;
   gap: 4px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border-0);
+  background: var(--nx-bg-2);
+  border-bottom: 1px solid var(--nx-border);
 }
 
 .nx-source-mode-btn {
@@ -16,7 +16,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-2);
+  color: var(--nx-text-muted);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -26,13 +26,13 @@
 }
 
 .nx-source-mode-btn:hover {
-  color: var(--text-0);
-  background: var(--surface-2);
+  color: var(--nx-text);
+  background: var(--nx-card-bg);
 }
 
 .nx-source-mode-btn.is-active {
-  background: var(--surface-2);
-  color: var(--tone-primary);
+  background: var(--nx-card-bg);
+  color: var(--nx-accent);
   box-shadow: var(--shadow-xs);
 }
 
@@ -43,15 +43,15 @@
   justify-content: center;
   height: 100%;
   padding: 40px;
-  background: var(--bg-0);
+  background: var(--nx-bg);
 }
 
 .nx-uncontacted-state__card {
   max-width: 400px;
   width: 100%;
   padding: 32px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-1);
+  background: var(--nx-panel-bg);
+  border: 1px solid var(--nx-border);
   border-radius: var(--radius-xl);
   text-align: center;
   box-shadow: var(--shadow-lg);
@@ -64,9 +64,9 @@
   width: 64px;
   height: 64px;
   margin: 0 auto 20px;
-  background: var(--bg-1);
+  background: var(--nx-bg-2);
   border-radius: 50%;
-  color: var(--text-3);
+  color: var(--nx-text-muted);
 }
 
 .nx-uncontacted-state__icon svg {
@@ -79,13 +79,13 @@
   margin: 0 0 12px;
   font-size: 20px;
   font-weight: 600;
-  color: var(--text-0);
+  color: var(--nx-text);
 }
 
 .nx-uncontacted-state__card p {
   margin: 0 0 24px;
   font-size: 14px;
-  color: var(--text-2);
+  color: var(--nx-text-muted);
   line-height: 1.5;
 }
 
@@ -111,7 +111,7 @@
 }
 
 .nx-btn--primary {
-  background: var(--tone-primary);
+  background: var(--nx-accent);
   color: #000;
 }
 
@@ -120,14 +120,14 @@
 }
 
 .nx-btn--secondary {
-  background: var(--surface-2);
-  color: var(--text-1);
-  border: 1px solid var(--border-1);
+  background: var(--nx-card-bg);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
 }
 
 .nx-btn--secondary:hover {
-  background: var(--surface-hover);
-  color: var(--text-0);
+  background: var(--nx-glass-bg-hover);
+  color: var(--nx-text);
 }
 
 .nx-btn svg {
