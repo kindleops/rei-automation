@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import {
   fetchQueueModel,
@@ -8,972 +8,1364 @@ import {
   retryQueueItem,
   cancelQueueItem,
   retryRoutingForItem,
-  type QueueModel,
-  type QueueItem,
+  retryAllFailed,
+  runQueueOnce,
 } from '../../lib/data/queueData'
-import type { QueueItemStatus } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueFetchOptions } from '../../domain/queue/queue.types'
+import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { Icon } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'
+import { buildContextFromQueueItem } from '../../modules/inbox/active-context'
 import './queue-premium.css'
 
-// ── Types & Helpers ────────────────────────────────────────────────────────
-
-type ViewMode = 'today' | 'week' | 'month' | 'list' | 'approval' | 'failed'
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
-// ── Components ────────────────────────────────────────────────────────────
+const truncate = (s: string | null | undefined, max: number) =>
+  !s ? '—' : s.length > max ? s.slice(0, max) + '…' : s
 
-/**
- * Status Badge for Queue Items
- */
-const StatusBadge = ({ status }: { status: QueueItemStatus }) => {
-  const labels: Record<string, string> = {
-    ready: 'Ready',
-    scheduled: 'Scheduled',
-    approval: 'Pending Approval',
-    failed: 'Failed',
-    sent: 'Sent',
-    delivered: 'Delivered',
-    retry: 'Retrying',
-    held: 'On Hold',
-    paused_invalid_queue_row: 'Routing Blocked',
+const relTime = (iso: string | null | undefined): string => {
+  if (!iso) return '—'
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const h = Math.floor(min / 60)
+  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
+}
+
+const fmtPhone = (p: string | null | undefined) =>
+  p ? `…${p.slice(-4)}` : '—'
+
+const pct = (num: number, den: number) =>
+  den > 0 ? Math.round((num / den) * 100) : 0
+
+// ── Date filter ────────────────────────────────────────────────────────────
+
+type DatePreset = 'today' | '24h' | '7d' | '30d' | 'custom'
+
+const DATE_PRESET_LABELS: Record<DatePreset, string> = {
+  today: 'Today', '24h': 'Last 24h', '7d': 'Last 7d', '30d': 'Last 30d', custom: 'Custom',
+}
+
+function getPresetRange(preset: Exclude<DatePreset, 'custom'>): { from: string; to: string } {
+  const now = new Date()
+  const to = now.toISOString()
+  if (preset === 'today') {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    return { from, to }
   }
+  const ms = preset === '24h' ? 86400000 : preset === '7d' ? 7 * 86400000 : 30 * 86400000
+  return { from: new Date(now.getTime() - ms).toISOString(), to }
+}
 
+function buildFetchOptions(
+  preset: DatePreset,
+  customFrom: string,
+  customTo: string,
+  page: number,
+  pageSize: number,
+): QueueFetchOptions {
+  if (preset === 'custom') {
+    return {
+      dateFrom: customFrom || new Date(Date.now() - 7 * 86400000).toISOString(),
+      dateTo: customTo || new Date().toISOString(),
+      page,
+      pageSize,
+    }
+  }
+  const range = getPresetRange(preset)
+  return { dateFrom: range.from, dateTo: range.to, page, pageSize }
+}
+
+// ── Status constants ───────────────────────────────────────────────────────
+
+type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent'
+
+const STATUS_TONE: Record<string, string> = {
+  scheduled: 'blue', queued: 'blue', sending: 'cyan', sent: 'green',
+  delivered: 'green', failed: 'red', retry: 'red', blocked: 'amber',
+  held: 'amber', approval: 'amber', cancelled: 'muted',
+  paused_name_missing: 'amber', paused_invalid_queue_row: 'amber',
+  paused_max_retries: 'amber', paused_duplicate: 'amber',
+  paused_global_lock: 'amber', duplicate_blocked: 'muted',
+  incident_quarantine: 'red', expired: 'muted', replied_before_send: 'green',
+}
+
+const FAILURE_TONE: Record<string, string> = {
+  Carrier: 'red', Compliance: 'red', Routing: 'amber',
+  Template: 'amber', Payload: 'amber', Webhook: 'amber',
+}
+
+const BLOCKED_STATUSES = new Set([
+  'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
+  'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
+])
+
+const HEALTH_TONE: Record<string, string> = {
+  healthy: 'green', watch: 'amber', degraded: 'amber', critical: 'red',
+}
+
+function healthFromPct(failRate: number): 'healthy' | 'watch' | 'degraded' | 'critical' {
+  if (failRate >= 30) return 'critical'
+  if (failRate >= 15) return 'degraded'
+  if (failRate >= 5) return 'watch'
+  return 'healthy'
+}
+
+// ── Template stats ─────────────────────────────────────────────────────────
+
+interface TemplateStat {
+  id: string
+  name: string
+  usage: number
+  sent: number
+  delivered: number
+  failed: number
+  blocked: number
+  optOuts: number
+  deliveryPct: number
+  failPct: number
+  health: 'healthy' | 'watch' | 'degraded' | 'critical'
+}
+
+function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
+  const map = new Map<string, TemplateStat>()
+  for (const i of items) {
+    const id = i.templateId ?? i.selectedTemplateId ?? 'no-template'
+    const name = i.templateName || 'No Template'
+    const s = map.get(id) ?? { id, name, usage: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0, deliveryPct: 0, failPct: 0, health: 'healthy' }
+    s.usage++
+    if (i.status === 'sent') s.sent++
+    if (i.status === 'delivered') s.delivered++
+    if (i.status === 'failed' || i.status === 'retry') s.failed++
+    if (BLOCKED_STATUSES.has(i.status)) s.blocked++
+    if (i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'blacklist_pair_21610') s.optOuts++
+    map.set(id, s)
+  }
+  return Array.from(map.values()).map(s => {
+    const denom = s.sent + s.delivered + s.failed
+    s.deliveryPct = pct(s.delivered, denom)
+    s.failPct = pct(s.failed, denom)
+    s.health = healthFromPct(s.failPct)
+    return s
+  }).sort((a, b) => b.usage - a.usage)
+}
+
+// ── Sender (TextGrid) stats ────────────────────────────────────────────────
+
+interface SenderStat {
+  phone: string
+  market: string
+  sent: number
+  delivered: number
+  failed: number
+  blocked: number
+  optOuts: number
+  violations21610: number
+  deliveryPct: number
+  failPct: number
+  health: 'healthy' | 'watch' | 'degraded' | 'critical'
+  lastUsed: string | null
+  state: 'active' | 'paused' | 'degraded' | 'blocked'
+}
+
+function buildSenderStats(items: QueueItem[]): SenderStat[] {
+  const map = new Map<string, SenderStat>()
+  for (const i of items) {
+    const phone = i.fromPhoneNumber || 'unknown'
+    if (phone === 'unknown') continue
+    const s = map.get(phone) ?? {
+      phone, market: i.market || '—', sent: 0, delivered: 0, failed: 0, blocked: 0,
+      optOuts: 0, violations21610: 0, deliveryPct: 0, failPct: 0,
+      health: 'healthy', lastUsed: null, state: 'active',
+    }
+    if (i.status === 'sent') s.sent++
+    if (i.status === 'delivered') s.delivered++
+    if (i.status === 'failed' || i.status === 'retry') s.failed++
+    if (BLOCKED_STATUSES.has(i.status)) s.blocked++
+    if (i.failureCategory === 'recipient_opted_out') s.optOuts++
+    if (i.failureCategory === 'blacklist_pair_21610') s.violations21610++
+    const ts = i.lastEventAt || i.sentAt || i.updatedAt
+    if (ts && (!s.lastUsed || ts > s.lastUsed)) s.lastUsed = ts
+    if (!s.market || s.market === '—') s.market = i.market || '—'
+    map.set(phone, s)
+  }
+  return Array.from(map.values()).map(s => {
+    const denom = s.sent + s.delivered + s.failed
+    s.deliveryPct = pct(s.delivered, denom)
+    s.failPct = pct(s.failed, denom)
+    s.health = s.violations21610 > 0 ? 'critical' : healthFromPct(s.failPct)
+    const hasActive = items.some(i => i.fromPhoneNumber === s.phone && ['scheduled', 'queued', 'ready'].includes(i.status))
+    s.state = s.violations21610 > 0 ? 'blocked' : s.health === 'critical' ? 'degraded' : hasActive ? 'active' : 'paused'
+    return s
+  }).sort((a, b) => (b.sent + b.delivered) - (a.sent + a.delivered))
+}
+
+// ── Market stats ───────────────────────────────────────────────────────────
+
+interface MarketStat {
+  market: string
+  total: number
+  sent: number
+  delivered: number
+  failed: number
+  blocked: number
+  optOuts: number
+  deliveryPct: number
+  health: 'healthy' | 'watch' | 'degraded' | 'critical'
+}
+
+function buildMarketStats(items: QueueItem[]): MarketStat[] {
+  const map = new Map<string, MarketStat>()
+  for (const i of items) {
+    const m = i.market || 'Unknown'
+    const s = map.get(m) ?? { market: m, total: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0, deliveryPct: 0, health: 'healthy' }
+    s.total++
+    if (i.status === 'sent') s.sent++
+    if (i.status === 'delivered') s.delivered++
+    if (i.status === 'failed' || i.status === 'retry') s.failed++
+    if (BLOCKED_STATUSES.has(i.status)) s.blocked++
+    if (i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'blacklist_pair_21610') s.optOuts++
+    map.set(m, s)
+  }
+  return Array.from(map.values()).map(s => {
+    const denom = s.sent + s.delivered + s.failed
+    s.deliveryPct = pct(s.delivered, denom)
+    s.health = healthFromPct(pct(s.failed, denom))
+    return s
+  }).sort((a, b) => b.total - a.total)
+}
+
+// ── KPI Card ────────────────────────────────────────────────────────────────
+
+interface KpiCardProps { label: string; value: number | string; tone?: string; onClick?: () => void; active?: boolean; sub?: string }
+
+const KpiCard = ({ label, value, tone, onClick, active, sub }: KpiCardProps) => (
+  <button
+    type="button"
+    className={cls('occ-kpi', tone && `is-${tone}`, active && 'is-active', onClick && 'is-clickable')}
+    onClick={onClick}
+    disabled={!onClick}
+  >
+    <span className="occ-kpi__value">{value}</span>
+    <span className="occ-kpi__label">{label}</span>
+    {sub && <span className="occ-kpi__sub">{sub}</span>}
+  </button>
+)
+
+// ── Date Filter ─────────────────────────────────────────────────────────────
+
+const DateFilter = ({
+  preset,
+  customFrom,
+  customTo,
+  onPreset,
+  onCustomFrom,
+  onCustomTo,
+}: {
+  preset: DatePreset
+  customFrom: string
+  customTo: string
+  onPreset: (p: DatePreset) => void
+  onCustomFrom: (v: string) => void
+  onCustomTo: (v: string) => void
+}) => {
   return (
-    <span className={cls('nx-badge', `nx-badge--${status}`)}>
-      {labels[status] || status}
-    </span>
+    <div className="occ-date-filter">
+      <div className="occ-date-presets">
+        {(['today', '24h', '7d', '30d', 'custom'] as DatePreset[]).map(p => (
+          <button
+            key={p}
+            type="button"
+            className={cls('occ-date-btn', preset === p && 'is-active')}
+            onClick={() => onPreset(p)}
+          >
+            {DATE_PRESET_LABELS[p]}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' && (
+        <div className="occ-date-custom">
+          <input
+            type="datetime-local"
+            className="occ-date-input"
+            value={customFrom ? customFrom.slice(0, 16) : ''}
+            onChange={e => onCustomFrom(e.target.value ? new Date(e.target.value).toISOString() : '')}
+          />
+          <span className="occ-date-sep">→</span>
+          <input
+            type="datetime-local"
+            className="occ-date-input"
+            value={customTo ? customTo.slice(0, 16) : ''}
+            onChange={e => onCustomTo(e.target.value ? new Date(e.target.value).toISOString() : '')}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
-/**
- * Risk Tag
- */
-const RiskTag = ({ level }: { level: 'low' | 'medium' | 'high' }) => (
-  <span className={cls('nx-risk-tag', `is-${level}`)}>
-    {level} RISK
-  </span>
+// ── Inspector Row ───────────────────────────────────────────────────────────
+
+const InspRow = ({ label, value, tone, mono }: { label: string; value: React.ReactNode; tone?: string; mono?: boolean }) => (
+  <div className="occ-insp-row">
+    <span className="occ-insp-label">{label}</span>
+    <span className={cls('occ-insp-value', tone && `is-${tone}`, mono && 'occ-mono')}>{value || '—'}</span>
+  </div>
 )
 
-/**
- * Queue Card for Grid/List views
- */
-const OperationalRow = ({
-  item, 
-  isSelected, 
-  onClick 
-}: { 
-  item: QueueItem, 
-  isSelected: boolean, 
-  onClick: () => void 
-}) => (
-  <div 
-    className={cls('nx-operational-row', isSelected && 'is-selected')}
-    onClick={onClick}
-  >
-    <div className="nx-op-cell is-seller">
-      <span className="nx-seller-name">{item.sellerName}</span>
-      <span className="nx-seller-address">{item.propertyAddress}</span>
-      <span className="nx-op-campaign-meta">campaign_id: {item.campaignId || '—'}</span>
-      <span className="nx-op-campaign-meta">campaign_target_id: {item.campaignTargetId || '—'}</span>
-      <div className="nx-op-hover-intel">
-        <span className={cls('nx-temp-dot', `is-${item.sellerTemperature}`)} />
-        <small>{item.sellerTemperature.toUpperCase()}</small>
-        {item.memoryStatus !== 'none' && (
+// ── Hero Inspector (row dossier) ────────────────────────────────────────────
+
+const HeroInspector = ({
+  item,
+  onAction,
+}: {
+  item: QueueItem | null
+  onAction: (action: string, id: string) => void
+}) => {
+  if (!item) return null
+  const tone = STATUS_TONE[item.status] ?? 'muted'
+  const failLabel = item.failureCategory ? (FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')) : null
+  const originLabel = item.automationSource || item.rowSource?.replace(/_/g, ' ') || 'Legacy Queue Row'
+
+  return (
+    <aside className="occ-inspector occ-dossier">
+      <div className="occ-dossier__header">
+        <div className="occ-dossier__identity">
+          <strong className="occ-dossier__seller">{truncate(item.sellerName, 30)}</strong>
+          <span className={cls('occ-status-pill', `is-${tone}`)}>{item.status.replace(/_/g, ' ')}</span>
+        </div>
+        <button type="button" className="occ-inspector__close" onClick={() => onAction('deselect', item.id)}>
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+
+      <div className="occ-inspector__body">
+
+        {/* Identity */}
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Identity</div>
+          <InspRow label="Full Name" value={item.sellerFullName || item.sellerName} />
+          <InspRow label="Phone" value={item.toPhoneNumber} mono />
+          <InspRow label="Property" value={truncate(item.propertyAddress, 40)} />
+          {item.propertyCity && (
+            <InspRow label="City / State" value={`${item.propertyCity}${item.propertyState ? ', ' + item.propertyState : ''}`} />
+          )}
+          <InspRow label="Market" value={item.market} />
+          {item.linkedPropertyId && <InspRow label="Property ID" value={truncate(item.linkedPropertyId, 24)} mono />}
+          {item.linkedOwnerId && <InspRow label="Owner ID" value={truncate(item.linkedOwnerId, 24)} mono />}
+        </div>
+
+        {/* Origin */}
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Origin</div>
+          <InspRow label="Source" value={originLabel} />
+          <InspRow label="Campaign" value={item.campaignName || (item.campaignId ? truncate(item.campaignId, 24) : 'Legacy Row')} />
+          {item.campaignTargetId && <InspRow label="Target ID" value={truncate(item.campaignTargetId, 24)} mono />}
+          {item.workflowId && <InspRow label="Workflow" value={truncate(item.workflowId, 24)} mono />}
+          {item.queueKey && <InspRow label="Queue Key" value={truncate(item.queueKey, 28)} mono />}
+          <InspRow label="Created" value={formatRelativeTime(item.createdAt)} />
+          <InspRow label="Touch #" value={String(item.touchNumber)} />
+        </div>
+
+        {/* Routing */}
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Routing</div>
+          <InspRow label="From" value={item.fromPhoneNumber} mono />
+          <InspRow label="To" value={item.toPhoneNumber} mono />
+          <InspRow label="Template" value={truncate(item.templateName, 32)} />
+          <InspRow label="Scheduled" value={formatRelativeTime(item.scheduledForLocal)} />
+          {item.routingTier != null && <InspRow label="Tier" value={String(item.routingTier)} />}
+          {item.routingRuleName && <InspRow label="Rule" value={item.routingRuleName} />}
+          {item.routingReason && <InspRow label="Routing Reason" value={truncate(item.routingReason, 40)} />}
+        </div>
+
+        {/* Message */}
+        {item.messageText && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Message</div>
+            <div className="occ-insp-message">{item.messageText}</div>
+          </div>
+        )}
+
+        {/* Delivery */}
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Delivery</div>
+          <InspRow label="Status" value={item.status.replace(/_/g, ' ')} tone={tone} />
+          <InspRow label="Provider Status" value={item.deliveryStatus} tone={item.deliveryStatus === 'delivered' ? 'green' : item.deliveryStatus === 'failed' ? 'red' : undefined} />
+          {item.providerMessageId && <InspRow label="SID" value={truncate(item.providerMessageId, 22)} mono />}
+          {item.textgridMessageId && <InspRow label="TG Message ID" value={truncate(item.textgridMessageId, 22)} mono />}
+          {item.sentAt && <InspRow label="Sent At" value={relTime(item.sentAt)} />}
+          {item.deliveredAt && <InspRow label="Delivered At" value={relTime(item.deliveredAt)} />}
+          <InspRow label="Retries" value={`${item.retryCount} / ${item.maxRetries}`} />
+          <InspRow label="Retry Eligible" value={item.retryEligible ? 'Yes' : 'No'} tone={item.retryEligible ? 'green' : undefined} />
+        </div>
+
+        {/* Failure details */}
+        {(failLabel || item.pausedReason || item.blockedReason || item.guardReason) && (
+          <div className="occ-insp-section occ-insp-section--failure">
+            <div className="occ-insp-section-title">Failure Details</div>
+            {failLabel && <InspRow label="Cause" value={failLabel} tone="red" />}
+            {item.failedReason && <InspRow label="Raw" value={truncate(item.failedReason, 48)} tone="red" />}
+            {item.pausedReason && <InspRow label="Paused" value={item.pausedReason.replace(/_/g, ' ')} tone="amber" />}
+            {item.blockedReason && <InspRow label="Blocked" value={item.blockedReason.replace(/_/g, ' ')} tone="amber" />}
+            {item.guardReason && <InspRow label="Guard" value={item.guardReason.replace(/_/g, ' ')} tone="amber" />}
+          </div>
+        )}
+
+        {/* Last event */}
+        {(item.lastEventType || item.deliveryStatus !== 'pending') && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Last Event</div>
+            {item.lastEventType && <InspRow label="Type" value={item.lastEventType} />}
+            {item.lastEventAt && <InspRow label="When" value={relTime(item.lastEventAt)} />}
+          </div>
+        )}
+
+        {/* Diagnostic flags */}
+        {item.diagnosticFlags.length > 0 && (
+          <div className="occ-insp-section occ-insp-section--diag">
+            <div className="occ-insp-section-title">Diagnostics</div>
+            <div className="occ-diag-flags">
+              {item.diagnosticFlags.map(f => (
+                <span key={f} className="occ-diag-flag">{f.replace(/_/g, ' ')}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="occ-inspector__actions">
+        {item.status === 'approval' && (
+          <button className="occ-action-btn is-primary" onClick={() => onAction('approve', item.id)}>
+            <Icon name="check" size={13} /> Approve
+          </button>
+        )}
+        {(item.status === 'failed' || item.status === 'retry') && item.retryEligible && (
+          <button className="occ-action-btn is-primary" onClick={() => onAction('retry', item.id)}>
+            <Icon name="zap" size={13} /> Retry
+          </button>
+        )}
+        {item.status === 'paused_invalid_queue_row' && (
+          <button className="occ-action-btn is-secondary" onClick={() => onAction('retry-routing', item.id)}>
+            <Icon name="refresh-cw" size={13} /> Retry Routing
+          </button>
+        )}
+        {['scheduled', 'queued', 'ready'].includes(item.status) && (
           <>
-            <span className="nx-intel-divider" />
-            <Icon name="brain" className="nx-intel-icon" />
-            <small>Memory Active</small>
+            <button className="occ-action-btn is-secondary" onClick={() => onAction('hold', item.id)}>
+              <Icon name="shield" size={13} /> Hold
+            </button>
+            <button className="occ-action-btn is-secondary" onClick={() => onAction('reschedule', item.id)}>
+              <Icon name="clock" size={13} /> +1 Day
+            </button>
           </>
         )}
-      </div>
-    </div>
-    
-    <div className="nx-op-cell is-status">
-      <StatusBadge status={item.status} />
-      <span className="nx-op-stage">{item.currentStage}</span>
-    </div>
-
-    <div className="nx-op-cell is-action">
-      <span className="nx-next-action">{item.nextBestAction || 'Automated Outreach'}</span>
-      {item.urgencyScore > 75 && <RiskTag level="high" />}
-    </div>
-
-    <div className="nx-op-cell is-timing">
-      <span className="nx-timing-val">{formatRelativeTime(item.scheduledForLocal)}</span>
-      <span className="nx-timing-sub">{item.market}</span>
-    </div>
-
-    <div className="nx-op-cell is-ai">
-      <div className="nx-ai-bar">
-        <div className="nx-ai-fill" style={{ width: `${item.aiConfidence}%`, background: item.aiConfidence > 85 ? 'var(--success)' : 'var(--warning)' }} />
-      </div>
-      <span className="nx-ai-val">{item.aiConfidence}%</span>
-    </div>
-
-    <div className="nx-op-cell is-agent">
-      <span className="nx-agent-name">{item.agent}</span>
-    </div>
-  </div>
-)
-
-
-/**
- * Intelligence Row
- */
-const IntelRow = ({ label, value, icon, className }: { label: string; value: string | number; icon?: string; className?: string }) => (
-  <div className={cls('nx-queue-inspector-row', className)}>
-    <span className="nx-queue-inspector-label">
-      {icon && <span style={{ marginRight: 6 }}>{icon}</span>}
-      {label}
-    </span>
-    <span className="nx-queue-inspector-value">{value || '—'}</span>
-  </div>
-)
-
-/**
- * Collapsible Inspector Card
- */
-const CollapsibleInspectorCard = ({ 
-  title, 
-  icon, 
-  children, 
-  className,
-  defaultExpanded = true 
-}: { 
-  title: string; 
-  icon: any; 
-  children: React.ReactNode; 
-  className?: string;
-  defaultExpanded?: boolean 
-}) => {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  return (
-    <section className={cls('nx-inspector-card', !expanded && 'is-collapsed', className)}>
-      <button type="button" className="nx-inspector-card__header" onClick={() => setExpanded(!expanded)}>
-        <Icon name={icon} />
-        <strong>{title}</strong>
-        <Icon name="chevron-down" className={cls('nx-inspector-card__chevron', expanded && 'is-rotated')} />
-      </button>
-      {expanded && <div className="nx-inspector-card__body">{children}</div>}
-    </section>
-  )
-}
-
-/**
- * Intelligence Inspector Panel
- */
-const TacticalIntelligenceStack = ({
-  item, 
-  onAction,
-  viewMode
-}: { 
-  item: QueueItem | null, 
-  onAction: (action: string, id: string) => void,
-  viewMode: string
-}) => {
-  const [showMetadata, setShowMetadata] = useState(false)
-
-  if (!item) {
-    return (
-      <aside className="nx-queue-inspector is-empty">
-        <div className="nx-empty-state">
-          <Icon name="radar" style={{ width: 48, height: 48, opacity: 0.2, marginBottom: 16 }} />
-          <p>Awaiting operational target</p>
-        </div>
-      </aside>
-    )
-  }
-
-  return (
-    <aside className="nx-queue-inspector">
-      <header className="nx-queue-inspector-header">
-        <div className="nx-inspector-title">
-          <h2>Tactical Intelligence</h2>
-          <StatusBadge status={item.status} />
-        </div>
-        <button className="nx-inspector-close" onClick={() => onAction('deselect', item.id)}>
-          <Icon name="close" />
-        </button>
-      </header>
-
-      <div className="nx-queue-inspector-body">
-        {/* Dynamic Context Block based on View */}
-        {viewMode === 'approval' && (
-          <CollapsibleInspectorCard title="AI Review Rationale" icon="shield">
-            <div className="nx-inspector-grid">
-              <IntelRow label="Reason" value={item.approvalReason || 'Requires human review'} className="is-warning" />
-              <IntelRow label="Confidence" value={`${item.aiConfidence}%`} />
-              <IntelRow label="Risk Assessment" value={item.riskLevel.toUpperCase()} className={`is-risk-${item.riskLevel}`} />
-            </div>
-            {item.priorThreadSummary && (
-              <div className="nx-approval-message-preview" style={{ marginTop: '12px' }}>
-                <Icon name="file-text" />
-                <p><strong>Memory:</strong> {item.priorThreadSummary}</p>
-              </div>
-            )}
-          </CollapsibleInspectorCard>
-        )}
-
-        {viewMode === 'failed' && (
-          <CollapsibleInspectorCard title="Diagnostics & Recovery" icon="alert" className="is-error">
-            <div className="nx-error-box" style={{ marginBottom: 12 }}>
-              <strong>{item.failureGroup || 'System Failure'} - {item.failureReason || 'Unknown'}</strong>
-              <p>Attempt {item.retryCount} of {item.maxRetries}</p>
-            </div>
-            <div className="nx-inspector-grid">
-              <IntelRow label="Retry Eligible" value={item.retryEligible ? 'Yes' : 'No'} className={item.retryEligible ? 'is-success' : 'is-error'} />
-              <IntelRow label="Action Required" value={item.retryEligible ? 'Retry Sequence' : 'Human Intervention'} />
-            </div>
-          </CollapsibleInspectorCard>
-        )}
-
-        {/* Global Core Execution Details */}
-        <CollapsibleInspectorCard title="Execution Details" icon="radar">
-          <div className="nx-inspector-grid">
-            <IntelRow label="campaign_id" value={item.campaignId || '—'} />
-            <IntelRow label="campaign_target_id" value={item.campaignTargetId || '—'} />
-            <IntelRow label="Scheduled" value={new Date(item.scheduledForLocal).toLocaleString()} />
-            <IntelRow label="Priority" value={item.priority.toUpperCase()} className={cls(item.priority === 'P0' && 'is-urgent')} />
-            <IntelRow label="Stage" value={item.currentStage} />
-            <IntelRow label="Market" value={item.market} />
-            <IntelRow label="Next Action" value={item.nextBestAction || 'Automated Outreach'} />
-          </div>
-        </CollapsibleInspectorCard>
-
-        {/* Seller Telemetry */}
-        <CollapsibleInspectorCard title="Seller Telemetry" icon="user">
-          <div className="nx-inspector-grid">
-            <IntelRow label="Seller" value={item.sellerName} />
-            <IntelRow label="Temperature" value={item.sellerTemperature.toUpperCase()} className={`is-temp-${item.sellerTemperature}`} />
-            <IntelRow label="Urgency" value={`${item.urgencyScore}/100`} />
-            <IntelRow label="Intent" value={item.extractedIntent || 'Discovering'} />
-            <IntelRow label="Memory" value={item.memoryStatus.toUpperCase()} />
-          </div>
-        </CollapsibleInspectorCard>
-
-        <CollapsibleInspectorCard title="Payload Signal" icon="file-text" defaultExpanded={viewMode === 'approval'}>
-          <div className="nx-inspector-message-preview">
-            <div className="nx-msg-meta">
-              <span>{item.templateName}</span>
-              <span>{item.useCase}</span>
-            </div>
-            <p>{item.messageText}</p>
-          </div>
-        </CollapsibleInspectorCard>
-
-        <div className="nx-inspector-advanced">
-          <button 
-            className="nx-inspector-toggle-json"
-            onClick={() => setShowMetadata(!showMetadata)}
-          >
-            <Icon name="grid" />
-            {showMetadata ? 'Hide Metadata' : 'View Raw Signal'}
-          </button>
-          
-          {showMetadata && (
-            <pre className="nx-inspector-json">
-              {JSON.stringify(item, null, 2)}
-            </pre>
-          )}
-        </div>
-      </div>
-
-      <div className="nx-queue-inspector-actions">
-        {item.status === 'approval' && (
-          <button className="nx-btn nx-btn--primary" onClick={() => onAction('approve', item.id)}>
-            <Icon name="check" /> Approve
+        {item.linkedInboxThreadId && (
+          <button className="occ-action-btn is-secondary" onClick={() => onAction('view-thread', item.id)}>
+            <Icon name="message" size={13} /> Thread
           </button>
         )}
-        {(item.status === 'ready' || item.status === 'scheduled') && (
-          <button className="nx-btn nx-btn--secondary" onClick={() => onAction('hold', item.id)}>
-            <Icon name="shield" /> Hold
-          </button>
-        )}
-        {item.status === 'failed' && item.retryEligible && (
-          <button className="nx-btn nx-btn--primary" onClick={() => onAction('retry', item.id)}>
-            <Icon name="zap" /> Retry Sequence
-          </button>
-        )}
-        <button className="nx-btn nx-btn--secondary" onClick={() => onAction('reschedule', item.id)}>
-          <Icon name="calendar" /> Reschedule
-        </button>
-        <button className="nx-btn nx-btn--danger" onClick={() => onAction('cancel', item.id)}>
-          <Icon name="close" /> Suppress
+        <button className="occ-action-btn is-danger" onClick={() => onAction('cancel', item.id)}>
+          <Icon name="close" size={13} /> Suppress
         </button>
       </div>
     </aside>
   )
 }
 
+// ── Intelligence Panel (no row selected) ────────────────────────────────────
 
-// ── Main Page Component ────────────────────────────────────────────────────
-interface QueuePageProps {
-  data?: QueueModel
+const IntelPanel = ({
+  items,
+  onGlobalAction,
+}: {
+  items: QueueItem[]
+  onGlobalAction: (action: string) => void
+}) => {
+  const oneHourAgo = Date.now() - 3600000
+
+  const failedLastHour = useMemo(() =>
+    items.filter(i => (i.status === 'failed' || i.status === 'retry') && new Date(i.updatedAt).getTime() > oneHourAgo).length
+  , [items, oneHourAgo])
+
+  const deliveredLastHour = useMemo(() =>
+    items.filter(i => i.status === 'delivered' && i.deliveredAt && new Date(i.deliveredAt).getTime() > oneHourAgo).length
+  , [items, oneHourAgo])
+
+  const optOutsLastHour = useMemo(() =>
+    items.filter(i =>
+      (i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'blacklist_pair_21610') &&
+      new Date(i.updatedAt).getTime() > oneHourAgo
+    ).length
+  , [items, oneHourAgo])
+
+  const activeSenders = useMemo(() =>
+    new Set(items.filter(i => ['scheduled', 'queued', 'ready', 'sending'].includes(i.status) && i.fromPhoneNumber).map(i => i.fromPhoneNumber)).size
+  , [items])
+
+  const pendingRetries = useMemo(() => items.filter(i => i.status === 'retry' && i.retryEligible).length, [items])
+
+  const blockedContacts = useMemo(() => items.filter(i => BLOCKED_STATUSES.has(i.status)).length, [items])
+
+  const topFailures = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const i of items) {
+      if (i.failureCategory) map.set(i.failureCategory, (map.get(i.failureCategory) ?? 0) + 1)
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)
+  }, [items])
+
+  return (
+    <aside className="occ-inspector occ-intel">
+      <div className="occ-intel__head">
+        <span className="occ-intel__title">QUEUE INTELLIGENCE</span>
+        <span className="occ-intel__sub">Select a row for dossier</span>
+      </div>
+      <div className="occ-inspector__body">
+
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Live Ops / Hour</div>
+          <div className="occ-intel-grid">
+            {[
+              { val: activeSenders, lbl: 'Active Senders', tone: activeSenders > 0 ? '' : '' },
+              { val: deliveredLastHour, lbl: 'Delivered', tone: deliveredLastHour > 0 ? 'green' : '' },
+              { val: failedLastHour, lbl: 'Failed', tone: failedLastHour > 0 ? 'red' : '' },
+              { val: optOutsLastHour, lbl: 'Opt-Outs', tone: optOutsLastHour > 0 ? 'red' : '' },
+              { val: pendingRetries, lbl: 'Pending Retry', tone: pendingRetries > 0 ? 'amber' : '' },
+              { val: blockedContacts, lbl: 'Blocked', tone: blockedContacts > 10 ? 'amber' : '' },
+            ].map(({ val, lbl, tone }) => (
+              <div key={lbl} className={cls('occ-intel-stat', tone && `is-${tone}`)}>
+                <span className="occ-intel-stat__val">{val}</span>
+                <span className="occ-intel-stat__lbl">{lbl}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="occ-insp-section">
+          <div className="occ-insp-section-title">Global Controls</div>
+          <div className="occ-intel-actions">
+            <button className="occ-action-btn is-primary" onClick={() => onGlobalAction('retry-all-failed')}>
+              <Icon name="zap" size={11} /> Retry All Failed
+            </button>
+            <button className="occ-action-btn is-secondary" onClick={() => onGlobalAction('run-queue-now')}>
+              <Icon name="send" size={11} /> Run Queue
+            </button>
+          </div>
+        </div>
+
+        {topFailures.length > 0 && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Top Failure Causes</div>
+            {topFailures.map(([cat, count]) => (
+              <div key={cat} className="occ-intel-failure-row">
+                <span className="occ-intel-failure-label">{FAILURE_LABEL[cat] ?? cat.replace(/_/g, ' ')}</span>
+                <span className="occ-intel-failure-count">{count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </aside>
+  )
 }
 
-export const QueuePage = ({ data: initialData }: QueuePageProps = {}) => {
-  const [loading, setLoading] = useState(!initialData)
-  const [model, setModel] = useState<QueueModel | null>(initialData || null)
-  const [viewMode, setViewMode] = useState<ViewMode>('today')
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<QueueItemStatus | 'all'>('all')
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false)
+// ── Templates Module ────────────────────────────────────────────────────────
 
-  const refreshData = useCallback(async () => {
+const TemplatesModule = ({ items }: { items: QueueItem[] }) => {
+  const stats = useMemo(() => buildTemplateStats(items), [items])
+
+  return (
+    <div className="occ-module">
+      <div className="occ-module-head">
+        <div className="occ-module-col occ-col-name">Template</div>
+        <div className="occ-module-col occ-col-num">Usage</div>
+        <div className="occ-module-col occ-col-num">Sent</div>
+        <div className="occ-module-col occ-col-num">Del</div>
+        <div className="occ-module-col occ-col-num">Fail</div>
+        <div className="occ-module-col occ-col-num">Blk</div>
+        <div className="occ-module-col occ-col-num">Opt-Outs</div>
+        <div className="occ-module-col occ-col-pct">Del%</div>
+        <div className="occ-module-col occ-col-pct">Fail%</div>
+        <div className="occ-module-col occ-col-badge">Health</div>
+      </div>
+      <div className="occ-module-body">
+        {stats.length === 0 && (
+          <div className="occ-module-empty">No template data for this date range.</div>
+        )}
+        {stats.map(s => (
+          <div key={s.id} className="occ-module-row">
+            <div className="occ-module-col occ-col-name occ-col-name--strong">
+              <span>{truncate(s.name, 28)}</span>
+              {s.id !== 'no-template' && <small className="occ-mono">{truncate(s.id, 20)}</small>}
+            </div>
+            <div className="occ-module-col occ-col-num">{s.usage}</div>
+            <div className="occ-module-col occ-col-num">{s.sent}</div>
+            <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
+            <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
+            <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
+            <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
+            <div className={cls('occ-module-col occ-col-pct', s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
+              {s.deliveryPct}%
+            </div>
+            <div className={cls('occ-module-col occ-col-pct', s.failPct > 15 ? 'is-red' : s.failPct > 5 ? 'is-amber' : '')}>
+              {s.failPct}%
+            </div>
+            <div className="occ-module-col occ-col-badge">
+              <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Sender Numbers Module ───────────────────────────────────────────────────
+
+const SendersModule = ({ items }: { items: QueueItem[] }) => {
+  const stats = useMemo(() => buildSenderStats(items), [items])
+
+  const STATE_TONE: Record<string, string> = { active: 'green', paused: 'muted', degraded: 'amber', blocked: 'red' }
+
+  return (
+    <div className="occ-module occ-module--senders">
+      <div className="occ-module-head occ-module-head--senders">
+        <div className="occ-module-col occ-col-phone">Number</div>
+        <div className="occ-module-col occ-col-market">Market</div>
+        <div className="occ-module-col occ-col-num">Sent</div>
+        <div className="occ-module-col occ-col-num">Del</div>
+        <div className="occ-module-col occ-col-num">Fail</div>
+        <div className="occ-module-col occ-col-num">Blk</div>
+        <div className="occ-module-col occ-col-num">Opt-Outs</div>
+        <div className="occ-module-col occ-col-num">21610</div>
+        <div className="occ-module-col occ-col-pct">Del%</div>
+        <div className="occ-module-col occ-col-badge">Health</div>
+        <div className="occ-module-col occ-col-small">Last Used</div>
+        <div className="occ-module-col occ-col-badge">State</div>
+      </div>
+      <div className="occ-module-body">
+        {stats.length === 0 && (
+          <div className="occ-module-empty">No sender data for this date range.</div>
+        )}
+        {stats.map(s => (
+          <div key={s.phone} className="occ-module-row">
+            <div className="occ-module-col occ-col-phone occ-mono">{s.phone}</div>
+            <div className="occ-module-col occ-col-market">{truncate(s.market, 12)}</div>
+            <div className="occ-module-col occ-col-num">{s.sent}</div>
+            <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
+            <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
+            <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
+            <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
+            <div className={cls('occ-module-col occ-col-num', s.violations21610 > 0 && 'is-red occ-bold')}>{s.violations21610}</div>
+            <div className={cls('occ-module-col occ-col-pct', s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
+              {s.deliveryPct}%
+            </div>
+            <div className="occ-module-col occ-col-badge">
+              <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+            </div>
+            <div className="occ-module-col occ-col-small">{relTime(s.lastUsed)}</div>
+            <div className="occ-module-col occ-col-badge">
+              <span className={cls('occ-state-badge', `is-${STATE_TONE[s.state] ?? 'muted'}`)}>{s.state}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Market Health Module ────────────────────────────────────────────────────
+
+const MarketModule = ({ items }: { items: QueueItem[] }) => {
+  const stats = useMemo(() => buildMarketStats(items), [items])
+
+  return (
+    <div className="occ-module">
+      <div className="occ-module-head">
+        <div className="occ-module-col occ-col-name">Market</div>
+        <div className="occ-module-col occ-col-num">Total</div>
+        <div className="occ-module-col occ-col-num">Sent</div>
+        <div className="occ-module-col occ-col-num">Del</div>
+        <div className="occ-module-col occ-col-num">Fail</div>
+        <div className="occ-module-col occ-col-num">Blk</div>
+        <div className="occ-module-col occ-col-num">Opt-Outs</div>
+        <div className="occ-module-col occ-col-pct">Del%</div>
+        <div className="occ-module-col occ-col-badge">Health</div>
+      </div>
+      <div className="occ-module-body">
+        {stats.length === 0 && (
+          <div className="occ-module-empty">No market data for this date range.</div>
+        )}
+        {stats.map(s => (
+          <div key={s.market} className="occ-module-row">
+            <div className="occ-module-col occ-col-name occ-col-name--strong">{truncate(s.market, 20)}</div>
+            <div className="occ-module-col occ-col-num">{s.total}</div>
+            <div className="occ-module-col occ-col-num">{s.sent}</div>
+            <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
+            <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
+            <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
+            <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
+            <div className={cls('occ-module-col occ-col-pct', s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
+              {s.deliveryPct}%
+            </div>
+            <div className="occ-module-col occ-col-badge">
+              <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Failure Taxonomy Module ─────────────────────────────────────────────────
+
+const FailureModule = ({ items, onFilterStatus }: { items: QueueItem[]; onFilterStatus: (s: StatusBucket) => void }) => {
+  const groups = useMemo(() => {
+    const map = new Map<string, { label: string; group: string; count: number }>()
+    for (const i of items) {
+      if (i.status === 'failed' || i.status === 'retry' || BLOCKED_STATUSES.has(i.status)) {
+        const cat = i.failureCategory ?? 'unknown'
+        const label = FAILURE_LABEL[cat] ?? cat.replace(/_/g, ' ')
+        const existing = map.get(cat)
+        map.set(cat, { label, group: i.failureGroup ?? 'Unknown', count: (existing?.count ?? 0) + 1 })
+      }
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1].count - a[1].count)
+  }, [items])
+
+  return (
+    <div className="occ-module occ-module--failure">
+      {groups.length === 0 && (
+        <div className="occ-module-empty">No failure data for this date range.</div>
+      )}
+      <div className="occ-failure-grid">
+        {groups.map(([cat, { label, group, count }]) => {
+          const tone = FAILURE_TONE[group] ?? 'amber'
+          return (
+            <button
+              key={cat}
+              type="button"
+              className="occ-failure-chip"
+              onClick={() => onFilterStatus('failed')}
+            >
+              <span className={cls('occ-failure-chip__dot', `is-${tone}`)} />
+              <span className="occ-failure-chip__label">{label}</span>
+              <span className="occ-failure-chip__group">{group}</span>
+              <span className={cls('occ-failure-chip__count', `is-${tone}`)}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Event Timeline Module ───────────────────────────────────────────────────
+
+const EVENT_ICON: Record<string, string> = {
+  sent: 'send', delivered: 'check', failed: 'alert-circle', retry: 'refresh-cw',
+  scheduled: 'clock', queued: 'clock', blocked: 'shield', cancelled: 'close',
+  approval: 'zap', held: 'pause', replied_before_send: 'message',
+}
+
+const EventTimelineModule = ({
+  items,
+  onSelectItem,
+}: {
+  items: QueueItem[]
+  onSelectItem: (id: string) => void
+}) => {
+  const events = useMemo(() =>
+    [...items]
+      .filter(i => i.lastEventAt || i.updatedAt)
+      .sort((a, b) => new Date(b.lastEventAt ?? b.updatedAt).getTime() - new Date(a.lastEventAt ?? a.updatedAt).getTime())
+      .slice(0, 25)
+  , [items])
+
+  return (
+    <div className="occ-module occ-module--timeline">
+      {events.length === 0 && (
+        <div className="occ-module-empty">No events for this date range.</div>
+      )}
+      <div className="occ-timeline">
+        {events.map(i => {
+          const tone = STATUS_TONE[i.status] ?? 'muted'
+          const iconName = EVENT_ICON[i.status] ?? 'zap'
+          return (
+            <button
+              key={i.id}
+              type="button"
+              className="occ-timeline-row"
+              onClick={() => onSelectItem(i.id)}
+            >
+              <div className={cls('occ-timeline-icon', `is-${tone}`)}>
+                <Icon name={iconName as any} size={10} />
+              </div>
+              <div className="occ-timeline-connector" />
+              <div className="occ-timeline-content">
+                <div className="occ-timeline-main">
+                  <strong className="occ-timeline-seller">{truncate(i.sellerName, 24)}</strong>
+                  <span className={cls('occ-status-pill', `is-${tone}`)}>{i.status.replace(/_/g, ' ')}</span>
+                </div>
+                <div className="occ-timeline-meta">
+                  <span>{truncate(i.market, 14)}</span>
+                  {i.campaignName && <span>· {truncate(i.campaignName, 18)}</span>}
+                  {i.templateName && i.templateName !== 'Template not attached' && (
+                    <span>· {truncate(i.templateName, 16)}</span>
+                  )}
+                </div>
+              </div>
+              <span className="occ-timeline-time">{relTime(i.lastEventAt ?? i.updatedAt)}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Bottom Module Tabs ──────────────────────────────────────────────────────
+
+type BottomTab = 'templates' | 'senders' | 'market' | 'failures' | 'events'
+
+const BOTTOM_TABS: Array<{ key: BottomTab; label: string }> = [
+  { key: 'templates', label: 'Templates' },
+  { key: 'senders', label: 'TextGrid Numbers' },
+  { key: 'market', label: 'Market Health' },
+  { key: 'failures', label: 'Failure Taxonomy' },
+  { key: 'events', label: 'Event Timeline' },
+]
+
+// ── Queue Table Row ─────────────────────────────────────────────────────────
+
+const QueueRow = ({
+  item,
+  isSelected,
+  onClick,
+}: {
+  item: QueueItem
+  isSelected: boolean
+  onClick: () => void
+}) => {
+  const tone = STATUS_TONE[item.status] ?? 'muted'
+  const hasDiag = item.diagnosticFlags.length > 0
+  const failLabel = item.failureCategory ? (FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')) : null
+  const failTone = item.failureGroup ? (FAILURE_TONE[item.failureGroup] ?? 'amber') : null
+
+  return (
+    <button
+      type="button"
+      className={cls('occ-row', isSelected && 'is-selected', hasDiag && 'has-diag')}
+      onClick={onClick}
+    >
+      <div className="occ-cell occ-cell--seller">
+        <strong className={hasDiag ? 'is-amber' : ''}>{truncate(item.sellerName, 24)}</strong>
+        <small>{truncate(item.propertyAddress, 28)}</small>
+      </div>
+      <div className="occ-cell occ-cell--campaign">
+        <span>{truncate(item.campaignName ?? item.automationSource ?? item.useCase, 18)}</span>
+        <small>{truncate(item.market, 14)}</small>
+      </div>
+      <div className="occ-cell occ-cell--template">
+        {truncate(item.templateName, 20)}
+      </div>
+      <div className="occ-cell occ-cell--from occ-mono">
+        {fmtPhone(item.fromPhoneNumber)}
+      </div>
+      <div className="occ-cell occ-cell--scheduled">
+        {relTime(item.scheduledForLocal)}
+      </div>
+      <div className="occ-cell occ-cell--status">
+        <span className={cls('occ-status-pill', `is-${tone}`)}>
+          {item.status.replace(/_/g, ' ')}
+        </span>
+      </div>
+      <div className="occ-cell occ-cell--failure">
+        {failLabel
+          ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{failLabel}</span>
+          : <span className="occ-fail-pill" style={{ opacity: 0.3 }}>—</span>
+        }
+      </div>
+      <div className="occ-cell occ-cell--event">
+        {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
+      </div>
+    </button>
+  )
+}
+
+// ── Main Page ───────────────────────────────────────────────────────────────
+
+interface QueuePageProps {
+  data?: QueueModel
+  onSelectItem?: (item: QueueItem) => void
+}
+
+const PAGE_SIZE = 500
+
+export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = {}) => {
+  const [loading, setLoading] = useState(!initialData)
+  const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<StatusBucket>('all')
+  const [marketFilter, setMarketFilter] = useState('all')
+  const [templateFilter, setTemplateFilter] = useState('all')
+  const [senderFilter, setSenderFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(0)
+  const [datePreset, setDatePreset] = useState<DatePreset>('7d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [activeBottomTab, setActiveBottomTab] = useState<BottomTab>('templates')
+  const [bottomExpanded, setBottomExpanded] = useState(true)
+  const realtimeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dateFilterMounted = useRef(false)
+
+  const buildOpts = useCallback(
+    (page: number) => buildFetchOptions(datePreset, customFrom, customTo, page, PAGE_SIZE),
+    [datePreset, customFrom, customTo]
+  )
+
+  const refreshData = useCallback(async (page = currentPage) => {
+    // Race Supabase against a 6s timeout — if it hangs, keep existing model and clear loading
+    const timeout = new Promise<null>(res => setTimeout(() => res(null), 6000))
     try {
-      const data = await fetchQueueModel()
-      setModel(data)
+      const result = await Promise.race([fetchQueueModel(buildOpts(page)), timeout])
+      if (result) setModel(result)
     } catch (err) {
-      console.error('Failed to fetch queue data', err)
       emitNotification({
         title: 'Queue Load Failed',
         detail: err instanceof Error ? err.message : 'Database sync error',
-        severity: 'critical'
+        severity: 'critical',
       })
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [buildOpts, currentPage])
+
+  // Debounce realtime refreshes to avoid stampede
+  const debouncedRefresh = useCallback(() => {
+    if (realtimeRef.current) clearTimeout(realtimeRef.current)
+    realtimeRef.current = setTimeout(() => refreshData(currentPage), 2500)
+  }, [refreshData, currentPage])
 
   useEffect(() => {
-    refreshData()
-
+    if (!initialData) refreshData(0)
     const supabase = getSupabaseClient()
-    const channel = supabase
-      .channel('queue-live-updates')
-      .on(
-        'postgres_changes',
-        { event: '*', table: 'send_queue', schema: 'public' },
-        () => {
-          refreshData()
-        }
-      )
+    const ch = supabase
+      .channel('occ-queue-live')
+      .on('postgres_changes', { event: '*', table: 'send_queue', schema: 'public' }, debouncedRefresh)
       .subscribe()
+    return () => { supabase.removeChannel(ch); if (realtimeRef.current) clearTimeout(realtimeRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-    return () => {
-      supabase.removeChannel(channel)
+  // Re-fetch when date filter changes — skip initial mount; also skip if custom preset has no dates
+  useEffect(() => {
+    if (!dateFilterMounted.current) { dateFilterMounted.current = true; return }
+    if (datePreset === 'custom' && !customFrom && !customTo) return
+    setCurrentPage(0)
+    setLoading(true)
+    refreshData(0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datePreset, customFrom, customTo])
+
+  const items = model?.items ?? []
+
+  // ── Derived counts ──────────────────────────────────────────────────────
+  const counts = useMemo(() => {
+    const c = {
+      scheduled: 0, queued: 0, sending: 0, sent: 0,
+      delivered: 0, failed: 0, blocked: 0, approval: 0, optOuts: 0, total: items.length,
     }
+    for (const i of items) {
+      if (i.status === 'scheduled') c.scheduled++
+      else if (i.status === 'queued') c.queued++
+      else if (i.status === 'sending') c.sending++
+      else if (i.status === 'sent') c.sent++
+      else if (i.status === 'delivered') c.delivered++
+      else if (i.status === 'failed' || i.status === 'retry') c.failed++
+      else if (BLOCKED_STATUSES.has(i.status)) c.blocked++
+      else if (i.status === 'approval') c.approval++
+      if (i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'blacklist_pair_21610') c.optOuts++
+    }
+    return c
+  }, [items])
+
+  // ── Unique filter options ────────────────────────────────────────────────
+  const marketOptions = useMemo(() => {
+    const s = new Set(items.map(i => i.market).filter(Boolean))
+    return ['all', ...Array.from(s).sort()]
+  }, [items])
+
+  const templateOptions = useMemo(() => {
+    const s = new Set(items.map(i => i.templateName).filter(n => n && n !== 'Template not attached'))
+    return ['all', ...Array.from(s).sort()]
+  }, [items])
+
+  const senderOptions = useMemo(() => {
+    const s = new Set(items.map(i => i.fromPhoneNumber).filter(Boolean))
+    return ['all', ...Array.from(s).sort()]
+  }, [items])
+
+  // ── Filtered rows ────────────────────────────────────────────────────────
+  const filteredItems = useMemo(() => {
+    let result = items
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'failed') result = result.filter(i => i.status === 'failed' || i.status === 'retry')
+      else if (statusFilter === 'blocked') result = result.filter(i => BLOCKED_STATUSES.has(i.status))
+      else result = result.filter(i => i.status === statusFilter)
+    }
+    if (marketFilter !== 'all') result = result.filter(i => i.market === marketFilter)
+    if (templateFilter !== 'all') result = result.filter(i => i.templateName === templateFilter)
+    if (senderFilter !== 'all') result = result.filter(i => i.fromPhoneNumber === senderFilter)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(i =>
+        i.sellerName.toLowerCase().includes(q) ||
+        (i.sellerFullName || '').toLowerCase().includes(q) ||
+        i.propertyAddress.toLowerCase().includes(q) ||
+        i.market.toLowerCase().includes(q) ||
+        i.templateName.toLowerCase().includes(q) ||
+        (i.campaignId ?? '').toLowerCase().includes(q) ||
+        (i.campaignName ?? '').toLowerCase().includes(q) ||
+        (i.phone ?? '').includes(q) ||
+        (i.queueKey ?? '').includes(q),
+      )
+    }
+    return result
+  }, [items, statusFilter, marketFilter, templateFilter, senderFilter, searchQuery])
+
+  const selectedItem = model?.items.find(i => i.id === selectedId) ?? null
+
+  // ── Row click — select + dispatch global property context ────────────────
+  const handleSelectRow = useCallback((item: QueueItem) => {
+    const next = item.id === selectedId ? null : item.id
+    setSelectedId(next)
+    if (next) {
+      // Global property selection — dispatch custom event for cross-module sync
+      const ctx = buildContextFromQueueItem(item, 'queue', 'open_queue')
+      window.dispatchEvent(new CustomEvent('nexus:queue-select', { detail: ctx }))
+      onSelectItem?.(item)
+    }
+  }, [selectedId, onSelectItem])
+
+  // ── Pagination controls ──────────────────────────────────────────────────
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page)
+    setLoading(true)
+    refreshData(page)
   }, [refreshData])
 
-  // Keyboard navigation for view switching
-  useEffect(() => {
-    const handleKeys = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      
-      const modes: ViewMode[] = ['today', 'week', 'month', 'list', 'approval', 'failed']
-      const key = parseInt(e.key)
-      if (key >= 1 && key <= 6) {
-        setViewMode(modes[key - 1])
-      }
-    }
-    window.addEventListener('keydown', handleKeys)
-    return () => window.removeEventListener('keydown', handleKeys)
-  }, [])
+  // ── Row + global actions ─────────────────────────────────────────────────
+  const handleAction = useCallback(async (action: string, id: string) => {
+    if (action === 'deselect') { setSelectedId(null); return }
 
-  const handleAction = async (action: string, id: string) => {
-    const item = model?.items.find((i: QueueItem) => i.id === id)
-    if (!item) return
-
-    if (action === 'deselect') {
-      setSelectedItemId(null)
-      setMobileInspectorOpen(false)
+    if (action === 'retry-all-failed') {
+      try {
+        const res = await retryAllFailed()
+        emitNotification({ title: res.ok ? 'Retry queued' : 'Retry failed', detail: res.errorMessage ?? 'Done', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
+        if (res.ok) refreshData(currentPage)
+      } catch { emitNotification({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
       return
     }
 
-    // Optimistic UI mapping
-    let successMessage = ''
+    if (action === 'run-queue-now') {
+      try {
+        const res = await runQueueOnce()
+        emitNotification({ title: res.ok ? 'Queue run triggered' : 'Run failed', detail: res.errorMessage ?? 'Processing started', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
+        if (res.ok) setTimeout(() => refreshData(currentPage), 3000)
+      } catch { emitNotification({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
+      return
+    }
+
+    if (action === 'view-thread') {
+      const item = model?.items.find(i => i.id === id)
+      if (item?.linkedInboxThreadId) {
+        window.dispatchEvent(new CustomEvent('nexus:open-thread', { detail: { threadId: item.linkedInboxThreadId } }))
+      }
+      return
+    }
+
+    const item = model?.items.find(i => i.id === id)
+    if (!item) return
+
     let resultPromise: Promise<any> | null = null
+    let successMsg = ''
 
     switch (action) {
-      case 'approve':
-        successMessage = `Approved send to ${item.sellerName}`
-        resultPromise = approveQueueItem(item)
-        break
-      case 'hold':
-        successMessage = `Held item for ${item.sellerName}`
-        resultPromise = holdQueueItem(item)
-        break
-      case 'cancel':
-        successMessage = `Cancelled item for ${item.sellerName}`
-        resultPromise = cancelQueueItem(item)
-        break
-      case 'retry':
-        successMessage = `Retrying send to ${item.sellerName}`
-        resultPromise = retryQueueItem(item)
-        break
-      case 'retry-routing':
-        successMessage = `Retrying routing for ${item.sellerName}`
-        resultPromise = retryRoutingForItem(item)
-        break
-      case 'reschedule':
-        // Simplified for now - in production would open a date picker
-        const tomorrow = new Date()
-        tomorrow.setDate(tomorrow.getDate() + 1)
-        successMessage = `Rescheduled to ${tomorrow.toLocaleDateString()}`
-        resultPromise = rescheduleQueueItem(item, tomorrow.toISOString())
-        break
+      case 'approve':       resultPromise = approveQueueItem(item);    successMsg = `Approved ${item.sellerName}`; break
+      case 'hold':          resultPromise = holdQueueItem(item);       successMsg = `Held ${item.sellerName}`; break
+      case 'cancel':        resultPromise = cancelQueueItem(item);     successMsg = `Suppressed ${item.sellerName}`; break
+      case 'retry':         resultPromise = retryQueueItem(item);      successMsg = `Retrying ${item.sellerName}`; break
+      case 'retry-routing': resultPromise = retryRoutingForItem(item); successMsg = `Routing retry for ${item.sellerName}`; break
+      case 'reschedule': {
+        const t = new Date(); t.setDate(t.getDate() + 1)
+        resultPromise = rescheduleQueueItem(item, t.toISOString()); successMsg = `Rescheduled ${item.sellerName}`; break
+      }
     }
 
     if (resultPromise) {
       try {
         const res = await resultPromise
         if (res.ok) {
-          emitNotification({
-            title: 'Action Successful',
-            detail: successMessage,
-            severity: 'success',
-            sound: 'notification'
-          })
-          refreshData()
-        } else {
-          throw new Error(res.errorMessage || 'Unknown error')
-        }
+          emitNotification({ title: 'Done', detail: successMsg, severity: 'success', sound: 'notification' })
+          refreshData(currentPage)
+        } else throw new Error(res.errorMessage ?? 'Unknown error')
       } catch (err) {
-        emitNotification({
-          title: 'Action Failed',
-          detail: err instanceof Error ? err.message : 'Database update failed',
-          severity: 'critical',
-          sound: 'alert-triggered'
-        })
+        emitNotification({ title: 'Action Failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
       }
     }
-  }
+  }, [model, refreshData, currentPage])
 
-  const selectedItem = model?.items.find((i: QueueItem) => i.id === selectedItemId) || null
-
-  const handleSelectItem = useCallback((id: string) => {
-    setSelectedItemId(id)
-    if (window.matchMedia('(max-width: 768px)').matches) {
-      setMobileInspectorOpen(true)
-      setMobileSidebarOpen(false)
-    }
-  }, [])
-
-  const filteredItems = (model?.items || []).filter((item: QueueItem) => {
-    if (statusFilter !== 'all' && item.status !== statusFilter) return false
-    
-    // Additional view-specific filtering
-    if (viewMode === 'approval') return item.status === 'approval'
-    if (viewMode === 'failed') return item.status === 'failed'
-    
-    return true
-  })
-
-  // Group items for Week view (Campaign Clusters)
-  const weekClusters = useMemo(() => {
-    if (viewMode !== 'week') return []
-    const groups = new Map<string, QueueItem[]>()
-
-    filteredItems.forEach(item => {
-      // Group by Market + Temperature + Stage
-      const key = `${item.market}|${item.sellerTemperature}|${item.currentStage}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
-    })
-
-    return Array.from(groups.entries()).map(([key, items]) => {
-      const [market, temp, stage] = key.split('|')
-      return { market, temp, stage, items }
-    }).sort((a, b) => b.items.length - a.items.length)
-  }, [filteredItems, viewMode])
-
-  // Group items for Failed view
-  const failedGroups = useMemo(() => {
-    if (viewMode !== 'failed') return []
-    const groups = new Map<string, QueueItem[]>()
-
-    filteredItems.forEach(item => {
-      const key = item.failureGroup || 'Unknown'
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
-    })
-
-    return Array.from(groups.entries()).map(([group, items]) => ({
-      group,
-      items
-    })).sort((a, b) => b.items.length - a.items.length)
-  }, [filteredItems, viewMode])
-
-  // Group items for Today view
-  const timeBuckets = [
-    { label: 'Past Due / Overdue', filter: (i: QueueItem) => new Date(i.scheduledForLocal) < new Date() && (i.status === 'ready' || i.status === 'retry') },
-    { label: 'Upcoming (Next 4h)', filter: (i: QueueItem) => {
-      const diff = new Date(i.scheduledForLocal).getTime() - new Date().getTime()
-      return diff > 0 && diff < 4 * 3600 * 1000
-    }},
-    { label: 'Later Today', filter: (i: QueueItem) => {
-      const diff = new Date(i.scheduledForLocal).getTime() - new Date().getTime()
-      return diff >= 4 * 3600 * 1000 && new Date(i.scheduledForLocal).toDateString() === new Date().toDateString()
-    }}
+  // ── Filter tabs ──────────────────────────────────────────────────────────
+  const filterTabs: Array<{ key: StatusBucket; label: string; count: number; tone?: string }> = [
+    { key: 'all', label: 'All', count: counts.total },
+    { key: 'scheduled', label: 'Scheduled', count: counts.scheduled, tone: 'blue' },
+    { key: 'queued', label: 'Queued', count: counts.queued, tone: 'blue' },
+    { key: 'sending', label: 'Sending', count: counts.sending, tone: 'cyan' },
+    { key: 'approval', label: 'Approval', count: counts.approval, tone: 'amber' },
+    { key: 'failed', label: 'Failed', count: counts.failed, tone: 'red' },
+    { key: 'blocked', label: 'Blocked', count: counts.blocked, tone: 'amber' },
+    { key: 'delivered', label: 'Delivered', count: counts.delivered, tone: 'green' },
+    { key: 'sent', label: 'Sent', count: counts.sent, tone: 'green' },
   ]
 
   if (loading) {
     return (
-      <div className="nx-premium-queue is-loading">
-        <div className="nx-loading-spinner" />
-        <p>Syncing operations queue...</p>
+      <div className="occ-root occ-loading">
+        <span className="occ-spinner" />
+        <p>Syncing outbound queue…</p>
       </div>
     )
   }
 
+  const totalCount = model?.totalCount ?? items.length
+  const totalPages = model?.totalPages ?? 1
+  const rowStart = currentPage * PAGE_SIZE + 1
+  const rowEnd = Math.min((currentPage + 1) * PAGE_SIZE, totalCount)
+
   return (
-    <div className="nx-premium-queue">
-      <header className="nx-queue-topbar">
-        <div className="nx-queue-topbar__title">
-          <h1>Operations Queue</h1>
-          <div className="nx-view-switcher">
-            {(['today', 'week', 'month', 'list', 'approval', 'failed'] as ViewMode[]).map(mode => (
-              <button 
-                key={mode}
-                className={cls('nx-view-btn', viewMode === mode && 'is-active')}
-                onClick={() => setViewMode(mode)}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="occ-root">
 
-        <div className="nx-queue-topbar__actions">
-          <div className="nx-queue-stat">
-            <small>READY</small>
-            <b>{model?.readyCount || 0}</b>
-          </div>
-          <div className="nx-queue-stat is-warning">
-            <small>PENDING</small>
-            <b>{model?.approvalCount || 0}</b>
-          </div>
-          <div className="nx-queue-stat is-danger">
-            <small>FAILED</small>
-            <b>{model?.failedCount || 0}</b>
-          </div>
-          <button className="nx-btn nx-btn--secondary nx-mobile-panel-toggle" onClick={() => setMobileSidebarOpen(v => !v)}>
-            <Icon name="filter" /> Filters
+      {/* ── Top bar ─────────────────────────────────────────────────── */}
+      <div className="occ-topbar">
+        <div className="occ-topbar__left">
+          <h1 className="occ-topbar__title">OUTBOUND COMMAND CENTER</h1>
+          <DateFilter
+            preset={datePreset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onPreset={p => setDatePreset(p)}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+          />
+        </div>
+        <div className="occ-topbar__actions">
+          <span className="occ-topbar__total">
+            {rowStart}–{rowEnd} of {totalCount.toLocaleString()}
+          </span>
+          <button type="button" className="occ-action-btn is-primary" onClick={() => handleAction('retry-all-failed', '')}>
+            <Icon name="zap" size={11} /> Retry Failed
           </button>
-          <button className="nx-btn nx-btn--secondary" onClick={refreshData}>
-            <Icon name="radar" /> Refresh
+          <button type="button" className="occ-action-btn is-secondary" onClick={() => handleAction('run-queue-now', '')}>
+            <Icon name="send" size={11} /> Run Queue
+          </button>
+          <button type="button" className="occ-refresh-btn" onClick={() => refreshData(currentPage)}>
+            <Icon name="refresh-cw" size={13} />
           </button>
         </div>
-      </header>
+      </div>
 
-      <div className={cls('nx-queue-shell', mobileSidebarOpen && 'm-sidebar-open', mobileInspectorOpen && 'm-inspector-open')}
-        onClick={(e) => {
-          if ((e.target as HTMLElement).classList.contains('nx-queue-shell')) {
-            setMobileSidebarOpen(false)
-            setMobileInspectorOpen(false)
-          }
-        }}
-      >
-        <aside className="nx-queue-sidebar">
-          <div className="nx-queue-sidebar-section">
-            <span className="nx-queue-sidebar-label">Active Capacity</span>
-            <div className="nx-queue-capacity">
-              <div className="nx-queue-capacity-item">
-                <span className="nx-queue-capacity-label">Sent Today</span>
-                <span className="nx-queue-capacity-value">{model?.sentTodayCount || 0}</span>
-              </div>
-              <div className="nx-queue-capacity-item">
-                <span className="nx-queue-capacity-label">Daily Limit</span>
-                <span className="nx-queue-capacity-value">1,200</span>
-              </div>
-              <div className="nx-queue-capacity-progress">
-                <div 
-                  className="nx-queue-capacity-bar" 
-                  style={{ width: `${Math.min(((model?.sentTodayCount || 0) / 1200) * 100, 100)}%` }} 
-                />
-              </div>
+      {/* ── KPI strip ────────────────────────────────────────────────── */}
+      {/* Counts below are page-scoped (current loaded rows). Total row count is shown in the pagination bar. */}
+      <div className="occ-kpi-strip">
+        <KpiCard label="Scheduled" value={counts.scheduled} tone={counts.scheduled > 0 ? 'blue' : undefined} onClick={() => setStatusFilter('scheduled')} active={statusFilter === 'scheduled'} />
+        <KpiCard label="Queued"    value={counts.queued}    tone={counts.queued > 0 ? 'blue' : undefined}      onClick={() => setStatusFilter('queued')}    active={statusFilter === 'queued'} />
+        <KpiCard label="Sending"   value={counts.sending}   tone={counts.sending > 0 ? 'cyan' : undefined}     onClick={() => setStatusFilter('sending')}   active={statusFilter === 'sending'} />
+        <KpiCard label="Delivered" value={counts.delivered} tone={counts.delivered > 0 ? 'green' : undefined}  onClick={() => setStatusFilter('delivered')} active={statusFilter === 'delivered'} />
+        <KpiCard label="Sent"      value={counts.sent}      tone={counts.sent > 0 ? 'green' : undefined}       onClick={() => setStatusFilter('sent')}      active={statusFilter === 'sent'} />
+        <KpiCard label="Failed"    value={counts.failed}    tone={counts.failed > 0 ? 'red' : undefined}       onClick={() => setStatusFilter('failed')}    active={statusFilter === 'failed'} />
+        <KpiCard label="Blocked"   value={counts.blocked}   tone={counts.blocked > 0 ? 'amber' : undefined}    onClick={() => setStatusFilter('blocked')}   active={statusFilter === 'blocked'} />
+        <KpiCard label="Opt-Outs"  value={counts.optOuts}   tone={counts.optOuts > 0 ? 'red' : undefined} />
+        <KpiCard label="Approval"  value={counts.approval}  tone={counts.approval > 0 ? 'amber' : undefined}   onClick={() => setStatusFilter('approval')}  active={statusFilter === 'approval'} />
+        {totalPages > 1 && (
+          <span className="occ-kpi-page-scope" title={`These counts reflect the current page (${rowStart}–${rowEnd} of ${totalCount.toLocaleString()} total rows)`}>
+            pg.&nbsp;{currentPage + 1}&nbsp;/&nbsp;{totalPages}
+          </span>
+        )}
+      </div>
+
+      {/* ── Main split: table + inspector ────────────────────────────── */}
+      <div className="occ-main">
+
+        {/* Table column */}
+        <div className="occ-table-col">
+
+          {/* Filter bar */}
+          <div className="occ-filter-bar">
+            <div className="occ-filter-tabs">
+              {filterTabs.map(t => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={cls('occ-filter-tab', t.tone && t.count > 0 && `has-${t.tone}`, statusFilter === t.key && 'is-active')}
+                  onClick={() => setStatusFilter(t.key)}
+                >
+                  {t.label}
+                  {t.count > 0 && <span className="occ-filter-tab__count">{t.count}</span>}
+                </button>
+              ))}
             </div>
+            <div className="occ-filter-selects">
+              <select className="occ-filter-select" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
+                {marketOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All Markets' : o}</option>)}
+              </select>
+              <select className="occ-filter-select" value={templateFilter} onChange={e => setTemplateFilter(e.target.value)}>
+                {templateOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All Templates' : truncate(o, 22)}</option>)}
+              </select>
+              <select className="occ-filter-select" value={senderFilter} onChange={e => setSenderFilter(e.target.value)}>
+                {senderOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All Senders' : `…${o.slice(-4)}`}</option>)}
+              </select>
+            </div>
+            <input
+              type="search"
+              className="occ-search"
+              placeholder="Search seller, property, campaign…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
           </div>
 
-          <div className="nx-queue-sidebar-section">
-            <span className="nx-queue-sidebar-label">Status Filters</span>
-            {(['all', 'ready', 'scheduled', 'approval', 'held', 'failed'] as const).map(s => (
-              <button 
-                key={s}
-                className={cls('nx-queue-bucket-btn', statusFilter === s && 'is-active')}
-                onClick={() => setStatusFilter(s)}
-              >
-                <span className="nx-bucket-name">{s === 'all' ? 'All Items' : s.charAt(0).toUpperCase() + s.slice(1)}</span>
-                <span className="nx-queue-bucket-count">
-                  {s === 'all' ? model?.items.length : (model as any)[`${s}Count`] || 0}
+          {/* Table header */}
+          <div className="occ-table-head">
+            <span>Seller / Property</span>
+            <span>Campaign / Market</span>
+            <span>Template</span>
+            <span>From</span>
+            <span>Scheduled</span>
+            <span>Status</span>
+            <span>Failure Cause</span>
+            <span>Last Event</span>
+          </div>
+
+          {/* Table body */}
+          <div className="occ-table-body">
+            {filteredItems.map(item => (
+              <QueueRow
+                key={item.id}
+                item={item}
+                isSelected={selectedId === item.id}
+                onClick={() => handleSelectRow(item)}
+              />
+            ))}
+            {filteredItems.length === 0 && (
+              <div className="occ-table-empty">
+                {items.length === 0
+                  ? 'No queue rows for this date range.'
+                  : 'No rows match current filter.'}
+              </div>
+            )}
+          </div>
+
+          {/* Table footer with pagination */}
+          <div className="occ-table-footer">
+            <span className="occ-table-footer__count">
+              {filteredItems.length !== items.length
+                ? `${filteredItems.length} filtered of `
+                : ''
+              }
+              {rowStart}–{rowEnd} of {totalCount.toLocaleString()} rows
+            </span>
+            {totalPages > 1 && (
+              <div className="occ-pagination">
+                <button
+                  type="button"
+                  className="occ-page-btn"
+                  disabled={currentPage === 0}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                >
+                  ‹ Prev
+                </button>
+                <span className="occ-page-info">
+                  Page {currentPage + 1} of {totalPages}
                 </span>
+                <button
+                  type="button"
+                  className="occ-page-btn"
+                  disabled={currentPage >= totalPages - 1}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                >
+                  Next ›
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Inspector: row detail or queue intelligence */}
+        {selectedItem
+          ? <HeroInspector item={selectedItem} onAction={handleAction} />
+          : <IntelPanel items={items} onGlobalAction={action => handleAction(action, '')} />
+        }
+      </div>
+
+      {/* ── Bottom module area ──────────────────────────────────────── */}
+      <div className={cls('occ-modules-area', bottomExpanded && 'is-expanded')}>
+        <div className="occ-modules-bar">
+          <div className="occ-module-tabs">
+            {BOTTOM_TABS.map(t => (
+              <button
+                key={t.key}
+                type="button"
+                className={cls('occ-module-tab', activeBottomTab === t.key && 'is-active')}
+                onClick={() => {
+                  if (activeBottomTab === t.key) {
+                    setBottomExpanded(v => !v)
+                  } else {
+                    setActiveBottomTab(t.key)
+                    setBottomExpanded(true)
+                  }
+                }}
+              >
+                {t.label}
+                {t.key === 'failures' && counts.failed > 0 && (
+                  <span className="occ-module-tab__badge is-red">{counts.failed}</span>
+                )}
+                {t.key === 'senders' && buildSenderStats(items).filter(s => s.violations21610 > 0).length > 0 && (
+                  <span className="occ-module-tab__badge is-red">!</span>
+                )}
               </button>
             ))}
           </div>
-
-          <div className="nx-queue-sidebar-section is-spacer" />
-
-          <div className="nx-queue-sidebar-section">
-            <div className="nx-sidebar-footer">
-              <div className="nx-engine-info" style={{ marginBottom: '12px', fontSize: '11px', opacity: 0.8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>Send Engine:</span>
-                  <span style={{ color: 'var(--success)' }}>{model?.sendEngine}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Mode:</span>
-                  <span className={cls('nx-engine-mode', model?.engineMode === 'proxy' ? 'is-proxy' : 'is-limited')} style={{ 
-                    color: model?.engineMode === 'proxy' ? 'var(--success)' : 'var(--warning)',
-                    textTransform: 'uppercase',
-                    fontWeight: 'bold'
-                  }}>
-                    {model?.engineMode}
-                  </span>
-                </div>
-              </div>
-              <div className="nx-pressure-gauge">
-                <div className={cls('nx-gauge-dot', `is-pressure-${model?.apiPressureLevel || 'low'}`)} />
-                <span>API Pressure: {model?.apiPressureLevel.toUpperCase()}</span>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <main className="nx-queue-main">
-          <div className="nx-queue-scroll-area">
-            {viewMode === 'today' && (
-              <div className="nx-today-view" data-testid="queue-today-view">
-                {timeBuckets.map(bucket => {
-                  const items = filteredItems.filter(bucket.filter)
-                  if (items.length === 0) return null
-                  return (
-                    <div key={bucket.label} className="nx-queue-group">
-                      <div className="nx-queue-group-header">
-                        <h3>{bucket.label}</h3>
-                        <span className="nx-queue-group-count">{items.length}</span>
-                      </div>
-                      <div className="nx-operational-stack">
-                        {/* Table Header for Today View Rows */}
-                        <div className="nx-operational-row is-header">
-                          <div className="nx-op-cell is-seller">Seller & Property</div>
-                          <div className="nx-op-cell is-status">Stage</div>
-                          <div className="nx-op-cell is-action">Next Action</div>
-                          <div className="nx-op-cell is-timing">Timing & Market</div>
-                          <div className="nx-op-cell is-ai">AI Confidence</div>
-                          <div className="nx-op-cell is-agent">Agent</div>
-                        </div>
-                        {items.map((item: QueueItem) => (
-                          <OperationalRow
-                            key={item.id} 
-                            item={item} 
-                            isSelected={selectedItemId === item.id}
-                            onClick={() => handleSelectItem(item.id)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-                {filteredItems.length === 0 && (
-                  <div className="nx-queue-empty">
-                    <p>No items scheduled for today.</p>
-                  </div>
-                )}
-              </div>
+          <button
+            type="button"
+            className="occ-module-collapse"
+            onClick={() => setBottomExpanded(v => !v)}
+          >
+            <Icon name={bottomExpanded ? 'chevron-down' : 'chevron-up'} size={11} />
+          </button>
+        </div>
+        {bottomExpanded && (
+          <div className="occ-module-content">
+            {activeBottomTab === 'templates' && <TemplatesModule items={items} />}
+            {activeBottomTab === 'senders' && <SendersModule items={items} />}
+            {activeBottomTab === 'market' && <MarketModule items={items} />}
+            {activeBottomTab === 'failures' && (
+              <FailureModule items={items} onFilterStatus={s => setStatusFilter(s)} />
             )}
-
-            {viewMode === 'list' && (
-              <div className="nx-list-view" data-testid="queue-list-view">
-                <div className="nx-queue-table-container">
-                  <table className="nx-queue-table is-dense">
-                    <thead>
-                      <tr>
-                        <th>Seller / Property</th>
-                        <th>Campaign Metadata</th>
-                        <th style={{ width: '25%' }}>Message Preview</th>
-                        <th>Status</th>
-                        <th>Scheduled</th>
-                        <th>Market</th>
-                        <th>Agent</th>
-                        <th>Stage</th>
-                        <th>Temp</th>
-                        <th>Risk</th>
-                        <th className="nx-table-actions-th">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.map((item: QueueItem) => (
-                        <tr 
-                          key={item.id} 
-                          className={cls(selectedItemId === item.id && 'is-selected')}
-                          onClick={() => handleSelectItem(item.id)}
-                        >
-                          <td>
-                            <div className="nx-cell-owner">
-                              <strong>{item.sellerName}</strong>
-                              <small>{item.propertyAddress}</small>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="nx-cell-owner nx-cell-owner--metadata">
-                              <small>campaign_id: {item.campaignId || '—'}</small>
-                              <small>campaign_target_id: {item.campaignTargetId || '—'}</small>
-                            </div>
-                          </td>
-                          <td className="nx-cell-preview">
-                            <span className="nx-preview-text">{item.messageText}</span>
-                          </td>
-                          <td><StatusBadge status={item.status} /></td>
-                          <td>{formatRelativeTime(item.scheduledForLocal)}</td>
-                          <td>{item.market}</td>
-                          <td>{item.agent}</td>
-                          <td>{item.currentStage}</td>
-                          <td>
-                            <span className={cls('nx-temp-dot', `is-${item.sellerTemperature}`)} />
-                          </td>
-                          <td>{item.urgencyScore > 75 ? <RiskTag level="high" /> : <RiskTag level={item.riskLevel} />}</td>
-                          <td>
-                            <div className="nx-table-quick-actions" onClick={e => e.stopPropagation()}>
-                              {(item.status === 'ready' || item.status === 'scheduled') && (
-                                <button className="nx-icon-btn" title="Hold" onClick={() => handleAction('hold', item.id)}><Icon name="shield" /></button>
-                              )}
-                              {item.status === 'failed' && item.retryEligible && (
-                                <button className="nx-icon-btn is-primary" title="Retry" onClick={() => handleAction('retry', item.id)}><Icon name="zap" /></button>
-                              )}
-                              <button className="nx-icon-btn" title="Edit" onClick={() => emitNotification({ title: 'Not Implemented', detail: 'Inline edit requires backend API', severity: 'warning', sound: 'notification' })}><Icon name="file-text" /></button>
-                              <button className="nx-icon-btn is-danger" title="Suppress" onClick={() => handleAction('cancel', item.id)}><Icon name="close" /></button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredItems.length === 0 && (
-                        <tr>
-                          <td colSpan={11} className="nx-table-empty">
-                            No items found in the current view.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {viewMode === 'approval' && (
-              <div className="nx-approval-stack" data-testid="queue-approval-view">
-                {filteredItems.map((item: QueueItem) => (
-                  <div key={item.id} className={cls('nx-approval-card', selectedItemId === item.id && 'is-selected')} onClick={() => handleSelectItem(item.id)}>
-                    <div className="nx-approval-card-header">
-                      <div className="nx-approval-seller">
-                        <h4>{item.sellerName}</h4>
-                        <span>{item.propertyAddress}</span>
-                      </div>
-                      <div className="nx-approval-meta-tags">
-                        <span className="nx-tag is-warning"><Icon name="shield" /> {item.approvalReason || 'Human Review Required'}</span>
-                        <span className={cls('nx-tag', item.aiConfidence > 80 ? 'is-success' : 'is-error')}>AI Confidence: {item.aiConfidence}%</span>
-                      </div>
-                    </div>
-
-                    <div className="nx-approval-card-body">
-                      <div className="nx-approval-context">
-                        <div className="nx-context-row">
-                          <span className="nx-label">Extracted Intent:</span>
-                          <span className="nx-value">{item.extractedIntent || 'Unknown'}</span>
-                        </div>
-                        <div className="nx-context-row">
-                          <span className="nx-label">Seller Temp:</span>
-                          <span className="nx-value is-caps">{item.sellerTemperature}</span>
-                        </div>
-                        {item.priorThreadSummary && (
-                          <div className="nx-context-row is-full">
-                            <span className="nx-label">Prior Thread Summary:</span>
-                            <span className="nx-value">{item.priorThreadSummary}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="nx-approval-message-box">
-                        <div className="nx-message-box-header">
-                          <span>Proposed AI Reply</span>
-                          <span className="nx-template-name">{item.templateName}</span>
-                        </div>
-                        <p>{item.messageText}</p>
-                      </div>
-                    </div>
-
-                    <div className="nx-approval-card-footer" onClick={e => e.stopPropagation()}>
-                      <button className="nx-btn nx-btn--primary" onClick={() => handleAction('approve', item.id)}>
-                        <Icon name="check" /> Approve
-                      </button>
-                      <button className="nx-btn nx-btn--secondary" onClick={() => emitNotification({ title: 'Not Implemented', detail: 'Inline edit requires backend API', severity: 'warning', sound: 'notification' })}>
-                        <Icon name="file-text" /> Edit
-                      </button>
-                      <button className="nx-btn nx-btn--secondary" onClick={() => handleAction('hold', item.id)}>
-                        <Icon name="shield" /> Hold
-                      </button>
-                      <button className="nx-btn nx-btn--danger" onClick={() => handleAction('cancel', item.id)}>
-                        <Icon name="close" /> Suppress
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {filteredItems.length === 0 && (
-                  <div className="nx-queue-empty">
-                    <p>No items pending human approval.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {viewMode === 'failed' && (
-              <div className="nx-failure-stack" data-testid="queue-failed-view">
-                {failedGroups.map(({ group, items }: { group: string, items: QueueItem[] }) => (
-                  <div key={group} className="nx-failure-group">
-                    <div className="nx-failure-group-header">
-                      <h3>{group} Failures</h3>
-                      <span className="nx-count-badge">{items.length}</span>
-                    </div>
-                    <div className="nx-operational-stack is-nested">
-                      {items.map((item: QueueItem) => (
-                        <div
-                          key={item.id}
-                          className={cls('nx-failure-item', selectedItemId === item.id && 'is-selected')}
-                          onClick={() => handleSelectItem(item.id)}
-                        >
-                          <div className="nx-failure-item-top">
-                            <div className="nx-failure-item-identity">
-                              <strong>{item.sellerName}</strong>
-                              <span>{item.propertyAddress}</span>
-                            </div>
-                            <span className="nx-failure-reason">{item.failureReason || 'Unknown Error'}</span>
-                          </div>
-                          <div className="nx-failure-item-bottom">
-                            <span className="nx-failure-meta">
-                              Attempt {item.retryCount} of {item.maxRetries} • {item.retryEligible ? 'Retry Eligible' : 'Human Action Required'}
-                            </span>
-                            <div className="nx-failure-actions" onClick={e => e.stopPropagation()}>
-                              {item.retryEligible && (
-                                <button className="nx-btn nx-btn--xs nx-btn--primary" onClick={() => handleAction('retry', item.id)}>
-                                  <Icon name="zap" style={{ width: 12, height: 12, marginRight: 4 }} /> Retry
-                                </button>
-                              )}
-                              <button className="nx-btn nx-btn--xs nx-btn--secondary" onClick={() => emitNotification({ title: 'Not Implemented', detail: 'Rerouting requires backend support.', severity: 'warning', sound: 'notification' })}>
-                                Reroute
-                              </button>
-                              <button className="nx-btn nx-btn--xs nx-btn--danger" onClick={() => handleAction('cancel', item.id)}>
-                                Suppress
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {failedGroups.length === 0 && (
-                  <div className="nx-queue-empty">
-                    <p>No failed items in queue.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {viewMode === 'week' && (
-              <div className="nx-week-board" data-testid="queue-week-view">
-                <div className="nx-campaign-swimlanes">
-                  {weekClusters.map((cluster: { market: string, temp: string, stage: string, items: QueueItem[] }) => (
-                    <div key={`${cluster.market}-${cluster.temp}-${cluster.stage}`} className="nx-campaign-cluster">
-                      <div className="nx-cluster-header">
-                        <div className="nx-cluster-identity">
-                          <h3>{cluster.market.toUpperCase()}</h3>
-                          <span className={cls('nx-cluster-tag', `is-${cluster.temp}`)}>{cluster.temp}</span>
-                          <span className="nx-cluster-tag is-stage">{cluster.stage}</span>
-                        </div>
-                        <div className="nx-cluster-metrics">
-                          <span>{cluster.items.length} Sellers</span>
-                          <span>{cluster.items.filter((i: QueueItem) => i.urgencyScore > 50).length} High Urgency</span>
-                        </div>
-                      </div>
-
-                      <div className="nx-operational-stack is-nested">
-                        {cluster.items.map((item: QueueItem) => (
-                          <OperationalRow
-                            key={item.id}
-                            item={item}
-                            isSelected={selectedItemId === item.id}
-                            onClick={() => handleSelectItem(item.id)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  {weekClusters.length === 0 && (
-                    <div className="nx-queue-empty">
-                      <p>No campaign clusters active for this week.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {viewMode === 'month' && (
-              <div className="nx-month-heatmap" data-testid="queue-month-view">
-                 {/* Heatmap Calendar */}
-                 <div className="nx-queue-month-grid">
-                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                     <div key={day} className="nx-month-day-label">{day}</div>
-                   ))}
-                   {/* Empty cells for start of month alignment */}
-                   <div className="nx-month-cell is-empty" />
-                   <div className="nx-month-cell is-empty" />
-                   {Array.from({ length: 30 }).map((_, i) => {
-                     // Generate deterministic metrics from array index to avoid Math.random
-                     const outVolume = (i * 13) % 120 + 20
-                     const inVolume = (i * 7) % 5
-                     const activityLevel = outVolume > 100 ? 4 : outVolume > 70 ? 3 : outVolume > 40 ? 2 : 1
-                     const isSelected = selectedItemId === `day-${i}`
-
-                     return (
-                       <div
-                         key={i}
-                         className={cls('nx-month-cell', i === 14 && 'is-today', isSelected && 'is-selected')}
-                         onClick={() => handleSelectItem(`day-${i}`)}
-                       >
-                         <span className="nx-month-date">{i + 1}</span>
-                         <div className="nx-month-intensity" data-level={activityLevel} />
-                         <div className="nx-month-metrics">
-                           <span>{outVolume} Out</span>
-                           <span style={{ color: 'var(--success)' }}>{inVolume} In</span>
-                         </div>
-                       </div>
-                     )
-                   })}
-                 </div>
-
-                 {/* Cadence Timeline */}
-                 <div className="nx-forecast-timeline">
-                   <h3>Automation Cadence Timeline</h3>
-                   <div className="nx-timeline-track">
-                     <div className="nx-timeline-marker" style={{ left: '15%' }} title="Nurture Wave" />
-                     <div className="nx-timeline-marker is-spike" style={{ left: '45%' }} title="High Volume Outreach" />
-                     <div className="nx-timeline-marker" style={{ left: '80%' }} title="Follow-up Cycle" />
-                   </div>
-                   <div className="nx-operational-stack is-nested">
-                      {filteredItems.slice(0, 5).map((item: QueueItem) => (
-                        <OperationalRow
-                          key={item.id}
-                          item={item}
-                          isSelected={selectedItemId === item.id}
-                          onClick={() => handleSelectItem(item.id)}
-                        />
-                      ))}
-                   </div>
-                 </div>
-              </div>
+            {activeBottomTab === 'events' && (
+              <EventTimelineModule items={items} onSelectItem={id => setSelectedId(p => p === id ? null : id)} />
             )}
           </div>
-        </main>
-
-        <TacticalIntelligenceStack
-          item={selectedItem} 
-          onAction={handleAction} 
-          viewMode={viewMode}
-        />
+        )}
       </div>
     </div>
   )
