@@ -170,8 +170,8 @@
 }
 
 .nxhud-header-btn.is-active {
-  background: rgba(56, 208, 240, 0.12);
-  border-color: rgba(56, 208, 240, 0.28);
+  background: rgba(var(--nexus-accent-rgb), 0.12);
+  border-color: rgba(var(--nexus-accent-rgb), 0.28);
   color: #60d9f5;
 }
 
@@ -217,10 +217,10 @@
 }
 
 .nxhud-filter-chip.is-active {
-  background: rgba(56, 208, 240, 0.11);
-  border-color: rgba(56, 208, 240, 0.30);
+  background: rgba(var(--nexus-accent-rgb), 0.11);
+  border-color: rgba(var(--nexus-accent-rgb), 0.30);
   color: #70dcf5;
-  box-shadow: 0 0 10px rgba(56, 208, 240, 0.10);
+  box-shadow: 0 0 10px rgba(var(--nexus-accent-rgb), 0.10);
 }
 
 .nxhud-filter-chip.has-alerts.is-active {
@@ -246,9 +246,9 @@
 }
 
 .nxhud-mark-read-btn:hover {
-  color: rgba(56, 208, 240, 0.65);
-  background: rgba(56, 208, 240, 0.06);
-  border-color: rgba(56, 208, 240, 0.14);
+  color: rgba(var(--nexus-accent-rgb), 0.65);
+  background: rgba(var(--nexus-accent-rgb), 0.06);
+  border-color: rgba(var(--nexus-accent-rgb), 0.14);
 }
 
 /* ── Category / space chips ──────────────────────────────────────────── */
@@ -375,13 +375,13 @@
 }
 
 .nxhud-card.is-inbox {
-  border-color: rgba(56, 208, 240, 0.18);
+  border-color: rgba(var(--nexus-accent-rgb), 0.18);
 }
 .nxhud-card.is-inbox .nxhud-card__rail {
-  background: linear-gradient(180deg, #38d0f0, rgba(56, 208, 240, 0.30));
+  background: linear-gradient(180deg, var(--nexus-accent), rgba(var(--nexus-accent-rgb), 0.30));
 }
 .nxhud-card.is-inbox:hover {
-  box-shadow: 0 4px 18px rgba(56, 208, 240, 0.09);
+  box-shadow: 0 4px 18px rgba(var(--nexus-accent-rgb), 0.09);
 }
 
 .nxhud-card.is-ai {
@@ -426,7 +426,7 @@
 }
 
 .nxhud-card.is-focused {
-  box-shadow: 0 0 0 1px rgba(56, 208, 240, 0.14) inset;
+  box-shadow: 0 0 0 1px rgba(var(--nexus-accent-rgb), 0.14) inset;
 }
 
 /* Card inner layout */
@@ -461,7 +461,7 @@
 .nxhud-card__icon-wrap svg { width: 11px; height: 11px; }
 
 .nxhud-card.is-critical .nxhud-card__icon-wrap { color: #ff7070; background: rgba(255, 69, 58, 0.14); }
-.nxhud-card.is-inbox    .nxhud-card__icon-wrap { color: #55d5f2; background: rgba(56, 208, 240, 0.10); }
+.nxhud-card.is-inbox    .nxhud-card__icon-wrap { color: #55d5f2; background: rgba(var(--nexus-accent-rgb), 0.10); }
 .nxhud-card.is-ai       .nxhud-card__icon-wrap { color: #b38aff; background: rgba(153, 102, 255, 0.12); }
 .nxhud-card.is-offer    .nxhud-card__icon-wrap { color: #5ae08b; background: rgba(48, 209, 88, 0.11); }
 .nxhud-card.is-warning  .nxhud-card__icon-wrap { color: #f5b84a; background: rgba(245, 166, 35, 0.11); }
@@ -492,8 +492,8 @@
   text-transform: uppercase;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(56, 208, 240, 0.10);
-  border: 1px solid rgba(56, 208, 240, 0.20);
+  background: rgba(var(--nexus-accent-rgb), 0.10);
+  border: 1px solid rgba(var(--nexus-accent-rgb), 0.20);
   color: rgba(80, 210, 240, 0.60);
 }
 
@@ -511,7 +511,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #38d0f0;
+  background: var(--nexus-accent);
   flex-shrink: 0;
 }
 .nxhud-card.is-critical .nxhud-card__unread-dot { background: #ff5a52; }
@@ -603,8 +603,8 @@
   white-space: nowrap;
 }
 .nxhud-card__action-btn:hover {
-  background: rgba(56, 208, 240, 0.09);
-  border-color: rgba(56, 208, 240, 0.22);
+  background: rgba(var(--nexus-accent-rgb), 0.09);
+  border-color: rgba(var(--nexus-accent-rgb), 0.22);
   color: #60d9f5;
 }
 
@@ -740,8 +740,8 @@
   color: rgba(205, 220, 250, 0.75);
 }
 .nxhud-mode-chip.is-active {
-  background: rgba(56, 208, 240, 0.11);
-  border-color: rgba(56, 208, 240, 0.28);
+  background: rgba(var(--nexus-accent-rgb), 0.11);
+  border-color: rgba(var(--nexus-accent-rgb), 0.28);
   color: #70dcf5;
 }
 
@@ -821,7 +821,7 @@
   background: rgba(12, 6, 6, 0.94);
 }
 .nxhud-toast.is-inbox, .nxhud-toast.is-info {
-  border-left-color: #38d0f0;
+  border-left-color: var(--nexus-accent);
 }
 .nxhud-toast.is-ai {
   border-left-color: #9966ff;
@@ -850,7 +850,7 @@
 .nxhud-toast__icon svg { width: 13px; height: 13px; }
 
 .nxhud-toast.is-critical .nxhud-toast__icon { color: #ff7070; background: rgba(255, 69, 58, 0.12); }
-.nxhud-toast.is-inbox    .nxhud-toast__icon { color: #50d5f2; background: rgba(56, 208, 240, 0.09); }
+.nxhud-toast.is-inbox    .nxhud-toast__icon { color: #50d5f2; background: rgba(var(--nexus-accent-rgb), 0.09); }
 .nxhud-toast.is-ai       .nxhud-toast__icon { color: #b38aff; background: rgba(153, 102, 255, 0.10); }
 .nxhud-toast.is-offer, .nxhud-toast.is-success { }
 .nxhud-toast.is-offer .nxhud-toast__icon,

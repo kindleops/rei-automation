@@ -38,10 +38,10 @@
   --nx-glass-saturate:         1.6;
   --nx-glass-inner-highlight:  inset 0 1px 0 rgba(255,255,255,0.08);
   --nx-glass-divider:          rgba(255, 255, 255, 0.06);
-  --nx-glass-accent:           #38d0f0;
-  --nx-glass-accent-rgb:       56, 208, 240;
-  --nx-glass-accent-soft:      rgba(56, 208, 240, 0.12);
-  --nx-glass-accent-border:    rgba(56, 208, 240, 0.28);
+  --nx-glass-accent:           var(--nexus-accent);
+  --nx-glass-accent-rgb:       var(--nexus-accent-rgb);
+  --nx-glass-accent-soft:      rgba(var(--nexus-accent-rgb), 0.12);
+  --nx-glass-accent-border:    rgba(var(--nexus-accent-rgb), 0.28);
   --nx-glass-danger:           #ff5a52;
   --nx-glass-danger-soft:      rgba(255, 69, 58, 0.12);
   --nx-glass-danger-border:    rgba(255, 69, 58, 0.28);
@@ -74,10 +74,10 @@
   --nx-glass-saturate:         1.8;
   --nx-glass-inner-highlight:  inset 0 1px 0 rgba(255,255,255,0.80);
   --nx-glass-divider:          rgba(15, 23, 42, 0.07);
-  --nx-glass-accent:           #0055ff;
-  --nx-glass-accent-rgb:       0, 85, 255;
-  --nx-glass-accent-soft:      rgba(0, 85, 255, 0.08);
-  --nx-glass-accent-border:    rgba(0, 85, 255, 0.22);
+  --nx-glass-accent:           var(--nexus-accent);
+  --nx-glass-accent-rgb:       var(--nexus-accent-rgb);
+  --nx-glass-accent-soft:      rgba(var(--nexus-accent-rgb), 0.08);
+  --nx-glass-accent-border:    rgba(var(--nexus-accent-rgb), 0.22);
   --nx-glass-danger:           #dc2626;
   --nx-glass-danger-soft:      rgba(220, 38, 38, 0.08);
   --nx-glass-danger-border:    rgba(220, 38, 38, 0.22);
@@ -1245,6 +1245,27 @@
   border-radius: var(--nx-glass-radius-menu);
   box-shadow: var(--nx-glass-shadow), var(--nx-glass-inner-highlight);
   color: var(--nx-glass-text);
+}
+
+/* Workspace menu anchor: left-side trigger → extend rightward from left edge.
+   Overrides .nx-liquid-popover's right:0 which was causing off-screen clipping. */
+.nx-topbar-workspace-menu {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: calc(100% + 8px);
+  z-index: 12000;
+  transform-origin: top left;
+  display: flex;
+  flex-direction: row;
+  overflow: visible;
+  animation: nx-popover-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Flip: when right overflow detected, anchor to right edge instead */
+.nx-topbar-workspace-menu.is-submenu-left {
+  left: auto;
+  right: 0;
+  transform-origin: top right;
 }
 
 .nx-workspace-menu-root {

@@ -494,7 +494,7 @@ export function applyThemeToDOM(): void {
   if (import.meta.env.DEV) {
     setTimeout(() => {
       const cs = getComputedStyle(document.body);
-      console.log('--- Light Mode Computed Vars ---');
+      console.log(isLight ? '--- Light Mode Computed Vars ---' : '--- Dark Mode Computed Vars ---');
       console.log('--nx-bg:', cs.getPropertyValue('--nx-bg'));
       console.log('--nx-panel-bg:', cs.getPropertyValue('--nx-panel-bg'));
       console.log('--nx-card-bg:', cs.getPropertyValue('--nx-card-bg'));
