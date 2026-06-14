@@ -8182,9 +8182,9 @@ non‑Home surfaces only ──────────────────�
   --room-accent: var(--tone-primary);
   position: relative;
 }
-/* Inbox — cool blue ambient */
-.nx-inbox { --room-accent: #38D0F0; }
-.nx-inbox::before { background: radial-gradient(ellipse at 20% 0%, rgba(56,208,240,0.06) 0%, transparent 60%); }
+/* Inbox — accent ambient */
+.nx-inbox { --room-accent: var(--nexus-accent); }
+.nx-inbox::before { background: radial-gradient(ellipse at 20% 0%, rgba(var(--nexus-accent-rgb),0.06) 0%, transparent 60%); }
 .nx-inbox__header { border-bottom: 1px solid rgba(var(--nexus-accent-rgb), 0.08); }
 .nx-inbox-thread[aria-selected="true"] { border-left-color: var(--tone-primary); }
 /* Base transparent; severity variants (.is-critical/.is-warning/.is-info) defined at component level above */
@@ -8194,9 +8194,9 @@ non‑Home surfaces only ──────────────────�
 .nx-alert-card.is-warning:hover { border-left-color: var(--tone-warning); }
 .nx-alert-card.is-info:hover { border-left-color: rgba(var(--nexus-accent-rgb), 0.5); }
 .nx-market-row[aria-selected="true"] { border-left-color: var(--tone-warning); background: rgba(216, 149, 48, 0.04); }
-/* Buyers — electric teal */
-.nx-buyer { --room-accent: #38D0F0; }
-.nx-buyer::before { background: radial-gradient(ellipse at 70% 10%, rgba(56,208,240,0.05) 0%, transparent 55%); }
+/* Buyers — accent ambient */
+.nx-buyer { --room-accent: var(--nexus-accent); }
+.nx-buyer::before { background: radial-gradient(ellipse at 70% 10%, rgba(var(--nexus-accent-rgb),0.05) 0%, transparent 55%); }
 .nx-buyer-row[aria-selected="true"] { border-left-color: var(--tone-primary); }
 .nx-watch-card { border-left: 2px solid transparent; }
 .nx-watch-card:hover { border-left-color: var(--tone-success); }
@@ -9852,8 +9852,8 @@ Motion
 }
 
 @keyframes nx-orb-pulse-glow {
-  0%, 100% { box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px rgba(56,208,240,0.15); }
-  50%      { box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 40px rgba(56,208,240,0.30); }
+  0%, 100% { box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px rgba(var(--nexus-accent-rgb),0.15); }
+  50%      { box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 40px rgba(var(--nexus-accent-rgb),0.30); }
 }
 /* ── Live glow + speaking vibration for Copilot orb ─────────────────── */
 

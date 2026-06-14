@@ -400,7 +400,7 @@ export const KpiIntelligencePage = () => {
         {/* BUYER DEMAND */}
         <Section title="Buyer Demand" className="nx-grid-buyer">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ padding: '12px', background: 'rgba(56, 208, 240, 0.05)', borderRadius: '8px', border: '1px solid rgba(56, 208, 240, 0.1)' }}>
+            <div style={{ padding: '12px', background: 'rgba(var(--nexus-accent-rgb), 0.05)', borderRadius: '8px', border: '1px solid rgba(var(--nexus-accent-rgb), 0.1)' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--nx-neon-blue)', marginBottom: '4px' }}>Avg Buyer Score</div>
               <div style={{ fontSize: '24px', fontWeight: 800 }}>84.5</div>
             </div>

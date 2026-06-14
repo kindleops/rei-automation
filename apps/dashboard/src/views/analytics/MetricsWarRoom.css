@@ -1,7 +1,7 @@
 .nx-metrics-war-room {
   --nx-border: rgba(255, 255, 255, 0.08);
   --nx-bg-card: rgba(15, 23, 42, 0.5);
-  --nx-neon-blue: #38d0f0;
+  --nx-neon-blue: var(--nexus-accent);
   --nx-neon-green: #2cb87a;
   --nx-neon-red: #d4404c;
   --nx-neon-yellow: #d89530;
@@ -215,7 +215,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at center, rgba(56, 208, 240, 0.03) 0%, transparent 70%);
+  background: radial-gradient(circle at center, rgba(var(--nexus-accent-rgb), 0.03) 0%, transparent 70%);
 }
 
 /* Funnel Visualization */
@@ -251,7 +251,7 @@
   height: 100%;
   background: var(--nx-neon-blue);
   transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 0 10px rgba(56, 208, 240, 0.3);
+  box-shadow: 0 0 10px rgba(var(--nexus-accent-rgb), 0.3);
 }
 
 /* Leaderboards Table */

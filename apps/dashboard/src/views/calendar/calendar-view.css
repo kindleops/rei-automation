@@ -9,7 +9,7 @@
   overflow-x: hidden;
   color: #eef4ff;
   background:
-    radial-gradient(circle at top right, rgba(34, 211, 238, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(var(--nexus-accent-rgb), 0.08), transparent 26%),
     linear-gradient(180deg, rgba(6, 10, 18, 0.98), rgba(4, 7, 13, 0.96));
 }
 
