@@ -5380,6 +5380,104 @@ export async function updateCampaign(campaignId, payload = {}, deps = {}) {
   return { ok: true, campaign: data, campaign_id: data.id }
 }
 
+/**
+ * Clone a campaign into a fresh DRAFT. Copies configuration + saved filters,
+ * but never copies targets, queue rows, lifecycle timestamps, or live flags.
+ */
+export async function cloneCampaign(campaignId, input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const { data: source, error } = await supabase.from('campaigns').select('*').eq('id', campaignId).single()
+  if (error) throw error
+  if (!source) return { ok: false, error: 'campaign_not_found' }
+
+  const {
+    id: _id, created_at: _createdAt, updated_at: _updatedAt,
+    last_transition_from: _ltf, last_transition_reason: _ltr, last_transition_at: _lta,
+    built_at: _builtAt, queued_at: _queuedAt, scheduled_at: _scheduledAt, scheduled_for: _scheduledFor,
+    activating_at: _activatingAt, activated_at: _activatedAt, paused_at: _pausedAt,
+    completed_at: _completedAt, failed_at: _failedAt, failure_reason: _failureReason,
+    archived_at: _archivedAt, emergency_stop_at: _emergencyStopAt,
+    ...rest
+  } = source
+
+  const newRow = {
+    ...rest,
+    name: clean(input.name) || `${source.name} (copy)`,
+    status: 'draft',
+    auto_send_enabled: false,
+    auto_queue_enabled: false,
+  }
+  const { data: created, error: insertError } = await supabase.from('campaigns').insert(newRow).select('*').single()
+  if (insertError) throw insertError
+
+  const { data: filters } = await supabase.from('campaign_filters').select('*').eq('campaign_id', campaignId)
+  if (filters?.length) {
+    const cloned = filters.map(({ id: _fid, campaign_id: _fcid, created_at: _fc, updated_at: _fu, ...filter }) => ({
+      ...filter,
+      campaign_id: created.id,
+    }))
+    await supabase.from('campaign_filters').insert(cloned)
+  }
+
+  await recordCampaignEvent({
+    campaign_id: created.id,
+    event_type: 'campaign.cloned',
+    severity: 'info',
+    title: 'Campaign cloned',
+    description: `Cloned from "${source.name}".`,
+    metadata: { source_campaign_id: campaignId },
+  }, deps)
+  return { ok: true, campaign: created, campaign_id: created.id, source_campaign_id: campaignId }
+}
+
+/**
+ * Delete a campaign. Hard-deletes (purging targets/windows/filters/events) only
+ * when no send_queue rows reference it. Otherwise cancels its active queue rows
+ * and archives the campaign so historical sends are never destroyed.
+ */
+export async function deleteCampaign(campaignId, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const { data: campaign, error } = await supabase
+    .from('campaigns').select('id,status,name').eq('id', campaignId).maybeSingle()
+  if (error) throw error
+  if (!campaign) return { ok: false, error: 'campaign_not_found' }
+
+  const { count: linkedCount } = await supabase
+    .from('send_queue').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId)
+
+  if ((linkedCount || 0) > 0) {
+    const { data: cancelled } = await supabase
+      .from('send_queue')
+      .update({ queue_status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('campaign_id', campaignId)
+      .in('queue_status', ['queued', 'scheduled', 'ready', 'pending', 'approved', 'processing'])
+      .select('id')
+    await transitionCampaignStatus(supabase, campaignId, 'archived', { reason: 'delete_requested_history_preserved' })
+    await recordCampaignEvent({
+      campaign_id: campaignId,
+      event_type: 'campaign.archived',
+      severity: 'warning',
+      title: 'Campaign archived (delete requested; send history preserved)',
+      metadata: { linked_queue_rows: linkedCount, queue_rows_cancelled: cancelled?.length || 0 },
+    }, deps)
+    return {
+      ok: true, campaign_id: campaignId, deleted: false, archived: true,
+      queue_rows_cancelled: cancelled?.length || 0, reason: 'send_history_preserved',
+    }
+  }
+
+  const { data: targets } = await supabase.from('campaign_targets').delete().eq('campaign_id', campaignId).select('id')
+  const { data: windows } = await supabase.from('campaign_send_windows').delete().eq('campaign_id', campaignId).select('id')
+  await supabase.from('campaign_filters').delete().eq('campaign_id', campaignId)
+  await supabase.from('campaign_events').delete().eq('campaign_id', campaignId)
+  const { error: delError } = await supabase.from('campaigns').delete().eq('id', campaignId)
+  if (delError) throw delError
+  return {
+    ok: true, campaign_id: campaignId, deleted: true, archived: false,
+    targets_removed: targets?.length || 0, windows_removed: windows?.length || 0, queue_rows_cancelled: 0,
+  }
+}
+
 export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const detail = await getCampaign(campaignId, deps)
@@ -5473,8 +5571,16 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       inserted += chunk.length
     }
 
-    const nextStatus = rows.length > 0 && campaign.status === 'draft' ? 'ready' : campaign.status
-    await supabase.from('campaigns').update({ status: nextStatus }).eq('id', campaignId)
+    // Build Targets drives the campaign into the canonical BUILT state (via the
+    // concurrency-safe state machine). Only from pre-queue states — re-building an
+    // already live/active campaign must not yank it back. normalizeCampaignStatus
+    // folds legacy 'ready'/'previewed' onto 'built'.
+    if (inserted > 0) {
+      const fromStatus = normalizeCampaignStatus(campaign.status)
+      if (['draft', 'built', 'queued'].includes(fromStatus)) {
+        await transitionCampaignStatus(supabase, campaignId, 'built', { reason: 'build_targets' })
+      }
+    }
     await finishCampaignRun(run.id, {
       status: 'completed',
       total_scanned: graph.totalMatched,
@@ -6466,9 +6572,19 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           .update({ target_status: 'planned', last_launched_at: new Date().toISOString() })
           .in('id', targetUpdates)
       }
-      // Drive the campaign to `active` through the concurrency-safe state
-      // machine (walks scheduled -> activating -> active as needed).
-      await activateCampaign(supabase, campaignId, { reason: 'queue_plan_live_write' })
+      // Stage the campaign: rows are written as `scheduled` send_queue rows.
+      // Walk BUILT -> QUEUED -> SCHEDULED. We deliberately do NOT auto-activate:
+      // ACTIVE is the explicit operator go-live trigger, and the queue runner
+      // only sends rows whose campaign is ACTIVE (campaign-gated dispatch).
+      const earliestScheduledFor = scheduledItems
+        .map((item) => item.scheduled_for_utc)
+        .filter(Boolean)
+        .sort()[0] || null
+      await transitionCampaignStatus(supabase, campaignId, 'queued', { reason: 'queue_plan_live_write' })
+      await transitionCampaignStatus(supabase, campaignId, 'scheduled', {
+        reason: 'queue_plan_live_write',
+        scheduledFor: earliestScheduledFor,
+      })
     }
 
     if (run) {
@@ -6644,8 +6760,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
  * STATE only — does not enqueue or send (that is createCampaignQueuePlan).
  */
 const CAMPAIGN_LIFECYCLE_ACTIONS = {
-  preview: 'previewed',
-  mark_previewed: 'previewed',
+  preview: 'built',
+  mark_previewed: 'built',
+  mark_built: 'built',
+  build: 'built',
+  queue: 'queued',
+  mark_queued: 'queued',
   schedule: 'scheduled',
   unschedule: 'draft',
   begin_activation: 'activating',

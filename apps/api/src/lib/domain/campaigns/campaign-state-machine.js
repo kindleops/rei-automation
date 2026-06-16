@@ -13,7 +13,8 @@
 
 export const CAMPAIGN_STATES = Object.freeze([
   'draft',
-  'previewed',
+  'built',
+  'queued',
   'scheduled',
   'activating',
   'active',
@@ -34,25 +35,32 @@ export const TERMINAL_CAMPAIGN_STATES = Object.freeze(new Set(['archived']))
  * with campaigns saved before the lifecycle migration.
  */
 export const QUEUEABLE_CAMPAIGN_STATES = Object.freeze(
-  new Set(['scheduled', 'activating', 'active', 'ready', 'live_limited'])
+  new Set(['built', 'queued', 'scheduled', 'activating', 'active', 'ready', 'live_limited'])
 )
 
 /**
  * Legacy status -> lifecycle status. Older rows used readiness markers
- * ('ready'/'live_limited') in the same column; map them onto the lifecycle.
+ * ('ready'/'previewed'/'live_limited') in the same column; map them onto the
+ * canonical lifecycle. Kept in sync with campaign_transition_status() in SQL.
  */
 export const LEGACY_STATUS_ALIASES = Object.freeze({
-  ready: 'previewed',
+  ready: 'built',
+  previewed: 'built',
   live_limited: 'active',
   started: 'activating',
   live_scheduled: 'scheduled',
 })
 
-/** Directed legal edges. Kept in sync with campaign_status_transitions table. */
+/**
+ * Directed legal edges. Kept in sync with the SQL campaign_transition_status()
+ * edge set. Canonical path: draft -> built -> queued -> scheduled -> activating
+ * -> active. `built` is set by Build Targets; `queued` by the live queue write.
+ */
 const TRANSITIONS = Object.freeze({
-  draft: ['previewed', 'scheduled', 'archived'],
-  previewed: ['scheduled', 'draft', 'archived'],
-  scheduled: ['activating', 'draft', 'paused', 'archived'],
+  draft: ['built', 'scheduled', 'archived'],
+  built: ['queued', 'scheduled', 'draft', 'archived'],
+  queued: ['scheduled', 'built', 'draft', 'paused', 'archived'],
+  scheduled: ['activating', 'active', 'queued', 'draft', 'paused', 'archived'],
   activating: ['active', 'failed', 'paused'],
   active: ['paused', 'completed', 'failed'],
   paused: ['active', 'scheduled', 'completed', 'archived'],
@@ -171,7 +179,8 @@ export async function transitionCampaignStatus(supabase, campaignId, toStatus, o
 const WALK_PATHS = Object.freeze({
   active: {
     draft: ['scheduled', 'activating', 'active'],
-    previewed: ['scheduled', 'activating', 'active'],
+    built: ['scheduled', 'activating', 'active'],
+    queued: ['scheduled', 'activating', 'active'],
     scheduled: ['activating', 'active'],
     activating: ['active'],
     paused: ['active'],
@@ -249,6 +258,8 @@ async function transitionCampaignStatusFallback(supabase, campaignId, to, { reas
     last_transition_at: nowIso,
     updated_at: nowIso,
   }
+  if (to === 'built') patch.built_at = nowIso
+  if (to === 'queued') patch.queued_at = nowIso
   if (to === 'scheduled') {
     patch.scheduled_at = nowIso
     patch.scheduled_for = scheduledFor || nowIso

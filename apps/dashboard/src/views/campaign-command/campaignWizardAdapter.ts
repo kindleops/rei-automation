@@ -140,6 +140,7 @@ export interface CampaignPreviewResult {
   dry_run: true
   request_id?: string | null
   result_hash?: string | null
+  preview_unavailable?: boolean
   total_matched_properties: number
   total_matched: number
   total_scanned: number
@@ -1476,55 +1477,30 @@ async function previewTargetsLocal(draft: CampaignWizardDraft, meta?: CampaignFa
       reason: 'unsupported_in_preview' as const,
     }))
 
-  const base = 18420
-  const domainWeight = validFilters.reduce((score, filter) => {
-    const field = fieldByKey.get(normalizeCampaignFieldKey(filter.fieldKey))
-    const valueSize = Array.isArray(filter.value) ? Math.max(1, filter.value.length) : 1
-    const typeFactor = field?.type === 'boolean' ? 0.91 : field?.type === 'number' || field?.type === 'date' ? 0.86 : 0.82
-    const valueFactor = Math.max(0.58, typeFactor + Math.min(0.08, valueSize * 0.015))
-    return score * valueFactor
-  }, 1)
-  const anchorBoost = draft.target_filters.properties.length > 0 ? 1 : 0.94
-  const unsupportedDrag = Math.max(0.82, 1 - unsupported.length * 0.025)
-  const totalMatched = Math.max(18, Math.round(base * domainWeight * anchorBoost * unsupportedDrag))
-  const complianceBlocked = Math.round(totalMatched * (0.07 + Math.min(0.05, validFilters.length * 0.003)))
-  const missingPhone = Math.round(totalMatched * 0.045)
-  const missingRoute = Math.round(totalMatched * (draft.target_filters.sender_coverage.length ? 0.025 : 0.06))
-  const recentContact = Math.round(totalMatched * (draft.target_filters.outreach.length ? 0.04 : 0.065))
-  const duplicateQueue = Math.round(totalMatched * 0.025)
-  const blockedWaterfall: CampaignBlockedStep[] = [
-    { key: 'suppression_or_opt_out', label: 'Suppression or opt-out', count: complianceBlocked },
-    { key: 'missing_clean_phone', label: 'Missing clean phone', count: missingPhone },
-    { key: 'missing_sender_route', label: 'Missing sender coverage', count: missingRoute },
-    { key: 'recent_contact', label: 'Recent contact window', count: recentContact },
-    { key: 'duplicate_queue', label: 'Duplicate active queue', count: duplicateQueue },
-  ]
-  const blockedTotal = blockedWaterfall.reduce((sum, step) => sum + step.count, 0)
-  const cleanTargets = Math.max(0, totalMatched - complianceBlocked - missingPhone)
-  const readyToQueue = Math.max(0, totalMatched - blockedTotal)
-  const queueableToday = Math.min(readyToQueue, Math.max(75, Math.round(readyToQueue * 0.34)))
-
+  // No fabricated funnel. Reach numbers must come from the backend graph query
+  // (the same source Build Targets materializes from), so Builder Reach and
+  // Campaign Ready can never disagree with real data. When the live preview is
+  // unavailable we surface an explicit "unavailable" state with zeroed counts
+  // rather than inventing reach from heuristic multipliers.
   const warnings = unsupported.map((item) => `${item.label} is approved but unsupported in preview.`)
-  if (meta) warnings.unshift(meta.degradedReason)
+  warnings.unshift(meta?.degradedReason ?? 'Live preview unavailable — reach is computed by the backend graph, not estimated locally.')
 
   return {
     ok: true,
     dry_run: true,
     request_id: requestId ?? null,
-    result_hash: `local-${validFilters.length}-${totalMatched}-${readyToQueue}`,
-    total_matched_properties: totalMatched,
-    total_matched: totalMatched,
-    total_scanned: base,
-    clean_targets: cleanTargets,
-    ready_to_queue: readyToQueue,
-    queueable_today: queueableToday,
-    blocked_waterfall: blockedWaterfall,
-    blocked_counts_by_reason: blockedWaterfall.reduce<Record<string, number>>((acc, step) => {
-      acc[step.key] = step.count
-      return acc
-    }, {}),
-    distributions: buildDistributions(totalMatched),
-    sample_targets: buildSampleTargets(validFilters),
+    result_hash: null,
+    preview_unavailable: true,
+    total_matched_properties: 0,
+    total_matched: 0,
+    total_scanned: 0,
+    clean_targets: 0,
+    ready_to_queue: 0,
+    queueable_today: 0,
+    blocked_waterfall: [],
+    blocked_counts_by_reason: {},
+    distributions: buildDistributions(0),
+    sample_targets: [],
     unsupported_in_preview: unsupported,
     warnings,
     applied_filters: Object.values(serializeFilterGroups(draft.target_filters)).flat(),
@@ -2175,95 +2151,4 @@ function buildDistributions(total: number): CampaignDistribution[] {
       ],
     },
   ]
-}
-
-function buildSampleTargets(filters: CampaignFilterCondition[]): CampaignSampleTarget[] {
-  const marketFilter = filters.find((filter) => filter.fieldKey === 'properties.market')
-  const stateFilter = filters.find((filter) => filter.fieldKey === 'properties.property_state')
-  const market = firstValue(marketFilter?.value, 'Dallas-Fort Worth')
-  const state = firstValue(stateFilter?.value, 'TX').toUpperCase()
-  return [
-    {
-      id: 'sample-1',
-      property: {
-        address: '1428 S Lancaster Rd',
-        market,
-        property_state: state,
-        property_type: 'Single Family',
-        equity_percent: 72,
-        final_acquisition_score: 86,
-      },
-      prospect: {
-        name: 'Maria H.',
-        language_preference: 'English',
-        age_bucket: '55-64',
-        sms_eligible: true,
-      },
-      master_owner: {
-        owner_type_guess: 'Small Portfolio',
-        priority_tier: 'A',
-        portfolio_total_value: '$1.4M',
-        property_count: 3,
-      },
-      phone: {
-        phone_owner: 'T-Mobile',
-        activity_status: 'Active',
-        usage_12_months: 18,
-      },
-      outreach: {
-        never_contacted: true,
-        next_allowed_sms_at: 'Today 9:00 AM',
-        touch_count: 0,
-      },
-      sender_coverage: {
-        routing_allowed: true,
-        routing_tier: 'Primary',
-        sender_coverage_status: 'Covered',
-      },
-    },
-    {
-      id: 'sample-2',
-      property: {
-        address: '810 W Gardenia Ave',
-        market,
-        property_state: state,
-        property_type: 'Duplex',
-        equity_percent: 64,
-        final_acquisition_score: 79,
-      },
-      prospect: {
-        name: 'D. Williams',
-        language_preference: 'English',
-        age_bucket: '65-74',
-        sms_eligible: true,
-      },
-      master_owner: {
-        owner_type_guess: 'Individual',
-        priority_tier: 'B',
-        portfolio_total_value: '$620K',
-        property_count: 1,
-      },
-      phone: {
-        phone_owner: 'Verizon',
-        activity_status: 'Recently Active',
-        usage_12_months: 9,
-      },
-      outreach: {
-        never_contacted: false,
-        next_allowed_sms_at: 'Tomorrow 10:30 AM',
-        touch_count: 1,
-      },
-      sender_coverage: {
-        routing_allowed: true,
-        routing_tier: 'Fallback',
-        sender_coverage_status: 'Covered',
-      },
-    },
-  ]
-}
-
-function firstValue(value: unknown, fallback: string): string {
-  if (Array.isArray(value) && value.length > 0) return String(value[0])
-  if (typeof value === 'string' && value.trim()) return value
-  return fallback
 }

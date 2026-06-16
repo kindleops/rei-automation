@@ -24,7 +24,15 @@ import {
   getCampaignBackend,
   listCampaignsBackend,
   queueCampaignPlan,
+  queueCampaignBatch,
+  setCampaignLifecycle,
+  cloneCampaignBackend,
+  deleteCampaignBackend,
 } from '../../lib/api/backendClient'
+
+export type CampaignLifecycleAction =
+  | 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation'
+  | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive'
 
 // ── Supabase loaders ────────────────────────────────────────────────────────────
 
@@ -512,9 +520,57 @@ export const fetchCampaignLogs = async (campaignId: string): Promise<CampaignLog
   return []
 }
 
-export const queueBatch = async (campaignId: string, options: { limit: number; dry_run: boolean; respect_send_window: boolean; interval_seconds: number }) => {
-  console.log(`[API] POST /api/campaigns/${campaignId}/queue-batch`, options)
-  return { success: true, queued: options.limit }
+// Live commit. Writes real send_queue rows (staged as `scheduled`); the campaign
+// walks BUILT -> QUEUED -> SCHEDULED. Nothing sends until the campaign is ACTIVE.
+export const queueBatch = async (
+  campaignId: string,
+  options: { limit: number; respect_send_window?: boolean; interval_seconds?: number },
+) => {
+  const res = await queueCampaignBatch(campaignId, {
+    limit: options.limit,
+    interval_seconds: options.interval_seconds,
+    respect_send_window: options.respect_send_window,
+  })
+  if (!res.ok) {
+    const upstream = (res.upstream && typeof res.upstream === 'object') ? (res.upstream as Record<string, unknown>) : {}
+    const blockers = (upstream.exact_blockers ?? upstream.blockers) as string[] | undefined
+    throw new Error(
+      (blockers?.length ? `Blocked: ${blockers.join(', ')}` : '') || res.message || res.error || 'queue_batch_failed',
+    )
+  }
+  return {
+    success: res.data.ok !== false,
+    queued: res.data.send_queue_rows_created ?? res.data.queued_count ?? 0,
+    status: res.data.status,
+    blockers: (res.data.exact_blockers ?? res.data.blockers ?? []) as string[],
+    result: res.data,
+  }
+}
+
+// Operator lifecycle controls — pause / resume / archive / schedule / activate / …
+export const campaignLifecycle = async (
+  campaignId: string,
+  action: CampaignLifecycleAction,
+  payload: Record<string, unknown> = {},
+) => {
+  const res = await setCampaignLifecycle(campaignId, action, payload)
+  if (!res.ok) {
+    throw new Error(res.message || res.error || `lifecycle_${action}_failed`)
+  }
+  return res.data
+}
+
+export const cloneCampaign = async (campaignId: string, name?: string): Promise<string> => {
+  const res = await cloneCampaignBackend(campaignId, name ? { name } : {})
+  if (!res.ok) throw new Error(res.message || res.error || 'campaign_clone_failed')
+  if (!res.data.campaign_id) throw new Error('campaign_clone_failed')
+  return res.data.campaign_id
+}
+
+export const deleteCampaign = async (campaignId: string) => {
+  const res = await deleteCampaignBackend(campaignId)
+  if (!res.ok) throw new Error(res.message || res.error || 'campaign_delete_failed')
+  return res.data
 }
 
 export const fetchCampaignMarketMetrics = async (campaignId: string): Promise<CampaignMarketMetric[]> => {

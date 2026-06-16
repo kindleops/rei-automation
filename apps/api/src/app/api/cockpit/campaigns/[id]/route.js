@@ -3,6 +3,7 @@ import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../_shared.js
 import {
   getCampaign,
   updateCampaign,
+  deleteCampaign,
 } from '@/lib/domain/campaigns/campaign-automation-service.js'
 
 export const runtime = 'nodejs'
@@ -62,6 +63,28 @@ export async function PATCH(request, { params }) {
     return withCors(request, {
       ok: false,
       error: 'campaign_patch_failed',
+      message: error?.message || String(error),
+    }, 500)
+  }
+}
+
+export async function DELETE(request, { params }) {
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+
+  const campaignId = await campaignIdFromParams(params)
+  if (!campaignId) {
+    return withCors(request, { ok: false, error: 'campaign_id_required' }, 400)
+  }
+
+  try {
+    const result = await deleteCampaign(campaignId)
+    return withCors(request, result, result.ok === false ? 400 : 200)
+  } catch (error) {
+    console.error('campaigns.delete_failed', error)
+    return withCors(request, {
+      ok: false,
+      error: 'campaign_delete_failed',
       message: error?.message || String(error),
     }, 500)
   }

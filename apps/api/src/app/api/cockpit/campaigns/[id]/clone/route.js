@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../../_shared.js'
-import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automation-service.js'
+import { cloneCampaign } from '@/lib/domain/campaigns/campaign-automation-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300
+export const maxDuration = 60
 
 function withCors(request, payload, status = 200) {
   return NextResponse.json(payload, { status, headers: corsHeaders(request) })
@@ -30,28 +30,13 @@ export async function POST(request, { params }) {
 
   try {
     const body = await parseJsonSafe(request)
-    // Live commit: writes real send_queue rows. These are staged as `scheduled`
-    // and the campaign walks BUILT -> QUEUED -> SCHEDULED. Nothing is sent until
-    // the campaign is ACTIVE (Activate) — the runner is campaign-gated.
-    const result = await createCampaignQueuePlan(campaignId, {
-      ...body,
-      dry_run: false,
-      no_send: false,
-      confirm_live: true,
-      create_send_queue_rows: true,
-      explicit_operator_action: true,
-    })
-
-    return withCors(request, {
-      ...result,
-      success: result.ok !== false,
-      queued_count: result.send_queue_rows_created ?? 0,
-    }, result.ok === false ? 423 : 200)
+    const result = await cloneCampaign(campaignId, body)
+    return withCors(request, result, result.ok === false ? 400 : 200)
   } catch (error) {
-    console.error('campaigns.queue_batch_failed', error)
+    console.error('campaigns.clone_failed', error)
     return withCors(request, {
       ok: false,
-      error: 'campaign_queue_batch_failed',
+      error: 'campaign_clone_failed',
       message: error?.message || String(error),
     }, 500)
   }

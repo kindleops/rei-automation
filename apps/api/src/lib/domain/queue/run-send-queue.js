@@ -12,8 +12,33 @@ import {
 } from "@/lib/domain/queue/process-send-queue.js";
 import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
+import { isLiveCampaignStatus, LIVE_CAMPAIGN_STATES } from "@/lib/domain/campaigns/campaign-state-machine.js";
 function normalizeRows(data) {
   return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Campaign-gated dispatch: a send_queue row that belongs to a campaign is only
+ * eligible to send while that campaign is live (ACTIVE/activating). Rows with no
+ * campaign_id are unaffected and flow exactly as before. Returns a Set of live
+ * campaign ids, or null if the lookup failed (caller fails closed for campaign
+ * rows so a transient error can never dispatch a non-active campaign).
+ */
+async function fetchLiveCampaignIds(supabase) {
+  try {
+    const { data, error } = await supabase
+      .from("campaigns")
+      .select("id,status")
+      .in("status", [...LIVE_CAMPAIGN_STATES]);
+    if (error) {
+      warn("queue.live_campaign_fetch_failed", { error: error.message });
+      return null;
+    }
+    return new Set((data || []).filter((c) => isLiveCampaignStatus(c.status)).map((c) => c.id));
+  } catch (err) {
+    warn("queue.live_campaign_fetch_failed", { error: err?.message });
+    return null;
+  }
 }
 
 function nowIso() {
@@ -171,7 +196,23 @@ export async function runSendQueue(
 
   // 2. Fetch candidates (no global lock skip)
   const candidates = await buildQueueCandidates(limit, now, { ...deps, dry_run, supabaseClient: supabase });
-  const rows = normalizeRows(candidates.rows);
+  const candidateRows = normalizeRows(candidates.rows);
+
+  // 2b. Campaign-gated dispatch. Rows belonging to a campaign only send while
+  // that campaign is live (ACTIVE/activating). Unlinked rows flow as today.
+  const liveCampaignIds = await fetchLiveCampaignIds(supabase);
+  const rows = candidateRows.filter((row) => {
+    const campaignId = row.campaign_id || row.metadata?.campaign_id || null;
+    if (!campaignId) return true;
+    return liveCampaignIds ? liveCampaignIds.has(campaignId) : false;
+  });
+  const campaign_gated_held_back = candidateRows.length - rows.length;
+  if (campaign_gated_held_back > 0) {
+    log_info("queue.campaign_gated_rows_held", {
+      held_back: campaign_gated_held_back,
+      live_campaigns: liveCampaignIds ? liveCampaignIds.size : 0,
+    });
+  }
 
   log_info("queue_rows_claimed", { count: rows.length });
 

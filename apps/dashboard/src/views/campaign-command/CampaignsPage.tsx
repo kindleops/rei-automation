@@ -12,7 +12,11 @@ import {
   fetchCampaignLogs,
   buildSuppressionChecklist,
   queueBatch,
+  campaignLifecycle,
+  cloneCampaign,
+  deleteCampaign,
 } from './campaigns.adapter'
+import type { CampaignLifecycleAction } from './campaigns.adapter'
 import { CreateCampaignModal } from './CreateCampaignModal'
 import { CampaignControlCenter } from './CampaignControlCenter'
 import type {
@@ -1203,35 +1207,86 @@ export const CampaignsPage = () => {
 
   const handleCampaignAction = useCallback(
     async (action: string, campaign: CampaignSummary) => {
-      if (action === 'queue-batch') {
-        const h = computeHealth(campaign)
-        if (h.level === 'dangerous') {
-          emitNotification({ title: 'Cannot Queue Batch', detail: 'Campaign health is critical', severity: 'critical' })
+      try {
+        if (action === 'refresh') { load(); return }
+        if (action === 'targets') {
+          emitNotification({ title: 'Build Targets', detail: `Opening builder for "${campaign.campaign_name}"…`, severity: 'info' })
           return
         }
-        await queueBatch(campaign.id, {
-          limit: campaign.ready_targets,
-          dry_run: false,
-          respect_send_window: true,
-          interval_seconds: campaign.send_interval_seconds || 15
+
+        if (action === 'queue-batch') {
+          const h = computeHealth(campaign)
+          if (h.level === 'dangerous') {
+            emitNotification({ title: 'Cannot Queue Batch', detail: 'Campaign health is critical', severity: 'critical' })
+            return
+          }
+          if (!campaign.ready_targets) {
+            emitNotification({ title: 'Nothing to queue', detail: 'Build targets first — 0 ready targets.', severity: 'warning' })
+            return
+          }
+          const res = await queueBatch(campaign.id, {
+            limit: campaign.ready_targets,
+            respect_send_window: true,
+            interval_seconds: campaign.send_interval_seconds || 15,
+          })
+          if (res.blockers?.length) {
+            emitNotification({ title: 'Queue blocked', detail: res.blockers.join(', '), severity: 'warning' })
+          } else {
+            emitNotification({
+              title: `Queued ${res.queued} sends`,
+              detail: `"${campaign.campaign_name}" staged → SCHEDULED. Activate to go live.`,
+              severity: 'success',
+            })
+          }
+          load(); return
+        }
+
+        const lifecycleMap: Record<string, CampaignLifecycleAction> = {
+          pause: 'pause',
+          resume: 'resume',
+          start: 'activate',
+          activate: 'activate',
+          schedule: 'schedule',
+          unschedule: 'unschedule',
+          cancel: 'unschedule',
+          archive: 'archive',
+          complete: 'complete',
+        }
+        if (lifecycleMap[action]) {
+          const result = await campaignLifecycle(campaign.id, lifecycleMap[action])
+          emitNotification({
+            title: `"${campaign.campaign_name}" → ${result.to ?? lifecycleMap[action]}`,
+            severity: action === 'pause' || action === 'cancel' || action === 'archive' ? 'warning' : 'success',
+          })
+          load(); return
+        }
+
+        if (action === 'clone') {
+          await cloneCampaign(campaign.id)
+          emitNotification({ title: 'Campaign cloned', detail: `New draft created from "${campaign.campaign_name}".`, severity: 'success' })
+          load(); return
+        }
+
+        if (action === 'delete') {
+          const res = await deleteCampaign(campaign.id)
+          emitNotification({
+            title: res.archived ? 'Campaign archived' : 'Campaign deleted',
+            detail: res.archived
+              ? 'Send history preserved; archived instead of deleted.'
+              : `Removed "${campaign.campaign_name}".`,
+            severity: 'warning',
+          })
+          load(); return
+        }
+
+        emitNotification({ title: action, severity: 'info' })
+      } catch (err) {
+        emitNotification({
+          title: `Action failed: ${action}`,
+          detail: err instanceof Error ? err.message : String(err),
+          severity: 'critical',
         })
       }
-      
-      const messages: Record<string, string> = {
-        pause:        `"${campaign.campaign_name}" paused.`,
-        resume:       `"${campaign.campaign_name}" resumed.`,
-        start:        `"${campaign.campaign_name}" started.`,
-        cancel:       `Schedule cancelled for "${campaign.campaign_name}".`,
-        'queue-batch': `Batch queued for "${campaign.campaign_name}".`,
-        targets:      `Build Targets wizard opening…`,
-        schedule:     `Schedule opened for "${campaign.campaign_name}".`,
-        refresh:      `Metrics refreshed.`,
-      }
-      emitNotification({
-        title: messages[action] ?? action,
-        severity: action === 'pause' || action === 'cancel' ? 'warning' : 'success',
-      })
-      if (action === 'refresh') load()
     },
     [load],
   )
