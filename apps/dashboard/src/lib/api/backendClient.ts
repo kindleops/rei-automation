@@ -1248,13 +1248,17 @@ export interface QueueBatchResponse {
   message?: string
 }
 
-export function queueCampaignBatch(campaignId: string, limit: number, interval_seconds: number): Promise<BackendResult<QueueBatchResponse>> {
-  return queueCampaignPlan(campaignId, {
-    dry_run: true,
-    create_send_queue_rows: false,
-    explicit_operator_action: true,
-    limit,
-    interval_seconds,
+// Live commit. Writes real send_queue rows (staged as `scheduled`) and walks the
+// campaign BUILT -> QUEUED -> SCHEDULED. Nothing is sent until Activate (the
+// runner is campaign-gated). The /queue-batch route enforces the live flags
+// server-side; the client only supplies operator intent + pacing.
+export function queueCampaignBatch(
+  campaignId: string,
+  payload: { limit?: number; interval_seconds?: number; respect_send_window?: boolean } = {},
+): Promise<BackendResult<QueueBatchResponse>> {
+  return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-batch`, {
+    method: 'POST',
+    body: JSON.stringify({ explicit_operator_action: true, ...payload }),
   })
 }
 
@@ -1374,11 +1378,49 @@ export interface CampaignLifecycleResponse {
 
 export function setCampaignLifecycle(
   campaignId: string,
-  action: 'preview' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive',
+  action: 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive',
   payload: Record<string, unknown> = {},
 ): Promise<BackendResult<CampaignLifecycleResponse>> {
   return callBackend<CampaignLifecycleResponse>(`/api/cockpit/campaigns/${campaignId}/lifecycle`, {
     method: 'POST',
     body: JSON.stringify({ action, ...payload }),
+  })
+}
+
+export interface CampaignCloneResponse {
+  ok: boolean
+  campaign_id?: string
+  campaign?: Record<string, unknown>
+  error?: string
+  message?: string
+}
+
+export function cloneCampaignBackend(
+  campaignId: string,
+  payload: Record<string, unknown> = {},
+): Promise<BackendResult<CampaignCloneResponse>> {
+  return callBackend<CampaignCloneResponse>(`/api/cockpit/campaigns/${campaignId}/clone`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export interface CampaignDeleteResponse {
+  ok: boolean
+  campaign_id?: string
+  deleted?: boolean
+  archived?: boolean
+  targets_removed?: number
+  windows_removed?: number
+  queue_rows_cancelled?: number
+  error?: string
+  message?: string
+}
+
+export function deleteCampaignBackend(
+  campaignId: string,
+): Promise<BackendResult<CampaignDeleteResponse>> {
+  return callBackend<CampaignDeleteResponse>(`/api/cockpit/campaigns/${campaignId}`, {
+    method: 'DELETE',
   })
 }
