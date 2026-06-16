@@ -993,16 +993,23 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
       const now = Date.now()
       const last = lastRefreshAtRef.current ? new Date(lastRefreshAtRef.current).getTime() : 0
-      
+
+      // When realtime has flapped to CHANNEL_ERROR/TIMED_OUT (status 'error') or fully
+      // disconnected, back off polling to >=30s so a degraded socket can't trigger an
+      // inbox/live request storm. Healthy/connecting states keep the normal 15s cadence.
+      const realtimeStatus = stateRef.current.realtimeStatus
+      const realtimeDegradedNow = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
+      const effectiveMinRefreshMs = realtimeDegradedNow ? 30_000 : minRefreshMs
+
       // Lightweight polling fallback while the tab is focused.
-      if (now - last < minRefreshMs) {
-        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'min_interval_not_met', elapsed: now - last, min: minRefreshMs })
+      if (now - last < effectiveMinRefreshMs) {
+        if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'min_interval_not_met', elapsed: now - last, min: effectiveMinRefreshMs, realtimeStatus })
         return null
       }
 
       // If active bucket already has live rows and last successful live fetch was recent, skip refresh.
       const currentBucket = stateRef.current.buckets[bucketKey]
-      if (currentBucket && currentBucket.rows.length > 0 && (now - last < minRefreshMs)) {
+      if (currentBucket && currentBucket.rows.length > 0 && (now - last < effectiveMinRefreshMs)) {
          if (isDev) console.log('[INBOX_REFRESH_SKIPPED]', { bucketKey, refresh_skipped_reason: 'bucket_recently_loaded' })
          return null
       }

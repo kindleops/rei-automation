@@ -2352,9 +2352,12 @@ async function queryMessageEventsByStrictStrategy({
   limit,
   diagnostics,
 }) {
+  // NOTE: no `{ count: "exact" }` — an exact count over message_events (multi-million rows)
+  // ran per-strategy and was the root cause of 27s–108s thread-messages responses. We derive
+  // `total` from the returned rows instead, which keeps each lookup an indexed, sub-second query.
   let query = supabase
     .from("message_events")
-    .select("*", { count: "exact" });
+    .select("*");
 
   query = strategy.apply(query);
   const filterAudit = {

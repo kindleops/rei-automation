@@ -1305,13 +1305,14 @@ const FILTER_COLUMNS_BY_ALIAS: Record<string, readonly string[]> = {
     'prospect_id',
     'property_id',
   ],
-  // Only allow indexed ID lookups on properties — address-based OR queries cause statement timeouts
-  properties: ['property_id', 'id', 'owner_id', 'master_owner_id'],
+  // Only allow indexed ID lookups on properties — address-based OR queries cause statement timeouts.
+  // NOTE: public.properties has no `id` column — property_id is the canonical key.
+  properties: ['property_id', 'owner_id', 'master_owner_id'],
 }
 
 // Minimal column sets to avoid select=* on large tables
 const SELECT_COLUMNS_BY_ALIAS: Record<string, string> = {
-  properties: 'property_id,id,master_owner_id,owner_id,property_address,property_address_full,market,market_id',
+  properties: 'property_id,master_owner_id,owner_id,property_address,property_address_full,market,market_id',
 }
 
 /** Returns the first existing table for an alias key, or the raw key if not a known alias. */
