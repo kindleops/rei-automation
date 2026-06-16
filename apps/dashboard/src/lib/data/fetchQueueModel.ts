@@ -1,8 +1,103 @@
 import { getSupabaseClient } from '../supabaseClient'
 import { asBoolean, asIso, asNumber, asString, getFirst, safeArray, type AnyRecord } from './shared'
-import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason, QueueFetchOptions, QueueDateBasis, StageCode } from '../../domain/queue/queue.types'
+import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
 import { getBackendBaseUrl } from '../api/backendClient'
+
+// ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
+
+const DEFAULT_PAGE_SIZE = 500
+
+const VALID_DATE_BASIS: QueueDateBasis[] = ['created_at', 'scheduled_for', 'updated_at']
+
+// Maps a UI status bucket → concrete queue_status values for server-side .in()
+//
+// SOURCE OF TRUTH for send metrics (see also QueuePage aggregators):
+//   Sent      = every row that reached the provider / was dispatched. This is a
+//               SUPERSET of delivered + failed-after-send + transient 'sent'.
+//               Guarantees sent >= delivered everywhere.
+//   Delivered = provider confirmed delivered only (subset of sent).
+//   Failed    = provider/carrier failure after a send attempt (subset of sent).
+//   Blocked   = stopped BEFORE provider send (pauses, guards, duplicates).
+//   Opt-outs  = opt-out / 21610 suppression events.
+const SENT_STATUS_VALUES = ['sent', 'delivered', 'failed', 'retry', 'retrying']
+const STATUS_BUCKET_VALUES: Record<string, string[]> = {
+  scheduled: ['scheduled'],
+  queued: ['queued', 'ready', 'pending'],
+  sending: ['sending'],
+  sent: SENT_STATUS_VALUES,
+  delivered: ['delivered'],
+  failed: ['failed', 'retry', 'retrying'],
+  blocked: [
+    'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
+    'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
+  ],
+  approval: ['approval', 'awaiting_approval'],
+}
+
+// Normalizes ownership / reply stage from the columns the spec allows. Falls
+// back gracefully — never invents a stage that the row does not support.
+function deriveStage(
+  row: AnyRecord,
+  md: AnyRecord,
+  rowSource: QueueItem['rowSource'],
+  touchNumber: number,
+): { code: StageCode | null; label: string | null } {
+  if (rowSource === 'auto_reply' || asBoolean(getFirst(md, ['auto_reply']), false)) {
+    return { code: 'auto_reply', label: STAGE_LABELS.auto_reply }
+  }
+  if (rowSource === 'manual' || asString(getFirst(md, ['source']), '') === 'manual') {
+    return { code: 'manual_reply', label: STAGE_LABELS.manual_reply }
+  }
+
+  // Explicit stage_code wins (e.g. "S3", "stage_3", "ownership_s2")
+  const rawCode = (
+    asString(getFirst(row, ['stage_code', 'current_stage']), '') ||
+    asString(getFirst(md, ['stage_code', 'template_use_case']), '')
+  ).toLowerCase()
+  const codeMatch = rawCode.match(/s(?:tage)?[_\-\s]?([1-5])/)
+  if (codeMatch) {
+    const code = `S${codeMatch[1]}` as StageCode
+    return { code, label: STAGE_LABELS[code] }
+  }
+
+  // Touch number → ownership stage (1-5)
+  if (touchNumber >= 1 && touchNumber <= 5) {
+    const code = `S${touchNumber}` as StageCode
+    return { code, label: STAGE_LABELS[code] }
+  }
+
+  return { code: null, label: null }
+}
+
+// Full owner/seller name resolution order (Phase 5)
+function resolveFullName(
+  row: AnyRecord,
+  md: AnyRecord,
+  target: AnyRecord | null,
+  owner: AnyRecord | null,
+  fallbackPhone: string,
+): string {
+  const candidateSnapshot = (md.candidate_snapshot && typeof md.candidate_snapshot === 'object' ? md.candidate_snapshot : {}) as AnyRecord
+  const targetSnapshot = (md.target_snapshot && typeof md.target_snapshot === 'object' ? md.target_snapshot : {}) as AnyRecord
+  const ordered = [
+    asString(getFirst(row, ['seller_display_name']), ''),
+    asString(getFirst(candidateSnapshot, ['seller_full_name']), ''),
+    asString(getFirst(candidateSnapshot, ['owner_display_name']), ''),
+    asString(getFirst(targetSnapshot, ['seller_full_name']), ''),
+    asString(getFirst(targetSnapshot, ['owner_display_name']), ''),
+    asString(getFirst(target || {}, ['seller_full_name', 'seller_name']), ''),
+    asString(getFirst(owner || {}, ['display_name']), ''),
+    asString(getFirst(row, ['full_name', 'entity_name', 'seller_name']), ''),
+    asString(getFirst(row, ['seller_first_name', 'first_name']), ''),
+  ]
+  for (const candidate of ordered) {
+    const trimmed = candidate.trim()
+    if (trimmed && trimmed.toLowerCase() !== 'unknown seller') return trimmed
+  }
+  return fallbackPhone || 'Unknown seller'
+}
 
 const toQueueStatus = (value: unknown): QueueItemStatus => {
   const status = asString(value, '').toLowerCase()
@@ -63,18 +158,96 @@ const asRecord = (value: unknown): AnyRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as AnyRecord : {}
 )
 
-export const fetchQueueModel = async (): Promise<QueueModel> => {
+export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<QueueModel> => {
   const supabase = getSupabaseClient()
 
-  // Step 1: Fetch Queue
-  const queueResult = await supabase
-    .from('send_queue')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(1200)
+  // ── Resolve server-side filter inputs ──────────────────────────────────────
+  const dateBasis: QueueDateBasis = VALID_DATE_BASIS.includes(opts.dateBasis as QueueDateBasis)
+    ? (opts.dateBasis as QueueDateBasis)
+    : 'created_at'
+  const page = Math.max(0, Math.floor(opts.page ?? 0))
+  const pageSize = Math.max(1, Math.min(1000, Math.floor(opts.pageSize ?? DEFAULT_PAGE_SIZE)))
+  const statusBucket = opts.status && opts.status !== 'all' ? opts.status : null
+  const statusValues = statusBucket ? STATUS_BUCKET_VALUES[statusBucket] ?? null : null
+
+  // Applies the range filters (date / market / sender) shared by the table,
+  // count and KPI queries. Typed loosely on purpose — the Postgrest builder
+  // generics recurse otherwise.
+  const applyRangeFilters = (q: any): any => {
+    let out = q
+    if (opts.dateFrom) out = out.gte(dateBasis, opts.dateFrom)
+    if (opts.dateTo) out = out.lte(dateBasis, opts.dateTo)
+    if (opts.market && opts.market !== 'all') out = out.eq('market', opts.market)
+    if (opts.sender && opts.sender !== 'all') out = out.eq('from_phone_number', opts.sender)
+    return out
+  }
+
+  // Table/count query also narrows by the selected status bucket. The KPI
+  // aggregation deliberately omits status so every bucket stays countable.
+  const applyFilters = (q: any): any => {
+    const out = applyRangeFilters(q)
+    return statusValues ? out.in('queue_status', statusValues) : out
+  }
+
+  // Step 1: Fetch one page of the queue with an exact total count for the range.
+  const queueResult = await applyFilters(
+    supabase.from('send_queue').select('*', { count: 'exact' }),
+  )
+    .order(dateBasis, { ascending: false, nullsFirst: false })
+    .range(page * pageSize, page * pageSize + pageSize - 1)
 
   if (queueResult.error) throw new Error(queueResult.error.message)
   const queueRows = safeArray(queueResult.data as AnyRecord[])
+  const totalCount = Number(queueResult.count ?? queueRows.length)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  // Step 1b: Range-accurate KPI aggregation (independent of the visible page).
+  // Pulls only the small columns needed to bucket statuses across the whole
+  // filtered date range so the KPI strip reflects the range, not just the page.
+  const rangeKpis = {
+    scheduled: 0, queued: 0, sending: 0, sent: 0,
+    delivered: 0, failed: 0, blocked: 0, approval: 0, optOuts: 0, total: totalCount,
+  }
+  let rangeOk = false
+  try {
+    // Range-accurate counts via parallel head-only COUNT queries (not row-capped
+    // by PostgREST's max-rows, unlike a select+client-side tally).
+    const bucketCount = async (values: string[]): Promise<number> => {
+      const res = await applyRangeFilters(
+        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
+      ).in('queue_status', values)
+      if (res.error) throw new Error(res.error.message)
+      return Number(res.count ?? 0)
+    }
+    const optOutCount = async (): Promise<number> => {
+      const res = await applyRangeFilters(
+        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
+      ).or('failed_reason.ilike.%opt%,blocked_reason.ilike.%opt%,failed_reason.ilike.%21610%,blocked_reason.ilike.%21610%')
+      return Number(res.count ?? 0)
+    }
+    const [scheduled, queued, sending, sent, delivered, failed, blocked, approval, optOuts] = await Promise.all([
+      bucketCount(STATUS_BUCKET_VALUES.scheduled),
+      bucketCount(STATUS_BUCKET_VALUES.queued),
+      bucketCount(STATUS_BUCKET_VALUES.sending),
+      bucketCount(STATUS_BUCKET_VALUES.sent),
+      bucketCount(STATUS_BUCKET_VALUES.delivered),
+      bucketCount(STATUS_BUCKET_VALUES.failed),
+      bucketCount(STATUS_BUCKET_VALUES.blocked),
+      bucketCount(STATUS_BUCKET_VALUES.approval),
+      optOutCount(),
+    ])
+    Object.assign(rangeKpis, { scheduled, queued, sending, sent, delivered, failed, blocked, approval, optOuts })
+    // When no status filter is active, totalCount already reflects the range.
+    if (statusValues) {
+      const tot = await applyRangeFilters(
+        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
+      )
+      rangeKpis.total = Number(tot.count ?? totalCount)
+    }
+    rangeOk = true
+  } catch {
+    // Non-fatal — page still renders with page-scoped counts as a fallback.
+  }
 
   // Step 2: Extract IDs
   const propertyIds = new Set<string>()
@@ -169,6 +342,30 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
   const ownerById = new Map(safeArray(ownerRes.data as AnyRecord[]).map(r => [r.master_owner_id, r]))
   const textgridNumbers = safeArray(tgRes.data as AnyRecord[])
 
+  // Configured-market registry from the textgrid_numbers fleet. Drives Market
+  // Health so every market we own a sender in shows up — even with zero rows in
+  // the current page/range. "active" is defensive: a market counts as active
+  // unless every sender is explicitly flagged inactive/paused.
+  const marketDirectory = (() => {
+    const m = new Map<string, { senderCount: number; active: boolean }>()
+    for (const n of textgridNumbers) {
+      const market = asString(getFirst(n, ['market', 'sender_market']), '').trim()
+      if (!market) continue
+      const entry = m.get(market) ?? { senderCount: 0, active: false }
+      entry.senderCount++
+      const status = asString(getFirst(n, ['status', 'state']), '').toLowerCase()
+      const explicitlyInactive =
+        asBoolean(getFirst(n, ['paused', 'is_paused']), false) ||
+        status === 'paused' || status === 'inactive' || status === 'disabled' ||
+        asBoolean(getFirst(n, ['active', 'is_active']), true) === false
+      if (!explicitlyInactive) entry.active = true
+      m.set(market, entry)
+    }
+    return Array.from(m.entries())
+      .map(([market, v]) => ({ market, senderCount: v.senderCount, active: v.active }))
+      .sort((a, b) => a.market.localeCompare(b.market))
+  })()
+
   // Step 4: Hydration Mapping
   const items: QueueItem[] = queueRows.map((row, index) => {
     const id = asString(row['id'], `queue-${index + 1}`)
@@ -200,11 +397,10 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     const scheduledIso = asIso(getFirst(row, ['scheduled_for', 'scheduled_at', 'send_at'])) ?? new Date().toISOString()
     const localScheduledIso = asIso(getFirst(row, ['scheduled_for_local'])) || scheduledIso
 
-    const sellerName = asString(
-      getFirst(target || {}, ['seller_name', 'seller_full_name']),
-      asString(getFirst(row, ['full_name', 'entity_name', 'seller_name', 'first_name']),
-      asString(getFirst(owner || {}, ['display_name', 'entity_name', 'first_name']), 'Unknown seller'))
-    )
+    // Full owner/seller name resolution (Phase 5) — phone is the final fallback.
+    const toPhoneEarly = asString(getFirst(row, ['to_phone_number', 'phone']), '')
+    const sellerName = resolveFullName(row, md, target, owner, toPhoneEarly)
+    const nameIsFallbackPhone = Boolean(toPhoneEarly) && sellerName === toPhoneEarly
 
     const propertyAddress = asString(
       getFirst(target || {}, ['property_address_full', 'address_full']),
@@ -247,9 +443,13 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     else if (md.source === 'manual') rowSource = 'manual'
     else rowSource = 'feeder' // fallback
 
+    // Normalized stage (Phase 3)
+    const touchNumber = Math.max(asNumber(getFirst(row, ['touch_number']), 1), 1)
+    const { code: stageCode, label: stageLabel } = deriveStage(row, md, rowSource, touchNumber)
+
     // Diagnostics
     const flags: string[] = []
-    if (sellerName === 'Unknown seller') flags.push('MISSING_OWNER')
+    if (sellerName === 'Unknown seller' || nameIsFallbackPhone) flags.push('MISSING_OWNER')
     if (propertyAddress === 'No property linked') flags.push('MISSING_PROPERTY')
     if (status === 'sent' && !event) flags.push('MISSING_MESSAGE_EVENT')
     if (rowSource === 'campaign' && !metadataCampaignTargetId && !target) flags.push('MISSING_CAMPAIGN_TARGET')
@@ -272,6 +472,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       sellerDisplayName: sellerName,
       sellerFirstName: asString(getFirst(target || {}, ['seller_first_name']), asString(getFirst(owner || {}, ['first_name']), '')) || null,
       sellerFullName: sellerName,
+      sellerFullNameResolved: sellerName,
       propertyAddress,
       propertyCity: asString(getFirst(target || {}, ['property_city']), asString(getFirst(property || {}, ['property_address_city']), '')) || null,
       propertyState: asString(getFirst(target || {}, ['property_state']), asString(getFirst(property || {}, ['property_address_state']), '')) || null,
@@ -289,6 +490,8 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       stage: asString(getFirst(row, ['stage', 'seller_stage']), 'lead'),
       stageBefore: asString(getFirst(row, ['stage_before']), asString(md.stage_before, '')) || null,
       stageAfter: asString(getFirst(row, ['stage_after']), asString(md.stage_after, '')) || null,
+      stageCode,
+      stageLabel,
       messageText,
       scheduledForLocal: localScheduledIso,
       scheduledForUtc: scheduledIso,
@@ -297,7 +500,7 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       status,
       statusLabel: statusLabelFor(status),
       priority: toPriority(getFirst(row, ['priority'])),
-      touchNumber: Math.max(asNumber(getFirst(row, ['touch_number']), 1), 1),
+      touchNumber,
       language: asString(getFirst(row, ['language']), 'en') === 'es' ? 'es' : 'en',
       retryCount,
       maxRetries,
@@ -359,7 +562,10 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
       lastEventStatus: event ? asString(event.delivery_status, '') || null : null,
       diagnosticFlags: flags,
       rowSource,
-      failureCategory
+      failureCategory,
+      automationSource: asString(getFirst(md, ['automation_source', 'source']), '') || null,
+      workflowId: asString(getFirst(row, ['workflow_id']), asString(getFirst(md, ['workflow_id']), '')) || null,
+      queueKey: qKey || null,
     }
   })
 
@@ -399,5 +605,16 @@ export const fetchQueueModel = async (): Promise<QueueModel> => {
     apiPressureLevel,
     sendEngine: 'real-estate-automation',
     engineMode,
+    // Server-side pagination metadata (Phase 1)
+    totalCount,
+    currentPage: page,
+    pageSize,
+    totalPages,
+    hasMore: page < totalPages - 1,
+    fetchOptions: opts,
+    // Only surface range counts when the aggregation actually succeeded; the
+    // page falls back to page-scoped counts when this is undefined.
+    rangeCounts: rangeOk ? rangeKpis : undefined,
+    marketDirectory,
   }
 }

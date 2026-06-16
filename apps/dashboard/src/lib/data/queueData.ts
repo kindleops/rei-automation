@@ -60,6 +60,12 @@ export const cancelQueueItem = async (item: QueueItem): Promise<QueueActionResul
   return { ok: true, errorMessage: null, updatedItem: { ...item, status: 'held' } }
 }
 
+export const runQueueOnce = async (): Promise<QueueActionResult> => {
+  const result = await backendClient.runQueueNow()
+  if (!result.ok) return { ok: false, errorMessage: 'Failed to run queue' }
+  return { ok: true, errorMessage: null }
+}
+
 export const retryRoutingForItem = async (item: QueueItem): Promise<QueueActionResult> => {
   // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
   // Backend re-resolves routing and reschedules.
@@ -73,4 +79,10 @@ export const retryQueueItem = async (item: QueueItem): Promise<QueueActionResult
   const result = await backendClient.retryQueueItem(String(item.id))
   if (!result.ok) return { ok: false, errorMessage: result.message }
   return { ok: true, errorMessage: null, updatedItem: { ...item, status: 'retry', retryCount: (item.retryCount || 0) + 1 } }
+}
+
+export const retryAllFailed = async (): Promise<QueueActionResult> => {
+  const result = await backendClient.retryFailed()
+  if (!result.ok) return { ok: false, errorMessage: result.message ?? 'Failed to retry items' }
+  return { ok: true, errorMessage: null }
 }

@@ -1,0 +1,80 @@
+export function degradedLiveResponse({
+  timeoutMode,
+  error,
+  reason,
+  dataMode,
+  countsSource,
+}) {
+  return {
+    ok: true,
+    degraded: true,
+    dataMode,
+    timeoutMode,
+    error_code: error,
+    error,
+    threads: [],
+    messages: [],
+    counts: {},
+    countsDegraded: true,
+    countsApproximate: false,
+    diagnostics: {
+      source: null,
+      sourceUsed: null,
+      live_source: null,
+      countsSource,
+      countsDegraded: true,
+      countsApproximate: false,
+      count_preserved_reason: reason,
+      refresh_skipped_reason: null,
+    },
+    mapPins: [],
+    pagination: { limit: 0, returned: 0, has_more: false, next_cursor: null },
+  };
+}
+
+export function degradedThreadMessagesPayload({
+  error,
+  thread_key,
+  canonical_e164,
+  offset,
+  limit,
+  diagnostics = {},
+}) {
+  const pagination = {
+    offset,
+    limit,
+    total: 0,
+    has_more: false,
+    next_offset: null,
+  };
+  const message = error?.message || "Unknown thread messages error";
+  return {
+    ok: true,
+    action: "thread-messages",
+    degraded: true,
+    error_code: "thread_messages_degraded",
+    error: "thread_messages_degraded",
+    message,
+    thread_key,
+    threadKey: thread_key || null,
+    identityUsed: null,
+    sourceUsed: "message_events:degraded",
+    queryMs: null,
+    messages: [],
+    pagination,
+    diagnostics: {
+      ...(diagnostics || {}),
+      thread_key,
+      canonical_e164: canonical_e164 || null,
+      canonical_thread_key: thread_key,
+      identityUsed: null,
+      sourceUsed: "message_events:degraded",
+      message_count: 0,
+      degraded: true,
+      error: message,
+      error_code: "thread_messages_degraded",
+      messages: [],
+      pagination,
+    },
+  };
+}

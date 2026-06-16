@@ -149,6 +149,12 @@ const generateQueueItem = (index: number): QueueItem => {
     diagnosticFlags: [],
     rowSource: 'campaign',
     guardReason: null,
+    automationSource: 'campaign_launch_execution',
+    workflowId: null,
+    queueKey: `feed-${index}`,
+    stageCode: (['S1', 'S2', 'S3', 'S4', 'S5'] as const)[Math.floor(Math.random() * 5)],
+    stageLabel: null,
+    sellerFullNameResolved: 'Mock Seller',
   }
 }
 

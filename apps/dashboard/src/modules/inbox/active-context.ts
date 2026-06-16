@@ -50,6 +50,10 @@ export type ActiveInboxContext = {
   activityId?: string
   market?: string
   date?: string
+  // Property-aware payload so other apps can hydrate from a queue selection
+  toPhoneNumber?: string
+  propertyAddress?: string
+  sellerName?: string
   sourceView?: ActiveInboxContextSource
   intent?: ActiveInboxContextIntent
 }
@@ -102,6 +106,9 @@ export const buildContextFromQueueItem = (
     queueId: text(item.queueId ?? item.id),
     messageEventId: text(item.messageEventId),
     market: text(item.market),
+    toPhoneNumber: text(item.toPhoneNumber ?? item.phone),
+    propertyAddress: text(item.propertyAddress),
+    sellerName: text(item.sellerFullName ?? item.sellerName),
     sourceView,
     intent,
   }

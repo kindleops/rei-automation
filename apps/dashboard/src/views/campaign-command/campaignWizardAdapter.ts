@@ -225,6 +225,12 @@ export interface CampaignPreviewResult {
   degraded?: boolean
   degradedReason?: string
   source?: 'backend' | 'local_fallback'
+  graph_refresh_scope?: string | null
+  graph_row_count?: number | null
+  graph_freshness?: {
+    refresh_started_at?: string | null
+    refresh_finished_at?: string | null
+  } | null
   _raw?: unknown
   _request?: {
     endpoint: string

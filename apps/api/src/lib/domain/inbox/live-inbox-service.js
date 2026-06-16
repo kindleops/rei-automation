@@ -1,7 +1,7 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 
-const PRIMARY_THREAD_SOURCE = "inbox_threads_view";
+const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
@@ -1458,6 +1458,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
+  const skipDelivery = bool(params.skip_delivery) || options.skipDelivery === true || timeoutMode === "initial_boot";
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -1564,8 +1565,11 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   }
 
   const deliveryHydrationStartedAt = nowMs();
-  finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
-  const deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
+  let deliveryHydrationMs = 0;
+  if (!skipDelivery) {
+    finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
+    deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
+  }
 
   console.log("[INBOX_BUCKET_ROWS]", {
     source: sourceConfig.name,
@@ -2129,71 +2133,45 @@ function buildStrictMessageStrategies(lookup = {}) {
     });
   }
 
-  if (lookup.propertyId && normalizedPhone) {
-    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
-    strategies.push({
-      name: "property_id+normalized_phone",
-      filter: {
-        table: "message_events",
-        eq: { property_id: lookup.propertyId },
-        phoneVariants: phoneFilter.phoneVariants,
-        or: phoneFilter.orClause,
-      },
-      apply(query) {
-        return applyPhoneAnyFilter(query.eq("property_id", lookup.propertyId), normalizedPhone);
-      },
-    });
-  }
-
-  if ((lookup.masterOwnerId || lookup.ownerId) && normalizedPhone) {
-    const ownerId = lookup.masterOwnerId || lookup.ownerId;
-    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
-    strategies.push({
-      name: "master_owner_id+normalized_phone",
-      filter: {
-        table: "message_events",
-        eq: { master_owner_id: ownerId },
-        phoneVariants: phoneFilter.phoneVariants,
-        or: phoneFilter.orClause,
-      },
-      apply(query) {
-        return applyPhoneAnyFilter(query.eq("master_owner_id", ownerId), normalizedPhone);
-      },
-    });
-  }
-
-  if (lookup.prospectId && normalizedPhone) {
-    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
-    strategies.push({
-      name: "prospect_id+normalized_phone",
-      filter: {
-        table: "message_events",
-        eq: { prospect_id: lookup.prospectId },
-        phoneVariants: phoneFilter.phoneVariants,
-        or: phoneFilter.orClause,
-      },
-      apply(query) {
-        return applyPhoneAnyFilter(query.eq("prospect_id", lookup.prospectId), normalizedPhone);
-      },
-    });
-  }
-
-  // Phone-only fallback: catches message_events rows where property_id/master_owner_id
-  // aren't populated. rowConflictsWithLookup (applied in messageMatchesStrictLookup)
-  // prevents cross-property bleed for rows that do have conflicting IDs.
   if (normalizedPhone) {
-    const phoneFilter = buildPhoneAnyFilter(normalizedPhone);
     strategies.push({
-      name: "normalized_phone_fallback",
-      filter: {
-        table: "message_events",
-        phoneVariants: phoneFilter.phoneVariants,
-        or: phoneFilter.orClause,
-        audit: "phone_only_with_identity_audit",
-      },
-      apply(query) {
-        return applyPhoneAnyFilter(query, normalizedPhone);
-      },
+      name: "thread_key=canonical_e164",
+      filter: { table: "message_events", eq: { thread_key: normalizedPhone } },
+      apply(query) { return query.eq("thread_key", normalizedPhone); }
+    });
+    strategies.push({
+      name: "to_phone_number=canonical_e164",
+      filter: { table: "message_events", eq: { to_phone_number: normalizedPhone } },
+      apply(query) { return query.eq("to_phone_number", normalizedPhone); }
+    });
+    strategies.push({
+      name: "from_phone_number=canonical_e164",
+      filter: { table: "message_events", eq: { from_phone_number: normalizedPhone } },
+      apply(query) { return query.eq("from_phone_number", normalizedPhone); }
+    });
+  }
+
+  if (lookup.legacyThreadKey) {
+    strategies.push({
+      name: "legacy_thread_key",
+      filter: { table: "message_events", eq: { thread_key: lookup.legacyThreadKey } },
+      apply(query) { return query.eq("thread_key", lookup.legacyThreadKey); }
+    });
+  }
+
+  if (lookup.selectedThreadKey) {
+    strategies.push({
+      name: "original_thread_key",
+      filter: { table: "message_events", eq: { thread_key: lookup.selectedThreadKey } },
+      apply(query) { return query.eq("thread_key", lookup.selectedThreadKey); }
+    });
+  }
+
+  if (conversationThreadId && conversationThreadId !== lookup.selectedThreadKey) {
+    strategies.push({
+      name: "conversation_thread_id",
+      filter: { table: "message_events", eq: { thread_key: conversationThreadId } },
+      apply(query) { return query.eq("thread_key", conversationThreadId); }
     });
   }
 
@@ -2212,6 +2190,22 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   }
 
   const normalizedPhone = getLookupNormalizedPhone(lookup);
+  if (strategyName === "thread_key=canonical_e164") {
+    return clean(row.thread_key) === normalizedPhone && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "to_phone_number=canonical_e164") {
+    return clean(row.to_phone_number) === normalizedPhone && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "from_phone_number=canonical_e164") {
+    return clean(row.from_phone_number) === normalizedPhone && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "legacy_thread_key") {
+    return clean(row.thread_key) === clean(lookup.legacyThreadKey) && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "original_thread_key") {
+    return clean(row.thread_key) === clean(lookup.selectedThreadKey) && !rowConflictsWithLookup(row, lookup);
+  }
+
   const rowPhones = new Set(buildPhoneVariants(
     row.normalized_phone,
     row.canonical_e164,
@@ -2225,17 +2219,6 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   if (!hasPhone) return false;
   if (rowConflictsWithLookup(row, lookup)) return false;
 
-  if (strategyName === "prospect_id+normalized_phone") {
-    return clean(row.prospect_id || row.canonical_prospect_id) === clean(lookup.prospectId);
-  }
-  if (strategyName === "property_id+normalized_phone") {
-    return clean(row.property_id || row.final_property_id) === clean(lookup.propertyId);
-  }
-  if (strategyName === "master_owner_id+normalized_phone") {
-    return clean(row.master_owner_id || row.owner_id || row.final_master_owner_id) === clean(lookup.masterOwnerId || lookup.ownerId);
-  }
-  if (strategyName === "normalized_phone_unlinked") return true;
-  if (strategyName === "normalized_phone_fallback") return true;
   return false;
 }
 
@@ -2478,10 +2461,12 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     strategies_tried: strategies.map((strategy) => strategy.name),
     fallback_order: [
       "latest_message_id_exact",
-      "property_id+normalized_phone",
-      "master_owner_id+normalized_phone",
-      "prospect_id+normalized_phone",
-      "normalized_phone_fallback",
+      "thread_key=canonical_e164",
+      "to_phone_number=canonical_e164",
+      "from_phone_number=canonical_e164",
+      "legacy_thread_key",
+      "original_thread_key",
+      "conversation_thread_id",
       "latest_preview_source_row",
     ],
     sourceResults: [],

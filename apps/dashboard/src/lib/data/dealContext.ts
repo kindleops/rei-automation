@@ -6,7 +6,33 @@ import {
 } from '../api/backendClient'
 import { asBoolean, asIso, asNumber, asString, type AnyRecord } from './shared'
 
-export interface DealContext {
+export interface DealDossier {
+  identity: {
+    thread_key: string
+    property_id?: string
+    prospect_id?: string
+    master_owner_id?: string
+    canonical_e164?: string
+  }
+  property: AnyRecord
+  prospect: AnyRecord
+  master_owner: AnyRecord
+  phones: any[]
+  primary_phone: AnyRecord
+  emails: any[]
+  primary_email: AnyRecord
+  conversation: AnyRecord
+  deal_status: AnyRecord
+  valuation: AnyRecord
+  buyer_match: AnyRecord
+  census: AnyRecord
+  acquisition_decision: AnyRecord
+  compliance: AnyRecord
+  freshness: AnyRecord
+  raw_sources_debug?: AnyRecord
+}
+
+export interface DealContext extends DealDossier {
   id: string
   deal_context_id: string
   contextType: string
@@ -237,6 +263,127 @@ function isTextGridNumber(phone: string | null | undefined): boolean {
 }
 
 export function normalizeDealContext(row: AnyRecord): DealContext {
+  // If this is already a DealDossier structure from the new service
+  if (row.identity && row.property && row.prospect) {
+    const dossier = row as unknown as DealDossier
+    const prop = dossier.property
+    const pros = dossier.prospect
+    const own = dossier.master_owner
+    const conv = dossier.conversation
+    const status = dossier.deal_status
+    const val = dossier.valuation
+    
+    // Construct the flat context for legacy views
+    return {
+      ...dossier,
+      id: dossier.identity.thread_key,
+      deal_context_id: dossier.identity.thread_key,
+      contextType: 'property',
+      context_type: 'property',
+      propertyId: dossier.identity.property_id || null,
+      property_id: dossier.identity.property_id || null,
+      masterOwnerId: dossier.identity.master_owner_id || null,
+      master_owner_id: dossier.identity.master_owner_id || null,
+      prospectId: dossier.identity.prospect_id || null,
+      prospect_id: dossier.identity.prospect_id || null,
+      canonicalProspectId: dossier.identity.prospect_id || null,
+      canonical_prospect_id: dossier.identity.prospect_id || null,
+      threadKey: dossier.identity.thread_key || null,
+      thread_key: dossier.identity.thread_key || null,
+      canonicalE164: dossier.identity.canonical_e164 || null,
+      canonical_e164: dossier.identity.canonical_e164 || null,
+
+      property: prop,
+      masterOwner: own,
+      prospect: pros,
+      phone: dossier.primary_phone,
+      phoneData: dossier.primary_phone,
+      email: dossier.primary_email,
+      threadState: conv,
+      valuation: val,
+      buyerMatch: dossier.buyer_match,
+      acquisitionDecision: dossier.acquisition_decision,
+      compliance: dossier.compliance,
+
+      ownerName: own.full_name || pros.full_name || 'Unknown',
+      owner_name: own.full_name || pros.full_name || 'Unknown',
+      display_name: own.full_name || pros.full_name || 'Unknown',
+      displayName: own.full_name || pros.full_name || 'Unknown',
+      firstName: pros.first_name || '',
+      fullName: pros.full_name || own.full_name || '',
+      sellerDisplayName: own.full_name || pros.full_name || '',
+      propertyAddress: prop.full_address || '',
+      property_address_full: prop.full_address || '',
+      market: prop.market || '',
+      market_name: prop.market || '',
+      phoneDisplay: dossier.identity.canonical_e164 || '',
+      latestMessageBody: conv.latest_message_body || '',
+      latest_message_body: conv.latest_message_body || '',
+      latestActivityAt: dossier.freshness.latest_message_at || null,
+      latest_activity_at: dossier.freshness.latest_message_at || null,
+      latest_message_at: dossier.freshness.latest_message_at || null,
+      status: status.universal_status || 'unknown',
+      universal_status: status.universal_status || 'unknown',
+      universalStatus: status.universal_status || 'unknown',
+      stage: conv.conversation_stage || 'unknown',
+      universal_stage: conv.conversation_stage || 'unknown',
+      universalStage: conv.conversation_stage || 'unknown',
+      bucket: conv.inbox_status || 'all_messages',
+      inbox_bucket: conv.inbox_status || 'all_messages',
+      inboxBucket: conv.inbox_status || 'all_messages',
+      conversationStage: conv.conversation_stage || 'unknown',
+
+      sellerPhone: dossier.identity.canonical_e164 || '',
+      seller_phone: dossier.identity.canonical_e164 || '',
+      bestPhone: pros.prospect_best_phone || dossier.identity.canonical_e164 || '',
+      best_phone: pros.prospect_best_phone || dossier.identity.canonical_e164 || '',
+
+      prospect_name: pros.full_name || '',
+      full_name: pros.full_name || '',
+      first_name: pros.first_name || '',
+      cnam: pros.cnam || '',
+
+      latitude: prop.latitude || 0,
+      longitude: prop.longitude || 0,
+      property_type: prop.property_type || '',
+      property_class: prop.property_class || '',
+      propertyState: prop.state || '',
+      propertyZip: prop.zip || '',
+      propertyCounty: prop.county || '',
+      estimatedValue: val.estimated_value || 0,
+      estimated_value: val.estimated_value || 0,
+      estimated_arv: val.estimated_arv || prop.estimated_arv || 0,
+      equityAmount: val.equity_amount || 0,
+      equity_amount: val.equity_amount || 0,
+      equityPercent: val.equity_percent || 0,
+      equity_percent: val.equity_percent || 0,
+      cashOffer: status.offer_price || 0,
+      cash_offer: status.offer_price || 0,
+      estimatedRepairCost: prop.estimated_repair_cost || 0,
+      estimated_repair_cost: prop.estimated_repair_cost || 0,
+      finalAcquisitionScore: dossier.prospect.motivation_score || 0,
+      final_acquisition_score: dossier.prospect.motivation_score || 0,
+      priorityScore: dossier.prospect.motivation_score || 0,
+      priority_score: dossier.prospect.motivation_score || 0,
+      propertyTags: [],
+      sellerTags: asStringArray(pros.person_flags_text),
+      lat: prop.latitude || 0,
+      lng: prop.longitude || 0,
+      optOut: dossier.primary_phone.dnc_status || false,
+      wrongNumber: false,
+      notInterested: false,
+      needsReview: false,
+      suppressed: dossier.primary_phone.suppression_status || false,
+
+      campaign_name: '',
+      queue_status: '',
+      reply_intent: conv.seller_intent || '',
+      lead_temperature: '',
+
+      raw: row,
+    } as unknown as DealContext
+  }
+
   const property = asRecord(row.property_data ?? row.property ?? row.propertyData)
   const propertyRaw = asRecord(property.raw_payload_json)
   const masterOwner = asRecord(row.master_owner_data ?? row.masterOwner ?? row.masterOwnerData)
@@ -249,6 +396,7 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
   const suppression = asRecord(row.suppression_data ?? row.suppression ?? row.suppressionData)
   const valuation = asRecord(row.valuation_data ?? row.valuation ?? row.valuationData)
   const buyerMatch = asRecord(row.buyer_match_data ?? row.buyerMatch ?? row.buyerMatchData)
+  const acquisitionDecision = asRecord(row.acquisition_decision_data ?? row.acquisitionDecision ?? row.acquisition_decision)
   const latestMessageEvent = asRecord(
     row.latest_message_event_data ?? row.latestMessageEvent ?? row.latest_message_event ?? row.latestMessageEventData,
   )
@@ -410,7 +558,34 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
 
   const canonicalE164 = sellerPhone || null
 
+  // Build the synthetic dossier for legacy rows if possible
+  const dossier: DealDossier = {
+    identity: {
+      thread_key: threadKey || '',
+      property_id: propertyId || undefined,
+      prospect_id: prospectId || undefined,
+      master_owner_id: masterOwnerId || undefined,
+      canonical_e164: canonicalE164 || undefined
+    },
+    property: property,
+    prospect: prospect,
+    master_owner: masterOwner,
+    phones: [],
+    primary_phone: phoneData,
+    emails: [],
+    primary_email: email,
+    conversation: threadState,
+    deal_status: { universal_status: status, universal_stage: stage },
+    valuation: valuation,
+    buyer_match: buyerMatch,
+    census: {},
+    acquisition_decision: acquisitionDecision || {},
+    compliance: { is_suppressed: firstBoolean(row.suppressed, threadState.suppressed) },
+    freshness: { latest_message_at: latestActivityAt }
+  }
+
   return {
+    ...dossier,
     id: dealContextId,
     deal_context_id: dealContextId,
     contextType,
@@ -440,9 +615,6 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     textgridNumberId,
     textgrid_number_id: textgridNumberId,
 
-    property,
-    masterOwner,
-    prospect,
     phone: phoneData,
     phoneData,
     email,
@@ -450,8 +622,6 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     campaign,
     queue,
     suppression,
-    valuation,
-    buyerMatch,
     contactStack: (contactStack as any) || {},
     latestMessageEvent,
 
@@ -543,7 +713,7 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     lead_temperature: firstString(row.lead_temperature, threadState.lead_temperature, ''),
 
     raw: row,
-  } as any
+  } as unknown as DealContext
 }
 
 export async function getDealContextList(

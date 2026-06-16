@@ -1,5 +1,20 @@
 import { asString, getFirst, type AnyRecord } from '../../lib/data/shared'
 
+export const FAILURE_LABEL: Record<string, string> = {
+  textgrid_content_filter: 'TextGrid Content Filter',
+  blacklist_pair_21610: 'Blacklist Rule (21610)',
+  recipient_opted_out: 'Recipient Opted Out',
+  invalid_number: 'Invalid Phone Number',
+  suppression_blocked: 'Suppression Blocked',
+  no_valid_sender: 'No Valid Sender',
+  missing_template: 'Missing Template',
+  blank_message_body: 'Blank Message Body',
+  message_event_missing: 'Message Event Missing',
+  carrier_failure: 'Carrier Failure',
+  stale_runnable_row: 'Stale Queue Item',
+  unknown: 'Unknown Failure'
+}
+
 export const classifyQueueFailure = (
   row: AnyRecord,
   event: AnyRecord | null,

@@ -234,6 +234,18 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
         priority: t.priority,
         inboxCategory: t.inboxCategory,
         uiIntent: t.uiIntent,
+        propertyAddressFull: t.propertyAddressFull,
+        propertyAddress: t.propertyAddress,
+        market: t.market,
+        propertyType: t.propertyType,
+        queueStatus: t.queueStatus,
+        estimatedValue: t.estimatedValue,
+        bestPhone: t.bestPhone,
+        canonicalE164: t.canonicalE164,
+        propertyId: t.propertyId,
+        prospectId: t.prospectId,
+        latestMessageBody: t.latestMessageBody || (t as any).latest_message_body,
+        latestMessageAt: t.latestMessageAt || (t as any).latest_message_at,
       }))
 
       const cachePayload = JSON.stringify({
@@ -375,6 +387,19 @@ const normalizeRealtimeDirection = (value: unknown): 'inbound' | 'outbound' | 'u
   if (raw.startsWith('in') || raw.includes('incoming') || raw.includes('received')) return 'inbound'
   if (raw.startsWith('out') || raw.includes('sent') || raw.includes('queued')) return 'outbound'
   return 'unknown'
+}
+
+const getRichnessScore = (threads: any[]): number => {
+  if (!threads || threads.length === 0) return 0
+  const t = threads[0]
+  let score = 0
+  if (t.propertyAddressFull || t.propertyAddress || t.displayAddress) score += 1
+  if (t.ownerName || t.sellerDisplayName) score += 1
+  if (t.canonicalE164 || t.bestPhone || t.sellerPhone || t.phone) score += 1
+  if (t.latestMessageBody || t.preview || t.lastMessageBody || t.message_body) score += 1
+  if (t.propertyId || t.property_id) score += 1
+  if (t.market || t.propertyType || t.property_type) score += 1
+  return score
 }
 
 const normalizeRealtimeStatus = (value: unknown): string => {
@@ -781,6 +806,22 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         })
         if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
+      }
+
+      if (model.dataMode === 'fallback_error' && hasThreadRows && currentRowsCount > 0) {
+        const currentScore = getRichnessScore(currentBucket.rows)
+        const incomingScore = getRichnessScore(model.threads)
+        if (incomingScore < currentScore) {
+          console.warn(`[Inbox Protection] Ignoring fallback_error response. Preserving ${currentRowsCount} richer existing rows (score: ${currentScore} vs ${incomingScore}).`)
+          dispatch({
+            type: 'BUCKET_FETCH_ERROR',
+            bucketKey,
+            requestId,
+            error: model.liveFetchError ?? 'Data mode degraded with lower richness. Preserving rich cache.'
+          })
+          if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
+          return model
+        }
       }
 
       if (model.dataMode !== 'live' && hasThreadRows) {

@@ -169,13 +169,13 @@ export const buildInboxNotifications = ({
 
   if (queueProcessorHealth?.status === 'warning' || queueProcessorHealth?.status === 'critical') {
     notifications.push({
-      id: queueProcessorHealth.status === 'critical' ? 'queue-critical' : 'queue-delayed',
+      id: 'queue_health_status',
       command_space: 'Queue',
       type: 'queue_delayed',
       title: queueProcessorHealth.status === 'critical' ? 'Queue health critical' : 'Queue processor delayed',
       body: queueProcessorHealth.summary,
       severity: queueProcessorHealth.status === 'critical' ? 'critical' : 'warning',
-      status: 'unread',
+      status: 'read',
       created_at: queueProcessorHealth.checkedAt,
       read_at: null,
       related_thread_id: null,
@@ -192,13 +192,13 @@ export const buildInboxNotifications = ({
 
   if (autonomyModel.emergencyState) {
     notifications.push({
-      id: 'autonomy-emergency',
+      id: 'autonomy_engine_status',
       command_space: 'AI',
       type: 'autonomy_emergency_stop',
       title: 'Autonomous engine in protective posture',
       body: autonomyModel.topDirective,
       severity: 'critical',
-      status: 'unread',
+      status: 'read',
       created_at: queueProcessorHealth?.checkedAt || selectedCreatedAt,
       read_at: null,
       related_thread_id: selectedThread?.id ?? null,
