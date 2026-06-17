@@ -2303,12 +2303,18 @@
 }
 
 .cmp-studio-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   padding: 16px 32px;
-  border-top: 1px solid var(--border, rgba(255,255,255,0.06));
-  background: rgba(0,0,0,0.2);
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  background: var(--bg-main, #06080d);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 /* Studio Live Summary (Right) */
@@ -3008,6 +3014,135 @@
 .cmp-target-reach .cmp-summary-body {
   padding: 18px;
   gap: 16px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Target Reach — clean connected cards + waterfall spine
+   These classes are rendered by <ReachFunnelStep> but previously had no
+   layout, causing labels/values/descriptions to run together.
+   ════════════════════════════════════════════════════════════════════════ */
+.cmp-reach-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cmp-reach-funnel-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 12px;
+  padding-bottom: 10px;
+}
+.cmp-reach-funnel-step:last-child { padding-bottom: 0; }
+
+/* Waterfall spine: node dot + connector line down the left edge */
+.cmp-reach-funnel-node {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: 15px auto 0;
+  border-radius: 50%;
+  background: var(--bg-main, #06080d);
+  border: 2px solid var(--accent, #3ecf8e);
+}
+.cmp-reach-funnel-connector {
+  position: absolute;
+  left: 7px;
+  top: 27px;
+  bottom: -3px;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(62, 207, 142, 0.40), rgba(62, 207, 142, 0.06));
+}
+
+/* Card: label / value / description each get their own line */
+.cmp-reach-funnel-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label value"
+    "hint  hint";
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.cmp-reach-funnel-content > span {
+  grid-area: label;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  color: var(--text-1, #a1a1aa);
+}
+.cmp-reach-funnel-content > strong {
+  grid-area: value;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--text-0, #f4f4f5);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cmp-reach-funnel-content > em {
+  grid-area: hint;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-3, #71717a);
+}
+
+/* Accent steps — Ready To Schedule / Sendable Today */
+.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-node {
+  background: var(--accent, #3ecf8e);
+  box-shadow: 0 0 0 4px rgba(62, 207, 142, 0.16);
+}
+.cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content {
+  border-color: rgba(62, 207, 142, 0.32);
+  background: rgba(62, 207, 142, 0.07);
+}
+
+/* Light theme */
+[data-nexus-theme="light"] .cmp-reach-funnel-node {
+  background: #ffffff !important;
+}
+[data-nexus-theme="light"] .cmp-reach-funnel-content {
+  border: 1px solid var(--border) !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+[data-nexus-theme="light"] .cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content {
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+
+/* Red ops theme */
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-node {
+  border-color: #ff1212 !important;
+  background: #160305 !important;
+}
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-connector {
+  background: linear-gradient(180deg, rgba(255, 18, 18, 0.40), rgba(255, 18, 18, 0.06)) !important;
+}
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-content {
+  border-color: rgba(255, 18, 18, 0.14) !important;
+  background: rgba(25, 9, 10, 0.40) !important;
+}
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-step.is-accent .cmp-reach-funnel-node {
+  background: #ff1212 !important;
+  box-shadow: 0 0 0 4px rgba(255, 18, 18, 0.18) !important;
+}
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content {
+  border-color: rgba(255, 18, 18, 0.32) !important;
+  background: rgba(255, 18, 18, 0.07) !important;
+}
+[data-nexus-theme="red_ops"] .cmp-reach-funnel-step.is-accent .cmp-reach-funnel-content > strong {
+  color: #ff6b3d !important;
 }
 
 .cmp-reach-grid {

@@ -36,6 +36,18 @@ const EMPTY_VALUE_OPERATORS = new Set(['is_empty', 'is_not_empty'])
 const OPTION_OPERATORS = new Set(['is_any_of', 'is_not_any_of'])
 const ALL_DOMAIN_KEYS: CampaignDomainKey[] = ['properties', 'prospects', 'master_owners', 'phones', 'outreach', 'sender_coverage']
 
+// Developer tooling (Developer Mode toggle + raw diagnostics) is hidden from the
+// normal operator UI. It surfaces only in dev builds or when an operator opts in
+// via `localStorage.setItem('cmp_dev_tools', '1')`.
+const isDeveloperToolsEnabled = (): boolean => {
+  try {
+    if (import.meta.env?.DEV) return true
+    return typeof window !== 'undefined' && window.localStorage?.getItem('cmp_dev_tools') === '1'
+  } catch {
+    return false
+  }
+}
+
 type PacingMode = 'conservative' | 'normal' | 'aggressive' | 'custom'
 
 interface LaunchSettings {
@@ -2497,6 +2509,7 @@ const BackendStatusStrip = ({
   onDeveloperModeChange: (value: boolean) => void
 }) => {
   const [expanded, setExpanded] = useState(false)
+  const showDeveloperTools = isDeveloperToolsEnabled()
   const source = DOMAIN_SOURCE_VIEWS[activeDomain] ?? 'unknown'
   const unsupportedFilters = [
     ...(preview?.unsupported_in_preview ?? []).map((item) => ({
@@ -2568,17 +2581,19 @@ const BackendStatusStrip = ({
         {previewMeta && (
           <span className="cmp-operator-strip__item">Updated {previewMeta.ts}</span>
         )}
-        <button
-          type="button"
-          className={`cmp-developer-toggle ${developerMode ? 'is-active' : ''}`}
-          onClick={() => {
-            const next = !developerMode
-            onDeveloperModeChange(next)
-            if (!next) setExpanded(false)
-          }}
-        >
-          Developer Mode
-        </button>
+        {showDeveloperTools && (
+          <button
+            type="button"
+            className={`cmp-developer-toggle ${developerMode ? 'is-active' : ''}`}
+            onClick={() => {
+              const next = !developerMode
+              onDeveloperModeChange(next)
+              if (!next) setExpanded(false)
+            }}
+          >
+            Developer Mode
+          </button>
+        )}
       </div>
 
       {developerMode && (
