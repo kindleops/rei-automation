@@ -1285,6 +1285,16 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
       last_intent: payload.detected_intent,
       latest_reply_template_id: payload.template_id,
       is_read: true,
+      // Rollup fields — without these the outbound send increments the count but
+      // never populates the thread's latest message, so outbound-only threads
+      // (e.g. the "waiting" bucket) render with a NULL latest_message_at (the
+      // dashboard then falls back to a snapshot time, empty preview, no direction).
+      // Mirrors the inbound sync block in logInboundMessageEvent.
+      latest_message_body: payload.message_body,
+      latest_message_at: payload.event_timestamp || payload.created_at,
+      latest_direction: "outbound",
+      latest_delivery_status: payload.delivery_status || "sent",
+      last_outbound_at: payload.sent_at || payload.event_timestamp || payload.created_at,
       increment_direction: "outbound",
     }, options);
   } catch (syncErr) {
