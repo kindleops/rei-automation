@@ -148,9 +148,17 @@ const rowMatchesThread = (row: Record<string, unknown>, threadKey: string): bool
   return needles.some((needle) => identities.has(needle))
 }
 
-const getRowBucketKey = (row: Record<string, unknown>): string => normalizeBucketKey(
-  getRowValue(row, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'),
-)
+const getRowAutomationLane = (row: Record<string, unknown>): string =>
+  String(getRowValue(row, 'automation_lane', 'automationLane') ?? '').trim().toLowerCase()
+
+const getRowBucketKey = (row: Record<string, unknown>): string => {
+  const bucket = normalizeBucketKey(
+    getRowValue(row, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'),
+  )
+  if (bucket) return bucket
+  if (getRowAutomationLane(row) === 'cold_reactivation') return 'cold'
+  return ''
+}
 
 const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): boolean => {
   const key = normalizeBucketKey(bucketKey)
@@ -159,6 +167,9 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
   if (key === 'active') return ACTIVE_BUCKETS.has(rowBucket)
   if (key === 'waiting') {
     return rowBucket === 'waiting'
+  }
+  if (key === 'cold') {
+    return rowBucket === 'cold' || getRowAutomationLane(row) === 'cold_reactivation'
   }
   return rowBucket === key
 }
