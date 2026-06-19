@@ -6,6 +6,7 @@ export type InboxBucket =
   | 'priority'
   | 'negotiating'
   | 'follow_up_due'
+  | 'waiting'
   | 'waiting_on_seller'
   | 'automated'
   | 'needs_review'
@@ -433,7 +434,8 @@ export const resolveInboxBucket = (
   if (bucket === 'suppressed') return 'dnc_suppressed'
   if (bucket === 'follow_up') return 'follow_up_due'
   if (bucket === 'cold') return 'cold_no_response'
-  if (bucket === 'all') return 'all_conversations'
+  if (bucket === 'waiting') return 'waiting'
+  if (bucket === 'all' || bucket === 'all_messages') return 'all_conversations'
   return bucket // 'needs_review' | 'priority' | 'new_replies' are identical
 }
 
@@ -451,11 +453,14 @@ export const matchesInboxBucket = (
   if (bucket === 'needs_review') return resolveInboxThreadState(thread, now).bucket === 'needs_review'
   if (bucket === 'priority') return resolveInboxThreadState(thread, now).bucket === 'priority'
   if (bucket === 'new_replies') return resolveInboxThreadState(thread, now).bucket === 'new_replies'
+  if (bucket === 'waiting' || bucket === 'waiting_on_seller') {
+    const raw = String(get(thread, 'inbox_bucket', 'inboxBucket') ?? '').toLowerCase()
+    return raw === 'waiting' || raw === 'waiting_on_seller' || resolveInboxThreadState(thread, now).bucket === 'waiting'
+  }
   if (bucket === 'follow_up' || bucket === 'follow_up_due') return resolveInboxThreadState(thread, now).bucket === 'follow_up'
   if (bucket === 'cold' || bucket === 'cold_no_response') return resolveInboxThreadState(thread, now).bucket === 'cold'
   // Legacy-only buckets that have no canonical equivalent
   if (bucket === 'negotiating') return UNDERWRITING_STAGES.has(buildConversationDecision(thread, now).conversation_stage)
-  if (bucket === 'waiting_on_seller') return buildConversationDecision(thread, now).automation_status === 'WAITING'
   if (bucket === 'automated') {
     const status = buildConversationDecision(thread, now).automation_status
     return status === 'AUTO-ELIGIBLE' || status === 'AUTO-QUEUED'

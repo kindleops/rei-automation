@@ -434,7 +434,8 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
   if (view === 'follow_up' || view === 'follow_up_due') return 'follow_up'
   if (view === 'cold' || view === 'cold_no_response' || view === 'missing_context' || view === 'not_contacted') return 'cold'
   if (view === 'dead' || view === 'wrong_number') return 'dead'
-  if (view === 'waiting_on_seller' || view === 'waiting' || view === 'outbound_only' || view === 'outbound_active') return 'waiting_on_seller'
+  if (view === 'waiting' || view === 'waiting_on_seller') return 'waiting'
+  if (view === 'outbound_only' || view === 'outbound_active') return 'follow_up'
   if (view === 'automated' || view === 'auto_replied' || view === 'queued') return 'automated'
   if (view === 'needs_review' || view === 'manual_review') return 'needs_review'
   if (view === 'dnc_opt_out' || view === 'suppressed' || view === 'opt_out') return 'suppressed'
@@ -469,8 +470,13 @@ export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxVie
       bucket === 'all_conversations'
         ? true
         : (
-          bucket === 'waiting_on_seller'
-            ? isWaitingInboxState(canonical) && !isArchived
+          bucket === 'waiting'
+            ? (
+              String(getField(thread, 'inbox_bucket') || getField(thread, 'inboxBucket') || getField(thread, 'inbox_category') || getField(thread, 'inboxCategory') || '').toLowerCase() === 'waiting'
+              || canonical.bucket === 'waiting'
+            ) && !isArchived
+            : bucket === 'waiting_on_seller'
+              ? canonical.bucket === 'waiting' && !isArchived
             : bucket === 'follow_up_due'
               ? canonical.bucket === 'follow_up'
               : bucket === 'cold_no_response'

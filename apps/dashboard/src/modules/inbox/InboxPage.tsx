@@ -895,10 +895,11 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     )
   }, [buyerCommandData.matches, buyerCommandData.profilePoints, buyerCommandData.recentPurchases, selectedBuyerKey])
 
-  const selectedFilteredOut = useMemo(() => (
+  const _selectedFilteredOut = useMemo(() => (
     Boolean(selected && !filtered.some((thread) => thread.id === selected.id))
   ), [filtered, selected])
-  const showSelectedInFilter = useCallback(() => {
+  void _selectedFilteredOut
+  const _showSelectedInFilter = useCallback(() => {
     if (!selected) return
     const decision = decisions.get(selected.id)
     let nextView: InboxViewSelectValue = 'all_conversations'
@@ -927,6 +928,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       limit: 100,
     })
   }, [decisions, refreshInbox, selected])
+  void _showSelectedInFilter
 
   useEffect(() => {
     if (!selected) return
@@ -1162,15 +1164,32 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
     }
     setSavedPreset(preset)
     const config = getSavedPresetConfig(preset)
-    const nextStage = (config.stage ?? stageFilter)
+    const isPrimaryCategoryTab = (
+      preset === 'all_messages'
+      || preset === 'my_priority'
+      || preset === 'new_inbounds'
+      || preset === 'review_required'
+      || preset === 'waiting'
+    )
     const nextView = (config.view ?? viewFilter)
-    const nextAdvanced = { ...advancedFilters, ...(config.advanced ?? {}) }
-    if (config.stage) setStageFilter(config.stage)
+    const nextStage = isPrimaryCategoryTab ? 'all_stages' : (config.stage ?? stageFilter)
+    const nextSearch = isPrimaryCategoryTab ? '' : searchQuery
+    const nextAdvanced = isPrimaryCategoryTab
+      ? { outOfStateOwner: 'all' as const, ...(config.advanced ?? {}) }
+      : { ...advancedFilters, ...(config.advanced ?? {}) }
+
+    if (isPrimaryCategoryTab) {
+      setSearchQuery('')
+      setStageFilter('all_stages')
+      setAdvancedFilters({ outOfStateOwner: 'all' })
+    } else {
+      if (config.stage) setStageFilter(config.stage)
+      if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
+    }
     if (config.view) {
       console.log('[BUCKET_STATE_SET]', config.view)
       setViewFilter(config.view)
     }
-    if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
 
     // Clear selection so stale thread from the previous bucket is never shown in the new bucket.
     setSelectedId(null)
@@ -1182,7 +1201,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       filters: {
         view: nextView,
         stage: nextStage,
-        query: searchQuery,
+        query: nextSearch,
         advanced: nextAdvanced,
       },
       cursor: null,

@@ -23,6 +23,7 @@
 
 /* ─── Category accent tokens ─────────────────────────────────────────────── */
 .nx-premium-inbox {
+  scrollbar-gutter: stable;
   --nx-cat-priority-a: #dc2626;
   --nx-cat-priority-b: #ef4444;
   --nx-cat-priority-c: #f97316;
@@ -48,6 +49,11 @@
 }
 
 .nx-sidebar-rebuilt {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   transition:
     --nx-header-c1 0.55s ease,
     --nx-header-c2 0.55s ease,
@@ -113,11 +119,15 @@
 /* ─── Full-header traveling gradient perimeter (1–1.5px, CSS-only) ─────── */
 .nx-inbox-header-shell {
   position: relative;
+  flex: 0 0 auto;
   flex-shrink: 0;
   z-index: 6;
   margin: 6px 8px 4px;
   padding: 1.5px;
   border-radius: 11px;
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+  min-height: 108px;
   isolation: isolate;
   overflow: hidden;
   contain: layout style paint;
@@ -153,6 +163,8 @@
 .nx-inbox-header-shell__inner {
   position: relative;
   z-index: 1;
+  width: 100%;
+  box-sizing: border-box;
   border-radius: 10px;
   background: var(--nx-header-inner-bg);
   overflow: hidden;
@@ -189,9 +201,11 @@
 }
 
 .nx-premium-inbox .nx-sidebar-rebuilt__list-container {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 0 0 10px;
 }
 
@@ -244,17 +258,21 @@
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   background: transparent;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  flex: 0 0 auto;
+  width: calc(100% - 16px);
+  box-sizing: border-box;
+  min-height: 52px;
 }
 .nx-cat-nav::-webkit-scrollbar { display: none; }
 
 .nx-cat-nav__item {
   position: relative;
-  flex: 1 0 auto;
-  min-width: max(76px, 17%);
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -743,6 +761,16 @@
   flex-direction: column;
   gap: 0;
   padding: 0 8px 8px;
+  min-height: 100%;
+  flex: 1 1 auto;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__empty {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
 }
 
 /* ─── Responsive layouts (one component) ─────────────────────────────────── */

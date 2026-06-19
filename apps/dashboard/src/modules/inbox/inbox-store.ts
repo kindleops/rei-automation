@@ -89,6 +89,7 @@ const BUCKET_ALIASES: Record<string, string> = {
   opt_out: 'suppressed',
   wrong_number: 'dead',
   waiting_on_seller: 'waiting',
+  waiting: 'waiting',
 }
 
 const ACTIVE_BUCKETS = new Set(['priority', 'new_replies', 'needs_review', 'follow_up'])
@@ -150,9 +151,6 @@ const rowMatchesThread = (row: Record<string, unknown>, threadKey: string): bool
 const getRowBucketKey = (row: Record<string, unknown>): string => normalizeBucketKey(
   getRowValue(row, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'),
 )
-
-const getRowDirection = (row: Record<string, unknown>): string =>
-  String(getRowValue(row, 'latest_message_direction', 'latestMessageDirection', 'latestDirection', 'lastDirection', 'direction') ?? '').trim().toLowerCase()
 
 const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): boolean => {
   const key = normalizeBucketKey(bucketKey)

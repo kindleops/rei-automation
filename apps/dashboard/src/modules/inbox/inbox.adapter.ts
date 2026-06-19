@@ -624,6 +624,7 @@ const BUCKET_ALIAS_MAP: Record<string, string> = {
   outbound_active: 'follow_up',
   follow_up_due: 'follow_up',
   waiting_on_seller: 'waiting',
+  waiting: 'waiting',
   cold_no_response: 'cold',
   dnc_opt_out: 'suppressed',
   opt_out: 'suppressed',

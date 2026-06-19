@@ -216,50 +216,73 @@ type DeliveryReceipt = {
   icon: 'arrow-down-left' | 'check-double' | 'x' | 'check' | 'clock'
 }
 
+const deliveryStatusTokens = (thread: InboxWorkflowThread): string[] => {
+  const row = thread as unknown as Record<string, unknown>
+  return [
+    row.latest_delivery_status,
+    row.delivery_status,
+    row.latest_provider_delivery_status,
+    row.provider_delivery_status,
+    row.latestDeliveryStatus,
+    row.deliveryStatus,
+    row.raw_carrier_status,
+    row.raw_status,
+    row.queue_status,
+    row.queueStatus,
+  ].map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean)
+}
+
 const resolveDeliveryReceipt = (
   thread: InboxWorkflowThread,
   latestDirection: string,
-  deliveryStatus: 'sent' | 'delivered' | 'failed' | null,
 ): DeliveryReceipt | null => {
   if (latestDirection === 'inbound') {
     return { type: 'inbound', label: 'Inbound', icon: 'arrow-down-left' }
   }
-  const row = thread as Record<string, unknown>
-  const providerStatus = String(
-    row.latest_provider_delivery_status
-    || row.provider_delivery_status
-    || row.latestDeliveryStatus
-    || row.latest_delivery_status
-    || row.deliveryStatus
-    || row.delivery_status
-    || row.raw_carrier_status
-    || '',
-  ).toLowerCase()
-  const isFinalFailure = readBoolean(thread, 'is_final_failure', 'isFinalFailure')
-    || readBoolean(thread, 'latest_is_final_failure', 'latestIsFinalFailure')
+
+  const statusEvidence = deliveryStatusTokens(thread)
+  const isFinalFailure = readBoolean(thread, 'is_final_failure', 'isFinalFailure', 'latest_is_final_failure', 'latestIsFinalFailure')
   const failedAt = readString(thread, 'latest_failed_at', 'latestFailedAt', 'failed_at', 'failedAt')
   const deliveredAt = readString(thread, 'latest_delivered_at', 'latestDeliveredAt', 'delivered_at', 'deliveredAt')
   const sentAt = readString(thread, 'latest_sent_at', 'latestSentAt', 'sent_at', 'sentAt')
 
-  if (isFinalFailure || failedAt || providerStatus.includes('fail') || providerStatus.includes('undeliv')) {
+  const hasFailure = isFinalFailure
+    || Boolean(failedAt)
+    || statusEvidence.some((status) => (
+      status.includes('fail')
+      || status.includes('undeliv')
+      || status.includes('rejected')
+      || status === 'error'
+      || status.includes('error')
+    ))
+  if (hasFailure) {
     return { type: 'failed', label: 'Failed', icon: 'x' }
   }
-  if (
-    deliveryStatus === 'delivered'
-    || deliveredAt
-    || (providerStatus.includes('deliver') && !providerStatus.includes('undeliv'))
-  ) {
+
+  const hasDelivered = Boolean(deliveredAt)
+    || statusEvidence.some((status) => status.includes('deliver') && !status.includes('undeliv'))
+  if (hasDelivered) {
     return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
   }
-  if (deliveryStatus === 'sent' || sentAt || providerStatus === 'sent' || providerStatus === 'success' || providerStatus === 'accepted') {
+
+  const hasSent = Boolean(sentAt)
+    || statusEvidence.some((status) => status === 'sent' || status === 'success' || status === 'accepted')
+  if (hasSent) {
     return { type: 'sent', label: 'Sent', icon: 'check' }
   }
-  if (providerStatus.includes('pending') || providerStatus.includes('queue') || providerStatus.includes('schedul') || providerStatus.includes('process')) {
+
+  const hasPending = statusEvidence.some((status) => (
+    status.includes('pending')
+    || status.includes('queue')
+    || status.includes('schedul')
+    || status.includes('process')
+    || status === 'queued'
+    || status === 'sending'
+  ))
+  if (hasPending || latestDirection === 'outbound') {
     return { type: 'pending', label: 'Pending', icon: 'clock' }
   }
-  if (latestDirection === 'outbound') {
-    return { type: 'pending', label: 'Pending', icon: 'clock' }
-  }
+
   return null
 }
 
@@ -385,24 +408,7 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   if ((thread as any).absenteeOwner || (decision as any).absentee_owner) intelTags.push('Absentee')
   if ((thread as any).distressScore > 70) intelTags.push('Distressed')
 
-  // 1. Delivery Status Logic (Outbound ONLY)
-  let deliveryStatus: 'sent' | 'delivered' | 'failed' | null = null
-
-  if (latestDirection === 'outbound') {
-    const latestDeliveredAt = (thread as any).latestDeliveredAt || (thread as any).lastDeliveredAt
-    const latestSentAt = (thread as any).latestSentAt || (thread as any).sentAt
-    const latestStatus = String((thread as any).latestDeliveryStatus || (thread as any).deliveryStatus || '').toLowerCase()
-
-    if (latestDeliveredAt || latestStatus === 'delivered') {
-      deliveryStatus = 'delivered'
-    } else if (latestStatus === 'failed' || latestStatus.includes('undeliv')) {
-      deliveryStatus = 'failed'
-    } else if (latestSentAt || (thread as any).latestProviderSid || (thread as any).outbound_count > 0) {
-      deliveryStatus = 'sent'
-    }
-  }
-
-  const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection, deliveryStatus)
+  const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection)
   const marketLine = market && market !== 'Unknown Market' ? market : '—'
   const metaParts: string[] = []
   if (propertyTypeLabel) metaParts.push(propertyTypeLabel)
@@ -468,8 +474,10 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     marketLine,
     metaLine,
     intelTags,
-    deliveryStatus,
     deliveryReceipt,
+    deliveryStatus: deliveryReceipt?.type === 'inbound'
+      ? null
+      : (deliveryReceipt?.type ?? null),
     visualCategory,
   }
 }
@@ -726,9 +734,8 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
           {deliveryReceipt && (
-            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)}>
+            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} title={deliveryReceipt.label} aria-label={deliveryReceipt.label}>
               <Icon name={deliveryReceipt.icon} />
-              <span>{deliveryReceipt.label}</span>
               <span className="nx-row25__footer-sep" aria-hidden="true">·</span>
               <time className="nx-row25__receipt-time">{ageLabel}</time>
             </span>
@@ -801,9 +808,11 @@ export const InboxSidebar = ({
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
   loading = false,
-  realtimeStatus = 'connecting',
-  refreshMode = 'realtime',
+  realtimeStatus: _realtimeStatus = 'connecting',
+  refreshMode: _refreshMode = 'realtime',
 }: InboxSidebarProps) => {
+  void _realtimeStatus
+  void _refreshMode
   const groupsRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
   const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
@@ -860,16 +869,19 @@ export const InboxSidebar = ({
   // the cold stale-age sub-filter. No in-component re-bucketing, no fallback to other buckets.
   const displayedActiveThreads = useMemo(() => {
     const activeBucket = activeBucketConfig.bucket
-    const now = new Date()
 
-    // Safety hard-filter: reject any rows the backend returned with a mismatched bucket.
-    // In normal operation this is a no-op; it protects against backend classification drift.
     const resolveAuthoritativeBucket = (thread: InboxWorkflowThread): string => {
-      const bucket = readString(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket').toLowerCase()
+      const bucket = readString(thread, 'inbox_bucket', 'inboxBucket').toLowerCase()
       if (bucket === 'waiting_on_seller') return 'waiting'
       if (bucket) return bucket
-      const fallback = resolveBucketFromThreadState(thread) || classifyInboxBucket(thread, now).bucket
-      return fallback === 'waiting_on_seller' ? 'waiting' : fallback
+      const legacy = readString(thread, 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket').toLowerCase()
+      if (legacy === 'waiting_on_seller') return 'waiting'
+      if (legacy === 'hot_leads' || legacy === 'hot') return 'priority'
+      if (legacy === 'new_inbound' || legacy === 'needs_reply') return 'new_replies'
+      if (legacy === 'outbound_active' || legacy === 'follow_up_due') return 'follow_up'
+      if (legacy === 'cold_no_response' || legacy === 'not_contacted') return 'cold'
+      if (legacy === 'dnc_opt_out' || legacy === 'opt_out') return 'suppressed'
+      return legacy
     }
 
     let filtered = activeBucket === 'all_messages'
@@ -879,11 +891,7 @@ export const InboxSidebar = ({
           if (activeBucket === 'needs_review') {
             return rowBucket === 'needs_review' || readBoolean(thread, 'needs_review', 'needsReview')
           }
-          if (rowBucket !== activeBucket) {
-            console.log('[VISIBLE_THREAD_REJECT]', thread.threadKey || thread.id, activeBucket, rowBucket)
-            return false
-          }
-          return true
+          return rowBucket === activeBucket
         })
 
     const sorted = sortThreadsByDecision(filtered, decisionMap).slice(0, visibleThreadCount)

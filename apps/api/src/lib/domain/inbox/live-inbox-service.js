@@ -1237,6 +1237,79 @@ function toSupabaseBoolean(value) {
   return value ? "true" : "false";
 }
 
+async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
+  const normalized = normalizeLiveFilter(filter);
+  if (normalized === "all") return null;
+
+  let query = supabase
+    .from("inbox_thread_state")
+    .select("thread_key")
+    .not("thread_key", "is", null)
+    .neq("thread_key", "");
+
+  switch (normalized) {
+    case "priority":
+      query = query.eq("inbox_bucket", "priority");
+      break;
+    case "new_replies":
+      query = query.eq("inbox_bucket", "new_replies");
+      break;
+    case "needs_review":
+      query = query.eq("inbox_bucket", "needs_review");
+      break;
+    case "follow_up":
+      query = query.eq("inbox_bucket", "follow_up");
+      break;
+    case "cold":
+      query = query.eq("inbox_bucket", "cold");
+      break;
+    case "dead":
+      query = query.eq("inbox_bucket", "dead");
+      break;
+    case "suppressed":
+      query = query.eq("inbox_bucket", "suppressed");
+      break;
+    case "waiting":
+      query = query.eq("inbox_bucket", "waiting");
+      break;
+    case "active":
+      if (typeof query.in === "function") {
+        query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
+      }
+      break;
+    case "unlinked":
+      return null;
+    default:
+      return null;
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+}
+
+async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
+  const uniqueKeys = [...new Set(threadKeys.map((key) => clean(key)).filter(Boolean))];
+  if (!uniqueKeys.length) return new Map();
+
+  const { data, error } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key,inbox_bucket")
+    .in("thread_key", uniqueKeys);
+
+  if (error) throw error;
+
+  const bucketByThreadKey = new Map();
+  for (const row of data || []) {
+    const threadKey = clean(row.thread_key);
+    const bucket = lower(row.inbox_bucket);
+    if (threadKey && bucket) bucketByThreadKey.set(threadKey, bucket);
+  }
+
+  return bucketByThreadKey;
+}
+
 function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]) {
   if (sourceConfig.key === "enriched") {
     switch (filter) {
@@ -1265,7 +1338,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
           ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
           : query;
       case "waiting":
-        return query.eq("inbox_category", "outbound_active");
+        return query;
       case "unlinked":
         return typeof query.is === "function" ? query.is("property_id", null) : query;
       default:
@@ -1354,7 +1427,17 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
       query = query.eq(sourceConfig.directionColumn, normalizeDirection(params.direction));
     }
 
-    query = applyQueryFilter(query, filter, sourceConfig);
+    const authoritativeThreadKeys = await fetchAuthoritativeThreadKeysForFilter(supabase, filter);
+    if (authoritativeThreadKeys !== null) {
+      if (authoritativeThreadKeys.length === 0) {
+        return { data: [], count: 0, error: null, sourceConfig };
+      }
+      if (typeof query.in === "function") {
+        query = query.in("thread_key", authoritativeThreadKeys);
+      }
+    } else {
+      query = applyQueryFilter(query, filter, sourceConfig);
+    }
 
     if (params.q && typeof query.or === "function") {
       const qStr = `%${clean(params.q)}%`;
@@ -1505,7 +1588,21 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   });
   const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
-  const rows = (rawRows || []).map((row) => normalizeThreadRow(row, params));
+  const bucketByThreadKey = await fetchInboxBucketsByThreadKeys(
+    supabase,
+    (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
+  );
+  const rows = (rawRows || []).map((row) => {
+    const normalized = normalizeThreadRow(row, params);
+    const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
+    const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
+    if (!authoritativeBucket) return normalized;
+    return {
+      ...normalized,
+      inbox_bucket: authoritativeBucket,
+      inbox_category: authoritativeBucket,
+    };
+  });
   const postFiltered = sortThreads(rows)
     .filter((row) => threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
