@@ -173,6 +173,84 @@ const formatMoneyCompact = (value: number | null) => (value && value > 0 ? forma
 
 const formatPercentCompact = (value: number | null) => (value && value > 0 ? formatPercent(value) : '—')
 
+const formatCompactMoney = (value: number | null): string => {
+  if (value == null || value <= 0) return '—'
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (value >= 1_000) return `$${Math.round(value / 1_000)}K`
+  return `$${Math.round(value).toLocaleString()}`
+}
+
+const formatEquityDisplay = (amount: number | null, percent: number | null): string => {
+  if (percent != null && percent > 0) return `${Math.round(percent)}%`
+  if (amount != null && amount > 0) return formatCompactMoney(amount)
+  return '—'
+}
+
+const resolvePropertyTypeLabel = (propertyType: string): string => {
+  const t = propertyType.toLowerCase()
+  if (!t || t === 'unknown type') return ''
+  if (t.includes('single') || t === 'sfr') return 'SFR'
+  if (t.includes('multi')) return 'Multifamily'
+  if (t.includes('condo')) return 'Condo'
+  if (t.includes('town')) return 'Townhome'
+  if (t.includes('land')) return 'Land'
+  if (t.includes('commercial')) return 'Commercial'
+  return propertyType
+}
+
+const resolveStageNumber = (stage: string): number | null => {
+  const s = stage.toLowerCase()
+  const match = s.match(/stage[_\s#-]*(\d+)/)
+  if (match) return Number(match[1])
+  if (s.includes('stage_1') || s === '1') return 1
+  if (s.includes('stage_2')) return 2
+  if (s.includes('stage_3')) return 3
+  if (s.includes('stage_4')) return 4
+  if (s.includes('stage_5')) return 5
+  return null
+}
+
+type DeliveryReceipt = {
+  type: 'inbound' | 'delivered' | 'failed' | 'sent' | 'pending'
+  label: string
+  icon: 'arrow-down-left' | 'check-double' | 'x' | 'check' | 'clock'
+}
+
+const resolveDeliveryReceipt = (
+  thread: InboxWorkflowThread,
+  latestDirection: string,
+  deliveryStatus: 'sent' | 'delivered' | 'failed' | null,
+): DeliveryReceipt | null => {
+  if (latestDirection === 'inbound') {
+    return { type: 'inbound', label: 'Inbound', icon: 'arrow-down-left' }
+  }
+  const latestStatus = String(
+    (thread as Record<string, unknown>).latestDeliveryStatus
+    || (thread as Record<string, unknown>).deliveryStatus
+    || '',
+  ).toLowerCase()
+  if (deliveryStatus === 'delivered' || latestStatus === 'delivered') {
+    return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
+  }
+  if (deliveryStatus === 'failed' || latestStatus.includes('fail') || latestStatus.includes('undeliv')) {
+    return { type: 'failed', label: 'Failed', icon: 'x' }
+  }
+  if (latestStatus.includes('pending') || latestStatus.includes('queue') || latestStatus.includes('schedul')) {
+    return { type: 'pending', label: 'Pending', icon: 'clock' }
+  }
+  if (deliveryStatus === 'sent' || latestDirection === 'outbound') {
+    return { type: 'sent', label: 'Sent', icon: 'check' }
+  }
+  return null
+}
+
+const priorityScoreClass = (score: number | null): string => {
+  if (score == null) return ''
+  if (score >= 70) return 'is-priority-high'
+  if (score >= 40) return 'is-priority-medium'
+  return 'is-priority-low'
+}
+
 const renderBadge = (label: string, key: string) => (
   <span key={key} className="nx-ops75-badge">{label}</span>
 )
@@ -247,10 +325,13 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     ['HOT', 'VERY_HOT', 'READY_TO_CLOSE'].includes(decision.lead_temperature) &&
     decision.suppression_status === 'clear'
   ) || ['urgent', 'high'].includes(String(thread.priority || '').toLowerCase())
-  const stage = (thread as any).conversationStage || decision.conversation_stage
-  const stageNum = stage.includes('stage_1') ? 'S1' : stage.includes('stage_2') ? 'S2' : stage.includes('stage_3') ? 'S3' : stage.includes('stage_4') ? 'S4' : stage.includes('stage_5') ? 'S5' : ''
-  
-  const pTypeShort = propertyType === 'Single Family' ? 'SFR' : propertyType === 'Multi Family' ? 'Multifamily' : propertyType
+  const stage = String((thread as any).conversationStage || decision.conversation_stage || '')
+  const stageNumber = resolveStageNumber(stage)
+  const stageNum = stageNumber ? `S${stageNumber}` : ''
+  const stageDisplay = stageNumber ? `Stage #${stageNumber}` : ''
+  const propertyTypeLabel = resolvePropertyTypeLabel(propertyType)
+  const pTypeShort = propertyTypeLabel || propertyType
+  const unitCount = readNumber(thread, 'unitCount', 'unit_count', 'units', 'number_of_units', 'units_count', 'portfolio_total_units')
   
   // Intel Tags
   const intelTags: string[] = []
@@ -270,12 +351,20 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
 
     if (latestDeliveredAt || latestStatus === 'delivered') {
       deliveryStatus = 'delivered'
-    } else if (latestStatus === 'failed') {
+    } else if (latestStatus === 'failed' || latestStatus.includes('undeliv')) {
       deliveryStatus = 'failed'
     } else if (latestSentAt || (thread as any).latestProviderSid || (thread as any).outbound_count > 0) {
       deliveryStatus = 'sent'
     }
   }
+
+  const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection, deliveryStatus)
+  const contextParts: string[] = []
+  if (market && market !== 'Unknown Market') contextParts.push(market)
+  if (propertyTypeLabel) contextParts.push(propertyTypeLabel)
+  if (unitCount != null && unitCount > 1) contextParts.push(`${unitCount} Units`)
+  if (stageDisplay) contextParts.push(stageDisplay)
+  const contextLine = contextParts.join(' · ') || '—'
 
   // 2. Visual Category Logic (Inbound ONLY)
   let visualCategory: 'positive' | 'negative' | 'autopilot' | 'review' | 'none' = 'none'
@@ -321,8 +410,14 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     isHot,
     stage,
     stageNum,
+    stageNumber,
+    stageDisplay,
+    propertyTypeLabel,
+    unitCount,
+    contextLine,
     intelTags,
     deliveryStatus,
+    deliveryReceipt,
     visualCategory,
   }
 }
@@ -523,41 +618,28 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 })
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
-// Compact three-zone row for rail25 / review50.
-// Uses .nx-row25 CSS from inbox-density-25.css. No checkboxes or large cards.
-function CompactRow25({ thread, selected, decision, onSelect }: { thread: any; selected: boolean; decision: any; onSelect: (id: string) => void }) {
+// Elite three-zone row — rail25 / review50 / ops75 / full100
+const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
+  thread: InboxWorkflowThread
+  selected: boolean
+  decision: ConversationDecision
+  onSelect: (id: string) => void
+}) => {
+  const vars = getThreadVars(thread, decision)
   const {
-    name, address, market, pTypeShort,
-    latestMessageBody, latestDirection,
-    estimatedValue, equityPercent, finalAcquisitionScore,
-    timestamp, isHot, stage, stageNum, deliveryStatus, visualCategory,
-  } = getThreadVars(thread, decision)
+    name, address, contextLine, latestMessageBody, latestDirection,
+    estimatedValue, equityAmount, equityPercent, finalAcquisitionScore,
+    timestamp, isHot, deliveryReceipt, visualCategory,
+  } = vars
 
-  const stageChipClass = (() => {
-    const s = stage.toLowerCase()
-    if (['offer', 'negotiat', 'under_contract', 'closing', 'stage_3', 'stage_4', 'stage_5'].some(k => s.includes(k))) return 'is-hot'
-    if (['follow_up', 'waiting', 'automated', 'outbound_active', 'stage_2'].some(k => s.includes(k))) return 'is-wait'
-    if (['cold', 'not_contacted', 'stage_1'].some(k => s.includes(k))) return 'is-cold'
-    if (['dead', 'suppressed', 'wrong_number', 'not_interested'].some(k => s.includes(k))) return 'is-dead'
-    return ''
-  })()
-
-  const deliveryInfo = (() => {
-    if (latestDirection === 'inbound') return { cls: 'is-inbound', sym: '↩', lbl: 'Inb' }
-    if (deliveryStatus === 'delivered') return { cls: 'is-delivered', sym: '✓✓', lbl: 'Dlvd' }
-    if (deliveryStatus === 'failed') return { cls: 'is-failed', sym: '✗', lbl: 'Fail' }
-    if (latestDirection === 'outbound' || deliveryStatus === 'sent') return { cls: 'is-sent', sym: '✓', lbl: 'Sent' }
-    return null
-  })()
-
-  const evVal = estimatedValue ? formatCurrency(estimatedValue) : '—'
-  const evCls = (estimatedValue ?? 0) > 250000 ? 'is-green' : (estimatedValue ?? 0) > 100000 ? 'is-amber' : 'is-muted'
-  const eqVal = equityPercent ? formatPercent(equityPercent) : '—'
-  const eqCls = (equityPercent ?? 0) > 30 ? 'is-green' : (equityPercent ?? 0) > 15 ? 'is-amber' : 'is-muted'
-  const scrVal = finalAcquisitionScore != null ? String(finalAcquisitionScore) : '—'
-  const scrCls = (finalAcquisitionScore ?? 0) > 70 ? 'is-green' : (finalAcquisitionScore ?? 0) > 40 ? 'is-amber' : 'is-muted'
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
-  const stageShort = stage.replace(/_/g, ' ').toUpperCase().replace(/\s+STAGE\s*/, '').slice(0, 10)
+  const intentLabel = visualCategory !== 'none'
+    ? visualCategory === 'positive' ? 'Hot intent'
+      : visualCategory === 'negative' ? 'Negative'
+        : visualCategory === 'review' ? 'Review'
+          : visualCategory === 'autopilot' ? 'Automated'
+            : null
+    : null
 
   return (
     <div
@@ -570,55 +652,57 @@ function CompactRow25({ thread, selected, decision, onSelect }: { thread: any; s
         latestDirection === 'inbound' && 'is-inbound',
         latestDirection === 'outbound' && 'is-outbound',
         isHot && 'is-hot',
-        `is-category-${visualCategory}`,
+        visualCategory !== 'none' && `is-category-${visualCategory}`,
       )}
       data-thread-id={thread.id}
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
-      <div className="nx-row25__left">
-        <div className="nx-row25__name-line">
-          {decision.unread && <span className="nx-row25__pip" />}
-          <span className="nx-row25__name">{name}</span>
-          {stageNum && <span className="nx-row25__stage-num">{stageNum}</span>}
+      <div className="nx-row25__zone nx-row25__zone--left">
+        <span className="nx-row25__context">{contextLine}</span>
+      </div>
+
+      <div className="nx-row25__zone nx-row25__zone--center">
+        <div className="nx-row25__head">
+          <span className="nx-row25__name-wrap">
+            {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
+            <span className="nx-row25__name">{name}</span>
+          </span>
+          <time className="nx-row25__time">{ageLabel}</time>
         </div>
         <span className="nx-row25__addr">{address}</span>
-        <div className="nx-row25__meta-row">
-          <span className="nx-row25__meta">{market}{pTypeShort ? ` · ${pTypeShort}` : ''}</span>
-          {stageChipClass && <span className={cls('nx-row25__stage-chip', stageChipClass)}>{stageShort}</span>}
-        </div>
-      </div>
-      <div className="nx-row25__center">
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
-          {deliveryInfo && (
-            <span className={cls('nx-row25__delivery', deliveryInfo.cls)}>
-              <span className="nx-row25__delivery-sym">{deliveryInfo.sym}</span>
-              <span className="nx-row25__delivery-lbl">{deliveryInfo.lbl}</span>
+          {deliveryReceipt && (
+            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)}>
+              <Icon name={deliveryReceipt.icon} />
+              <span>{deliveryReceipt.label}</span>
             </span>
           )}
-          {deliveryInfo && <span className="nx-row25__footer-sep">·</span>}
-          <span className="nx-row25__age">{ageLabel}</span>
-          {isHot && <span className="nx-row25__hot" />}
+          {intentLabel && <span className="nx-row25__intent">{intentLabel}</span>}
         </div>
       </div>
-      <div className="nx-row25__intel">
-        <div className="nx-row25__kv">
-          <span className="nx-row25__k">EV</span>
-          <span className={cls('nx-row25__v', evCls)}>{evVal}</span>
+
+      <div className="nx-row25__zone nx-row25__zone--right">
+        <div className="nx-row25__metric">
+          <span className="nx-row25__metric-k">Value</span>
+          <span className="nx-row25__metric-v">{formatCompactMoney(estimatedValue)}</span>
         </div>
-        <div className="nx-row25__kv">
-          <span className="nx-row25__k">EQ</span>
-          <span className={cls('nx-row25__v', eqCls)}>{eqVal}</span>
+        <div className="nx-row25__metric">
+          <span className="nx-row25__metric-k">Priority</span>
+          <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>
+            {finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'}
+          </span>
         </div>
-        <div className="nx-row25__kv nx-row25__kv--score">
-          <span className="nx-row25__k">SCR</span>
-          <span className={cls('nx-row25__v', scrCls)}>{scrVal}</span>
+        <div className="nx-row25__metric">
+          <span className="nx-row25__metric-k">Equity</span>
+          <span className="nx-row25__metric-v">{formatEquityDisplay(equityAmount, equityPercent)}</span>
         </div>
       </div>
     </div>
   )
-}
+})
+CompactRow25.displayName = 'CompactRow25'
 
 const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   if (!thread) return <div className="nx-deal-snapshot-empty">Select a thread to view details</div>
@@ -850,19 +934,29 @@ export const InboxSidebar = ({
           <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
         </div>
       </div>
-      <div className="nx-sidebar-rebuilt__chips-wrap" role="tablist">
+      <div className="nx-cat-nav" role="tablist" aria-label="Inbox categories">
         {VISIBLE_INBOX_CHIPS.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
+          const showUnread = item.bucket === 'new_replies' && Number(countValue ?? 0) > 0
           return (
-            <button key={item.view} type="button" className={cls('nx-inbox-chip-v2', isActive && 'is-active', item.accentClass)} onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onApplySavedPreset(viewToPreset(item.view))
-            }}>
-              <span className="nx-inbox-chip-v2__icon">{item.icon}</span>
-              <span className="nx-inbox-chip-v2__label">{item.label}</span>
-              <span className="nx-inbox-chip-v2__count">{formatCount(countValue)}</span>
+            <button
+              key={item.view}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              data-category={item.bucket}
+              className={cls('nx-cat-nav__item', isActive && 'is-active')}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onApplySavedPreset(viewToPreset(item.view))
+              }}
+            >
+              <span className="nx-cat-nav__icon" aria-hidden="true">{item.icon}</span>
+              <span className="nx-cat-nav__label">{item.label}</span>
+              <span className="nx-cat-nav__count">{formatCount(countValue)}</span>
+              {showUnread && <span className="nx-cat-nav__unread" aria-label="Unread replies" />}
             </button>
           )
         })}
@@ -976,9 +1070,17 @@ export const InboxSidebar = ({
     </div>
   )
 
+  const sidebarShellClass = cls(
+    'nx-sidebar-rebuilt',
+    `nx-sidebar--mode-${inboxMode}`,
+    inboxMode === 'review50' && 'nx-sidebar--mode-rail25',
+    `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`,
+    savedPreset && 'has-preset',
+  )
+
   if (inboxMode === 'review50') {
     return (
-      <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, 'nx-sidebar--mode-rail25', `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
+      <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
         <div className="nx-review50-layout">
           <div className="nx-review50-left" ref={groupsRef}>
             {renderTopActions()}
@@ -998,7 +1100,7 @@ export const InboxSidebar = ({
 
   if (inboxMode === 'full100') {
     return (
-      <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
+      <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
         <div className="nx-full100-layout">
           <div className="nx-full100-left">
             {renderTopActions()}
@@ -1006,16 +1108,8 @@ export const InboxSidebar = ({
           </div>
           <div className="nx-full100-center" ref={groupsRef}>
             {renderMultiSelectBar()}
-            <div className="nx-ops75-table-header">
-              <div className="nx-ops75-col nx-ops75-col--check"></div>
-              <div className="nx-ops75-col nx-ops75-col--seller">Seller & Address</div>
-              <div className="nx-ops75-col nx-ops75-col--msg">Latest Message</div>
-              <div className="nx-ops75-col nx-ops75-col--meta">Intel</div>
-              <div className="nx-ops75-col nx-ops75-col--status">Status</div>
-              <div className="nx-ops75-col nx-ops75-col--actions"></div>
-            </div>
             <div className="nx-sidebar-rebuilt__list-container">
-              {renderListContent(ConversationRowOps75)}
+              {renderListContent(CompactRow25)}
             </div>
           </div>
           <div className="nx-full100-right">
@@ -1026,25 +1120,13 @@ export const InboxSidebar = ({
     )
   }
 
-  const RowComponent = inboxMode === 'ops75' ? ConversationRowOps75 : CompactRow25
-
   return (
-    <aside className={cls('nx-sidebar-rebuilt', `nx-sidebar--mode-${inboxMode}`, `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`, savedPreset && 'has-preset')}>
+    <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
       {renderTopActions()}
       <div className="nx-sidebar-rebuilt__list-container" ref={groupsRef}>
         {renderSecondaryControls()}
         {renderMultiSelectBar()}
-        {inboxMode === 'ops75' && (
-          <div className="nx-ops75-table-header">
-            <div className="nx-ops75-col nx-ops75-col--check"></div>
-            <div className="nx-ops75-col nx-ops75-col--seller">Seller & Address</div>
-            <div className="nx-ops75-col nx-ops75-col--msg">Latest Message</div>
-            <div className="nx-ops75-col nx-ops75-col--meta">Intel</div>
-            <div className="nx-ops75-col nx-ops75-col--status">Status</div>
-            <div className="nx-ops75-col nx-ops75-col--actions"></div>
-          </div>
-        )}
-        {renderListContent(RowComponent)}
+        {renderListContent(CompactRow25)}
       </div>
     </aside>
   )

@@ -84,8 +84,6 @@
    ROW BASE
    ══════════════════════════════════════════════════════════════════════════ */
 .nx-sidebar--mode-rail25 .nx-row25 {
-  display: flex !important;
-  align-items: stretch !important;
   min-height: 52px;
   position: relative;
   cursor: pointer;

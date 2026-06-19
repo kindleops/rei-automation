@@ -138,6 +138,7 @@ import './inbox-premium.css'
 import './inbox-polish.css'
 import './notification-hud.css'
 import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
+import './inbox-elite-ui.css' // elite category nav + three-zone row system
 import '../../views/buyer-match/buyer-intel-upgrade.css'
 import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/copilot.css)
 import './conversation-redesign.css'
