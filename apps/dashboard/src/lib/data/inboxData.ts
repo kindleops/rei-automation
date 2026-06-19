@@ -1969,7 +1969,10 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   const unreadCount = asNumber(row.unread_count ?? row.unread, 0)
   const needsReply = unreadCount > 0 || (latestMessageDirection === 'inbound' && !row.queue_status)
   
-  const inboxBucket = asString(dc.inboxBucket || dc.inbox_bucket || row.inbox_bucket || row.inbox_category || 'all_messages').toLowerCase()
+  const inboxBucket = asString(
+    row.inbox_bucket || row.inbox_category || row.inboxBucket || row.inboxCategory ||
+    dc.inbox_bucket || dc.inboxBucket || 'all_messages',
+  ).toLowerCase()
   const deliveryStatus = asString(getFirst(row, [
     'latest_delivery_status',
     'delivery_status',

@@ -243,11 +243,21 @@ const resolveDeliveryReceipt = (
   const statusEvidence = deliveryStatusTokens(thread)
   const isFinalFailure = readBoolean(thread, 'is_final_failure', 'isFinalFailure', 'latest_is_final_failure', 'latestIsFinalFailure')
   const failedAt = readString(thread, 'latest_failed_at', 'latestFailedAt', 'failed_at', 'failedAt')
+  const failureReason = readString(
+    thread,
+    'latest_failure_reason',
+    'latestFailureReason',
+    'failure_reason',
+    'failureReason',
+    'error_message',
+    'errorMessage',
+  )
   const deliveredAt = readString(thread, 'latest_delivered_at', 'latestDeliveredAt', 'delivered_at', 'deliveredAt')
   const sentAt = readString(thread, 'latest_sent_at', 'latestSentAt', 'sent_at', 'sentAt')
 
   const hasFailure = isFinalFailure
     || Boolean(failedAt)
+    || Boolean(failureReason)
     || statusEvidence.some((status) => (
       status.includes('fail')
       || status.includes('undeliv')
@@ -869,32 +879,8 @@ export const InboxSidebar = ({
   // the cold stale-age sub-filter. No in-component re-bucketing, no fallback to other buckets.
   const displayedActiveThreads = useMemo(() => {
     const activeBucket = activeBucketConfig.bucket
-
-    const resolveAuthoritativeBucket = (thread: InboxWorkflowThread): string => {
-      const bucket = readString(thread, 'inbox_bucket', 'inboxBucket').toLowerCase()
-      if (bucket === 'waiting_on_seller') return 'waiting'
-      if (bucket) return bucket
-      const legacy = readString(thread, 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket').toLowerCase()
-      if (legacy === 'waiting_on_seller') return 'waiting'
-      if (legacy === 'hot_leads' || legacy === 'hot') return 'priority'
-      if (legacy === 'new_inbound' || legacy === 'needs_reply') return 'new_replies'
-      if (legacy === 'outbound_active' || legacy === 'follow_up_due') return 'follow_up'
-      if (legacy === 'cold_no_response' || legacy === 'not_contacted') return 'cold'
-      if (legacy === 'dnc_opt_out' || legacy === 'opt_out') return 'suppressed'
-      return legacy
-    }
-
-    let filtered = activeBucket === 'all_messages'
-      ? searchableThreads
-      : searchableThreads.filter((thread) => {
-          const rowBucket = resolveAuthoritativeBucket(thread)
-          if (activeBucket === 'needs_review') {
-            return rowBucket === 'needs_review' || readBoolean(thread, 'needs_review', 'needsReview')
-          }
-          return rowBucket === activeBucket
-        })
-
-    const sorted = sortThreadsByDecision(filtered, decisionMap).slice(0, visibleThreadCount)
+    // Rows are already bucket-scoped by useInboxData; only apply search, sort, and cold stale-age.
+    const sorted = sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
 
     console.log('[VISIBLE_THREADS_SOURCE]', activeBucket, threads.length, sorted.length, 'store')
 

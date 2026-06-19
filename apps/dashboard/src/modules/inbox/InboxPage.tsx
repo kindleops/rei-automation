@@ -1206,6 +1206,9 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       },
       cursor: null,
       limit: 100,
+      _force: true,
+      _timeoutMode: 'manual_bucket_switch',
+      _refreshReason: 'manual_bucket_switch',
     })
   }, [DEV, advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
 

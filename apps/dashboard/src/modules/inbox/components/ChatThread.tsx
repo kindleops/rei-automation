@@ -65,21 +65,45 @@ const messageTimestampMs = (message: ThreadMessage): number => {
 }
 
 const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | 'sent' | 'delivered' => {
-  // Precedence: delivered > failed > queued > sent. Backend reconciliation
-  // already downgrades disputed failure records with success evidence to sent.
-  if (message.deliveredAt) return 'delivered'
-  
   const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
-  if (status === 'delivered') return 'delivered'
-  
   const raw = String(message.rawStatus || '').toLowerCase()
-  if (raw.includes('delivered')) return 'delivered'
-  
-  if (status === 'failed' || raw.includes('fail') || raw.includes('error') || raw.includes('undeliver')) return 'failed'
-  if (status === 'queued' || status === 'pending' || status === 'sending' || raw.includes('queue') || raw.includes('pending') || raw.includes('schedule') || raw.includes('approval') || raw.includes('sending')) return 'queued'
-  if (status === 'sent' || raw.includes('sent') || raw === 'success') return 'sent'
-  
-  return 'sent'
+  const failedAt = String((message as { failedAt?: string | null; failed_at?: string | null }).failedAt
+    ?? (message as { failed_at?: string | null }).failed_at
+    ?? '').trim()
+  const isFinalFailure = Boolean(
+    (message as { isFinalFailure?: boolean; is_final_failure?: boolean }).isFinalFailure
+    ?? (message as { is_final_failure?: boolean }).is_final_failure,
+  )
+  const statusEvidence = [status, raw].filter(Boolean)
+
+  const hasFailure = isFinalFailure
+    || Boolean(failedAt)
+    || Boolean(message.error)
+    || statusEvidence.some((value) => (
+      value.includes('fail')
+      || value.includes('undeliv')
+      || value.includes('rejected')
+      || value === 'error'
+      || value.includes('error')
+    ))
+  if (hasFailure) return 'failed'
+
+  if (message.deliveredAt) return 'delivered'
+  if (statusEvidence.some((value) => value.includes('deliver') && !value.includes('undeliv'))) return 'delivered'
+
+  if (message.sentAt) return 'sent'
+  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'sent'
+
+  if (statusEvidence.some((value) => (
+    value.includes('pending')
+    || value.includes('queue')
+    || value.includes('schedul')
+    || value.includes('process')
+    || value === 'queued'
+    || value === 'sending'
+  ))) return 'queued'
+
+  return 'queued'
 }
 
 const getDeliveryPillStyle = (badge: string) => {
