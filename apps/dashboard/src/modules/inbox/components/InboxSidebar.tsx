@@ -251,6 +251,15 @@ const priorityScoreClass = (score: number | null): string => {
   return 'is-priority-low'
 }
 
+const resolveStatusChipClass = (thread: InboxWorkflowThread): string => {
+  const bucket = resolveBucketFromThreadState(thread) ?? classifyInboxBucket(thread).bucket
+  if (bucket === 'priority') return 'is-priority'
+  if (bucket === 'new_replies') return 'is-new_replies'
+  if (bucket === 'needs_review') return 'is-needs_review'
+  if (bucket === 'follow_up' || bucket === 'waiting_on_seller') return 'is-waiting'
+  return 'is-all_messages'
+}
+
 const renderBadge = (label: string, key: string) => (
   <span key={key} className="nx-ops75-badge">{label}</span>
 )
@@ -359,8 +368,14 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   }
 
   const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection, deliveryStatus)
+  const marketLine = market && market !== 'Unknown Market' ? market : '—'
+  const metaParts: string[] = []
+  if (propertyTypeLabel) metaParts.push(propertyTypeLabel)
+  if (unitCount != null && unitCount > 1) metaParts.push(`${unitCount} Units`)
+  if (stageDisplay) metaParts.push(stageDisplay)
+  const metaLine = metaParts.join(' · ') || '—'
   const contextParts: string[] = []
-  if (market && market !== 'Unknown Market') contextParts.push(market)
+  if (marketLine !== '—') contextParts.push(marketLine)
   if (propertyTypeLabel) contextParts.push(propertyTypeLabel)
   if (unitCount != null && unitCount > 1) contextParts.push(`${unitCount} Units`)
   if (stageDisplay) contextParts.push(stageDisplay)
@@ -415,6 +430,8 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     propertyTypeLabel,
     unitCount,
     contextLine,
+    marketLine,
+    metaLine,
     intelTags,
     deliveryStatus,
     deliveryReceipt,
@@ -618,7 +635,7 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 })
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
-// Elite three-zone row — rail25 / review50 / ops75 / full100
+// Elite four-zone row — rail25 / review50 / ops75 / full100
 const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
   thread: InboxWorkflowThread
   selected: boolean
@@ -627,19 +644,15 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
 }) => {
   const vars = getThreadVars(thread, decision)
   const {
-    name, address, contextLine, latestMessageBody, latestDirection,
-    estimatedValue, equityAmount, equityPercent, finalAcquisitionScore,
-    timestamp, isHot, deliveryReceipt, visualCategory,
+    name, address, marketLine, metaLine, latestMessageBody, latestDirection,
+    statusLabel, bucketLabel, estimatedValue, equityAmount, equityPercent,
+    finalAcquisitionScore, timestamp, isHot, deliveryReceipt, visualCategory,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
-  const intentLabel = visualCategory !== 'none'
-    ? visualCategory === 'positive' ? 'Hot intent'
-      : visualCategory === 'negative' ? 'Negative'
-        : visualCategory === 'review' ? 'Review'
-          : visualCategory === 'autopilot' ? 'Automated'
-            : null
-    : null
+  const statusChipClass = resolveStatusChipClass(thread)
+  const statusChipLabel = bucketLabel !== 'all messages' ? bucketLabel : statusLabel
+  const unreadCount = readNumber(thread, 'unreadCount', 'unread_count', 'unreadMessages', 'unread_messages')
 
   return (
     <div
@@ -658,18 +671,16 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
-      <div className="nx-row25__zone nx-row25__zone--left">
-        <span className="nx-row25__context">{contextLine}</span>
+      <div className="nx-row25__zone nx-row25__zone--context">
+        <span className="nx-row25__market">{marketLine}</span>
+        <span className="nx-row25__meta">{metaLine}</span>
       </div>
 
-      <div className="nx-row25__zone nx-row25__zone--center">
-        <div className="nx-row25__head">
-          <span className="nx-row25__name-wrap">
-            {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
-            <span className="nx-row25__name">{name}</span>
-          </span>
-          <time className="nx-row25__time">{ageLabel}</time>
-        </div>
+      <div className="nx-row25__zone nx-row25__zone--conversation">
+        <span className="nx-row25__name-wrap">
+          {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
+          <span className="nx-row25__name">{name}</span>
+        </span>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
@@ -679,11 +690,12 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
               <span>{deliveryReceipt.label}</span>
             </span>
           )}
-          {intentLabel && <span className="nx-row25__intent">{intentLabel}</span>}
+          {deliveryReceipt && <span className="nx-row25__footer-sep" aria-hidden="true">·</span>}
+          <time className="nx-row25__time">{ageLabel}</time>
         </div>
       </div>
 
-      <div className="nx-row25__zone nx-row25__zone--right">
+      <div className="nx-row25__zone nx-row25__zone--metrics">
         <div className="nx-row25__metric">
           <span className="nx-row25__metric-k">Value</span>
           <span className="nx-row25__metric-v">{formatCompactMoney(estimatedValue)}</span>
@@ -698,6 +710,21 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
           <span className="nx-row25__metric-k">Equity</span>
           <span className="nx-row25__metric-v">{formatEquityDisplay(equityAmount, equityPercent)}</span>
         </div>
+      </div>
+
+      <div className="nx-row25__zone nx-row25__zone--action">
+        <span className={cls('nx-row25__status-chip', statusChipClass)}>{statusChipLabel}</span>
+        {unreadCount != null && unreadCount > 1 && (
+          <span className="nx-row25__unread-badge">{unreadCount}</span>
+        )}
+        <button
+          type="button"
+          className="nx-row25__overflow-btn"
+          aria-label="Thread actions"
+          onClick={(e) => { e.stopPropagation() }}
+        >
+          <Icon name="more" />
+        </button>
       </div>
     </div>
   )
@@ -922,7 +949,8 @@ export const InboxSidebar = ({
   }, [activeBucketConfig.bucket, displayedActiveThreads.length])
 
   const renderTopActions = () => (
-    <div className={cls('nx-sidebar-rebuilt__top-glow', `is-${activeBucketConfig.accentClass.replace('is-', '')}`)}>
+    <div className="nx-inbox-header-shell">
+      <div className={cls('nx-inbox-header-shell__inner', 'nx-sidebar-rebuilt__top-glow', `is-${activeBucketConfig.accentClass.replace('is-', '')}`)}>
       <div className="nx-sidebar-rebuilt__search-top">
         <div className="nx-sidebar-rebuilt__search-input-wrap">
           <Icon name="search" className="nx-sidebar-rebuilt__search-icon" />
@@ -980,6 +1008,7 @@ export const InboxSidebar = ({
           ))}
         </div>
       )}
+      </div>
     </div>
   )
 
