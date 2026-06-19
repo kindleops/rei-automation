@@ -967,6 +967,111 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
 })
 CompactRow25.displayName = 'CompactRow25'
 
+// 100% command-center row — structured column grid (not a stretched rail)
+const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
+  thread: InboxWorkflowThread
+  selected: boolean
+  decision: ConversationDecision
+  onSelect: (id: string) => void
+}) => {
+  const vars = getThreadVars(thread, decision)
+  const {
+    name, address, market, propertyTypeLabel, unitCount, stageDisplay,
+    latestMessageBody, latestDirection, estimatedValue, equityAmount, equityPercent,
+    finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition, propertyFlags,
+  } = vars
+
+  const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
+  const bucketAccentClass = resolveStatusChipClass(thread).replace('is-', 'is-bucket-')
+  const valueDisplay = formatCompactMoney(estimatedValue)
+  const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
+  const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
+  const conditionDisplay = buildingCondition || '—'
+  const marketDisplay = market && market !== 'Unknown Market' ? market : '—'
+  const typeDisplay = propertyTypeLabel || '—'
+  const unitsDisplay = unitCount != null && unitCount > 1 ? `${unitCount} Units` : null
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={cls(
+        'nx-cc-row',
+        bucketAccentClass,
+        selected && 'is-selected',
+        decision.unread && 'is-unread',
+        latestDirection === 'inbound' && 'is-inbound',
+        latestDirection === 'outbound' && 'is-outbound',
+      )}
+      data-thread-id={thread.id}
+      onClick={() => onSelect(thread.id)}
+      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
+    >
+      <div className="nx-cc-row__col nx-cc-row__col--seller">
+        <div className="nx-cc-row__seller-head">
+          {decision.unread && <span className="nx-cc-row__unread-dot" aria-hidden="true" />}
+          <span className="nx-cc-row__name">{name}</span>
+        </div>
+        <span className="nx-cc-row__addr">{address}</span>
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--conversation">
+        <span className="nx-cc-row__preview">{latestMessageBody}</span>
+        <div className="nx-cc-row__receipt-row">
+          {deliveryReceipt ? (
+            <span className={cls('nx-cc-row__receipt', `is-${deliveryReceipt.type}`)}>
+              <Icon name={deliveryReceipt.icon} />
+              <span>{deliveryReceipt.label}</span>
+              <span className="nx-cc-row__receipt-sep">·</span>
+              <time>{ageLabel}</time>
+            </span>
+          ) : (
+            <time className="nx-cc-row__receipt-time">{ageLabel}</time>
+          )}
+        </div>
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--market">
+        <span className="nx-cc-row__meta-line">{marketDisplay}</span>
+        <span className="nx-cc-row__meta-line">{typeDisplay}</span>
+        {unitsDisplay && <span className="nx-cc-row__meta-line">{unitsDisplay}</span>}
+        {stageDisplay && <span className="nx-cc-row__meta-line is-stage">{stageDisplay}</span>}
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--flags">
+        {propertyFlags.length > 0 ? (
+          <PropertyFlagBadges flags={propertyFlags} maxVisible={3} density="rich" />
+        ) : (
+          <span className="nx-cc-row__empty">—</span>
+        )}
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--value">
+        <span className="nx-cc-row__metric-k">Value</span>
+        <span className="nx-cc-row__metric-v">{valueDisplay}</span>
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--priority">
+        <span className="nx-cc-row__metric-k">Priority</span>
+        <span className={cls('nx-cc-row__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--equity">
+        <span className="nx-cc-row__metric-k">Equity</span>
+        <span className="nx-cc-row__metric-v">{equityDisplay}</span>
+      </div>
+
+      <div className="nx-cc-row__col nx-cc-row__col--condition">
+        <span className="nx-cc-row__metric-k">Condition</span>
+        <span className={cls('nx-cc-row__metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
+          {conditionDisplay}
+        </span>
+      </div>
+    </div>
+  )
+})
+CommandCenterRow.displayName = 'CommandCenterRow'
+
 const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   if (!thread) return <div className="nx-deal-snapshot-empty">Select a thread to view details</div>
   const { name, address, market, latestMessageBody } = getThreadVars(thread, decision)
@@ -999,6 +1104,7 @@ export const InboxSidebar = ({
   void _realtimeStatus
   void _refreshMode
   const groupsRef = useRef<HTMLDivElement | null>(null)
+  const catNavRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
   const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1154,6 +1260,15 @@ export const InboxSidebar = ({
     el.scrollTop = 0
   }, [activeBucketConfig.bucket])
 
+  // Keep the active category tab centered / visible in the horizontal rail (25% and narrow headers).
+  useEffect(() => {
+    const nav = catNavRef.current
+    if (!nav) return
+    const activeTab = nav.querySelector<HTMLElement>('.nx-cat-nav__item.is-active')
+    if (!activeTab) return
+    activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [activeBucketConfig.view, inboxMode])
+
   // Log the row state for the active bucket each time it changes.
   useEffect(() => {
     if (displayedActiveThreads.length === 0) return
@@ -1180,7 +1295,7 @@ export const InboxSidebar = ({
           <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
         </div>
       </div>
-      <div className="nx-cat-nav" role="tablist" aria-label="Inbox categories">
+      <div className="nx-cat-nav" ref={catNavRef} role="tablist" aria-label="Inbox categories">
         {VISIBLE_INBOX_CHIPS.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
@@ -1201,7 +1316,7 @@ export const InboxSidebar = ({
             >
               <span className="nx-cat-nav__icon" aria-hidden="true">{item.icon}</span>
               <span className="nx-cat-nav__label" title={item.label}>
-                {inboxMode === 'rail25' ? item.shortLabel : item.label}
+                {item.label}
               </span>
               <span className="nx-cat-nav__count">{formatCount(countValue)}</span>
               {showUnread && <span className="nx-cat-nav__unread" aria-label="Unread replies" />}
@@ -1285,7 +1400,19 @@ export const InboxSidebar = ({
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
-        <div className="nx-sidebar-rebuilt__threads">
+        <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table')}>
+          {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
+            <div className="nx-cc-table__header" aria-hidden="true">
+              <span className="nx-cc-table__th nx-cc-table__th--seller">Seller / Property</span>
+              <span className="nx-cc-table__th nx-cc-table__th--conversation">Latest Conversation</span>
+              <span className="nx-cc-table__th nx-cc-table__th--market">Market / Type / Stage</span>
+              <span className="nx-cc-table__th nx-cc-table__th--flags">Flags</span>
+              <span className="nx-cc-table__th nx-cc-table__th--value">Value</span>
+              <span className="nx-cc-table__th nx-cc-table__th--priority">Priority</span>
+              <span className="nx-cc-table__th nx-cc-table__th--equity">Equity</span>
+              <span className="nx-cc-table__th nx-cc-table__th--condition">Condition</span>
+            </div>
+          )}
           {loading && displayedActiveThreads.length === 0 ? (
             <div className="nx-sidebar-skeleton">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -1301,6 +1428,21 @@ export const InboxSidebar = ({
           ) : displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
             const decision = decisionMap.get(thread.id)
             if (!decision) return null
+            const onThreadSelect = (id: string) => {
+              console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
+              onSelect(id)
+            }
+            if (inboxMode === 'full100') {
+              return (
+                <CommandCenterRow
+                  key={thread.threadKey || thread.id}
+                  thread={thread}
+                  selected={selectedId === thread.id}
+                  decision={decision}
+                  onSelect={onThreadSelect}
+                />
+              )
+            }
             return (
               <CompactRow25
                 key={thread.threadKey || thread.id}
@@ -1308,10 +1450,7 @@ export const InboxSidebar = ({
                 selected={selectedId === thread.id}
                 decision={decision}
                 inboxMode={inboxMode}
-                onSelect={(id: string) => {
-                  console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
-                  onSelect(id)
-                }}
+                onSelect={onThreadSelect}
               />
             )
           }) : (
