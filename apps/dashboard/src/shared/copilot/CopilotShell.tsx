@@ -34,11 +34,6 @@ export function CopilotShell({ open, context, onClose, onAction, onToggle }: Cop
 
   useEffect(() => subscribeSettings(() => setSettings(loadSettings())), [])
 
-  const mode: CopilotMode = (settings.copilotMode as CopilotMode) ?? 'sidecar'
-  const enabled = settings.copilotEnabled !== false
-
-  if (!enabled) return null
-
   const handleOrbClick = useCallback(() => {
     onToggle()
   }, [onToggle])
@@ -56,6 +51,11 @@ export function CopilotShell({ open, context, onClose, onAction, onToggle }: Cop
   const handleAction = useCallback((intent: ResolvedIntent) => {
     onAction(intent)
   }, [onAction])
+
+  const mode: CopilotMode = (settings.copilotMode as CopilotMode) ?? 'sidecar'
+  const enabled = settings.copilotEnabled !== false
+
+  if (!enabled) return null
 
   return (
     <>

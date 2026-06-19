@@ -1,12 +1,17 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import type { Plugin } from 'vite'
 import { createClient } from '@supabase/supabase-js'
 import { fetchCensusZcta, fetchCensusCounty } from './src/lib/census/censusClient'
 import { transformCensusRow } from './src/lib/census/censusTransform'
 
+const requireFromDashboard = createRequire(import.meta.url)
 const tslibShim = fileURLToPath(new URL('./src/lib/tslib-shim.ts', import.meta.url))
+const reactEntry = path.dirname(requireFromDashboard.resolve('react/package.json'))
+const reactDomEntry = path.dirname(requireFromDashboard.resolve('react-dom/package.json'))
 
 /* ── Underwriting Logic (Shared with API) ────────────────────────── */
 
@@ -624,7 +629,12 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         tslib: tslibShim,
+        react: reactEntry,
+        'react-dom': reactDomEntry,
+        'react/jsx-runtime': path.resolve(reactEntry, 'jsx-runtime.js'),
+        'react/jsx-dev-runtime': path.resolve(reactEntry, 'jsx-dev-runtime.js'),
       },
+      dedupe: ['react', 'react-dom', 'framer-motion'],
     },
   }
 })

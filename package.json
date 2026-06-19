@@ -5,6 +5,10 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
   "scripts": {
     "build:api": "npm --workspace apps/api run build",
     "build:dashboard": "npm --workspace apps/dashboard run build",
