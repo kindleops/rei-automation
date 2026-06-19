@@ -23,9 +23,9 @@
 
 /* ─── Category accent tokens ─────────────────────────────────────────────── */
 .nx-premium-inbox {
-  --nx-cat-priority-a: #ef4444;
-  --nx-cat-priority-b: #f97316;
-  --nx-cat-priority-c: #dc2626;
+  --nx-cat-priority-a: #dc2626;
+  --nx-cat-priority-b: #ef4444;
+  --nx-cat-priority-c: #f97316;
   --nx-cat-new-a: #38bdf8;
   --nx-cat-new-b: #22d3ee;
   --nx-cat-new-c: #6366f1;
@@ -95,13 +95,15 @@
   --nx-header-c3: var(--nx-cat-all-c);
 }
 
-@keyframes nx-header-border-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes nx-header-border-breathe {
-  0%, 100% { opacity: 0.72; }
-  50% { opacity: 1; }
+@keyframes nx-header-accent-breath {
+  0%, 100% {
+    opacity: 0.18;
+    filter: saturate(0.9) brightness(0.92);
+  }
+  50% {
+    opacity: 0.72;
+    filter: saturate(1.18) brightness(1.08);
+  }
 }
 
 @keyframes nx-unread-pulse {
@@ -109,75 +111,62 @@
   50% { opacity: 0.55; transform: scale(0.82); }
 }
 
-/* ─── Full-header animated gradient perimeter ───────────────────────────── */
+/* ─── Full-header breathing gradient frame (static, no travel) ─────────── */
 .nx-inbox-header-shell {
-  --nx-header-border-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
   position: relative;
   margin: 10px 10px 0;
+  padding: 2px;
   border-radius: 12px;
   isolation: isolate;
+  overflow: hidden;
   contain: layout style;
-}
-
-/* Faint static frame — keeps the shell crisp when trace passes */
-.nx-inbox-header-shell::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--nx-header-c1) 34%, transparent),
-    color-mix(in srgb, var(--nx-header-c2) 28%, transparent),
-    color-mix(in srgb, var(--nx-header-c3) 34%, transparent),
-    color-mix(in srgb, var(--nx-header-c1) 34%, transparent)
+  background: linear-gradient(
+    135deg,
+    var(--nx-header-c1),
+    var(--nx-header-c2),
+    var(--nx-header-c3),
+    var(--nx-header-c2),
+    var(--nx-header-c1)
   );
-  -webkit-mask: var(--nx-header-border-mask);
-  mask: var(--nx-header-border-mask);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.55;
 }
 
-/* Traveling gradient trace on exact outer edge */
+/* Second gradient layer — opacity/filter breathe only */
 .nx-inbox-header-shell::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    transparent 248deg,
-    var(--nx-header-c1) 262deg,
-    var(--nx-header-c2) 278deg,
-    var(--nx-header-c3) 294deg,
-    transparent 308deg,
-    transparent 360deg
+  background: linear-gradient(
+    45deg,
+    var(--nx-header-c2),
+    var(--nx-header-c3),
+    var(--nx-header-c1),
+    var(--nx-header-c3),
+    var(--nx-header-c2)
   );
-  -webkit-mask: var(--nx-header-border-mask);
-  mask: var(--nx-header-border-mask);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  transform-origin: center center;
-  will-change: transform;
-  animation:
-    nx-header-border-spin 14s linear infinite,
-    nx-header-border-breathe 5.5s ease-in-out infinite;
+  opacity: 0.28;
+  animation: nx-header-accent-breath 4.8s ease-in-out infinite;
   pointer-events: none;
-  z-index: 2;
+  z-index: 0;
+}
+
+/* Restrained static edge glow — no blur animation */
+.nx-inbox-header-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 16%, transparent),
+    0 3px 16px color-mix(in srgb, var(--nx-header-c2) 12%, transparent);
+  pointer-events: none;
+  z-index: -1;
 }
 
 .nx-inbox-header-shell__inner {
   position: relative;
   z-index: 1;
-  border-radius: 10.5px;
+  border-radius: 10px;
   background: var(--nx-header-inner-bg);
   overflow: hidden;
   transition: background 0.3s ease;
@@ -353,14 +342,8 @@
 @media (prefers-reduced-motion: reduce) {
   .nx-inbox-header-shell::before {
     animation: none !important;
-    opacity: 0.85;
-    background: conic-gradient(
-      from 0deg,
-      var(--nx-header-c1),
-      var(--nx-header-c2),
-      var(--nx-header-c3),
-      var(--nx-header-c1)
-    );
+    opacity: 0.4;
+    filter: none;
   }
   .nx-cat-nav__unread,
   .nx-row25__unread-dot { animation: none !important; }
@@ -716,14 +699,33 @@
   --nx-header-inner-bg: rgba(255, 255, 255, 0.98);
 }
 
-[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell::after {
-  opacity: 0.42;
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--nx-header-c1) 72%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 68%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 72%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 68%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c1) 72%, #ffffff)
+  );
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell::before {
-  animation:
-    nx-header-border-spin 16s linear infinite,
-    nx-header-border-breathe 6s ease-in-out infinite;
+  background: linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--nx-header-c2) 70%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 68%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c1) 70%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 68%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 70%, #ffffff)
+  );
+  animation: nx-header-accent-breath 5.4s ease-in-out infinite;
+}
+
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell::after {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 22%, transparent),
+    0 2px 12px color-mix(in srgb, var(--nx-header-c2) 10%, transparent);
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-cat-nav {
