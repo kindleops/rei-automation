@@ -2847,6 +2847,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     new_inbound: concreteCount('new_replies', 'new_inbound') ?? 0,
     automated: concreteCount('automated') ?? 0,
     outbound_active: concreteCount('follow_up', 'outbound_active') ?? 0,
+    waiting: concreteCount('waiting', 'waiting_on_seller') ?? 0,
     cold_no_response: concreteCount('cold', 'cold_no_response') ?? 0,
     dead: concreteCount('dead') ?? 0,
     all: concreteCount('all_messages', 'all', 'total') ?? 0,
@@ -2855,6 +2856,44 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   }
 
   const hasEmbeddedCounts = Boolean(viewCounts && Object.values(viewCounts).some((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0))
+  const countsWereSkipped = countsSource === 'skipped' || countPreservedReason === 'counts_skipped_by_request'
+
+  if ((!hasEmbeddedCounts || countsWereSkipped) && !options.signal?.aborted) {
+    try {
+      const countsRace = Promise.race([
+        backendClient.fetchInboxCounts(options.signal).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ])
+      const countsRes = await countsRace
+      if (countsRes?.ok) {
+        const payloadRecord = countsRes.data as AnyRecord
+        const rawCounts = (
+          payloadRecord?.counts
+          ?? (payloadRecord?.data as AnyRecord | undefined)?.counts
+          ?? {}
+        ) as AnyRecord
+        if (Object.keys(rawCounts).length > 0) {
+          categoryCounts = {
+            hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? categoryCounts.hot_leads),
+            needs_review: Number(rawCounts.needs_review ?? categoryCounts.needs_review),
+            new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? categoryCounts.new_inbound),
+            automated: Number(rawCounts.automated ?? categoryCounts.automated),
+            outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? categoryCounts.outbound_active),
+            waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? categoryCounts.waiting),
+            cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? categoryCounts.cold_no_response),
+            dead: Number(rawCounts.dead ?? categoryCounts.dead),
+            all: Number(rawCounts.all_messages ?? rawCounts.all ?? categoryCounts.all),
+            dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? categoryCounts.dnc_opt_out),
+            all_inbound: allInboundCount,
+          }
+          if (DEV) console.log('[fetchInboxModel] counts enriched from /api/cockpit/inbox/counts', { categoryCounts })
+        }
+      }
+    } catch {
+      // counts remain best-effort; rows are already committed
+    }
+  }
+
   const shouldBlockOnBackgroundCounts =
     Boolean((viewResult as AnyRecord)?.allowBlockingCountFallback) &&
     !countsDegraded &&
@@ -2907,12 +2946,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
 
   const priorityInboxCount = concreteCount('priority') ?? categoryCounts.hot_leads
   const activeInboxCount = concreteCount('active') ?? (categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound + categoryCounts.outbound_active)
-  const waitingInboxCount = concreteCount('waiting', 'waiting_on_seller') ?? threads.filter((thread: InboxThread) => {
-    const threadRecord = thread as unknown as AnyRecord
-    const direction = String(threadRecord['latestDirection'] ?? thread.latest_message_direction ?? '').toLowerCase()
-    const bucket = String(threadRecord['inboxBucket'] ?? thread.inbox_bucket ?? threadRecord['inboxCategory'] ?? '').toLowerCase()
-    return direction === 'outbound' && bucket !== 'dead' && bucket !== 'suppressed'
-  }).length
+  const waitingInboxCount = concreteCount('waiting', 'waiting_on_seller') ?? categoryCounts.waiting ?? 0
   const allInboxCount = categoryCounts.all || totalAvailable
   
   const unreadThreadsCount = categoryCounts.new_inbound
@@ -3235,6 +3269,7 @@ export interface ThreadMessageFetchOptions {
   maxPages?: number
   maxMessages?: number
   offset?: number
+  fetchAll?: boolean
   signal?: AbortSignal
 }
 
@@ -3469,8 +3504,12 @@ export const getThreadMessagesPageForThread = async (
 
   try {
     const params = new URLSearchParams()
-    params.set('offset', String(offset))
-    params.set('limit', String(limit))
+    if (options.fetchAll) {
+      params.set('fetch_all', '1')
+    } else {
+      params.set('offset', String(offset))
+      params.set('limit', String(limit))
+    }
     if (lookup.conversationThreadId) params.set('conversation_thread_id', lookup.conversationThreadId)
     if (lookup.legacyThreadKey) params.set('legacy_thread_key', lookup.legacyThreadKey)
     if (lookup.normalizedPhone) params.set('normalized_phone', lookup.normalizedPhone)
@@ -3498,11 +3537,6 @@ export const getThreadMessagesPageForThread = async (
       const payload = (result.data ?? {}) as AnyRecord
       const integrityBlocked = Boolean(payload.integrity_blocked || payload.integrityBlocked || (payload.diagnostics as AnyRecord | undefined)?.integrity_blocked)
       if (integrityBlocked) {
-        emitNotification({
-          title: 'Thread identity conflict',
-          detail: 'This conversation matched multiple seller/property identities. Messages were blocked to avoid showing the wrong thread.',
-          severity: 'warning',
-        })
         return emptyThreadMessagePage(offset, limit, asRecord(payload.diagnostics))
       }
       const diagnostics = (payload.diagnostics ?? {}) as AnyRecord
@@ -3547,11 +3581,55 @@ export const getThreadMessagesPageForThread = async (
   return emptyThreadMessagePage(offset, limit, { degraded: true })
 }
 
+export const getAllThreadMessagesForThread = async (
+  thread: InboxThread | InboxWorkflowThread,
+  options: ThreadMessageFetchOptions = {},
+): Promise<ThreadMessagePageResult> => {
+  const fullPage = await getThreadMessagesPageForThread(thread, { ...options, fetchAll: true })
+  if (fullPage.messages.length > 0 && !fullPage.pagination.hasMore) {
+    return fullPage
+  }
+
+  const pageSize = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : MESSAGE_EVENTS_THREAD_PAGE_SIZE
+  const maxPages = Math.max(1, options.maxPages ?? 40)
+  let offset = 0
+  let combined: ThreadMessage[] = []
+  let lastDiagnostics: AnyRecord = {}
+  let hasMore = true
+  let pages = 0
+
+  while (hasMore && pages < maxPages) {
+    if (options.signal?.aborted) break
+    const page = await getThreadMessagesPageForThread(thread, { ...options, offset, maxMessages: pageSize, fetchAll: false })
+    lastDiagnostics = asRecord(page.diagnostics)
+    if (page.messages.length === 0) break
+    combined = offset === 0
+      ? page.messages
+      : dedupeMessages([...page.messages, ...combined])
+    hasMore = page.pagination.hasMore
+    offset = Number(page.pagination.nextOffset ?? (offset + page.messages.length))
+    pages += 1
+    if (!hasMore) break
+  }
+
+  return {
+    messages: combined,
+    pagination: {
+      offset: 0,
+      limit: combined.length,
+      total: combined.length,
+      hasMore: false,
+      nextOffset: null,
+    },
+    diagnostics: lastDiagnostics,
+  }
+}
+
 export const getThreadMessagesForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   options: ThreadMessageFetchOptions = {},
 ): Promise<ThreadMessage[]> => {
-  const page = await getThreadMessagesPageForThread(thread, options)
+  const page = await getAllThreadMessagesForThread(thread, options)
   return page.messages
 }
 
@@ -3565,7 +3643,7 @@ export const getThreadHydrationForThread = async (
   const threadRecord = thread as unknown as AnyRecord
   const fallbackDealContext = normalizeDealContext(threadRecord)
 
-  const page = await getThreadMessagesPageForThread(thread, { signal })
+  const page = await getAllThreadMessagesForThread(thread, { signal })
   const diagnostics = asRecord(page.diagnostics)
   const integrityBlocked = Boolean(diagnostics.integrity_blocked || diagnostics.integrityBlocked)
   const messages = integrityBlocked ? [] : page.messages

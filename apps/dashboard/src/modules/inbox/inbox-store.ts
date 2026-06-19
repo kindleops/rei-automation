@@ -160,7 +160,7 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
   if (key === 'all_messages') return true
   if (key === 'active') return ACTIVE_BUCKETS.has(rowBucket)
   if (key === 'waiting') {
-    return getRowDirection(row) === 'outbound' && rowBucket !== 'dead' && rowBucket !== 'suppressed'
+    return rowBucket === 'waiting'
   }
   return rowBucket === key
 }

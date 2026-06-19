@@ -55,7 +55,7 @@ function buildCountRow(rows = []) {
     dead: byBucket("dead"),
     suppressed: byBucket("suppressed"),
     active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up"].includes(row.inbox_bucket)).length,
-    waiting: rows.filter((row) => row.latest_message_direction === "outbound" && !["dead", "suppressed"].includes(row.inbox_bucket)).length,
+    waiting: byBucket("waiting"),
     unlinked: rows.filter((row) => row.property_id == null).length,
   };
 }

@@ -3,6 +3,7 @@ import { inboxReducer, EMPTY_INBOX_STORE_STATE } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
 import { buildConversationThreadIdFromRecord, fetchInboxModel, type InboxFetchOptions, type InboxSourceMode } from '../../lib/data/inboxData'
+import * as backendClient from '../../lib/api/backendClient'
 import type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/inbox/inbox-model-types'
 export type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/inbox/inbox-model-types'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
@@ -453,8 +454,8 @@ const rowBucket = (row: Record<string, unknown> | null | undefined): string => n
 const rowDirection = (row: Record<string, unknown> | null | undefined): 'inbound' | 'outbound' | 'unknown' =>
   normalizeRealtimeDirection(row?.latest_message_direction ?? row?.latestMessageDirection ?? row?.latestDirection ?? row?.direction)
 
-const isWaitingCount = (bucket: string, direction: 'inbound' | 'outbound' | 'unknown'): boolean =>
-  direction === 'outbound' && bucket !== 'dead' && bucket !== 'suppressed'
+const isWaitingCount = (bucket: string, _direction: 'inbound' | 'outbound' | 'unknown'): boolean =>
+  bucket === 'waiting'
 
 const incrementCount = (counts: Record<string, number>, key: string, delta: number) => {
   if (!key || delta === 0) return
@@ -912,6 +913,33 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           bucketKey,
           count_preserved_reason: model.countPreservedReason ?? model.liveDiagnostics?.countPreservedReason ?? 'counts_degraded_no_replacement',
         })
+      }
+
+      if (
+        model.countPreservedReason === 'counts_skipped_by_request'
+        || model.countsSource === 'skipped'
+      ) {
+        void backendClient.fetchInboxCounts().then((res) => {
+          if (!res.ok) return
+          const payload = (res.data ?? {}) as Record<string, unknown>
+          const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, number> | undefined
+          if (!rawCounts || Object.keys(rawCounts).length === 0) return
+          dispatch({
+            type: 'SET_VIEW_COUNTS',
+            counts: {
+              priority: Number(rawCounts.priority ?? 0),
+              new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
+              needs_review: Number(rawCounts.needs_review ?? 0),
+              waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? 0),
+              follow_up: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? 0),
+              cold: Number(rawCounts.cold ?? 0),
+              dead: Number(rawCounts.dead ?? 0),
+              suppressed: Number(rawCounts.suppressed ?? 0),
+              all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
+              all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
+            },
+          })
+        }).catch(() => {})
       }
 
       // Store secondary metadata (mapPins, pagination, debug counts) separately.

@@ -582,7 +582,7 @@ function computeCountsFromThreads(rows = []) {
     if (bucket === "dead") counts.dead += 1;
     if (bucket === "suppressed") counts.suppressed += 1;
     if (["priority", "new_replies", "needs_review", "follow_up"].includes(bucket)) counts.active += 1;
-    if (normalizeDirection(row.latest_message_direction || row.direction) === "outbound" && !["dead", "suppressed"].includes(bucket)) counts.waiting += 1;
+    if (bucket === "waiting") counts.waiting += 1;
     if (!row.property_id) counts.unlinked += 1;
   }
   counts.all_messages = counts.all;
@@ -653,7 +653,7 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "active":
       return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
     case "waiting":
-      return direction === "outbound" && !["dead", "suppressed"].includes(bucket);
+      return bucket === "waiting";
     case "unlinked":
       return !thread.property_id;
     default:
@@ -1265,7 +1265,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
           ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
           : query;
       case "waiting":
-        return query.eq("latest_direction", "outbound");
+        return query.eq("inbox_category", "outbound_active");
       case "unlinked":
         return typeof query.is === "function" ? query.is("property_id", null) : query;
       default:
@@ -1302,7 +1302,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
         : query;
     case "waiting":
-      return query.eq("latest_message_direction", "outbound");
+      return query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     default:
@@ -2431,7 +2431,9 @@ async function queryMessageEventsByStrictStrategy({
   };
 }
 
-export async function getThreadMessages(threadLookupInput, { offset = 0, limit = 50 } = {}, deps = {}) {
+const THREAD_MESSAGES_FETCH_ALL_CAP = 2000;
+
+export async function getThreadMessages(threadLookupInput, { offset = 0, limit = 50, fetchAll = false } = {}, deps = {}) {
   const startedAt = nowMs();
   const supabase = deps.supabase || defaultSupabase;
   const baseLookup = normalizeThreadLookupInput(threadLookupInput);
@@ -2444,8 +2446,10 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     normalizedPhone: baseLookup.normalizedPhone || parsedConversationId.normalizedPhone || null,
     latestMessageId: baseLookup.latestMessageId || null,
   };
-  const safeOffset = Math.max(0, Number.parseInt(clean(offset) || "0", 10) || 0);
-  const safeLimit = Math.min(100, Math.max(1, Number.parseInt(clean(limit) || "50", 10) || 50));
+  const safeOffset = fetchAll ? 0 : Math.max(0, Number.parseInt(clean(offset) || "0", 10) || 0);
+  const safeLimit = fetchAll
+    ? THREAD_MESSAGES_FETCH_ALL_CAP
+    : Math.min(100, Math.max(1, Number.parseInt(clean(limit) || "50", 10) || 50));
   const { strategies, normalizedPhone, conversationThreadId } = buildStrictMessageStrategies(lookup);
   const diagnostics = {
     selected_thread_key: lookup.selectedThreadKey,

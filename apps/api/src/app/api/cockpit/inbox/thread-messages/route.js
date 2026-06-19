@@ -34,8 +34,11 @@ export async function GET(request) {
   const owner_id = clean(searchParams.get('owner_id'))
   const master_owner_id = clean(searchParams.get('master_owner_id'))
   const latest_message_id = clean(searchParams.get('latest_message_id') || searchParams.get('latestMessageId') || searchParams.get('latest_message_event_id') || searchParams.get('latestMessageEventId'))
-  const offset = Math.max(0, Number.parseInt(clean(searchParams.get('offset')) || '0', 10) || 0)
-  const limit = Math.min(100, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '50', 10) || 50))
+  const fetchAll = ['1', 'true', 'yes'].includes(clean(searchParams.get('fetch_all') || searchParams.get('fetchAll')).toLowerCase())
+  const offset = fetchAll ? 0 : Math.max(0, Number.parseInt(clean(searchParams.get('offset')) || '0', 10) || 0)
+  const limit = fetchAll
+    ? 2000
+    : Math.min(100, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '50', 10) || 50))
 
   if (!thread_key && !conversation_thread_id && !legacy_thread_key && !normalized_phone && !canonical_e164 && !phone_e164 && !phone && !best_phone && !seller_phone && !prospect_id && !property_id && !owner_id && !master_owner_id && !latest_message_id) {
     return NextResponse.json(
@@ -77,14 +80,16 @@ export async function GET(request) {
       owner_id,
       master_owner_id,
       latest_message_id,
-    }, { offset, limit })
+    }, { offset, limit, fetchAll })
     const nextOffset = offset + rows.length
+    const hasMore = fetchAll ? false : nextOffset < total
 
     return NextResponse.json(
       {
         ok: true,
         action: 'thread-messages',
         degraded: false,
+        fetch_all: fetchAll,
         integrity_blocked: integrityBlocked === true,
         integrityBlocked: integrityBlocked === true,
         thread_key,
@@ -99,8 +104,8 @@ export async function GET(request) {
           offset,
           limit,
           total,
-          has_more: nextOffset < total,
-          next_offset: nextOffset < total ? nextOffset : null,
+          has_more: hasMore,
+          next_offset: hasMore ? nextOffset : null,
         },
         diagnostics: {
           ...diagnostics,
@@ -120,8 +125,8 @@ export async function GET(request) {
             offset,
             limit,
             total,
-            has_more: nextOffset < total,
-            next_offset: nextOffset < total ? nextOffset : null,
+            has_more: hasMore,
+            next_offset: hasMore ? nextOffset : null,
           },
         },
       },

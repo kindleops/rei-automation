@@ -224,22 +224,41 @@ const resolveDeliveryReceipt = (
   if (latestDirection === 'inbound') {
     return { type: 'inbound', label: 'Inbound', icon: 'arrow-down-left' }
   }
-  const latestStatus = String(
-    (thread as Record<string, unknown>).latestDeliveryStatus
-    || (thread as Record<string, unknown>).deliveryStatus
+  const row = thread as Record<string, unknown>
+  const providerStatus = String(
+    row.latest_provider_delivery_status
+    || row.provider_delivery_status
+    || row.latestDeliveryStatus
+    || row.latest_delivery_status
+    || row.deliveryStatus
+    || row.delivery_status
+    || row.raw_carrier_status
     || '',
   ).toLowerCase()
-  if (deliveryStatus === 'delivered' || latestStatus === 'delivered') {
-    return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
-  }
-  if (deliveryStatus === 'failed' || latestStatus.includes('fail') || latestStatus.includes('undeliv')) {
+  const isFinalFailure = readBoolean(thread, 'is_final_failure', 'isFinalFailure')
+    || readBoolean(thread, 'latest_is_final_failure', 'latestIsFinalFailure')
+  const failedAt = readString(thread, 'latest_failed_at', 'latestFailedAt', 'failed_at', 'failedAt')
+  const deliveredAt = readString(thread, 'latest_delivered_at', 'latestDeliveredAt', 'delivered_at', 'deliveredAt')
+  const sentAt = readString(thread, 'latest_sent_at', 'latestSentAt', 'sent_at', 'sentAt')
+
+  if (isFinalFailure || failedAt || providerStatus.includes('fail') || providerStatus.includes('undeliv')) {
     return { type: 'failed', label: 'Failed', icon: 'x' }
   }
-  if (latestStatus.includes('pending') || latestStatus.includes('queue') || latestStatus.includes('schedul')) {
+  if (
+    deliveryStatus === 'delivered'
+    || deliveredAt
+    || (providerStatus.includes('deliver') && !providerStatus.includes('undeliv'))
+  ) {
+    return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
+  }
+  if (deliveryStatus === 'sent' || sentAt || providerStatus === 'sent' || providerStatus === 'success' || providerStatus === 'accepted') {
+    return { type: 'sent', label: 'Sent', icon: 'check' }
+  }
+  if (providerStatus.includes('pending') || providerStatus.includes('queue') || providerStatus.includes('schedul') || providerStatus.includes('process')) {
     return { type: 'pending', label: 'Pending', icon: 'clock' }
   }
-  if (deliveryStatus === 'sent' || latestDirection === 'outbound') {
-    return { type: 'sent', label: 'Sent', icon: 'check' }
+  if (latestDirection === 'outbound') {
+    return { type: 'pending', label: 'Pending', icon: 'clock' }
   }
   return null
 }
@@ -308,7 +327,8 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
   if (raw.includes('priority') || raw.includes('hot_leads') || raw === 'hot') return 'priority'
   if (raw.includes('new_reply') || raw.includes('new_replies') || raw.includes('new_inbound') || raw.includes('needs_reply')) return 'new_replies'
   if (raw.includes('needs_review') || raw.includes('manual_review')) return 'needs_review'
-  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated') || raw.includes('waiting_on_seller') || raw.includes('waiting')) return 'follow_up'
+  if (raw === 'waiting' || raw.includes('waiting_on_seller')) return 'waiting'
+  if (raw.includes('follow_up') || raw.includes('follow-up') || raw.includes('outbound_active') || raw.includes('automated')) return 'follow_up'
   if (raw.includes('dead') || raw.includes('wrong_number') || raw.includes('not_interested')) return 'dead'
   if (raw.includes('suppressed') || raw.includes('dnc') || raw.includes('opt_out')) return 'suppressed'
   if (raw.includes('cold') || raw.includes('not_contacted')) return 'cold'
@@ -844,18 +864,23 @@ export const InboxSidebar = ({
 
     // Safety hard-filter: reject any rows the backend returned with a mismatched bucket.
     // In normal operation this is a no-op; it protects against backend classification drift.
+    const resolveAuthoritativeBucket = (thread: InboxWorkflowThread): string => {
+      const bucket = readString(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priority_bucket', 'priorityBucket').toLowerCase()
+      if (bucket === 'waiting_on_seller') return 'waiting'
+      if (bucket) return bucket
+      const fallback = resolveBucketFromThreadState(thread) || classifyInboxBucket(thread, now).bucket
+      return fallback === 'waiting_on_seller' ? 'waiting' : fallback
+    }
+
     let filtered = activeBucket === 'all_messages'
       ? searchableThreads
       : searchableThreads.filter((thread) => {
-          const stateBucket = resolveBucketFromThreadState(thread)
-          const resolvedBucket = stateBucket || classifyInboxBucket(thread, now).bucket
-          if (resolvedBucket !== activeBucket) {
-            console.log(
-              '[VISIBLE_THREAD_REJECT]',
-              thread.threadKey || thread.id,
-              activeBucket,
-              readString(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory'),
-            )
+          const rowBucket = resolveAuthoritativeBucket(thread)
+          if (activeBucket === 'needs_review') {
+            return rowBucket === 'needs_review' || readBoolean(thread, 'needs_review', 'needsReview')
+          }
+          if (rowBucket !== activeBucket) {
+            console.log('[VISIBLE_THREAD_REJECT]', thread.threadKey || thread.id, activeBucket, rowBucket)
             return false
           }
           return true

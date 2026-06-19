@@ -256,6 +256,8 @@ export const ChatThread = ({
       } else {
         node.scrollTop = previous.top + (nextHeight - previous.height)
       }
+    } else if (nextHeight > node.clientHeight) {
+      node.scrollTop = nextHeight - node.clientHeight
     }
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }

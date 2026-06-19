@@ -23,13 +23,14 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
 
-    // Option C: Fast list rows first (Skip heavy aggregations and delivery queues)
-    params.skip_counts = 'true'
-    params.skip_delivery = 'true'
-
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
       ? params.timeout_mode
       : 'manual_bucket_switch'
+    // Initial boot: rows first for speed. Bucket switch / refresh / load-more include counts + delivery.
+    if (timeoutMode === 'initial_boot') {
+      params.skip_counts = 'true'
+      params.skip_delivery = 'true'
+    }
     const timeoutMs = TIMEOUT_MS_BY_MODE[timeoutMode]
     const requestedFilter = params.filter || params.bucket || 'all'
     const requestedLimit = Number(params.limit || (timeoutMode === 'initial_boot' ? INITIAL_BOOT_DEFAULT_LIMIT : 100))

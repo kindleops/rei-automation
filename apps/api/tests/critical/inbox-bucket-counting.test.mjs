@@ -20,7 +20,7 @@ function buildLiveCountRow(rows = []) {
     dead: byBucket('dead'),
     suppressed: byBucket('suppressed'),
     active: rows.filter((row) => ['priority', 'new_replies', 'needs_review', 'follow_up'].includes(row.inbox_bucket)).length,
-    waiting: rows.filter((row) => row.latest_message_direction === 'outbound' && !['dead', 'suppressed'].includes(row.inbox_bucket)).length,
+    waiting: byBucket('waiting'),
     unlinked: rows.filter((row) => row.property_id == null).length,
   };
 }
@@ -163,7 +163,7 @@ test("getLiveInbox returns canonical counts including dead", async () => {
   ];
   
   const supabase = makeSupabaseStub(rows);
-  const result = await getLiveInbox({ filter: 'all' }, { supabase });
+  const result = await getLiveInbox({ filter: 'all', skip_delivery: 'true' }, { supabase });
 
   assert.equal(result.counts.all, 2);
   assert.equal(result.counts.dead, 1);
