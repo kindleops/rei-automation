@@ -22,6 +22,7 @@ const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filt
 export interface AdvancedFilterOptions {
   markets: string[]
   states: string[]
+  cities?: string[]
   zips: string[]
   propertyTypes: string[]
   ownerTypes: string[]
@@ -29,6 +30,14 @@ export interface AdvancedFilterOptions {
   languages: string[]
   personas: string[]
   assignedAgents: string[]
+  deliveryStatuses?: string[]
+  propertyConditions?: string[]
+  distressFlags?: string[]
+}
+
+export interface AdvancedFilterChipView {
+  key: string
+  label: string
 }
 
 interface InboxSidebarProps {
@@ -41,6 +50,9 @@ interface InboxSidebarProps {
   onApplySavedPreset: (preset: InboxSavedFilterPreset) => void
   viewCounts: Record<string, number | string | null | undefined>
   onOpenAdvancedFilters: () => void
+  activeFilterChips?: AdvancedFilterChipView[]
+  activeFilterCount?: number
+  onRemoveFilterChip?: (key: string) => void
   onClearFilters?: () => void
   onRetryLoad?: () => void
   onLoadMore: () => void
@@ -1094,7 +1106,8 @@ const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
 
 export const InboxSidebar = ({
   threads, selectedId, activeViewFilter, onSelect, savedPreset, onApplySavedPreset,
-  viewCounts, onOpenAdvancedFilters, onClearFilters, onRetryLoad, onLoadMore, canLoadMore,
+  viewCounts, onOpenAdvancedFilters, activeFilterChips = [], activeFilterCount = 0,
+  onRemoveFilterChip, onClearFilters, onRetryLoad, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
   loading = false,
@@ -1291,10 +1304,25 @@ export const InboxSidebar = ({
           {searchQuery && <button type="button" className="nx-sidebar-rebuilt__search-clear" onClick={() => onSearchQueryChange?.('')}><Icon name="close" /></button>}
         </div>
         <div className="nx-sidebar-rebuilt__top-actions">
-          <button type="button" className="nx-sidebar__icon-button" title="Advanced filters" onClick={onOpenAdvancedFilters}><Icon name="filter" /></button>
+          <button type="button" className="nx-sidebar__icon-button" title="Advanced filters" onClick={onOpenAdvancedFilters}>
+            <Icon name="filter" />
+            {activeFilterCount > 0 && <span className="nx-sidebar__filter-badge">{activeFilterCount}</span>}
+          </button>
           <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
         </div>
       </div>
+      {activeFilterChips.length > 0 && (
+        <div className="nx-sidebar__active-filters" role="group" aria-label="Active filters">
+          {activeFilterChips.map((chip) => (
+            <span key={chip.key} className="nx-sidebar__filter-chip">
+              {chip.label}
+              <button type="button" onClick={() => onRemoveFilterChip?.(chip.key)} aria-label={`Remove ${chip.label}`}>
+                <Icon name="x" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="nx-cat-nav" ref={catNavRef} role="tablist" aria-label="Inbox categories">
         {VISIBLE_INBOX_CHIPS.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])

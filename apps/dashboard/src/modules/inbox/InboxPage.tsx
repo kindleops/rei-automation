@@ -132,6 +132,13 @@ import {
   type InboxViewSelectValue,
 } from './inbox-ui-helpers'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
+import {
+  buildAdvancedFilterChips,
+  clearAllAdvancedFilters,
+  countActiveAdvancedFilters,
+  hasActiveAdvancedFilters,
+  serializeAdvancedFiltersForServer,
+} from '../../domain/inbox/inbox-advanced-filter-engine'
 import { getViewLayoutMode, type ViewWidthPercent } from '../../domain/inbox/view-layout'
 import './inbox-premium.css'
 // inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
@@ -816,10 +823,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [data.allInboxCount, data.counts, decisions, threads])
 
+  const serverAdvancedPayload = useMemo(
+    () => serializeAdvancedFiltersForServer(advancedFilters, { stage: stageFilter, view: viewFilter }),
+    [advancedFilters, stageFilter, viewFilter],
+  )
+
   const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
     skipViewFilter: false,
     skipStageFilter: false,
-  }), [])
+    skipAdvancedFilter: hasActiveAdvancedFilters(advancedFilters),
+  }), [advancedFilters])
 
   const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => {
     return applyInboxFilters(threads, {
@@ -849,8 +862,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       stage: 'all_stages',
       view: 'all_conversations',
       advanced: advancedFilters,
-    }, { skipViewFilter: false, skipStageFilter: false })
-  ), [advancedFilters, searchQuery, threads])
+    }, serverFilterOptions)
+  ), [advancedFilters, searchQuery, serverFilterOptions, threads])
 
   const handleLoadMore = useCallback(async () => {
     await loadMore()
@@ -861,8 +874,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     view: viewFilter,
     stage: stageFilter,
     query: searchQuery,
-    advanced: advancedFilters,
-  }), [advancedFilters, searchQuery, stageFilter, viewFilter])
+    advanced: serverAdvancedPayload,
+  }), [searchQuery, serverAdvancedPayload, stageFilter, viewFilter])
+
+  const activeAdvancedFilterCount = useMemo(
+    () => countActiveAdvancedFilters(advancedFilters),
+    [advancedFilters],
+  )
+
+  const activeAdvancedFilterChips = useMemo(
+    () => buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter }).map((chip) => ({
+      key: chip.key,
+      label: chip.label,
+    })),
+    [advancedFilters, stageFilter, viewFilter],
+  )
 
   const selected = useMemo(() => {
     if (selectedId) {
@@ -1198,15 +1224,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     )
     const nextView = (config.view ?? viewFilter)
     const nextStage = isPrimaryCategoryTab ? 'all_stages' : (config.stage ?? stageFilter)
-    const nextSearch = isPrimaryCategoryTab ? '' : searchQuery
-    const nextAdvanced = isPrimaryCategoryTab
-      ? { outOfStateOwner: 'all' as const, ...(config.advanced ?? {}) }
-      : { ...advancedFilters, ...(config.advanced ?? {}) }
+    const nextSearch = searchQuery
+    const nextAdvanced = config.advanced
+      ? { ...advancedFilters, ...config.advanced }
+      : advancedFilters
 
     if (isPrimaryCategoryTab) {
-      setSearchQuery('')
       setStageFilter('all_stages')
-      setAdvancedFilters({ outOfStateOwner: 'all' })
     } else {
       if (config.stage) setStageFilter(config.stage)
       if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
@@ -1227,7 +1251,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: nextView,
         stage: nextStage,
         query: nextSearch,
-        advanced: nextAdvanced,
+        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: nextStage, view: nextView }),
       },
       cursor: null,
       limit: 100,
@@ -1260,10 +1284,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [])
 
   const handleResetFilters = useCallback(() => {
+    const cleared = clearAllAdvancedFilters()
     setSearchQuery('')
     setStageFilter('all_stages')
     setViewFilter('all_conversations')
-    setAdvancedFilters({ outOfStateOwner: 'all' })
+    setAdvancedFilters(cleared)
     setSavedPreset('all_messages')
     setSelectedId(null)
     setSelectedThreadKey(null)
@@ -1273,12 +1298,56 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: 'all_conversations',
         stage: 'all_stages',
         query: '',
-        advanced: { outOfStateOwner: 'all' },
+        advanced: serializeAdvancedFiltersForServer(cleared),
       },
       cursor: null,
       limit: 100,
+      _force: true,
+      _refreshReason: 'clear_all_filters',
     })
   }, [refreshInbox])
+
+  const handleApplyAdvancedFilters = useCallback((payload: {
+    view: InboxViewSelectValue
+    stage: InboxStageSelectValue
+    advanced: InboxAdvancedFilters
+  }) => {
+    setViewFilter(payload.view)
+    setStageFilter(payload.stage)
+    setAdvancedFilters(payload.advanced)
+    void refreshInbox({
+      filters: {
+        view: payload.view,
+        stage: payload.stage,
+        query: searchQuery,
+        advanced: serializeAdvancedFiltersForServer(payload.advanced, { stage: payload.stage, view: payload.view }),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _refreshReason: 'advanced_filters_apply',
+    })
+  }, [refreshInbox, searchQuery])
+
+  const handleRemoveAdvancedFilterChip = useCallback((chipKey: string) => {
+    const chip = buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter })
+      .find((entry) => entry.key === chipKey)
+    if (!chip) return
+    const nextAdvanced = chip.clear(advancedFilters)
+    setAdvancedFilters(nextAdvanced)
+    void refreshInbox({
+      filters: {
+        view: viewFilter,
+        stage: stageFilter,
+        query: searchQuery,
+        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: stageFilter, view: viewFilter }),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _refreshReason: 'advanced_filter_chip_remove',
+    })
+  }, [advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
 
   const handleRetryInboxLoad = useCallback(() => {
     void refreshInbox({
@@ -3650,6 +3719,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onApplySavedPreset={applySavedPreset}
         viewCounts={viewCounts}
         onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+        activeFilterChips={activeAdvancedFilterChips}
+        activeFilterCount={activeAdvancedFilterCount}
+        onRemoveFilterChip={handleRemoveAdvancedFilterChip}
         onClearFilters={handleResetFilters}
         onRetryLoad={handleRetryInboxLoad}
         onLoadMore={handleLoadMore}
@@ -4067,6 +4139,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onApplySavedPreset={applySavedPreset}
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+            activeFilterChips={activeAdvancedFilterChips}
+            activeFilterCount={activeAdvancedFilterCount}
+            onRemoveFilterChip={handleRemoveAdvancedFilterChip}
             onClearFilters={handleResetFilters}
             onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
@@ -4097,6 +4172,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onApplySavedPreset={applyRightSavedPreset}
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+            activeFilterChips={activeAdvancedFilterChips}
+            activeFilterCount={activeAdvancedFilterCount}
+            onRemoveFilterChip={handleRemoveAdvancedFilterChip}
             onClearFilters={handleResetFilters}
             onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
@@ -4254,16 +4332,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       <AdvancedFiltersPopover
         open={activeOverlay === 'filters'}
         stageFilter={stageFilter}
-        setStageFilter={setStageFilter}
         viewFilter={viewFilter}
-        setViewFilter={setViewFilter}
         advancedFilters={advancedFilters}
-        onAdvancedFiltersChange={(filters) => setAdvancedFilters(filters)}
+        onAdvancedFiltersChange={setAdvancedFilters}
         advancedFilterOptions={advancedFilterOptions}
         viewCounts={viewCounts}
+        resultCount={filtered.length}
         onReset={handleResetFilters}
         onClose={() => setActiveOverlay(null)}
-        onApply={() => { /* Handled by useEffect */ }}
+        onApply={handleApplyAdvancedFilters}
       />
 
       {activeOverlay === 'activity' && (

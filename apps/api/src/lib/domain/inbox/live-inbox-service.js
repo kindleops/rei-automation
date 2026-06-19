@@ -5,6 +5,12 @@ import {
   buildColdTransitionPatch,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
+import {
+  parseAdvancedFiltersParam,
+  hasActiveAdvancedFilters,
+  applyLiveInboxAdvancedFilters,
+  shouldPreferEnrichedSource,
+} from "@/lib/domain/inbox/inbox-advanced-filters.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -1538,16 +1544,24 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 }
 
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
-  const authoritativeResult = await queryAuthoritativeInboxThreads(params, {
-    supabase,
-    limit,
-    filter,
-    cursorKeyset,
-    offset,
-  });
-  if (authoritativeResult) return authoritativeResult;
+  const advancedFilters = parseAdvancedFiltersParam(params);
+  const advancedActive = hasActiveAdvancedFilters(advancedFilters);
 
-  const sourceCandidates = getThreadSourceCandidates(preferredThreadSource);
+  if (!advancedActive) {
+    const authoritativeResult = await queryAuthoritativeInboxThreads(params, {
+      supabase,
+      limit,
+      filter,
+      cursorKeyset,
+      offset,
+    });
+    if (authoritativeResult) return authoritativeResult;
+  }
+
+  const resolvedPreferredSource = advancedActive && shouldPreferEnrichedSource(advancedFilters)
+    ? FALLBACK_THREAD_SOURCE
+    : preferredThreadSource;
+  const sourceCandidates = getThreadSourceCandidates(resolvedPreferredSource);
   let lastError = null;
 
   for (const sourceConfig of sourceCandidates) {
@@ -1583,6 +1597,10 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
           .map((column) => `${column}.ilike.${qStr}`)
           .join(",")
       );
+    }
+
+    if (advancedActive) {
+      query = applyLiveInboxAdvancedFilters(query, advancedFilters, sourceConfig.name);
     }
 
     if (typeof query.order === "function") {

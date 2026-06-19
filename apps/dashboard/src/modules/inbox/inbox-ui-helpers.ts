@@ -183,6 +183,11 @@ export interface InboxAdvancedFilters {
   netAssetValueMin?: number
   netAssetValueMax?: number
   priority?: string
+
+  // Advanced search (server-side ilike)
+  ownerNameSearch?: string
+  phoneNumberSearch?: string
+  addressSearch?: string
 }
 
 export interface InboxFilterState {
@@ -607,6 +612,8 @@ export interface ApplyInboxFiltersOptions {
   skipViewFilter?: boolean
   /** Supabase already filtered by `stage` when it maps to a persisted workflow stage. */
   skipStageFilter?: boolean
+  /** Live API already applied advanced filters server-side. */
+  skipAdvancedFilter?: boolean
 }
 
 export const applyInboxFilters = (
@@ -616,11 +623,12 @@ export const applyInboxFilters = (
 ): InboxWorkflowThread[] => {
   const skipView = options.skipViewFilter === true
   const skipStage = options.skipStageFilter === true
+  const skipAdvanced = options.skipAdvancedFilter === true
   return threads.filter((thread) => (
     matchesSearchInternal(thread, state.search) &&
     (skipStage || matchesStageSelection(thread, state.stage)) &&
     (skipView || matchesViewSelection(thread, state.view)) &&
-    matchesAdvancedFilters(thread, state.advanced)
+    (skipAdvanced || matchesAdvancedFilters(thread, state.advanced))
   ))
 }
 

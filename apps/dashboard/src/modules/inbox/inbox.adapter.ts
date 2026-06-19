@@ -182,7 +182,10 @@ export const adaptInboxModel = (store: CommandCenterStore): InboxModel => {
 
 
 export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxModel> => {
-  const filterKey = options.filters?.view ?? 'all_messages'
+  const advancedKey = options.filters?.advanced && Object.keys(options.filters.advanced).length > 0
+    ? `:adv:${JSON.stringify(options.filters.advanced)}`
+    : ''
+  const filterKey = `${options.filters?.view ?? 'all_messages'}${advancedKey}`
   const scopedCacheKey = `${CACHE_KEY}:${filterKey}`
   const timeoutMode = resolveLiveInboxTimeoutMode(options)
   const timeoutMs = resolveLiveInboxTimeoutMs(timeoutMode)

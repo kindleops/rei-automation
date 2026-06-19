@@ -5415,9 +5415,135 @@
 /* ── Elite Advanced Filters Popover ─────────────────────────────────────── */
 
 .nx-filter-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: rgba(0, 0, 0, 0.4) !important;
   backdrop-filter: blur(12px);
   z-index: 10000 !important;
+}
+
+.nx-filter-overlay--slide {
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+.nx-icf-slideover {
+  width: min(480px, 96vw) !important;
+  max-width: 96vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  border-radius: 14px 0 0 14px !important;
+  animation: nx-slide-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-slide-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.nx-icf-body--groups {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.nx-icf-group {
+  border-bottom: 1px solid var(--nx-border-subtle);
+}
+
+.nx-icf-group-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: transparent;
+  border: none;
+  color: var(--nx-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nx-icf-group-toggle:hover {
+  background: var(--nx-bg-hover);
+}
+
+.nx-icf-group-toggle svg {
+  width: 14px;
+  height: 14px;
+  color: var(--nx-text-muted);
+}
+
+.nx-icf-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nx-icf-range span {
+  color: var(--nx-text-muted);
+  font-size: 12px;
+}
+
+.nx-sidebar__filter-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--nx-accent-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button {
+  position: relative;
+}
+
+.nx-sidebar__active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+
+.nx-sidebar__filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--nx-bg-elevated);
+  border: 1px solid var(--nx-border-subtle);
+  color: var(--nx-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.nx-sidebar__filter-chip button {
+  background: transparent;
+  border: none;
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 0;
+}
+
+.nx-sidebar__filter-chip button svg {
+  width: 12px;
+  height: 12px;
+}
+
+[data-nexus-theme="light"] .nx-icf-slideover {
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.12);
 }
 
 .nx-filter-modal {

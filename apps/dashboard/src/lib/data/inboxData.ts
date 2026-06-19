@@ -122,6 +122,7 @@ export interface LiveInboxFetchParams {
   cursor?: string | null
   limit?: number
   map?: boolean
+  advanced?: Record<string, unknown>
   timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
   refreshReason?: string
   signal?: AbortSignal
@@ -1836,6 +1837,7 @@ export const fetchLiveInbox = async ({
   cursor = null,
   limit = 200,
   map = true,
+  advanced,
   timeoutMode,
   refreshReason,
   signal,
@@ -1849,6 +1851,7 @@ export const fetchLiveInbox = async ({
     cursor,
     limit,
     map: map ? '1' : '0',
+    advanced: advanced && Object.keys(advanced).length > 0 ? JSON.stringify(advanced) : undefined,
     timeout_mode: timeoutMode,
     refresh_reason: refreshReason,
   }
@@ -2244,6 +2247,9 @@ export const getInboxRowsForView = async (
   const endpoint = '/api/cockpit/inbox/live'
   const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
   const threadShellStartedAt = dataLayerNow()
+  const serverAdvancedPayload = options.filters?.advanced && typeof options.filters.advanced === 'object'
+    ? options.filters.advanced
+    : undefined
 
   const live = await loadDashboardViewModel(
     'inbox_threads_view',
@@ -2253,6 +2259,7 @@ export const getInboxRowsForView = async (
       cursor: rawCursor ?? String(numericOffset),
       limit: page_size,
       map: false,
+      advanced: serverAdvancedPayload,
       timeoutMode: options._timeoutMode,
       refreshReason: options._refreshReason,
       signal: options.signal,
