@@ -97,12 +97,12 @@
 
 @keyframes nx-header-accent-breath {
   0%, 100% {
-    opacity: 0.18;
-    filter: saturate(0.9) brightness(0.92);
+    opacity: 0.42;
+    filter: saturate(1.02) brightness(0.98);
   }
   50% {
-    opacity: 0.72;
-    filter: saturate(1.18) brightness(1.08);
+    opacity: 0.92;
+    filter: saturate(1.28) brightness(1.12);
   }
 }
 
@@ -115,7 +115,7 @@
 .nx-inbox-header-shell {
   position: relative;
   margin: 10px 10px 0;
-  padding: 2px;
+  padding: 3px;
   border-radius: 12px;
   isolation: isolate;
   overflow: hidden;
@@ -144,7 +144,7 @@
     var(--nx-header-c3),
     var(--nx-header-c2)
   );
-  opacity: 0.28;
+  opacity: 0.5;
   animation: nx-header-accent-breath 4.8s ease-in-out infinite;
   pointer-events: none;
   z-index: 0;
@@ -157,8 +157,8 @@
   inset: 0;
   border-radius: inherit;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 16%, transparent),
-    0 3px 16px color-mix(in srgb, var(--nx-header-c2) 12%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 26%, transparent),
+    0 4px 20px color-mix(in srgb, var(--nx-header-c2) 20%, transparent);
   pointer-events: none;
   z-index: -1;
 }
@@ -342,7 +342,7 @@
 @media (prefers-reduced-motion: reduce) {
   .nx-inbox-header-shell::before {
     animation: none !important;
-    opacity: 0.4;
+    opacity: 0.58;
     filter: none;
   }
   .nx-cat-nav__unread,
@@ -702,30 +702,31 @@
 [data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell {
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--nx-header-c1) 72%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c2) 68%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c3) 72%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c2) 68%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c1) 72%, #ffffff)
+    color-mix(in srgb, var(--nx-header-c1) 58%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 54%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 58%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 54%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c1) 58%, #ffffff)
   );
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell::before {
   background: linear-gradient(
     45deg,
-    color-mix(in srgb, var(--nx-header-c2) 70%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c3) 68%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c1) 70%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c3) 68%, #ffffff),
-    color-mix(in srgb, var(--nx-header-c2) 70%, #ffffff)
+    color-mix(in srgb, var(--nx-header-c2) 56%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 54%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c1) 56%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c3) 54%, #ffffff),
+    color-mix(in srgb, var(--nx-header-c2) 56%, #ffffff)
   );
+  opacity: 0.56;
   animation: nx-header-accent-breath 5.4s ease-in-out infinite;
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-header-shell::after {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 22%, transparent),
-    0 2px 12px color-mix(in srgb, var(--nx-header-c2) 10%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--nx-header-c2) 30%, transparent),
+    0 3px 14px color-mix(in srgb, var(--nx-header-c2) 16%, transparent);
 }
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-cat-nav {
