@@ -3486,7 +3486,15 @@ export async function upsertInboxThreadState(payload, deps = {}) {
     insert_payload.latest_message_event_id = clean(payload.latest_message_event_id);
   }
   if (payload.message_count !== undefined) insert_payload.message_count = Number(payload.message_count) || 0;
-  if (payload.inbox_bucket !== undefined) insert_payload.inbox_bucket = clean(payload.inbox_bucket);
+  if (payload.inbox_bucket !== undefined) {
+    insert_payload.inbox_bucket = payload.inbox_bucket == null ? null : clean(payload.inbox_bucket);
+  }
+  if (payload.automation_lane !== undefined) {
+    insert_payload.automation_lane = payload.automation_lane == null ? null : clean(payload.automation_lane);
+  }
+  if (payload.disposition !== undefined) {
+    insert_payload.disposition = payload.disposition == null ? null : clean(payload.disposition);
+  }
   if (typeof payload.is_suppressed === "boolean") insert_payload.is_suppressed = payload.is_suppressed;
   if (payload.last_inbound_at !== undefined) insert_payload.last_inbound_at = payload.last_inbound_at;
   if (payload.last_outbound_at !== undefined) insert_payload.last_outbound_at = payload.last_outbound_at;

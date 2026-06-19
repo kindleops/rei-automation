@@ -1,3 +1,8 @@
+import {
+  isFailedDeliveryStatus,
+  resolveOutboundReplyState,
+} from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -234,20 +239,37 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
   }
   if (
     flags.wrong_number ||
+    disposition === "wrong_number" ||
+    reasonCodes.includes("wrong_number")
+  ) {
+    return null;
+  }
+
+  if (
     flags.not_interested ||
     existingStatus === "dead" ||
     existingBucket === "dead" ||
     disposition === "dead" ||
-    disposition === "wrong_number" ||
     disposition === "not_interested" ||
-    reasonCodes.includes("wrong_number") ||
     reasonCodes.includes("not_interested")
   ) {
-    return "dead";
+    return null;
   }
 
   if (is_outbound) {
-    return "waiting";
+    const outboundState = resolveOutboundReplyState({
+      lastOutboundAt:
+        messageEvent.sent_at ||
+        messageEvent.received_at ||
+        existingState.last_outbound_at ||
+        existingState.latest_message_at,
+      lastInboundAt: existingState.last_inbound_at,
+      latestDeliveryStatus:
+        messageEvent.delivery_status ||
+        messageEvent.provider_delivery_status ||
+        existingState.latest_delivery_status,
+    });
+    return outboundState.inbox_bucket;
   }
 
   if (PRIORITY_INTENTS.includes(primary) || PRIORITY_OBJECTIONS.includes(objection)) {
@@ -263,6 +285,79 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
   }
 
   return "new_replies";
+}
+
+export function resolveAutomationLaneFromClassification(
+  classification = {},
+  messageEvent = {},
+  existingState = {},
+  inbox_bucket = null,
+) {
+  const direction = clean(messageEvent.direction).toLowerCase();
+  const inboundFlags = resolveThreadFlagsFromClassification(classification);
+  const existingFlags = resolveThreadFlagsFromClassification(existingState);
+  const flags = {
+    opt_out: inboundFlags.opt_out || existingFlags.opt_out,
+    wrong_number: inboundFlags.wrong_number || existingFlags.wrong_number,
+    not_interested: inboundFlags.not_interested || existingFlags.not_interested,
+  };
+
+  if (flags.opt_out || lower(inbox_bucket) === "suppressed") return null;
+
+  if (flags.wrong_number || flags.not_interested) return "disqualified";
+
+  const deliveryStatus = clean(
+    messageEvent.delivery_status ||
+    messageEvent.provider_delivery_status ||
+    existingState.latest_delivery_status,
+  );
+  if (direction === "outbound" && isFailedDeliveryStatus(deliveryStatus)) {
+    return "delivery_recovery";
+  }
+
+  if (direction === "outbound") {
+    const outboundState = resolveOutboundReplyState({
+      lastOutboundAt:
+        messageEvent.sent_at ||
+        messageEvent.received_at ||
+        existingState.last_outbound_at ||
+        existingState.latest_message_at,
+      lastInboundAt: existingState.last_inbound_at,
+      latestDeliveryStatus: deliveryStatus,
+    });
+    return outboundState.automation_lane;
+  }
+
+  if (["priority", "new_replies"].includes(lower(inbox_bucket))) {
+    return "active_conversation";
+  }
+
+  if (lower(inbox_bucket) === "needs_review") return "manual_review";
+
+  return existingState.automation_lane || null;
+}
+
+export function resolveDispositionFromClassification(
+  classification = {},
+  messageEvent = {},
+  existingState = {},
+  inbox_bucket = null,
+) {
+  const inboundFlags = resolveThreadFlagsFromClassification(classification);
+  const existingFlags = resolveThreadFlagsFromClassification(existingState);
+  const flags = {
+    opt_out: inboundFlags.opt_out || existingFlags.opt_out,
+    wrong_number: inboundFlags.wrong_number || existingFlags.wrong_number,
+    not_interested: inboundFlags.not_interested || existingFlags.not_interested,
+  };
+
+  if (flags.opt_out || lower(inbox_bucket) === "suppressed") return "suppressed";
+  if (flags.wrong_number) return "wrong_number";
+  if (flags.not_interested) return "not_interested";
+  if (["priority", "new_replies", "needs_review", "waiting"].includes(lower(inbox_bucket))) {
+    return null;
+  }
+  return existingState.disposition || null;
 }
 
 export function buildThreadStatePatchFromClassification({ messageEvent = {}, classification = {}, existingState = {} }) {
@@ -316,7 +411,19 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
   patch.inbox_bucket = bucket;
   patch.inbox_category = bucket;
   patch.resolved_inbox_bucket = bucket;
-  
+  patch.automation_lane = resolveAutomationLaneFromClassification(
+    is_inbound ? classification : existingState,
+    messageEvent,
+    existingState,
+    bucket,
+  );
+  patch.disposition = resolveDispositionFromClassification(
+    is_inbound ? classification : existingState,
+    messageEvent,
+    existingState,
+    bucket,
+  );
+
   if (is_inbound && classification?.seller_state?.lead_temperature) {
     patch.lead_temperature = classification.seller_state.lead_temperature;
   }

@@ -78,18 +78,6 @@ export function normalizeExistingInboxState(existingState = {}) {
   };
 }
 
-function resolveDisposition(patch = {}, existingState = {}) {
-  if (patch.inbox_bucket === "suppressed" || patch.opt_out) return "suppressed";
-  if (patch.inbox_bucket === "dead" || patch.wrong_number || patch.not_interested) {
-    if (patch.wrong_number || lower(existingState.disposition) === "wrong_number") return "wrong_number";
-    return "not_interested";
-  }
-  if (["priority", "new_replies", "needs_review", "waiting", "cold", "follow_up"].includes(patch.inbox_bucket)) {
-    return null;
-  }
-  return existingState.disposition || null;
-}
-
 function buildBrainItemFromContext({ precedingOutbound = null, conversationStage = null } = {}) {
   const fields = [];
 
@@ -166,15 +154,19 @@ export async function classifyThreadFromChronology(messages = [], options = {}) 
     });
   }
 
-  const patch = latest.direction === "outbound"
-    ? buildThreadStatePatchFromClassification({
-      messageEvent: latest,
-      classification: {},
-      existingState: classifiedState,
-    })
-    : classifiedState;
+  const chronologyState = {
+    ...existingState,
+    ...classifiedState,
+    last_outbound_at: outboundMsgs[0]?.sent_at || outboundMsgs[0]?.received_at || existingState.last_outbound_at || null,
+    last_inbound_at: inboundMsgs[0]?.received_at || inboundMsgs[0]?.sent_at || existingState.last_inbound_at || null,
+    latest_delivery_status: latest.delivery_status || existingState.latest_delivery_status || null,
+  };
 
-  const disposition = resolveDisposition(patch, existingState);
+  const patch = buildThreadStatePatchFromClassification({
+    messageEvent: latest.direction === "outbound" ? latest : latestInbound,
+    classification: latest.direction === "outbound" ? {} : classification,
+    existingState: chronologyState,
+  });
 
   const seller_phone = latest.direction === "inbound"
     ? latest.from_phone_number
@@ -206,7 +198,8 @@ export async function classifyThreadFromChronology(messages = [], options = {}) 
     detected_intent: patch.detected_intent || patch.primary_intent || null,
     reply_intent: patch.primary_intent || null,
     classification_confidence: classification.confidence ?? null,
-    disposition,
+    automation_lane: patch.automation_lane ?? null,
+    disposition: patch.disposition ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -233,7 +226,8 @@ export function patchToInboxThreadState(patch = {}, overrides = {}) {
     latest_delivery_status: patch.latest_delivery_status,
     last_inbound_at: patch.last_inbound_at,
     last_outbound_at: patch.last_outbound_at,
-    inbox_bucket: patch.inbox_bucket,
+    inbox_bucket: patch.inbox_bucket ?? null,
+    automation_lane: patch.automation_lane ?? overrides.automation_lane ?? null,
     last_intent: patch.detected_intent || patch.reply_intent || patch.primary_intent || overrides.last_intent,
     is_suppressed: patch.inbox_bucket === "suppressed" || patch.opt_out === true || overrides.is_suppressed,
     disposition: patch.disposition ?? overrides.disposition ?? null,

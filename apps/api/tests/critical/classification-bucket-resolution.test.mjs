@@ -4,28 +4,31 @@ import {
   resolveThreadFlagsFromClassification,
   resolveUniversalStatusFromClassification,
   resolveInboxBucketFromClassification,
+  resolveAutomationLaneFromClassification,
 } from "../../src/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 
 describe("Classification Bucket Resolution", () => {
-  it("resolves not_interested to dead bucket", () => {
+  it("resolves not_interested to disqualified lane with null bucket", () => {
     const classification = { primary_intent: "not_interested" };
     const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
+    const lane = resolveAutomationLaneFromClassification(classification, { direction: "inbound" }, {}, bucket);
     const status = resolveUniversalStatusFromClassification(classification, { direction: "inbound" });
     const flags = resolveThreadFlagsFromClassification(classification);
 
-    assert.strictEqual(bucket, "dead");
+    assert.strictEqual(bucket, null);
+    assert.strictEqual(lane, "disqualified");
     assert.strictEqual(status.universal_status, "dead");
     assert.strictEqual(status.universal_stage, "not_interested");
     assert.strictEqual(flags.not_interested, true);
   });
 
-  it("resolves wrong_number to dead bucket", () => {
+  it("resolves wrong_number to disqualified lane with null bucket", () => {
     const classification = { primary_intent: "wrong_number" };
     const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
     const status = resolveUniversalStatusFromClassification(classification, { direction: "inbound" });
     const flags = resolveThreadFlagsFromClassification(classification);
 
-    assert.strictEqual(bucket, "dead");
+    assert.strictEqual(bucket, null);
     assert.strictEqual(status.universal_status, "dead");
     assert.strictEqual(status.universal_stage, "wrong_number");
     assert.strictEqual(flags.wrong_number, true);
@@ -63,14 +66,29 @@ describe("Classification Bucket Resolution", () => {
     assert.strictEqual(status.universal_stage, "Offer");
   });
 
-  it("resolves latest outbound message to awaiting_response / waiting bucket", () => {
-    const existingState = { inbox_bucket: "new_replies", primary_intent: "who_is_this" };
-    const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound" }, existingState);
+  it("resolves recent outbound message to awaiting_response / waiting bucket", () => {
+    const existingState = {
+      inbox_bucket: "new_replies",
+      primary_intent: "who_is_this",
+      last_outbound_at: new Date().toISOString(),
+      last_inbound_at: "2026-01-01T00:00:00.000Z",
+    };
+    const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound", sent_at: existingState.last_outbound_at }, existingState);
     const status = resolveUniversalStatusFromClassification({}, { direction: "outbound" }, existingState);
 
     assert.strictEqual(bucket, "waiting");
     assert.strictEqual(status.universal_status, "awaiting_response");
     assert.strictEqual(status.universal_stage, "awaiting_response");
+  });
+
+  it("resolves stale outbound message to null bucket for cold reactivation", () => {
+    const staleOutbound = "2026-01-01T00:00:00.000Z";
+    const existingState = {
+      last_outbound_at: staleOutbound,
+      last_inbound_at: "2025-12-01T00:00:00.000Z",
+    };
+    const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound", sent_at: staleOutbound }, existingState);
+    assert.strictEqual(bucket, null);
   });
 
   it("resolves property_correction to needs_review bucket and needs_review status", () => {
@@ -91,12 +109,12 @@ describe("Classification Bucket Resolution", () => {
     assert.strictEqual(bucket, "needs_review");
   });
 
-  it("resolves outbound message on dead thread to remain dead", () => {
+  it("resolves outbound message on not_interested thread to null bucket", () => {
     const existingState = { universal_status: "dead", inbox_bucket: "dead", not_interested: true };
     const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound" }, existingState);
     const status = resolveUniversalStatusFromClassification({}, { direction: "outbound" }, existingState);
 
-    assert.strictEqual(bucket, "dead");
+    assert.strictEqual(bucket, null);
     assert.strictEqual(status.universal_status, "dead");
   });
 

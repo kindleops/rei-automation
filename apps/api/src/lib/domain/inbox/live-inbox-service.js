@@ -1,5 +1,9 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
+import {
+  WAITING_REPLY_WINDOW_MS,
+  buildColdTransitionPatch,
+} from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -645,7 +649,7 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "follow_up":
       return bucket === "follow_up";
     case "cold":
-      return bucket === "cold";
+      return bucket === "cold" || lower(thread.automation_lane) === "cold_reactivation";
     case "dead":
       return bucket === "dead" || thread.wrong_number === true || thread.not_interested === true;
     case "suppressed":
@@ -1261,7 +1265,7 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
       query = query.eq("inbox_bucket", "follow_up");
       break;
     case "cold":
-      query = query.eq("inbox_bucket", "cold");
+      query = query.eq("automation_lane", "cold_reactivation");
       break;
     case "dead":
       query = query.eq("inbox_bucket", "dead");
@@ -1433,6 +1437,7 @@ const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   "is_read",
   "is_suppressed",
   "disposition",
+  "automation_lane",
   "updated_at",
 ].join(",");
 
@@ -1464,7 +1469,7 @@ async function queryAuthoritativeInboxThreads(params = {}, {
       query = query.eq("inbox_bucket", "follow_up");
       break;
     case "cold":
-      query = query.eq("inbox_bucket", "cold");
+      query = query.eq("automation_lane", "cold_reactivation");
       break;
     case "dead":
       query = query.eq("inbox_bucket", "dead");
@@ -1520,6 +1525,7 @@ async function queryAuthoritativeInboxThreads(params = {}, {
     detected_intent: row.last_intent,
     reply_intent: row.last_intent,
     inbox_category: row.inbox_bucket,
+    automation_lane: row.automation_lane,
   }));
 
   return {
@@ -1617,20 +1623,55 @@ export async function getLiveCounts(params = {}, deps = {}) {
   return result.counts;
 }
 
+async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
+  const cutoffIso = new Date(now - WAITING_REPLY_WINDOW_MS).toISOString();
+  const { data: staleRows, error } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key,inbox_bucket,last_outbound_at,last_inbound_at")
+    .eq("inbox_bucket", "waiting")
+    .lt("last_outbound_at", cutoffIso)
+    .limit(500);
+
+  if (error) throw error;
+
+  let transitioned = 0;
+  for (const row of staleRows || []) {
+    const patch = buildColdTransitionPatch({
+      inbox_bucket: row.inbox_bucket,
+      lastOutboundAt: row.last_outbound_at,
+      lastInboundAt: row.last_inbound_at,
+      now,
+    });
+    if (!patch) continue;
+
+    const { error: updateError } = await supabase
+      .from("inbox_thread_state")
+      .update(patch)
+      .eq("thread_key", row.thread_key);
+    if (!updateError) transitioned += 1;
+  }
+
+  if (transitioned > 0) {
+    console.log("[INBOX_WAITING_COLD_TRANSITION]", { transitioned, cutoffIso });
+  }
+
+  return transitioned;
+}
+
 async function fetchAuthoritativeInboxCounts(supabase) {
+  await transitionStaleWaitingThreads(supabase);
+
   const buckets = [
     "priority",
     "new_replies",
     "needs_review",
     "follow_up",
-    "cold",
     "dead",
     "suppressed",
     "waiting",
   ];
 
   const counts = buildEmptyCounts();
-  let total = 0;
   let unlinked = 0;
 
   for (const bucket of buckets) {
@@ -1641,8 +1682,15 @@ async function fetchAuthoritativeInboxCounts(supabase) {
 
     if (error) throw error;
     counts[bucket] = Number(count || 0);
-    total += counts[bucket];
   }
+
+  const { count: coldCount, error: coldError } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key", { count: "exact", head: true })
+    .eq("automation_lane", "cold_reactivation");
+
+  if (coldError) throw coldError;
+  counts.cold = Number(coldCount || 0);
 
   const { count: allCount, error: allError } = await supabase
     .from("inbox_thread_state")
@@ -1775,6 +1823,12 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
         offset = Math.trunc(numericCursor);
       }
     }
+  }
+
+  try {
+    await transitionStaleWaitingThreads(supabase);
+  } catch (error) {
+    console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
   }
 
   const threadQueryStartedAt = nowMs();
