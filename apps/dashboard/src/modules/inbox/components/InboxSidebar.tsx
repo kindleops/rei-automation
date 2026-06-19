@@ -245,10 +245,32 @@ const resolveDeliveryReceipt = (
 }
 
 const priorityScoreClass = (score: number | null): string => {
-  if (score == null) return ''
-  if (score >= 70) return 'is-priority-high'
-  if (score >= 40) return 'is-priority-medium'
+  if (score == null) return 'is-muted'
+  if (score >= 80) return 'is-priority-critical'
+  if (score >= 60) return 'is-priority-high'
   return 'is-priority-low'
+}
+
+const resolveMaterialIntent = (thread: InboxWorkflowThread, decision: ConversationDecision): string | null => {
+  const intent = String((decision as any).ui_intent || (thread as any).uiIntent || (thread as any).detected_intent || '').toLowerCase()
+  const status = readString(thread, 'universalStatus', 'universal_status', 'inboxStatus', 'statusText', 'status').toLowerCase()
+  const haystack = `${intent} ${status}`
+
+  if (haystack.includes('wrong_number') || haystack.includes('wrong number')) return 'Wrong Number'
+  if (haystack.includes('not_interested') || haystack.includes('not interested')) return 'Not Interested'
+  if (haystack.includes('ownership') && haystack.includes('confirm')) return 'Ownership Confirmed'
+  if (haystack.includes('price_provided') || haystack.includes('price provided') || haystack.includes('asking price')) return 'Price Provided'
+  if (haystack.includes('asks_offer') || haystack.includes('ask offer') || haystack.includes('make offer')) return 'Asks Offer'
+  if (haystack.includes('interested') || intent === 'yes') return 'Seller Interested'
+
+  return null
+}
+
+const formatDirectionLabel = (direction: string): string => {
+  const d = direction.toLowerCase()
+  if (d === 'inbound') return 'Inbound'
+  if (d === 'outbound') return 'Outbound'
+  return ''
 }
 
 const resolveStatusChipClass = (thread: InboxWorkflowThread): string => {
@@ -635,7 +657,7 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 })
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
-// Elite four-zone row — rail25 / review50 / ops75 / full100
+// Elite four-zone row — rail25 / review50 / ops75 / full100 (one component, responsive CSS)
 const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
   thread: InboxWorkflowThread
   selected: boolean
@@ -646,13 +668,19 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
   const {
     name, address, marketLine, metaLine, latestMessageBody, latestDirection,
     statusLabel, bucketLabel, estimatedValue, equityAmount, equityPercent,
-    finalAcquisitionScore, timestamp, isHot, deliveryReceipt, visualCategory,
+    finalAcquisitionScore, timestamp, deliveryReceipt,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
   const statusChipClass = resolveStatusChipClass(thread)
+  const bucketAccentClass = statusChipClass.replace('is-', 'is-bucket-')
   const statusChipLabel = bucketLabel !== 'all messages' ? bucketLabel : statusLabel
   const unreadCount = readNumber(thread, 'unreadCount', 'unread_count', 'unreadMessages', 'unread_messages')
+  const directionLabel = formatDirectionLabel(latestDirection)
+  const materialIntent = resolveMaterialIntent(thread, decision)
+  const valueDisplay = formatCompactMoney(estimatedValue)
+  const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
+  const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
 
   return (
     <div
@@ -660,12 +688,11 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
       tabIndex={0}
       className={cls(
         'nx-row25',
+        bucketAccentClass,
         selected && 'is-selected',
         decision.unread && 'is-unread',
         latestDirection === 'inbound' && 'is-inbound',
         latestDirection === 'outbound' && 'is-outbound',
-        isHot && 'is-hot',
-        visualCategory !== 'none' && `is-category-${visualCategory}`,
       )}
       data-thread-id={thread.id}
       onClick={() => onSelect(thread.id)}
@@ -677,10 +704,13 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--conversation">
-        <span className="nx-row25__name-wrap">
-          {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
-          <span className="nx-row25__name">{name}</span>
-        </span>
+        <div className="nx-row25__head">
+          <span className="nx-row25__name-wrap">
+            {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
+            <span className="nx-row25__name">{name}</span>
+          </span>
+          <time className="nx-row25__time nx-row25__time--head">{ageLabel}</time>
+        </div>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
@@ -690,26 +720,35 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
               <span>{deliveryReceipt.label}</span>
             </span>
           )}
-          {deliveryReceipt && <span className="nx-row25__footer-sep" aria-hidden="true">·</span>}
-          <time className="nx-row25__time">{ageLabel}</time>
+          {deliveryReceipt && directionLabel && <span className="nx-row25__footer-sep" aria-hidden="true">·</span>}
+          {directionLabel && <span className="nx-row25__direction">{directionLabel}</span>}
+          {materialIntent && (
+            <>
+              <span className="nx-row25__footer-sep" aria-hidden="true">·</span>
+              <span className="nx-row25__intent">{materialIntent}</span>
+            </>
+          )}
         </div>
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--metrics">
-        <div className="nx-row25__metric">
-          <span className="nx-row25__metric-k">Value</span>
-          <span className="nx-row25__metric-v">{formatCompactMoney(estimatedValue)}</span>
+        <div className="nx-row25__metrics-group" aria-label="Opportunity metrics">
+          <div className="nx-row25__metric-cell">
+            <span className="nx-row25__metric-v">{valueDisplay}</span>
+            <span className="nx-row25__metric-k">Value</span>
+          </div>
+          <div className="nx-row25__metric-cell">
+            <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
+            <span className="nx-row25__metric-k">Priority</span>
+          </div>
+          <div className="nx-row25__metric-cell">
+            <span className="nx-row25__metric-v">{equityDisplay}</span>
+            <span className="nx-row25__metric-k">Equity</span>
+          </div>
         </div>
-        <div className="nx-row25__metric">
-          <span className="nx-row25__metric-k">Priority</span>
-          <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>
-            {finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'}
-          </span>
-        </div>
-        <div className="nx-row25__metric">
-          <span className="nx-row25__metric-k">Equity</span>
-          <span className="nx-row25__metric-v">{formatEquityDisplay(equityAmount, equityPercent)}</span>
-        </div>
+        <span className="nx-row25__metrics-inline" aria-hidden="true">
+          {valueDisplay} · {scoreDisplay} · {equityDisplay}
+        </span>
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--action">
