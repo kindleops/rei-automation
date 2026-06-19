@@ -63,6 +63,7 @@ type BucketConfig = {
   bucket: CanonicalBucket
   view: InboxViewSelectValue
   label: string
+  shortLabel: string
   icon: string
   description: string
   accentClass: string
@@ -70,15 +71,15 @@ type BucketConfig = {
 }
 
 const BUCKETS: BucketConfig[] = [
-  { bucket: 'priority', view: 'priority', label: 'Priority', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
-  { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
-  { bucket: 'needs_review', view: 'needs_review', label: 'Needs Review', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
-  { bucket: 'waiting', view: 'waiting', label: 'Waiting', icon: '⏳', description: 'Outbound sent, awaiting seller response', accentClass: 'is-wait', countKey: 'waiting' },
-  { bucket: 'follow_up', view: 'follow_up', label: 'Follow Up', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
-  { bucket: 'cold', view: 'cold', label: 'Cold', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
-  { bucket: 'dead', view: 'dead', label: 'Dead', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
-  { bucket: 'suppressed', view: 'suppressed', label: 'Suppressed', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
-  { bucket: 'all_messages', view: 'all_conversations', label: 'All Messages', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all_messages' },
+  { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
+  { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', shortLabel: 'New', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
+  { bucket: 'needs_review', view: 'needs_review', label: 'Needs Review', shortLabel: 'Review', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
+  { bucket: 'waiting', view: 'waiting', label: 'Waiting', shortLabel: 'Waiting', icon: '⏳', description: 'Outbound sent, awaiting seller response', accentClass: 'is-wait', countKey: 'waiting' },
+  { bucket: 'follow_up', view: 'follow_up', label: 'Follow Up', shortLabel: 'Follow Up', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
+  { bucket: 'cold', view: 'cold', label: 'Cold', shortLabel: 'Cold', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
+  { bucket: 'dead', view: 'dead', label: 'Dead', shortLabel: 'Dead', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
+  { bucket: 'suppressed', view: 'suppressed', label: 'Suppressed', shortLabel: 'DNC', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
+  { bucket: 'all_messages', view: 'all_conversations', label: 'All Messages', shortLabel: 'All', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all_messages' },
 ]
 
 const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
@@ -700,13 +701,16 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 })
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
-// Elite four-zone row — rail25 / review50 / ops75 / full100 (one component, responsive CSS)
-const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
+// Elite inbox row — rail25 / review50 / ops75 / full100 (one component, mode CSS)
+const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = 'review50' }: {
   thread: InboxWorkflowThread
   selected: boolean
   decision: ConversationDecision
   onSelect: (id: string) => void
+  inboxMode?: 'rail25' | 'review50' | 'ops75' | 'full100'
 }) => {
+  const isCompactRail = inboxMode === 'rail25'
+  const showConditionMetric = inboxMode === 'ops75' || inboxMode === 'full100'
   const vars = getThreadVars(thread, decision)
   const {
     name, address, contextLine, latestMessageBody, latestDirection,
@@ -763,6 +767,13 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             <span className="nx-row25__context-line">{contextLine}</span>
           </div>
         )}
+        {isCompactRail && (
+          <div className="nx-row25__compact-metrics" aria-label="Value, priority, and equity">
+            <span className="nx-row25__compact-metric" title="Value">{valueDisplay}</span>
+            <span className="nx-row25__compact-metric" title="Priority">{scoreDisplay}</span>
+            <span className="nx-row25__compact-metric" title="Equity">{equityDisplay}</span>
+          </div>
+        )}
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--metrics">
@@ -779,12 +790,14 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             <span className="nx-row25__metric-k">Equity</span>
             <span className="nx-row25__metric-v">{equityDisplay}</span>
           </div>
-          <div className={cls('nx-row25__metric-cell', !buildingCondition && 'is-empty')}>
-            <span className="nx-row25__metric-k">Condition</span>
-            <span className={cls('nx-row25__metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
-              {buildingCondition || '—'}
-            </span>
-          </div>
+          {showConditionMetric && (
+            <div className={cls('nx-row25__metric-cell', !buildingCondition && 'is-empty')}>
+              <span className="nx-row25__metric-k">Condition</span>
+              <span className={cls('nx-row25__metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
+                {buildingCondition || '—'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1025,7 +1038,9 @@ export const InboxSidebar = ({
               }}
             >
               <span className="nx-cat-nav__icon" aria-hidden="true">{item.icon}</span>
-              <span className="nx-cat-nav__label">{item.label}</span>
+              <span className="nx-cat-nav__label" title={item.label}>
+                {inboxMode === 'rail25' ? item.shortLabel : item.label}
+              </span>
               <span className="nx-cat-nav__count">{formatCount(countValue)}</span>
               {showUnread && <span className="nx-cat-nav__unread" aria-label="Unread replies" />}
             </button>
@@ -1105,33 +1120,49 @@ export const InboxSidebar = ({
     )
   )
 
-  const renderListContent = (RowComp: any) => (
-    <div className="nx-sidebar-rebuilt__threads">
-      {loading && displayedActiveThreads.length === 0 ? (
-        <div className="nx-sidebar-skeleton">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className={cls("nx-sidebar-skeleton__row", densityMode === 'compact' && 'is-compact')}>
-              <div className="nx-sidebar-skeleton__avatar shimmer" />
-              <div className="nx-sidebar-skeleton__content">
-                <div className="nx-sidebar-skeleton__line nx-sidebar-skeleton__line--title shimmer" style={{ width: '45%' }} />
-                <div className="nx-sidebar-skeleton__line shimmer" style={{ width: '75%' }} />
-              </div>
+  const renderListContent = () => (
+    <>
+      <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
+        <div className="nx-sidebar-rebuilt__threads">
+          {loading && displayedActiveThreads.length === 0 ? (
+            <div className="nx-sidebar-skeleton">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className={cls('nx-sidebar-skeleton__row', densityMode === 'compact' && 'is-compact')}>
+                  <div className="nx-sidebar-skeleton__avatar shimmer" />
+                  <div className="nx-sidebar-skeleton__content">
+                    <div className="nx-sidebar-skeleton__line nx-sidebar-skeleton__line--title shimmer" style={{ width: '45%' }} />
+                    <div className="nx-sidebar-skeleton__line shimmer" style={{ width: '75%' }} />
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
+            const decision = decisionMap.get(thread.id)
+            if (!decision) return null
+            return (
+              <CompactRow25
+                key={thread.threadKey || thread.id}
+                thread={thread}
+                selected={selectedId === thread.id}
+                decision={decision}
+                inboxMode={inboxMode}
+                onSelect={(id: string) => {
+                  console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
+                  onSelect(id)
+                }}
+              />
+            )
+          }) : (
+            <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>
+              {inboxLoadFailed ? (
+                <button type="button" className="nx-sidebar-rebuilt__telemetry-indicator" onClick={() => onRetryLoad?.()}>
+                  <Icon name="alert" /> Inbox could not load. Retry.
+                </button>
+              ) : 'No conversations match this filter.'}
+            </div>
+          )}
         </div>
-      ) : displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
-        const decision = decisionMap.get(thread.id)
-        if (!decision) return null
-        return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
-      }) : (
-        <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>
-          {inboxLoadFailed ? (
-            <button type="button" className="nx-sidebar-rebuilt__telemetry-indicator" onClick={() => onRetryLoad?.()}>
-              <Icon name="alert" /> Inbox could not load. Retry.
-            </button>
-          ) : 'No conversations match this filter.'}
-        </div>
-      )}
+      </div>
       {canLoadMore && (
         <div className="nx-sidebar-rebuilt__load-more">
           <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
@@ -1139,66 +1170,23 @@ export const InboxSidebar = ({
           </button>
         </div>
       )}
-    </div>
+    </>
   )
 
   const sidebarShellClass = cls(
     'nx-sidebar-rebuilt',
     `nx-sidebar--mode-${inboxMode}`,
-    inboxMode === 'review50' && 'nx-sidebar--mode-rail25',
     `nx-sidebar--active-${activeBucketConfig.accentClass.replace('is-', '')}`,
     savedPreset && 'has-preset',
   )
 
-  if (inboxMode === 'review50') {
-    return (
-      <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
-        <div className="nx-review50-layout">
-          <div className="nx-review50-left">
-            {renderTopActions()}
-            {renderSecondaryControls()}
-            {renderMultiSelectBar()}
-            <div className="nx-sidebar-rebuilt__list-container" ref={groupsRef}>
-              {renderListContent(CompactRow25)}
-            </div>
-          </div>
-          <div className="nx-review50-right">
-            <DealSnapshotPlaceholder thread={threads.find(t => t.id === selectedId)} decision={selectedId ? decisionMap.get(selectedId) : null} />
-          </div>
-        </div>
-      </aside>
-    )
-  }
-
-  if (inboxMode === 'full100') {
-    return (
-      <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
-        <div className="nx-full100-layout">
-          <div className="nx-full100-left">
-            {renderTopActions()}
-            {renderSecondaryControls()}
-          </div>
-          <div className="nx-full100-center" ref={groupsRef}>
-            {renderMultiSelectBar()}
-            <div className="nx-sidebar-rebuilt__list-container">
-              {renderListContent(CompactRow25)}
-            </div>
-          </div>
-          <div className="nx-full100-right">
-            <DealSnapshotPlaceholder thread={threads.find(t => t.id === selectedId)} decision={selectedId ? decisionMap.get(selectedId) : null} />
-          </div>
-        </div>
-      </aside>
-    )
-  }
-
   return (
-    <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
+    <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket} data-inbox-layout={inboxMode}>
       {renderTopActions()}
-      <div className="nx-sidebar-rebuilt__list-container" ref={groupsRef}>
+      <div className="nx-sidebar-rebuilt__list-container">
         {renderSecondaryControls()}
         {renderMultiSelectBar()}
-        {renderListContent(CompactRow25)}
+        {renderListContent()}
       </div>
     </aside>
   )

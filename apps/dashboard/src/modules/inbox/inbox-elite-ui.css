@@ -50,15 +50,21 @@
   --nx-header-c3: var(--nx-cat-all-c);
 }
 
-.nx-premium-inbox > .nx-inbox-shell,
-.nx-premium-inbox .nx-inbox-shell {
+.nx-premium-inbox > .nx-inbox-shell:not(.nx-inbox-shell--workspace-status),
+.nx-premium-inbox .nx-inbox-shell:not(.nx-inbox-shell--workspace-status) {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
   align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   scrollbar-gutter: stable;
+}
+
+.nx-premium-inbox.is-multi-view-active > .nx-inbox-shell,
+.nx-premium-inbox.is-multi-view-active .nx-inbox-shell {
+  display: flex !important;
+  grid-template-columns: unset !important;
 }
 
 .nx-premium-inbox .nx-inbox-shell:has(.nx-intelligence-panel) {
@@ -74,10 +80,10 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  width: 380px;
-  min-width: 380px;
-  max-width: 380px;
-  flex: 0 0 380px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: 1 1 auto;
   overflow: hidden;
   transition:
     --nx-header-c1 0.55s ease,
@@ -243,10 +249,8 @@
 .nx-premium-inbox .nx-sidebar-rebuilt__list-container {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  padding: 0 0 10px;
+  overflow: hidden;
+  padding: 0;
 }
 
 .nx-premium-inbox .nx-review50-left,
@@ -761,88 +765,7 @@
   flex: 1 1 auto;
 }
 
-/* ─── Responsive layouts (one component) ─────────────────────────────────── */
-.nx-premium-inbox .nx-sidebar--mode-full100 .nx-row25 {
-  --nx-row-height: 100px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-ops75 .nx-row25 {
-  grid-template-columns: minmax(0, 1fr) minmax(176px, 196px);
-  --nx-row-height: 96px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-review50 .nx-row25 {
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 180px);
-  --nx-row-pad-x: 12px;
-  --nx-row-height: 94px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-review50 .nx-row25__metrics-group {
-  gap: 2px 8px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-review50 .nx-row25__metric-v { font-size: 12px; }
-
-/* 25% rail — compact two-column layout */
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25 {
-  grid-template-columns: minmax(0, 1fr) minmax(132px, 152px);
-  grid-template-areas: "conversation metrics";
-  --nx-row-pad-x: 10px;
-  --nx-row-pad-y: 8px;
-  --nx-row-height: 94px;
-  gap: 0 6px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__name {
-  font-size: 13.5px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__preview {
-  font-size: 12px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__metrics-group {
-  grid-template-columns: repeat(2, minmax(52px, 1fr));
-  gap: 3px 6px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__metric-cell {
-  align-items: flex-end;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__metric-v {
-  font-size: 11px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__metric-k {
-  font-size: 6.5px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__receipt-label {
-  font-size: 9.5px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-row25__context-line {
-  font-size: 9.5px;
-}
-
-/* 25% rail — scrollable category header, no label overlap */
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-cat-nav {
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  padding-bottom: 2px;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-cat-nav__item {
-  flex: 0 0 auto;
-  min-width: 76px;
-  scroll-snap-align: start;
-}
-
-.nx-premium-inbox .nx-sidebar--mode-rail25:not(.nx-sidebar--mode-review50):not(.nx-sidebar--mode-ops75):not(.nx-sidebar--mode-full100) .nx-cat-nav__label {
-  font-size: 9px;
-  letter-spacing: 0.03em;
-}
+/* Mode-specific row/layout rules: inbox-workspace-layout.css */
 
 /* ─── Light mode ────────────────────────────────────────────────────────── */
 [data-nexus-theme="light"] .nx-premium-inbox {

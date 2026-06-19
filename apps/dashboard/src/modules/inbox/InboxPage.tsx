@@ -139,6 +139,7 @@ import './inbox-polish.css'
 import './notification-hud.css'
 import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
 import './inbox-elite-ui.css' // full-header gradient + category rail + four-zone rows
+import './inbox-workspace-layout.css' // 25/50/75/100 workspace mode layout system
 import '../../views/buyer-match/buyer-intel-upgrade.css'
 import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/copilot.css)
 import './conversation-redesign.css'
