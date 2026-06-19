@@ -709,20 +709,17 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
 }) => {
   const vars = getThreadVars(thread, decision)
   const {
-    name, address, marketLine, metaLine, latestMessageBody, latestDirection,
-    statusLabel, bucketLabel, estimatedValue, equityAmount, equityPercent,
+    name, address, contextLine, latestMessageBody, latestDirection,
+    estimatedValue, equityAmount, equityPercent,
     finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
-  const statusChipClass = resolveStatusChipClass(thread)
-  const bucketAccentClass = statusChipClass.replace('is-', 'is-bucket-')
-  const statusChipLabel = bucketLabel !== 'all messages' ? bucketLabel : statusLabel
-  const unreadCount = readNumber(thread, 'unreadCount', 'unread_count', 'unreadMessages', 'unread_messages')
-  const materialIntent = resolveMaterialIntent(thread, decision)
+  const bucketAccentClass = resolveStatusChipClass(thread).replace('is-', 'is-bucket-')
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
+  const showMetadata = contextLine && contextLine !== '—'
 
   return (
     <div
@@ -740,11 +737,6 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
-      <div className="nx-row25__zone nx-row25__zone--context">
-        <span className="nx-row25__market">{marketLine}</span>
-        <span className="nx-row25__meta">{metaLine}</span>
-      </div>
-
       <div className="nx-row25__zone nx-row25__zone--conversation">
         <div className="nx-row25__head">
           <span className="nx-row25__name-wrap">
@@ -755,17 +747,22 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
-          {deliveryReceipt && (
-            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} title={deliveryReceipt.label} aria-label={deliveryReceipt.label}>
+          {deliveryReceipt ? (
+            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={`${deliveryReceipt.label} ${ageLabel}`}>
               <Icon name={deliveryReceipt.icon} />
-              <span className="nx-row25__footer-sep" aria-hidden="true">·</span>
+              <span className="nx-row25__receipt-label">{deliveryReceipt.label}</span>
+              <span className="nx-row25__receipt-sep" aria-hidden="true">·</span>
               <time className="nx-row25__receipt-time">{ageLabel}</time>
             </span>
-          )}
-          {materialIntent && (
-            <span className="nx-row25__intent-tag">{materialIntent}</span>
+          ) : (
+            <time className="nx-row25__receipt-time is-standalone">{ageLabel}</time>
           )}
         </div>
+        {showMetadata && (
+          <div className="nx-row25__context">
+            <span className="nx-row25__context-line">{contextLine}</span>
+          </div>
+        )}
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--metrics">
@@ -782,28 +779,13 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             <span className="nx-row25__metric-k">Equity</span>
             <span className="nx-row25__metric-v">{equityDisplay}</span>
           </div>
-          {buildingCondition && (
-            <div className="nx-row25__metric-cell">
-              <span className="nx-row25__metric-k">Condition</span>
-              <span className="nx-row25__metric-v">{buildingCondition}</span>
-            </div>
-          )}
+          <div className={cls('nx-row25__metric-cell', !buildingCondition && 'is-empty')}>
+            <span className="nx-row25__metric-k">Condition</span>
+            <span className={cls('nx-row25__metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
+              {buildingCondition || '—'}
+            </span>
+          </div>
         </div>
-      </div>
-
-      <div className="nx-row25__zone nx-row25__zone--action">
-        <span className={cls('nx-row25__status-chip', statusChipClass)}>{statusChipLabel}</span>
-        {unreadCount != null && unreadCount > 1 && (
-          <span className="nx-row25__unread-badge">{unreadCount}</span>
-        )}
-        <button
-          type="button"
-          className="nx-row25__overflow-btn"
-          aria-label="Thread actions"
-          onClick={(e) => { e.stopPropagation() }}
-        >
-          <Icon name="more" />
-        </button>
       </div>
     </div>
   )
