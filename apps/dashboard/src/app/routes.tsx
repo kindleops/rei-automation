@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { FullscreenAppShell } from '../shared/FullscreenAppShell'
 import { InboxView } from '../views/inbox/InboxView'
 
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
@@ -44,6 +45,10 @@ const defineRoute = <TData,>(route: AppRoute<TData>): ResolvedRoute => ({
   render: (data) => route.render(data as TData),
 })
 
+const wrapFullscreen = (node: ReactNode, viewId?: string) => (
+  <FullscreenAppShell viewId={viewId}>{node}</FullscreenAppShell>
+)
+
 const rootRoute = defineRoute<null>({
   path: '/',
   title: 'NEXUS | Inbox',
@@ -55,7 +60,7 @@ const inboxRoute = defineRoute<null>({
   path: '/inbox',
   title: 'NEXUS | Inbox',
   loader: async () => null,
-  render: () => <InboxView />,
+  render: () => <InboxView initialWorkspaceView="thread" routeMode="fullscreen" />,
 })
 
 const conversationRoute = defineRoute<null>({
@@ -69,96 +74,84 @@ const dealIntelligenceRoute = defineRoute<AcquisitionWorkspaceModel>({
   path: '/deal-intelligence',
   title: 'NEXUS | Deal Intelligence',
   loader: loadAcquisitionWorkspace,
-  render: (data) => <PropertyIntelligenceApp data={data} />,
+  render: (data) => wrapFullscreen(<PropertyIntelligenceApp data={data} />, 'deal_intelligence'),
 })
 
 const compIntelligenceRoute = defineRoute<null>({
   path: '/comp-intelligence',
   title: 'NEXUS | Comp Intelligence',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="comp_intelligence" />,
+  render: () => <InboxView initialWorkspaceView="comp_intelligence" routeMode="fullscreen" />,
 })
 
 const buyerMatchRoute = defineRoute<BuyerModel>({
   path: '/buyer-match',
   title: 'NEXUS | Buyer Match',
   loader: loadBuyer,
-  render: (data) => <BuyerMatchView data={data} />,
+  render: (data) => wrapFullscreen(<BuyerMatchView data={data} />, 'buyer_match'),
 })
 
 const queueRoute = defineRoute<QueueModel>({
   path: '/queue',
   title: 'NEXUS | Queue',
   loader: loadQueue,
-  render: (data) => <QueueView data={data} />,
+  render: (data) => wrapFullscreen(<QueueView data={data} />, 'queue'),
 })
 
 const pipelineRoute = defineRoute<null>({
   path: '/pipeline',
   title: 'NEXUS | Pipeline',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="pipeline" />,
+  render: () => <InboxView initialWorkspaceView="pipeline" routeMode="fullscreen" />,
 })
 
 const calendarRoute = defineRoute<null>({
   path: '/calendar',
   title: 'NEXUS | Calendar',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="calendar" />,
+  render: () => <InboxView initialWorkspaceView="calendar" routeMode="fullscreen" />,
 })
 
 const mapRoute = defineRoute<null>({
   path: '/map',
   title: 'NEXUS | Map',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="command_map" />,
+  render: () => <InboxView initialWorkspaceView="command_map" routeMode="fullscreen" />,
 })
 
 const analyticsRoute = defineRoute<null>({
   path: '/analytics',
   title: 'NEXUS | Analytics',
   loader: async () => null,
-  render: () => <KpiIntelligencePage />,
+  render: () => wrapFullscreen(<KpiIntelligencePage />, 'metrics'),
 })
 
 const closingDeskRoute = defineRoute<null>({
   path: '/closing-desk',
   title: 'NEXUS | Closing Desk',
   loader: async () => null,
-  render: () => <ClosingDeskView />,
+  render: () => wrapFullscreen(<ClosingDeskView />, 'closing_desk'),
 })
 
 const campaignCommandRoute = defineRoute<null>({
   path: '/campaign-command',
   title: 'NEXUS | Campaign Command',
   loader: async () => null,
-  render: () => <CampaignsPage />,
+  render: () => wrapFullscreen(<CampaignsPage />, 'campaigns'),
 })
 
 const emailCommandRoute = defineRoute<null>({
   path: '/email-command',
   title: 'NEXUS | Email Command',
   loader: async () => null,
-  render: () => <EmailCommandCenter />,
+  render: () => wrapFullscreen(<EmailCommandCenter paneWidth="100" />, 'email'),
 })
 
 const workflowStudioRoute = defineRoute<null>({
   path: '/workflow-studio',
   title: 'NEXUS | Workflow Studio',
   loader: async () => null,
-  render: () => (
-    <div
-      className="nx-premium-inbox"
-      style={{
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      <WorkflowStudioV2 />
-    </div>
-  ),
+  render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
 const routes = [

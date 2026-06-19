@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './shared/fullscreen-app-shell.css'
 import './styles/nexus-theme.css'
 import './dossier.css'
 import './styles/mobile-responsive.css'

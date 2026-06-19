@@ -1,15 +1,21 @@
+import type { InboxWorkspaceView } from '../../modules/inbox/active-context'
 import InboxPage from '../../modules/inbox/InboxPage'
 
-type InboxInitialWorkspaceView =
-  | 'comp_intelligence'
-  | 'pipeline'
-  | 'calendar'
-  | 'command_map'
+export type InboxRouteMode = 'workspace' | 'fullscreen'
 
 interface InboxViewProps {
-  initialWorkspaceView?: InboxInitialWorkspaceView
+  initialWorkspaceView?: InboxWorkspaceView
+  routeMode?: InboxRouteMode
 }
 
-export function InboxView({ initialWorkspaceView }: InboxViewProps = {}) {
-  return <InboxPage initialWorkspaceView={initialWorkspaceView} />
+export function InboxView({
+  initialWorkspaceView,
+  routeMode = 'fullscreen',
+}: InboxViewProps = {}) {
+  return (
+    <InboxPage
+      initialWorkspaceView={initialWorkspaceView}
+      routeMode={routeMode}
+    />
+  )
 }

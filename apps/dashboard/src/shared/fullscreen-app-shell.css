@@ -1,0 +1,87 @@
+/* Shared fullscreen route contract — modeled on nx-deal-intelligence-fullscreen */
+
+.nx-stage {
+  display: flex;
+  flex-direction: column;
+}
+
+.nx-stage > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.nx-fullscreen-app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.nx-premium-inbox.is-route-fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 24%),
+    #090d15;
+}
+
+.nx-fullscreen-app-shell.is-view-deal_intelligence,
+.nx-deal-intelligence-fullscreen {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 24%),
+    #090d15;
+}
+
+.nx-fullscreen-app-shell.is-view-deal_intelligence .nx-intelligence-panel,
+.nx-deal-intelligence-fullscreen .nx-intelligence-panel {
+  width: 100% !important;
+  flex: 1 1 100% !important;
+  max-width: none !important;
+  border-left: 0 !important;
+}
+
+.nx-fullscreen-app-shell.is-view-deal_intelligence .nx-intel-scroll-body,
+.nx-deal-intelligence-fullscreen .nx-intel-scroll-body {
+  padding-inline: 24px !important;
+}
+
+.nx-fullscreen-app-shell > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+.nx-fullscreen-app-shell .nx-workspace-pane-surface,
+.nx-fullscreen-app-shell .nx-workspace-surface {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.nx-fullscreen-app-shell .nx-intelligence-panel {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+}

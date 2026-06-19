@@ -347,15 +347,38 @@ const sumWidths = (values: ViewWidthPercent[]) => values.reduce((total, value) =
 const cloneDefaultWorkspaceViews = (): InboxWorkspaceView[] => [...DEFAULT_WORKSPACE_VIEWS]
 const cloneDefaultWorkspaceWidths = (): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => ({ ...DEFAULT_WORKSPACE_WIDTHS })
 
+type InboxRouteMode = 'workspace' | 'fullscreen'
+
 type InboxPageProps = {
   initialWorkspaceView?: InboxWorkspaceView
+  routeMode?: InboxRouteMode
 }
 
-const getInitialWorkspaceViews = (initialWorkspaceView?: InboxWorkspaceView): InboxWorkspaceView[] =>
-  initialWorkspaceView ? [initialWorkspaceView] : cloneDefaultWorkspaceViews()
+const resolveRouteEntryView = (
+  routeMode: InboxRouteMode,
+  initialWorkspaceView?: InboxWorkspaceView,
+): InboxWorkspaceView | undefined => {
+  if (routeMode !== 'fullscreen') return initialWorkspaceView
+  return initialWorkspaceView ?? 'thread'
+}
 
-const getInitialWorkspaceWidths = (initialWorkspaceView?: InboxWorkspaceView): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> =>
-  initialWorkspaceView ? {} : cloneDefaultWorkspaceWidths()
+const getInitialWorkspaceViews = (
+  initialWorkspaceView?: InboxWorkspaceView,
+  routeMode: InboxRouteMode = 'workspace',
+): InboxWorkspaceView[] => {
+  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
+  if (entryView) return [entryView]
+  return cloneDefaultWorkspaceViews()
+}
+
+const getInitialWorkspaceWidths = (
+  initialWorkspaceView?: InboxWorkspaceView,
+  routeMode: InboxRouteMode = 'workspace',
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
+  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
+  if (entryView) return {}
+  return cloneDefaultWorkspaceWidths()
+}
 const DEFAULT_WORKSPACE_KEY: NexusWorkspaceKey = 'deal_desk'
 const WORKSPACE_VIEWS_STORAGE_KEY = 'nx.inbox.workspace-views-by-key'
 const isDefaultWorkspaceSet = (views: InboxWorkspaceView[]) =>
@@ -510,7 +533,8 @@ const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): 
   return 'assisted'
 }
 
-export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {}) {
+export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace' }: InboxPageProps = {}) {
+  const isRouteFullscreen = routeMode === 'fullscreen'
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messageRefetchKey, setMessageRefetchKey] = useState(0)
   const {
@@ -533,8 +557,8 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
   const [rightViewFilter, setRightViewFilter] = useState<InboxViewSelectValue>('new_replies')
   const [rightSavedPreset, setRightSavedPreset] = useState<InboxSavedFilterPreset>('new_inbounds')
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<NexusWorkspaceKey>(DEFAULT_WORKSPACE_KEY)
-  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() => getInitialWorkspaceViews(initialWorkspaceView))
-  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() => getInitialWorkspaceWidths(initialWorkspaceView))
+  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() => getInitialWorkspaceViews(initialWorkspaceView, routeMode))
+  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() => getInitialWorkspaceWidths(initialWorkspaceView, routeMode))
   const [tableSort, setTableSort] = useState<ConversationTableSort>('last_activity_desc')
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
@@ -2065,12 +2089,12 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
   useEffect(() => {
     try {
       setSelectedWorkspaceKey(DEFAULT_WORKSPACE_KEY)
-      let initialViews = getInitialWorkspaceViews(initialWorkspaceView)
-      let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView)
+      let initialViews = getInitialWorkspaceViews(initialWorkspaceView, routeMode)
+      let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView, routeMode)
       setSelectedWorkspaceViews(initialViews)
       setWorkspaceWidthOverrides(initialWidths)
 
-      if (initialWorkspaceView === undefined) {
+      if (!isRouteFullscreen && initialWorkspaceView === undefined) {
         const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
         let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
         try {
@@ -3505,6 +3529,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
   const isCustomMultiView = isMultiView && !isDefaultWorkspaceShell
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
+  const useFullscreenShell = !workspaceBlocked && !isMultiView && (isRouteFullscreen || isDealIntelligenceView)
   const showLeftPanel = isDefaultWorkspaceShell
   const isDoubleSided = inboxMode === 'full_double'
   const showRightCommandPanel = isDefaultWorkspaceShell
@@ -3906,6 +3931,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       className={cls(
         'nx-premium-inbox nx-inbox',
         ...layoutClasses,
+        isRouteFullscreen && 'is-route-fullscreen',
         isCommandMapView && 'is-command-view-active',
         `is-workspace-${activeWorkspaceView}`,
         isCustomMultiView && 'is-multi-view-active',
@@ -3990,25 +4016,16 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       />
       {workspaceBlocked ? (
         <div className="nx-inbox-shell nx-inbox-shell--workspace-status">{renderWorkspaceStatusShell()}</div>
-      ) : isDealIntelligenceView && !isMultiView ? (
-        <div className="nx-deal-intelligence-fullscreen">
-          <IntelligencePanel
-            thread={selected}
-            threadContext={threadContext}
-            intelligence={threadIntelligence}
-            dealContext={canonicalSelectedContext}
-            onStatusChange={handleStatusChange}
-            onStageChange={handleStageChange}
-            onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-            onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
-            onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
-            onOpenAi={() => setActiveOverlay('ai')}
-            messages={displayedMessages}
-            panelMode="full"
-            layoutMode="full"
-          />
-
-      </div>
+      ) : useFullscreenShell ? (
+        <div
+          className={cls(
+            'nx-fullscreen-app-shell',
+            `is-view-${activeWorkspaceView}`,
+            isDealIntelligenceView && 'nx-deal-intelligence-fullscreen',
+          )}
+        >
+          {renderWorkspacePane(activeWorkspaceView, 'single', '100')}
+        </div>
       ) : (
       <div
         className={cls('nx-inbox-shell', mobileSidebarOpen && 'm-sidebar-open', mobileIntelOpen && 'm-intel-open')}
