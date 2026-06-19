@@ -26,8 +26,8 @@
 .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__threads {
   display: flex !important;
   flex-direction: column !important;
-  gap: 4px !important;
-  padding: 4px 0 8px !important;
+  gap: 0 !important;
+  padding: 0 8px 8px !important;
 }
 
 /* ─── Load More — never sticky ───────────────────────────────────────────── */

@@ -266,13 +266,6 @@ const resolveMaterialIntent = (thread: InboxWorkflowThread, decision: Conversati
   return null
 }
 
-const formatDirectionLabel = (direction: string): string => {
-  const d = direction.toLowerCase()
-  if (d === 'inbound') return 'Inbound'
-  if (d === 'outbound') return 'Outbound'
-  return ''
-}
-
 const resolveStatusChipClass = (thread: InboxWorkflowThread): string => {
   const bucket = resolveBucketFromThreadState(thread) ?? classifyInboxBucket(thread).bucket
   if (bucket === 'priority') return 'is-priority'
@@ -676,7 +669,6 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
   const bucketAccentClass = statusChipClass.replace('is-', 'is-bucket-')
   const statusChipLabel = bucketLabel !== 'all messages' ? bucketLabel : statusLabel
   const unreadCount = readNumber(thread, 'unreadCount', 'unread_count', 'unreadMessages', 'unread_messages')
-  const directionLabel = formatDirectionLabel(latestDirection)
   const materialIntent = resolveMaterialIntent(thread, decision)
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
@@ -709,7 +701,6 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
             <span className="nx-row25__name">{name}</span>
           </span>
-          <time className="nx-row25__time nx-row25__time--head">{ageLabel}</time>
         </div>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
@@ -718,15 +709,12 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)}>
               <Icon name={deliveryReceipt.icon} />
               <span>{deliveryReceipt.label}</span>
+              <span className="nx-row25__footer-sep" aria-hidden="true">·</span>
+              <time className="nx-row25__receipt-time">{ageLabel}</time>
             </span>
           )}
-          {deliveryReceipt && directionLabel && <span className="nx-row25__footer-sep" aria-hidden="true">·</span>}
-          {directionLabel && <span className="nx-row25__direction">{directionLabel}</span>}
           {materialIntent && (
-            <>
-              <span className="nx-row25__footer-sep" aria-hidden="true">·</span>
-              <span className="nx-row25__intent">{materialIntent}</span>
-            </>
+            <span className="nx-row25__intent-tag">{materialIntent}</span>
           )}
         </div>
       </div>
@@ -734,21 +722,18 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
       <div className="nx-row25__zone nx-row25__zone--metrics">
         <div className="nx-row25__metrics-group" aria-label="Opportunity metrics">
           <div className="nx-row25__metric-cell">
-            <span className="nx-row25__metric-v">{valueDisplay}</span>
             <span className="nx-row25__metric-k">Value</span>
+            <span className="nx-row25__metric-v">{valueDisplay}</span>
           </div>
           <div className="nx-row25__metric-cell">
-            <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
             <span className="nx-row25__metric-k">Priority</span>
+            <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
           </div>
           <div className="nx-row25__metric-cell">
-            <span className="nx-row25__metric-v">{equityDisplay}</span>
             <span className="nx-row25__metric-k">Equity</span>
+            <span className="nx-row25__metric-v">{equityDisplay}</span>
           </div>
         </div>
-        <span className="nx-row25__metrics-inline" aria-hidden="true">
-          {valueDisplay} · {scoreDisplay} · {equityDisplay}
-        </span>
       </div>
 
       <div className="nx-row25__zone nx-row25__zone--action">
@@ -1150,11 +1135,11 @@ export const InboxSidebar = ({
     return (
       <aside className={sidebarShellClass} data-active-category={activeBucketConfig.bucket}>
         <div className="nx-review50-layout">
-          <div className="nx-review50-left" ref={groupsRef}>
+          <div className="nx-review50-left">
             {renderTopActions()}
             {renderSecondaryControls()}
             {renderMultiSelectBar()}
-            <div className="nx-sidebar-rebuilt__list-container">
+            <div className="nx-sidebar-rebuilt__list-container" ref={groupsRef}>
               {renderListContent(CompactRow25)}
             </div>
           </div>
