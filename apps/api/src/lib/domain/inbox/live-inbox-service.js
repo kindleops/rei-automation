@@ -4,6 +4,7 @@ import {
   WAITING_REPLY_WINDOW_MS,
   buildColdTransitionPatch,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -1930,6 +1931,17 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
+  const linkedContextHydrationStartedAt = nowMs();
+  let linkedContextHydrationMs = 0;
+  try {
+    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+  } catch (error) {
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+    console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
+  }
+
   const deliveryHydrationStartedAt = nowMs();
   let deliveryHydrationMs = 0;
   if (!skipDelivery) {
@@ -1967,6 +1979,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     threadQueryMs,
     countQueryMs,
     deliveryHydrationMs,
+    linkedContextHydrationMs,
   };
 
   const mapPins = wantsMap

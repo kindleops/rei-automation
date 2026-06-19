@@ -198,6 +198,16 @@ const resolvePropertyTypeLabel = (propertyType: string): string => {
   return propertyType
 }
 
+const PLACEHOLDER_CONDITIONS = new Set(['unknown', 'n/a', 'na', 'none', 'null', ''])
+
+const resolveBuildingCondition = (thread: InboxWorkflowThread): string | null => {
+  const raw = readString(thread, 'buildingCondition', 'building_condition', 'condition')
+  const normalized = raw.trim()
+  if (!normalized) return null
+  if (PLACEHOLDER_CONDITIONS.has(normalized.toLowerCase())) return null
+  return normalized
+}
+
 const resolveStageNumber = (stage: string): number | null => {
   const s = stage.toLowerCase()
   const match = s.match(/stage[_\s#-]*(\d+)/)
@@ -409,6 +419,7 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   const propertyTypeLabel = resolvePropertyTypeLabel(propertyType)
   const pTypeShort = propertyTypeLabel || propertyType
   const unitCount = readNumber(thread, 'unitCount', 'unit_count', 'units', 'number_of_units', 'units_count', 'portfolio_total_units')
+  const buildingCondition = resolveBuildingCondition(thread)
   
   // Intel Tags
   const intelTags: string[] = []
@@ -489,6 +500,7 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
       ? null
       : (deliveryReceipt?.type ?? null),
     visualCategory,
+    buildingCondition,
   }
 }
 
@@ -699,7 +711,7 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
   const {
     name, address, marketLine, metaLine, latestMessageBody, latestDirection,
     statusLabel, bucketLabel, estimatedValue, equityAmount, equityPercent,
-    finalAcquisitionScore, timestamp, deliveryReceipt,
+    finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
@@ -770,6 +782,12 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect }: {
             <span className="nx-row25__metric-k">Equity</span>
             <span className="nx-row25__metric-v">{equityDisplay}</span>
           </div>
+          {buildingCondition && (
+            <div className="nx-row25__metric-cell">
+              <span className="nx-row25__metric-k">Condition</span>
+              <span className="nx-row25__metric-v">{buildingCondition}</span>
+            </div>
+          )}
         </div>
       </div>
 

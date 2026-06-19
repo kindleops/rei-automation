@@ -446,15 +446,17 @@ export const resolveInboxSellerNameWithSource = (row: Record<string, unknown>): 
     try { meta = JSON.parse(meta) as Record<string, unknown> } catch (e) { meta = {} }
   }
 
+  const prospectName = firstName && lastName ? `${firstName} ${lastName}` : firstName || null
+
   const candidates: Array<{ val: unknown; source: string }> = [
-    { val: row.owner_display_name || row.ownerDisplayName, source: 'owner_display_name' },
-    { val: row.seller_display_name || row.sellerDisplayName, source: 'seller_display_name' },
-    { val: row.seller_name || row.sellerName, source: 'seller_name' },
-    { val: row.owner_name || row.ownerName, source: 'owner_name' },
-    { val: row.prospect_full_name || row.prospectFullName, source: 'prospect_full_name' },
+    { val: row.owner_name || row.ownerName, source: 'master_owner_name' },
     { val: row.primary_owner_name || row.primaryOwnerName, source: 'primary_owner_name' },
+    { val: row.prospect_full_name || row.prospectFullName || row.prospect_name || row.prospectName, source: 'prospect_full_name' },
+    { val: prospectName, source: 'prospect_names' },
     { val: row.contact_name || row.contactName, source: 'contact_name' },
-    { val: firstName && lastName ? `${firstName} ${lastName}` : firstName || null, source: 'prospect_names' },
+    { val: row.seller_display_name || row.sellerDisplayName, source: 'seller_display_name' },
+    { val: row.owner_display_name || row.ownerDisplayName, source: 'owner_display_name' },
+    { val: row.seller_name || row.sellerName, source: 'seller_name' },
     { val: ownerFirstName && ownerLastName ? `${ownerFirstName} ${ownerLastName}` : ownerFirstName || null, source: 'owner_names' },
     { val: row.property_owner_name || row.propertyOwnerName, source: 'property_owner_name' },
     { val: row.prospect_cnam || row.prospectCnam, source: 'prospect_cnam' },
@@ -2542,14 +2544,7 @@ export const getInboxThreads = async (
     const bestPhone = sellerPhone
     const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
     
-    const ownerDisplayName = asString(
-      row.seller_name ??
-      row.owner_name ??
-      row.prospect_full_name ??
-      row.prospect_name ??
-      row.owner_display_name,
-      ''
-    ) || ''
+    const ownerDisplayName = resolveInboxSellerName(row as Record<string, unknown>)
 
     // Fallback address order:
     // 1. property_address_full
@@ -2650,13 +2645,19 @@ export const getInboxThreads = async (
       baths: row.baths as string | number,
       sqft: row.sqft as string | number,
       yearBuilt: row.year_built as string | number,
-      equityAmount: asNumber(row.equity_percent, 0) > 0 && asNumber(row.estimated_value, 0) > 0
-        ? (asNumber(row.equity_percent, 0) / 100) * asNumber(row.estimated_value, 0)
-        : 0,
+      equityAmount: asNumber(row.equity_amount ?? row.estimated_equity_amount, 0)
+        || (asNumber(row.equity_percent, 0) > 0 && asNumber(row.estimated_value, 0) > 0
+          ? (asNumber(row.equity_percent, 0) / 100) * asNumber(row.estimated_value, 0)
+          : 0),
       equityPercent: asNumber(row.equity_percent, 0),
       estimatedRepairCost: asNumber(row.estimated_repair_cost, 0),
       estimatedValue: row.estimated_value ?? null,
       finalAcquisitionScore: finalAcquisitionScore || null,
+      priorityScore: asNumber(row.priority_score, 0) || undefined,
+      unitCount: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
+      units_count: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
+      building_condition: asString(row.building_condition ?? row.condition, '') || undefined,
+      buildingCondition: asString(row.building_condition ?? row.condition, '') || undefined,
       motivationScore: asNumber(row.priority_score, 0),
       ownerType: asString(row.owner_type, '') || undefined,
       contactLanguage: asString(row.language_preference, '') || undefined,
