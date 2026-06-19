@@ -63,26 +63,32 @@ describe("Classification Bucket Resolution", () => {
     assert.strictEqual(status.universal_stage, "Offer");
   });
 
-  it("resolves latest outbound message to awaiting_response / cold bucket", () => {
-    const existingState = { inbox_bucket: "cold" };
+  it("resolves latest outbound message to awaiting_response / waiting bucket", () => {
+    const existingState = { inbox_bucket: "new_replies", primary_intent: "who_is_this" };
     const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound" }, existingState);
     const status = resolveUniversalStatusFromClassification({}, { direction: "outbound" }, existingState);
 
-    assert.strictEqual(bucket, "cold");
+    assert.strictEqual(bucket, "waiting");
     assert.strictEqual(status.universal_status, "awaiting_response");
     assert.strictEqual(status.universal_stage, "awaiting_response");
   });
 
-  it("resolves property_correction to new_replies bucket and needs_review", () => {
+  it("resolves property_correction to needs_review bucket and needs_review status", () => {
     const classification = { primary_intent: "property_correction" };
     const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
     const status = resolveUniversalStatusFromClassification(classification, { direction: "inbound" });
     const flags = resolveThreadFlagsFromClassification(classification);
 
-    assert.strictEqual(bucket, "new_replies");
+    assert.strictEqual(bucket, "needs_review");
     assert.strictEqual(status.universal_status, "needs_review");
     assert.strictEqual(status.universal_stage, "property_correction");
     assert.strictEqual(flags.not_interested, false);
+  });
+
+  it("resolves unclear low-confidence inbound to needs_review bucket", () => {
+    const classification = { primary_intent: "unclear", confidence: 0.55 };
+    const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
+    assert.strictEqual(bucket, "needs_review");
   });
 
   it("resolves outbound message on dead thread to remain dead", () => {

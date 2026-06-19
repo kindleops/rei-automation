@@ -1409,7 +1409,137 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
   };
 }
 
+const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
+  "thread_key",
+  "seller_phone",
+  "canonical_e164",
+  "our_number",
+  "master_owner_id",
+  "property_id",
+  "prospect_id",
+  "market",
+  "inbox_bucket",
+  "latest_message_body",
+  "latest_message_at",
+  "latest_direction",
+  "latest_delivery_status",
+  "latest_message_event_id",
+  "message_count",
+  "inbound_count",
+  "outbound_count",
+  "last_inbound_at",
+  "last_outbound_at",
+  "last_intent",
+  "is_read",
+  "is_suppressed",
+  "disposition",
+  "updated_at",
+].join(",");
+
+async function queryAuthoritativeInboxThreads(params = {}, {
+  supabase = defaultSupabase,
+  limit,
+  filter,
+  cursorKeyset,
+  offset,
+} = {}) {
+  const normalizedFilter = normalizeLiveFilter(filter);
+  if (normalizedFilter === "all") return null;
+
+  let query = supabase
+    .from("inbox_thread_state")
+    .select(AUTHORITATIVE_INBOX_THREAD_FIELDS);
+
+  switch (normalizedFilter) {
+    case "priority":
+      query = query.eq("inbox_bucket", "priority");
+      break;
+    case "new_replies":
+      query = query.eq("inbox_bucket", "new_replies");
+      break;
+    case "needs_review":
+      query = query.eq("inbox_bucket", "needs_review");
+      break;
+    case "follow_up":
+      query = query.eq("inbox_bucket", "follow_up");
+      break;
+    case "cold":
+      query = query.eq("inbox_bucket", "cold");
+      break;
+    case "dead":
+      query = query.eq("inbox_bucket", "dead");
+      break;
+    case "suppressed":
+      query = query.eq("inbox_bucket", "suppressed");
+      break;
+    case "waiting":
+      query = query.eq("inbox_bucket", "waiting");
+      break;
+    case "active":
+      if (typeof query.in === "function") {
+        query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
+      }
+      break;
+    case "unlinked":
+      if (typeof query.is === "function") query = query.is("property_id", null);
+      break;
+    default:
+      return null;
+  }
+
+  if (params.q && typeof query.or === "function") {
+    const qStr = `%${clean(params.q)}%`;
+    query = query.or(`thread_key.ilike.${qStr},seller_phone.ilike.${qStr},latest_message_body.ilike.${qStr}`);
+  }
+
+  if (typeof query.order === "function") {
+    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
+    query = query.order("thread_key", { ascending: false });
+  }
+
+  if (cursorKeyset && typeof query.or === "function") {
+    query = query.or(
+      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`
+    );
+    if (typeof query.limit === "function") query = query.limit(limit + 1);
+  } else if (offset > 0 && typeof query.range === "function") {
+    query = query.range(offset, offset + limit);
+  } else if (typeof query.range === "function") {
+    query = query.range(0, limit);
+  } else if (typeof query.limit === "function") {
+    query = query.limit(limit + 1);
+  }
+
+  const result = await query;
+  if (result.error) throw result.error;
+
+  const rows = (result.data || []).map((row) => ({
+    ...row,
+    latest_message_direction: row.latest_direction,
+    direction: row.latest_direction,
+    detected_intent: row.last_intent,
+    reply_intent: row.last_intent,
+    inbox_category: row.inbox_bucket,
+  }));
+
+  return {
+    data: rows,
+    count: rows.length,
+    error: null,
+    sourceConfig: THREAD_SOURCE_CONFIGS[0],
+  };
+}
+
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
+  const authoritativeResult = await queryAuthoritativeInboxThreads(params, {
+    supabase,
+    limit,
+    filter,
+    cursorKeyset,
+    offset,
+  });
+  if (authoritativeResult) return authoritativeResult;
+
   const sourceCandidates = getThreadSourceCandidates(preferredThreadSource);
   let lastError = null;
 
@@ -1487,9 +1617,80 @@ export async function getLiveCounts(params = {}, deps = {}) {
   return result.counts;
 }
 
+async function fetchAuthoritativeInboxCounts(supabase) {
+  const buckets = [
+    "priority",
+    "new_replies",
+    "needs_review",
+    "follow_up",
+    "cold",
+    "dead",
+    "suppressed",
+    "waiting",
+  ];
+
+  const counts = buildEmptyCounts();
+  let total = 0;
+  let unlinked = 0;
+
+  for (const bucket of buckets) {
+    const { count, error } = await supabase
+      .from("inbox_thread_state")
+      .select("thread_key", { count: "exact", head: true })
+      .eq("inbox_bucket", bucket);
+
+    if (error) throw error;
+    counts[bucket] = Number(count || 0);
+    total += counts[bucket];
+  }
+
+  const { count: allCount, error: allError } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key", { count: "exact", head: true });
+
+  if (allError) throw allError;
+
+  const { count: unlinkedCount, error: unlinkedError } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key", { count: "exact", head: true })
+    .is("property_id", null);
+
+  if (unlinkedError) throw unlinkedError;
+
+  counts.all = Number(allCount || total);
+  counts.all_messages = counts.all;
+  counts.unlinked = Number(unlinkedCount || unlinked);
+  counts.active =
+    counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
+  counts.hot_leads = counts.priority;
+  counts.new_inbound = counts.new_replies;
+  counts.needs_reply = counts.new_replies;
+  counts.manual_review = counts.needs_review;
+  counts.automated = counts.needs_review;
+  counts.outbound_active = counts.follow_up;
+  counts.cold_no_response = counts.cold;
+  counts.dnc_opt_out = counts.suppressed;
+  counts.waiting_on_seller = counts.waiting;
+
+  return counts;
+}
+
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
+
+  try {
+    const authoritativeCounts = await fetchAuthoritativeInboxCounts(supabase);
+    console.log("[INBOX_COUNTS_UPDATED]", authoritativeCounts);
+    return {
+      counts: authoritativeCounts,
+      source: "inbox_thread_state:authoritative",
+      approximate: false,
+      degraded: false,
+    };
+  } catch (error) {
+    console.warn("[INBOX_COUNTS_AUTHORITATIVE_FALLBACK]", error?.message || error);
+  }
 
   for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
     if (sourceConfig.countSource) {

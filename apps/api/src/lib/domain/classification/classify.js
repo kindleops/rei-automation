@@ -4118,8 +4118,9 @@ Rules:
 
 const AI_CONFIDENCE_THRESHOLD = 0.82;
 
-export async function classify(message, brain_item = null) {
+export async function classify(message, brain_item = null, options = {}) {
   const text = cleanMessage(message);
+  const heuristicOnly = options?.heuristicOnly === true;
 
   if (!text) {
     const automation_decision = deriveAutomationDecision({
@@ -4146,6 +4147,20 @@ export async function classify(message, brain_item = null) {
   }
 
   const heuristic = classifyHeuristic(text, brain_item);
+
+  if (heuristicOnly) {
+    const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
+    return {
+      ...heuristic,
+      motivation_score: final_motivation,
+      seller_state: computeSellerState({ message: text, ...heuristic, motivation_score: final_motivation }),
+      source: "heuristic",
+      notes: "",
+      detected_intent: heuristic.primary_intent,
+      automation_decision,
+    };
+  }
 
   // Compliance is absolute
   if (heuristic.compliance_flag === "stop_texting") {

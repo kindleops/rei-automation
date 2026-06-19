@@ -11,6 +11,11 @@ import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
+import {
+  classifyThreadFromChronology,
+  patchToInboxThreadState,
+} from "@/lib/domain/inbox/classify-thread-from-chronology.js";
+import { buildThreadStatePatchFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import { updateContactOutreachState } from "@/lib/domain/outreach/outreach-service.js";
 import {
   normalizeTextGridFailure,
@@ -1416,29 +1421,6 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
     return options.writeOutboundSuccessMessageEvent(payload);
   }
 
-  // ── Sync to inbox_thread_state ───────────────────────────────────────────
-  try {
-    await upsertInboxThreadState({
-      thread_key: payload.thread_key,
-      seller_phone: payload.to_phone_number,
-      canonical_e164: payload.to_phone_number,
-      our_number: payload.from_phone_number,
-      master_owner_id: payload.master_owner_id,
-      prospect_id: payload.prospect_id,
-      property_id: payload.property_id,
-      market: normalized.market || null,
-      stage: payload.stage_after || payload.stage_before,
-      status: "active",
-      priority: payload.priority,
-      last_intent: payload.detected_intent,
-      latest_reply_template_id: payload.template_id,
-      is_read: true,
-      increment_direction: "outbound",
-    }, options);
-  } catch (syncErr) {
-    console.error("FAILED TO SYNC THREAD STATE ON OUTBOUND SUCCESS", syncErr);
-  }
-
   try {
     await updateContactOutreachState({
       master_owner_id: payload.master_owner_id,
@@ -1486,7 +1468,27 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
         provider_message_id: normalized.provider_message_id,
         master_owner_id: normalized.master_owner_id,
       });
-      return data || payload;
+
+      const savedPayload = data || payload;
+      try {
+        await syncClassifiedInboxThreadState({
+          thread_key: savedPayload.thread_key,
+          seller_phone: savedPayload.to_phone_number,
+          our_number: savedPayload.from_phone_number,
+          master_owner_id: savedPayload.master_owner_id,
+          prospect_id: savedPayload.prospect_id,
+          property_id: savedPayload.property_id,
+          market: normalized.market || null,
+          conversationStage: savedPayload.stage_after || savedPayload.stage_before,
+          messageEvent: savedPayload,
+          is_read: true,
+          increment_direction: "outbound",
+        }, options);
+      } catch (syncErr) {
+        console.error("FAILED TO SYNC CLASSIFIED THREAD STATE ON OUTBOUND SUCCESS", syncErr);
+      }
+
+      return savedPayload;
     }
   } catch (db_error) {
     warn("message_events.upsert_caught", {
@@ -2670,34 +2672,6 @@ export async function logInboundMessageEvent(payload, options = {}) {
     console.error("FAILED TO UPDATE OUTREACH STATE ON INBOUND", outreachErr);
   }
 
-  // ── Sync to inbox_thread_state ───────────────────────────────────────────
-  // Added 2026-05-07 to ensure the dashboard has a single row per thread
-  try {
-    await upsertInboxThreadState({
-      thread_key: event.thread_key,
-      seller_phone: event.from_phone_number,
-      canonical_e164: event.from_phone_number,
-      our_number: event.to_phone_number,
-      master_owner_id: event.master_owner_id,
-      prospect_id: event.prospect_id,
-      property_id: event.property_id,
-      market: payload.market || null,
-      stage: event.stage_after || event.stage_before,
-      status: "active",
-      priority: event.priority,
-      last_intent: event.detected_intent,
-      automation_state: event.routing_allowed ? "running" : "paused",
-      is_read: false,
-      latest_message_body: event.message_body,
-      latest_message_at: event.created_at || new Date().toISOString(),
-      latest_direction: "inbound",
-      latest_delivery_status: "delivered",
-      last_inbound_at: event.created_at || new Date().toISOString(),
-      increment_direction: "inbound",
-    }, options);
-  } catch (syncErr) {
-    console.error("FAILED TO SYNC THREAD STATE ON INBOUND", syncErr);
-  }
   const { data, error } = await supabase
     .from(MESSAGE_EVENTS_TABLE)
     .upsert(event, {
@@ -2709,7 +2683,101 @@ export async function logInboundMessageEvent(payload, options = {}) {
 
   if (error) throw error;
 
-  return data || event;
+  const savedEvent = data || event;
+
+  try {
+    await syncClassifiedInboxThreadState({
+      thread_key: savedEvent.thread_key,
+      seller_phone: savedEvent.from_phone_number,
+      our_number: savedEvent.to_phone_number,
+      master_owner_id: savedEvent.master_owner_id,
+      prospect_id: savedEvent.prospect_id,
+      property_id: savedEvent.property_id,
+      market: payload.market || null,
+      conversationStage: savedEvent.stage_after || savedEvent.stage_before || conversation_stage,
+      classification: payload.classification || null,
+      messageEvent: savedEvent,
+      is_read: false,
+      increment_direction: "inbound",
+    }, options);
+  } catch (syncErr) {
+    console.error("FAILED TO SYNC CLASSIFIED THREAD STATE ON INBOUND", syncErr);
+  }
+
+  return savedEvent;
+}
+
+export async function syncClassifiedInboxThreadState({
+  thread_key,
+  seller_phone,
+  our_number,
+  master_owner_id,
+  prospect_id,
+  property_id,
+  market,
+  conversationStage,
+  classification,
+  messageEvent,
+  is_read,
+  increment_direction,
+} = {}, deps = {}) {
+  const supabase = getSupabase(deps);
+  const normalizedThreadKey = clean(thread_key);
+  if (!normalizedThreadKey) return { ok: false, reason: "missing_thread_key" };
+
+  const { data: existingState } = await supabase
+    .from("inbox_thread_state")
+    .select("*")
+    .eq("thread_key", normalizedThreadKey)
+    .maybeSingle();
+
+  let patch;
+  if (classification && messageEvent) {
+    patch = buildThreadStatePatchFromClassification({
+      messageEvent,
+      classification,
+      existingState: existingState || {},
+    });
+    patch = {
+      ...patch,
+      seller_phone,
+      our_number,
+      canonical_e164: seller_phone,
+      latest_message_event_id: messageEvent.id || messageEvent.provider_message_sid || null,
+      detected_intent: patch.detected_intent || patch.primary_intent || null,
+    };
+  } else {
+    const { data: messages, error: messagesError } = await supabase
+      .from(MESSAGE_EVENTS_TABLE)
+      .select("*")
+      .eq("thread_key", normalizedThreadKey)
+      .order("created_at", { ascending: false });
+
+    if (messagesError) throw messagesError;
+    patch = await classifyThreadFromChronology(messages || [], {
+      existingState: existingState || {},
+      conversationStage,
+    });
+  }
+
+  if (!patch) return { ok: false, reason: "classification_patch_empty" };
+
+  const inboxPayload = patchToInboxThreadState(patch, {
+    thread_key: normalizedThreadKey,
+    seller_phone,
+    canonical_e164: seller_phone,
+    our_number,
+    master_owner_id,
+    prospect_id,
+    property_id,
+    market,
+    is_read,
+    increment_direction,
+    status: "active",
+    automation_state: "running",
+  });
+
+  return upsertInboxThreadState(inboxPayload, deps);
 }
 
 export async function syncDeliveryEvent(payload, options = {}) {
@@ -3414,6 +3482,12 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   if (payload.latest_message_at !== undefined) insert_payload.latest_message_at = payload.latest_message_at;
   if (payload.latest_direction !== undefined) insert_payload.latest_direction = clean(payload.latest_direction);
   if (payload.latest_delivery_status !== undefined) insert_payload.latest_delivery_status = clean(payload.latest_delivery_status);
+  if (payload.latest_message_event_id !== undefined) {
+    insert_payload.latest_message_event_id = clean(payload.latest_message_event_id);
+  }
+  if (payload.message_count !== undefined) insert_payload.message_count = Number(payload.message_count) || 0;
+  if (payload.inbox_bucket !== undefined) insert_payload.inbox_bucket = clean(payload.inbox_bucket);
+  if (typeof payload.is_suppressed === "boolean") insert_payload.is_suppressed = payload.is_suppressed;
   if (payload.last_inbound_at !== undefined) insert_payload.last_inbound_at = payload.last_inbound_at;
   if (payload.last_outbound_at !== undefined) insert_payload.last_outbound_at = payload.last_outbound_at;
 

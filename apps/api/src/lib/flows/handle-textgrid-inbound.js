@@ -3,7 +3,7 @@ import { loadContext } from "@/lib/domain/context/load-context.js";
 import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
 import { createBrain } from "@/lib/domain/context/resolve-brain.js";
 import { classify } from "@/lib/domain/classification/classify.js";
-import { buildThreadStatePatchFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
+import { syncClassifiedInboxThreadState } from "@/lib/supabase/sms-engine.js";
 import { resolveRoute } from "@/lib/domain/routing/resolve-route.js";
 import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
 import { getPodioRetryAfterSeconds, isPodioRateLimitError } from "@/lib/providers/podio.js";
@@ -1141,23 +1141,32 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     try {
       classification = await runtimeDeps.classify(message_body, brain_item);
 
-      // Generate the canonical thread state from the new single source of truth
       try {
-        const patch = buildThreadStatePatchFromClassification({
-          messageEvent: extracted,
+        await syncClassifiedInboxThreadState({
+          thread_key: inbound_from,
+          seller_phone: inbound_from,
+          our_number: inbound_to,
+          master_owner_id,
+          prospect_id,
+          property_id,
+          market: market_id,
+          conversationStage: stage_before,
           classification,
+          messageEvent: {
+            id: inbound_message_event_id,
+            provider_message_sid: extracted.message_id,
+            direction: "inbound",
+            message_body,
+            received_at: extracted.received_at || payload?.http_received_at || new Date().toISOString(),
+            delivery_status: extracted.status || "received",
+          },
+          is_read: false,
+          increment_direction: "inbound",
+        }, {
+          supabase: runtimeDeps.getSupabaseClient?.(),
         });
-        const thread_key = inbound_from;
-        
-        const supabase = runtimeDeps.getSupabaseClient?.();
-        if (supabase) {
-          await supabase.from("deal_thread_state").upsert({
-            thread_key,
-            ...patch,
-          }, { onConflict: "thread_key" });
-        }
       } catch (patchErr) {
-        safeWarn("deal_thread_state_upsert_failed", { error: patchErr?.message || "unknown" });
+        safeWarn("inbox_thread_state_upsert_failed", { error: patchErr?.message || "unknown" });
       }
 
       signals = runtimeDeps.extractUnderwritingSignals({

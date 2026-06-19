@@ -2,14 +2,37 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function lower(value) {
+  return clean(value).toLowerCase();
+}
+
 export function resolveThreadFlagsFromClassification(classification = {}) {
   const primary = clean(classification.primary_intent);
   const objection = clean(classification.objection);
   const compliance = clean(classification.compliance_flag);
+  const disposition = lower(classification.disposition);
 
-  const opt_out = compliance === "stop_texting" || primary === "opt_out";
-  const wrong_number = primary === "wrong_number" || objection === "wrong_number";
-  const not_interested = primary === "property_correction" ? false : (primary === "not_interested" || objection === "not_interested");
+  const opt_out =
+    classification.opt_out === true ||
+    classification.is_suppressed === true ||
+    compliance === "stop_texting" ||
+    primary === "opt_out" ||
+    disposition === "suppressed" ||
+    disposition === "opt_out";
+  const wrong_number =
+    classification.wrong_number === true ||
+    primary === "wrong_number" ||
+    objection === "wrong_number" ||
+    disposition === "wrong_number";
+  const not_interested =
+    primary === "property_correction"
+      ? false
+      : (
+        classification.not_interested === true ||
+        primary === "not_interested" ||
+        objection === "not_interested" ||
+        disposition === "not_interested"
+      );
 
   return {
     opt_out,
@@ -119,49 +142,124 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
   };
 }
 
+const PRIORITY_INTENTS = [
+  "seller_interested",
+  "asking_price_provided",
+  "asks_offer",
+  "callback_requested",
+  "latent_interest",
+  "ownership_confirmed",
+];
+
+const PRIORITY_OBJECTIONS = [
+  "send_offer_first",
+  "need_more_money",
+  "needs_call",
+  "wants_written_offer",
+  "wants_proof_of_funds",
+];
+
+const NEEDS_REVIEW_INTENTS = [
+  "unclear",
+  "property_correction",
+  "info_request",
+  "hostile_or_legal",
+];
+
+const NEW_REPLY_INTENTS = [
+  "who_is_this",
+  "condition_disclosed",
+  "tenant_occupied",
+  "need_time",
+];
+
+const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
+
+function normalizeLegacyBucket(bucket = "") {
+  const normalized = clean(bucket).toLowerCase();
+  if (normalized === "waiting_on_seller") return "waiting";
+  return normalized;
+}
+
+function shouldRouteToNeedsReview(classification = {}) {
+  const primary = clean(classification.primary_intent);
+  const confidence = Number(classification.confidence);
+
+  if (NEEDS_REVIEW_INTENTS.includes(primary)) return true;
+  if (classification.needs_review === true) return true;
+  if (classification.automation_decision?.human_review_required === true && primary === "unclear") {
+    return true;
+  }
+  if (Number.isFinite(confidence) && confidence > 0 && confidence < REVIEW_CONFIDENCE_THRESHOLD) {
+    return true;
+  }
+
+  return false;
+}
+
 export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}) {
-  // Use flags derived from classification (if inbound) or existingState (if outbound/fallback)
   const direction = clean(messageEvent.direction).toLowerCase();
   const is_outbound = direction === "outbound";
-  const flags = is_outbound ? resolveThreadFlagsFromClassification(existingState) : resolveThreadFlagsFromClassification(classification);
-  const primary = is_outbound ? clean(existingState.primary_intent) : clean(classification.primary_intent);
-  const objection = is_outbound ? clean(existingState.objection) : clean(classification.objection);
+  const inboundFlags = resolveThreadFlagsFromClassification(classification);
+  const existingFlags = resolveThreadFlagsFromClassification(existingState);
+  const flags = {
+    opt_out: inboundFlags.opt_out || existingFlags.opt_out,
+    wrong_number: inboundFlags.wrong_number || existingFlags.wrong_number,
+    not_interested: inboundFlags.not_interested || existingFlags.not_interested,
+  };
+  const primary = is_outbound
+    ? clean(existingState.primary_intent || classification.primary_intent)
+    : clean(classification.primary_intent || existingState.primary_intent);
+  const objection = is_outbound
+    ? clean(existingState.objection || classification.objection)
+    : clean(classification.objection || existingState.objection);
 
   const existingStatus = existingState.universal_status || existingState.status || "";
-  const existingBucket = existingState.inbox_bucket || "";
+  const existingBucket = normalizeLegacyBucket(existingState.inbox_bucket || existingState.inbox_category || "");
+  const disposition = lower(existingState.disposition || "");
+  const reasonCodes = Array.isArray(existingState.reason_codes)
+    ? existingState.reason_codes.map((code) => lower(code))
+    : [];
 
-  // 1. Enforce Terminal States IMMEDIATELY
-  if (flags.opt_out || existingStatus === "suppressed" || existingBucket === "suppressed") {
+  if (
+    flags.opt_out ||
+    existingStatus === "suppressed" ||
+    existingBucket === "suppressed" ||
+    disposition === "suppressed" ||
+    disposition === "opt_out" ||
+    disposition === "off" ||
+    reasonCodes.includes("opt_out")
+  ) {
     return "suppressed";
   }
-  if (flags.wrong_number || flags.not_interested || existingStatus === "dead" || existingBucket === "dead") {
+  if (
+    flags.wrong_number ||
+    flags.not_interested ||
+    existingStatus === "dead" ||
+    existingBucket === "dead" ||
+    disposition === "dead" ||
+    disposition === "wrong_number" ||
+    disposition === "not_interested" ||
+    reasonCodes.includes("wrong_number") ||
+    reasonCodes.includes("not_interested")
+  ) {
     return "dead";
   }
 
-  // 2. Outbound Fallback
   if (is_outbound) {
-    return existingBucket === "waiting_on_seller" ? "waiting_on_seller" : "cold";
+    return "waiting";
   }
 
-  // 3. Priority Intents
-  const priority_intents = [
-    "seller_interested",
-    "asking_price_provided",
-    "asks_offer",
-    "callback_requested",
-    "latent_interest",
-    "need_more_money",
-    "send_offer_first"
-  ];
-
-  if (priority_intents.includes(primary) || priority_intents.includes(objection)) {
+  if (PRIORITY_INTENTS.includes(primary) || PRIORITY_OBJECTIONS.includes(objection)) {
     return "priority";
   }
 
-  // 4. New Replies / Q&A
-  const motivation_score = Number(classification.motivation_score) || 0;
-  if (["who_is_this", "unclear", "condition_disclosed", "tenant_occupied", "property_correction"].includes(primary)) {
-    return (motivation_score > 60 && primary !== "property_correction") ? "priority" : "new_replies";
+  if (shouldRouteToNeedsReview(classification)) {
+    return "needs_review";
+  }
+
+  if (NEW_REPLY_INTENTS.includes(primary)) {
+    return "new_replies";
   }
 
   return "new_replies";
@@ -181,7 +279,17 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
     latest_message_at: messageEvent.received_at || messageEvent.sent_at || messageEvent.event_timestamp || new Date().toISOString(),
     latest_message_body: messageEvent.message_body || messageEvent.message,
     latest_message_direction: direction,
-    updated_at: new Date().toISOString()
+    latest_direction: direction,
+    latest_delivery_status: clean(
+      messageEvent.delivery_status ||
+      messageEvent.provider_delivery_status ||
+      messageEvent.raw_carrier_status ||
+      (direction === "inbound" ? "delivered" : "")
+    ) || null,
+    latest_provider_delivery_status: clean(messageEvent.provider_delivery_status) || null,
+    latest_failed_at: messageEvent.failed_at || null,
+    latest_failure_reason: clean(messageEvent.failure_reason) || null,
+    updated_at: new Date().toISOString(),
   };
 
   // Only overlay classification results if it was an inbound message and we have classification
@@ -206,6 +314,7 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
   patch.universal_status = statuses.universal_status;
   patch.universal_stage = statuses.universal_stage;
   patch.inbox_bucket = bucket;
+  patch.inbox_category = bucket;
   patch.resolved_inbox_bucket = bucket;
   
   if (is_inbound && classification?.seller_state?.lead_temperature) {
