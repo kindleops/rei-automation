@@ -157,6 +157,22 @@
   50% { opacity: 1; box-shadow: 0 0 10px var(--nx-surface-accent-glow); }
 }
 
+@keyframes nx-header-ambient-glow {
+  0%, 100% {
+    opacity: 0.42;
+    filter: blur(0px);
+  }
+  50% {
+    opacity: 0.78;
+    filter: blur(0.5px);
+  }
+}
+
+@keyframes nx-cat-glass-sheen {
+  0%, 100% { opacity: 0.35; transform: translateX(-8%); }
+  50% { opacity: 0.65; transform: translateX(8%); }
+}
+
 @keyframes nx-unread-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.82); }
@@ -193,17 +209,37 @@
   animation: nx-header-border-travel 8.5s linear infinite;
 }
 
-/* Restrained outer glow — stays inside shell bounds */
+/* Ambient liquid edge-light — soft pulse, not a hard box */
+.nx-inbox-header-shell::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 80% at 50% 0%,
+    color-mix(in srgb, var(--nx-header-c2) 22%, transparent) 0%,
+    color-mix(in srgb, var(--nx-header-c1) 10%, transparent) 38%,
+    transparent 72%
+  );
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+  animation: nx-header-ambient-glow 6.5s ease-in-out infinite;
+}
+
 .nx-inbox-header-shell::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   box-shadow:
-    0 0 10px color-mix(in srgb, var(--nx-header-c2) 14%, transparent),
-    0 2px 8px color-mix(in srgb, var(--nx-header-c1) 8%, transparent);
+    0 0 14px color-mix(in srgb, var(--nx-header-c2) 16%, transparent),
+    0 0 28px color-mix(in srgb, var(--nx-header-c1) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--nx-header-c3) 5%, transparent);
   pointer-events: none;
   z-index: 0;
+  animation: nx-header-ambient-glow 6.5s ease-in-out infinite;
+  animation-delay: -2.2s;
 }
 
 .nx-inbox-header-shell__inner {
@@ -343,8 +379,14 @@
 }
 
 .nx-cat-nav__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   font-size: 13px;
   line-height: 1;
+  flex-shrink: 0;
   filter: saturate(0.75) brightness(0.92);
   transition: filter 0.2s ease, transform 0.18s ease;
 }
@@ -381,21 +423,53 @@
   animation: nx-unread-pulse 2.2s ease-in-out infinite;
 }
 
-/* Active — elite nav rail: underline + glow, no filled card */
+/* Active — liquid-glass tab with animated underline accent */
 .nx-cat-nav__item.is-active {
   color: #f8fbff;
-  background: rgba(255, 255, 255, 0.018);
+  background: color-mix(in srgb, var(--nx-surface-accent) 9%, rgba(255, 255, 255, 0.04));
+  border-radius: 8px 8px 0 0;
+  border: 1px solid color-mix(in srgb, var(--nx-surface-accent) 22%, rgba(255, 255, 255, 0.08));
+  border-bottom-color: transparent;
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 4px 14px color-mix(in srgb, var(--nx-surface-accent) 10%, transparent);
+}
+
+.nx-cat-nav__item.is-active::before {
+  content: '';
+  position: absolute;
+  inset: 1px 2px auto;
+  height: 42%;
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.03) 55%,
+    transparent 100%
+  );
+  pointer-events: none;
+  animation: nx-cat-glass-sheen 5.5s ease-in-out infinite;
 }
 
 .nx-cat-nav__item.is-active::after {
   content: '';
   position: absolute;
-  left: 14%;
-  right: 14%;
+  left: 12%;
+  right: 12%;
   bottom: 0;
-  height: 1.5px;
+  height: 2px;
   border-radius: 2px 2px 0 0;
-  background: var(--nx-surface-accent);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--nx-surface-accent) 22%,
+    color-mix(in srgb, var(--nx-surface-accent) 88%, #ffffff) 50%,
+    var(--nx-surface-accent) 78%,
+    transparent 100%
+  );
+  box-shadow: 0 0 8px var(--nx-surface-accent-glow);
   animation: nx-cat-underline-pulse 3.2s ease-in-out infinite;
 }
 
@@ -426,6 +500,12 @@
     animation: none !important;
     background-position: 50% 50%;
   }
+  .nx-inbox-header-shell::before,
+  .nx-inbox-header-shell::after {
+    animation: none !important;
+    opacity: 0.55;
+  }
+  .nx-cat-nav__item.is-active::before,
   .nx-cat-nav__item.is-active::after {
     animation: none !important;
     opacity: 0.9;
@@ -805,7 +885,11 @@
 }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-cat-nav__item.is-active {
   color: #0f172a;
-  background: rgba(15, 23, 42, 0.02);
+  background: color-mix(in srgb, var(--nx-surface-accent) 7%, rgba(255, 255, 255, 0.92));
+  border-color: color-mix(in srgb, var(--nx-surface-accent) 20%, #e2e8f0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 3px 12px color-mix(in srgb, var(--nx-surface-accent) 8%, rgba(15, 23, 42, 0.06));
 }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-cat-nav__item.is-active .nx-cat-nav__count {
   background: color-mix(in srgb, var(--nx-surface-accent) 16%, #ffffff);

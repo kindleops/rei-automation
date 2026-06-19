@@ -187,6 +187,99 @@ const formatEquityDisplay = (amount: number | null, percent: number | null): str
   return '—'
 }
 
+const PROPERTY_FLAG_ORDER = [
+  'Absentee',
+  'Probate',
+  'Tax Delinquent',
+  'High Equity',
+  'Pre-Foreclosure',
+  'Vacant',
+  'Senior Owner',
+  'Multifamily',
+  'Land',
+  'Commercial',
+] as const
+
+const resolvePropertyFlags = (
+  thread: InboxWorkflowThread,
+  decision: ConversationDecision,
+  context: {
+    propertyTypeLabel: string
+    propertyType: string
+    equityPercent: number | null
+    propertyTags: string[]
+    sellerTags: string[]
+    intelTags: string[]
+  },
+): string[] => {
+  const flags = new Set<string>()
+  const tagHaystack = [...context.propertyTags, ...context.sellerTags, ...context.intelTags]
+    .join(' ')
+    .toLowerCase()
+
+  const addIf = (condition: boolean, label: (typeof PROPERTY_FLAG_ORDER)[number]) => {
+    if (condition) flags.add(label)
+  }
+
+  addIf(
+    readBoolean(thread, 'absenteeOwner', 'absentee_owner', 'isAbsentee', 'is_absentee')
+      || Boolean((decision as { absentee_owner?: boolean }).absentee_owner),
+    'Absentee',
+  )
+  addIf(
+    readBoolean(thread, 'probate', 'isProbate', 'is_probate')
+      || Boolean((decision as { probate?: boolean }).probate),
+    'Probate',
+  )
+  addIf(
+    readBoolean(thread, 'taxDelinquent', 'tax_delinquent', 'property_tax_delinquent', 'isTaxDelinquent')
+      || Boolean((thread as { property_tax_delinquent?: boolean }).property_tax_delinquent),
+    'Tax Delinquent',
+  )
+  addIf(
+    readBoolean(thread, 'vacant', 'isVacant', 'is_vacant')
+      || Boolean((decision as { vacant?: boolean }).vacant),
+    'Vacant',
+  )
+  addIf(
+    readBoolean(thread, 'highEquity', 'high_equity')
+      || Boolean((decision as { high_equity?: boolean }).high_equity)
+      || Boolean((thread as { highEquity?: boolean }).highEquity),
+    'High Equity',
+  )
+  addIf(
+    readBoolean(thread, 'preForeclosure', 'pre_foreclosure', 'isPreForeclosure', 'pre_foreclosure_flag'),
+    'Pre-Foreclosure',
+  )
+  addIf(
+    readBoolean(thread, 'seniorOwner', 'senior_owner', 'isSeniorOwner', 'senior_owner_flag'),
+    'Senior Owner',
+  )
+
+  if (context.equityPercent != null && context.equityPercent >= 50) flags.add('High Equity')
+
+  const typeText = (context.propertyTypeLabel || context.propertyType || '').toLowerCase()
+  if (typeText.includes('multi')) flags.add('Multifamily')
+  if (typeText.includes('land')) flags.add('Land')
+  if (typeText.includes('commercial')) flags.add('Commercial')
+
+  if (tagHaystack.includes('absentee')) flags.add('Absentee')
+  if (tagHaystack.includes('probate')) flags.add('Probate')
+  if (tagHaystack.includes('tax delinquent') || tagHaystack.includes('tax_delinquent')) flags.add('Tax Delinquent')
+  if (tagHaystack.includes('high equity')) flags.add('High Equity')
+  if (tagHaystack.includes('pre-foreclosure') || tagHaystack.includes('pre foreclosure') || tagHaystack.includes('preforeclosure')) {
+    flags.add('Pre-Foreclosure')
+  }
+  if (tagHaystack.includes('foreclosure')) flags.add('Pre-Foreclosure')
+  if (tagHaystack.includes('vacant')) flags.add('Vacant')
+  if (tagHaystack.includes('senior')) flags.add('Senior Owner')
+  if (tagHaystack.includes('multifamily') || tagHaystack.includes('multi-family')) flags.add('Multifamily')
+  if (tagHaystack.includes(' land ') || tagHaystack.endsWith(' land') || tagHaystack.startsWith('land ')) flags.add('Land')
+  if (tagHaystack.includes('commercial')) flags.add('Commercial')
+
+  return PROPERTY_FLAG_ORDER.filter((label) => flags.has(label))
+}
+
 const resolvePropertyTypeLabel = (propertyType: string): string => {
   const t = propertyType.toLowerCase()
   if (!t || t === 'unknown type') return ''
@@ -342,6 +435,41 @@ const renderBadge = (label: string, key: string) => (
   <span key={key} className="nx-ops75-badge">{label}</span>
 )
 
+const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }: {
+  flags: string[]
+  maxVisible?: number
+  density?: 'compact' | 'default' | 'rich'
+}) => {
+  if (flags.length === 0) return null
+  const visible = flags.slice(0, maxVisible)
+  const overflow = flags.length - visible.length
+  const hidden = flags.slice(maxVisible)
+
+  return (
+    <div
+      className={cls('nx-prop-flags', density !== 'default' && `is-${density}`)}
+      aria-label={`Property flags: ${flags.join(', ')}`}
+    >
+      <div className="nx-prop-flags__visible">
+        {visible.map((flag) => (
+          <span key={flag} className="nx-prop-flags__badge">{flag}</span>
+        ))}
+        {overflow > 0 && (
+          <span className="nx-prop-flags__overflow" aria-hidden="true">+{overflow}</span>
+        )}
+      </div>
+      {overflow > 0 && (
+        <div className="nx-prop-flags__popover" role="tooltip">
+          {hidden.map((flag) => (
+            <span key={flag} className="nx-prop-flags__badge">{flag}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})
+PropertyFlagBadges.displayName = 'PropertyFlagBadges'
+
 const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
   const search = query.trim().toLowerCase()
   if (!search) return true
@@ -430,6 +558,15 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   if ((thread as any).absenteeOwner || (decision as any).absentee_owner) intelTags.push('Absentee')
   if ((thread as any).distressScore > 70) intelTags.push('Distressed')
 
+  const propertyFlags = resolvePropertyFlags(thread, decision, {
+    propertyTypeLabel,
+    propertyType,
+    equityPercent,
+    propertyTags,
+    sellerTags,
+    intelTags,
+  })
+
   const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection)
   const marketLine = market && market !== 'Unknown Market' ? market : '—'
   const metaParts: string[] = []
@@ -496,6 +633,7 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     marketLine,
     metaLine,
     intelTags,
+    propertyFlags,
     deliveryReceipt,
     deliveryStatus: deliveryReceipt?.type === 'inbound'
       ? null
@@ -710,12 +848,14 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   inboxMode?: 'rail25' | 'review50' | 'ops75' | 'full100'
 }) => {
   const isCompactRail = inboxMode === 'rail25'
-  const showConditionMetric = inboxMode === 'ops75' || inboxMode === 'full100'
+  const showPropertyFlags = inboxMode === 'review50' || inboxMode === 'ops75' || inboxMode === 'full100'
+  const showSideMetrics = !isCompactRail
   const vars = getThreadVars(thread, decision)
   const {
     name, address, contextLine, latestMessageBody, latestDirection,
     estimatedValue, equityAmount, equityPercent,
     finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
+    propertyFlags,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
@@ -723,7 +863,10 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
+  const conditionDisplay = buildingCondition || '—'
   const showMetadata = contextLine && contextLine !== '—'
+  const flagMaxVisible = inboxMode === 'full100' ? 3 : inboxMode === 'ops75' ? 2 : 2
+  const flagDensity = inboxMode === 'full100' ? 'rich' : inboxMode === 'ops75' ? 'default' : 'compact'
 
   return (
     <div
@@ -731,6 +874,7 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
       tabIndex={0}
       className={cls(
         'nx-row25',
+        `is-mode-${inboxMode}`,
         bucketAccentClass,
         selected && 'is-selected',
         decision.unread && 'is-unread',
@@ -767,39 +911,57 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
             <span className="nx-row25__context-line">{contextLine}</span>
           </div>
         )}
+        {showPropertyFlags && (
+          <PropertyFlagBadges flags={propertyFlags} maxVisible={flagMaxVisible} density={flagDensity} />
+        )}
         {isCompactRail && (
-          <div className="nx-row25__compact-metrics" aria-label="Value, priority, and equity">
-            <span className="nx-row25__compact-metric" title="Value">{valueDisplay}</span>
-            <span className="nx-row25__compact-metric" title="Priority">{scoreDisplay}</span>
-            <span className="nx-row25__compact-metric" title="Equity">{equityDisplay}</span>
+          <div className="nx-row25__compact-metrics" aria-label="Value, priority, equity, and condition">
+            <div className="nx-row25__compact-metric-cell">
+              <span className="nx-row25__compact-metric-k">Value</span>
+              <span className="nx-row25__compact-metric-v">{valueDisplay}</span>
+            </div>
+            <div className="nx-row25__compact-metric-cell">
+              <span className="nx-row25__compact-metric-k">Priority</span>
+              <span className={cls('nx-row25__compact-metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
+            </div>
+            <div className="nx-row25__compact-metric-cell">
+              <span className="nx-row25__compact-metric-k">Equity</span>
+              <span className="nx-row25__compact-metric-v">{equityDisplay}</span>
+            </div>
+            <div className={cls('nx-row25__compact-metric-cell', !buildingCondition && 'is-empty')}>
+              <span className="nx-row25__compact-metric-k">Condition</span>
+              <span className={cls('nx-row25__compact-metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
+                {conditionDisplay}
+              </span>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="nx-row25__zone nx-row25__zone--metrics">
-        <div className="nx-row25__metrics-group" aria-label="Opportunity metrics">
-          <div className="nx-row25__metric-cell">
-            <span className="nx-row25__metric-k">Value</span>
-            <span className="nx-row25__metric-v">{valueDisplay}</span>
-          </div>
-          <div className="nx-row25__metric-cell">
-            <span className="nx-row25__metric-k">Priority</span>
-            <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
-          </div>
-          <div className="nx-row25__metric-cell">
-            <span className="nx-row25__metric-k">Equity</span>
-            <span className="nx-row25__metric-v">{equityDisplay}</span>
-          </div>
-          {showConditionMetric && (
+      {showSideMetrics && (
+        <div className="nx-row25__zone nx-row25__zone--metrics">
+          <div className="nx-row25__metrics-group" aria-label="Opportunity metrics">
+            <div className="nx-row25__metric-cell">
+              <span className="nx-row25__metric-k">Value</span>
+              <span className="nx-row25__metric-v">{valueDisplay}</span>
+            </div>
+            <div className="nx-row25__metric-cell">
+              <span className="nx-row25__metric-k">Priority</span>
+              <span className={cls('nx-row25__metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
+            </div>
+            <div className="nx-row25__metric-cell">
+              <span className="nx-row25__metric-k">Equity</span>
+              <span className="nx-row25__metric-v">{equityDisplay}</span>
+            </div>
             <div className={cls('nx-row25__metric-cell', !buildingCondition && 'is-empty')}>
               <span className="nx-row25__metric-k">Condition</span>
               <span className={cls('nx-row25__metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
-                {buildingCondition || '—'}
+                {conditionDisplay}
               </span>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 })
