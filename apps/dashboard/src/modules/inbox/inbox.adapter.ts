@@ -802,7 +802,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           type: 'BUCKET_FETCH_ERROR',
           bucketKey,
           requestId,
-          error: model.liveFetchError ?? 'Data mode degraded. Inbox will retry on next poll.'
+          error: model.liveFetchError ?? 'inbox_load_failed'
         })
         if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
@@ -817,7 +817,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             type: 'BUCKET_FETCH_ERROR',
             bucketKey,
             requestId,
-            error: model.liveFetchError ?? 'Data mode degraded with lower richness. Preserving rich cache.'
+            error: model.liveFetchError ?? 'inbox_load_failed'
           })
           if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
           return model
@@ -841,7 +841,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
              type: 'BUCKET_FETCH_ERROR',
              bucketKey,
              requestId,
-             error: model.liveFetchError ?? 'Load more degraded.'
+             error: model.liveFetchError ?? 'inbox_load_failed'
            })
            if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
            return model

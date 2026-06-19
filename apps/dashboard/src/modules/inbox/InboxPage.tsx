@@ -1214,12 +1214,15 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
   const handleResetFilters = useCallback(() => {
     setSearchQuery('')
     setStageFilter('all_stages')
-    setViewFilter('priority')
+    setViewFilter('all_conversations')
     setAdvancedFilters({ outOfStateOwner: 'all' })
-    setSavedPreset('my_priority')
+    setSavedPreset('all_messages')
+    setSelectedId(null)
+    setSelectedThreadKey(null)
+    selectedThreadFallbackRef.current = null
     void refreshInbox({
       filters: {
-        view: 'priority',
+        view: 'all_conversations',
         stage: 'all_stages',
         query: '',
         advanced: { outOfStateOwner: 'all' },
@@ -1228,6 +1231,14 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
       limit: 100,
     })
   }, [refreshInbox])
+
+  const handleRetryInboxLoad = useCallback(() => {
+    void refreshInbox({
+      filters: currentInboxQuery,
+      cursor: null,
+      limit: 100,
+    })
+  }, [currentInboxQuery, refreshInbox])
 
   const handleFocusWorkspaceView = useCallback((view: InboxWorkspaceView) => {
     setSelectedWorkspaceViews((current) => {
@@ -3591,6 +3602,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
         viewCounts={viewCounts}
         onOpenAdvancedFilters={() => setActiveOverlay('filters')}
         onClearFilters={handleResetFilters}
+        onRetryLoad={handleRetryInboxLoad}
         onLoadMore={handleLoadMore}
         canLoadMore={Boolean(data.pagination?.hasMore)}
         recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -4015,6 +4027,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
             onClearFilters={handleResetFilters}
+            onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
             canLoadMore={Boolean(data.pagination?.hasMore)}
             recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -4044,6 +4057,7 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
             onClearFilters={handleResetFilters}
+            onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
             canLoadMore={Boolean(data.pagination?.hasMore)}
             recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -4087,17 +4101,6 @@ export default function InboxPage({ initialWorkspaceView }: InboxPageProps = {})
               onToggleFull={() => setDossierFull((full) => !full)}
               onClose={() => setActiveOverlay(null)}
             />
-          )}
-
-          {selectedFilteredOut && selected && (
-            <div className="nx-filtered-out-notice">
-              <span>Selected thread is outside this filter.</span>
-              <div className="nx-filtered-out-notice__actions">
-                <button type="button" onClick={handleResetFilters}>Clear filters</button>
-                <button type="button" onClick={showSelectedInFilter}>Show selected</button>
-                <button type="button" onClick={() => handleThreadAction(selected, 'pin')}>Keep selected pinned</button>
-              </div>
-            </div>
           )}
 
           {isCustomMultiView ? (

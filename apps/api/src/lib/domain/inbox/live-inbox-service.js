@@ -1099,13 +1099,27 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
 function toMessageAt(row = {}) {
   return (
     row.event_timestamp ||
-    row.message_created_at ||
     row.received_at ||
     row.sent_at ||
-    row.delivered_at ||
     row.created_at ||
+    row.message_created_at ||
+    row.delivered_at ||
     null
   );
+}
+
+function messageSortTime(row = {}) {
+  return asTime(toMessageAt(row));
+}
+
+function compareMessagesOldestFirst(left = {}, right = {}) {
+  const delta = messageSortTime(left) - messageSortTime(right);
+  if (delta !== 0) return delta;
+  return clean(left.id || left.message_event_id).localeCompare(clean(right.id || right.message_event_id));
+}
+
+function compareMessagesNewestFirst(left = {}, right = {}) {
+  return -compareMessagesOldestFirst(left, right);
 }
 
 function normalizeBody(value) {
@@ -2219,7 +2233,7 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   if (!hasPhone) return false;
   if (rowConflictsWithLookup(row, lookup)) return false;
 
-  return false;
+  return true;
 }
 
 function rowConflictsWithLookup(row = {}, lookup = {}) {
@@ -2400,11 +2414,7 @@ async function queryMessageEventsByStrictStrategy({
   const rows = dedupeRowsByMessageId(Array.isArray(data) ? data : [])
     .filter((row) => messageMatchesStrictLookup(row, lookup, strategy.name))
     .map((row) => normalizeMessageRow(row))
-    .sort((left, right) => (
-      asTime(left.event_timestamp || left.message_created_at || left.created_at) -
-      asTime(right.event_timestamp || right.message_created_at || right.created_at) ||
-      clean(left.id).localeCompare(clean(right.id))
-    ));
+    .sort(compareMessagesOldestFirst);
 
   diagnostics.sourceResults.push({
     source: "message_events",
@@ -2579,18 +2589,10 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
 
   const mergedRows = dedupeRowsByMessageId(strategyResults.flatMap((result) => result.rows))
     .map((row) => normalizeMessageRow(row))
-    .sort((left, right) => (
-      asTime(right.event_timestamp || right.message_created_at || right.created_at) -
-      asTime(left.event_timestamp || left.message_created_at || left.created_at) ||
-      clean(right.id).localeCompare(clean(left.id))
-    ));
+    .sort(compareMessagesNewestFirst);
   const pagedRows = mergedRows
     .slice(safeOffset, safeOffset + safeLimit)
-    .sort((left, right) => (
-      asTime(left.event_timestamp || left.message_created_at || left.created_at) -
-      asTime(right.event_timestamp || right.message_created_at || right.created_at) ||
-      clean(left.id).localeCompare(clean(right.id))
-    ));
+    .sort(compareMessagesOldestFirst);
   const rows = pagedRows;
   const total = Math.max(
     mergedRows.length,

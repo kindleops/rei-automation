@@ -42,6 +42,7 @@ interface InboxSidebarProps {
   viewCounts: Record<string, number | string | null | undefined>
   onOpenAdvancedFilters: () => void
   onClearFilters?: () => void
+  onRetryLoad?: () => void
   onLoadMore: () => void
   canLoadMore: boolean
   recentlyUpdatedThreadIds?: Set<string>
@@ -69,17 +70,24 @@ type BucketConfig = {
 }
 
 const BUCKETS: BucketConfig[] = [
-  { bucket: 'priority', view: 'priority', label: 'PRIORITY', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
-  { bucket: 'new_replies', view: 'new_replies', label: 'NEW REPLIES', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
-  { bucket: 'needs_review', view: 'needs_review', label: 'NEEDS REVIEW', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
-  { bucket: 'follow_up', view: 'follow_up', label: 'FOLLOW UP', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
-  { bucket: 'cold', view: 'cold', label: 'COLD', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
-  { bucket: 'dead', view: 'dead', label: 'DEAD', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
-  { bucket: 'suppressed', view: 'suppressed', label: 'SUPPRESSED', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
-  { bucket: 'all', view: 'all_conversations', label: 'ALL MESSAGES', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all' },
+  { bucket: 'priority', view: 'priority', label: 'Priority', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
+  { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
+  { bucket: 'needs_review', view: 'needs_review', label: 'Needs Review', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
+  { bucket: 'waiting', view: 'waiting', label: 'Waiting', icon: '⏳', description: 'Outbound sent, awaiting seller response', accentClass: 'is-wait', countKey: 'waiting' },
+  { bucket: 'follow_up', view: 'follow_up', label: 'Follow Up', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
+  { bucket: 'cold', view: 'cold', label: 'Cold', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
+  { bucket: 'dead', view: 'dead', label: 'Dead', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
+  { bucket: 'suppressed', view: 'suppressed', label: 'Suppressed', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
+  { bucket: 'all_messages', view: 'all_conversations', label: 'All Messages', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all_messages' },
 ]
 
-const INBOX_CHIPS = BUCKETS
+const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
+  BUCKETS[0],
+  BUCKETS[1],
+  BUCKETS[2],
+  BUCKETS[3],
+  BUCKETS[8],
+]
 
 type LocalSavedFilter = {
   id: string
@@ -634,7 +642,7 @@ const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
 
 export const InboxSidebar = ({
   threads, selectedId, activeViewFilter, onSelect, savedPreset, onApplySavedPreset,
-  viewCounts, onOpenAdvancedFilters, onClearFilters, onLoadMore, canLoadMore,
+  viewCounts, onOpenAdvancedFilters, onClearFilters, onRetryLoad, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
   loading = false,
@@ -647,20 +655,21 @@ export const InboxSidebar = ({
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
   const prevThreadsLengthRef = useRef(threads.length)
-  const loadingErrorMessage = formatLoadingError(loadingError)
-  const realtimeDegraded = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
-  const degradedModeMessage = loadingErrorMessage || (realtimeDegraded ? 'Realtime degraded. Using polling mode.' : '')
+  const inboxLoadFailed = Boolean(formatLoadingError(loadingError))
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
-    if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'follow_up'
+    if (activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'waiting'
+    if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'follow_up') return 'follow_up'
     if (activeViewFilter === 'dnc_opt_out' || activeViewFilter === 'opt_out') return 'suppressed'
     if (activeViewFilter === 'cold_no_response' || activeViewFilter === 'not_contacted') return 'cold'
     if (activeViewFilter === 'wrong_number' || (activeViewFilter as string) === 'not_interested') return 'dead'
-    if (activeViewFilter === 'all' || activeViewFilter === 'all_messages') return 'all_conversations'
+    if ((activeViewFilter as string) === 'all' || activeViewFilter === 'all_messages' || activeViewFilter === 'all_conversations') return 'all_conversations'
     return activeViewFilter
   }, [activeViewFilter])
 
   const activeBucketConfig = useMemo(
-    () => BUCKETS.find((bucket) => bucket.view === canonicalActiveView) ?? BUCKETS.find((bucket) => bucket.bucket === 'priority') ?? BUCKETS[0],
+    () => BUCKETS.find((bucket) => bucket.view === canonicalActiveView)
+      ?? BUCKETS.find((bucket) => bucket.bucket === 'all_messages')
+      ?? VISIBLE_INBOX_CHIPS[VISIBLE_INBOX_CHIPS.length - 1],
     [canonicalActiveView],
   )
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
@@ -700,7 +709,7 @@ export const InboxSidebar = ({
 
     // Safety hard-filter: reject any rows the backend returned with a mismatched bucket.
     // In normal operation this is a no-op; it protects against backend classification drift.
-    let filtered = activeBucket === 'all'
+    let filtered = activeBucket === 'all_messages'
       ? searchableThreads
       : searchableThreads.filter((thread) => {
           const stateBucket = resolveBucketFromThreadState(thread)
@@ -746,6 +755,13 @@ export const InboxSidebar = ({
     if (bulkSelectedIds.size === 0) return
     console.warn('BACKEND_ENDPOINT_NOT_READY', { action, selected: Array.from(bulkSelectedIds) })
   }
+
+  const handleClearFilters = useCallback(() => {
+    setColdStaleDays(null)
+    onSearchQueryChange?.('')
+    onClearFilters?.()
+    onApplySavedPreset('all_messages')
+  }, [onApplySavedPreset, onClearFilters, onSearchQueryChange])
 
   // Clear load-more spinner when new threads arrive; timeout is a fallback for empty loads.
   useEffect(() => {
@@ -831,11 +847,11 @@ export const InboxSidebar = ({
         </div>
         <div className="nx-sidebar-rebuilt__top-actions">
           <button type="button" className="nx-sidebar__icon-button" title="Advanced filters" onClick={onOpenAdvancedFilters}><Icon name="filter" /></button>
-          <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={() => onClearFilters?.()}><Icon name="close" /></button>
+          <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
         </div>
       </div>
       <div className="nx-sidebar-rebuilt__chips-wrap" role="tablist">
-        {INBOX_CHIPS.map((item) => {
+        {VISIBLE_INBOX_CHIPS.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
           return (
@@ -873,22 +889,17 @@ export const InboxSidebar = ({
     </div>
   )
 
-  const renderSecondaryControls = () => {
-    if (degradedModeMessage) {
-      console.warn('[TELEMETRY_DEGRADED_BANNER]', {
-        error: loadingErrorMessage || null,
-        realtimeStatus,
-        refreshMode,
-        endpoint: '/api/cockpit/inbox/live',
-      })
-    }
-    return (
+  const renderSecondaryControls = () => (
     <>
       <div className="nx-sidebar-rebuilt__secondary-controls">
-        {degradedModeMessage && (
-          <span className="nx-sidebar-rebuilt__telemetry-indicator" title={degradedModeMessage}>
-            <Icon name="alert" /> Degraded · {refreshMode === 'polling' ? 'Polling' : 'Telemetry'}
-          </span>
+        {inboxLoadFailed && (
+          <button
+            type="button"
+            className="nx-sidebar-rebuilt__telemetry-indicator"
+            onClick={() => onRetryLoad?.()}
+          >
+            <Icon name="alert" /> Inbox could not load. Retry.
+          </button>
         )}
         <button type="button" onClick={() => {
           const name = typeof window !== 'undefined' ? window.prompt('Save current filter as:') : null
@@ -913,8 +924,7 @@ export const InboxSidebar = ({
         </div>
       )}
     </>
-    )
-  }
+  )
 
   const renderMultiSelectBar = () => (
     bulkSelectedIds.size > 0 && (
@@ -948,12 +958,11 @@ export const InboxSidebar = ({
         if (!decision) return null
         return <RowComp key={thread.threadKey || thread.id} thread={thread} selected={selectedId === thread.id} decision={decision} onSelect={(id: string) => { console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter }); onSelect(id) }} selectedForBulk={bulkSelectedIds.has(thread.id)} onToggleBulk={handleToggleBulk} />
       }) : (
-        <div className={cls('nx-sidebar-rebuilt__empty', degradedModeMessage && 'is-degraded')}>
-          {degradedModeMessage ? (
-            <>
-              <strong>Inbox degraded mode</strong>
-              <span>{degradedModeMessage}</span>
-            </>
+        <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>
+          {inboxLoadFailed ? (
+            <button type="button" className="nx-sidebar-rebuilt__telemetry-indicator" onClick={() => onRetryLoad?.()}>
+              <Icon name="alert" /> Inbox could not load. Retry.
+            </button>
           ) : 'No conversations match this filter.'}
         </div>
       )}
@@ -1045,6 +1054,7 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
   if (view === 'new_replies') return 'new_inbounds'
   if (view === 'priority') return 'my_priority'
   if (view === 'needs_review') return 'review_required'
+  if (view === 'waiting' || view === 'waiting_on_seller') return 'waiting'
   if (view === 'follow_up' || view === 'follow_up_due') return 'offer_needed'
   if (view === 'cold' || view === 'cold_no_response' || view === 'not_contacted') return 'missing_context'
   if (view === 'dead' || view === 'wrong_number') return 'wrong_numbers'

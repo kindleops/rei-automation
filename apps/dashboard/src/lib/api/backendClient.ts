@@ -102,7 +102,11 @@ export interface BackendApiSecretResult {
 }
 
 export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
-  const secret = (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined) || ''
+  const secret = (
+    (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined)
+    || (import.meta.env.VITE_OPS_DASHBOARD_SECRET as string | undefined)
+    || ''
+  )
   if (!secret && import.meta.env.PROD) throw new Error('Missing VITE_BACKEND_API_SECRET')
   return {
     secret,

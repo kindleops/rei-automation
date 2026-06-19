@@ -2252,8 +2252,8 @@ export const getInboxRowsForView = async (
         // Enrichment endpoint failures (deal-context, valuation-snapshot) are isolated
         // at the call site and must never reach this path.
         emitNotification({
-          title: 'Inbox Connection Error',
-          detail: '/api/cockpit/inbox/live failed. Thread list preserved from last successful load.',
+          title: 'Inbox could not load',
+          detail: 'Retry.',
           severity: 'warning',
         })
       }
@@ -3563,155 +3563,36 @@ export const getThreadHydrationForThread = async (
   const lookup = getThreadLookupIdentity(thread)
   const threadKey = lookup.selectedThreadKey
   const threadRecord = thread as unknown as AnyRecord
-  const params = new URLSearchParams()
-  if (threadKey) params.set('thread_key', threadKey)
-  if (lookup.conversationThreadId) params.set('conversation_thread_id', lookup.conversationThreadId)
-  if (lookup.legacyThreadKey) params.set('legacy_thread_key', lookup.legacyThreadKey)
-  if (lookup.normalizedPhone) params.set('normalized_phone', lookup.normalizedPhone)
-  if (lookup.canonicalE164) {
-    params.set('canonical_e164', lookup.canonicalE164)
-    params.set('phone_e164', lookup.canonicalE164)
-  }
-  if (lookup.phone) params.set('phone', lookup.phone)
-  if (lookup.bestPhone) params.set('best_phone', lookup.bestPhone)
-  if (lookup.sellerPhone) params.set('seller_phone', lookup.sellerPhone)
-  if (lookup.latestMessageId) {
-    params.set('latest_message_id', lookup.latestMessageId)
-    params.set('latestMessageId', lookup.latestMessageId)
-  }
-  const propertyId = asString(threadRecord.propertyId ?? threadRecord.property_id, '')
-  const prospectId = asString(threadRecord.prospectId ?? threadRecord.prospect_id, '')
-  const masterOwnerId = asString(threadRecord.ownerId ?? threadRecord.master_owner_id ?? threadRecord.masterOwnerId, '')
-  if (propertyId) params.set('property_id', propertyId)
-  if (prospectId) params.set('prospect_id', prospectId)
-  if (masterOwnerId) {
-    params.set('master_owner_id', masterOwnerId)
-    params.set('owner_id', masterOwnerId)
-  }
-
   const fallbackDealContext = normalizeDealContext(threadRecord)
 
-  try {
-    const result = await backendClient.fetchInboxThreadHydration(params.toString(), signal)
-    if (!result.ok) throw new Error(result.message)
-    const payload = asRecord(result.data)
-    const integrityBlocked = Boolean(payload.integrity_blocked || payload.integrityBlocked || asRecord(payload.diagnostics).integrity_blocked)
-    if (integrityBlocked) {
-      emitNotification({
-        title: 'Thread identity conflict',
-        detail: 'This conversation matched multiple seller/property identities. Messages were blocked to avoid showing the wrong thread.',
-        severity: 'warning',
-      })
-    }
-    const rawMessages = safeArray(payload.messages as AnyRecord[])
-    const messages = integrityBlocked ? [] : applyDeliveryStatusDisplay(dedupeMessages(rawMessages.map(toThreadMessage)))
-    const rawPagination = asRecord(payload.pagination ?? asRecord(payload.diagnostics).pagination)
-    const total = Number(rawPagination.total ?? rawMessages.length)
-    const hasMore = Boolean(rawPagination.has_more ?? rawPagination.hasMore ?? (Number.isFinite(total) ? messages.length < total : false))
-    const nextOffset = rawPagination.next_offset ?? rawPagination.nextOffset
-    commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
+  const page = await getThreadMessagesPageForThread(thread, { signal })
+  const diagnostics = asRecord(page.diagnostics)
+  const integrityBlocked = Boolean(diagnostics.integrity_blocked || diagnostics.integrityBlocked)
+  const messages = integrityBlocked ? [] : page.messages
+
+  commitDashboardMessages(
+    threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''),
+    messages as unknown as AnyRecord[],
+    {
       phase: 'messages',
-      source: 'thread_hydration',
+      source: 'thread_messages',
       integrityBlocked,
       replace: true,
-    })
-    logHydrationPhaseDone('messages', hydrationStartedAt, {
-      threadKey,
-      messages: messages.length,
-    })
-    const dealContextRaw = asRecord(payload.deal_context)
-    const hydrationRecord = {
-      ...threadRecord,
-      ...asRecord(payload.thread),
-      ...dealContextRaw,
-      property_data: payload.property ?? dealContextRaw.property_data,
-      master_owner_data: payload.master_owner ?? dealContextRaw.master_owner_data,
-      prospect_data: payload.prospect ?? dealContextRaw.prospect_data,
-      phone_data: payload.phone ?? dealContextRaw.phone_data,
-      valuation_data: payload.valuation ?? dealContextRaw.valuation_data,
-      routing_data: payload.routing,
-      outreach_data: payload.outreach,
-    } as AnyRecord
-    const dealContext = Object.keys(hydrationRecord).length > 0
-      ? normalizeDealContext(hydrationRecord)
-      : fallbackDealContext
-    logHydrationPhaseDone('property_prospect', hydrationStartedAt, {
-      threadKey,
-      propertyResolved: Boolean(payload.property || dealContext.propertyId),
-      prospectResolved: Boolean(payload.prospect || dealContext.prospectId),
-      ownerResolved: Boolean(payload.master_owner || dealContext.masterOwnerId),
-      phoneResolved: Boolean(payload.phone || dealContext.canonicalE164),
-    })
-    logHydrationPhaseDone('deal_intelligence', hydrationStartedAt, {
-      threadKey,
-      dealContextResolved: Boolean(dealContext.id || dealContext.propertyId),
-      valuationResolved: Boolean(payload.valuation),
-      buyerSignalResolved: Boolean(dealContext.buyerMatch?.id),
-    })
-    const intelligence = {
-      ...threadRecord,
-      ...asRecord(payload.thread),
-      selected_thread: {
-        properties: payload.property ? [payload.property] : [],
-        prospects: payload.prospect ? [payload.prospect] : [],
-        master_owners: payload.master_owner ? [payload.master_owner] : [],
-        phone_numbers: payload.phone ? [payload.phone] : [],
-      },
-      property_data: payload.property,
-      master_owner_data: payload.master_owner,
-      prospect_data: payload.prospect,
-      phone_data: payload.phone,
-      valuation_data: payload.valuation,
-      deal_context: payload.deal_context,
-      routing: payload.routing,
-      outreach: payload.outreach,
-      diagnostics: payload.diagnostics,
-    } as ThreadIntelligenceRecord
+    },
+  )
+  logHydrationPhaseDone('messages', hydrationStartedAt, {
+    threadKey,
+    messages: messages.length,
+  })
 
-    return {
-      messages,
-      pagination: {
-        offset: Number(rawPagination.offset ?? 0) || 0,
-        limit: Number(rawPagination.limit ?? 50) || 50,
-        total: Number.isFinite(total) ? total : null,
-        hasMore,
-        nextOffset: Number.isFinite(Number(nextOffset)) ? Number(nextOffset) : (hasMore ? messages.length : null),
-      },
-      dealContext,
-      intelligence,
-      diagnostics: asRecord(payload.diagnostics),
-      degradedParts: safeArray(payload.degradedParts as string[]),
-      raw: payload,
-    }
-  } catch (err) {
-    if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') throw err
-    if (DEV) console.warn('[ThreadHydration] unified hydration failed; falling back to split endpoints', err)
-    const messages = await getThreadMessagesForThread(thread, { signal }).catch(() => [])
-    commitDashboardMessages(threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''), messages as unknown as AnyRecord[], {
-      phase: 'messages',
-      source: 'thread_hydration_fallback',
-      replace: true,
-    })
-    logHydrationPhaseDone('messages', hydrationStartedAt, {
-      threadKey,
-      messages: messages.length,
-      degraded: true,
-    })
-    return {
-      messages,
-      pagination: {
-        offset: 0,
-        limit: messages.length || 50,
-        total: messages.length,
-        hasMore: false,
-        nextOffset: null,
-      },
-      dealContext: fallbackDealContext,
-      intelligence: threadRecord as ThreadIntelligenceRecord,
-      diagnostics: { degraded: true, error: err instanceof Error ? err.message : String(err), sourceUsed: 'frontend_fallback' },
-      degradedParts: ['thread_hydration'],
-      raw: {},
-    }
+  return {
+    messages,
+    pagination: page.pagination,
+    dealContext: fallbackDealContext,
+    intelligence: threadRecord as ThreadIntelligenceRecord,
+    diagnostics,
+    degradedParts: [],
+    raw: diagnostics,
   }
 }
 

@@ -679,6 +679,7 @@ export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<strin
 
 export const getSavedPresetConfig = (preset: InboxSavedFilterPreset): Partial<InboxFilterState> => {
   if (preset === 'all_messages') return { view: 'all_conversations' }
+  if (preset === 'waiting') return { view: 'waiting' }
   if (preset === 'inbound_only') return { view: 'inbound' }
   if (preset === 'outbound_only') return { view: 'outbound' }
   if (preset === 'needs_reply') return { view: 'new_replies' }

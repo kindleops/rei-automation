@@ -11,6 +11,7 @@ export type InboxSavedFilterPreset =
   | 'pinned'
   | 'unassigned'
   | 'all_messages'
+  | 'waiting'
   | 'inbound_only'
   | 'outbound_only'
   | 'needs_reply'

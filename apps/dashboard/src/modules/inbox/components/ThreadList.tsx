@@ -126,7 +126,7 @@ export const ThreadList = memo(({
       <div className="nx-rail-list">
         {filtered.length === 0 ? (
           <div className="nx-rail-empty">
-            <p>{loadingError ? `Inbox data could not load: ${loadingError}` : 'No threads match your filters.'}</p>
+            <p>{loadingError ? 'Inbox could not load. Retry.' : 'No threads match your filters.'}</p>
           </div>
         ) : (
           <div className="nx-thread-list-items">

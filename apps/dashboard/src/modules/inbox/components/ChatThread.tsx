@@ -515,40 +515,21 @@ export const ChatThread = ({
           })
         })()}
 
-        {messages.length === 0 && !loading && (() => {
-          const latestBody = String((thread as any)?.latestMessageBody || (thread as any)?.latest_message_body || '').trim()
-          if (latestBody) {
-            return (
-              <div className="nx-hydration-failed">
-                {import.meta.env.DEV && (
-                  <div className="nx-hydration-failed__dev-banner">
-                    ⚠ message hydration returned 0 rows — thread has preview but no timeline
-                  </div>
-                )}
-                <div className="nx-hydration-failed__body">
-                  <Icon name="message" style={{ opacity: 0.25, width: 28, height: 28, marginBottom: 8 }} />
-                  <p>Messages unavailable</p>
-                  <p className="nx-hydration-failed__sub">Timeline could not be loaded. The conversation exists but message history failed to hydrate.</p>
-                  <button
-                    type="button"
-                    className="nx-btn nx-btn--secondary"
-                    style={{ marginTop: 10 }}
-                    onClick={() => onThreadAction?.(thread.id, 'refetch', { threadKey: thread.threadKey || thread.id })}
-                  >
-                    <Icon name="refresh-cw" style={{ width: 13, height: 13 }} />
-                    <span>Retry</span>
-                  </button>
-                </div>
-              </div>
-            )
-          }
-          return (
-            <div className="nx-inbox__messages-empty">
-              <Icon name="message" style={{ opacity: 0.08, width: 36, height: 36, marginBottom: 10 }} />
-              <p>No messages in this thread.</p>
-            </div>
-          )
-        })()}
+        {messages.length === 0 && !loading && (
+          <div className="nx-inbox__messages-empty">
+            <Icon name="message" style={{ opacity: 0.08, width: 36, height: 36, marginBottom: 10 }} />
+            <p>No messages in this thread.</p>
+            <button
+              type="button"
+              className="nx-btn nx-btn--secondary"
+              style={{ marginTop: 10 }}
+              onClick={() => onThreadAction?.(thread.id, 'refetch', { threadKey: thread.threadKey || thread.id })}
+            >
+              <Icon name="refresh-cw" style={{ width: 13, height: 13 }} />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
       </div>
 
     </div>
