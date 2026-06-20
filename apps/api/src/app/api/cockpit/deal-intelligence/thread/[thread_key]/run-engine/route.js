@@ -11,6 +11,9 @@ const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',
   'https://nexus-dashboard.vercel.app',
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
 ])
 
 function resolveAllowedOrigin(origin) {
@@ -65,7 +68,11 @@ export async function POST(request, { params }) {
       async start(controller) {
         const emit = (event) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
         try {
-          const result = await runAcquisitionEngineWithProgress(property_id, (progress) => emit({ ok: true, ...progress }))
+          const result = await runAcquisitionEngineWithProgress(
+            property_id,
+            (progress) => emit({ ok: true, ...progress }),
+            { thread_key },
+          )
           const dossier = await getUniversalDealDossier({ thread_key, property_id })
           emit({ ok: true, stage: 'decision_ready', status: 'done', dossier })
           controller.close()
@@ -83,9 +90,13 @@ export async function POST(request, { params }) {
 
   const stages = []
   try {
-    const result = await runAcquisitionEngineWithProgress(property_id, (progress) => {
-      stages.push(progress)
-    })
+    const result = await runAcquisitionEngineWithProgress(
+      property_id,
+      (progress) => {
+        stages.push(progress)
+      },
+      { thread_key },
+    )
     const dossier = await getUniversalDealDossier({ thread_key, property_id })
     return NextResponse.json(
       { ok: true, stages, result, dossier },

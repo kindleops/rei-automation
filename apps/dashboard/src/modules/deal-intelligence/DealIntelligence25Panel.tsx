@@ -462,7 +462,11 @@ export const DealIntelligence25Panel = ({
               </div>
             </div>
           ) : null}
-          {engineError ? <div className="nx-di25-engine-error">Engine failed — prior results retained. {engineError}</div> : null}
+          {engineError ? (
+          <div className="nx-di25-engine-error">
+            Engine failed — prior results retained. {humanizeEnum(engineError.replace(/_/g, ' ')) || engineError}
+          </div>
+        ) : null}
         </div>
       </section>
 

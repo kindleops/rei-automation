@@ -17,6 +17,15 @@ interface EngineProgress {
   label: string
 }
 
+function resolvePropertyId(thread: ThreadIdentity | null | undefined, dossier: DealIntelligenceDossier | null) {
+  return (
+    thread?.propertyId
+    || (dossier?.identity?.property_id as string | undefined)
+    || dossier?.property?.property_id
+    || null
+  )
+}
+
 export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undefined) {
   const [dossier, setDossier] = useState<DealIntelligenceDossier | null>(null)
   const [loading, setLoading] = useState(false)
@@ -25,6 +34,11 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
   const [engineError, setEngineError] = useState<string | null>(null)
   const [engineProgress, setEngineProgress] = useState<EngineProgress[]>([])
   const requestIdRef = useRef(0)
+  const dossierRef = useRef<DealIntelligenceDossier | null>(null)
+
+  useEffect(() => {
+    dossierRef.current = dossier
+  }, [dossier])
 
   const refresh = useCallback(async () => {
     if (!thread?.threadKey) {
@@ -39,7 +53,8 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     const base = getBackendBaseUrl()
     const secret = getBackendSecret()
     const qs = new URLSearchParams()
-    if (thread.propertyId) qs.set('property_id', thread.propertyId)
+    const propertyId = resolvePropertyId(thread, dossierRef.current)
+    if (propertyId) qs.set('property_id', propertyId)
     if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
     if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
     if (thread.masterOwnerId) qs.set('master_owner_id', thread.masterOwnerId)
@@ -76,7 +91,17 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
   }, [refresh])
 
   const runDecisionEngine = useCallback(async () => {
-    if (!thread?.threadKey || !thread?.propertyId) return
+    if (!thread?.threadKey) {
+      setEngineError('thread_key_required')
+      return
+    }
+
+    const propertyId = resolvePropertyId(thread, dossierRef.current)
+    if (!propertyId) {
+      setEngineError('property_id_required')
+      return
+    }
+
     setEngineRunning(true)
     setEngineError(null)
     setEngineProgress(
@@ -89,7 +114,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
 
     const base = getBackendBaseUrl()
     const secret = getBackendSecret()
-    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(thread.threadKey)}/run-engine?stream=true&property_id=${encodeURIComponent(thread.propertyId)}`
+    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(thread.threadKey)}/run-engine?stream=true&property_id=${encodeURIComponent(propertyId)}`
 
     try {
       const res = await fetch(url, {
@@ -99,13 +124,14 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
           'Content-Type': 'application/json',
           'x-ops-dashboard-secret': secret,
         },
-        body: JSON.stringify({ property_id: thread.propertyId }),
+        body: JSON.stringify({ property_id: propertyId }),
       })
       if (!res.ok || !res.body) throw new Error(`run_engine_http_${res.status}`)
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let streamFailed: string | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -115,7 +141,19 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
         buffer = lines.pop() || ''
         for (const line of lines) {
           if (!line.trim()) continue
-          const event = JSON.parse(line)
+          const event = JSON.parse(line) as {
+            ok?: boolean
+            error?: string
+            stage?: EngineProgressStage
+            status?: string
+            dossier?: DealIntelligenceDossier
+          }
+
+          if (event.ok === false && event.error) {
+            streamFailed = event.error
+            continue
+          }
+
           if (event.stage) {
             const stageOrder = [...ENGINE_STAGE_DISPLAY_ORDER, 'calculating_confidence' as EngineProgressStage]
             const eventIndex = stageOrder.indexOf(event.stage)
@@ -133,10 +171,12 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
             )
           }
           if (event.dossier) {
-            setDossier(event.dossier as DealIntelligenceDossier)
+            setDossier(event.dossier)
           }
         }
       }
+
+      if (streamFailed) throw new Error(streamFailed)
       await refresh()
     } catch (err: unknown) {
       setEngineError(err instanceof Error ? err.message : 'run_engine_failed')

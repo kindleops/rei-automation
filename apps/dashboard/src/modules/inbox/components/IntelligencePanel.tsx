@@ -5921,7 +5921,7 @@ export const IntelligencePanel = ({
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
           <DealIntelligence25Panel
-            threadKey={thread.threadKey}
+            threadKey={thread.threadKey || thread.id}
             propertyId={dealContext?.identity?.property_id || thread.propertyId}
             prospectId={dealContext?.identity?.prospect_id || thread.prospectId}
             masterOwnerId={dealContext?.identity?.master_owner_id || thread.masterOwnerId}

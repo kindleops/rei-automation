@@ -46,11 +46,21 @@ const PROPERTY_SELECT = [
   'total_loan_balance', 'property_flags_text', 'property_flags_json', 'streetview_image',
   'satellite_image', 'final_acquisition_score', 'structured_motivation_score',
   'deal_strength_score', 'tag_distress_score', 'ai_score', 'ownership_years',
-  'sale_date', 'sale_price', 'saleprice', 'document_type', 'recording_date', 'default_date',
+  'sale_date', 'saleprice', 'document_type', 'recording_date', 'default_date',
   'total_loan_amt', 'total_loan_payment', 'tax_amt', 'tax_delinquent', 'active_lien',
   'lot_acreage', 'lot_square_feet', 'stories', 'avg_sqft_per_unit', 'beds_per_unit',
   'assd_improvement_value', 'assd_land_value', 'assd_total_value',
-  'rehab_level', 'construction_type', 'resale_price',
+  'rehab_level', 'construction_type',
+].join(',')
+
+const PROPERTY_ENGINE_SELECT = [
+  'property_id', 'property_address_full', 'property_address_city', 'property_address_state',
+  'property_address_zip', 'property_zip', 'property_address_county_name', 'property_county_name',
+  'market', 'market_region', 'latitude', 'longitude', 'property_type', 'property_class',
+  'normalized_asset_class', 'asset_class', 'asset_type', 'total_bedrooms', 'total_baths',
+  'building_square_feet', 'units_count', 'year_built', 'building_condition',
+  'estimated_repair_cost', 'estimated_value', 'equity_amount', 'equity_percent',
+  'total_loan_balance', 'ownership_years', 'sale_date', 'saleprice',
 ].join(',')
 
 const OWNER_SELECT = [
@@ -275,7 +285,7 @@ function buildPropertyDetailGroups(propertyRow, hydrated, property) {
       assessed_land_value: num(propertyRow?.assd_land_value),
       assessed_total_value: num(propertyRow?.assd_total_value),
       repair_estimate: num(property?.repair_estimate),
-      resale_price: num(propertyRow?.resale_price),
+
     },
     sale_recording: {
       last_sale_date: pick(propertyRow?.sale_date),
@@ -1375,15 +1385,62 @@ export const ENGINE_STAGE_LABELS = {
   decision_ready: 'Decision ready',
 }
 
-export async function runAcquisitionEngineWithProgress(propertyId, onProgress) {
+async function loadPropertyRowForEngine(propertyId, threadKey) {
+  const id = clean(propertyId)
+  if (!id) return { property: null, hydrated: null, location: null }
+
+  let property = await queryMaybe('properties', PROPERTY_ENGINE_SELECT, { property_id: id })
+  if (!property) {
+    property = await queryMaybe('properties', PROPERTY_SELECT, { property_id: id })
+  }
+
+  const hydrated = await queryHydratedThread({ property_id: id, thread_key: threadKey })
+  const location = resolveCanonicalLocation({
+    propertyRow: property,
+    hydrated,
+    identity: { property_id: id, full_address: hydrated?.property_address_full },
+  })
+
+  if (!property && hydrated) {
+    property = {
+      property_id: id,
+      property_address_full: hydrated.property_address_full,
+      property_address_city: hydrated.property_address_city,
+      property_address_state: hydrated.property_address_state,
+      property_address_zip: hydrated.property_address_zip || hydrated.zip,
+      property_zip: hydrated.property_address_zip || hydrated.zip,
+      market: hydrated.market || hydrated.market_region,
+      latitude: hydrated.latitude,
+      longitude: hydrated.longitude,
+      property_type: hydrated.property_type,
+      property_class: hydrated.property_class,
+      normalized_asset_class: hydrated.property_class,
+      units_count: hydrated.units_count,
+      total_bedrooms: hydrated.total_bedrooms,
+      total_baths: hydrated.total_baths,
+      building_square_feet: hydrated.building_square_feet,
+      year_built: hydrated.year_built,
+      building_condition: hydrated.building_condition,
+      estimated_repair_cost: hydrated.estimated_repair_cost,
+      estimated_value: hydrated.estimated_value,
+      equity_amount: hydrated.equity_amount,
+      equity_percent: hydrated.equity_percent,
+      total_loan_balance: hydrated.total_loan_balance || hydrated.total_loan_amt,
+      ownership_years: hydrated.ownership_years,
+    }
+  }
+
+  return { property, hydrated, location }
+}
+
+export async function runAcquisitionEngineWithProgress(propertyId, onProgress, options = {}) {
   const emit = (stage, status = 'running', detail = null) => {
     if (typeof onProgress === 'function') onProgress({ stage, status, detail })
   }
 
   emit('resolving_property', 'running')
-  const property = await queryMaybe('properties', PROPERTY_SELECT, { property_id: clean(propertyId) })
+  const { property, location } = await loadPropertyRowForEngine(propertyId, options.thread_key)
   if (!property) throw new Error('property_not_found')
-  const location = resolveCanonicalLocation({ propertyRow: property, hydrated: null, identity: {} })
   emit('resolving_property', 'done')
 
   emit('loading_comps', 'running')
