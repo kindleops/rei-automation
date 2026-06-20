@@ -18,7 +18,6 @@ export interface BaselineScores {
   deal_strength_score?: number | null
   motivation_score?: number | null
   distress_score?: number | null
-  ai_score?: number | null
   label?: string
 }
 
@@ -63,6 +62,7 @@ export interface CompRecord {
   id?: string
   address?: string | null
   property_type?: string | null
+  asset_class?: string | null
   sale_date?: string | null
   sale_price?: number | null
   distance_miles?: number | null
@@ -71,12 +71,16 @@ export interface CompRecord {
   bathrooms?: number | null
   sqft?: number | null
   year_built?: number | null
+  construction_type?: string | null
+  subdivision?: string | null
+  school_district?: string | null
   ppsf?: number | null
   ppu?: number | null
   similarity_score?: number | null
   weight?: number | null
   included?: boolean
   exclusion_reason?: string | null
+  source?: string | null
 }
 
 export interface DealIntelligenceProperty {
@@ -186,21 +190,35 @@ export interface DealIntelligenceDossier {
   buyer_market: Record<string, unknown>
   buyer_matches: Record<string, unknown>
   census: Record<string, unknown>
+  conversation_intelligence?: Record<string, unknown>
   activity_timeline: ActivityEvent[]
   compliance?: Record<string, unknown>
   freshness?: Record<string, unknown>
 }
 
+export const ENGINE_STAGE_DISPLAY_ORDER: EngineProgressStage[] = [
+  'resolving_property',
+  'loading_comps',
+  'qualifying_comps',
+  'calculating_valuation',
+  'measuring_buyer_demand',
+  'evaluating_seller_pressure',
+  'comparing_strategies',
+  'building_offer_stack',
+  'persisting_decision',
+  'decision_ready',
+]
+
 export const ENGINE_STAGE_LABELS: Record<EngineProgressStage, string> = {
-  resolving_property: 'Resolving property and ownership',
-  loading_comps: 'Loading comparable sales',
+  resolving_property: 'Resolving property',
+  loading_comps: 'Selecting comparable sales',
   qualifying_comps: 'Qualifying usable comps',
   calculating_valuation: 'Calculating valuation range',
-  measuring_buyer_demand: 'Measuring buyer demand and liquidity',
-  evaluating_seller_pressure: 'Evaluating seller and foreclosure pressure',
-  comparing_strategies: 'Comparing acquisition strategies',
-  building_offer_stack: 'Building the offer stack',
+  measuring_buyer_demand: 'Measuring investor demand',
+  evaluating_seller_pressure: 'Evaluating seller pressure',
+  comparing_strategies: 'Comparing strategies',
+  building_offer_stack: 'Building offer stack',
   calculating_confidence: 'Calculating confidence',
-  persisting_decision: 'Persisting acquisition decision',
+  persisting_decision: 'Persisting decision',
   decision_ready: 'Decision ready',
 }

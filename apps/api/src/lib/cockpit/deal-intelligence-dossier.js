@@ -721,8 +721,8 @@ function activityTone(type) {
 async function fetchActivityTimeline({ thread_key, canonical_e164, property_id, hydrated, abortSignal }) {
   const events = []
   const pushUnique = (event) => {
-    const key = `${event.type}|${event.timestamp}|${event.label}`
-    if (!events.some((e) => `${e.type}|${e.timestamp}|${e.label}` === key)) {
+    const key = event.id || `${event.type}|${event.timestamp}|${event.label}|${event.source}`
+    if (!events.some((e) => (e.id || `${e.type}|${e.timestamp}|${e.label}|${e.source}`) === key)) {
       events.push({ ...event, tone: event.tone || activityTone(event.type) })
     }
   }
@@ -802,32 +802,37 @@ async function fetchActivityTimeline({ thread_key, canonical_e164, property_id, 
       const direction = clean(msg.direction).toLowerCase()
       const intent = clean(msg.intent).toLowerCase()
       const eventType = clean(msg.event_type).toLowerCase()
+      const msgId = clean(msg.id)
+      const base = { timestamp: msg.created_at, source: 'message_events', id: msgId || undefined }
 
       if (direction === 'outbound' || direction === 'out') {
-        pushUnique({ type: 'outreach_sent', label: 'Outreach sent', timestamp: msg.created_at, source: 'message_events' })
+        pushUnique({ ...base, type: 'outreach_sent', label: 'Outbound message sent' })
       } else if (direction === 'inbound' || direction === 'in') {
         if (intent.includes('negative') || intent.includes('not interested')) {
-          pushUnique({ type: 'negative_engagement', label: 'Negative engagement', timestamp: msg.created_at, source: 'message_events' })
+          pushUnique({ ...base, type: 'negative_engagement', label: 'Negative engagement' })
         } else if (intent.includes('positive')) {
-          pushUnique({ type: 'positive_engagement', label: 'Positive engagement', timestamp: msg.created_at, source: 'message_events' })
+          pushUnique({ ...base, type: 'positive_engagement', label: 'Positive engagement' })
         } else {
-          pushUnique({ type: 'inbound_reply', label: 'Inbound seller reply', timestamp: msg.created_at, source: 'message_events' })
+          pushUnique({ ...base, type: 'inbound_reply', label: 'Inbound seller response' })
         }
       }
 
       if (intent.includes('wrong') || eventType.includes('wrong_number')) {
-        pushUnique({ type: 'wrong_number', label: 'Wrong number', timestamp: msg.created_at, source: 'message_events' })
+        pushUnique({ ...base, type: 'wrong_number', label: 'Wrong number reported' })
       }
-      if (intent && !['positive', 'negative', 'unknown'].includes(intent)) {
+      if (intent && !['positive', 'negative', 'unknown', ''].includes(intent)) {
         pushUnique({
+          ...base,
           type: 'automation_classified',
-          label: `Automation classified · ${intent.replace(/_/g, ' ')}`,
-          timestamp: msg.created_at,
-          source: 'message_events',
+          label: `Intent classified · ${intent.replace(/_/g, ' ')}`,
+          detail: clean(msg.message_body).slice(0, 120) || null,
         })
       }
-      if (clean(msg.delivery_status).toLowerCase() === 'failed') {
-        pushUnique({ type: 'delivery_failure', label: 'Delivery failure', timestamp: msg.created_at, source: 'message_events' })
+      const delivery = clean(msg.delivery_status).toLowerCase()
+      if (delivery === 'failed') {
+        pushUnique({ ...base, type: 'delivery_failure', label: 'Delivery failed' })
+      } else if (delivery === 'delivered' && (direction === 'outbound' || direction === 'out')) {
+        pushUnique({ ...base, type: 'follow_up_sent', label: 'Message delivered' })
       }
     }
   }
@@ -873,14 +878,67 @@ async function fetchActivityTimeline({ thread_key, canonical_e164, property_id, 
     .slice(0, 30)
 }
 
+function ageFromMob(mob) {
+  const raw = clean(mob)
+  if (!raw) return null
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length >= 6) {
+    const year = Number(digits.slice(0, 4))
+    const month = Number(digits.slice(4, 6))
+    if (year > 1900 && year <= new Date().getFullYear() && month >= 1 && month <= 12) {
+      const now = new Date()
+      let age = now.getFullYear() - year
+      if (now.getMonth() + 1 < month) age -= 1
+      return age > 0 && age < 120 ? age : null
+    }
+  }
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    const age = Math.floor((Date.now() - parsed.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    return age > 0 && age < 120 ? age : null
+  }
+  return null
+}
+
 function buildBaselineScores(propertyRow, hydrated) {
   return {
     acquisition_score: num(pick(propertyRow?.final_acquisition_score, hydrated?.final_acquisition_score)),
     deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
     motivation_score: num(pick(propertyRow?.structured_motivation_score, hydrated?.priority_score, hydrated?.structured_motivation_score)),
     distress_score: num(pick(propertyRow?.tag_distress_score, hydrated?.tag_distress_score)),
-    ai_score: num(pick(propertyRow?.ai_score, hydrated?.ai_score)),
     label: 'Baseline Property Intelligence',
+  }
+}
+
+function buildConversationIntelligence(hydrated, acquisition, compliance) {
+  const fields = {
+    latest_intent: pick(hydrated?.reply_intent, hydrated?.latest_intent, hydrated?.detected_intent),
+    reply_intent: pick(hydrated?.reply_intent),
+    seller_state: pick(hydrated?.universal_stage, hydrated?.stage),
+    lead_temperature: pick(hydrated?.lead_temperature),
+    sentiment: pick(hydrated?.sentiment, hydrated?.latest_sentiment),
+    motivation_signal: pick(hydrated?.motivation_signal, hydrated?.structured_motivation_score),
+    language: pick(hydrated?.best_language, hydrated?.language_preference),
+    latest_inbound_summary: pick(hydrated?.latest_message_body, hydrated?.latest_inbound_body),
+    recommended_conversation_angle: pick(acquisition?.recommended_conversation_angle, hydrated?.ai_next_action, hydrated?.next_action),
+    last_seller_response_at: hydrated?.latest_message_direction === 'inbound' ? hydrated?.latest_message_at : null,
+    next_follow_up_at: pick(hydrated?.next_follow_up_at, hydrated?.follow_up_at),
+    universal_status: pick(hydrated?.universal_status, hydrated?.inbox_bucket),
+  }
+
+  const populated = Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => hasValue(value)),
+  )
+
+  if (!Object.keys(populated).length) {
+    return { status: 'sparse' }
+  }
+
+  return {
+    status: 'available',
+    ...populated,
+    sms_eligible: compliance?.is_suppressed ? false : true,
+    suppressed: compliance?.is_suppressed ?? false,
   }
 }
 
@@ -940,8 +998,17 @@ function normalizeProspect(prospectRow, hydrated, phoneRow) {
     prospect_id: clean(pick(prospectRow?.prospect_id, hydrated?.prospect_id)),
     name,
     language: pick(hydrated?.best_language, prospectRow?.language_preference),
-    age: num(pick(prospectRow?.calculated_age, prospectRow?.age, prospectRow?.prospect_age, hydrated?.prospect_age, hydrated?.calculated_age)),
+    age: num(pick(
+      prospectRow?.calculated_age,
+      prospectRow?.age,
+      prospectRow?.prospect_age,
+      hydrated?.prospect_age,
+      hydrated?.calculated_age,
+      ageFromMob(prospectRow?.mob),
+      ageFromMob(hydrated?.mob),
+    )),
     occupation: pick(hydrated?.occupation, prospectRow?.occupation_group),
+    occupation_code: pick(hydrated?.occupation_code),
     occupation_group: pick(prospectRow?.occupation_group, hydrated?.occupation_group),
     household_income: pick(prospectRow?.est_household_income, hydrated?.est_household_income),
     net_asset_value: pick(prospectRow?.net_asset_value, hydrated?.net_asset_value),
@@ -953,8 +1020,7 @@ function normalizeProspect(prospectRow, hydrated, phoneRow) {
     likely_renter: prospectRow?.likely_renter ?? hydrated?.likely_renting ?? null,
     person_flags: parseDelimitedFlags(pick(prospectRow?.person_flags_text, hydrated?.person_flags_text)),
     matching_flags: parseDelimitedFlags(pick(prospectRow?.matching_flags, hydrated?.matching_flags)),
-    contact_score: num(pick(prospectRow?.contact_score_final, hydrated?.prospect_contact_score)),
-    phone_score: num(pick(prospectRow?.phone_score_final, hydrated?.prospect_phone_score)),
+    relationship_flags: parseDelimitedFlags(pick(prospectRow?.matching_flags, hydrated?.matching_flags, prospectRow?.person_flags_text)),
     best_email: pick(prospectRow?.best_email, hydrated?.prospect_best_email),
     contact_window: pick(phoneRow?.contact_window, hydrated?.best_contact_window),
     thread_priority: num(hydrated?.thread_priority),
@@ -998,26 +1064,42 @@ function normalizeOwner(ownerRow, hydrated) {
   }
 }
 
-function normalizePhone(phoneRow, hydrated, canonicalE164) {
+function normalizePhone(phoneRow, hydrated, canonicalE164, ownerRow, compliance) {
+  const alternates = [
+    pick(ownerRow?.best_phone_2),
+    pick(ownerRow?.best_phone_3),
+    pick(hydrated?.prospect_best_phone_2),
+  ].filter((v) => v && v !== canonicalE164)
+
   if (phoneRow) {
     return {
       status: 'available',
       number: pick(phoneRow.canonical_e164, phoneRow.phone, canonicalE164),
+      alternate_numbers: [...new Set(alternates)],
       type: phoneRow.phone_type || null,
-      carrier: null,
+      carrier: phoneRow.carrier || null,
       activity_status: phoneRow.activity_status || null,
+      activity_period: phoneRow.activity_status || null,
       usage: phoneRow.usage_12_months || phoneRow.usage_2_months || null,
+      phone_score: num(pick(phoneRow.phone_score_final, hydrated?.prospect_phone_score)),
       contact_score: num(phoneRow.contact_score_final),
       contact_window: pick(phoneRow.contact_window, hydrated?.best_contact_window),
       timezone: phoneRow.timezone || null,
       wrong_number: Boolean(phoneRow.wrong_number_at),
+      sms_eligible: compliance?.is_suppressed ? false : true,
+      delivery_eligible: compliance?.is_suppressed ? false : true,
+      suppressed: compliance?.is_suppressed ?? false,
+      suppression_reason: compliance?.suppressions?.[0]?.reason || null,
     }
   }
   if (canonicalE164) {
     return {
       status: 'available',
       number: canonicalE164,
+      alternate_numbers: [...new Set(alternates)],
       contact_window: hydrated?.best_contact_window || null,
+      sms_eligible: compliance?.is_suppressed ? false : true,
+      suppressed: compliance?.is_suppressed ?? false,
     }
   }
   return { status: 'missing' }
@@ -1197,7 +1279,12 @@ export async function buildDealIntelligenceDossier({
   const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
   const prospect = normalizeProspect(prospectRow, hydrated, phoneRow)
   const owner = normalizeOwner(ownerRow, hydrated)
-  const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164)
+  const compliance = {
+    suppressions: suppressions || [],
+    is_suppressed: Array.isArray(suppressions) && suppressions.length > 0,
+  }
+  const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164, ownerRow, compliance)
+  const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance)
 
   const census = censusRow
     ? {
@@ -1233,11 +1320,9 @@ export async function buildDealIntelligenceDossier({
     buyer_market: buyerMarket,
     buyer_matches: buyerMatches,
     census,
+    conversation_intelligence,
     activity_timeline: activity,
-    compliance: {
-      suppressions: suppressions || [],
-      is_suppressed: Array.isArray(suppressions) && suppressions.length > 0,
-    },
+    compliance,
     freshness: {
       property_current: Boolean(propertyRow || hydrated),
       acquisition_computed_at: acquisition?.computed_at || null,

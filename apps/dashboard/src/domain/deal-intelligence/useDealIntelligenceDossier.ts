@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
 import type { DealIntelligenceDossier, EngineProgressStage } from './deal-intelligence.types'
-import { ENGINE_STAGE_LABELS } from './deal-intelligence.types'
+import { ENGINE_STAGE_DISPLAY_ORDER, ENGINE_STAGE_LABELS } from './deal-intelligence.types'
 
 interface ThreadIdentity {
   threadKey?: string
@@ -80,7 +80,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     setEngineRunning(true)
     setEngineError(null)
     setEngineProgress(
-      (Object.keys(ENGINE_STAGE_LABELS) as EngineProgressStage[]).map((stage) => ({
+      ENGINE_STAGE_DISPLAY_ORDER.map((stage) => ({
         stage,
         status: 'running',
         label: ENGINE_STAGE_LABELS[stage],
@@ -117,7 +117,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
           if (!line.trim()) continue
           const event = JSON.parse(line)
           if (event.stage) {
-            const stageOrder = Object.keys(ENGINE_STAGE_LABELS)
+            const stageOrder = [...ENGINE_STAGE_DISPLAY_ORDER, 'calculating_confidence' as EngineProgressStage]
             const eventIndex = stageOrder.indexOf(event.stage)
             setEngineProgress((prev) =>
               prev.map((item) => {
