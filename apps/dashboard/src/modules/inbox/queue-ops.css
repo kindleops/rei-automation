@@ -3678,25 +3678,16 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 [data-nexus-theme="light"] .occ-root {
-  --occ-bg: #ffffff !important;
-  --occ-panel: #ffffff !important;
-  --occ-card: #ffffff !important;
-  --occ-border: rgba(0, 0, 0, 0.08) !important;
-  --occ-border-s: rgba(0, 0, 0, 0.15) !important;
-  --occ-text: #000000 !important;
-  --occ-muted: #1c1c1e !important;
-  --occ-dim: #636366 !important;
-  
-  background: #ffffff !important;
+  --occ-text: #111827 !important;
+  --occ-muted: #4b5563 !important;
+  --occ-dim: #6b7280 !important;
 }
 
 [data-nexus-theme="light"] .occ-topbar {
-  background: #ffffff !important;
   border-bottom: 1px solid var(--occ-border) !important;
 }
 
 [data-nexus-theme="light"] .occ-kpi-strip {
-  background: #f9f9fa !important;
   border-bottom: 1px solid var(--occ-border) !important;
 }
 
@@ -3999,3 +3990,373 @@
 
 /* Supersede the legacy page-scope label styling now that scope is dynamic */
 .occ-kpi-scope::after { content: none; }
+
+/* ══════════════════════════════════════════════════════════════════
+   V5 — Outbound Command Center refinement pass
+   Liquid glass · responsive layouts · density · confirmation · themes
+   ══════════════════════════════════════════════════════════════════ */
+
+.occ-atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 15% -5%, color-mix(in srgb, var(--occ-accent) 14%, transparent), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 85% 0%, color-mix(in srgb, var(--occ-blue) 10%, transparent), transparent 50%);
+  animation: occ-atmo-drift 28s ease-in-out infinite alternate;
+}
+@keyframes occ-atmo-drift {
+  0% { opacity: 0.55; transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0.85; transform: translate3d(-1%, 1%, 0) scale(1.02); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .occ-atmosphere, .occ-section-tab.is-active, .occ-kpi__value { animation: none !important; transition: none !important; }
+}
+
+.occ-root { position: relative; }
+.occ-root > *:not(.occ-atmosphere) { position: relative; z-index: 1; }
+
+.occ-command-header {
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  background: color-mix(in srgb, var(--occ-panel) 88%, transparent);
+}
+.occ-command-identity { display: flex; flex-direction: column; gap: 2px; }
+.occ-command-meta {
+  font-size: 10px;
+  color: var(--occ-dim);
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.occ-refresh-pill {
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--occ-accent) 18%, transparent);
+  color: var(--occ-accent);
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.occ-glass-rail {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--occ-panel) 72%, transparent);
+}
+.occ-kpi-strip.occ-glass-rail {
+  border-bottom: 1px solid var(--occ-border);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--occ-accent) 6%, transparent), transparent 40%),
+    color-mix(in srgb, var(--occ-panel) 80%, transparent);
+}
+.occ-kpi.is-loading .occ-kpi__value.is-pending { opacity: 0.45; }
+.occ-kpi__value { transition: color 180ms ease, opacity 180ms ease; }
+
+.occ-section-tab.is-active {
+  position: relative;
+  overflow: hidden;
+}
+.occ-section-tab.is-active::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, var(--occ-accent) 22%, transparent) 50%, transparent 70%);
+  animation: occ-tab-shimmer 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes occ-tab-shimmer {
+  0%, 100% { transform: translateX(-120%); }
+  50% { transform: translateX(120%); }
+}
+
+/* ── Density ─────────────────────────────────────────────────────── */
+.occ-density-select {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--occ-border);
+  background: rgba(0,0,0,0.12);
+  flex-shrink: 0;
+}
+.occ-density-btn {
+  border: none;
+  background: transparent;
+  color: var(--occ-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.occ-density-btn.is-active {
+  background: color-mix(in srgb, var(--occ-accent) 20%, transparent);
+  color: var(--occ-text);
+}
+.occ-root.is-density-command .occ-row { padding: 3px 10px; font-size: 11px; }
+.occ-root.is-density-comfortable .occ-row { padding: 10px 12px; }
+.occ-root.is-density-compact .occ-row { padding: 6px 10px; }
+
+/* ── Table row enrichment ────────────────────────────────────────── */
+.occ-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--occ-panel) 92%, transparent);
+}
+.occ-table-body.is-refreshing { opacity: 0.72; pointer-events: none; }
+.occ-row-wrap { border-bottom: 1px solid var(--occ-border); }
+.occ-row-wrap:nth-child(even) .occ-row { background: rgba(255,255,255,0.012); }
+.occ-row {
+  border-left: 3px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.occ-row.is-selected,
+.occ-row-wrap.is-selected .occ-row {
+  background: color-mix(in srgb, var(--occ-accent) 10%, transparent) !important;
+  border-left-color: var(--occ-accent);
+}
+.occ-row.is-status-red { border-left-color: var(--occ-red); }
+.occ-row.is-status-amber { border-left-color: var(--occ-amber); }
+.occ-row.is-status-green { border-left-color: var(--occ-green); }
+.occ-row.is-status-blue, .occ-row.is-status-cyan { border-left-color: var(--occ-cyan); }
+.occ-row:hover { background: rgba(255,255,255,0.035); }
+
+.occ-seller-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.occ-identity-glyph {
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  color: var(--occ-muted);
+  flex-shrink: 0;
+}
+.occ-identity-glyph.is-property { color: var(--occ-cyan); background: rgba(34,211,238,0.12); }
+.occ-contact-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: var(--occ-dim);
+  font-family: 'SF Mono', monospace;
+}
+.occ-seller-sub, .occ-seller-meta { color: var(--occ-dim); }
+.occ-block-cause { color: var(--occ-amber); font-size: 9px; }
+.occ-hist-warn { color: var(--occ-amber); display: inline-flex; margin-left: 4px; }
+.occ-approval-tag { color: var(--occ-amber); font-weight: 700; font-size: 9px; }
+.occ-row-preview {
+  padding: 8px 14px 10px 36px;
+  font-size: 11px;
+  color: var(--occ-muted);
+  background: rgba(0,0,0,0.12);
+  border-top: 1px dashed var(--occ-border);
+}
+.occ-row-preview p { margin: 0; white-space: pre-wrap; }
+
+/* ── Dossier glass ───────────────────────────────────────────────── */
+.occ-dossier { position: relative; overflow: hidden; }
+.occ-dossier__atmo {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--occ-accent) 12%, transparent), transparent 55%);
+}
+.occ-diag-collapse {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--occ-dim);
+}
+.occ-diag-collapse code {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.2);
+  word-break: break-word;
+  font-size: 9px;
+}
+.occ-diag-flag.is-hist {
+  color: var(--occ-amber);
+  background: rgba(245,158,11,0.1);
+}
+.occ-sample-badge {
+  font-size: 9px;
+  color: var(--occ-dim);
+  margin-left: 4px;
+}
+
+/* ── Confirmation modal ──────────────────────────────────────────── */
+.occ-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  padding: 20px;
+}
+.occ-confirm-modal {
+  position: relative;
+  width: min(480px, 100%);
+  border-radius: 14px;
+  border: 1px solid var(--occ-border-s);
+  background: color-mix(in srgb, var(--occ-panel) 94%, transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+.occ-confirm-modal__atmo {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--occ-accent) 16%, transparent), transparent 60%);
+  pointer-events: none;
+}
+.occ-confirm-modal__head {
+  display: flex;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  align-items: flex-start;
+}
+.occ-confirm-modal__title { margin: 0; font-size: 15px; font-weight: 700; }
+.occ-confirm-modal__sub { margin: 4px 0 0; font-size: 11px; color: var(--occ-dim); }
+.occ-confirm-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 0 18px 12px;
+}
+.occ-confirm-stat {
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--occ-border);
+  text-align: center;
+}
+.occ-confirm-stat__val { display: block; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.occ-confirm-stat__lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--occ-dim); }
+.occ-confirm-stat.is-green .occ-confirm-stat__val { color: var(--occ-green); }
+.occ-confirm-stat.is-amber .occ-confirm-stat__val { color: var(--occ-amber); }
+.occ-confirm-stat.is-red .occ-confirm-stat__val { color: var(--occ-red); }
+.occ-confirm-modal__scope { padding: 0 18px 10px; }
+.occ-confirm-modal__scope-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--occ-dim); display: block; margin-bottom: 6px; }
+.occ-confirm-modal__chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.occ-confirm-modal__note { margin: 0 18px 10px; font-size: 11px; color: var(--occ-muted); }
+.occ-confirm-modal__note.is-warn { color: var(--occ-amber); }
+.occ-confirm-modal__note.is-danger { color: var(--occ-red); }
+.occ-confirm-modal__phrase { display: flex; flex-direction: column; gap: 6px; padding: 0 18px 12px; font-size: 11px; color: var(--occ-dim); }
+.occ-confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--occ-border);
+}
+
+/* ── Timeline enrichment ─────────────────────────────────────────── */
+.occ-timeline-group__label {
+  padding: 6px 12px 2px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--occ-dim);
+}
+.occ-timeline-expl {
+  font-size: 10px;
+  color: var(--occ-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.occ-dossier-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--occ-border-s);
+  background: color-mix(in srgb, var(--occ-accent) 24%, var(--occ-panel));
+  color: var(--occ-text);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  cursor: pointer;
+}
+
+/* ── Responsive layouts ──────────────────────────────────────────── */
+.occ-root.is-layout-compact .occ-main { flex-direction: column; }
+.occ-root.is-layout-compact .occ-inspector { width: 100%; max-height: 220px; border-left: none; border-top: 1px solid var(--occ-border); }
+.occ-root.is-layout-compact .occ-section-view__body { padding: 8px; }
+.occ-root.is-layout-compact .occ-kpi:nth-child(n+6) { display: none; }
+.occ-root.is-layout-compact .occ-filter-tabs { display: none; }
+
+.occ-root.is-layout-medium .occ-main { flex-direction: column; }
+.occ-root.is-layout-medium .occ-inspector {
+  position: fixed;
+  right: 0; top: 0; bottom: 0;
+  width: min(340px, 92vw);
+  z-index: 30;
+  transform: translateX(100%);
+  transition: transform 220ms ease;
+  box-shadow: -12px 0 40px rgba(0,0,0,0.35);
+}
+.occ-root.is-layout-medium.is-dossier-open .occ-inspector { transform: translateX(0); }
+.occ-root.is-layout-medium .occ-kpi:nth-child(n+8) { display: none; }
+
+.occ-root.is-layout-expanded .occ-inspector { width: 280px; min-width: 240px; }
+.occ-root.is-layout-full .occ-inspector { width: 320px; }
+
+/* ── Light mode refinement (tinted glass, not flat white) ──────── */
+[data-nexus-theme="light"] .occ-root {
+  --occ-bg: #eef1f6 !important;
+  --occ-panel: rgba(255,255,255,0.78) !important;
+  --occ-card: rgba(255,255,255,0.92) !important;
+  --occ-border: rgba(15,23,42,0.08) !important;
+  --occ-border-s: rgba(15,23,42,0.14) !important;
+  background:
+    radial-gradient(ellipse 70% 45% at 10% -8%, rgba(16,185,129,0.08), transparent 55%),
+    radial-gradient(ellipse 50% 35% at 90% 0%, rgba(59,130,246,0.06), transparent 50%),
+    #eef1f6 !important;
+}
+[data-nexus-theme="light"] .occ-command-header,
+[data-nexus-theme="light"] .occ-glass-rail,
+[data-nexus-theme="light"] .occ-table-head {
+  background: rgba(255,255,255,0.82) !important;
+  box-shadow: 0 1px 0 rgba(15,23,42,0.06);
+}
+[data-nexus-theme="light"] .occ-row-wrap:nth-child(even) .occ-row { background: rgba(15,23,42,0.02); }
+[data-nexus-theme="light"] .occ-confirm-modal { background: rgba(255,255,255,0.94) !important; }
+
+/* ── Red Ops theme ───────────────────────────────────────────────── */
+[data-nexus-theme="red_ops"] .occ-root {
+  --occ-accent: var(--nx-accent, #ff1212);
+  --occ-bg: #0c0204;
+  --occ-panel: rgba(22,3,5,0.88);
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(255,18,18,0.14), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(120,10,10,0.2), transparent 50%),
+    #0c0204;
+}
+[data-nexus-theme="red_ops"] .occ-atmosphere {
+  background:
+    radial-gradient(ellipse 70% 45% at 30% 0%, rgba(255,18,18,0.18), transparent 60%),
+    radial-gradient(ellipse 50% 35% at 80% 100%, rgba(180,20,20,0.12), transparent 55%);
+}
+[data-nexus-theme="red_ops"] .occ-section-tab.is-active {
+  background: linear-gradient(180deg, rgba(255,18,18,0.2), rgba(255,18,18,0.06));
+  border-color: rgba(255,18,18,0.35);
+}
+[data-nexus-theme="red_ops"] .occ-kpi.is-active::after { background: var(--occ-accent); }
+[data-nexus-theme="red_ops"] .occ-status-pill.is-green { color: #4ade80; }
+[data-nexus-theme="red_ops"] .occ-status-pill.is-amber { color: #fbbf24; }
+[data-nexus-theme="red_ops"] .occ-status-pill.is-red { color: #f87171; }

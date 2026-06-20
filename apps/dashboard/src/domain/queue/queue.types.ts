@@ -119,7 +119,9 @@ export interface QueueItem {
   
   sellerFirstName: string | null
   sellerFullName: string | null
-  
+  activeProspectFullName?: string | null
+  masterOwnerDisplayName?: string | null
+
   propertyCity: string | null
   propertyState: string | null
   propertyZip: string | null

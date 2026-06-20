@@ -399,8 +399,17 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
 
     // Full owner/seller name resolution (Phase 5) — phone is the final fallback.
     const toPhoneEarly = asString(getFirst(row, ['to_phone_number', 'phone']), '')
+    const candidateSnapshot = asRecord(md.candidate_snapshot)
     const sellerName = resolveFullName(row, md, target, owner, toPhoneEarly)
     const nameIsFallbackPhone = Boolean(toPhoneEarly) && sellerName === toPhoneEarly
+    const activeProspectFullName = asString(
+      getFirst(targetSnapshot, ['prospect_full_name', 'active_prospect_full_name']),
+      asString(getFirst(candidateSnapshot, ['prospect_full_name']), ''),
+    ) || null
+    const masterOwnerDisplayName = asString(
+      getFirst(owner || {}, ['display_name']),
+      asString(getFirst(candidateSnapshot, ['owner_display_name']), asString(getFirst(targetSnapshot, ['owner_display_name']), '')),
+    ) || null
 
     const propertyAddress = asString(
       getFirst(target || {}, ['property_address_full', 'address_full']),
@@ -473,6 +482,8 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       sellerFirstName: asString(getFirst(target || {}, ['seller_first_name']), asString(getFirst(owner || {}, ['first_name']), '')) || null,
       sellerFullName: sellerName,
       sellerFullNameResolved: sellerName,
+      activeProspectFullName,
+      masterOwnerDisplayName,
       propertyAddress,
       propertyCity: asString(getFirst(target || {}, ['property_city']), asString(getFirst(property || {}, ['property_address_city']), '')) || null,
       propertyState: asString(getFirst(target || {}, ['property_state']), asString(getFirst(property || {}, ['property_address_state']), '')) || null,

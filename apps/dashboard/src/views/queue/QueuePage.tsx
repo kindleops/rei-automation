@@ -20,6 +20,24 @@ import { Icon } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'
 import { buildContextFromQueueItem } from '../../modules/inbox/active-context'
+import { QueueConfirmModal } from './components/QueueConfirmModal'
+import { useQueueLayout } from './hooks/useQueueLayout'
+import {
+  BLOCKED_STATUSES,
+  buildBulkActionPreview,
+  displayName,
+  isDelivered,
+  isFailed,
+  isSent,
+  isNonRetryableRow,
+  pct,
+  resolveSellerIdentity,
+  resolveStatusPresentation,
+  templateHealthWithSample,
+  type BulkActionPreview,
+  type QueueDensity,
+  type QueueSection,
+} from './queue-ui-helpers'
 import '../../modules/inbox/queue-ops.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -43,17 +61,10 @@ const relTime = (iso: string | null | undefined): string => {
 const fmtPhone = (p: string | null | undefined) =>
   p ? `…${p.slice(-4)}` : '—'
 
-const pct = (num: number, den: number) =>
-  den > 0 ? Math.round((num / den) * 100) : 0
-
 // ── Stage + name helpers (Phase 3 / Phase 5) ────────────────────────────────
 
 const resolveStageLabel = (item: QueueItem): string =>
   item.stageLabel ?? (item.stageCode ? STAGE_LABELS[item.stageCode] : '—')
-
-// Full seller/owner name with phone as the final fallback.
-const displayName = (item: QueueItem): string =>
-  item.sellerFullName || item.sellerName || item.toPhoneNumber || item.phone || '—'
 
 type StageFilter = 'all' | StageCode
 
@@ -140,34 +151,10 @@ const DATE_BASIS_LABELS: Record<QueueDateBasis, string> = {
 
 type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent'
 
-const STATUS_TONE: Record<string, string> = {
-  scheduled: 'blue', queued: 'blue', sending: 'cyan', sent: 'green',
-  delivered: 'green', failed: 'red', retry: 'red', blocked: 'amber',
-  held: 'amber', approval: 'amber', cancelled: 'muted',
-  paused_name_missing: 'amber', paused_invalid_queue_row: 'amber',
-  paused_max_retries: 'amber', paused_duplicate: 'amber',
-  paused_global_lock: 'amber', duplicate_blocked: 'muted',
-  incident_quarantine: 'red', expired: 'muted', replied_before_send: 'green',
-}
-
 const FAILURE_TONE: Record<string, string> = {
   Carrier: 'red', Compliance: 'red', Routing: 'amber',
   Template: 'amber', Payload: 'amber', Webhook: 'amber',
 }
-
-const BLOCKED_STATUSES = new Set([
-  'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
-  'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
-])
-
-// ── Send-metric source of truth (mirrors fetchQueueModel STATUS_BUCKET_VALUES) ─
-// Sent is the SUPERSET of every dispatched row, so sent >= delivered always.
-const DELIVERED_STATUSES = new Set(['delivered'])
-const FAILED_STATUSES = new Set(['failed', 'retry', 'retrying'])
-const SENT_STATUSES = new Set(['sent', 'delivered', 'failed', 'retry', 'retrying'])
-const isDelivered = (s: string) => DELIVERED_STATUSES.has(s)
-const isFailed = (s: string) => FAILED_STATUSES.has(s)
-const isSent = (s: string) => SENT_STATUSES.has(s) // reached provider (dispatched)
 
 const HEALTH_TONE: Record<string, string> = {
   healthy: 'green', watch: 'amber', degraded: 'amber', critical: 'red',
@@ -194,7 +181,8 @@ interface TemplateStat {
   violations21610: number
   deliveryPct: number
   failPct: number
-  health: 'healthy' | 'watch' | 'degraded' | 'critical'
+  health: 'healthy' | 'watch' | 'degraded' | 'critical' | 'insufficient'
+  healthLabel: string
   // Dossier detail (loaded page/range scope)
   stageLabel: string | null
   useCase: string
@@ -214,7 +202,7 @@ function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
     const name = i.templateName || 'No Template'
     const s = map.get(id) ?? {
       id, name, usage: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0,
-      violations21610: 0, deliveryPct: 0, failPct: 0, health: 'healthy',
+      violations21610: 0, deliveryPct: 0, failPct: 0, health: 'healthy', healthLabel: 'Healthy',
       stageLabel: null, useCase: '', language: '', sampleBody: '',
       markets: [], senders: [], firstSeen: null, lastSeen: null,
     }
@@ -247,7 +235,9 @@ function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
     // sent is the dispatched superset → delivered/failed are subsets of it.
     s.deliveryPct = pct(s.delivered, s.sent)
     s.failPct = pct(s.failed, s.sent)
-    s.health = healthFromPct(s.failPct)
+    const sample = templateHealthWithSample(s.sent, s.failPct)
+    s.health = sample.health === 'insufficient' ? 'insufficient' : sample.health
+    s.healthLabel = sample.label
     return s
   }).sort((a, b) => b.usage - a.usage)
 }
@@ -354,16 +344,24 @@ function buildMarketStats(items: QueueItem[], directory: ConfiguredMarket[] = []
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
 
-interface KpiCardProps { label: string; value: number | string; tone?: string; onClick?: () => void; active?: boolean; sub?: string }
+interface KpiCardProps {
+  label: string
+  value: number | string
+  tone?: string
+  onClick?: () => void
+  active?: boolean
+  sub?: string
+  loading?: boolean
+}
 
-const KpiCard = ({ label, value, tone, onClick, active, sub }: KpiCardProps) => (
+const KpiCard = ({ label, value, tone, onClick, active, sub, loading }: KpiCardProps) => (
   <button
     type="button"
-    className={cls('occ-kpi', tone && `is-${tone}`, active && 'is-active', onClick && 'is-clickable')}
+    className={cls('occ-kpi', tone && `is-${tone}`, active && 'is-active', onClick && 'is-clickable', loading && 'is-loading')}
     onClick={onClick}
-    disabled={!onClick}
+    disabled={!onClick || loading}
   >
-    <span className="occ-kpi__value">{value}</span>
+    <span className={cls('occ-kpi__value', loading && 'is-pending')}>{loading ? '—' : value}</span>
     <span className="occ-kpi__label">{label}</span>
     {sub && <span className="occ-kpi__sub">{sub}</span>}
   </button>
@@ -440,16 +438,19 @@ const HeroInspector = ({
   onAction: (action: string, id: string) => void
 }) => {
   if (!item) return null
-  const tone = STATUS_TONE[item.status] ?? 'muted'
+  const identity = resolveSellerIdentity(item)
+  const statusView = resolveStatusPresentation(item)
   const failLabel = item.failureCategory ? (FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')) : null
   const originLabel = item.automationSource || item.rowSource?.replace(/_/g, ' ') || 'Legacy Queue Row'
+  const retryBlocked = isNonRetryableRow(item)
 
   return (
     <aside className="occ-inspector occ-dossier">
+      <div className="occ-dossier__atmo" aria-hidden="true" />
       <div className="occ-dossier__header">
         <div className="occ-dossier__identity">
-          <strong className="occ-dossier__seller">{truncate(displayName(item), 30)}</strong>
-          <span className={cls('occ-status-pill', `is-${tone}`)}>{item.status.replace(/_/g, ' ')}</span>
+          <strong className="occ-dossier__seller">{truncate(identity.primary, 30)}</strong>
+          <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
         </div>
         <button type="button" className="occ-inspector__close" onClick={() => onAction('deselect', item.id)}>
           <Icon name="close" size={12} />
@@ -461,7 +462,9 @@ const HeroInspector = ({
         {/* Identity */}
         <div className="occ-insp-section">
           <div className="occ-insp-section-title">Identity</div>
-          <InspRow label="Full Name" value={displayName(item)} />
+          <InspRow label="Full Name" value={identity.primary} />
+          {identity.secondary && <InspRow label="Active Person" value={identity.secondary} />}
+          {identity.masterOwner && <InspRow label="Master Owner" value={identity.masterOwner} />}
           <InspRow label="Phone" value={item.toPhoneNumber} mono />
           <InspRow label="Property" value={truncate(item.propertyAddress, 40)} />
           {item.propertyCity && (
@@ -508,22 +511,28 @@ const HeroInspector = ({
         {/* Delivery */}
         <div className="occ-insp-section">
           <div className="occ-insp-section-title">Delivery</div>
-          <InspRow label="Status" value={item.status.replace(/_/g, ' ')} tone={tone} />
+          <InspRow label="Status" value={statusView.primary} tone={statusView.tone} />
+          {statusView.blocking && <InspRow label="Blocking Cause" value={statusView.blocking} tone="amber" />}
           <InspRow label="Provider Status" value={item.deliveryStatus} tone={item.deliveryStatus === 'delivered' ? 'green' : item.deliveryStatus === 'failed' ? 'red' : undefined} />
           {item.providerMessageId && <InspRow label="SID" value={truncate(item.providerMessageId, 22)} mono />}
           {item.textgridMessageId && <InspRow label="TG Message ID" value={truncate(item.textgridMessageId, 22)} mono />}
           {item.sentAt && <InspRow label="Sent At" value={relTime(item.sentAt)} />}
           {item.deliveredAt && <InspRow label="Delivered At" value={relTime(item.deliveredAt)} />}
           <InspRow label="Retries" value={`${item.retryCount} / ${item.maxRetries}`} />
-          <InspRow label="Retry Eligible" value={item.retryEligible ? 'Yes' : 'No'} tone={item.retryEligible ? 'green' : undefined} />
+          <InspRow label="Retry Eligible" value={retryBlocked ? 'No (non-retryable)' : item.retryEligible ? 'Yes' : 'No'} tone={item.retryEligible && !retryBlocked ? 'green' : undefined} />
         </div>
 
         {/* Failure details */}
         {(failLabel || item.pausedReason || item.blockedReason || item.guardReason) && (
           <div className="occ-insp-section occ-insp-section--failure">
-            <div className="occ-insp-section-title">Failure Details</div>
+            <div className="occ-insp-section-title">Failure</div>
             {failLabel && <InspRow label="Cause" value={failLabel} tone="red" />}
-            {item.failedReason && <InspRow label="Raw" value={truncate(item.failedReason, 48)} tone="red" />}
+            {item.failedReason && (
+              <details className="occ-diag-collapse">
+                <summary>Raw provider diagnostic</summary>
+                <code>{item.failedReason}</code>
+              </details>
+            )}
             {item.pausedReason && <InspRow label="Paused" value={item.pausedReason.replace(/_/g, ' ')} tone="amber" />}
             {item.blockedReason && <InspRow label="Blocked" value={item.blockedReason.replace(/_/g, ' ')} tone="amber" />}
             {item.guardReason && <InspRow label="Guard" value={item.guardReason.replace(/_/g, ' ')} tone="amber" />}
@@ -540,6 +549,17 @@ const HeroInspector = ({
         )}
 
         {/* Diagnostic flags */}
+        {statusView.historicalWarnings.length > 0 && (
+          <div className="occ-insp-section occ-insp-section--diag">
+            <div className="occ-insp-section-title">Historical Warnings</div>
+            <div className="occ-diag-flags">
+              {statusView.historicalWarnings.map(f => (
+                <span key={f} className="occ-diag-flag is-hist">{f}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {item.diagnosticFlags.length > 0 && (
           <div className="occ-insp-section occ-insp-section--diag">
             <div className="occ-insp-section-title">Diagnostics</div>
@@ -559,7 +579,7 @@ const HeroInspector = ({
             <Icon name="check" size={13} /> Approve
           </button>
         )}
-        {(item.status === 'failed' || item.status === 'retry') && item.retryEligible && (
+        {(item.status === 'failed' || item.status === 'retry') && item.retryEligible && !retryBlocked && (
           <button className="occ-action-btn is-primary" onClick={() => onAction('retry', item.id)}>
             <Icon name="zap" size={13} /> Retry
           </button>
@@ -596,10 +616,22 @@ const HeroInspector = ({
 
 const IntelPanel = ({
   items,
-  onGlobalAction,
+  section,
+  kpi,
+  templateStats,
+  senderStats,
+  marketStats,
+  failureStats,
+  onRequestConfirm,
 }: {
   items: QueueItem[]
-  onGlobalAction: (action: string) => void
+  section: QueueSection
+  kpi: { failed: number; blocked: number; approval: number; scheduled: number; queued: number }
+  templateStats: TemplateStat[]
+  senderStats: SenderStat[]
+  marketStats: MarketStat[]
+  failureStats: FailureCauseStat[]
+  onRequestConfirm: (action: string) => void
 }) => {
   const oneHourAgo = Date.now() - 3600000
 
@@ -634,46 +666,117 @@ const IntelPanel = ({
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)
   }, [items])
 
+  const degradedTemplates = templateStats.filter(t => t.health === 'degraded' || t.health === 'critical').length
+  const blockedSenders = senderStats.filter(s => s.state === 'blocked' || s.health === 'critical').length
+  const degradedMarkets = marketStats.filter(m => m.health === 'degraded' || m.health === 'critical').length
+  const noSenderMarkets = marketStats.filter(m => !m.senderExists).length
+  const retryableFailures = failureStats.filter(f => f.retryable).reduce((n, f) => n + f.count, 0)
+  const complianceFailures = failureStats.filter(f => f.category === 'Compliance').reduce((n, f) => n + f.count, 0)
+  const eventVelocity = items.filter(i => i.lastEventAt && Date.now() - new Date(i.lastEventAt).getTime() < 3600000).length
+
+  const sectionTitle: Record<QueueSection, string> = {
+    queue: 'Queue Operations',
+    templates: 'Template Health',
+    senders: 'Sender Fleet',
+    market: 'Market Posture',
+    failures: 'Failure Intelligence',
+    events: 'Event Stream',
+  }
+
   return (
-    <aside className="occ-inspector occ-intel">
+    <aside className={cls('occ-inspector occ-intel', `is-tab-${section}`)}>
       <div className="occ-intel__head">
         <span className="occ-intel__title">QUEUE INTELLIGENCE</span>
-        <span className="occ-intel__sub">Select a row for dossier</span>
+        <span className="occ-intel__sub">{sectionTitle[section]} · select a row for dossier</span>
       </div>
       <div className="occ-inspector__body">
 
-        <div className="occ-insp-section">
-          <div className="occ-insp-section-title">Live Ops / Hour</div>
-          <div className="occ-intel-grid">
-            {[
-              { val: activeSenders, lbl: 'Active Senders', tone: activeSenders > 0 ? '' : '' },
-              { val: deliveredLastHour, lbl: 'Delivered', tone: deliveredLastHour > 0 ? 'green' : '' },
-              { val: failedLastHour, lbl: 'Failed', tone: failedLastHour > 0 ? 'red' : '' },
-              { val: optOutsLastHour, lbl: 'Opt-Outs', tone: optOutsLastHour > 0 ? 'red' : '' },
-              { val: pendingRetries, lbl: 'Pending Retry', tone: pendingRetries > 0 ? 'amber' : '' },
-              { val: blockedContacts, lbl: 'Blocked', tone: blockedContacts > 10 ? 'amber' : '' },
-            ].map(({ val, lbl, tone }) => (
-              <div key={lbl} className={cls('occ-intel-stat', tone && `is-${tone}`)}>
-                <span className="occ-intel-stat__val">{val}</span>
-                <span className="occ-intel-stat__lbl">{lbl}</span>
+        {section === 'queue' && (
+          <>
+            <div className="occ-insp-section">
+              <div className="occ-insp-section-title">Live Ops / Hour</div>
+              <div className="occ-intel-grid">
+                {[
+                  { val: activeSenders, lbl: 'Active Senders' },
+                  { val: deliveredLastHour, lbl: 'Delivered', tone: 'green' },
+                  { val: failedLastHour, lbl: 'Failed', tone: failedLastHour > 0 ? 'red' : '' },
+                  { val: optOutsLastHour, lbl: 'Opt-Outs', tone: optOutsLastHour > 0 ? 'red' : '' },
+                  { val: pendingRetries, lbl: 'Pending Retry', tone: pendingRetries > 0 ? 'amber' : '' },
+                  { val: blockedContacts, lbl: 'Blocked', tone: blockedContacts > 0 ? 'amber' : '' },
+                ].map(({ val, lbl, tone }) => (
+                  <div key={lbl} className={cls('occ-intel-stat', tone && `is-${tone}`)}>
+                    <span className="occ-intel-stat__val">{val}</span>
+                    <span className="occ-intel-stat__lbl">{lbl}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            <div className="occ-insp-section">
+              <div className="occ-insp-section-title">Pending Work</div>
+              <InspRow label="Scheduled" value={kpi.scheduled} />
+              <InspRow label="Queued" value={kpi.queued} />
+              <InspRow label="Approval" value={kpi.approval} tone={kpi.approval > 0 ? 'amber' : undefined} />
+            </div>
+          </>
+        )}
+
+        {section === 'templates' && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Template Posture</div>
+            <InspRow label="Templates tracked" value={templateStats.length} />
+            <InspRow label="Degraded / critical" value={degradedTemplates} tone={degradedTemplates > 0 ? 'amber' : undefined} />
+            <InspRow label="Low-sample templates" value={templateStats.filter(t => t.sent < 5).length} />
           </div>
-        </div>
+        )}
+
+        {section === 'senders' && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Sender Fleet</div>
+            <InspRow label="Active senders" value={senderStats.filter(s => s.state === 'active').length} />
+            <InspRow label="Blocked / critical" value={blockedSenders} tone={blockedSenders > 0 ? 'red' : undefined} />
+            <InspRow label="21610 violations" value={senderStats.reduce((n, s) => n + s.violations21610, 0)} tone="red" />
+          </div>
+        )}
+
+        {section === 'market' && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Market Health</div>
+            <InspRow label="Healthy markets" value={marketStats.filter(m => m.health === 'healthy').length} tone="green" />
+            <InspRow label="Degraded markets" value={degradedMarkets} tone={degradedMarkets > 0 ? 'amber' : undefined} />
+            <InspRow label="No registered sender" value={noSenderMarkets} tone={noSenderMarkets > 0 ? 'red' : undefined} />
+          </div>
+        )}
+
+        {section === 'failures' && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Failure Totals</div>
+            <InspRow label="Retryable" value={retryableFailures} tone="green" />
+            <InspRow label="Non-retryable" value={failureStats.filter(f => !f.retryable).reduce((n, f) => n + f.count, 0)} />
+            <InspRow label="Compliance failures" value={complianceFailures} tone={complianceFailures > 0 ? 'red' : undefined} />
+          </div>
+        )}
+
+        {section === 'events' && (
+          <div className="occ-insp-section">
+            <div className="occ-insp-section-title">Event Velocity</div>
+            <InspRow label="Events / hour" value={eventVelocity} />
+            <InspRow label="Failed events" value={failedLastHour} tone={failedLastHour > 0 ? 'red' : undefined} />
+          </div>
+        )}
 
         <div className="occ-insp-section">
           <div className="occ-insp-section-title">Global Controls</div>
           <div className="occ-intel-actions">
-            <button className="occ-action-btn is-primary" onClick={() => onGlobalAction('retry-all-failed')}>
+            <button className="occ-action-btn is-primary" onClick={() => onRequestConfirm('retry-all-failed')}>
               <Icon name="zap" size={11} /> Retry All Failed
             </button>
-            <button className="occ-action-btn is-secondary" onClick={() => onGlobalAction('run-queue-now')}>
+            <button className="occ-action-btn is-secondary" onClick={() => onRequestConfirm('run-queue-now')}>
               <Icon name="send" size={11} /> Run Queue
             </button>
           </div>
         </div>
 
-        {topFailures.length > 0 && (
+        {section === 'queue' && topFailures.length > 0 && (
           <div className="occ-insp-section">
             <div className="occ-insp-section-title">Top Failure Causes</div>
             {topFailures.map(([cat, count]) => (
@@ -705,7 +808,8 @@ const TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose:
       {s.stageLabel && <span className="occ-tag">{s.stageLabel}</span>}
       {s.useCase && <span className="occ-tag is-muted">{s.useCase}</span>}
       {s.language && <span className="occ-tag is-muted">{s.language.toUpperCase()}</span>}
-      <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+      <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health === 'insufficient' ? 'watch' : s.health]}`)}>{s.healthLabel}</span>
+      {s.sent < 5 && <span className="occ-sample-badge">n={s.sent}</span>}
     </div>
 
     <div className="occ-tpl-dossier__metrics">
@@ -813,7 +917,8 @@ const TemplatesModule = ({ items, onViewRows }: { items: QueueItem[]; onViewRows
                 {s.failPct}%
               </div>
               <div className="occ-module-col occ-col-badge">
-                <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+                <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health === 'insufficient' ? 'watch' : s.health]}`)}>{s.healthLabel}</span>
+                {s.sent < 5 && <small className="occ-sample-badge">n={s.sent}</small>}
               </div>
             </button>
           ))}
@@ -1090,6 +1195,11 @@ const EVENT_ICON: Record<string, string> = {
 
 const TIMELINE_PAGE_SIZE = 30
 
+const TIMELINE_FILTERS = [
+  'all', 'scheduled', 'queued', 'sending', 'sent', 'delivered', 'failed', 'blocked',
+  'retry', 'opt-out', 'suppression', 'approval', 'workflow', 'provider receipt',
+] as const
+
 const EventTimelineModule = ({
   items,
   onSelectItem,
@@ -1098,6 +1208,7 @@ const EventTimelineModule = ({
   onSelectItem: (id: string) => void
 }) => {
   const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [groupBy, setGroupBy] = useState<'time' | 'campaign' | 'seller' | 'sender' | 'market'>('time')
   const [page, setPage] = useState(0)
 
   const sorted = useMemo(() =>
@@ -1106,21 +1217,37 @@ const EventTimelineModule = ({
       .sort((a, b) => new Date(b.lastEventAt ?? b.updatedAt).getTime() - new Date(a.lastEventAt ?? a.updatedAt).getTime())
   , [items])
 
-  // Available event types present in the data (status drives the event kind).
-  const typeOptions = useMemo(() => {
-    const s = new Set<string>()
-    for (const i of sorted) s.add(BLOCKED_STATUSES.has(i.status) ? 'blocked' : i.status)
-    return ['all', ...Array.from(s).sort()]
-  }, [sorted])
+  const matchesTimelineFilter = (item: QueueItem, filter: string): boolean => {
+    if (filter === 'all') return true
+    const statusKey = BLOCKED_STATUSES.has(item.status) ? 'blocked' : item.status
+    if (filter === 'opt-out') return item.failureCategory === 'recipient_opted_out'
+    if (filter === 'suppression') return item.failureCategory === 'blacklist_pair_21610' || item.failureCategory === 'suppression_blocked'
+    if (filter === 'workflow') return Boolean(item.workflowId || item.automationSource)
+    if (filter === 'provider receipt') return Boolean(item.providerMessageId || item.textgridMessageId || item.lastEventType)
+    if (filter === 'retry') return item.status === 'retry'
+    return statusKey === filter || item.status === filter
+  }
 
-  const filtered = useMemo(() => {
-    if (typeFilter === 'all') return sorted
-    return sorted.filter(i => (BLOCKED_STATUSES.has(i.status) ? 'blocked' : i.status) === typeFilter)
-  }, [sorted, typeFilter])
+  const filtered = useMemo(() => sorted.filter(i => matchesTimelineFilter(i, typeFilter)), [sorted, typeFilter])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / TIMELINE_PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
   const events = filtered.slice(safePage * TIMELINE_PAGE_SIZE, safePage * TIMELINE_PAGE_SIZE + TIMELINE_PAGE_SIZE)
+
+  const groupedEvents = useMemo(() => {
+    if (groupBy === 'time') return [{ key: 'timeline', label: '', items: events }]
+    const map = new Map<string, QueueItem[]>()
+    for (const item of events) {
+      const key = groupBy === 'campaign' ? (item.campaignName || 'No campaign')
+        : groupBy === 'seller' ? displayName(item)
+        : groupBy === 'sender' ? (item.fromPhoneNumber || 'No sender')
+        : (item.market || 'Unknown market')
+      const bucket = map.get(key) ?? []
+      bucket.push(item)
+      map.set(key, bucket)
+    }
+    return Array.from(map.entries()).map(([key, groupItems]) => ({ key, label: key, items: groupItems }))
+  }, [filtered, groupBy, events])
   const start = filtered.length === 0 ? 0 : safePage * TIMELINE_PAGE_SIZE + 1
   const end = Math.min((safePage + 1) * TIMELINE_PAGE_SIZE, filtered.length)
 
@@ -1132,9 +1259,16 @@ const EventTimelineModule = ({
           value={typeFilter}
           onChange={e => { setTypeFilter(e.target.value); setPage(0) }}
         >
-          {typeOptions.map(t => (
-            <option key={t} value={t}>{t === 'all' ? 'All event types' : t.replace(/_/g, ' ')}</option>
+          {TIMELINE_FILTERS.map(t => (
+            <option key={t} value={t}>{t === 'all' ? 'All events' : t.replace(/_/g, ' ')}</option>
           ))}
+        </select>
+        <select className="occ-filter-select" value={groupBy} onChange={e => setGroupBy(e.target.value as typeof groupBy)}>
+          <option value="time">Group: time</option>
+          <option value="campaign">Group: campaign</option>
+          <option value="seller">Group: seller/thread</option>
+          <option value="sender">Group: sender</option>
+          <option value="market">Group: market</option>
         </select>
         <span className="occ-timeline-count">{filtered.length.toLocaleString()} events</span>
       </div>
@@ -1142,37 +1276,47 @@ const EventTimelineModule = ({
         <div className="occ-module-empty">No events for this date range.</div>
       )}
       <div className="occ-timeline">
-        {events.map(i => {
-          const tone = STATUS_TONE[i.status] ?? 'muted'
-          const iconName = EVENT_ICON[i.status] ?? 'zap'
-          return (
-            <button
-              key={i.id}
-              type="button"
-              className="occ-timeline-row"
-              onClick={() => onSelectItem(i.id)}
-            >
-              <div className={cls('occ-timeline-icon', `is-${tone}`)}>
-                <Icon name={iconName as any} size={10} />
-              </div>
-              <div className="occ-timeline-connector" />
-              <div className="occ-timeline-content">
-                <div className="occ-timeline-main">
-                  <strong className="occ-timeline-seller">{truncate(i.sellerName, 24)}</strong>
-                  <span className={cls('occ-status-pill', `is-${tone}`)}>{i.status.replace(/_/g, ' ')}</span>
-                </div>
-                <div className="occ-timeline-meta">
-                  <span>{truncate(i.market, 14)}</span>
-                  {i.campaignName && <span>· {truncate(i.campaignName, 18)}</span>}
-                  {i.templateName && i.templateName !== 'Template not attached' && (
-                    <span>· {truncate(i.templateName, 16)}</span>
-                  )}
-                </div>
-              </div>
-              <span className="occ-timeline-time">{relTime(i.lastEventAt ?? i.updatedAt)}</span>
-            </button>
-          )
-        })}
+        {groupedEvents.map(group => (
+          <div key={group.key} className="occ-timeline-group">
+            {group.label && <div className="occ-timeline-group__label">{truncate(group.label, 40)}</div>}
+            {group.items.map(i => {
+              const statusView = resolveStatusPresentation(i)
+              const iconName = EVENT_ICON[i.status] ?? 'zap'
+              const exactTime = i.lastEventAt ?? i.updatedAt
+              return (
+                <button
+                  key={i.id}
+                  type="button"
+                  className="occ-timeline-row"
+                  onClick={() => onSelectItem(i.id)}
+                  title={exactTime ? new Date(exactTime).toLocaleString() : undefined}
+                >
+                  <div className={cls('occ-timeline-icon', `is-${statusView.tone}`)}>
+                    <Icon name={iconName as any} size={10} />
+                  </div>
+                  <div className="occ-timeline-connector" />
+                  <div className="occ-timeline-content">
+                    <div className="occ-timeline-main">
+                      <strong className="occ-timeline-seller">{truncate(displayName(i), 24)}</strong>
+                      <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
+                    </div>
+                    <div className="occ-timeline-meta">
+                      <span>{truncate(i.propertyAddress, 18)}</span>
+                      <span>· {truncate(i.market, 12)}</span>
+                      {i.stageLabel && <span>· {truncate(i.stageLabel, 10)} T{i.touchNumber}</span>}
+                      {i.templateName && i.templateName !== 'Template not attached' && (
+                        <span>· {truncate(i.templateName, 14)}</span>
+                      )}
+                      {i.fromPhoneNumber && <span>· …{i.fromPhoneNumber.slice(-4)}</span>}
+                    </div>
+                    <div className="occ-timeline-expl">{statusView.blocking || i.lastEventType || 'Queue event recorded'}</div>
+                  </div>
+                  <span className="occ-timeline-time">{relTime(exactTime)}</span>
+                </button>
+              )
+            })}
+          </div>
+        ))}
       </div>
       {filtered.length > TIMELINE_PAGE_SIZE && (
         <div className="occ-table-footer occ-timeline-footer">
@@ -1194,8 +1338,6 @@ const EventTimelineModule = ({
 
 // ── Bottom Module Tabs ──────────────────────────────────────────────────────
 
-type QueueSection = 'queue' | 'templates' | 'senders' | 'market' | 'failures' | 'events'
-
 const QUEUE_SECTIONS: Array<{ key: QueueSection; label: string; icon: string }> = [
   { key: 'queue', label: 'Queue Rows', icon: 'list' },
   { key: 'templates', label: 'Templates', icon: 'file-text' },
@@ -1210,63 +1352,95 @@ const QUEUE_SECTIONS: Array<{ key: QueueSection; label: string; icon: string }> 
 const QueueRow = ({
   item,
   isSelected,
+  isExpanded,
+  density,
   onClick,
 }: {
   item: QueueItem
   isSelected: boolean
+  isExpanded: boolean
+  density: QueueDensity
   onClick: () => void
 }) => {
-  const tone = STATUS_TONE[item.status] ?? 'muted'
-  const hasDiag = item.diagnosticFlags.length > 0
-  const failLabel = item.failureCategory ? (FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')) : null
+  const identity = resolveSellerIdentity(item)
+  const statusView = resolveStatusPresentation(item)
   const failTone = item.failureGroup ? (FAILURE_TONE[item.failureGroup] ?? 'amber') : null
   const stageLabel = resolveStageLabel(item)
   const stageTone = item.stageCode ? (STAGE_TONE[item.stageCode] ?? 'muted') : 'muted'
+  const cityState = [item.propertyCity, item.propertyState].filter(Boolean).join(', ')
+  const workflowLane = item.automationSource || item.rowSource?.replace(/_/g, ' ') || 'Queue'
+  const hasHistorical = statusView.historicalWarnings.length > 0
 
   return (
-    <button
-      type="button"
-      className={cls('occ-row', isSelected && 'is-selected', hasDiag && 'has-diag')}
-      onClick={onClick}
-    >
-      <div className="occ-cell occ-cell--seller">
-        <strong className={hasDiag ? 'is-amber' : ''}>{truncate(displayName(item), 24)}</strong>
-        <small>{truncate(item.propertyAddress, 28)}</small>
-      </div>
-      <div className="occ-cell occ-cell--stage">
-        {item.stageCode
-          ? <span className={cls('occ-stage-pill', `is-${stageTone}`)}>{stageLabel}</span>
-          : <span className="occ-stage-pill is-muted">—</span>}
-        <small>Touch {item.touchNumber}</small>
-      </div>
-      <div className="occ-cell occ-cell--campaign">
-        <span>{truncate(item.campaignName ?? item.automationSource ?? item.useCase, 18)}</span>
-        <small>{truncate(item.market, 14)}</small>
-      </div>
-      <div className="occ-cell occ-cell--template">
-        {truncate(item.templateName, 20)}
-      </div>
-      <div className="occ-cell occ-cell--from occ-mono">
-        {fmtPhone(item.fromPhoneNumber)}
-      </div>
-      <div className="occ-cell occ-cell--scheduled">
-        {relTime(item.scheduledForLocal)}
-      </div>
-      <div className="occ-cell occ-cell--status">
-        <span className={cls('occ-status-pill', `is-${tone}`)}>
-          {item.status.replace(/_/g, ' ')}
-        </span>
-      </div>
-      <div className="occ-cell occ-cell--failure">
-        {failLabel
-          ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{failLabel}</span>
-          : <span className="occ-fail-pill" style={{ opacity: 0.3 }}>—</span>
-        }
-      </div>
-      <div className="occ-cell occ-cell--event">
-        {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
-      </div>
-    </button>
+    <div className={cls('occ-row-wrap', isSelected && 'is-selected', isExpanded && 'is-expanded', `is-density-${density}`)}>
+      <button
+        type="button"
+        className={cls('occ-row', `is-status-${statusView.tone}`, isSelected && 'is-selected', hasHistorical && 'has-hist-warn')}
+        onClick={onClick}
+        style={{ '--occ-row-accent': `var(--occ-${statusView.tone}, var(--occ-muted))` } as React.CSSProperties}
+      >
+        <div className="occ-cell occ-cell--seller" title={identity.primary}>
+          <div className="occ-seller-line">
+            <span className={cls('occ-identity-glyph', `is-${identity.glyph}`)} aria-hidden="true">
+              <Icon name={identity.glyph === 'property' ? 'home' : 'user'} size={10} />
+            </span>
+            <strong>{truncate(identity.primary, 26)}</strong>
+            {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
+          </div>
+          {identity.secondary && <small className="occ-seller-sub">{truncate(identity.secondary, 24)}</small>}
+          <small>{truncate(item.propertyAddress, 28)}</small>
+          {cityState && <small className="occ-seller-meta">{cityState}</small>}
+        </div>
+        <div className="occ-cell occ-cell--stage">
+          {item.stageCode
+            ? <span className={cls('occ-stage-pill', `is-${stageTone}`)}>{stageLabel}</span>
+            : <span className="occ-stage-pill is-muted">—</span>}
+          <small>Touch {item.touchNumber} · {truncate(workflowLane, 14)}</small>
+          {item.requiresApproval && <small className="occ-approval-tag">Approval</small>}
+        </div>
+        <div className="occ-cell occ-cell--campaign">
+          <span>{truncate(item.campaignName ?? item.automationSource ?? item.useCase, 18)}</span>
+          <small>{truncate(item.market, 14)}</small>
+          {item.campaignTargetId && <small className="occ-seller-meta">Target linked</small>}
+        </div>
+        <div className="occ-cell occ-cell--template" title={item.templateName}>
+          <span>{truncate(item.templateName, 20)}</span>
+          {item.templateId && <small className="occ-mono">{truncate(item.templateId, 16)}</small>}
+          <small>{item.language?.toUpperCase()}</small>
+        </div>
+        <div className="occ-cell occ-cell--from">
+          <span className="occ-mono">{item.fromPhoneNumber ? fmtPhone(item.fromPhoneNumber) : '—'}</span>
+          <small>{truncate(item.market, 12)}</small>
+        </div>
+        <div className="occ-cell occ-cell--scheduled">
+          <span>{relTime(item.scheduledForLocal)}</span>
+          <small>{item.timezone?.split('/').pop()}</small>
+        </div>
+        <div className="occ-cell occ-cell--status">
+          <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
+          {statusView.blocking && <small className="occ-block-cause">{truncate(statusView.blocking, 22)}</small>}
+          {hasHistorical && (
+            <span className="occ-hist-warn" title={statusView.historicalWarnings.join(' · ')}>
+              <Icon name="alert-circle" size={10} />
+            </span>
+          )}
+        </div>
+        <div className="occ-cell occ-cell--failure">
+          {statusView.blocking && isFailed(item.status)
+            ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{truncate(statusView.blocking, 18)}</span>
+            : <span className="occ-fail-pill is-muted">—</span>}
+        </div>
+        <div className="occ-cell occ-cell--event" title={item.lastEventAt ?? undefined}>
+          {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
+          {item.lastEventType && <small>{truncate(item.lastEventType, 12)}</small>}
+        </div>
+      </button>
+      {isExpanded && item.messageText && (
+        <div className="occ-row-preview">
+          <p>{item.messageText}</p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1280,9 +1454,11 @@ interface QueuePageProps {
 const PAGE_SIZE = 500 // default; overridable via the page-size selector
 
 export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = {}) => {
+  const { rootRef, layoutMode, paneWidth } = useQueueLayout()
   const [loading, setLoading] = useState(!initialData)
   const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusBucket>('all')
   const [marketFilter, setMarketFilter] = useState('all')
   const [templateFilter, setTemplateFilter] = useState('all')
@@ -1299,6 +1475,9 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   const [section, setSection] = useState<QueueSection>('queue')
   const [stageFilter, setStageFilter] = useState<StageFilter>('all')
   const [templateSearch, setTemplateSearch] = useState('')
+  const [density, setDensity] = useState<QueueDensity>('compact')
+  const [confirmPreview, setConfirmPreview] = useState<BulkActionPreview | null>(null)
+  const [dossierOpen, setDossierOpen] = useState(true)
   const realtimeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dateFilterMounted = useRef(false)
 
@@ -1450,16 +1629,22 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   const selectedItem = model?.items.find(i => i.id === selectedId) ?? null
 
   // ── Row click — select + dispatch global property context ────────────────
+  const requestGlobalAction = useCallback((action: string) => {
+    setConfirmPreview(buildBulkActionPreview(action, items, kpi.failed))
+  }, [items, kpi.failed])
+
   const handleSelectRow = useCallback((item: QueueItem) => {
     const next = item.id === selectedId ? null : item.id
     setSelectedId(next)
+    setDossierOpen(true)
+    if (layoutMode === 'medium' || layoutMode === 'compact') setExpandedId(next)
     if (next) {
       // Global property selection — dispatch custom event for cross-module sync
       const ctx = buildContextFromQueueItem(item, 'queue', 'open_queue')
       window.dispatchEvent(new CustomEvent('nexus:queue-select', { detail: ctx }))
       onSelectItem?.(item)
     }
-  }, [selectedId, onSelectItem])
+  }, [selectedId, onSelectItem, layoutMode])
 
   // ── Pagination controls ──────────────────────────────────────────────────
   const handlePageChange = useCallback((page: number) => {
@@ -1470,9 +1655,10 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
 
   // ── Row + global actions ─────────────────────────────────────────────────
   const handleAction = useCallback(async (action: string, id: string) => {
-    if (action === 'deselect') { setSelectedId(null); return }
+    if (action === 'deselect') { setSelectedId(null); setExpandedId(null); return }
 
     if (action === 'retry-all-failed') {
+      setConfirmPreview(null)
       setBusyAction('retry-all-failed')
       try {
         const res = await retryAllFailed()
@@ -1484,6 +1670,7 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
     }
 
     if (action === 'run-queue-now') {
+      setConfirmPreview(null)
       setBusyAction('run-queue-now')
       try {
         const res = await runQueueOnce()
@@ -1534,6 +1721,38 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   }, [model, refreshData, currentPage])
 
   // ── Filter tabs ──────────────────────────────────────────────────────────
+  const templateStatsMemo = useMemo(() => buildTemplateStats(items), [items])
+  const senderStatsMemo = useMemo(() => buildSenderStats(items), [items])
+  const marketStatsMemo = useMemo(() => buildMarketStats(items, model?.marketDirectory ?? []), [items, model?.marketDirectory])
+  const failureStatsMemo = useMemo<FailureCauseStat[]>(() => {
+    const map = new Map<string, { count: number; markets: Set<string>; senders: Set<string>; templates: Set<string> }>()
+    for (const i of items) {
+      const cause = deriveFailureCause(i)
+      if (!cause) continue
+      const entry = map.get(cause) ?? { count: 0, markets: new Set(), senders: new Set(), templates: new Set() }
+      entry.count++
+      if (i.market && i.market !== 'Market unknown') entry.markets.add(i.market)
+      if (i.fromPhoneNumber) entry.senders.add(i.fromPhoneNumber)
+      if (i.templateName && i.templateName !== 'Template not attached') entry.templates.add(i.templateName)
+      map.set(cause, entry)
+    }
+    return Array.from(map.entries()).map(([cause, e]) => {
+      const meta = FAILURE_META[cause] ?? FAILURE_META.unknown
+      return {
+        cause,
+        label: FAILURE_CAUSE_LABEL[cause] ?? cause.replace(/_/g, ' '),
+        category: meta.category,
+        count: e.count,
+        retryable: meta.retryable,
+        suppression: meta.suppression,
+        action: meta.action,
+        markets: Array.from(e.markets).sort(),
+        senders: Array.from(e.senders),
+        templates: Array.from(e.templates).sort(),
+      }
+    })
+  }, [items])
+
   const filterTabs: Array<{ key: StatusBucket; label: string; count: number; tone?: string }> = [
     { key: 'all', label: 'All', count: kpi.total },
     { key: 'scheduled', label: 'Scheduled', count: kpi.scheduled, tone: 'blue' },
@@ -1546,58 +1765,89 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
     { key: 'sent', label: 'Sent', count: kpi.sent, tone: 'green' },
   ]
 
-  if (loading) {
-    return (
-      <div className="occ-root occ-loading">
-        <span className="occ-spinner" />
-        <p>Syncing outbound queue…</p>
-      </div>
-    )
-  }
+  const isInitialLoad = loading && !model
+  const kpiLoading = loading && !kpiIsRange
 
   const totalCount = model?.totalCount ?? items.length
   const totalPages = model?.totalPages ?? 1
   const rowStart = totalCount === 0 ? 0 : currentPage * pageSize + 1
   const rowEnd = Math.min((currentPage + 1) * pageSize, totalCount)
 
+  if (isInitialLoad) {
+    return (
+      <div ref={rootRef} className="occ-root occ-loading is-layout-full">
+        <span className="occ-spinner" />
+        <p>Syncing outbound queue…</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="occ-root">
+    <div
+      ref={rootRef}
+      className={cls(
+        'occ-root',
+        `is-layout-${layoutMode}`,
+        `is-pane-${paneWidth}`,
+        `is-density-${density}`,
+        dossierOpen && selectedItem && 'is-dossier-open',
+      )}
+    >
+      <div className="occ-atmosphere" aria-hidden="true" />
+      <QueueConfirmModal
+        preview={confirmPreview}
+        busy={busyAction !== null}
+        onConfirm={() => confirmPreview && handleAction(confirmPreview.action, '')}
+        onCancel={() => setConfirmPreview(null)}
+      />
 
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <div className="occ-topbar">
+      <div className="occ-topbar occ-command-header">
         <div className="occ-topbar__left">
-          <h1 className="occ-topbar__title">OUTBOUND COMMAND CENTER</h1>
-          <DateFilter
+          <div className="occ-command-identity">
+            <h1 className="occ-topbar__title">Outbound Command Center</h1>
+            <span className="occ-command-meta">
+              {DATE_PRESET_LABELS[datePreset]} · {DATE_BASIS_LABELS[dateBasis]} basis
+              {loading && <span className="occ-refresh-pill">Refreshing…</span>}
+            </span>
+          </div>
+          {layoutMode !== 'compact' && (
+            <DateFilter
             preset={datePreset}
             customFrom={customFrom}
             customTo={customTo}
             onPreset={p => setDatePreset(p)}
             onCustomFrom={setCustomFrom}
             onCustomTo={setCustomTo}
-          />
+            />
+          )}
         </div>
         <div className="occ-topbar__actions">
           <span className="occ-topbar__total">
             {rowStart}–{rowEnd} of {totalCount.toLocaleString()}
           </span>
-          <button
-            type="button"
-            className={cls('occ-action-btn is-primary', busyAction === 'retry-all-failed' && 'is-busy')}
-            disabled={busyAction !== null}
-            onClick={() => handleAction('retry-all-failed', '')}
-          >
-            <Icon name={busyAction === 'retry-all-failed' ? 'refresh-cw' : 'zap'} size={11} />
-            {busyAction === 'retry-all-failed' ? ' Retrying…' : ' Retry Failed'}
-          </button>
-          <button
-            type="button"
-            className={cls('occ-action-btn is-secondary', busyAction === 'run-queue-now' && 'is-busy')}
-            disabled={busyAction !== null}
-            onClick={() => handleAction('run-queue-now', '')}
-          >
-            <Icon name={busyAction === 'run-queue-now' ? 'refresh-cw' : 'send'} size={11} />
-            {busyAction === 'run-queue-now' ? ' Running…' : ' Run Queue'}
-          </button>
+          {layoutMode === 'full' && (
+            <>
+              <button
+                type="button"
+                className={cls('occ-action-btn is-primary', busyAction === 'retry-all-failed' && 'is-busy')}
+                disabled={busyAction !== null}
+                onClick={() => requestGlobalAction('retry-all-failed')}
+              >
+                <Icon name={busyAction === 'retry-all-failed' ? 'refresh-cw' : 'zap'} size={11} />
+                {busyAction === 'retry-all-failed' ? ' Retrying…' : ' Retry Failed'}
+              </button>
+              <button
+                type="button"
+                className={cls('occ-action-btn is-secondary', busyAction === 'run-queue-now' && 'is-busy')}
+                disabled={busyAction !== null}
+                onClick={() => requestGlobalAction('run-queue-now')}
+              >
+                <Icon name={busyAction === 'run-queue-now' ? 'refresh-cw' : 'send'} size={11} />
+                {busyAction === 'run-queue-now' ? ' Running…' : ' Run Queue'}
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={cls('occ-refresh-btn', loading && 'is-busy')}
@@ -1611,36 +1861,48 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
       </div>
 
       {/* ── KPI strip (range-accurate when server aggregation present) ── */}
-      <div className="occ-kpi-strip">
-        <KpiCard label="Scheduled" value={kpi.scheduled} tone={kpi.scheduled > 0 ? 'blue' : undefined} onClick={() => setStatusFilter('scheduled')} active={statusFilter === 'scheduled'} />
-        <KpiCard label="Queued"    value={kpi.queued}    tone={kpi.queued > 0 ? 'blue' : undefined}      onClick={() => setStatusFilter('queued')}    active={statusFilter === 'queued'} />
-        <KpiCard label="Sending"   value={kpi.sending}   tone={kpi.sending > 0 ? 'cyan' : undefined}     onClick={() => setStatusFilter('sending')}   active={statusFilter === 'sending'} />
-        <KpiCard label="Delivered" value={kpi.delivered} tone={kpi.delivered > 0 ? 'green' : undefined}  onClick={() => setStatusFilter('delivered')} active={statusFilter === 'delivered'} />
-        <KpiCard label="Sent"      value={kpi.sent}      tone={kpi.sent > 0 ? 'green' : undefined}       onClick={() => setStatusFilter('sent')}      active={statusFilter === 'sent'} />
-        <KpiCard label="Failed"    value={kpi.failed}    tone={kpi.failed > 0 ? 'red' : undefined}       onClick={() => setStatusFilter('failed')}    active={statusFilter === 'failed'} />
-        <KpiCard label="Blocked"   value={kpi.blocked}   tone={kpi.blocked > 0 ? 'amber' : undefined}    onClick={() => setStatusFilter('blocked')}   active={statusFilter === 'blocked'} />
-        <KpiCard label="Opt-Outs"  value={kpi.optOuts}   tone={kpi.optOuts > 0 ? 'red' : undefined} />
-        <KpiCard label="Approval"  value={kpi.approval}  tone={kpi.approval > 0 ? 'amber' : undefined}   onClick={() => setStatusFilter('approval')}  active={statusFilter === 'approval'} />
+      <div className="occ-kpi-strip occ-glass-rail">
+        <KpiCard label="Scheduled" value={kpi.scheduled} loading={kpiLoading} tone={kpi.scheduled > 0 ? 'blue' : undefined} onClick={() => setStatusFilter('scheduled')} active={statusFilter === 'scheduled'} />
+        <KpiCard label="Queued"    value={kpi.queued}    loading={kpiLoading} tone={kpi.queued > 0 ? 'blue' : undefined}      onClick={() => setStatusFilter('queued')}    active={statusFilter === 'queued'} />
+        <KpiCard label="Sending"   value={kpi.sending}   loading={kpiLoading} tone={kpi.sending > 0 ? 'cyan' : undefined}     onClick={() => setStatusFilter('sending')}   active={statusFilter === 'sending'} />
+        <KpiCard label="Delivered" value={kpi.delivered} loading={kpiLoading} tone={kpi.delivered > 0 ? 'green' : undefined}  onClick={() => setStatusFilter('delivered')} active={statusFilter === 'delivered'} />
+        <KpiCard label="Sent"      value={kpi.sent}      loading={kpiLoading} tone={kpi.sent > 0 ? 'green' : undefined}       onClick={() => setStatusFilter('sent')}      active={statusFilter === 'sent'} />
+        <KpiCard label="Failed"    value={kpi.failed}    loading={kpiLoading} tone={kpi.failed > 0 ? 'red' : undefined}       onClick={() => setStatusFilter('failed')}    active={statusFilter === 'failed'} />
+        <KpiCard label="Blocked"   value={kpi.blocked}   loading={kpiLoading} tone={kpi.blocked > 0 ? 'amber' : undefined}    onClick={() => setStatusFilter('blocked')}   active={statusFilter === 'blocked'} />
+        <KpiCard label="Opt-Outs"  value={kpi.optOuts}   loading={kpiLoading} tone={kpi.optOuts > 0 ? 'red' : undefined} />
+        <KpiCard label="Approval"  value={kpi.approval}  loading={kpiLoading} tone={kpi.approval > 0 ? 'amber' : undefined}   onClick={() => setStatusFilter('approval')}  active={statusFilter === 'approval'} />
         <span className={cls('occ-kpi-scope', kpiIsRange && 'is-range')} title={kpiIsRange ? 'Counts reflect the entire selected date range' : 'Counts reflect the current page'}>
           {kpiIsRange ? `${DATE_PRESET_LABELS[datePreset]} range` : 'page scope'}
         </span>
       </div>
 
       {/* ── Section selector (Phase 4) ──────────────────────────────── */}
-      <div className="occ-section-bar">
-        <div className="occ-section-tabs">
-          {QUEUE_SECTIONS.map(s => (
-            <button
-              key={s.key}
-              type="button"
-              className={cls('occ-section-tab', section === s.key && 'is-active')}
-              onClick={() => { setSection(s.key); if (s.key !== 'queue') setSelectedId(null) }}
-            >
-              <Icon name={s.icon as any} size={13} />
-              <span>{s.label}</span>
-              {s.key === 'failures' && kpi.failed > 0 && <span className="occ-section-tab__badge is-red">{kpi.failed}</span>}
-            </button>
-          ))}
+      <div className="occ-section-bar occ-glass-rail">
+        <div className="occ-section-tabs" role="tablist" aria-label="Queue command views">
+          {QUEUE_SECTIONS.map(s => {
+            const badge = s.key === 'failures' ? kpi.failed
+              : s.key === 'templates' ? templateStatsMemo.length
+              : s.key === 'senders' ? senderStatsMemo.length
+              : s.key === 'events' ? items.filter(i => i.lastEventAt).length
+              : s.key === 'market' ? marketStatsMemo.length
+              : 0
+            return (
+              <button
+                key={s.key}
+                type="button"
+                role="tab"
+                aria-selected={section === s.key}
+                className={cls('occ-section-tab', section === s.key && 'is-active')}
+                onClick={() => { setSection(s.key); if (s.key !== 'queue') setSelectedId(null) }}
+              >
+                <Icon name={s.icon as any} size={13} />
+                <span>{s.label}</span>
+                {badge > 0 && s.key !== 'queue' && (
+                  <span className={cls('occ-section-tab__badge', s.key === 'failures' && 'is-red')}>{badge > 999 ? '999+' : badge}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
         <label className="occ-date-basis">
           <span>Date basis</span>
@@ -1660,6 +1922,19 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
 
             {/* Filter bar */}
             <div className="occ-filter-bar">
+              <div className="occ-density-select" role="group" aria-label="Table density">
+                {(['comfortable', 'compact', 'command'] as QueueDensity[]).map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={cls('occ-density-btn', density === d && 'is-active')}
+                    onClick={() => setDensity(d)}
+                  >
+                    {d === 'comfortable' ? 'Comfortable' : d === 'compact' ? 'Compact' : 'Command'}
+                  </button>
+                ))}
+              </div>
+              {layoutMode !== 'compact' && (
               <div className="occ-filter-tabs">
                 {filterTabs.map(t => (
                   <button
@@ -1673,6 +1948,7 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
                   </button>
                 ))}
               </div>
+              )}
               <div className="occ-filter-selects">
                 <select className="occ-filter-select" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
                   {marketOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All Markets' : o}</option>)}
@@ -1715,12 +1991,14 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
             </div>
 
             {/* Table body */}
-            <div className="occ-table-body">
+            <div className={cls('occ-table-body', loading && 'is-refreshing')}>
               {filteredItems.map(item => (
                 <QueueRow
                   key={item.id}
                   item={item}
                   isSelected={selectedId === item.id}
+                  isExpanded={expandedId === item.id}
+                  density={density}
                   onClick={() => handleSelectRow(item)}
                 />
               ))}
@@ -1806,10 +2084,25 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
         )}
 
         {/* Inspector: row detail or queue intelligence */}
-        {selectedItem
-          ? <HeroInspector item={selectedItem} onAction={handleAction} />
-          : <IntelPanel items={items} onGlobalAction={action => handleAction(action, '')} />
-        }
+        {(layoutMode === 'full' || layoutMode === 'expanded' || dossierOpen) && (
+          selectedItem
+            ? <HeroInspector item={selectedItem} onAction={handleAction} />
+            : <IntelPanel
+                items={items}
+                section={section}
+                kpi={kpi}
+                templateStats={templateStatsMemo}
+                senderStats={senderStatsMemo}
+                marketStats={marketStatsMemo}
+                failureStats={failureStatsMemo}
+                onRequestConfirm={requestGlobalAction}
+              />
+        )}
+        {selectedItem && (layoutMode === 'medium' || layoutMode === 'compact') && (
+          <button type="button" className="occ-dossier-fab" onClick={() => setDossierOpen(v => !v)}>
+            <Icon name="file-text" size={14} />
+          </button>
+        )}
       </div>
     </div>
   )
