@@ -267,9 +267,16 @@ export const AdvancedFiltersModal = ({
 
           <div className="nx-ifm-main">
             <div className="nx-ifm-search">
-              <span className="nx-ifm-search-icon" aria-hidden="true">
-                <Icon name="search" size={17} className="nx-ifm-search-icon-svg" />
-              </span>
+              <svg
+                className="nx-ifm-search-glyph"
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                <path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+              </svg>
               <input
                 type="text"
                 className="nx-ifm-search-input"

@@ -450,3 +450,13 @@
   background: color-mix(in srgb, var(--nx-accent) 12%, transparent) !important;
   color: #020617 !important;
 }
+
+/* Advanced Filters modal is portaled to document.body (outside .nx-premium-inbox).
+   Pin search glyph size here so no upstream svg rule can stretch it in flex layout. */
+.nx-ifm-modal .nx-ifm-search-glyph {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  max-width: 14px !important;
+  flex: none !important;
+}
