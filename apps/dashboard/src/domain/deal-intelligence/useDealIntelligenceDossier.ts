@@ -22,6 +22,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [engineRunning, setEngineRunning] = useState(false)
+  const [engineError, setEngineError] = useState<string | null>(null)
   const [engineProgress, setEngineProgress] = useState<EngineProgress[]>([])
   const requestIdRef = useRef(0)
 
@@ -77,6 +78,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
   const runDecisionEngine = useCallback(async () => {
     if (!thread?.threadKey || !thread?.propertyId) return
     setEngineRunning(true)
+    setEngineError(null)
     setEngineProgress(
       (Object.keys(ENGINE_STAGE_LABELS) as EngineProgressStage[]).map((stage) => ({
         stage,
@@ -137,8 +139,10 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
       }
       await refresh()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'run_engine_failed')
-      setEngineProgress((prev) => prev.map((item, index) => (index === prev.length - 1 ? { ...item, status: 'error' } : item)))
+      setEngineError(err instanceof Error ? err.message : 'run_engine_failed')
+      setEngineProgress((prev) =>
+        prev.map((item) => (item.status === 'running' ? { ...item, status: 'error' } : item)),
+      )
     } finally {
       setEngineRunning(false)
     }
@@ -151,6 +155,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     refresh,
     runDecisionEngine,
     engineRunning,
+    engineError,
     engineProgress,
   }
 }

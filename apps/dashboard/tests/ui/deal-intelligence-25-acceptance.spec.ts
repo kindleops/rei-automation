@@ -44,11 +44,23 @@ async function verifyTulsa25Panel(page: Page) {
   await expect(shell).toContainText(/Tulsa/i)
   await expect(shell).toContainText(/SFR/i)
   await expect(shell).toContainText(/\$97/)
+  await expect(shell).toContainText(/Property Snapshot/i)
+  await expect(shell).toContainText(/Baseline Property Intelligence/i)
+  await expect(shell).toContainText(/Acquisition Decision Engine/i)
   await expect(shell).toContainText(/71/)
-  await expect(shell).toContainText(/85/)
-  await expect(shell).toContainText(/Fair/i)
   await expect(shell).toContainText(/Tax Delinquent|High Equity|Absentee/i)
-  await expect(shell).toContainText(/Full Decision Engine Not Run|Run Full Decision Engine/i)
+
+  const bodyText = await shell.innerText()
+  expect(bodyText).not.toMatch(/Attempted: ZIP/i)
+  expect(bodyText).not.toMatch(/Census enrichment not loaded/i)
+
+  const panelWidth = await page.evaluate(() => {
+    const shellEl = document.querySelector('.nx-deal-compact-shell') as HTMLElement | null
+    const scroll = document.querySelector('.nx-intelligence-panel.is-layout-compact .nx-intel-scroll-body') as HTMLElement | null
+    if (!shellEl || !scroll) return 0
+    return shellEl.getBoundingClientRect().width / scroll.getBoundingClientRect().width
+  })
+  expect(panelWidth).toBeGreaterThan(0.92)
 
   const media = page.locator('.nx-di25-media__surface')
   await expect(media).toBeVisible()
