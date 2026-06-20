@@ -1,11 +1,14 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import {
   HYDRATED_INBOX_SOURCE,
-  resolveFilterColumn,
-  resolveOptionsColumn,
   getInboxFilterCatalog,
 } from "./inbox-filter-catalog.js";
 import { parseAdvancedFiltersParam, hasActiveAdvancedFilters } from "./inbox-advanced-filters.js";
+import {
+  buildInboxFilterConditions,
+  collectPreserveValues,
+  resolveOptionsFieldSpec,
+} from "./inbox-filter-conditions.js";
 
 const clean = (v) => String(v ?? "").trim();
 const isActive = (v) => {
@@ -55,15 +58,6 @@ function normalizeFilters(raw = {}) {
   if (raw.personFlagsAll) out.personFlags = { mode: "all", values: raw.personFlagsAll };
   if (raw.personFlagsExclude) out.personFlags = { ...(out.personFlags || {}), exclude: raw.personFlagsExclude };
   return out;
-}
-
-function parseFlags(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.map(clean).filter(Boolean);
-  if (typeof value === "object") {
-    return Object.entries(value).filter(([, v]) => v === true || v === "true").map(([k]) => clean(k));
-  }
-  return String(value).split(/[,|;]+/).map((s) => clean(s)).filter(Boolean);
 }
 
 function applyEq(q, col, val) {
@@ -293,11 +287,15 @@ export function applyHydratedInboxFilters(query, rawFilters = {}) {
 
 export async function countHydratedInboxFilters(filters = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
+  const conditions = buildInboxFilterConditions(filters);
+  const { data, error } = await supabase.rpc("inbox_filter_match_count", { p_conditions: conditions });
+  if (!error) return Number(data ?? 0);
+
   let q = supabase.from(HYDRATED_INBOX_SOURCE).select("thread_key", { count: "exact", head: true });
   q = applyHydratedInboxFilters(q, filters);
-  const { count, error } = await q;
-  if (error) throw error;
-  return count ?? 0;
+  const fallback = await q;
+  if (fallback.error) throw fallback.error;
+  return fallback.count ?? 0;
 }
 
 export async function queryHydratedInboxThreads(params = {}, deps = {}) {
@@ -342,52 +340,38 @@ export async function queryHydratedInboxThreads(params = {}, deps = {}) {
   };
 }
 
-export async function queryInboxFilterOptions({ field, filters = {}, limit = 250 } = {}, deps = {}) {
+export async function queryInboxFilterOptions({ field, filters = {}, search = "" } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
-  const column = resolveOptionsColumn(field) || resolveFilterColumn(field) || field;
+  const fieldSpec = resolveOptionsFieldSpec(field);
+  const conditions = buildInboxFilterConditions(filters, {
+    excludeFieldKeys: fieldSpec.excludeKeys || [],
+    excludeColumns: fieldSpec.excludeColumns || [],
+  });
+  const preserveValues = collectPreserveValues(filters, fieldSpec);
+  const rpcArgs = {
+    p_field_kind: fieldSpec.kind,
+    p_column_name: fieldSpec.kind === "column" ? fieldSpec.column : null,
+    p_conditions: conditions,
+    p_search: clean(search) || null,
+    p_preserve_values: preserveValues,
+  };
 
-  if (field === "property_flags" || field === "propertyFlags") {
-    return queryFlagOptions(supabase, "property_flags_text", filters, limit);
-  }
-  if (field === "person_flags" || field === "personFlags") {
-    return queryFlagOptions(supabase, "person_flags_text", filters, limit);
-  }
-
-  let q = supabase.from(HYDRATED_INBOX_SOURCE).select(column).not(column, "is", null).neq(column, "").limit(8000);
-  q = applyHydratedInboxFilters(q, filters);
-  const { data, error } = await q;
+  const { data, error } = await supabase.rpc("inbox_filter_field_options", rpcArgs);
   if (error) throw error;
 
-  const counts = new Map();
-  for (const row of data || []) {
-    const val = clean(row[column]);
-    if (!val) continue;
-    counts.set(val, (counts.get(val) || 0) + 1);
-  }
-  const options = [...counts.entries()]
-    .map(([value, count]) => ({ value, label: value, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-    .slice(0, limit);
+  const options = (data || []).map((row) => ({
+    value: String(row.value ?? ""),
+    label: String(row.label ?? row.value ?? ""),
+    count: Number(row.count ?? 0),
+  }));
 
-  return { field, column, options, totalDistinct: counts.size };
-}
-
-async function queryFlagOptions(supabase, column, filters, limit) {
-  let q = supabase.from(HYDRATED_INBOX_SOURCE).select(column).not(column, "is", null).neq(column, "").limit(8000);
-  q = applyHydratedInboxFilters(q, filters);
-  const { data, error } = await q;
-  if (error) throw error;
-  const counts = new Map();
-  for (const row of data || []) {
-    for (const flag of parseFlags(row[column])) {
-      counts.set(flag, (counts.get(flag) || 0) + 1);
-    }
-  }
-  const options = [...counts.entries()]
-    .map(([value, count]) => ({ value, label: value, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-    .slice(0, limit);
-  return { field: column, column, options, totalDistinct: counts.size };
+  return {
+    field,
+    column: fieldSpec.kind === "column" ? fieldSpec.column : fieldSpec.kind,
+    options,
+    totalDistinct: options.length,
+    source: "inbox_threads_hydrated",
+  };
 }
 
 export { getInboxFilterCatalog, hasActiveAdvancedFilters, parseAdvancedFiltersParam, HYDRATED_INBOX_SOURCE };

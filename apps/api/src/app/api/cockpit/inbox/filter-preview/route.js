@@ -13,7 +13,12 @@ export async function GET(request) {
 
   try {
     const { searchParams } = new URL(request.url)
-    const filters = parseAdvancedFiltersParam(Object.fromEntries(searchParams.entries()))
+    const entries = Object.fromEntries(searchParams.entries())
+    const filters = {
+      ...parseAdvancedFiltersParam(entries),
+      filter: entries.filter || entries.inbox_bucket || undefined,
+      inbox_bucket: entries.inbox_bucket || entries.filter || undefined,
+    }
     const count = await countHydratedInboxFilters(filters)
     return NextResponse.json({ ok: true, count }, { status: 200, headers: cors })
   } catch (error) {

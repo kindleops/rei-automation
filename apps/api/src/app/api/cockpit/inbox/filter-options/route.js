@@ -17,10 +17,14 @@ export async function GET(request) {
     if (!field) {
       return NextResponse.json({ ok: false, error: 'field_required' }, { status: 400, headers: cors })
     }
-    const context = parseAdvancedFiltersParam(Object.fromEntries(searchParams.entries()))
-    delete context.field
-    const limit = Number(searchParams.get('limit') || 250)
-    const result = await queryInboxFilterOptions({ field, filters: context, limit })
+    const entries = Object.fromEntries(searchParams.entries())
+    const context = {
+      ...parseAdvancedFiltersParam(entries),
+      filter: entries.filter || entries.inbox_bucket || undefined,
+      inbox_bucket: entries.inbox_bucket || entries.filter || undefined,
+    }
+    const search = searchParams.get('search') || ''
+    const result = await queryInboxFilterOptions({ field, filters: context, search })
     return NextResponse.json({ ok: true, ...result }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
