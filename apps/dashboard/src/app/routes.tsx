@@ -154,6 +154,62 @@ const workflowStudioRoute = defineRoute<null>({
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
+const entityGraphRoute = defineRoute<null>({
+  path: '/entity-graph',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphPropertyRoute = defineRoute<null>({
+  path: '/entity-graph/property/:property_id',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphOwnerRoute = defineRoute<null>({
+  path: '/entity-graph/owner/:master_owner_id',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphProspectRoute = defineRoute<null>({
+  path: '/entity-graph/prospect/:prospect_id',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphContactRoute = defineRoute<null>({
+  path: '/entity-graph/contact/:type/:id',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphOrganizationRoute = defineRoute<null>({
+  path: '/entity-graph/organization/:id',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphMarketRoute = defineRoute<null>({
+  path: '/entity-graph/market/:market_key',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
+const entityGraphZipRoute = defineRoute<null>({
+  path: '/entity-graph/zip/:zip',
+  title: 'NEXUS | Entity Graph',
+  loader: async () => null,
+  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+})
+
 const routes = [
   rootRoute,
   inboxRoute,
@@ -170,6 +226,14 @@ const routes = [
   campaignCommandRoute,
   emailCommandRoute,
   workflowStudioRoute,
+  entityGraphRoute,
+  entityGraphPropertyRoute,
+  entityGraphOwnerRoute,
+  entityGraphProspectRoute,
+  entityGraphContactRoute,
+  entityGraphOrganizationRoute,
+  entityGraphMarketRoute,
+  entityGraphZipRoute,
 ]
 
 const legacyRouteAliases: Record<string, string> = {
@@ -194,8 +258,24 @@ const normalizePath = (path: string) => {
   return path.endsWith('/') ? path.slice(0, -1) : path
 }
 
+const matchEntityGraphRoute = (path: string) => {
+  if (path === '/entity-graph' || path.startsWith('/entity-graph/')) {
+    if (/^\/entity-graph\/property\/[^/]+$/.test(path)) return entityGraphPropertyRoute
+    if (/^\/entity-graph\/owner\/[^/]+$/.test(path)) return entityGraphOwnerRoute
+    if (/^\/entity-graph\/prospect\/[^/]+$/.test(path)) return entityGraphProspectRoute
+    if (/^\/entity-graph\/contact\/[^/]+\/[^/]+$/.test(path)) return entityGraphContactRoute
+    if (/^\/entity-graph\/organization\/[^/]+$/.test(path)) return entityGraphOrganizationRoute
+    if (/^\/entity-graph\/market\/[^/]+$/.test(path)) return entityGraphMarketRoute
+    if (/^\/entity-graph\/zip\/[^/]+$/.test(path)) return entityGraphZipRoute
+    return entityGraphRoute
+  }
+  return null
+}
+
 export const resolveRoute = (path: string) => {
   const normalizedPath = normalizePath(path)
+  const entityGraphMatch = matchEntityGraphRoute(normalizedPath)
+  if (entityGraphMatch) return entityGraphMatch
   const canonicalPath = legacyRouteAliases[normalizedPath] ?? normalizedPath
 
   return routes.find((route) => route.path === canonicalPath) ?? inboxRoute

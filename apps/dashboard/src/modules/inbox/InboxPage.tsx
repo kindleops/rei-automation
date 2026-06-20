@@ -119,6 +119,17 @@ import {
   type InboxWorkspaceView,
   type SetActiveContextOptions,
 } from './active-context'
+import { EntityGraphWorkspace } from '../entity-graph/EntityGraphWorkspace'
+import type { EntityGraphAction } from '../../domain/entity-graph/entity-graph.types'
+import {
+  activeInboxFromUniversalContext,
+  EMPTY_UNIVERSAL_ENTITY_CONTEXT,
+  mergeUniversalContexts,
+  parseEntityGraphDeepLink,
+  syncUniversalContextToUrl,
+  universalContextFromActiveInbox,
+} from '../../domain/entity-graph/universal-entity-context'
+import type { UniversalEntityContext } from '../../domain/entity-graph/entity-graph.types'
 import {
   applyInboxFilters,
   getAdvancedFilterOptions,
@@ -210,7 +221,7 @@ const isEnglishLanguage = (languageCode: string | null): boolean => {
 const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; description: string }> = [
   { key: 'thread', label: 'Inbox', description: 'Acquisition thread rail with priority buckets and live sellers.' },
   { key: 'sms_thread', label: 'Conversation View', description: 'Full seller conversation with quick actions and composer.' },
-  { key: 'list', label: 'List View', description: 'Dense sortable thread list across the acquisition inbox.' },
+  { key: 'list', label: 'Entity Graph', description: 'Universal entity selector across properties, owners, people, and contact methods.' },
   { key: 'deal_intelligence', label: 'Deal Intelligence', description: 'Full-screen seller, property, offer, and timeline intelligence.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signature timelines.' },
   { key: 'command_map', label: 'Command Map View', description: 'Cinematic acquisition map with ticker, pins, and live activity.' },
@@ -336,7 +347,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'queue', label: 'Queue', description: 'Queue execution and delivery status.' },
   { key: 'pipeline', label: 'Pipeline', description: 'Stage flow and deal movement.' },
   { key: 'calendar', label: 'Calendar', description: 'Follow-up schedule and event timeline.' },
-  { key: 'list', label: 'List', description: 'Dense sortable thread command list.' },
+  { key: 'list', label: 'Entity Graph', description: 'Universal entity search, dossier, and relationship selector.' },
   { key: 'command_map', label: 'Map', description: 'Command map for market and routing context.' },
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
@@ -560,6 +571,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [activeContext, setActiveContextState] = useState<ActiveInboxContext>({ sourceView: 'inbox' })
+  const [universalEntityContext, setUniversalEntityContext] = useState<UniversalEntityContext>(() => {
+    const deepLink = typeof window !== 'undefined' ? parseEntityGraphDeepLink(window.location.pathname) : null
+    return deepLink ?? EMPTY_UNIVERSAL_ENTITY_CONTEXT
+  })
   const [stageFilter, setStageFilter] = useState<InboxStageSelectValue>('all_stages')
   const [viewFilter, setViewFilter] = useState<InboxViewSelectValue>('all_messages' as any)
   const [savedPreset, setSavedPreset] = useState<InboxSavedFilterPreset>('my_priority')
@@ -1568,6 +1583,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const setActiveContext = useCallback((nextContext: ActiveInboxContext, options?: SetActiveContextOptions) => {
     setActiveContextState((current) => ({ ...current, ...nextContext }))
+    setUniversalEntityContext((current) => mergeUniversalContexts(current, {
+      entityType: nextContext.entityType ?? (nextContext.propertyId ? 'property' : nextContext.prospectId ? 'prospect' : nextContext.masterOwnerId || nextContext.sellerId ? 'master_owner' : current.entityType),
+      entityId: nextContext.entityId ?? nextContext.propertyId ?? nextContext.prospectId ?? nextContext.masterOwnerId ?? nextContext.sellerId ?? current.entityId,
+      propertyId: nextContext.propertyId ?? current.propertyId,
+      masterOwnerId: nextContext.masterOwnerId ?? nextContext.sellerId ?? current.masterOwnerId,
+      prospectId: nextContext.prospectId ?? current.prospectId,
+      threadKey: nextContext.threadKey ?? current.threadKey,
+      contactMethodType: nextContext.contactMethodType ?? current.contactMethodType,
+      contactMethodId: nextContext.contactMethodId ?? current.contactMethodId,
+      opportunityId: nextContext.opportunityId ?? current.opportunityId,
+    }))
 
     const nextThreadKey = nextContext.threadKey ?? null
     if (nextThreadKey) {
@@ -2951,6 +2977,81 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [setActiveContext, threads, viewFilter])
 
+  const handleUniversalEntityContextChange = useCallback((next: UniversalEntityContext, options?: { pushHistory?: boolean }) => {
+    setUniversalEntityContext(next)
+    setActiveContext(activeInboxFromUniversalContext(next, 'list'), { preserveCurrentViews: true })
+    if (options?.pushHistory) syncUniversalContextToUrl(next, 'push')
+  }, [setActiveContext])
+
+  const handleEntityGraphAction = useCallback((action: EntityGraphAction, context: UniversalEntityContext) => {
+    const threadMatch = context.threadKey
+      ? threads.find((thread) => (thread.threadKey || thread.id) === context.threadKey)
+      : threads.find((thread) =>
+        (context.propertyId && thread.propertyId === context.propertyId)
+        || (context.masterOwnerId && thread.ownerId === context.masterOwnerId)
+        || (context.prospectId && thread.prospectId === context.prospectId),
+      )
+
+    if (action === 'open_thread' || action === 'open_conversation') {
+      if (threadMatch) handleSelect(threadMatch.id)
+      else if (context.threadKey) setActiveContext({ threadKey: context.threadKey, ...activeInboxFromUniversalContext(context, 'list') }, { openThread: true })
+      return
+    }
+
+    if (action === 'create_manual_draft' || action === 'contact_owner' || action === 'contact_person' || action === 'email') {
+      if (threadMatch) {
+        handleSelect(threadMatch.id)
+        focusWorkspaceView('sms_thread')
+        return
+      }
+      setActiveContext(activeInboxFromUniversalContext(context, 'list'), { openThread: true, focusView: 'sms_thread' })
+      return
+    }
+
+    if (action === 'open_deal_intelligence') {
+      if (threadMatch) handleOpenDealIntelligence(threadMatch.id)
+      else if (context.propertyId) setActiveContext({ propertyId: context.propertyId, ...activeInboxFromUniversalContext(context, 'list') }, { preserveCurrentViews: true })
+      setSelectedWorkspaceViews(['deal_intelligence'])
+      return
+    }
+
+    if (action === 'show_on_map') {
+      setSelectedWorkspaceViews(['command_map'])
+      return
+    }
+
+    if (action === 'open_comp_intelligence') {
+      setSelectedWorkspaceViews(['comp_intelligence'])
+      return
+    }
+
+    if (action === 'open_buyer_match') {
+      setSelectedWorkspaceViews(['buyer_match'])
+      return
+    }
+  }, [focusWorkspaceView, handleOpenDealIntelligence, handleSelect, setActiveContext, threads])
+
+  useEffect(() => {
+    if (!selected) return
+    setUniversalEntityContext((current) => mergeUniversalContexts(current, universalContextFromActiveInbox({
+      ...activeContext,
+      threadKey: selected.threadKey || selected.id,
+      propertyId: selected.propertyId,
+      sellerId: selected.ownerId,
+      masterOwnerId: selected.ownerId,
+      prospectId: selected.prospectId,
+    })))
+  }, [activeContext, selected])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseEntityGraphDeepLink(window.location.pathname)
+      if (parsed) handleUniversalEntityContextChange(parsed)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [handleUniversalEntityContextChange])
+
   useEffect(() => {
     const handleCommandAction = (event: Event) => {
       const detail = (event as CustomEvent<Record<string, unknown>>).detail ?? {}
@@ -3789,16 +3890,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'list') {
       return (
-        <InboxConversationTable
-          threads={filtered}
-          selectedId={selected?.id ?? null}
-          sort={tableSort}
-          density={paneMode === 'multi' && paneWidth === '75' ? 'compact' : tableDensity}
-          layoutMode={layoutMode}
-          statCounts={listStatCounts}
-          onSortChange={setTableSort}
-          onDensityChange={setTableDensity}
-          onSelect={handleSelect}
+        <EntityGraphWorkspace
+          paneWidth={paneWidth}
+          themeMode={layoutState.theme}
+          universalContext={universalEntityContext}
+          onUniversalContextChange={handleUniversalEntityContextChange}
+          onAction={handleEntityGraphAction}
+          onSelectThreadKey={(threadKey) => {
+            const match = threads.find((thread) => (thread.threadKey || thread.id) === threadKey)
+            if (match) handleSelect(match.id)
+            else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'list') }, { openThread: true })
+          }}
         />
       )
     }
