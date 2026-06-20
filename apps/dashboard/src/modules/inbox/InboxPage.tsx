@@ -150,6 +150,7 @@ import './inbox-workspace-layout.css' // 25/50/75/100 workspace mode layout syst
 import '../../views/buyer-match/buyer-intel-upgrade.css'
 import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/copilot.css)
 import './conversation-redesign.css'
+import './conversation-composer-premium.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
 import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
@@ -3069,11 +3070,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   }, [setActiveContext])
 
-  const handleOperatorAction = useCallback(async (id: string, action: string) => {
+  const handleOperatorAction = useCallback(async (id: string, action: string, payload?: Record<string, unknown>) => {
     const thread = threads.find((t) => t.id === id)
     if (!thread) return
 
     if (DEV) console.log(`[OperatorAction] ${action} on ${id.slice(-8)}`)
+
+    if (action.startsWith('cancel_queue:') || action.startsWith('edit_queue:') || action.startsWith('approve_queue:')) {
+      await handleThreadAction(thread, action)
+      if (action.startsWith('edit_queue:')) {
+        const text = String(payload?.text ?? '').trim()
+        if (text) setDraftText(text)
+        setScheduledTemplatePayload({ text, template: null })
+        setSchedulePanelOpen(true)
+      }
+      return
+    }
 
     switch (action) {
       case 'refetch':
@@ -3125,10 +3137,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       case 'unread':
         await handleThreadAction(thread, 'unread')
         break
+      case 'open_dossier':
+        setActiveOverlay('dossier')
+        break
+      case 'add_note':
+        setActiveOverlay('dossier')
+        break
+      case 'mark_reviewed':
+        await handleThreadAction(thread, 'read')
+        break
+      case 'open_property':
+        handleOpenDealIntelligence(thread.id)
+        break
+      case 'ai_assist':
+        setActiveOverlay('ai')
+        break
       default:
         console.warn('[OperatorAction] Unknown action', action)
     }
-  }, [threads, handleWorkflowMutation, handleThreadAction, DEV])
+  }, [threads, handleWorkflowMutation, handleThreadAction, handleOpenDealIntelligence, setActiveOverlay, DEV])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
@@ -3646,7 +3673,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }
 
   const renderSmsThreadPane = (layoutMode: ReturnType<typeof getViewLayoutMode> = 'full') => (
-    <section className="nx-workspace-pane-surface nx-workspace-pane-surface--sms-thread">
+    <section className={cls('nx-workspace-pane-surface', 'nx-workspace-pane-surface--sms-thread', `is-layout-${layoutMode}`)}>
       <ChatThread
         thread={selected}
         messages={displayedMessagesWithTranslation}
@@ -3693,6 +3720,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         isTranslatingDraft={draftTranslationLoading}
         onTranslateDraft={handleTranslateDraft}
         autoTranslateDraft={!!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)}
+        layoutMode={layoutMode}
       />
     </section>
   )

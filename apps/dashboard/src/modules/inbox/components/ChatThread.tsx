@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
-import { formatMessageDateTime } from '../../../shared/formatters'
+import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
+import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
@@ -40,9 +41,6 @@ const fallback = (value: unknown, placeholder = '') => {
   return text || placeholder
 }
 
-const titleCase = (value: string) =>
-  value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const highlightText = (text: string, terms: string[]) => {
@@ -64,9 +62,12 @@ const messageTimestampMs = (message: ThreadMessage): number => {
   return Number.isFinite(ts) ? ts : 0
 }
 
-const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | 'sent' | 'delivered' => {
+type DeliveryBadge = 'sending' | 'sent' | 'delivered' | 'failed' | 'scheduled' | 'cancelled'
+
+const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
   const raw = String(message.rawStatus || '').toLowerCase()
+  const source = String(message.source || '').toLowerCase()
   const failedAt = String((message as { failedAt?: string | null; failed_at?: string | null }).failedAt
     ?? (message as { failed_at?: string | null }).failed_at
     ?? '').trim()
@@ -75,6 +76,8 @@ const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | '
     ?? (message as { is_final_failure?: boolean }).is_final_failure,
   )
   const statusEvidence = [status, raw].filter(Boolean)
+
+  if (statusEvidence.some((value) => value.includes('cancel'))) return 'cancelled'
 
   const hasFailure = isFinalFailure
     || Boolean(failedAt)
@@ -88,6 +91,11 @@ const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | '
     ))
   if (hasFailure) return 'failed'
 
+  const isScheduled = source === 'send_queue'
+    && statusEvidence.some((value) => value.includes('schedul') || value === 'queued' || value === 'approval' || value === 'pending')
+    && !message.sentAt
+  if (isScheduled) return 'scheduled'
+
   if (message.deliveredAt) return 'delivered'
   if (statusEvidence.some((value) => value.includes('deliver') && !value.includes('undeliv'))) return 'delivered'
 
@@ -97,23 +105,120 @@ const normalizeDeliveryBadge = (message: ThreadMessage): 'queued' | 'failed' | '
   if (statusEvidence.some((value) => (
     value.includes('pending')
     || value.includes('queue')
-    || value.includes('schedul')
     || value.includes('process')
     || value === 'queued'
     || value === 'sending'
-  ))) return 'queued'
+  ))) return 'sending'
 
-  return 'queued'
+  return 'sending'
 }
 
-const getDeliveryPillStyle = (badge: string) => {
+const deliveryBadgeLabel = (badge: DeliveryBadge): string => {
   switch (badge) {
-    case 'delivered': return { color: '#30d158', background: 'rgba(48, 209, 88, 0.12)', borderColor: 'rgba(48, 209, 88, 0.25)' }
-    case 'sent': return { color: '#64d2ff', background: 'rgba(100, 210, 255, 0.12)', borderColor: 'rgba(100, 210, 255, 0.25)' }
-    case 'failed': return { color: '#ff453a', background: 'rgba(255, 69, 58, 0.12)', borderColor: 'rgba(255, 69, 58, 0.25)' }
-    case 'queued': return { color: '#ffd60a', background: 'rgba(255, 214, 10, 0.12)', borderColor: 'rgba(255, 214, 10, 0.25)' }
-    default: return { color: 'rgba(155, 168, 192, 0.5)', background: 'transparent', borderColor: 'transparent' }
+    case 'sending': return 'Sending'
+    case 'sent': return 'Sent'
+    case 'delivered': return 'Delivered'
+    case 'failed': return 'Failed'
+    case 'scheduled': return 'Scheduled'
+    case 'cancelled': return 'Cancelled'
+    default: return badge
   }
+}
+
+const threadRecord = (thread: InboxWorkflowThread): Record<string, unknown> =>
+  thread as unknown as Record<string, unknown>
+
+const readNumber = (thread: InboxWorkflowThread, ...keys: string[]): number | null => {
+  const record = threadRecord(thread)
+  for (const key of keys) {
+    const value = Number(record[key])
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  return null
+}
+
+const readString = (thread: InboxWorkflowThread, ...keys: string[]): string => {
+  const record = threadRecord(thread)
+  for (const key of keys) {
+    const value = String(record[key] ?? '').trim()
+    if (value) return value
+  }
+  return ''
+}
+
+const resolvePropertyTypeLabel = (propertyType: string): string => {
+  const t = propertyType.toLowerCase()
+  if (!t || t === 'unknown type') return ''
+  if (t.includes('single') || t === 'sfr') return 'SFR'
+  if (t.includes('multi')) return 'Multifamily'
+  if (t.includes('condo')) return 'Condo'
+  if (t.includes('town')) return 'Townhome'
+  if (t.includes('land')) return 'Land'
+  if (t.includes('commercial')) return 'Commercial'
+  return propertyType
+}
+
+const resolveBuildingCondition = (thread: InboxWorkflowThread): string | null => {
+  const raw = readString(thread, 'buildingCondition', 'building_condition', 'condition')
+  const normalized = raw.trim()
+  if (!normalized) return null
+  if (['unknown', 'n/a', 'na', 'none', 'null'].includes(normalized.toLowerCase())) return null
+  return normalized
+}
+
+const resolveConversationPropertyFlags = (thread: InboxWorkflowThread): string[] => {
+  const decision = buildConversationDecision(thread)
+  const flags = new Set<string>()
+  const equityPercent = readNumber(thread, 'equityPercent', 'equity_percent')
+  const propertyType = readString(thread, 'propertyType', 'property_type')
+  const typeText = resolvePropertyTypeLabel(propertyType).toLowerCase()
+
+  const addIf = (condition: boolean, label: string) => { if (condition) flags.add(label) }
+
+  addIf(Boolean((thread as { absenteeOwner?: boolean }).absenteeOwner || (decision as { absentee_owner?: boolean }).absentee_owner), 'Absentee')
+  addIf(Boolean((thread as { probate?: boolean }).probate || (decision as { probate?: boolean }).probate), 'Probate')
+  addIf(Boolean((thread as { vacant?: boolean }).vacant || (decision as { vacant?: boolean }).vacant), 'Vacant')
+  addIf(Boolean((thread as { highEquity?: boolean }).highEquity || (decision as { high_equity?: boolean }).high_equity), 'High Equity')
+  if (equityPercent != null && equityPercent >= 50) flags.add('High Equity')
+  if (typeText.includes('multi')) flags.add('Multifamily')
+  if (typeText.includes('commercial')) flags.add('Commercial')
+
+  const order = ['Absentee', 'Probate', 'High Equity', 'Vacant', 'Multifamily', 'Commercial']
+  return order.filter((label) => flags.has(label))
+}
+
+const formatCompactMoney = (value: number | null): string => {
+  if (value == null || value <= 0) return '—'
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (value >= 1_000) return `$${Math.round(value / 1_000)}K`
+  return formatCurrency(value)
+}
+
+const formatEquityDisplay = (amount: number | null, percent: number | null): string => {
+  const pct = percent != null && percent > 0 ? formatPercent(percent) : null
+  const amt = amount != null && amount > 0 ? formatCompactMoney(amount) : null
+  if (pct && amt) return `${amt} / ${pct}`
+  return pct || amt || '—'
+}
+
+const formatDateSeparator = (iso: string): string => {
+  const date = new Date(iso)
+  if (!Number.isFinite(date.getTime())) return 'Earlier'
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+const sameCalendarDay = (leftIso: string, rightIso: string): boolean => {
+  const left = new Date(leftIso)
+  const right = new Date(rightIso)
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
 }
 
 // ── Conversation atmosphere class ─────────────────────────────────────────
@@ -348,60 +453,133 @@ export const ChatThread = ({
   const isCompact = layoutMode === 'compact'
   const atmosphereClass = getAtmosphereClass(thread, isSuppressed)
 
+  const propertyTypeRaw = readString(thread, 'propertyType', 'property_type')
+  const propertyTypeLabel = resolvePropertyTypeLabel(propertyTypeRaw) || propertyTypeRaw || '—'
+  const unitCount = readNumber(thread, 'unitCount', 'unit_count', 'units', 'number_of_units', 'units_count')
+  const estimatedValue = readNumber(thread, 'estimatedValue', 'estimated_value')
+  const equityAmount = readNumber(thread, 'equityAmount', 'equity_amount')
+  const equityPercent = readNumber(thread, 'equityPercent', 'equity_percent')
+  const buildingCondition = resolveBuildingCondition(thread)
+  const propertyFlags = resolveConversationPropertyFlags(thread)
+  const visibleFlags = propertyFlags.slice(0, 2)
+  const overflowFlagCount = Math.max(0, propertyFlags.length - visibleFlags.length)
+  const threadLanguage = readString(
+    thread,
+    'language',
+    'detected_language',
+    'seller_language',
+    'preferred_language',
+  ) || sellerLanguageLabel || 'Unknown'
+  const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
+
+  const renderHeaderActions = (withLabels = false) => (
+    <>
+      <button
+        type="button"
+        className={cls('nx-chat-action-icon', isStarred && 'is-active')}
+        title={isStarred ? 'Unstar thread' : 'Star thread'}
+        aria-pressed={isStarred}
+        onClick={() => onToggleStar?.()}
+      >
+        <Icon name="star" />
+        {withLabels && <span>{isStarred ? 'Unstar' : 'Star'}</span>}
+      </button>
+      <button
+        type="button"
+        className={cls('nx-chat-action-icon', thread.isPinned && 'is-active')}
+        title={thread.isPinned ? 'Unpin thread' : 'Pin thread'}
+        aria-pressed={thread.isPinned}
+        onClick={() => onTogglePin?.()}
+      >
+        <Icon name="bookmark" />
+        {withLabels && <span>{thread.isPinned ? 'Unpin' : 'Pin'}</span>}
+      </button>
+      <button
+        type="button"
+        className="nx-chat-action-icon"
+        title="Thread notes and details"
+        onClick={() => onThreadAction?.(thread.id, 'open_dossier')}
+      >
+        <Icon name="file-text" />
+        {withLabels && <span>Notes</span>}
+      </button>
+      <button
+        type="button"
+        className={cls('nx-chat-action-icon', thread.isArchived && 'is-active')}
+        title={thread.isArchived ? 'Restore to active inbox' : 'Archive thread (stays in All Messages)'}
+        onClick={() => onToggleArchive?.()}
+      >
+        <Icon name="archive" />
+        {withLabels && <span>{thread.isArchived ? 'Unarchive' : 'Archive'}</span>}
+      </button>
+    </>
+  )
+
   return (
     <div className={cls('nx-chat-container', `is-layout-${layoutMode}`, atmosphereClass)}>
       <div className="nx-chat-atmosphere" aria-hidden="true" />
 
-      {/* ── COMPACT CONTACT HEADER ─────────────────────────────────────── */}
       <header className="nx-chat-header-v2">
-        <div className="nx-chat-header-v2__left">
-          <div className="nx-chat-header-v2__identity">
-            <span className="nx-chat-header-v2__name">{ownerName}</span>
+        <div className="nx-chat-header-v2__left nx-conv-header-primary">
+          <div className="nx-conv-header-identity">
+            <span className="nx-conv-header-name">{ownerName}</span>
             {isRecovered && import.meta.env.DEV && (
-              <span className="nx-chat-recovered-badge" title="This thread was recovered from local selection history fallback.">
-                Recovered from row
+              <span className="nx-chat-recovered-badge" title="Recovered from local selection history fallback.">
+                Recovered
               </span>
             )}
             {phoneNumber && (
-              <span className="nx-chat-header-v2__phone">
+              <span className="nx-conv-header-phone">
                 <Icon name="phone" />
                 {phoneNumber}
               </span>
             )}
             {import.meta.env.DEV && (
-              <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug Thread">
+              <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug thread">
                 <Icon name="cpu" />
               </button>
             )}
           </div>
+
           {propertyAddress && (
-            <span className="nx-chat-header-v2__address">
-              <Icon name="pin" />
-              {propertyAddress}
-            </span>
+            <div className="nx-conv-header-address">{propertyAddress}</div>
           )}
-          <div className="nx-chat-header-v2__chips">
-            {market && <span className="nx-chat-chip nx-chat-chip--market">{market}</span>}
-            {isSuppressed && <span className="nx-chat-chip nx-chat-chip--danger"><Icon name="slash" />Suppressed</span>}
-            {backgroundLoading && <span className="nx-chat-chip nx-chat-chip--info"><Icon name="activity" style={{ width: 10, height: 10 }} />Syncing…</span>}
+
+          <div className="nx-conv-header-metrics" aria-label="Property context">
+            {market && <span className="nx-conv-metric is-accent">{market}</span>}
+            <span className="nx-conv-metric">{propertyTypeLabel}</span>
+            {unitCount != null && unitCount > 1 && (
+              <span className="nx-conv-metric">{unitCount} Units</span>
+            )}
+            <span className="nx-conv-metric">Value {formatCompactMoney(estimatedValue)}</span>
+            <span className="nx-conv-metric">Equity {equityDisplay}</span>
+            {buildingCondition && <span className="nx-conv-metric">{buildingCondition}</span>}
+            <span className="nx-conv-metric">{threadLanguage}</span>
+            {visibleFlags.map((flag) => (
+              <span key={flag} className="nx-conv-metric is-flag">{flag}</span>
+            ))}
+            {overflowFlagCount > 0 && (
+              <span className="nx-conv-metric is-flag">+{overflowFlagCount}</span>
+            )}
+            {isSuppressed && (
+              <span className="nx-conv-metric is-flag"><Icon name="slash" /> Suppressed</span>
+            )}
+            {backgroundLoading && (
+              <span className="nx-conv-metric"><Icon name="activity" style={{ width: 10, height: 10 }} /> Syncing</span>
+            )}
           </div>
         </div>
 
         {isCompact ? (
           <details className="nx-chat-actions-disclosure">
-            <summary><Icon name="more" /></summary>
+            <summary aria-label="Thread actions"><Icon name="more" /></summary>
             <div className="nx-chat-actions-disclosure__menu">
-              <button type="button" className={cls('nx-chat-action-icon', isStarred && 'is-active')} onClick={() => onToggleStar?.()}><Icon name="star" /><span>{isStarred ? 'Unstar' : 'Star'}</span></button>
-              <button type="button" className={cls('nx-chat-action-icon', thread.isPinned && 'is-active')} onClick={() => onTogglePin?.()}><Icon name="bookmark" /><span>{thread.isPinned ? 'Unpin' : 'Pin'}</span></button>
-              <button type="button" className="nx-chat-action-icon" onClick={() => onToggleArchive?.()}><Icon name="archive" /><span>{thread.isArchived ? 'Unarchive' : 'Archive'}</span></button>
+              {renderHeaderActions(true)}
             </div>
           </details>
         ) : (
           <div className="nx-chat-header-v2__actions">
-            <button type="button" className={cls('nx-chat-action-icon', isStarred && 'is-active')} title={isStarred ? 'Unstar' : 'Star'} onClick={() => onToggleStar?.()}><Icon name="star" /></button>
-            <button type="button" className={cls('nx-chat-action-icon', thread.isPinned && 'is-active')} title={thread.isPinned ? 'Unpin' : 'Pin'} onClick={() => onTogglePin?.()}><Icon name="bookmark" /></button>
-            <button type="button" className="nx-chat-action-icon" title="Notes"><Icon name="file-text" /></button>
-            <button type="button" className="nx-chat-action-icon" title={thread.isArchived ? 'Unarchive' : 'Archive'} onClick={() => onToggleArchive?.()}><Icon name="archive" /></button>
+            {renderHeaderActions(false)}
           </div>
         )}
       </header>
@@ -446,10 +624,16 @@ export const ChatThread = ({
             )
           }
 
-          return timelineMessages.map(msg => {
+          return timelineMessages.map((msg, index) => {
             const isOutbound = msg.direction === 'outbound'
             const deliveryBadge = normalizeDeliveryBadge(msg)
             const isFailed = deliveryBadge === 'failed'
+            const isScheduled = deliveryBadge === 'scheduled'
+            const isSending = deliveryBadge === 'sending'
+            const timestampIso = messageTimestampIso(msg)
+            const previousIso = index > 0 ? messageTimestampIso(timelineMessages[index - 1]) : null
+            const showDateSeparator = !previousIso || !sameCalendarDay(previousIso, timestampIso)
+            const queueId = String(msg.developerMeta?.queue_id ?? '').trim()
 
             const turn = phase3?.recentTurns?.find(t =>
               t.metadata?.inbound_message_id === msg.id ||
@@ -460,81 +644,114 @@ export const ChatThread = ({
             const isMessageTranslated = Boolean(threadTranslations?.[msg.id])
 
             return (
-              <div key={msg.id} className={cls('nx-bubble-wrap', isOutbound ? 'is-outbound' : 'is-inbound', isFailed && 'is-failed', !isOutbound && isTranslatingThread && 'is-translating')}>
-                <div className="nx-chat-bubble">
-                  {highlightText(msg.body, matchedKeywords.length ? matchedKeywords : [searchQuery])}
-
-                  {/* Phase 3 Turn Intelligence — compact inline */}
-                  {turn && (turn.intent_detected || turn.confidence_score) && (
-                    <div className="nx-turn-intel">
-                      {turn.intent_detected && (
-                        <span className="nx-turn-intent">
-                          {String(turn.intent_detected || '').replace(/_/g, ' ')}
-                        </span>
-                      )}
-                      {turn.confidence_score && (
-                        <span className="nx-turn-conf">
-                          {Math.round(turn.confidence_score * 100)}%
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="nx-bubble-footer">
-                  <time className="nx-bubble-time">{formatMessageDateTime(messageTimestampIso(msg))}</time>
-
-                  {isOutbound && (
-                    <div className="nx-delivery-row">
-                      <span
-                        className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}
-                        style={getDeliveryPillStyle(deliveryBadge)}
-                      >
-                        {titleCase(deliveryBadge)}
-                      </span>
-
-                      {deliveryBadge === 'failed' && (
-                        <button type="button" className="nx-retry-btn" onClick={() => onThreadAction?.(thread.id, 'retry_send')} title="Retry"><Icon name="refresh-cw" /></button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Translation badge — shows for all inbound messages */}
-                {!isOutbound && (
-                  isTranslatingThread ? (
-                    <div className="nx-translate-badge is-translating" title="Translating…">
-                      <span className="nx-translate-badge__spinner" />
-                      <span>Translating…</span>
-                    </div>
-                  ) : isMessageTranslated ? (
-                    <div
-                      className="nx-translate-badge is-translated"
-                      title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translated from ${sellerLanguageLabel}` : 'Translated'}
-                    >
-                      <Icon name="globe" />
-                      <span>Translated</span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="nx-translate-badge is-available"
-                      title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translate from ${sellerLanguageLabel}` : 'Translate message'}
-                      onClick={() => onTranslateThread?.()}
-                    >
-                      <Icon name="globe" />
-                      <span>Translate</span>
-                    </button>
-                  )
+              <div key={msg.id}>
+                {showDateSeparator && (
+                  <div className="nx-conv-date-separator" role="separator" aria-label={formatDateSeparator(timestampIso)}>
+                    <span>{formatDateSeparator(timestampIso)}</span>
+                  </div>
                 )}
 
-                {/* Hover affordances */}
-                <div className="nx-bubble-hover-actions">
-                  <button type="button" title="Copy" className="nx-bubble-action"><Icon name="link" /></button>
-                  {isFailed && isOutbound && (
-                    <button type="button" title="Retry" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'retry_send')}><Icon name="refresh-cw" /></button>
+                <div className={cls(
+                  'nx-bubble-wrap',
+                  isOutbound ? 'is-outbound' : 'is-inbound',
+                  isFailed && 'is-failed',
+                  isScheduled && 'is-scheduled',
+                  isSending && 'is-sending',
+                  !isOutbound && isTranslatingThread && 'is-translating',
+                )}>
+                  <div className="nx-chat-bubble">
+                    {highlightText(msg.body, matchedKeywords.length ? matchedKeywords : [searchQuery])}
+
+                    {turn && (turn.intent_detected || turn.confidence_score) && (
+                      <div className="nx-turn-intel">
+                        {turn.intent_detected && (
+                          <span className="nx-turn-intent">
+                            {String(turn.intent_detected || '').replace(/_/g, ' ')}
+                          </span>
+                        )}
+                        {turn.confidence_score && (
+                          <span className="nx-turn-conf">
+                            {Math.round(turn.confidence_score * 100)}%
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="nx-bubble-footer">
+                    <time className="nx-bubble-time" dateTime={timestampIso}>
+                      {formatMessageDateTime(timestampIso)}
+                    </time>
+
+                    {isOutbound && (
+                      <div className="nx-delivery-row">
+                        <span className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}>
+                          {deliveryBadgeLabel(deliveryBadge)}
+                        </span>
+
+                        {isScheduled && queueId && (
+                          <div className="nx-scheduled-actions">
+                            <button
+                              type="button"
+                              onClick={() => onThreadAction?.(thread.id, `edit_queue:${queueId}`, { text: msg.body })}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onThreadAction?.(thread.id, `cancel_queue:${queueId}`)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+
+                        {deliveryBadge === 'failed' && (
+                          <button type="button" className="nx-retry-btn" onClick={() => onThreadAction?.(thread.id, 'retry_send')} title="Retry send">
+                            <Icon name="refresh-cw" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {!isOutbound && (
+                    isTranslatingThread ? (
+                      <div className="nx-translate-badge is-translating" title="Translating…">
+                        <span className="nx-translate-badge__spinner" />
+                        <span>Translating…</span>
+                      </div>
+                    ) : isMessageTranslated ? (
+                      <div
+                        className="nx-translate-badge is-translated"
+                        title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translated from ${sellerLanguageLabel}` : 'Translated'}
+                      >
+                        <Icon name="globe" />
+                        <span>Translated</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="nx-translate-badge is-available"
+                        title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translate from ${sellerLanguageLabel}` : 'Translate message'}
+                        onClick={() => onTranslateThread?.()}
+                      >
+                        <Icon name="globe" />
+                        <span>Translate</span>
+                      </button>
+                    )
                   )}
-                  <button type="button" title="Note" className="nx-bubble-action"><Icon name="file-text" /></button>
+
+                  <div className="nx-bubble-hover-actions">
+                    {isFailed && isOutbound && (
+                      <button type="button" title="Retry send" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'retry_send')}>
+                        <Icon name="refresh-cw" />
+                      </button>
+                    )}
+                    <button type="button" title="Add note" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'add_note')}>
+                      <Icon name="file-text" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )
