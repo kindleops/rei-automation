@@ -245,6 +245,7 @@ const legacyRouteAliases: Record<string, string> = {
   '/workflows-v2': '/workflow-studio',
 
   '/properties': '/deal-intelligence',
+  '/list': '/entity-graph',
 
   '/markets': '/map',
   '/dossier': '/deal-intelligence',
@@ -259,15 +260,9 @@ const normalizePath = (path: string) => {
   return path.endsWith('/') ? path.slice(0, -1) : path
 }
 
+/** Always return the same route identity so deep-link selection never remounts the shell. */
 const matchEntityGraphRoute = (path: string) => {
   if (path === '/entity-graph' || path.startsWith('/entity-graph/')) {
-    if (/^\/entity-graph\/property\/[^/]+$/.test(path)) return entityGraphPropertyRoute
-    if (/^\/entity-graph\/owner\/[^/]+$/.test(path)) return entityGraphOwnerRoute
-    if (/^\/entity-graph\/prospect\/[^/]+$/.test(path)) return entityGraphProspectRoute
-    if (/^\/entity-graph\/contact\/[^/]+\/[^/]+$/.test(path)) return entityGraphContactRoute
-    if (/^\/entity-graph\/organization\/[^/]+$/.test(path)) return entityGraphOrganizationRoute
-    if (/^\/entity-graph\/market\/[^/]+$/.test(path)) return entityGraphMarketRoute
-    if (/^\/entity-graph\/zip\/[^/]+$/.test(path)) return entityGraphZipRoute
     return entityGraphRoute
   }
   return null

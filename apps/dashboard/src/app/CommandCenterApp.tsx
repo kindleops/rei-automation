@@ -63,6 +63,7 @@ const navItems: NavItem[] = [
   { path: '/inbox', label: 'Inbox', icon: 'inbox', shortcut: 'I', room: 'Inbox' },
   { path: '/conversation', label: 'Conversation', icon: 'inbox', shortcut: 'C', room: 'Conversation' },
   { path: '/deal-intelligence', label: 'Deal Intelligence', icon: 'target', shortcut: 'D', room: 'Deal Intelligence' },
+  { path: '/entity-graph', label: 'Entity Graph', icon: 'grid', shortcut: 'E', room: 'Entity Graph' },
   { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'stats', shortcut: 'O', room: 'Comp Intelligence' },
   { path: '/buyer-match', label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match' },
   { path: '/queue', label: 'Queue', icon: 'send', shortcut: 'Q', room: 'Queue' },
@@ -72,7 +73,7 @@ const navItems: NavItem[] = [
   { path: '/analytics', label: 'Analytics', icon: 'stats', shortcut: 'A', room: 'Analytics' },
   { path: '/closing-desk', label: 'Closing Desk', icon: 'file-text', shortcut: 'K', room: 'Closing Desk' },
   { path: '/campaign-command', label: 'Campaign Command', icon: 'send', shortcut: 'G', room: 'Campaign Command' },
-  { path: '/email-command', label: 'Email Command', icon: 'mail', shortcut: 'E', room: 'Email Command' },
+  { path: '/email-command', label: 'Email Command', icon: 'mail', shortcut: 'Y', room: 'Email Command' },
   { path: '/workflow-studio', label: 'Workflow Studio', icon: 'grid', shortcut: 'W', room: 'Workflow Studio' },
 ]
 
@@ -126,6 +127,8 @@ const canonicalizeRoutePath = (target?: string) => {
       return '/email-command'
     case '/workflows-v2':
       return '/workflow-studio'
+    case '/list':
+      return '/entity-graph'
     case '/properties':
     case '/dossier':
     case '/watchlists':

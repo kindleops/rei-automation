@@ -3740,7 +3740,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const isCustomMultiView = isMultiView && !isDefaultWorkspaceShell
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
-  const useFullscreenShell = !workspaceBlocked && !isMultiView && (isRouteFullscreen || isDealIntelligenceView)
+  const isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
+  const useFullscreenShell = !workspaceBlocked && !isMultiView && (isRouteFullscreen || isDealIntelligenceView || isEntityGraphView)
   const showLeftPanel = isDefaultWorkspaceShell
   const isDoubleSided = inboxMode === 'full_double'
   const showRightCommandPanel = isDefaultWorkspaceShell
@@ -3918,18 +3919,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'entity_graph') {
       return (
-        <EntityGraphWorkspace
-          paneWidth={paneWidth}
-          themeMode={layoutState.theme}
-          universalContext={universalEntityContext}
-          onUniversalContextChange={handleUniversalEntityContextChange}
-          onAction={handleEntityGraphAction}
-          onSelectThreadKey={(threadKey) => {
-            const match = threads.find((thread) => (thread.threadKey || thread.id) === threadKey)
-            if (match) handleSelect(match.id)
-            else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'entity_graph') }, { openThread: true })
-          }}
-        />
+        <section
+          className="nx-workspace-surface nx-workspace-surface--entity-graph"
+          style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}
+        >
+          <EntityGraphWorkspace
+            paneWidth={paneWidth}
+            themeMode={layoutState.theme}
+            universalContext={universalEntityContext}
+            onUniversalContextChange={handleUniversalEntityContextChange}
+            onAction={handleEntityGraphAction}
+            onSelectThreadKey={(threadKey) => {
+              const match = threads.find((thread) => (thread.threadKey || thread.id) === threadKey)
+              if (match) handleSelect(match.id)
+              else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'entity_graph') }, { openThread: true })
+            }}
+          />
+        </section>
       )
     }
 
@@ -4368,6 +4374,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             activeWorkspaceView === 'buyer_match' && 'is-buyer-mode',
             activeWorkspaceView === 'campaigns' && 'is-campaigns-mode',
             activeWorkspaceView === 'workflow_studio' && 'is-workflow-studio-mode',
+            activeWorkspaceView === 'entity_graph' && 'is-entity-graph-mode',
             isCommandMapView && 'is-command-map-mode',
           )}
         >

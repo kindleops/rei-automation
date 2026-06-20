@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EntityGraphDossier, EntityGraphNode } from '../../domain/entity-graph/entity-graph.types'
 
-type PositionedNode = EntityGraphNode & { x: number; y: number; fx?: number; fy?: number }
+type PositionedNode = EntityGraphNode & { x: number; y: number }
 
 const NODE_COLORS: Record<string, string> = {
   property: '56 189 248',
@@ -15,11 +15,24 @@ const NODE_COLORS: Record<string, string> = {
   thread: '248 113 113',
 }
 
+const LEGEND = [
+  { type: 'property', label: 'Property' },
+  { type: 'master_owner', label: 'Owner' },
+  { type: 'prospect', label: 'Person' },
+  { type: 'organization', label: 'Entity' },
+  { type: 'phone', label: 'Phone' },
+  { type: 'email', label: 'Email' },
+  { type: 'market', label: 'Market' },
+  { type: 'zip', label: 'ZIP' },
+]
+
 export function EntityGraphRelationshipGraph({
   dossier,
+  focusOnly = false,
   onNodeSelect,
 }: {
   dossier: EntityGraphDossier | null
+  focusOnly?: boolean
   onNodeSelect: (nodeId: string, nodeType: string, entityId: string) => void
 }) {
   const graph = dossier?.graph
@@ -29,62 +42,88 @@ export function EntityGraphRelationshipGraph({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({})
   const dragRef = useRef<{ mode: 'pan' | 'node'; nodeId?: string; x: number; y: number } | null>(null)
-  const viewportRef = useRef<HTMLDivElement | null>(null)
 
-  const width = 720
-  const height = 460
+  const width = 860
+  const height = 520
   const centerX = width / 2
   const centerY = height / 2
 
+  const visibleGraph = useMemo(() => {
+    if (!graph) return null
+    if (!focusOnly) return graph
+    const active = graph.nodes.find((n) => n.meta?.active)?.id
+    if (!active) return graph
+    const connected = new Set<string>([active])
+    for (const edge of graph.edges) {
+      if (edge.from === active) connected.add(edge.to)
+      if (edge.to === active) connected.add(edge.from)
+    }
+    return {
+      nodes: graph.nodes.filter((n) => connected.has(n.id)),
+      edges: graph.edges.filter((e) => connected.has(e.from) && connected.has(e.to)),
+    }
+  }, [focusOnly, graph])
+
   const positioned = useMemo(() => {
-    if (!graph?.nodes?.length) return [] as PositionedNode[]
-    const radius = Math.min(width, height) * 0.34
-    const neighbors = graph.nodes.filter((node) => !node.meta?.active)
-    return graph.nodes.map((node) => {
+    if (!visibleGraph?.nodes?.length) return [] as PositionedNode[]
+    const radius = Math.min(width, height) * 0.36
+    const neighbors = visibleGraph.nodes.filter((node) => !node.meta?.active)
+    return visibleGraph.nodes.map((node) => {
       const saved = nodePositions[node.id]
       if (saved) return { ...node, x: saved.x, y: saved.y }
       if (node.meta?.active) return { ...node, x: centerX, y: centerY }
       const index = neighbors.findIndex((entry) => entry.id === node.id)
-      const angle = (index / Math.max(neighbors.length, 1)) * Math.PI * 2
+      const angle = (index / Math.max(neighbors.length, 1)) * Math.PI * 2 - Math.PI / 2
       return {
         ...node,
         x: centerX + Math.cos(angle) * radius,
         y: centerY + Math.sin(angle) * radius,
       }
     })
-  }, [graph?.nodes, nodePositions])
+  }, [visibleGraph?.nodes, nodePositions])
 
   useEffect(() => {
-    setSelectedId(graph?.nodes.find((node) => node.meta?.active)?.id ?? null)
-    setZoom(1)
-    setOffset({ x: 0, y: 0 })
-  }, [dossier?.entityId, dossier?.entityType])
+    setSelectedId(visibleGraph?.nodes.find((node) => node.meta?.active)?.id ?? null)
+  }, [dossier?.entityId, dossier?.entityType, visibleGraph?.nodes])
 
-  if (!graph || graph.nodes.length === 0) {
-    return <div className="nx-entity-graph__empty">Select an entity to render its local relationship network.</div>
+  if (!visibleGraph || visibleGraph.nodes.length === 0) {
+    return (
+      <div className="eg-empty is-graph">
+        <strong>No graph edges</strong>
+        <span>This record has no linked relationships to visualize yet.</span>
+      </div>
+    )
   }
 
   const byId = new Map(positioned.map((node) => [node.id, node]))
 
-  const fitGraph = () => {
+  const recenter = () => {
     setZoom(1)
     setOffset({ x: 0, y: 0 })
+    setNodePositions({})
   }
 
   return (
-    <div className="nx-entity-graph__graph-shell">
-      <div className="nx-entity-graph__graph-toolbar">
-        <button type="button" onClick={() => setZoom((value) => Math.min(2.2, value + 0.12))}>Zoom In</button>
-        <button type="button" onClick={() => setZoom((value) => Math.max(0.55, value - 0.12))}>Zoom Out</button>
-        <button type="button" onClick={fitGraph}>Fit Graph</button>
-        <button type="button" onClick={() => { setNodePositions({}); fitGraph() }}>Reset View</button>
+    <div className="eg-graph">
+      <div className="eg-graph__toolbar">
+        <button type="button" className="eg-glass-btn" onClick={() => setZoom((v) => Math.min(2.4, v + 0.12))}>Zoom in</button>
+        <button type="button" className="eg-glass-btn" onClick={() => setZoom((v) => Math.max(0.5, v - 0.12))}>Zoom out</button>
+        <button type="button" className="eg-glass-btn" onClick={recenter}>Re-center</button>
       </div>
+
+      <div className="eg-graph__legend">
+        {LEGEND.map((item) => (
+          <span key={item.type} className="eg-graph__legend-item" data-type={item.type}>
+            {item.label}
+          </span>
+        ))}
+      </div>
+
       <div
-        ref={viewportRef}
-        className="nx-entity-graph__graph-canvas is-interactive"
+        className="eg-graph__viewport"
         onWheel={(event) => {
           event.preventDefault()
-          setZoom((current) => Math.min(2.2, Math.max(0.55, current + (event.deltaY < 0 ? 0.08 : -0.08))))
+          setZoom((current) => Math.min(2.4, Math.max(0.5, current + (event.deltaY < 0 ? 0.08 : -0.08))))
         }}
         onMouseDown={(event) => {
           const target = (event.target as HTMLElement).closest('[data-graph-node]') as HTMLElement | null
@@ -115,12 +154,14 @@ export function EntityGraphRelationshipGraph({
         onMouseUp={() => { dragRef.current = null }}
         onMouseLeave={() => { dragRef.current = null }}
       >
-        <div
-          className="nx-entity-graph__graph-stage"
-          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
-        >
-          <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="nx-entity-graph__graph-svg">
-            {graph.edges.map((edge) => {
+        <div className="eg-graph__stage" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
+          <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="eg-graph__svg">
+            <defs>
+              <marker id="eg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148, 163, 184, 0.65)" />
+              </marker>
+            </defs>
+            {visibleGraph.edges.map((edge) => {
               const from = byId.get(edge.from)
               const to = byId.get(edge.to)
               if (!from || !to) return null
@@ -128,8 +169,10 @@ export function EntityGraphRelationshipGraph({
               const midY = (from.y + to.y) / 2
               return (
                 <g key={`${edge.from}-${edge.to}`}>
-                  <line className="nx-entity-graph__graph-edge" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
-                  <text className="nx-entity-graph__graph-edge-label" x={midX} y={midY}>{edge.label}</text>
+                  <line className="eg-graph__edge" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
+                  {edge.label && (
+                    <text className="eg-graph__edge-label" x={midX} y={midY}>{edge.label}</text>
+                  )}
                 </g>
               )
             })}
@@ -142,7 +185,7 @@ export function EntityGraphRelationshipGraph({
                 key={node.id}
                 type="button"
                 data-graph-node={node.id}
-                className={`nx-entity-graph__graph-node${isActive ? ' is-active' : ''}${hoveredId === node.id ? ' is-hovered' : ''}`}
+                className={`eg-graph__node${isActive ? ' is-active' : ''}${hoveredId === node.id ? ' is-hovered' : ''}`}
                 data-type={node.type}
                 style={{
                   left: node.x,
@@ -150,23 +193,26 @@ export function EntityGraphRelationshipGraph({
                   ['--eg-node-accent' as string]: NODE_COLORS[node.type] ?? '148 163 184',
                 }}
                 onMouseEnter={() => setHoveredId(node.id)}
-                onMouseLeave={() => setHoveredId((current) => (current === node.id ? null : current))}
-                onClick={() => {
+                onMouseLeave={() => setHoveredId((c) => (c === node.id ? null : c))}
+                onClick={(e) => {
+                  e.stopPropagation()
                   setSelectedId(node.id)
                   onNodeSelect(node.id, node.type, entityId)
                 }}
                 title={node.label}
               >
-                <span>{node.label}</span>
+                <span className="eg-graph__node-label">{node.label}</span>
+                <span className="eg-graph__node-type">{node.type.replace(/_/g, ' ')}</span>
               </button>
             )
           })}
         </div>
       </div>
+
       {hoveredId && byId.get(hoveredId) && (
-        <div className="nx-entity-graph__graph-hover">
+        <div className="eg-graph__hover">
           <strong>{byId.get(hoveredId)?.label}</strong>
-          <span>{byId.get(hoveredId)?.type}</span>
+          <span>{byId.get(hoveredId)?.type?.replace(/_/g, ' ')}</span>
         </div>
       )}
     </div>

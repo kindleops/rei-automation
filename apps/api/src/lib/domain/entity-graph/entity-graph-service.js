@@ -1,6 +1,10 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
+  canonicalMarketKey,
   clean,
+  formatContactMethodPresentation,
+  formatPropertySummary,
+  formatReadablePhone,
   int,
   lower,
   normalizeAddressSearch,
@@ -10,6 +14,7 @@ import {
   parseJsonArray,
   phoneTail,
   relationshipLabel,
+  resolveEntityGraphMarket,
 } from './entity-graph-normalize.js'
 
 const DEFAULT_PAGE_SIZE = 25
@@ -436,30 +441,65 @@ const TAB_ENTITY_TYPES = {
 }
 
 function propertyToResult(row, score = 100) {
+  const summary = formatPropertySummary(row)
   return buildSearchResult({
     entityType: 'property',
     entityId: row.property_id,
-    title: row.property_address_full || row.property_id,
-    subtitle: [row.property_address_city, row.property_address_state, row.property_address_zip].filter(Boolean).join(', '),
-    badges: [row.market, row.normalized_asset_class || row.property_type].filter(Boolean),
-    score,
-    linkedCounts: { prospects: 1, contacts: 2 },
+    title: summary.title,
+    subtitle: summary.subtitle || undefined,
+    badges: [summary.marketLabel, summary.assetType].filter(Boolean),
+    score: summary.acquisitionScore ?? score,
+    linkedCounts: {
+      prospects: 1,
+      contacts: 2,
+      reachableContacts: 2,
+      avgAcquisitionScore: summary.acquisitionScore,
+    },
+    details: {
+      city: summary.city,
+      state: summary.state,
+      zip: summary.zip,
+      marketLabel: summary.marketLabel,
+      marketKey: summary.marketKey,
+      isUnmappedMarket: summary.isUnmappedMarket,
+      assetType: summary.assetType,
+      units: summary.units,
+      value: summary.value,
+      equity: summary.equity,
+      acquisitionScore: summary.acquisitionScore,
+      flagCount: summary.flagCount,
+      flags: summary.flags,
+    },
     contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
   })
 }
 
 function ownerToResult(row, score = 100) {
+  const phoneCount = parseJsonArray(row.joined_phone_ids_json).length
+  const emailCount = parseJsonArray(row.joined_email_ids_json).length
+  const propertyCount = row.property_count || parseJsonArray(row.joined_property_ids_json).length
+  const contactCount = phoneCount + emailCount
+  const coverage = propertyCount > 0 ? Math.round((contactCount / propertyCount) * 100) : undefined
   return buildSearchResult({
     entityType: 'master_owner',
     entityId: row.master_owner_id,
     title: row.display_name || row.master_owner_id,
-    subtitle: `${row.property_count || 0} properties`,
+    subtitle: `${propertyCount} properties · ${row.portfolio_total_value ? `$${Math.round(row.portfolio_total_value).toLocaleString()}` : 'Portfolio'}`,
     badges: [row.owner_type_guess, row.priority_tier].filter(Boolean),
-    score,
+    score: row.priority_score ?? score,
     linkedCounts: {
-      properties: row.property_count || parseJsonArray(row.joined_property_ids_json).length,
+      properties: propertyCount,
       prospects: parseJsonArray(row.joined_prospect_ids_json).length,
-      contacts: parseJsonArray(row.joined_phone_ids_json).length + parseJsonArray(row.joined_email_ids_json).length,
+      contacts: contactCount,
+      reachableContacts: contactCount,
+      contactCoverage: coverage,
+    },
+    details: {
+      ownerType: row.owner_type_guess || undefined,
+      priorityTier: row.priority_tier || undefined,
+      portfolioValue: row.portfolio_total_value ?? undefined,
+      portfolioEquity: row.portfolio_total_equity ?? undefined,
+      marketLabel: undefined,
     },
     contextIds: { masterOwnerId: row.master_owner_id, prospectId: row.best_prospect_id || undefined },
   })
@@ -506,13 +546,27 @@ function prospectToResult(row, score = 100) {
 }
 
 function phoneToResult(row, score = 100) {
+  const presentation = formatContactMethodPresentation(row, 'phone')
   return buildSearchResult({
     entityType: 'phone',
     entityId: row.phone_id,
-    title: row.canonical_e164 || row.phone,
+    title: presentation.displayValue || row.canonical_e164 || row.phone,
     subtitle: row.owner_display_name || undefined,
-    badges: [row.phone_type, row.wrong_number_at ? 'Wrong Number' : 'Eligible'].filter(Boolean),
+    badges: [presentation.phoneType, presentation.eligibility].filter(Boolean),
     score,
+    linkedCounts: {
+      reachableContacts: presentation.reachable ? 1 : 0,
+    },
+    details: {
+      contactType: presentation.contactType,
+      phoneType: presentation.phoneType || undefined,
+      eligibility: presentation.eligibility,
+      reachability: presentation.reachability,
+      wrongNumber: presentation.wrongNumber,
+      suppressed: presentation.suppressed,
+      optedOut: presentation.optedOut,
+      rawValue: row.canonical_e164 || row.phone,
+    },
     contextIds: {
       contactMethodId: row.phone_id,
       masterOwnerId: row.master_owner_id || undefined,
@@ -522,13 +576,26 @@ function phoneToResult(row, score = 100) {
 }
 
 function emailToResult(row, score = 100) {
+  const presentation = formatContactMethodPresentation(row, 'email')
   return buildSearchResult({
     entityType: 'email',
     entityId: row.email_id,
-    title: row.email_normalized || row.email,
+    title: presentation.displayValue || row.email_normalized || row.email,
     subtitle: row.owner_display_name || undefined,
-    badges: ['Email'],
+    badges: [presentation.eligibility].filter(Boolean),
     score,
+    linkedCounts: {
+      reachableContacts: presentation.reachable ? 1 : 0,
+    },
+    details: {
+      contactType: presentation.contactType,
+      eligibility: presentation.eligibility,
+      reachability: presentation.reachability,
+      wrongNumber: false,
+      suppressed: presentation.suppressed,
+      optedOut: presentation.optedOut,
+      rawValue: row.email_normalized || row.email,
+    },
     contextIds: {
       contactMethodId: row.email_id,
       masterOwnerId: row.master_owner_id || undefined,
@@ -562,33 +629,163 @@ const BROWSE_SORT_COLUMNS = {
   zips: { default: 'zip', columns: ['zip', 'property_count'] },
 }
 
-async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending }) {
+function parseBrowseFilters(params = {}) {
+  return {
+    market: clean(params.market || params.eg_market),
+    city: clean(params.city || params.eg_city),
+    state: clean(params.state || params.eg_state),
+    zip: clean(params.zip || params.eg_zip),
+    assetType: clean(params.asset_type || params.assetType || params.eg_asset_type),
+    ownerType: clean(params.owner_type || params.ownerType || params.eg_owner_type),
+    priorityTier: clean(params.priority_tier || params.priorityTier || params.eg_priority_tier),
+    contactStatus: clean(params.contact_status || params.contactStatus || params.eg_contact_status),
+    reachable: ['1', 'true', 'yes'].includes(lower(params.reachable || params.eg_reachable)),
+    unitsMin: int(params.units_min ?? params.unitsMin, null, 100000),
+    unitsMax: int(params.units_max ?? params.unitsMax, null, 100000),
+    scoreMin: Number(params.score_min ?? params.scoreMin ?? params.eg_score_min) || null,
+    scoreMax: Number(params.score_max ?? params.scoreMax ?? params.eg_score_max) || null,
+    coverageMin: Number(params.coverage_min ?? params.coverageMin ?? params.eg_coverage_min) || null,
+    language: clean(params.language || params.eg_language),
+    entityType: clean(params.entity_type || params.entityType || params.eg_entity_type),
+  }
+}
+
+function applyPropertyFilters(query, filters) {
+  if (filters.market) {
+    const like = `%${filters.market}%`
+    query = query.or(`market.ilike.${like},market_region.ilike.${like}`)
+  }
+  if (filters.city) query = query.ilike('property_address_city', `%${filters.city}%`)
+  if (filters.state) query = query.ilike('property_address_state', `%${filters.state}%`)
+  if (filters.zip) query = query.or(`property_address_zip.eq.${filters.zip},property_zip.eq.${filters.zip}`)
+  if (filters.assetType) {
+    query = query.or(`normalized_asset_class.ilike.%${filters.assetType}%,property_type.ilike.%${filters.assetType}%`)
+  }
+  if (filters.unitsMin !== null) query = query.gte('units_count', filters.unitsMin)
+  if (filters.unitsMax !== null) query = query.lte('units_count', filters.unitsMax)
+  if (filters.scoreMin !== null) query = query.gte('final_acquisition_score', filters.scoreMin)
+  if (filters.scoreMax !== null) query = query.lte('final_acquisition_score', filters.scoreMax)
+  return query
+}
+
+function applyOwnerFilters(query, filters) {
+  if (filters.ownerType) query = query.ilike('owner_type_guess', `%${filters.ownerType}%`)
+  if (filters.priorityTier) query = query.ilike('priority_tier', `%${filters.priorityTier}%`)
+  if (filters.market) query = query.ilike('primary_market', `%${filters.market}%`)
+  if (filters.coverageMin !== null) query = query.gte('contactability_score', filters.coverageMin)
+  return query
+}
+
+function applyProspectFilters(query, filters) {
+  if (filters.language) query = query.ilike('language_preference', `%${filters.language}%`)
+  if (filters.reachable) query = query.gt('contact_score_final', 0)
+  return query
+}
+
+function applyPhoneFilters(query, filters) {
+  if (filters.contactStatus === 'wrong') query = query.not('wrong_number_at', 'is', null)
+  if (filters.contactStatus === 'eligible') query = query.is('wrong_number_at', null)
+  if (filters.reachable) query = query.gt('contact_score_final', 0)
+  return query
+}
+
+function sumMetric(existing, row, key) {
+  const current = existing[key]
+  const incoming = row[key]
+  if (incoming === null || incoming === undefined) return current
+  if (current === null || current === undefined) return incoming
+  return Number(current) + Number(incoming)
+}
+
+function mergeCanonicalMarkets(rows) {
+  const merged = new Map()
+  for (const row of rows) {
+    const rawKey = String(row.market_key || row.canonical_market || '')
+    const resolved = resolveEntityGraphMarket({
+      market: row.sample_locality || rawKey,
+      marketRegion: row.canonical_market || row.market_region || rawKey,
+      state: row.state,
+    })
+    const canonical = resolved.canonicalKey || rawKey
+    const existing = merged.get(canonical) || {
+      market_key: canonical,
+      canonical_market: resolved.displayMarket,
+      is_unmapped: resolved.isUnmapped,
+      property_count: 0,
+      owner_count: 0,
+      people_count: 0,
+      reachable_phones: 0,
+      reachable_emails: 0,
+      reachable_contacts: 0,
+      high_equity_count: 0,
+      distressed_count: 0,
+      avg_acquisition_score: null,
+      contact_coverage_pct: null,
+      sample_locality: row.sample_locality || rawKey,
+      state: resolved.state || row.state || null,
+      _score_weight: 0,
+    }
+    existing.property_count = sumMetric(existing, row, 'property_count') ?? 0
+    existing.owner_count = sumMetric(existing, row, 'owner_count') ?? 0
+    existing.people_count = sumMetric(existing, row, 'people_count') ?? 0
+    existing.reachable_phones = sumMetric(existing, row, 'reachable_phones') ?? 0
+    existing.reachable_emails = sumMetric(existing, row, 'reachable_emails') ?? 0
+    existing.reachable_contacts = sumMetric(existing, row, 'reachable_contacts')
+      ?? (Number(existing.reachable_phones) + Number(existing.reachable_emails))
+    existing.high_equity_count = sumMetric(existing, row, 'high_equity_count') ?? 0
+    existing.distressed_count = sumMetric(existing, row, 'distressed_count') ?? 0
+    if (row.avg_acquisition_score !== null && row.avg_acquisition_score !== undefined) {
+      const weight = Number(row.property_count) || 0
+      existing._score_weight += weight
+      const prior = Number(existing.avg_acquisition_score) || 0
+      const priorWeight = Math.max(existing.property_count - weight, 0)
+      existing.avg_acquisition_score = existing._score_weight > 0
+        ? ((prior * priorWeight) + (Number(row.avg_acquisition_score) * weight)) / existing._score_weight
+        : row.avg_acquisition_score
+    }
+    if (existing.owner_count > 0) {
+      existing.contact_coverage_pct = Math.round((existing.reachable_contacts / existing.owner_count) * 1000) / 10
+    }
+    merged.set(canonical, existing)
+  }
+  return [...merged.values()]
+    .map(({ _score_weight, ...row }) => row)
+    .sort((a, b) => b.property_count - a.property_count)
+}
+
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
   const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
-  const { data, error, count } = await supabase
+  let query = supabase
     .from('properties')
     .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
+  query = applyPropertyFilters(query, filters)
+  const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => propertyToResult(row)), count || 0, cursor, pageSize)
 }
 
-async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending }) {
+async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
   const orderCol = BROWSE_SORT_COLUMNS.master_owners.columns.includes(sortBy) ? sortBy : 'display_name'
-  const { data, error, count } = await supabase
+  let query = supabase
     .from('master_owners')
     .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
+  query = applyOwnerFilters(query, filters)
+  const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => ownerToResult(row)), count || 0, cursor, pageSize)
 }
 
-async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending }) {
+async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
   const orderCol = BROWSE_SORT_COLUMNS.people.columns.includes(sortBy) ? sortBy : 'full_name'
-  const { data, error, count } = await supabase
+  let query = supabase
     .from('prospects')
     .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
+  query = applyProspectFilters(query, filters)
+  const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
@@ -621,7 +818,7 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
 
-async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype }) {
+async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype, filters = {} }) {
   const contactSubtype = lower(subtype || 'phone')
   if (contactSubtype === 'email') {
     const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
@@ -634,55 +831,117 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
     return paginatedResponse((data || []).map((row) => emailToResult(row)), count || 0, cursor, pageSize)
   }
   const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
-  const { data, error, count } = await supabase
+  let query = supabase
     .from('phones')
     .select(PHONE_SUMMARY_SELECT, { count: 'exact' })
+  query = applyPhoneFilters(query, filters)
+  const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => phoneToResult(row)), count || 0, cursor, pageSize)
 }
 
-async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending }) {
-  const orderCol = sortBy === 'property_count' ? 'property_count' : 'market_key'
-  let data
-  let error
-  let count
-  ;({ data, error, count } = await supabase
-    .from('v_entity_graph_markets')
-    .select('market_key, property_count', { count: 'exact' })
-    .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1))
-  if (error) {
-    const merged = dedupeResults(sortResults(await searchMarketsAndZips(supabase, '', cursor + pageSize + 50), ''))
-      .filter((row) => row.entityType === 'market')
-    const page = merged.slice(cursor, cursor + pageSize)
-    return paginatedResponse(page, merged.length, cursor, pageSize)
-  }
-  const results = (data || []).map((row) => {
-    const rawKey = String(row.market_key || '')
-    const parts = rawKey.split(',').map((part) => part.trim()).filter(Boolean)
-    const locality = parts[0] || rawKey
-    const state = parts.length > 1 ? parts[parts.length - 1] : null
-    const county = parts.length > 2 ? parts[1] : null
-    return buildSearchResult({
-      entityType: 'market',
-      entityId: row.market_key,
-      title: rawKey,
-      subtitle: state ? `${locality}, ${state}` : locality,
-      badges: ['Operating Market'],
-      score: 100,
-      linkedCounts: { properties: Number(row.property_count) || 0 },
-      details: {
-        locality,
-        county: county || undefined,
-        state: state || undefined,
-        marketLabel: rawKey,
-      },
-      contextIds: {},
-    })
+async function fetchMarketAggregateRows(supabase) {
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('entity_graph_browse_markets', {
+    p_offset: 0,
+    p_limit: 10000,
+    p_ascending: false,
   })
-  return paginatedResponse(results, count || 0, cursor, pageSize)
+  if (!rpcError && Array.isArray(rpcRows) && rpcRows.length > 0) return rpcRows
+
+  const { data, error } = await supabase
+    .from('v_entity_graph_market_aggregates')
+    .select('market_key, canonical_market, sample_locality, state, property_count, owner_count, avg_acquisition_score, high_equity_count, distressed_count')
+    .order('property_count', { ascending: false })
+    .limit(10000)
+  if (!error && data?.length) return data
+
+  const fallback = await supabase
+    .from('v_entity_graph_markets')
+    .select('market_key, canonical_market, sample_locality, state, property_count')
+    .order('property_count', { ascending: false })
+    .limit(10000)
+  return fallback.data || []
+}
+
+async function countCanonicalMarkets(supabase) {
+  const rows = await fetchMarketAggregateRows(supabase)
+  return mergeCanonicalMarkets(rows).length
+}
+
+function marketRowToResult(row) {
+  const canonical = String(row.canonical_market || row.market_key || '')
+  const state = row.state || null
+  const coverage = row.contact_coverage_pct ?? (
+    row.owner_count > 0 && row.reachable_contacts !== undefined
+      ? Math.round((Number(row.reachable_contacts) / Number(row.owner_count)) * 1000) / 10
+      : undefined
+  )
+  return buildSearchResult({
+    entityType: 'market',
+    entityId: canonical,
+    title: canonical,
+    subtitle: state || undefined,
+    badges: [row.is_unmapped ? 'Unmapped Locality' : 'Canonical Market'].filter(Boolean),
+    score: row.avg_acquisition_score ?? undefined,
+    linkedCounts: {
+      properties: Number(row.property_count) || 0,
+      masterOwners: row.owner_count ?? undefined,
+      prospects: row.people_count ?? undefined,
+      reachableContacts: row.reachable_contacts ?? undefined,
+      contacts: row.reachable_contacts ?? undefined,
+      contactCoverage: coverage,
+      avgAcquisitionScore: row.avg_acquisition_score ?? undefined,
+      highEquity: row.high_equity_count ?? undefined,
+      distressed: row.distressed_count ?? undefined,
+    },
+    details: {
+      locality: row.sample_locality || undefined,
+      state: state || undefined,
+      marketLabel: canonical,
+      metro: row.is_unmapped ? undefined : canonical,
+      isUnmapped: Boolean(row.is_unmapped),
+      contactCoverage: coverage,
+      highEquityCount: row.high_equity_count ?? undefined,
+      distressedCount: row.distressed_count ?? undefined,
+    },
+    contextIds: {},
+  })
+}
+
+async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
+  const rows = await fetchMarketAggregateRows(supabase)
+  let mergedRows = mergeCanonicalMarkets(rows)
+  if (filters.market) {
+    const needle = lower(filters.market)
+    mergedRows = mergedRows.filter((row) =>
+      lower(row.market_key).includes(needle)
+      || lower(row.canonical_market || '').includes(needle),
+    )
+  }
+  if (filters.state) {
+    const needle = lower(filters.state)
+    mergedRows = mergedRows.filter((row) => lower(row.state || '').includes(needle))
+  }
+
+  if (sortBy === 'market_key') {
+    mergedRows.sort((a, b) => {
+      const left = String(a.canonical_market || a.market_key)
+      const right = String(b.canonical_market || b.market_key)
+      return ascending ? left.localeCompare(right) : right.localeCompare(left)
+    })
+  } else {
+    mergedRows.sort((a, b) => {
+      const left = Number(a.property_count) || 0
+      const right = Number(b.property_count) || 0
+      return ascending ? left - right : right - left
+    })
+  }
+
+  const total = mergedRows.length
+  const pageRows = mergedRows.slice(cursor, cursor + pageSize)
+  return paginatedResponse(pageRows.map(marketRowToResult), total, cursor, pageSize)
 }
 
 async function fetchZipDistinctCount(supabase) {
@@ -705,26 +964,38 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
 
   if (!rpcError && Array.isArray(rpcRows)) {
     const total = await fetchZipDistinctCount(supabase)
-    const results = rpcRows.map((row) => buildSearchResult({
-      entityType: 'zip',
-      entityId: row.zip,
-      title: row.zip,
-      subtitle: row.market ? `Market: ${row.market}` : 'ZIP cluster',
-      badges: ['ZIP'],
-      score: Number(row.avg_acquisition_score) || undefined,
-      linkedCounts: {
-        properties: Number(row.property_count) || 0,
-        masterOwners: Number(row.owner_count) || undefined,
-        prospects: Number(row.people_count) || undefined,
-        reachableContacts: Number(row.reachable_contacts) || undefined,
-        contacts: Number(row.reachable_contacts) || undefined,
-        avgAcquisitionScore: Number(row.avg_acquisition_score) || undefined,
-      },
-      details: {
-        marketLabel: row.market || undefined,
-      },
-      contextIds: {},
-    }))
+    const results = rpcRows.map((row) => {
+      const marketResolved = row.market
+        ? resolveEntityGraphMarket({ market: row.market, marketRegion: row.market })
+        : null
+      const coverage = row.contact_coverage_pct ?? (
+        row.owner_count > 0 && row.reachable_contacts !== undefined
+          ? Math.round((Number(row.reachable_contacts) / Number(row.owner_count)) * 1000) / 10
+          : undefined
+      )
+      return buildSearchResult({
+        entityType: 'zip',
+        entityId: row.zip,
+        title: row.zip,
+        subtitle: marketResolved?.displayMarket || (row.market ? `Market: ${row.market}` : 'ZIP cluster'),
+        badges: ['ZIP'],
+        score: row.avg_acquisition_score ?? undefined,
+        linkedCounts: {
+          properties: Number(row.property_count) || 0,
+          masterOwners: row.owner_count ?? undefined,
+          prospects: row.people_count ?? undefined,
+          reachableContacts: row.reachable_contacts ?? undefined,
+          contacts: row.reachable_contacts ?? undefined,
+          contactCoverage: coverage,
+          avgAcquisitionScore: row.avg_acquisition_score ?? undefined,
+        },
+        details: {
+          marketLabel: marketResolved?.displayMarket || row.market || undefined,
+          contactCoverage: coverage,
+        },
+        contextIds: {},
+      })
+    })
     return paginatedResponse(results, total, cursor, pageSize)
   }
 
@@ -767,7 +1038,8 @@ export async function browseEntityGraph(params = {}, deps = {}) {
   const cursor = int(params.cursor || params.offset, 0)
   const sortBy = clean(params.sort_by || params.sortBy) || BROWSE_SORT_COLUMNS[tab]?.default || 'id'
   const ascending = ['1', 'true', 'yes'].includes(lower(params.ascending))
-  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype }
+  const filters = parseBrowseFilters(params)
+  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters }
 
   switch (tab) {
     case 'properties':
@@ -783,7 +1055,7 @@ export async function browseEntityGraph(params = {}, deps = {}) {
     case 'markets':
       return browseMarkets(supabase, browseArgs)
     case 'zips':
-      return browseZips(supabase, browseArgs)
+      return browseZips(supabase, { ...browseArgs, filters })
     default:
       return browseProperties(supabase, browseArgs)
   }
@@ -807,11 +1079,7 @@ export async function getEntityGraphCounts(deps = {}) {
     supabase.from('sub_owners').select('sub_owner_id', { count: 'exact', head: true }),
     supabase.from('phones').select('phone_id', { count: 'exact', head: true }),
     supabase.from('emails').select('email_id', { count: 'exact', head: true }),
-    supabase.from('v_entity_graph_markets').select('market_key', { count: 'exact', head: true }).then(async (result) => {
-      if (!result.error) return result
-      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).not('market', 'is', null)
-      return { count: count || 0, error: null }
-    }),
+    countCanonicalMarkets(supabase).then((count) => ({ count: count || 0, error: null })),
     supabase.rpc('entity_graph_zip_distinct_count').then(async (result) => {
       if (!result.error && result.data !== null && result.data !== undefined) {
         return { count: Number(result.data) || 0, error: null }
@@ -1046,47 +1314,98 @@ async function fetchContactLadder(supabase, { masterOwnerId, propertyId, prospec
   return { phones, emails }
 }
 
+function propertyGraphLabel(property) {
+  const summary = formatPropertySummary(property)
+  return summary.title === 'Address incomplete' ? summary.subtitle || property.property_id : summary.title
+}
+
 function buildGraphNodesEdges(anchor, neighborhood) {
   const nodes = []
   const edges = []
+  const edgeKeys = new Set()
   const pushNode = (id, type, label, meta = {}) => {
     if (nodes.some((node) => node.id === id)) return
     nodes.push({ id, type, label, meta })
   }
   const pushEdge = (from, to, label) => {
+    if (!from || !to || !label || from === to) return
+    const key = `${from}|${to}|${label}`
+    if (edgeKeys.has(key)) return
+    edgeKeys.add(key)
     edges.push({ from, to, label })
   }
 
   pushNode(anchor.id, anchor.type, anchor.label, { active: true, ...anchor.meta })
 
+  const ownerNodeId = neighborhood.owner
+    ? `master_owner:${neighborhood.owner.master_owner_id}`
+    : null
+  if (ownerNodeId && anchor.type !== 'master_owner') {
+    pushNode(ownerNodeId, 'master_owner', neighborhood.owner.display_name || neighborhood.owner.master_owner_id)
+  }
+
   for (const property of neighborhood.properties.slice(0, GRAPH_NODE_CAP)) {
     const id = `property:${property.property_id}`
-    pushNode(id, 'property', property.property_address_full || property.property_id)
-    pushEdge(anchor.id, id, anchor.type === 'master_owner' ? 'Owns' : 'Linked To')
+    pushNode(id, 'property', propertyGraphLabel(property))
+    if (anchor.type === 'master_owner') pushEdge(anchor.id, id, 'Owns')
+    else if (anchor.type === 'property') pushEdge(anchor.id, id, 'Portfolio')
+    else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Owns')
+    else pushEdge(anchor.id, id, 'Linked To')
+
+    const market = resolveEntityGraphMarket({
+      market: property.market,
+      marketRegion: property.market_region,
+      city: property.property_address_city,
+      state: property.property_address_state,
+    })
+    if (market.canonicalKey) {
+      const marketId = `market:${market.canonicalKey}`
+      pushNode(marketId, 'market', market.displayMarket)
+      pushEdge(id, marketId, 'Located In')
+    }
+    const zip = clean(property.property_address_zip || property.property_zip)
+    if (zip) {
+      const zipId = `zip:${zip}`
+      pushNode(zipId, 'zip', zip)
+      pushEdge(id, zipId, 'Located In')
+    }
   }
 
   for (const prospect of neighborhood.prospects.slice(0, 20)) {
     const id = `prospect:${prospect.prospect_id}`
     pushNode(id, 'prospect', prospect.full_name || prospect.prospect_id)
-    pushEdge(anchor.id, id, 'Associated With')
+    if (anchor.type === 'master_owner') pushEdge(anchor.id, id, 'Linked Person')
+    else if (anchor.type === 'prospect') pushEdge(anchor.id, id, 'Identity')
+    else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Linked Person')
+    else pushEdge(anchor.id, id, 'Linked Person')
   }
 
   for (const phone of neighborhood.phones.slice(0, 12)) {
     const id = `phone:${phone.phone_id}`
-    pushNode(id, 'phone', phoneTail(phone.canonical_e164 || phone.phone) || phone.phone_id)
-    pushEdge(anchor.id, id, 'Contacted Through')
+    const label = formatReadablePhone(phone.canonical_e164 || phone.phone) || phone.phone_id
+    pushNode(id, 'phone', label)
+    const prospectId = phone.primary_prospect_id || phone.canonical_prospect_id
+    if (prospectId) pushEdge(`prospect:${prospectId}`, id, 'Contacted Through')
+    else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Contacted Through')
+    else pushEdge(anchor.id, id, 'Contacted Through')
   }
 
   for (const email of neighborhood.emails.slice(0, 12)) {
     const id = `email:${email.email_id}`
-    pushNode(id, 'email', (email.email_normalized || email.email || '').split('@')[0])
-    pushEdge(anchor.id, id, 'Contacted Through')
+    const label = email.email_normalized || email.email || email.email_id
+    pushNode(id, 'email', label)
+    const prospectId = email.primary_prospect_id || email.canonical_prospect_id
+    if (prospectId) pushEdge(`prospect:${prospectId}`, id, 'Contacted Through')
+    else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Contacted Through')
+    else pushEdge(anchor.id, id, 'Contacted Through')
   }
 
   for (const thread of neighborhood.threads.slice(0, 12)) {
     const id = `thread:${thread.thread_key}`
-    pushNode(id, 'thread', 'Thread')
-    pushEdge(anchor.id, id, 'Discussing')
+    pushNode(id, 'thread', `Thread ${String(thread.thread_key).slice(-6)}`)
+    if (thread.prospect_id) pushEdge(id, `prospect:${thread.prospect_id}`, 'Participant')
+    if (thread.property_id) pushEdge(id, `property:${thread.property_id}`, 'Regarding')
+    else pushEdge(anchor.id, id, 'Regarding')
   }
 
   return { nodes: nodes.slice(0, GRAPH_NODE_CAP), edges }
@@ -1143,14 +1462,48 @@ function buildAggregateAnchorGraph(anchor, counts = {}, sampleChildren = {}) {
   return { nodes: nodes.slice(0, GRAPH_NODE_CAP), edges }
 }
 
-async function countMarketZipMetrics(supabase, field, value) {
-  const base = () => supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value)
-  const [total, highEquity, distressed, owners] = await Promise.all([
+function marketZipPropertyFilter(supabase, entityType, entityId) {
+  if (entityType === 'zip') {
+    return supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).or(`property_address_zip.eq.${entityId},property_zip.eq.${entityId}`)
+  }
+  const resolved = resolveEntityGraphMarket({ market: entityId, marketRegion: entityId })
+  if (resolved.isUnmapped) {
+    const locality = entityId.replace(/^Unmapped ·\s*/, '')
+    const [city, state] = locality.split(',').map((part) => clean(part))
+    let query = supabase.from('properties').select(PROPERTY_SUMMARY_SELECT)
+    if (city) query = query.ilike('property_address_city', city)
+    if (state) query = query.ilike('property_address_state', state)
+    return query
+  }
+  return supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).or(`market.eq.${entityId},market_region.eq.${entityId}`)
+}
+
+async function countMarketZipMetrics(supabase, entityType, entityId) {
+  const isZip = entityType === 'zip'
+  const filterField = isZip ? 'property_address_zip' : 'market'
+  const base = () => {
+    if (isZip) {
+      return supabase.from('properties').select('property_id', { count: 'exact', head: true })
+        .or(`property_address_zip.eq.${entityId},property_zip.eq.${entityId}`)
+    }
+    return supabase.from('properties').select('property_id', { count: 'exact', head: true })
+      .or(`market.eq.${entityId},market_region.eq.${entityId}`)
+  }
+  const [total, highEquity, distressed, owners, avgScore] = await Promise.all([
     base(),
-    supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value).gte('equity_percent', 50),
-    supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value).or('tax_delinquent.eq.true,active_lien.eq.true'),
-    supabase.from('properties').select('master_owner_id', { count: 'exact', head: true }).eq(field, value).not('master_owner_id', 'is', null),
+    base().gte('equity_percent', 50),
+    base().or('tax_delinquent.eq.true,active_lien.eq.true'),
+    base().not('master_owner_id', 'is', null),
+    supabase.from('properties').select('final_acquisition_score').or(
+      isZip
+        ? `property_address_zip.eq.${entityId},property_zip.eq.${entityId}`
+        : `market.eq.${entityId},market_region.eq.${entityId}`,
+    ).limit(5000),
   ])
+  const scores = (avgScore.data || []).map((row) => Number(row.final_acquisition_score)).filter((v) => Number.isFinite(v))
+  const avgAcquisitionScore = scores.length
+    ? Math.round((scores.reduce((sum, v) => sum + v, 0) / scores.length) * 100) / 100
+    : null
   return {
     properties: total.count || 0,
     highEquity: highEquity.count || 0,
@@ -1158,6 +1511,8 @@ async function countMarketZipMetrics(supabase, field, value) {
     masterOwners: owners.count || 0,
     people: 0,
     reachableContacts: 0,
+    avgAcquisitionScore,
+    filterField,
   }
 }
 
@@ -1195,7 +1550,7 @@ async function loadOwnerNeighborhood(supabase, masterOwnerId) {
 
   const graph = buildGraphNodesEdges(
     { id: `master_owner:${masterOwnerId}`, type: 'master_owner', label: owner.display_name || masterOwnerId },
-    { properties, prospects, phones: phones || [], emails: emails || [], threads },
+    { properties, prospects, phones: phones || [], emails: emails || [], threads, owner },
   )
 
   return {
@@ -1256,13 +1611,14 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
   }
 
   const graph = buildGraphNodesEdges(
-    { id: `property:${propertyId}`, type: 'property', label: property.property_address_full || propertyId },
+    { id: `property:${propertyId}`, type: 'property', label: propertyGraphLabel(property) },
     {
       properties: portfolioProperties,
       prospects: prospects || [],
       phones: contactLadder.phones,
       emails: contactLadder.emails,
       threads,
+      owner,
     },
   )
 
@@ -1435,10 +1791,11 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
       }
     }
     case 'market': {
-      const [sample, metrics] = await Promise.all([
-        supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('market', entityId).limit(8).then((res) => res.data || []),
+      const [sampleRes, metrics] = await Promise.all([
+        marketZipPropertyFilter(supabase, 'market', entityId).limit(8),
         countMarketZipMetrics(supabase, 'market', entityId),
       ])
+      const sample = sampleRes.data || []
       return {
         entityType: 'market',
         entityId,
@@ -1453,10 +1810,11 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
       }
     }
     case 'zip': {
-      const [sample, metrics] = await Promise.all([
-        supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('property_address_zip', entityId).limit(8).then((res) => res.data || []),
-        countMarketZipMetrics(supabase, 'property_address_zip', entityId),
+      const [sampleRes, metrics] = await Promise.all([
+        marketZipPropertyFilter(supabase, 'zip', entityId).limit(8),
+        countMarketZipMetrics(supabase, 'zip', entityId),
       ])
+      const sample = sampleRes.data || []
       return {
         entityType: 'zip',
         entityId,

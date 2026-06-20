@@ -1,4 +1,4 @@
-import { pushRoutePath, replaceRoutePath } from '../../app/router'
+import { replaceRoutePath } from '../../app/router'
 import type { ActiveInboxContext } from '../../modules/inbox/active-context'
 import type { EntitySearchResult, UniversalEntityContext, UniversalEntityType } from './entity-graph.types'
 
@@ -130,10 +130,21 @@ function preserveSearchParams(path: string): string {
   return search ? `${path}${search}` : path
 }
 
+function isEntityGraphRoute(pathname: string): boolean {
+  const normalized = pathname.replace(/\/+$/, '')
+  return normalized === '/entity-graph' || normalized.startsWith('/entity-graph/')
+}
+
 export function syncUniversalContextToUrl(context: UniversalEntityContext, mode: 'push' | 'replace' = 'replace'): void {
+  if (typeof window === 'undefined') return
+
+  // Embedded in Inbox (or any non-entity-graph surface): never change pathname.
+  // Route changes remount the shell and reset workspace state (tab, page, scroll).
+  if (!isEntityGraphRoute(window.location.pathname)) return
+
   const link = preserveSearchParams(buildEntityGraphDeepLink(context) ?? '/entity-graph')
-  if (mode === 'push') pushRoutePath(link)
-  else replaceRoutePath(link)
+  void mode
+  replaceRoutePath(link)
 }
 
 export function mergeUniversalContexts(

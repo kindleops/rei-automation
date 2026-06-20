@@ -38,7 +38,7 @@ export function routeEntityGraphAction(
     }
     syncContext()
     pushRoutePath('/conversation')
-    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: activeInboxFromUniversalContext(context, 'entity_graph') }))
+    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: activeInboxFromUniversalContext(context, 'list') }))
     return true
   }
 
@@ -49,7 +49,7 @@ export function routeEntityGraphAction(
     }
     syncContext()
     pushRoutePath('/conversation')
-    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: activeInboxFromUniversalContext(context, 'entity_graph') }))
+    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: activeInboxFromUniversalContext(context, 'list') }))
     return true
   }
 
@@ -102,6 +102,10 @@ export function routeEntityGraphAction(
   }
 
   if (action === 'view_properties') {
+    if (context.entityType === 'property' && context.propertyId) {
+      pushRoutePath(buildPropertyIntelligenceUrl({ pi_q: context.propertyId, pi_page: '1' }))
+      return true
+    }
     if (context.entityType === 'market' && context.entityId) {
       pushRoutePath(buildPropertyIntelligenceUrl({ pi_market: context.entityId, pi_page: '1' }))
       return true

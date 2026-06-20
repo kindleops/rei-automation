@@ -60,10 +60,17 @@ export function EntityGraphDossierPanel({
   }
 
   const identity = dossier.identity
-  const title = identity?.masterOwner
-    || (dossier.summary?.display_name as string)
-    || (dossier.summary?.property_address_full as string)
-    || dossier.entityId
+  const summary = dossier.summary as Record<string, unknown> | undefined
+  const title = dossier.entityType === 'property'
+    ? String(summary?.property_address_full || identity?.propertyContext || dossier.entityId)
+    : dossier.entityType === 'market'
+      ? String(summary?.market || dossier.entityId)
+      : dossier.entityType === 'zip'
+        ? String(summary?.zip || dossier.entityId)
+        : dossier.entityType === 'phone' || dossier.entityType === 'email'
+          ? String(identity?.contactMethod || dossier.entityId)
+          : identity?.masterOwner
+            || String(summary?.display_name || summary?.full_name || dossier.entityId)
 
   return (
     <div className={`nx-entity-graph__dossier${compact ? ' is-compact' : ''}`}>

@@ -12,6 +12,7 @@ export function buildEntityGraphActions(context: UniversalEntityContext, dossier
   const actions: EntityGraphActionItem[] = []
 
   if (type === 'property') {
+    actions.push({ key: 'view_properties', label: 'Open Property Intelligence' })
     actions.push({ key: 'open_deal_intelligence', label: 'Open Deal Intelligence' })
     actions.push({ key: 'open_comp_intelligence', label: 'Open Comp Intelligence' })
     actions.push({ key: 'open_buyer_match', label: 'Open Buyer Match' })

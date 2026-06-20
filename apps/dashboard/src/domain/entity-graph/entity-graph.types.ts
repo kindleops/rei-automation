@@ -57,6 +57,26 @@ export type EntitySearchResult = {
     county?: string
     state?: string
     metro?: string
+    city?: string
+    zip?: string
+    assetType?: string
+    units?: number
+    value?: number
+    equity?: number
+    acquisitionScore?: number
+    flagCount?: number
+    flags?: string
+    ownerType?: string
+    priorityTier?: string
+    portfolioValue?: number
+    portfolioEquity?: number
+    occupation?: string
+    language?: string
+    age?: number
+    reachable?: boolean
+    contactStatus?: string
+    entityType?: string
+    lastActivity?: string
   }
   contextIds: {
     propertyId?: string
@@ -151,6 +171,44 @@ export type EntityGraphDossier = {
   scores?: Record<string, unknown>
   graph?: { nodes: EntityGraphNode[]; edges: EntityGraphEdge[] }
   timeline?: Record<string, unknown>[]
+}
+
+export type EntityGraphFilters = {
+  market: string
+  city: string
+  state: string
+  zip: string
+  assetType: string
+  ownerType: string
+  priorityTier: string
+  contactStatus: string
+  reachable: boolean
+  unitsMin: string
+  unitsMax: string
+  scoreMin: string
+  scoreMax: string
+  coverageMin: string
+  language: string
+  entityType: string
+}
+
+export const EMPTY_ENTITY_GRAPH_FILTERS: EntityGraphFilters = {
+  market: '',
+  city: '',
+  state: '',
+  zip: '',
+  assetType: '',
+  ownerType: '',
+  priorityTier: '',
+  contactStatus: '',
+  reachable: false,
+  unitsMin: '',
+  unitsMax: '',
+  scoreMin: '',
+  scoreMax: '',
+  coverageMin: '',
+  language: '',
+  entityType: '',
 }
 
 export type EntityGraphAction =

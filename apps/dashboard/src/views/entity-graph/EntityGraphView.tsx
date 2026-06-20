@@ -16,26 +16,26 @@ import { EntityGraphWorkspace } from '../../modules/entity-graph/EntityGraphWork
 import { FullscreenAppShell } from '../../shared/FullscreenAppShell'
 import { subscribeSettings } from '../../shared/settings'
 
-function resolveThemeMode(): 'dark' | 'light' {
+type ThemeMode = 'dark' | 'light' | 'red_ops'
+
+function resolveThemeMode(): ThemeMode {
   if (typeof document === 'undefined') return 'dark'
   const theme = document.documentElement.getAttribute('data-nexus-theme') || 'dark'
-  return theme === 'light' ? 'light' : 'dark'
+  if (theme === 'light') return 'light'
+  if (theme === 'red_ops') return 'red_ops'
+  return 'dark'
 }
 
 export function EntityGraphView() {
-  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(resolveThemeMode)
+  const [themeMode, setThemeMode] = useState<ThemeMode>(resolveThemeMode)
   const [universalContext, setUniversalContext] = useState<UniversalEntityContext>(() => {
     const deepLink = typeof window !== 'undefined' ? parseEntityGraphDeepLink(window.location.pathname) : null
     return deepLink ?? getUniversalEntityContextSnapshot()
   })
 
-  useEffect(() => {
-    return subscribeSettings(() => setThemeMode(resolveThemeMode()))
-  }, [])
+  useEffect(() => subscribeSettings(() => setThemeMode(resolveThemeMode())), [])
 
-  useEffect(() => {
-    return subscribeUniversalEntityContext((next) => setUniversalContext(next))
-  }, [])
+  useEffect(() => subscribeUniversalEntityContext((next) => setUniversalContext(next)), [])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -46,9 +46,9 @@ export function EntityGraphView() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
-  const handleUniversalContextChange = useCallback((next: UniversalEntityContext, options?: { pushHistory?: boolean }) => {
+  const handleUniversalContextChange = useCallback((next: UniversalEntityContext) => {
     setUniversalEntityContextSnapshot(next)
-    if (options?.pushHistory) syncUniversalContextToUrl(next, 'push')
+    syncUniversalContextToUrl(next, 'replace')
   }, [])
 
   const handleAction = useCallback((action: EntityGraphAction, context: UniversalEntityContext) => {
