@@ -1,106 +1,273 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   CONVERSATION LIVE — Authoritative SMS thread styles
-   Loaded AFTER nx-ui-foundation-final.css to defeat inbox-premium.css and
-   inbox-polish.css !important leaks on legacy .nx-chat-bubble selectors.
-   Scope: .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live
+   CONVERSATION LIVE — Theme + accent contract for mounted ChatThread path
+   Appearance: Light / Dark / Red Ops  →  canvas, glass, neutral surfaces
+   Accent palette: --nx-accent*       →  highlights, outbound, liquid light
+   Scope: .nx-premium-inbox .nx-workspace-pane-surface--sms-thread
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Accent + appearance contract on full SMS pane (includes composer) */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread {
+  --nx-live-accent: var(--nx-accent, #3b82f6);
+  --nx-live-accent-soft: var(--nx-accent-soft, rgba(59, 130, 246, 0.12));
+  --nx-live-accent-glow: var(--nx-accent-glow, rgba(59, 130, 246, 0.22));
+  --nx-live-accent-border: color-mix(in srgb, var(--nx-live-accent) 42%, transparent);
+}
+
+/* ── Shared contract (accent-driven highlights) ─────────────────────────── */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live {
   --nx-live-accent: var(--nx-accent, #3b82f6);
+  --nx-live-accent-rgb: var(--nx-accent-rgb, var(--nexus-accent-rgb, 59, 130, 246));
+  --nx-live-accent-soft: var(--nx-accent-soft, rgba(59, 130, 246, 0.12));
+  --nx-live-accent-muted: var(--nx-accent-muted, var(--nx-accent-soft));
+  --nx-live-accent-strong: var(--nx-accent-strong, var(--nx-accent));
+  --nx-live-accent-glow: var(--nx-accent-glow, rgba(59, 130, 246, 0.22));
+  --nx-live-accent-border: color-mix(in srgb, var(--nx-live-accent) 42%, transparent);
+  --nx-live-accent-contrast: var(--nx-accent-contrast, #ffffff);
+  --nx-live-gradient-start: color-mix(in srgb, var(--nx-live-accent) 58%, rgba(8, 16, 36, 0.98));
+  --nx-live-gradient-mid: color-mix(in srgb, var(--nx-live-accent) 38%, rgba(6, 14, 28, 0.96));
+  --nx-live-gradient-end: color-mix(in srgb, var(--nx-live-accent) 22%, rgba(4, 10, 22, 1));
   --nx-live-out-solid: color-mix(in srgb, var(--nx-live-accent) 40%, rgba(6, 14, 30, 0.96));
-  --nx-live-out-bg: linear-gradient(
-    155deg,
-    color-mix(in srgb, var(--nx-live-accent) 56%, rgba(8, 16, 36, 0.98)) 0%,
-    color-mix(in srgb, var(--nx-live-accent) 28%, rgba(4, 10, 22, 1)) 100%
-  );
-  --nx-live-in-bg: color-mix(in srgb, rgba(255,255,255,0.09) 100%, rgba(10, 16, 30, 0.92));
-  --nx-live-glass: rgba(10, 16, 30, 0.72);
-  --nx-live-glass-border: rgba(255, 255, 255, 0.11);
+  --nx-live-out-bg: linear-gradient(155deg, var(--nx-live-gradient-start) 0%, var(--nx-live-gradient-mid) 52%, var(--nx-live-gradient-end) 100%);
   --nx-live-temp-tint: transparent;
+
+  /* Appearance defaults (dark) */
+  --nx-live-bg: var(--nx-bg, #050914);
+  --nx-live-bg-elevated: var(--nx-bg-2, #0b1220);
+  --nx-live-panel-bg: color-mix(in srgb, var(--nx-panel-bg, rgba(10, 16, 30, 0.92)) 88%, transparent);
+  --nx-live-glass-bg: rgba(10, 16, 30, 0.74);
+  --nx-live-glass-border: rgba(255, 255, 255, 0.11);
+  --nx-live-glass-highlight: rgba(255, 255, 255, 0.09);
+  --nx-live-in-bg: color-mix(in srgb, rgba(255,255,255,0.09) 100%, rgba(10, 16, 30, 0.92));
+  --nx-live-text: var(--nx-text, #e5e7eb);
+  --nx-live-text-muted: var(--nx-text-muted, #94a3b8);
+  --nx-live-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --nx-live-atmosphere-primary: color-mix(in srgb, var(--nx-live-accent) 16%, transparent);
+  --nx-live-atmosphere-secondary: color-mix(in srgb, var(--nx-live-accent) 8%, transparent);
 }
 
+/* ── Dark appearance ──────────────────────────────────────────────────────── */
+[data-nexus-theme="dark"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live,
+[data-nexus-theme="satellite"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live,
+[data-nexus-theme="monochrome"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live {
+  --nx-live-bg: #050914;
+  --nx-live-glass-bg: rgba(10, 16, 30, 0.78);
+  --nx-live-in-bg: linear-gradient(155deg, rgba(22, 30, 48, 0.94), rgba(12, 18, 32, 0.92));
+}
+
+/* ── Light appearance ─────────────────────────────────────────────────────── */
 [data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live {
-  --nx-live-in-bg: color-mix(in srgb, #ffffff 90%, rgba(15, 23, 42, 0.05));
-  --nx-live-glass: rgba(255, 255, 255, 0.86);
+  --nx-live-bg: #f8fafc;
+  --nx-live-bg-elevated: #ffffff;
+  --nx-live-panel-bg: rgba(255, 255, 255, 0.92);
+  --nx-live-glass-bg: rgba(255, 255, 255, 0.9);
   --nx-live-glass-border: rgba(15, 23, 42, 0.12);
+  --nx-live-glass-highlight: rgba(255, 255, 255, 0.98);
+  --nx-live-in-bg: linear-gradient(155deg, rgba(255,255,255,0.98), rgba(241, 245, 249, 0.94));
+  --nx-live-text: #0f172a;
+  --nx-live-text-muted: #64748b;
+  --nx-live-shadow: 0 10px 28px rgba(15, 23, 42, 0.09), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --nx-live-atmosphere-primary: color-mix(in srgb, var(--nx-live-accent) 14%, transparent);
+  --nx-live-atmosphere-secondary: color-mix(in srgb, var(--nx-live-accent) 6%, transparent);
 }
 
-/* ── Canvas ─────────────────────────────────────────────────────────────── */
+/* ── Red Ops appearance — full tactical environment tint ─────────────────── */
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread {
+  --nx-live-bg: #060103;
+  --nx-live-bg-elevated: #0e0205;
+  --nx-live-panel-bg: rgba(14, 3, 6, 0.94);
+  --nx-live-glass-bg: rgba(18, 4, 8, 0.84);
+  --nx-live-glass-border: rgba(220, 38, 60, 0.16);
+  --nx-live-glass-highlight: rgba(255, 120, 130, 0.07);
+  --nx-live-in-bg: linear-gradient(155deg, rgba(24, 6, 10, 0.96), rgba(14, 4, 8, 0.94));
+  --nx-live-text: #f4f4f5;
+  --nx-live-text-muted: rgba(244, 244, 245, 0.58);
+  --nx-live-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  --nx-live-atmosphere-primary: rgba(153, 27, 45, 0.32);
+  --nx-live-atmosphere-secondary: rgba(69, 10, 18, 0.42);
+}
+
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live {
+  --nx-live-atmosphere-primary: rgba(153, 27, 45, 0.28);
+  --nx-live-atmosphere-secondary: rgba(69, 10, 18, 0.38);
+}
+
+/* ── SMS thread pane canvas (appearance) ─────────────────────────────────── */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread {
+  background: var(--nx-live-bg, var(--nx-bg, #050914)) !important;
+  color: var(--nx-live-text, var(--nx-text)) !important;
+}
+
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live.nx-chat-container {
   position: relative !important;
   background:
-    radial-gradient(ellipse 80% 55% at 50% -5%, color-mix(in srgb, var(--nx-live-accent) 9%, transparent), transparent 70%),
-    var(--nx-bg-base, #060a12) !important;
+    radial-gradient(ellipse 85% 50% at 50% -8%, var(--nx-live-atmosphere-primary), transparent 68%),
+    radial-gradient(ellipse 55% 35% at 100% 0%, var(--nx-live-atmosphere-secondary), transparent 62%),
+    var(--nx-live-bg) !important;
 }
 
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live.nx-chat-container {
+  background:
+    radial-gradient(ellipse 92% 58% at 14% -10%, rgba(153, 27, 45, 0.3), transparent 64%),
+    radial-gradient(ellipse 72% 48% at 92% 8%, rgba(127, 29, 45, 0.22), transparent 58%),
+    radial-gradient(ellipse 100% 72% at 50% 112%, rgba(48, 8, 14, 0.38), transparent 56%),
+    linear-gradient(180deg, #060103 0%, #0a0204 50%, #070103 100%) !important;
+}
+
+[data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live.nx-chat-container {
+  background:
+    radial-gradient(ellipse 80% 45% at 50% -6%, var(--nx-live-atmosphere-primary), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+}
+
+/* ── Message list + lane alignment (mandatory) ───────────────────────────── */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-message-list {
   display: flex !important;
   flex-direction: column !important;
   padding: 16px clamp(12px, 4%, 44px) 20px !important;
-  gap: 6px !important;
+  gap: 4px !important;
   background: transparent !important;
 }
 
-/* ── Header: liquid atmosphere (unmistakable) ───────────────────────────── */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-lane {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-lane.is-inbound {
+  align-items: flex-start !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-lane.is-outbound {
+  align-items: flex-end !important;
+}
+
+/* ── Header: layered liquid intelligence surface ─────────────────────────── */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header {
   position: relative !important;
   display: flex !important;
   flex-direction: column !important;
   border-bottom: 1px solid var(--nx-live-glass-border) !important;
-  background: var(--nx-live-glass) !important;
-  backdrop-filter: blur(22px) saturate(1.5) !important;
-  -webkit-backdrop-filter: blur(22px) saturate(1.5) !important;
+  background: var(--nx-live-glass-bg) !important;
+  backdrop-filter: blur(24px) saturate(1.55) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.55) !important;
   overflow: hidden !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    var(--nx-live-shadow) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__atmosphere,
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__glow {
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__liquid {
+  position: absolute !important;
+  border-radius: 50% !important;
+  filter: blur(28px) !important;
+  opacity: 0.72 !important;
+  will-change: transform, opacity !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__liquid--field {
+  width: 140% !important;
+  height: 180% !important;
+  top: -70% !important;
+  left: -20% !important;
+  background: linear-gradient(
+    118deg,
+    color-mix(in srgb, var(--nx-live-accent) 42%, transparent),
+    transparent 48%,
+    color-mix(in srgb, var(--nx-live-accent) 18%, transparent) 72%,
+    transparent
+  ) !important;
+  animation: nx-live-liquid-field 22s ease-in-out infinite !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__liquid--bloom {
+  width: 55% !important;
+  height: 90% !important;
+  top: -20% !important;
+  right: -8% !important;
+  background: radial-gradient(circle, color-mix(in srgb, var(--nx-live-accent) 36%, transparent), transparent 68%) !important;
+  animation: nx-live-liquid-bloom 17s ease-in-out infinite alternate !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__liquid--edge {
+  width: 70% !important;
+  height: 40% !important;
+  bottom: -18% !important;
+  left: 18% !important;
+  background: radial-gradient(ellipse, rgba(255,255,255,0.08), transparent 70%) !important;
+  animation: nx-live-liquid-edge 13s ease-in-out infinite !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__glow {
-  position: absolute !important;
-  inset: -60% -35% !important;
-  pointer-events: none !important;
-  opacity: 1 !important;
+  inset: -50% -30% !important;
+  opacity: 0.85 !important;
   background:
-    radial-gradient(ellipse 50% 85% at 8% 22%, color-mix(in srgb, var(--nx-live-accent) 48%, transparent), transparent 68%),
-    radial-gradient(ellipse 42% 70% at 92% 12%, color-mix(in srgb, var(--nx-live-accent) 28%, transparent), transparent 72%),
-    radial-gradient(ellipse 55% 45% at 68% 110%, var(--nx-live-temp-tint), transparent 75%),
-    radial-gradient(ellipse 35% 30% at 40% 60%, rgba(255,255,255,0.06), transparent 70%) !important;
-  animation: nx-live-header-flow 16s ease-in-out infinite !important;
-  mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.45) 100%) !important;
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.45) 100%) !important;
+    radial-gradient(ellipse 48% 82% at 10% 24%, color-mix(in srgb, var(--nx-live-accent) 44%, transparent), transparent 68%),
+    radial-gradient(ellipse 40% 68% at 90% 14%, color-mix(in srgb, var(--nx-live-accent) 24%, transparent), transparent 72%),
+    radial-gradient(ellipse 52% 42% at 66% 108%, var(--nx-live-temp-tint), transparent 76%),
+    radial-gradient(ellipse 34% 28% at 42% 58%, rgba(255,255,255,0.05), transparent 72%) !important;
+  animation: nx-live-header-flow 19s ease-in-out infinite !important;
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.5) 100%) !important;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.5) 100%) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__glow::after {
   content: '' !important;
   position: absolute !important;
   inset: 0 !important;
-  background: radial-gradient(ellipse 70% 35% at 30% 80%, color-mix(in srgb, var(--nx-live-accent) 22%, transparent), transparent 70%) !important;
-  animation: nx-live-header-pulse 11s ease-in-out infinite alternate !important;
+  background: radial-gradient(ellipse 68% 32% at 28% 82%, color-mix(in srgb, var(--nx-live-accent) 20%, transparent), transparent 72%) !important;
+  animation: nx-live-header-pulse 14s ease-in-out infinite alternate !important;
+}
+
+@keyframes nx-live-liquid-field {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.55; }
+  40% { transform: translate3d(3%, -2%, 0) scale(1.05); opacity: 0.78; }
+  70% { transform: translate3d(-2%, 1.5%, 0) scale(1.02); opacity: 0.62; }
+}
+
+@keyframes nx-live-liquid-bloom {
+  0% { transform: translate3d(0, 0, 0) scale(0.95); opacity: 0.42; }
+  100% { transform: translate3d(-4%, 3%, 0) scale(1.08); opacity: 0.82; }
+}
+
+@keyframes nx-live-liquid-edge {
+  0%, 100% { opacity: 0.28; transform: translateX(0); }
+  50% { opacity: 0.55; transform: translateX(3%); }
 }
 
 @keyframes nx-live-header-flow {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   33% { transform: translate3d(2%, -1.2%, 0) scale(1.04); }
   66% { transform: translate3d(-1.5%, 0.8%, 0) scale(1.02); }
 }
 
 @keyframes nx-live-header-pulse {
-  0% { opacity: 0.45; }
-  100% { opacity: 0.9; }
+  0% { opacity: 0.38; }
+  100% { opacity: 0.88; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__liquid,
   .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__glow,
   .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header__glow::after {
     animation: none !important;
-    opacity: 0.8 !important;
+    opacity: 0.72 !important;
   }
 }
 
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-cold { --nx-live-temp-tint: color-mix(in srgb, #38bdf8 22%, transparent); }
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-warm { --nx-live-temp-tint: color-mix(in srgb, #f59e0b 20%, transparent); }
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-hot  { --nx-live-temp-tint: color-mix(in srgb, #f43f5e 18%, transparent); }
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-cold { --nx-live-temp-tint: color-mix(in srgb, #38bdf8 18%, transparent); }
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-warm { --nx-live-temp-tint: color-mix(in srgb, #f59e0b 16%, transparent); }
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-header.is-temp-hot  { --nx-live-temp-tint: color-mix(in srgb, #f43f5e 14%, transparent); }
 
-/* Layer A identity */
+/* Identity layer */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-layer-a {
   position: relative !important;
   z-index: 2 !important;
@@ -117,23 +284,23 @@
   font-weight: 700 !important;
   letter-spacing: -0.025em !important;
   line-height: 1.15 !important;
-  color: var(--nx-text-primary) !important;
+  color: var(--nx-live-text) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-identity-phone,
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-identity-market {
   font-size: 12.5px !important;
   font-weight: 500 !important;
-  color: var(--nx-text-secondary) !important;
+  color: var(--nx-live-text-muted) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-identity-address {
   font-size: 13px !important;
   font-weight: 500 !important;
-  color: color-mix(in srgb, var(--nx-text-primary) 82%, var(--nx-text-secondary)) !important;
+  color: color-mix(in srgb, var(--nx-live-text) 82%, var(--nx-live-text-muted)) !important;
 }
 
-/* Layer B intelligence cells */
+/* Property intelligence cells */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-layer-b {
   position: relative !important;
   z-index: 2 !important;
@@ -153,37 +320,71 @@
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell {
   display: inline-flex !important;
-  align-items: center !important;
-  padding: 7px 11px !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 1px !important;
+  min-height: 42px !important;
+  padding: 6px 11px !important;
   border-radius: 10px !important;
   border: 1px solid var(--nx-live-glass-border) !important;
-  background: color-mix(in srgb, var(--nx-live-glass) 65%, rgba(255,255,255,0.04)) !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
+  background: color-mix(in srgb, var(--nx-live-glass-bg) 72%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.35) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.35) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    0 6px 18px rgba(0,0,0,0.14) !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.01em !important;
-  color: var(--nx-text-secondary) !important;
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    0 6px 18px rgba(0,0,0,0.12) !important;
   white-space: nowrap !important;
   flex-shrink: 0 !important;
 }
 
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__label {
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--nx-live-text-muted) !important;
+  line-height: 1.1 !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__value {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--nx-live-text) !important;
+  line-height: 1.2 !important;
+}
+
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-market {
-  color: color-mix(in srgb, var(--nx-live-accent) 90%, #fff) !important;
-  border-color: color-mix(in srgb, var(--nx-live-accent) 32%, transparent) !important;
-  background: color-mix(in srgb, var(--nx-live-accent) 14%, var(--nx-live-glass)) !important;
+  border-color: var(--nx-live-accent-border) !important;
+  background: color-mix(in srgb, var(--nx-live-accent-soft) 100%, var(--nx-live-glass-bg)) !important;
+}
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-market .nx-intel-cell__value {
+  color: color-mix(in srgb, var(--nx-live-accent) 88%, var(--nx-live-text)) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-flag {
-  color: #fbbf24 !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
   border-color: rgba(251, 191, 36, 0.28) !important;
-  background: color-mix(in srgb, rgba(251,191,36,0.12) 100%, var(--nx-live-glass)) !important;
+  background: color-mix(in srgb, rgba(251,191,36,0.1) 100%, var(--nx-live-glass-bg)) !important;
+}
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-flag::before {
+  content: '' !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: #fbbf24 !important;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.45) !important;
+  flex-shrink: 0 !important;
+}
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-flag .nx-intel-cell__value {
+  color: #fbbf24 !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
 }
 
-/* Command strip */
+/* Unified command strip */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-command-strip {
   position: relative !important;
   z-index: 3 !important;
@@ -192,16 +393,17 @@
   gap: 8px !important;
   padding: 8px 14px !important;
   border-bottom: 1px solid var(--nx-live-glass-border) !important;
-  background: color-mix(in srgb, var(--nx-live-glass) 92%, transparent) !important;
-  backdrop-filter: blur(18px) !important;
-  -webkit-backdrop-filter: blur(18px) !important;
+  background: color-mix(in srgb, var(--nx-live-glass-bg) 94%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(1.4) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.4) !important;
+  box-shadow: inset 0 1px 0 var(--nx-live-glass-highlight) !important;
   overflow-x: auto !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-command-strip__primary {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 7px !important;
   flex-shrink: 0 !important;
 }
 
@@ -214,17 +416,48 @@
   display: inline-flex !important;
   align-items: center !important;
   gap: 6px !important;
+  min-height: 30px !important;
   padding: 6px 11px 6px 9px !important;
   border-radius: 9px !important;
   border: 1px solid var(--nx-live-glass-border) !important;
-  background: color-mix(in srgb, rgba(255,255,255,0.05) 100%, transparent) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06) !important;
+  background: color-mix(in srgb, var(--nx-live-glass-highlight) 55%, transparent) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: inset 0 1px 0 var(--nx-live-glass-highlight) !important;
   font-size: 11.5px !important;
   font-weight: 600 !important;
-  color: var(--nx-text-primary) !important;
+  color: var(--nx-live-text) !important;
   cursor: pointer !important;
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--nx-live-accent) 28%, var(--nx-live-glass-border)) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    0 6px 16px color-mix(in srgb, var(--nx-live-accent) 10%, transparent) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-control.is-open .nx-conv-glass-btn,
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-btn:focus-visible {
+  outline: none !important;
+  border-color: var(--nx-live-accent-border) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    0 0 0 2px color-mix(in srgb, var(--nx-live-accent) 18%, transparent),
+    0 8px 20px var(--nx-live-accent-glow) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-btn__caret {
+  font-size: 10px !important;
+  opacity: 0.72 !important;
+  margin-left: 1px !important;
+  transition: transform 0.16s !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-control.is-open .nx-conv-glass-btn__caret {
+  transform: rotate(180deg) !important;
+  opacity: 1 !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-auto-control .nx-conv-glass-btn {
@@ -232,22 +465,38 @@
   font-size: 11px !important;
 }
 
-/* ── Message bubbles (new nx-msg DOM — immune to legacy selectors) ─────── */
+/* Dropdown portal (command strip) */
+.nx-conv-dropdown-portal {
+  background: var(--nx-live-glass-bg, rgba(10, 16, 30, 0.94)) !important;
+  border: 1px solid var(--nx-live-glass-border, rgba(255,255,255,0.12)) !important;
+  backdrop-filter: blur(22px) saturate(1.45) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.45) !important;
+  box-shadow: var(--nx-live-shadow, 0 16px 40px rgba(0,0,0,0.28)) !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-conv-dropdown-portal {
+  background: rgba(14, 3, 6, 0.96) !important;
+  border-color: rgba(220, 38, 60, 0.18) !important;
+}
+
+[data-nexus-theme="light"] .nx-conv-dropdown-portal {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.1) !important;
+}
+
+.nx-conv-dropdown-option.is-selected {
+  background: color-mix(in srgb, var(--nx-accent) 14%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx-accent) 24%, transparent) !important;
+}
+
+/* ── Message bubbles ─────────────────────────────────────────────────────── */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg {
   display: flex !important;
   flex-direction: column !important;
+  width: fit-content !important;
   max-width: min(54%, 520px) !important;
-  margin-bottom: 10px !important;
-}
-
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound {
-  align-self: flex-start !important;
-  align-items: flex-start !important;
-}
-
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound {
-  align-self: flex-end !important;
-  align-items: flex-end !important;
+  margin-bottom: 8px !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__bubble {
@@ -260,30 +509,28 @@
   line-height: 1.56 !important;
   letter-spacing: 0.008em !important;
   word-break: break-word !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.16) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__bubble {
-  color: var(--nx-text-primary) !important;
+  color: var(--nx-live-text) !important;
   background: var(--nx-live-in-bg) !important;
   border: 1px solid var(--nx-live-glass-border) !important;
   border-radius: 20px 20px 20px 6px !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.07),
-    0 10px 26px rgba(0,0,0,0.14) !important;
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    var(--nx-live-shadow) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble {
-  color: rgba(252, 254, 255, 0.98) !important;
+  color: var(--nx-live-accent-contrast) !important;
   background: var(--nx-live-out-bg) !important;
-  border: 1px solid color-mix(in srgb, var(--nx-live-accent) 50%, transparent) !important;
+  border: 1px solid var(--nx-live-accent-border) !important;
   border-radius: 20px 20px 6px 20px !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.12),
-    0 12px 32px color-mix(in srgb, var(--nx-live-accent) 26%, transparent) !important;
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    0 12px 32px var(--nx-live-accent-glow) !important;
 }
 
-/* Integrated tail — child element, same solid as bubble edge */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__tail {
   position: absolute !important;
   bottom: 0 !important;
@@ -304,18 +551,19 @@
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__tail {
   right: -3px !important;
   background: var(--nx-live-out-solid) !important;
-  border-right: 1px solid color-mix(in srgb, var(--nx-live-accent) 50%, transparent) !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--nx-live-accent) 50%, transparent) !important;
+  border-right: 1px solid var(--nx-live-accent-border) !important;
+  border-bottom: 1px solid var(--nx-live-accent-border) !important;
   border-radius: 0 0 8px 0 !important;
   clip-path: polygon(0 0, 0 100%, 100% 100%) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-scheduled .nx-msg__bubble {
   border-style: dashed !important;
+  border-color: color-mix(in srgb, var(--nx-live-accent) 42%, var(--nx-live-glass-border)) !important;
   opacity: 0.94 !important;
 }
 
-/* Metadata row */
+/* Metadata */
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__meta {
   display: inline-flex !important;
   align-items: center !important;
@@ -328,9 +576,7 @@
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__time {
   font-size: 10.5px !important;
   font-weight: 500 !important;
-  color: var(--nx-text-muted) !important;
-  letter-spacing: 0 !important;
-  text-transform: none !important;
+  color: var(--nx-live-text-muted) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt {
@@ -342,15 +588,13 @@
   border: 1px solid transparent !important;
   font-size: 10px !important;
   font-weight: 600 !important;
-  letter-spacing: 0 !important;
-  text-transform: none !important;
   backdrop-filter: blur(8px) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt.is-sent {
-  color: #60a5fa !important;
-  background: rgba(96, 165, 250, 0.12) !important;
-  border-color: rgba(96, 165, 250, 0.24) !important;
+  color: var(--nx-live-accent) !important;
+  background: var(--nx-live-accent-soft) !important;
+  border-color: var(--nx-live-accent-border) !important;
 }
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt.is-delivered {
   color: #34d399 !important;
@@ -363,14 +607,14 @@
   border-color: rgba(251, 191, 36, 0.24) !important;
 }
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt.is-scheduled {
-  color: #a78bfa !important;
-  background: rgba(167, 139, 250, 0.12) !important;
-  border-color: rgba(167, 139, 250, 0.24) !important;
+  color: var(--nx-live-accent) !important;
+  background: var(--nx-live-accent-soft) !important;
+  border-color: var(--nx-live-accent-border) !important;
 }
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt.is-cancelled {
-  color: #94a3b8 !important;
-  background: rgba(148, 163, 184, 0.1) !important;
-  border-color: rgba(148, 163, 184, 0.22) !important;
+  color: var(--nx-live-text-muted) !important;
+  background: color-mix(in srgb, var(--nx-live-text-muted) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx-live-text-muted) 22%, transparent) !important;
 }
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__receipt.is-failed {
   color: #f87171 !important;
@@ -379,24 +623,8 @@
   cursor: help !important;
 }
 
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__translate {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 5px !important;
-  margin-top: 2px !important;
-  font-size: 10px !important;
-  font-weight: 500 !important;
-  color: var(--nx-text-muted) !important;
-}
-
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__translate button {
-  border: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-  font-size: 10px !important;
-  font-weight: 600 !important;
   color: var(--nx-live-accent) !important;
-  cursor: pointer !important;
 }
 
 /* Date separators */
@@ -406,7 +634,7 @@
   gap: 12px !important;
   width: 100% !important;
   margin: 14px 0 10px !important;
-  align-self: center !important;
+  align-self: stretch !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-day::before,
@@ -421,30 +649,70 @@
   padding: 4px 12px !important;
   border-radius: 999px !important;
   border: 1px solid var(--nx-live-glass-border) !important;
-  background: color-mix(in srgb, var(--nx-live-glass) 80%, transparent) !important;
+  background: color-mix(in srgb, var(--nx-live-glass-bg) 82%, transparent) !important;
   backdrop-filter: blur(10px) !important;
   font-size: 10px !important;
   font-weight: 650 !important;
   letter-spacing: 0.05em !important;
   text-transform: uppercase !important;
-  color: var(--nx-text-muted) !important;
+  color: var(--nx-live-text-muted) !important;
 }
 
-/* Scheduled actions */
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__scheduled-actions {
-  display: inline-flex !important;
-  gap: 5px !important;
+/* Composer + operating layer accent wiring (no layout changes) */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock__input-wrap:focus-within {
+  border-color: var(--nx-live-accent-border) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight, rgba(255,255,255,0.05)),
+    0 0 0 3px color-mix(in srgb, var(--nx-accent) 14%, transparent) !important;
 }
 
-.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__scheduled-actions button {
-  font-size: 9.5px !important;
-  font-weight: 600 !important;
-  padding: 2px 7px !important;
-  border-radius: 6px !important;
-  border: 1px solid var(--nx-live-glass-border) !important;
-  background: transparent !important;
-  color: var(--nx-text-muted) !important;
-  cursor: pointer !important;
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-send-button {
+  border-color: var(--nx-live-accent-border) !important;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--nx-accent) 88%, #fff 12%),
+    color-mix(in srgb, var(--nx-accent) 62%, #000 38%)
+  ) !important;
+  box-shadow: 0 8px 22px var(--nx-live-accent-glow) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-send-button.is-ready:hover:not(:disabled) {
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--nx-accent) 36%, transparent) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-tool-btn.is-active {
+  color: var(--nx-accent) !important;
+  background: var(--nx-live-accent-soft) !important;
+  border-color: var(--nx-live-accent-border) !important;
+}
+
+/* Quick Actions theme awareness */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread ~ .nx-quick-menu-popover,
+.nx-quick-menu-popover {
+  background: var(--nx-live-glass-bg, var(--nx-contract-menu-bg)) !important;
+  border-color: var(--nx-live-glass-border, var(--nx-contract-menu-border)) !important;
+  backdrop-filter: blur(20px) saturate(1.4) !important;
+}
+
+[data-nexus-theme="red_ops"] .nx-quick-menu-popover {
+  background: rgba(14, 3, 6, 0.96) !important;
+  border-color: rgba(220, 38, 60, 0.18) !important;
+}
+
+[data-nexus-theme="light"] .nx-quick-menu-popover {
+  background: rgba(255, 255, 255, 0.97) !important;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Red Ops composer dock tint */
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock {
+  background: color-mix(in srgb, rgba(14, 3, 6, 0.96) 100%, transparent) !important;
+  border-color: rgba(220, 38, 60, 0.14) !important;
+}
+
+[data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock {
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06) !important;
 }
 
 /* Width modes */

@@ -133,9 +133,10 @@ const isUnknownValue = (value: string): boolean => {
 
 const formatFlagLabel = (flag: string): string => (flag === 'Absentee' ? 'Absentee Owner' : flag)
 
-interface PropertyChip {
+interface PropertyIntelCell {
   key: string
   label: string
+  value: string
   className?: string
 }
 
@@ -486,16 +487,17 @@ export const ChatThread = ({
       ? 'is-temp-warm'
       : 'is-temp-cold'
 
-  const propertyChips: PropertyChip[] = []
-  if (propertyTypeLabel) propertyChips.push({ key: 'type', label: propertyTypeLabel })
-  if (unitCount != null && unitCount > 1) propertyChips.push({ key: 'units', label: `${unitCount} Units` })
-  if (estimatedValue) propertyChips.push({ key: 'value', label: `Value ${formatCompactMoney(estimatedValue)}` })
-  if (equityDisplay !== '—') propertyChips.push({ key: 'equity', label: `Equity ${equityDisplay}` })
-  if (buildingCondition) propertyChips.push({ key: 'condition', label: buildingCondition })
-  visibleFlags.forEach((flag) => propertyChips.push({ key: `flag-${flag}`, label: flag, className: 'is-flag' }))
-  if (overflowFlagCount > 0) propertyChips.push({ key: 'flags-more', label: `+${overflowFlagCount}`, className: 'is-flag' })
-  if (isSuppressed) propertyChips.push({ key: 'suppressed', label: 'Suppressed', className: 'is-status' })
-  if (backgroundLoading) propertyChips.push({ key: 'sync', label: 'Syncing…' })
+  const propertyCells: PropertyIntelCell[] = []
+  if (cleanMarket) propertyCells.push({ key: 'market', label: 'Market', value: cleanMarket, className: 'is-market' })
+  if (propertyTypeLabel) propertyCells.push({ key: 'type', label: 'Type', value: propertyTypeLabel })
+  if (unitCount != null && unitCount > 1) propertyCells.push({ key: 'units', label: 'Units', value: String(unitCount) })
+  if (estimatedValue) propertyCells.push({ key: 'value', label: 'Value', value: formatCompactMoney(estimatedValue) })
+  if (equityDisplay !== '—') propertyCells.push({ key: 'equity', label: 'Equity', value: equityDisplay })
+  if (buildingCondition) propertyCells.push({ key: 'condition', label: 'Condition', value: buildingCondition })
+  visibleFlags.forEach((flag) => propertyCells.push({ key: `flag-${flag}`, label: 'Flag', value: flag, className: 'is-flag' }))
+  if (overflowFlagCount > 0) propertyCells.push({ key: 'flags-more', label: 'Flags', value: `+${overflowFlagCount}`, className: 'is-flag' })
+  if (isSuppressed) propertyCells.push({ key: 'suppressed', label: 'Status', value: 'Suppressed', className: 'is-status' })
+  if (backgroundLoading) propertyCells.push({ key: 'sync', label: 'Sync', value: 'Syncing…' })
 
   const renderHeaderActions = (withLabels = false) => (
     <>
@@ -545,6 +547,11 @@ export const ChatThread = ({
       <div className="nx-chat-atmosphere" aria-hidden="true" />
 
       <header className={cls('nx-conv-header', temperatureClass)}>
+        <div className="nx-conv-header__atmosphere" aria-hidden="true">
+          <span className="nx-conv-header__liquid nx-conv-header__liquid--field" />
+          <span className="nx-conv-header__liquid nx-conv-header__liquid--bloom" />
+          <span className="nx-conv-header__liquid nx-conv-header__liquid--edge" />
+        </div>
         <div className="nx-conv-header__glow" aria-hidden="true" />
 
         <div className="nx-conv-layer-a">
@@ -593,12 +600,15 @@ export const ChatThread = ({
           )}
         </div>
 
-        {propertyChips.length > 0 && (
+        {propertyCells.length > 0 && (
           <div className="nx-conv-layer-b">
             <div className="nx-conv-property-strip" aria-label="Property intelligence">
-              {propertyChips.map((chip) => (
-                <span key={chip.key} className={cls('nx-intel-cell', chip.className)}>
-                  {chip.label}
+              {propertyCells.map((cell) => (
+                <span key={cell.key} className={cls('nx-intel-cell', cell.className)}>
+                  {!cell.className?.includes('is-flag') && (
+                    <span className="nx-intel-cell__label">{cell.label}</span>
+                  )}
+                  <span className="nx-intel-cell__value">{cell.value}</span>
                 </span>
               ))}
             </div>
@@ -668,7 +678,7 @@ export const ChatThread = ({
             const receiptMeta = deliveryBadgeMeta(deliveryBadge)
 
             return (
-              <div key={msg.id}>
+              <div key={msg.id} className={cls('nx-msg-lane', isOutbound ? 'is-outbound' : 'is-inbound')}>
                 {showDateSeparator && (
                   <div className="nx-msg-day" role="separator" aria-label={formatDateSeparator(timestampIso)}>
                     <span>{formatDateSeparator(timestampIso)}</span>

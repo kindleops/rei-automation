@@ -477,10 +477,18 @@ export function applyThemeToDOM(): void {
   // Set ONLY accent variables inline. Light/Dark full themes are managed by CSS classes/selectors.
   // DO NOT inject --nx-bg / --nx-surface / text tokens inline as it corrupts CSS variable cascades.
   root.style.setProperty('--nx-accent', accent.primary)
+  root.style.setProperty('--nx-accent-rgb', rgb)
   root.style.setProperty('--nx-accent-soft', accent.soft)
+  root.style.setProperty('--nx-accent-muted', accent.soft)
+  root.style.setProperty('--nx-accent-strong', accent.primary)
+  root.style.setProperty('--nx-accent-contrast', '#ffffff')
   root.style.setProperty('--nx-accent-glow', accent.glow)
+  root.style.setProperty('--nx-accent-border', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-start', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-mid', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-end', accent.primary)
   root.style.setProperty('--nx-badge-border', accent.primary)
-  
+
   root.style.setProperty('--nexus-accent', accent.primary)
   root.style.setProperty('--nexus-accent-rgb', rgb)
   root.style.setProperty('--nexus-accent-soft', accent.soft)
