@@ -224,7 +224,7 @@ const formatDateSeparator = (iso: string): string => {
   const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000)
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
-  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 const sameCalendarDay = (leftIso: string, rightIso: string): boolean => {
@@ -487,7 +487,6 @@ export const ChatThread = ({
       : 'is-temp-cold'
 
   const propertyChips: PropertyChip[] = []
-  if (cleanMarket) propertyChips.push({ key: 'market', label: cleanMarket, className: 'is-market' })
   if (propertyTypeLabel) propertyChips.push({ key: 'type', label: propertyTypeLabel })
   if (unitCount != null && unitCount > 1) propertyChips.push({ key: 'units', label: `${unitCount} Units` })
   if (estimatedValue) propertyChips.push({ key: 'value', label: `Value ${formatCompactMoney(estimatedValue)}` })
@@ -542,7 +541,7 @@ export const ChatThread = ({
   )
 
   return (
-    <div className={cls('nx-chat-container', `is-layout-${layoutMode}`, atmosphereClass)}>
+    <div className={cls('nx-chat-container', 'nx-conv-live', `is-layout-${layoutMode}`, atmosphereClass)}>
       <div className="nx-chat-atmosphere" aria-hidden="true" />
 
       <header className={cls('nx-conv-header', temperatureClass)}>
@@ -598,7 +597,7 @@ export const ChatThread = ({
           <div className="nx-conv-layer-b">
             <div className="nx-conv-property-strip" aria-label="Property intelligence">
               {propertyChips.map((chip) => (
-                <span key={chip.key} className={cls('nx-conv-chip', chip.className)}>
+                <span key={chip.key} className={cls('nx-intel-cell', chip.className)}>
                   {chip.label}
                 </span>
               ))}
@@ -666,23 +665,26 @@ export const ChatThread = ({
 
             const isMessageTranslated = Boolean(threadTranslations?.[msg.id])
 
+            const receiptMeta = deliveryBadgeMeta(deliveryBadge)
+
             return (
               <div key={msg.id}>
                 {showDateSeparator && (
-                  <div className="nx-conv-date-separator" role="separator" aria-label={formatDateSeparator(timestampIso)}>
+                  <div className="nx-msg-day" role="separator" aria-label={formatDateSeparator(timestampIso)}>
                     <span>{formatDateSeparator(timestampIso)}</span>
                   </div>
                 )}
 
                 <div className={cls(
-                  'nx-bubble-wrap',
+                  'nx-msg',
                   isOutbound ? 'is-outbound' : 'is-inbound',
                   isFailed && 'is-failed',
                   isScheduled && 'is-scheduled',
                   isSending && 'is-sending',
                   !isOutbound && isTranslatingThread && 'is-translating',
                 )}>
-                  <div className="nx-chat-bubble">
+                  <div className="nx-msg__bubble">
+                    <span className="nx-msg__tail" aria-hidden="true" />
                     {highlightText(msg.body, matchedKeywords.length ? matchedKeywords : [searchQuery])}
 
                     {turn && (turn.intent_detected || turn.confidence_score) && (
@@ -701,23 +703,23 @@ export const ChatThread = ({
                     )}
                   </div>
 
-                  <div className="nx-bubble-footer">
-                    <time className="nx-bubble-time" dateTime={timestampIso}>
+                  <div className="nx-msg__meta">
+                    <time className="nx-msg__time" dateTime={timestampIso}>
                       {formatMessageDateTime(timestampIso)}
                     </time>
 
                     {isOutbound && (
-                      <div className="nx-delivery-row">
+                      <>
                         <span
-                          className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}
+                          className={cls('nx-msg__receipt', `is-${deliveryBadge}`)}
                           title={deliveryBadge === 'failed' && msg.error ? String(msg.error) : undefined}
                         >
-                          <span className="nx-delivery-pill__icon" aria-hidden="true">{deliveryBadgeMeta(deliveryBadge).icon}</span>
-                          <span>{deliveryBadgeMeta(deliveryBadge).label}</span>
+                          <span aria-hidden="true">{receiptMeta.icon}</span>
+                          <span>{receiptMeta.label}</span>
                         </span>
 
                         {isScheduled && queueId && (
-                          <div className="nx-scheduled-actions">
+                          <div className="nx-msg__scheduled-actions">
                             <button
                               type="button"
                               onClick={() => onThreadAction?.(thread.id, `edit_queue:${queueId}`, { text: msg.body })}
@@ -738,18 +740,18 @@ export const ChatThread = ({
                             <Icon name="refresh-cw" />
                           </button>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
 
                   {!isOutbound && (
                     isTranslatingThread ? (
-                      <div className="nx-translate-meta is-translating" aria-live="polite">
+                      <div className="nx-msg__translate is-translating" aria-live="polite">
                         <span className="nx-translate-badge__spinner" />
                         <span>Translating…</span>
                       </div>
                     ) : isMessageTranslated ? (
-                      <div className="nx-translate-meta is-translated">
+                      <div className="nx-msg__translate is-translated">
                         <Icon name="globe" />
                         <span>
                           {sellerLanguageLabel && sellerLanguageLabel !== 'Unknown'
@@ -759,7 +761,7 @@ export const ChatThread = ({
                         <button type="button" onClick={() => onTranslateThread?.()}>Show Original</button>
                       </div>
                     ) : sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? (
-                      <div className="nx-translate-meta is-available">
+                      <div className="nx-msg__translate is-available">
                         <Icon name="globe" />
                         <span>{sellerLanguageLabel}</span>
                         <button type="button" onClick={() => onTranslateThread?.()}>Show Translation</button>
