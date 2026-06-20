@@ -7031,10 +7031,7 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
   const supabase = deps.supabase || defaultSupabase
   if (!campaignId) return { ok: false, error: 'campaign_id_required' }
   const action = clean(input.action || input.lifecycle_action)
-  const target = CAMPAIGN_LIFECYCLE_ACTIONS[action] || (CAMPAIGN_STATES.includes(clean(input.to_status)) ? clean(input.to_status) : null)
-  if (!target) return { ok: false, error: `unknown_lifecycle_action:${action || input.to_status || ''}` }
-
-  const reason = clean(input.reason) || `operator:${action || target}`
+  const reason = clean(input.reason) || `operator:${action || 'lifecycle'}`
   const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
 
   if (action === 'activate') {
@@ -7068,6 +7065,9 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       degraded: Boolean(result.lifecycle_result?.degraded),
     }
   }
+
+  const target = CAMPAIGN_LIFECYCLE_ACTIONS[action] || (CAMPAIGN_STATES.includes(clean(input.to_status)) ? clean(input.to_status) : null)
+  if (!target) return { ok: false, error: `unknown_lifecycle_action:${action || input.to_status || ''}` }
 
   if (action === 'restore') {
     const detail = await getCampaign(campaignId, deps)
