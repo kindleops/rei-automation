@@ -77,7 +77,7 @@ import { InboxActivityPanel } from './components/InboxActivityPanel'
 import { InboxCommandMap, type MapStyleMode } from '../../views/map/InboxCommandMap'
 import { InboxUtilityDrawer, MapDossierDrawer } from './components/InboxUtilityDrawer'
 import { LiveCopilotChat } from '../copilot/components/LiveCopilotChat'
-import { AdvancedFiltersPopover } from './components/AdvancedFiltersPopover'
+import { AdvancedFiltersModal } from './components/AdvancedFiltersModal'
 import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
@@ -4329,15 +4329,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       </div>
       )}
 
-      <AdvancedFiltersPopover
+      <AdvancedFiltersModal
         open={activeOverlay === 'filters'}
         stageFilter={stageFilter}
         viewFilter={viewFilter}
+        inboxBucket={viewFilter === 'all_conversations' ? 'all' : viewFilter}
         advancedFilters={advancedFilters}
         onAdvancedFiltersChange={setAdvancedFilters}
-        advancedFilterOptions={advancedFilterOptions}
-        viewCounts={viewCounts}
-        resultCount={filtered.length}
         onReset={handleResetFilters}
         onClose={() => setActiveOverlay(null)}
         onApply={handleApplyAdvancedFilters}

@@ -11,6 +11,11 @@ import {
   applyLiveInboxAdvancedFilters,
   shouldPreferEnrichedSource,
 } from "@/lib/domain/inbox/inbox-advanced-filters.js";
+import {
+  queryHydratedInboxThreads,
+  countHydratedInboxFilters,
+  HYDRATED_INBOX_SOURCE,
+} from "@/lib/domain/inbox/inbox-hydrated-filter-service.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -1546,6 +1551,19 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
   const advancedFilters = parseAdvancedFiltersParam(params);
   const advancedActive = hasActiveAdvancedFilters(advancedFilters);
+
+  if (advancedActive) {
+    const hydrated = await queryHydratedInboxThreads(
+      { ...params, limit, offset, filter },
+      { supabase },
+    );
+    return {
+      data: hydrated.data,
+      count: hydrated.count,
+      error: null,
+      sourceConfig: { name: HYDRATED_INBOX_SOURCE, key: "hydrated" },
+    };
+  }
 
   if (!advancedActive) {
     const authoritativeResult = await queryAuthoritativeInboxThreads(params, {

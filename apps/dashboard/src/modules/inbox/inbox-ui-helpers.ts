@@ -188,6 +188,14 @@ export interface InboxAdvancedFilters {
   ownerNameSearch?: string
   phoneNumberSearch?: string
   addressSearch?: string
+
+  // Flag filters (Match Any / All / Exclude)
+  propertyFlagsAny?: string[]
+  propertyFlagsAll?: string[]
+  propertyFlagsExclude?: string[]
+  personFlagsAny?: string[]
+  personFlagsAll?: string[]
+  personFlagsExclude?: string[]
 }
 
 export interface InboxFilterState {

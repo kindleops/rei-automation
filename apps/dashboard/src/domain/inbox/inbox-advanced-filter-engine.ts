@@ -211,6 +211,13 @@ export const serializeAdvancedFiltersForServer = (
   if (filters.suppressionReason) set('suppressed', true)
   if (filters.queueStatus) set('queueStatus', filters.queueStatus)
 
+  if (filters.propertyFlagsAny?.length) set('propertyFlagsAny', filters.propertyFlagsAny)
+  if (filters.propertyFlagsAll?.length) set('propertyFlagsAll', filters.propertyFlagsAll)
+  if (filters.propertyFlagsExclude?.length) set('propertyFlagsExclude', filters.propertyFlagsExclude)
+  if (filters.personFlagsAny?.length) set('personFlagsAny', filters.personFlagsAny)
+  if (filters.personFlagsAll?.length) set('personFlagsAll', filters.personFlagsAll)
+  if (filters.personFlagsExclude?.length) set('personFlagsExclude', filters.personFlagsExclude)
+
   return payload
 }
 
