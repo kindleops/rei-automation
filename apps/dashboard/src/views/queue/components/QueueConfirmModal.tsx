@@ -10,7 +10,11 @@ const ACTION_LABELS: Record<string, string> = {
   'pause-queue': 'Pause Queue',
   'resume-queue': 'Resume Queue',
   'cancel-queued': 'Cancel Queued Jobs',
-  'bulk-suppress': 'Bulk Suppress Contacts',
+  'bulk-retry': 'Bulk Retry',
+  'bulk-reschedule': 'Bulk Reschedule',
+  'bulk-pause': 'Bulk Pause',
+  'bulk-cancel': 'Bulk Cancel',
+  'bulk-suppress': 'Bulk Suppress',
 }
 
 interface QueueConfirmModalProps {
@@ -82,6 +86,35 @@ export function QueueConfirmModal({ preview, busy, onConfirm, onCancel }: QueueC
             <div className="occ-confirm-modal__chips">
               {preview.senders.slice(0, 5).map(s => <span key={s} className="occ-chip occ-mono">…{s.slice(-4)}</span>)}
               {preview.senders.length > 5 && <span className="occ-chip is-muted">+{preview.senders.length - 5}</span>}
+            </div>
+          </div>
+        )}
+
+        {preview.campaigns && preview.campaigns.length > 0 && (
+          <div className="occ-confirm-modal__scope">
+            <span className="occ-confirm-modal__scope-label">Campaigns</span>
+            <div className="occ-confirm-modal__chips">
+              {preview.campaigns.slice(0, 4).map(c => <span key={c} className="occ-chip">{c}</span>)}
+              {preview.campaigns.length > 4 && <span className="occ-chip is-muted">+{preview.campaigns.length - 4}</span>}
+            </div>
+          </div>
+        )}
+
+        {preview.templates && preview.templates.length > 0 && (
+          <div className="occ-confirm-modal__scope">
+            <span className="occ-confirm-modal__scope-label">Templates</span>
+            <div className="occ-confirm-modal__chips">
+              {preview.templates.slice(0, 4).map(t => <span key={t} className="occ-chip">{t}</span>)}
+              {preview.templates.length > 4 && <span className="occ-chip is-muted">+{preview.templates.length - 4}</span>}
+            </div>
+          </div>
+        )}
+
+        {preview.exclusionReasons && preview.exclusionReasons.length > 0 && (
+          <div className="occ-confirm-modal__scope">
+            <span className="occ-confirm-modal__scope-label">Exclusion reasons</span>
+            <div className="occ-confirm-modal__chips">
+              {preview.exclusionReasons.map(r => <span key={r} className="occ-chip is-red">{r.replace(/_/g, ' ')}</span>)}
             </div>
           </div>
         )}

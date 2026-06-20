@@ -164,6 +164,9 @@ export interface BulkActionPreview {
   excluded: number
   markets: string[]
   senders: string[]
+  campaigns?: string[]
+  templates?: string[]
+  exclusionReasons?: string[]
   retryable: number
   nonRetryable: number
   irreversible: boolean
@@ -240,3 +243,207 @@ export const templateHealthWithSample = (
 }
 
 export const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 100) : 0
+
+export interface QueueKpiCounts {
+  scheduled: number
+  queued: number
+  sending: number
+  sent: number
+  delivered: number
+  failed: number
+  blocked: number
+  approval: number
+  optOuts: number
+  total: number
+}
+
+export const KPI_TOOLTIPS: Record<string, string> = {
+  Scheduled: 'Rows awaiting their scheduled send window. Current-state bucket.',
+  Queued: 'Rows ready for the processor. Includes ready/pending statuses.',
+  Sending: 'Rows actively dispatching to the provider right now.',
+  Delivered: 'Provider-confirmed delivery. Subset of Sent.',
+  Sent: 'All dispatched rows (delivered + failed + transient sent). Cumulative dispatch metric.',
+  Failed: 'Provider or carrier failures after send attempt.',
+  Blocked: 'Stopped before provider send by guards, pauses, or compliance.',
+  'Opt-Outs': 'Opt-out and 21610 suppression events in range.',
+  Approval: 'Rows requiring operator approval before send.',
+}
+
+export type ProcessorState = 'running' | 'idle' | 'paused' | 'degraded' | 'blocked' | 'unknown'
+
+export interface OperationsPulseData {
+  processorState: ProcessorState
+  processorLabel: string
+  jobsLastHour: number
+  activeSenders: number
+  nextScheduled: string | null
+  pendingRetries: number
+  approvalRequired: number
+  blockedRows: number
+  latestReceipt: string | null
+  latestReceiptAge: string | null
+  lastSuccessfulRun: string | null
+  throughputLabel: string | null
+  capacityLabel: string | null
+}
+
+export const buildOperationsPulse = (items: QueueItem[], kpi: QueueKpiCounts, model?: { sentTodayCount?: number; safeCapacityRemaining?: number } | null): OperationsPulseData => {
+  const oneHourAgo = Date.now() - 3600000
+  const jobsLastHour = items.filter(i => {
+    const ts = i.sentAt || i.deliveredAt || i.lastEventAt || i.updatedAt
+    return ts && new Date(ts).getTime() > oneHourAgo && isSent(i.status)
+  }).length
+
+  const activeSenders = new Set(
+    items.filter(i => ['scheduled', 'queued', 'ready', 'sending'].includes(i.status) && i.fromPhoneNumber).map(i => i.fromPhoneNumber),
+  ).size
+
+  const nextRow = [...items]
+    .filter(i => ['scheduled', 'queued', 'ready'].includes(i.status) && i.scheduledForLocal)
+    .sort((a, b) => new Date(a.scheduledForLocal).getTime() - new Date(b.scheduledForLocal).getTime())[0]
+
+  const latestDelivered = [...items]
+    .filter(i => i.deliveredAt || (i.status === 'delivered' && i.lastEventAt))
+    .sort((a, b) => new Date(b.deliveredAt ?? b.lastEventAt ?? 0).getTime() - new Date(a.deliveredAt ?? a.lastEventAt ?? 0).getTime())[0]
+
+  const latestReceipt = latestDelivered?.deliveredAt ?? latestDelivered?.lastEventAt ?? null
+
+  let processorState: ProcessorState = 'idle'
+  if (kpi.sending > 0) processorState = 'running'
+  else if (kpi.blocked > kpi.scheduled + kpi.queued) processorState = 'blocked'
+  else if (kpi.failed > 10) processorState = 'degraded'
+  else if (kpi.scheduled + kpi.queued === 0 && kpi.sending === 0) processorState = 'idle'
+
+  const processorLabel = {
+    running: 'Running',
+    idle: 'Idle',
+    paused: 'Paused',
+    degraded: 'Degraded',
+    blocked: 'Blocked',
+    unknown: 'Unknown',
+  }[processorState]
+
+  const sentToday = model?.sentTodayCount ?? items.filter(i => i.sentAt && new Date(i.sentAt).toDateString() === new Date().toDateString()).length
+  const capacity = model?.safeCapacityRemaining
+
+  return {
+    processorState,
+    processorLabel,
+    jobsLastHour,
+    activeSenders,
+    nextScheduled: nextRow?.scheduledForLocal ?? null,
+    pendingRetries: items.filter(i => i.status === 'retry' && i.retryEligible).length,
+    approvalRequired: kpi.approval,
+    blockedRows: kpi.blocked,
+    latestReceipt: latestReceipt ? (latestDelivered?.providerMessageId ?? latestDelivered?.textgridMessageId ?? 'Receipt logged') : null,
+    latestReceiptAge: latestReceipt ? relTimeShort(latestReceipt) : null,
+    lastSuccessfulRun: latestReceipt,
+    throughputLabel: jobsLastHour > 0 ? `${jobsLastHour}/hr` : null,
+    capacityLabel: capacity != null ? `${sentToday} sent · ${capacity} cap remaining` : sentToday > 0 ? `${sentToday} sent today` : null,
+  }
+}
+
+const relTimeShort = (iso: string): string => {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const h = Math.floor(min / 60)
+  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
+}
+
+export interface ExceptionItem {
+  id: string
+  priority: number
+  category: string
+  label: string
+  urgency: 'critical' | 'high' | 'medium' | 'low'
+  count: number
+  action: string
+  owner: string | null
+  age: string | null
+  market: string | null
+  sender: string | null
+  campaign: string | null
+  causeKey: string | null
+}
+
+const EXCEPTION_PRIORITY: Array<{ key: string; label: string; urgency: ExceptionItem['urgency']; match: (i: QueueItem) => boolean; action: string }> = [
+  { key: 'blacklist_pair_21610', label: 'Compliance / 21610', urgency: 'critical', match: i => i.failureCategory === 'blacklist_pair_21610', action: 'Suppress sender↔recipient pair' },
+  { key: 'recipient_opted_out', label: 'Opt-out conflict', urgency: 'critical', match: i => i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'suppression_blocked', action: 'Honor opt-out — do not retry' },
+  { key: 'carrier', label: 'Provider rejection', urgency: 'high', match: i => i.failureGroup === 'Carrier' && isFailed(i.status), action: 'Review carrier failure and retry if eligible' },
+  { key: 'missing_template', label: 'Missing template', urgency: 'high', match: i => i.failureCategory === 'missing_template' || i.diagnosticFlags.includes('MISSING_TEMPLATE'), action: 'Attach template and re-queue' },
+  { key: 'message_event_missing', label: 'Message-event reconciliation', urgency: 'medium', match: i => i.diagnosticFlags.includes('MISSING_MESSAGE_EVENT'), action: 'Reconcile delivery webhook' },
+  { key: 'approval', label: 'Approval required', urgency: 'medium', match: i => i.status === 'approval', action: 'Review and approve send' },
+  { key: 'unknown', label: 'Unknown failure', urgency: 'low', match: i => isFailed(i.status) && !i.failureCategory, action: 'Inspect raw failure before bulk retry' },
+  { key: 'retryable', label: 'Retryable transient', urgency: 'low', match: i => isFailed(i.status) && i.retryEligible && !isNonRetryableRow(i), action: 'Safe to retry within caps' },
+]
+
+export const buildExceptionsCenter = (items: QueueItem[]): ExceptionItem[] => {
+  const results: ExceptionItem[] = []
+  for (const rule of EXCEPTION_PRIORITY) {
+    const matched = items.filter(rule.match)
+    if (matched.length === 0) continue
+    const sample = matched[0]
+    const oldest = matched.reduce((a, b) => (new Date(a.updatedAt) < new Date(b.updatedAt) ? a : b))
+    results.push({
+      id: rule.key,
+      priority: EXCEPTION_PRIORITY.indexOf(rule),
+      category: rule.label,
+      label: rule.label,
+      urgency: rule.urgency,
+      count: matched.length,
+      action: rule.action,
+      owner: sample.rowSource === 'campaign' ? 'Campaign queue' : sample.automationSource ?? null,
+      age: relTimeShort(oldest.updatedAt),
+      market: sample.market !== 'Market unknown' ? sample.market : null,
+      sender: sample.fromPhoneNumber || null,
+      campaign: sample.campaignName,
+      causeKey: rule.key,
+    })
+  }
+  return results.sort((a, b) => a.priority - b.priority)
+}
+
+export const buildSelectionPreview = (action: string, selected: QueueItem[]): BulkActionPreview => {
+  const retryEligible = selected.filter(i => isFailed(i.status) && i.retryEligible && !isNonRetryableRow(i))
+  const excluded = selected.filter(i => isFailed(i.status) && isNonRetryableRow(i))
+  const markets = [...new Set(selected.map(i => i.market).filter(m => m && m !== 'Market unknown'))]
+  const senders = [...new Set(selected.map(i => i.fromPhoneNumber).filter(Boolean))]
+  const campaigns = [...new Set(selected.map(i => i.campaignName).filter(Boolean))]
+
+  let eligible = selected.length
+  if (action === 'bulk-retry') eligible = retryEligible.length
+  if (action === 'bulk-cancel' || action === 'bulk-suppress') eligible = selected.filter(i => !['cancelled', 'delivered'].includes(i.status)).length
+
+  return {
+    action,
+    affected: selected.length,
+    eligible,
+    excluded: excluded.length,
+    markets,
+    senders,
+    retryable: retryEligible.length,
+    nonRetryable: excluded.length,
+    irreversible: action.includes('suppress') || action.includes('cancel'),
+    requiresPhrase: action.includes('suppress') || selected.length > 10,
+    campaigns,
+    templates: [...new Set(selected.map(i => i.templateName).filter(t => t && t !== 'Template not attached'))],
+    exclusionReasons: excluded.map(i => i.failureCategory ?? 'non-retryable').slice(0, 5),
+  } as BulkActionPreview & { campaigns?: string[]; templates?: string[]; exclusionReasons?: string[] }
+}
+
+export const FLOW_STAGES = [
+  { key: 'scheduled', label: 'Scheduled', cumulative: false },
+  { key: 'queued', label: 'Queued', cumulative: false },
+  { key: 'sending', label: 'Sending', cumulative: false, pulse: true },
+  { key: 'sent', label: 'Sent', cumulative: true },
+  { key: 'delivered', label: 'Delivered', cumulative: true },
+] as const
+
+export const FLOW_EXCEPTIONS = [
+  { key: 'failed', label: 'Failed', tone: 'red' },
+  { key: 'blocked', label: 'Blocked', tone: 'amber' },
+  { key: 'approval', label: 'Approval', tone: 'amber' },
+  { key: 'optOuts', label: 'Opt-Out', tone: 'red' },
+] as const
