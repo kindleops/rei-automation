@@ -1874,11 +1874,6 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), [])
 
-  const requestBulkAction = useCallback((action: string) => {
-    if (selectedRows.length === 0) return
-    setConfirmPreview(buildSelectionPreview(action, selectedRows))
-  }, [selectedRows])
-
   // ── Pagination controls ──────────────────────────────────────────────────
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page)
@@ -1964,6 +1959,11 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   const bulkNonRetryable = useMemo(() => selectedRows.filter(i => isFailed(i.status) && isNonRetryableRow(i)).length, [selectedRows])
 
   const runnableCount = useMemo(() => items.filter(i => ['scheduled', 'queued', 'ready'].includes(i.status)).length, [items])
+
+  const requestBulkAction = useCallback((action: string) => {
+    if (selectedRows.length === 0) return
+    setConfirmPreview(buildSelectionPreview(action, selectedRows))
+  }, [selectedRows])
 
   const executeConfirmedAction = useCallback(async () => {
     if (!confirmPreview) return
