@@ -11,7 +11,6 @@ import {
   type QueueSection,
 } from '../queue-ui-helpers'
 import type { QueueItem } from '../../../domain/queue/queue.types'
-import { ExceptionsCenter } from './ExceptionsCenter'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -33,11 +32,9 @@ interface CommandIntelligenceDockProps {
   selectedMarket: { market: string; total: number; deliveryPct: number; health: string; senderExists: boolean } | null
   selectedFailure: { cause: string; label: string; count: number; retryable: boolean; action: string } | null
   selectedEvent: QueueItem | null
-  exceptions: ExceptionItem[]
+  topException: ExceptionItem | null
   onAction: (action: string, id: string) => void
-  onRequestConfirm: (action: string) => void
   onViewFailureRows: (cause: string) => void
-  onClose: () => void
 }
 
 export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
@@ -47,60 +44,50 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
   if (collapsed) {
     return (
       <aside className="occ-cmd-dock is-collapsed">
-        <button type="button" className="occ-cmd-dock__expand" onClick={() => setCollapsed(false)} aria-label="Expand intelligence dock">
+        <button type="button" className="occ-cmd-dock__expand" onClick={() => setCollapsed(false)} aria-label="Expand intelligence">
           <Icon name="chevron-left" size={14} />
         </button>
         <div className="occ-cmd-dock__mini">
           <span className={cls('occ-cmd-dock__pulse', `is-${ops.processorState}`)}>{ops.processorLabel}</span>
           {props.kpi.failed > 0 && <span className="is-red">{props.kpi.failed}</span>}
-          {props.kpi.approval > 0 && <span className="is-amber">{props.kpi.approval}</span>}
         </div>
       </aside>
     )
   }
 
-  const { selectedItem, onAction, onClose } = props
+  const { selectedItem, onAction } = props
 
   if (selectedItem) {
     const identity = resolveSellerIdentity(selectedItem)
     const statusView = resolveStatusPresentation(selectedItem)
     const retryBlocked = isNonRetryableRow(selectedItem)
     return (
-      <aside className="occ-cmd-dock occ-dossier is-expanded">
-        <div className="occ-dossier__atmo" aria-hidden="true" />
+      <aside className="occ-cmd-dock occ-dossier">
         <header className="occ-cmd-dock__head">
           <div>
             <strong>{identity.primary}</strong>
             <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
           </div>
-          <button type="button" onClick={() => onAction('deselect', selectedItem.id)} aria-label="Close dossier"><Icon name="close" size={12} /></button>
+          <div className="occ-cmd-dock__head-actions">
+            <button type="button" onClick={() => onAction('deselect', selectedItem.id)} aria-label="Close"><Icon name="close" size={12} /></button>
+            <button type="button" onClick={() => setCollapsed(true)} aria-label="Collapse"><Icon name="chevron-right" size={12} /></button>
+          </div>
         </header>
         <div className="occ-cmd-dock__body">
-          <div className="occ-insp-section">
-            <div className="occ-insp-section-title">Identity</div>
-            <InspRow label="Seller" value={identity.primary} />
-            {identity.masterOwner && <InspRow label="Master Owner" value={identity.masterOwner} />}
-            <InspRow label="Property" value={selectedItem.propertyAddress} />
-            <InspRow label="Market" value={selectedItem.market} />
-          </div>
-          <div className="occ-insp-section">
-            <div className="occ-insp-section-title">Delivery Progression</div>
-            <InspRow label="Status" value={statusView.primary} tone={statusView.tone} />
-            <InspRow label="Provider" value={selectedItem.deliveryStatus} />
-            <InspRow label="Retries" value={`${selectedItem.retryCount}/${selectedItem.maxRetries}`} />
-            <InspRow label="Retry" value={retryBlocked ? 'Non-retryable' : selectedItem.retryEligible ? 'Eligible' : 'No'} tone={selectedItem.retryEligible && !retryBlocked ? 'green' : undefined} />
-          </div>
+          <InspRow label="Property" value={selectedItem.propertyAddress} />
+          <InspRow label="Stage" value={`${selectedItem.stageLabel ?? '—'} · T${selectedItem.touchNumber}`} />
+          <InspRow label="Campaign" value={selectedItem.campaignName} />
+          <InspRow label="Template" value={selectedItem.templateName} />
+          <InspRow label="Sender" value={selectedItem.fromPhoneNumber} />
           {selectedItem.messageText && (
             <div className="occ-insp-section">
               <div className="occ-insp-section-title">Message</div>
               <p className="occ-insp-message">{selectedItem.messageText}</p>
             </div>
           )}
-          {statusView.blocking && (
-            <div className="occ-insp-section occ-insp-section--failure">
-              <InspRow label="Blocking" value={statusView.blocking} tone="red" />
-            </div>
-          )}
+          <InspRow label="Provider" value={selectedItem.deliveryStatus} />
+          <InspRow label="Retry" value={retryBlocked ? 'Non-retryable' : selectedItem.retryEligible ? 'Eligible' : 'No'} tone={selectedItem.retryEligible && !retryBlocked ? 'green' : undefined} />
+          {statusView.blocking && <InspRow label="Blocking" value={statusView.blocking} tone="red" />}
         </div>
         <footer className="occ-cmd-dock__actions">
           {selectedItem.status === 'approval' && <button className="occ-action-btn is-primary" onClick={() => onAction('approve', selectedItem.id)}>Approve</button>}
@@ -109,7 +96,6 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
           )}
           <button className="occ-action-btn is-danger" onClick={() => onAction('cancel', selectedItem.id)}>Suppress</button>
         </footer>
-        <button type="button" className="occ-cmd-dock__collapse" onClick={() => setCollapsed(true)}>Collapse</button>
       </aside>
     )
   }
@@ -118,32 +104,38 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
     <aside className={cls('occ-cmd-dock', `is-tab-${props.section}`)}>
       <header className="occ-cmd-dock__head">
         <span className="occ-cmd-dock__title">Command Intelligence</span>
-        <button type="button" onClick={onClose} aria-label="Collapse dock"><Icon name="chevron-right" size={12} /></button>
+        <button type="button" onClick={() => setCollapsed(true)} aria-label="Collapse"><Icon name="chevron-right" size={12} /></button>
       </header>
       <div className="occ-cmd-dock__body">
-        {props.section === 'queue' && (
-          <>
-            <div className="occ-insp-section">
-              <div className="occ-insp-section-title">Processor</div>
-              <InspRow label="State" value={ops.processorLabel} tone={ops.processorState === 'running' ? 'cyan' : ops.processorState === 'degraded' ? 'amber' : undefined} />
-              <InspRow label="Next operation" value={ops.nextScheduled ? new Date(ops.nextScheduled).toLocaleString() : '—'} />
-              <InspRow label="Throughput" value={ops.throughputLabel ?? '—'} />
-            </div>
-            <ExceptionsCenter
-              exceptions={props.exceptions.slice(0, 4)}
-              selectedCause={null}
-              onSelect={() => {}}
-              onViewRows={props.onViewFailureRows}
-              compact
-            />
-          </>
+        <div className="occ-cmd-dock__ops">
+          <span className={cls('occ-cmd-dock__proc', `is-${ops.processorState}`)}>
+            <span className="occ-cmd-dock__dot" />{ops.processorLabel}
+          </span>
+          <div className="occ-cmd-dock__ops-grid">
+            <span>{ops.jobsLastHour}/hr</span>
+            <span>{ops.activeSenders} senders</span>
+            <span>{ops.pendingRetries} retry</span>
+            <span>{ops.blockedRows} blocked</span>
+          </div>
+          {ops.nextScheduled && <small>Next: {new Date(ops.nextScheduled).toLocaleString()}</small>}
+          {ops.throughputLabel && <small>{ops.throughputLabel}</small>}
+        </div>
+
+        {props.topException && (
+          <button
+            type="button"
+            className="occ-cmd-dock__urgent"
+            onClick={() => props.topException?.causeKey && props.onViewFailureRows(props.topException.causeKey)}
+          >
+            <span className="is-red">{props.topException.count}</span> {props.topException.label}
+          </button>
         )}
+
         {props.section === 'templates' && props.selectedTemplate && (
           <div className="occ-insp-section">
             <InspRow label="Template" value={props.selectedTemplate.name} />
             <InspRow label="Health" value={props.selectedTemplate.healthLabel} />
-            <InspRow label="Sent" value={props.selectedTemplate.sent} />
-            <InspRow label="Delivered" value={props.selectedTemplate.delivered} tone="green" />
+            <InspRow label="Sent/Del" value={`${props.selectedTemplate.sent} / ${props.selectedTemplate.delivered}`} />
             <InspRow label="Failed" value={props.selectedTemplate.failed} tone={props.selectedTemplate.failed > 0 ? 'red' : undefined} />
           </div>
         )}
@@ -151,24 +143,21 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
           <div className="occ-insp-section">
             <InspRow label="Number" value={props.selectedSender.phone} />
             <InspRow label="Market" value={props.selectedSender.market} />
-            <InspRow label="State" value={props.selectedSender.state} />
             <InspRow label="21610" value={props.selectedSender.violations21610} tone={props.selectedSender.violations21610 > 0 ? 'red' : undefined} />
-            <InspRow label="Delivery %" value={`${props.selectedSender.deliveryPct}%`} />
+            <InspRow label="Delivery" value={`${props.selectedSender.deliveryPct}%`} />
           </div>
         )}
         {props.section === 'market' && props.selectedMarket && (
           <div className="occ-insp-section">
             <InspRow label="Market" value={props.selectedMarket.market} />
             <InspRow label="Rows" value={props.selectedMarket.total} />
-            <InspRow label="Delivery %" value={`${props.selectedMarket.deliveryPct}%`} />
-            <InspRow label="Sender" value={props.selectedMarket.senderExists ? 'Registered' : 'None'} tone={props.selectedMarket.senderExists ? 'green' : 'red'} />
+            <InspRow label="Delivery" value={`${props.selectedMarket.deliveryPct}%`} />
           </div>
         )}
         {props.section === 'failures' && props.selectedFailure && (
           <div className="occ-insp-section">
             <InspRow label="Cause" value={props.selectedFailure.label} tone="red" />
             <InspRow label="Affected" value={props.selectedFailure.count} />
-            <InspRow label="Retryable" value={props.selectedFailure.retryable ? 'Yes' : 'No'} />
             <p className="occ-failure-card__action">{props.selectedFailure.action}</p>
           </div>
         )}
@@ -179,15 +168,7 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
             <InspRow label="Market" value={props.selectedEvent.market} />
           </div>
         )}
-        <div className="occ-insp-section">
-          <div className="occ-insp-section-title">Global</div>
-          <div className="occ-intel-actions">
-            <button className="occ-action-btn is-primary" onClick={() => props.onRequestConfirm('retry-all-failed')}>Retry All Failed</button>
-            <button className="occ-action-btn is-secondary" onClick={() => props.onRequestConfirm('run-queue-now')}>Run Queue</button>
-          </div>
-        </div>
       </div>
-      <button type="button" className="occ-cmd-dock__collapse" onClick={() => setCollapsed(true)}>Collapse</button>
     </aside>
   )
 }
