@@ -698,6 +698,40 @@ export function fetchDealContextCounts(
   return callBackend(`/api/cockpit/deal-context/counts${queryString ? `?${queryString}` : ''}`, { signal })
 }
 
+export function fetchEntityGraphSearch(
+  queryString = '',
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/entity-graph/search${queryString ? `?${queryString}` : ''}`, { signal })
+}
+
+export function fetchEntityGraphDossier(
+  type: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  switch (type) {
+    case 'property':
+      return callBackend(`/api/cockpit/entity-graph/property/${encodeURIComponent(id)}`, { signal })
+    case 'master_owner':
+    case 'owner':
+      return callBackend(`/api/cockpit/entity-graph/owner/${encodeURIComponent(id)}`, { signal })
+    case 'prospect':
+      return callBackend(`/api/cockpit/entity-graph/prospect/${encodeURIComponent(id)}`, { signal })
+    case 'phone':
+    case 'email':
+      return callBackend(`/api/cockpit/entity-graph/contact/${type}/${encodeURIComponent(id)}`, { signal })
+    case 'organization':
+      return callBackend(`/api/cockpit/entity-graph/organization/${encodeURIComponent(id)}`, { signal })
+    case 'market':
+      return callBackend(`/api/cockpit/entity-graph/market/${encodeURIComponent(id)}`, { signal })
+    case 'zip':
+      return callBackend(`/api/cockpit/entity-graph/zip/${encodeURIComponent(id)}`, { signal })
+    default:
+      return Promise.resolve({ ok: false, status: 400, error: 'unsupported_entity_type' })
+  }
+}
+
 // GET /api/internal/dashboard/nexus — live dashboard model.
 // Routes through callBackend so the secret header is never set outside this file.
 export function fetchNexusDashboard(signal?: AbortSignal): Promise<BackendResult<unknown>> {
