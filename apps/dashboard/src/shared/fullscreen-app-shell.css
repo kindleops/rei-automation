@@ -47,9 +47,36 @@
   min-height: 0;
   display: flex;
   flex: 1 1 auto;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 24%),
     #090d15;
+}
+
+.nx-fullscreen-app-shell.is-view-deal_intelligence .properties-page--scrollable,
+.nx-fullscreen-app-shell.is-view-entity_graph .properties-page--scrollable {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nx-fullscreen-app-shell.is-view-entity_graph .nx-entity-graph,
+.nx-fullscreen-app-shell.is-view-deal_intelligence .nx-workspace-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.nx-fullscreen-app-shell.is-view-entity_graph .nx-entity-graph__body,
+.nx-fullscreen-app-shell.is-view-entity_graph .nx-entity-graph__panel-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nx-fullscreen-app-shell.is-view-deal_intelligence .nx-intelligence-panel,

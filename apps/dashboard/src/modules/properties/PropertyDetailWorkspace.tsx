@@ -38,7 +38,7 @@ export const PropertyDetailWorkspace = ({
   handlers,
 }: PropertyDetailWorkspaceProps) => (
   <section className="pi-workspace" aria-label="Property intelligence workspace">
-    <PropertyCommandHeader property={property} priorityMarked={priorityMarked} onBack={onBack} handlers={handlers} />
+    <PropertyCommandHeader property={property} context={context} priorityMarked={priorityMarked} onBack={onBack} handlers={handlers} />
     <main className="pi-workspace-grid">
       <section className="pi-workspace-left">
         <PropertyVisualIntelligence property={property} handlers={handlers} />

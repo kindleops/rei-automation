@@ -72,6 +72,7 @@ function buildSearchResult({
   score = 0,
   linkedCounts = {},
   contextIds = {},
+  details = undefined,
 }) {
   return {
     entityType,
@@ -82,6 +83,7 @@ function buildSearchResult({
     score,
     linkedCounts,
     contextIds,
+    ...(details ? { details } : {}),
   }
 }
 
@@ -463,13 +465,33 @@ function ownerToResult(row, score = 100) {
   })
 }
 
+function normalizeOccupationLabel(row) {
+  const group = clean(row.occupation_group)
+  const code = clean(row.occupation_code)
+  if (group && !['0', '1', 'unknown', 'n/a'].includes(lower(group))) return group
+  if (code && !['0', '1'].includes(String(code))) return `Occupation ${code}`
+  return null
+}
+
+function classifyOwnershipEntity(row) {
+  const name = lower(`${row.owner_name || ''} ${row.owner_entity_id || ''}`)
+  if (name.includes('llc') || name.includes('corp') || name.includes('inc') || name.includes('l.l.c')) return 'LLC/Corporation'
+  if (name.includes('trust')) return 'Trust'
+  if (name.includes('estate')) return 'Estate'
+  if (name.includes('individual') || /^[a-z]+ [a-z]+$/i.test(clean(row.owner_name))) return 'Individual'
+  return 'Other/Unknown'
+}
+
 function prospectToResult(row, score = 100) {
+  const occupation = normalizeOccupationLabel(row)
+  const location = [row.primary_market, row.owner_display_name].filter(Boolean).join(' · ')
+  const shortId = String(row.prospect_id || '').slice(-6)
   return buildSearchResult({
     entityType: 'prospect',
     entityId: row.prospect_id,
     title: row.full_name || row.first_name || row.prospect_id,
-    subtitle: row.occupation_group || undefined,
-    badges: [row.likely_owner ? 'Likely Owner' : null, row.language_preference].filter(Boolean),
+    subtitle: occupation || location || `ID …${shortId}`,
+    badges: [row.likely_owner ? 'Likely Owner' : null, row.language_preference, occupation ? null : `…${shortId}`].filter(Boolean),
     score,
     linkedCounts: {
       properties: parseJsonArray(row.linked_property_ids_json).length,
@@ -585,9 +607,15 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
     entityType: 'organization',
     entityId: row.sub_owner_id,
     title: row.owner_name || row.sub_owner_id,
-    subtitle: row.owner_address_full || 'Sub-owner entity',
-    badges: ['Organization'],
+    subtitle: classifyOwnershipEntity(row),
+    badges: [classifyOwnershipEntity(row)].filter(Boolean),
     score: 100,
+    linkedCounts: { properties: 1, prospects: 0, contacts: 0 },
+    details: {
+      mailingAddress: row.owner_address_full
+        || [row.owner_address_city, row.owner_address_state, row.owner_address_zip].filter(Boolean).join(', ')
+        || undefined,
+    },
     contextIds: { masterOwnerId: row.master_owner_id || undefined },
   }))
   return paginatedResponse(results, count || 0, cursor, pageSize)
@@ -631,16 +659,29 @@ async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending }) 
     const page = merged.slice(cursor, cursor + pageSize)
     return paginatedResponse(page, merged.length, cursor, pageSize)
   }
-  const results = (data || []).map((row) => buildSearchResult({
-    entityType: 'market',
-    entityId: row.market_key,
-    title: row.market_key,
-    subtitle: 'Market intelligence',
-    badges: ['Market'],
-    score: 100,
-    linkedCounts: { properties: Number(row.property_count) || 0 },
-    contextIds: {},
-  }))
+  const results = (data || []).map((row) => {
+    const rawKey = String(row.market_key || '')
+    const parts = rawKey.split(',').map((part) => part.trim()).filter(Boolean)
+    const locality = parts[0] || rawKey
+    const state = parts.length > 1 ? parts[parts.length - 1] : null
+    const county = parts.length > 2 ? parts[1] : null
+    return buildSearchResult({
+      entityType: 'market',
+      entityId: row.market_key,
+      title: rawKey,
+      subtitle: state ? `${locality}, ${state}` : locality,
+      badges: ['Operating Market'],
+      score: 100,
+      linkedCounts: { properties: Number(row.property_count) || 0 },
+      details: {
+        locality,
+        county: county || undefined,
+        state: state || undefined,
+        marketLabel: rawKey,
+      },
+      contextIds: {},
+    })
+  })
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
 
@@ -667,11 +708,21 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
     const results = rpcRows.map((row) => buildSearchResult({
       entityType: 'zip',
       entityId: row.zip,
-      title: `ZIP ${row.zip}`,
-      subtitle: row.market || undefined,
+      title: row.zip,
+      subtitle: row.market ? `Market: ${row.market}` : 'ZIP cluster',
       badges: ['ZIP'],
-      score: 100,
-      linkedCounts: { properties: Number(row.property_count) || 0 },
+      score: Number(row.avg_acquisition_score) || undefined,
+      linkedCounts: {
+        properties: Number(row.property_count) || 0,
+        masterOwners: Number(row.owner_count) || undefined,
+        prospects: Number(row.people_count) || undefined,
+        reachableContacts: Number(row.reachable_contacts) || undefined,
+        contacts: Number(row.reachable_contacts) || undefined,
+        avgAcquisitionScore: Number(row.avg_acquisition_score) || undefined,
+      },
+      details: {
+        marketLabel: row.market || undefined,
+      },
       contextIds: {},
     }))
     return paginatedResponse(results, total, cursor, pageSize)
@@ -692,11 +743,18 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
   const results = (data || []).map((row) => buildSearchResult({
     entityType: 'zip',
     entityId: row.zip,
-    title: `ZIP ${row.zip}`,
-    subtitle: row.market || undefined,
+    title: row.zip,
+    subtitle: row.market ? `Market: ${row.market}` : 'ZIP cluster',
     badges: ['ZIP'],
     score: 100,
-    linkedCounts: { properties: Number(row.property_count) || 0 },
+    linkedCounts: {
+      properties: Number(row.property_count) || 0,
+      prospects: Number(row.people_count) || 0,
+      contacts: Number(row.reachable_contacts) || 0,
+    },
+    details: {
+      marketLabel: row.market || undefined,
+    },
     contextIds: {},
   }))
   return paginatedResponse(results, count || 0, cursor, pageSize)
@@ -1034,6 +1092,75 @@ function buildGraphNodesEdges(anchor, neighborhood) {
   return { nodes: nodes.slice(0, GRAPH_NODE_CAP), edges }
 }
 
+function buildAggregateAnchorGraph(anchor, counts = {}, sampleChildren = {}) {
+  const nodes = []
+  const edges = []
+  const pushNode = (id, type, label, meta = {}) => {
+    if (nodes.some((node) => node.id === id)) return
+    nodes.push({ id, type, label, meta })
+  }
+  const pushEdge = (from, to, label) => {
+    edges.push({ from, to, label })
+  }
+
+  pushNode(anchor.id, anchor.type, anchor.label, { active: true, ...anchor.meta })
+
+  const groups = [
+    { kind: 'properties', type: 'property', label: 'Properties', count: counts.properties },
+    { kind: 'master_owners', type: 'master_owner', label: 'Master Owners', count: counts.masterOwners },
+    { kind: 'people', type: 'prospect', label: 'People', count: counts.people },
+    { kind: 'reachable_contacts', type: 'phone', label: 'Reachable Contacts', count: counts.reachableContacts },
+    { kind: 'distressed', type: 'property', label: 'Distressed Properties', count: counts.distressed },
+    { kind: 'high_equity', type: 'property', label: 'High-Equity Properties', count: counts.highEquity },
+  ]
+
+  for (const group of groups) {
+    if (!group.count) continue
+    const groupId = `${anchor.type}:group:${group.kind}`
+    pushNode(groupId, group.type, `${group.label} (${group.count})`, {
+      group: true,
+      groupKind: group.kind,
+      count: group.count,
+      expandable: true,
+    })
+    pushEdge(anchor.id, groupId, 'Contains')
+
+    if (group.kind === 'properties' && Array.isArray(sampleChildren.properties) && sampleChildren.properties.length > 0) {
+      const sample = sampleChildren.properties.slice(0, 8)
+      for (const property of sample) {
+        const childId = `property:${property.property_id}`
+        pushNode(childId, 'property', property.property_address_full || property.property_id, { groupedUnder: groupId })
+        pushEdge(groupId, childId, 'Sample')
+      }
+      if (group.count > sample.length) {
+        const moreId = `${groupId}:more`
+        pushNode(moreId, 'property', `Show More (${group.count - sample.length})`, { showMore: true, groupKind: group.kind })
+        pushEdge(groupId, moreId, 'Expand')
+      }
+    }
+  }
+
+  return { nodes: nodes.slice(0, GRAPH_NODE_CAP), edges }
+}
+
+async function countMarketZipMetrics(supabase, field, value) {
+  const base = () => supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value)
+  const [total, highEquity, distressed, owners] = await Promise.all([
+    base(),
+    supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value).gte('equity_percent', 50),
+    supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq(field, value).or('tax_delinquent.eq.true,active_lien.eq.true'),
+    supabase.from('properties').select('master_owner_id', { count: 'exact', head: true }).eq(field, value).not('master_owner_id', 'is', null),
+  ])
+  return {
+    properties: total.count || 0,
+    highEquity: highEquity.count || 0,
+    distressed: distressed.count || 0,
+    masterOwners: owners.count || 0,
+    people: 0,
+    reachableContacts: 0,
+  }
+}
+
 async function loadOwnerNeighborhood(supabase, masterOwnerId) {
   const { data: owner } = await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', masterOwnerId).maybeSingle()
   if (!owner) return null
@@ -1308,31 +1435,37 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
       }
     }
     case 'market': {
-      const { data: sample } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('market', entityId).limit(25)
-      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq('market', entityId)
+      const [sample, metrics] = await Promise.all([
+        supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('market', entityId).limit(8).then((res) => res.data || []),
+        countMarketZipMetrics(supabase, 'market', entityId),
+      ])
       return {
         entityType: 'market',
         entityId,
-        summary: { market: entityId, propertyCount: count || 0 },
-        properties: sample || [],
-        graph: buildGraphNodesEdges(
+        summary: { market: entityId, propertyCount: metrics.properties || 0 },
+        properties: sample,
+        graph: buildAggregateAnchorGraph(
           { id: `market:${entityId}`, type: 'market', label: entityId },
-          { properties: sample || [], prospects: [], phones: [], emails: [], threads: [] },
+          metrics,
+          { properties: sample },
         ),
         timeline: [],
       }
     }
     case 'zip': {
-      const { data: sample } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('property_address_zip', entityId).limit(25)
-      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).eq('property_address_zip', entityId)
+      const [sample, metrics] = await Promise.all([
+        supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('property_address_zip', entityId).limit(8).then((res) => res.data || []),
+        countMarketZipMetrics(supabase, 'property_address_zip', entityId),
+      ])
       return {
         entityType: 'zip',
         entityId,
-        summary: { zip: entityId, propertyCount: count || 0 },
-        properties: sample || [],
-        graph: buildGraphNodesEdges(
+        summary: { zip: entityId, propertyCount: metrics.properties || 0 },
+        properties: sample,
+        graph: buildAggregateAnchorGraph(
           { id: `zip:${entityId}`, type: 'zip', label: entityId },
-          { properties: sample || [], prospects: [], phones: [], emails: [], threads: [] },
+          metrics,
+          { properties: sample },
         ),
         timeline: [],
       }

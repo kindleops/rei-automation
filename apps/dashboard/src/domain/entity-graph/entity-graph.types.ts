@@ -45,6 +45,18 @@ export type EntitySearchResult = {
     prospects?: number
     contacts?: number
     threads?: number
+    masterOwners?: number
+    reachableContacts?: number
+    contactCoverage?: number
+    avgAcquisitionScore?: number
+  }
+  details?: {
+    mailingAddress?: string
+    marketLabel?: string
+    locality?: string
+    county?: string
+    state?: string
+    metro?: string
   }
   contextIds: {
     propertyId?: string
@@ -163,3 +175,12 @@ export type EntityGraphAction =
   | 'mark_wrong_number'
   | 'view_owner'
   | 'view_prospect'
+  | 'create_opportunity'
+  | 'view_portfolio'
+  | 'view_master_owner'
+  | 'view_linked_properties'
+  | 'view_linked_person'
+  | 'apply_zip_filter'
+  | 'apply_market_filter'
+  | 'view_zip_intelligence'
+  | 'view_market_intelligence'

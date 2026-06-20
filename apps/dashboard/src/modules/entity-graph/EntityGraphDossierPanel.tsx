@@ -4,7 +4,7 @@ type Props = {
   dossier: EntityGraphDossier | null
   loading: boolean
   universalContext: UniversalEntityContext
-  actions: Array<{ key: EntityGraphAction; label: string; disabled?: boolean }>
+  actions: Array<{ key: EntityGraphAction; label: string; disabled?: boolean; hint?: string }>
   onAction?: (action: EntityGraphAction, context: UniversalEntityContext) => void
   onContactSelect: (entry: ContactLadderEntry) => void
   onSelectThreadKey?: (threadKey: string) => void
@@ -98,15 +98,17 @@ export function EntityGraphDossierPanel({
       )}
 
       <div className="nx-entity-graph__actions">
-        {actions.map((action) => (
+        {actions.map((action, index) => (
           <button
             key={action.key}
             type="button"
-            className="nx-entity-graph__action"
+            className={`nx-entity-graph__action${index === 0 && !action.disabled ? ' is-primary' : ''}`}
             disabled={action.disabled}
+            title={action.disabled ? action.hint : undefined}
             onClick={() => onAction?.(action.key, universalContext)}
           >
             {action.label}
+            {action.disabled && action.hint ? <span className="nx-entity-graph__action-hint">{action.hint}</span> : null}
           </button>
         ))}
       </div>

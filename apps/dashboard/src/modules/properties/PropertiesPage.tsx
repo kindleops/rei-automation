@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { pushRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
+import { evaluateContactReadiness } from './contactReadiness'
+import { PiGlassSelect } from './PiGlassSelect'
+import {
+  DEFAULT_LIST_STATE,
+  persistPropertyIntelligenceListState,
+  pushPropertyDetailState,
+  readPropertyIntelligenceStateFromUrl,
+  restorePropertyIntelligenceListState,
+  writePropertyIntelligenceStateToUrl,
+  type PropertyIntelligenceListState,
+} from './propertyIntelligenceState'
 import {
   fetchPropertyCount,
   fetchPropertyFacetOptions,
@@ -130,17 +141,22 @@ const matchesView = (record: PropertyRecord, view: PropertyWorkspaceView) => {
   return true
 }
 
-const updatePropertyQueryParam = (propertyId: string | null) => {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-  if (propertyId) url.searchParams.set('propertyId', propertyId)
-  else url.searchParams.delete('propertyId')
-  window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+function buildInitialListState(): PropertyIntelligenceListState {
+  const fromUrl = readPropertyIntelligenceStateFromUrl()
+  const restored = restorePropertyIntelligenceListState()
+  return {
+    ...DEFAULT_LIST_STATE,
+    ...restored,
+    ...fromUrl,
+    filters: { ...DEFAULT_LIST_STATE.filters, ...restored?.filters, ...fromUrl.filters },
+  }
 }
 
 export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: PropertiesPageProps) => {
+  const initialListState = useMemo(() => buildInitialListState(), [])
   const [model, setModel] = useState(initialModel)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [totalCount, setTotalCount] = useState(0)
   const [stats, setStats] = useState({
@@ -153,29 +169,25 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
     freeClearCount: 0,
   })
   const [mapPoints, setMapPoints] = useState<PropertyMapPoint[]>([])
-  const [quickFilters, setQuickFilters] = useState<string[]>([])
-  const [advancedFilters, setAdvancedFilters] = useState<PropertyFilterClause[]>([])
+  const [quickFilters, setQuickFilters] = useState<string[]>(initialListState.quickFilters)
+  const [advancedFilters, setAdvancedFilters] = useState<PropertyFilterClause[]>(initialListState.advancedFilters)
   const [savedViews, setSavedViews] = useState<SavedPropertyView[]>(loadViews)
-  const [view, setView] = useState<PropertyWorkspaceView>('command')
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
   const [rawOpen, setRawOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const [page, setPage] = useState(1)
-  const [searchInput, setSearchInput] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [sort, setSort] = useState<PropertySort>({ column: 'final_acquisition_score', ascending: false })
-  const [filters, setFilters] = useState<PropertyFilters>({
-    market: 'All Markets',
-    propertyType: 'All Types',
-    ownerType: 'All Owners',
-    equity: 'all',
-    taxDelinquent: 'all',
-    activeLien: 'all',
-    search: '',
-  })
+  const [page, setPage] = useState(initialListState.page)
+  const [searchInput, setSearchInput] = useState(initialListState.searchInput)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialListState.searchInput)
+  const [sort, setSort] = useState<PropertySort>(initialListState.sort)
+  const [filters, setFilters] = useState<PropertyFilters>(initialListState.filters)
+  const [view, setView] = useState<PropertyWorkspaceView>(initialListState.view)
 
   const noticeTimerRef = useRef<number | null>(null)
+  const listScrollRef = useRef<HTMLElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestGenerationRef = useRef(0)
+  const pendingScrollRestoreRef = useRef(initialListState.scrollTop)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchInput.trim()), 260)
@@ -218,9 +230,29 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
     [page, queryFilters, sort],
   )
 
+  const currentListState = useCallback((): PropertyIntelligenceListState => ({
+    page,
+    searchInput,
+    sort,
+    filters,
+    quickFilters,
+    advancedFilters,
+    view,
+    scrollTop: listScrollRef.current?.scrollTop ?? 0,
+  }), [advancedFilters, filters, page, quickFilters, searchInput, sort, view])
+
   useEffect(() => {
-    let active = true
-    setLoading(true)
+    writePropertyIntelligenceStateToUrl(currentListState(), selectedPropertyId)
+  }, [currentListState, selectedPropertyId])
+
+  useEffect(() => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const generation = ++requestGenerationRef.current
+    const hasData = model.properties.length > 0
+    if (hasData) setRefreshing(true)
+    else setLoading(true)
     setError(null)
 
     Promise.all([
@@ -231,7 +263,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
       fetchPropertyFacetOptions(),
     ])
       .then(([nextModel, count, nextStats, nextMapPoints, facets]) => {
-        if (!active) return
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return
         setModel({
           ...nextModel,
           marketOptions:
@@ -246,17 +278,41 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         setMapPoints(nextMapPoints)
       })
       .catch((err) => {
-        if (!active) return
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return
         setError(err instanceof Error ? err.message : 'Unable to load property intelligence')
       })
       .finally(() => {
-        if (active) setLoading(false)
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return
+        setLoading(false)
+        setRefreshing(false)
       })
 
-    return () => {
-      active = false
-    }
+    return () => controller.abort()
   }, [fallbackMarketOptions, queryParams])
+
+  useEffect(() => {
+    const onPopState = () => {
+      const restored = (window.history.state?.piState as PropertyIntelligenceListState | undefined) ?? restorePropertyIntelligenceListState()
+      if (restored) {
+        setPage(restored.page)
+        setSearchInput(restored.searchInput)
+        setDebouncedSearch(restored.searchInput)
+        setSort(restored.sort)
+        setFilters(restored.filters)
+        setQuickFilters(restored.quickFilters)
+        setAdvancedFilters(restored.advancedFilters)
+        setView(restored.view)
+        window.requestAnimationFrame(() => {
+          if (listScrollRef.current) listScrollRef.current.scrollTop = restored.scrollTop
+        })
+      }
+      const propertyId = new URLSearchParams(window.location.search).get('propertyId')
+      setSelectedPropertyId(propertyId ? model.properties.find((record) => [record.id, record.propertyId].includes(propertyId))?.id ?? null : null)
+      if (!propertyId) setRawOpen(false)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [model.properties])
 
   useEffect(() => {
     const propertyId = new URLSearchParams(window.location.search).get('propertyId')
@@ -296,27 +352,57 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
     { key: 'contact', label: 'Contact', render: (row) => row.distress.contactStatus ?? 'N/A' },
   ]
 
-  const actionHandlers = (property: PropertyRecord): PropertyActionHandlers => ({
-    openInbox: () => pushRoutePath(inboxPath(property)),
-    sendSms: () => pushRoutePath(inboxPath(property, true)),
-    createOffer: () => pushRoutePath('/closing-desk'),
-    generateContract: () => flashNotice('Contract flow routed from Offer Studio'),
-    viewOnMap: () => pushRoutePath(mapPath(property)),
-    addToCampaign: () => flashNotice('Campaign handoff is pending integration'),
-    linkContact: () => flashNotice('Contact linking is pending integration'),
-    markPriority: () => flashNotice('Priority marker saved for current session'),
-    openRawRecord: () => setRawOpen(true),
-  })
+  const actionHandlers = (property: PropertyRecord): PropertyActionHandlers => {
+    const context = model.contextsByPropertyId[property.id] ?? emptyContext
+    const readiness = evaluateContactReadiness(context)
+    const offerPathway = context.offerPathway
+    const offerParams = new URLSearchParams()
+    if (property.propertyId) offerParams.set('property_id', property.propertyId)
+    if (property.masterOwnerId) offerParams.set('master_owner_id', property.masterOwnerId)
+    const closingDeskPath = offerParams.toString() ? `/closing-desk?${offerParams}` : '/closing-desk'
+
+    return {
+      openInbox: () => pushRoutePath(inboxPath(property)),
+      sendSms: () => {
+        if (!readiness.canSendSms) {
+          flashNotice(readiness.blockReason ?? 'Link contact before outreach.')
+          return
+        }
+        pushRoutePath(inboxPath(property, true))
+      },
+      createOffer: () => {
+        if (!readiness.hasProspect) {
+          flashNotice('Link a prospect before creating an offer.')
+          return
+        }
+        pushRoutePath(closingDeskPath)
+      },
+      generateContract: () => {
+        if (!offerPathway.latestOffer) {
+          flashNotice('Create an offer before generating a contract.')
+          return
+        }
+        pushRoutePath(closingDeskPath)
+      },
+      viewOnMap: () => pushRoutePath(mapPath(property)),
+      addToCampaign: () => flashNotice('Campaign handoff is pending integration'),
+      linkContact: () => flashNotice('Open Entity Graph or Inbox to link canonical contact records.'),
+      markPriority: () => flashNotice('Priority marker saved for current session'),
+      openRawRecord: () => setRawOpen(true),
+    }
+  }
 
   const onOpenDetail = (property: PropertyRecord) => {
+    const state = currentListState()
+    persistPropertyIntelligenceListState(state)
+    pushPropertyDetailState(state, property.propertyId ?? property.id)
     setSelectedPropertyId(property.id)
-    updatePropertyQueryParam(property.propertyId ?? property.id)
   }
 
   const onCloseDetail = () => {
     setRawOpen(false)
-    updatePropertyQueryParam(null)
     setSelectedPropertyId(null)
+    window.history.back()
   }
 
   const toggleQuickFilter = (filter: QuickFilterKey) => {
@@ -350,9 +436,15 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
     flashNotice(`Loaded view: ${saved.label}`)
   }
 
+  const displayTotalCount = loading && totalCount === 0 ? '…' : totalCount.toLocaleString()
+  const displayStats = refreshing || loading
+    ? stats
+    : stats
+  const formatStat = (value: number) => (loading && value === 0 ? '…' : value.toLocaleString())
+
   if (selectedProperty) {
     return (
-      <section className="properties-page properties-page--workspace">
+      <section className="properties-page properties-page--workspace properties-page--scrollable">
         {notice && <div className="pi-toast">{notice}</div>}
         <PropertyDetail
           property={selectedProperty}
@@ -368,7 +460,13 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
   }
 
   return (
-    <section className="properties-page">
+    <section
+      className={`properties-page properties-page--scrollable${refreshing ? ' is-refreshing' : ''}`}
+      ref={listScrollRef}
+      onScroll={() => {
+        pendingScrollRestoreRef.current = listScrollRef.current?.scrollTop ?? 0
+      }}
+    >
       {notice && <div className="pi-toast">{notice}</div>}
       <header className="pi-app-header">
         <div>
@@ -410,93 +508,79 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </div>
       </header>
 
-      <section className="pi-kpi-row" aria-label="Property KPIs">
+      <section className={`pi-kpi-row${refreshing ? ' is-loading' : ''}`} aria-label="Property KPIs">
         <article>
           <span>Total Properties</span>
-          <strong>{totalCount}</strong>
-          <small>{workspaceStatus ?? 'Live Sync'}</small>
+          <strong>{displayTotalCount}</strong>
+          <small>{refreshing ? 'Refreshing…' : workspaceStatus ?? 'Live Sync'}</small>
         </article>
         <article>
           <span>High Equity</span>
-          <strong>{stats.highEquityCount}</strong>
+          <strong>{formatStat(displayStats.highEquityCount)}</strong>
           <small>50%+ equity</small>
         </article>
         <article>
           <span>Distress Signals</span>
-          <strong>{stats.distressCount}</strong>
+          <strong>{formatStat(displayStats.distressCount)}</strong>
           <small>Tax, lien, default, flags</small>
         </article>
         <article>
           <span>Free & Clear</span>
-          <strong>{stats.freeClearCount}</strong>
+          <strong>{formatStat(displayStats.freeClearCount)}</strong>
           <small>Loan balance zero</small>
         </article>
         <article>
           <span>Avg Priority</span>
-          <strong>{stats.avgPriorityScore}</strong>
+          <strong>{loading && displayStats.avgPriorityScore === 0 ? '…' : displayStats.avgPriorityScore}</strong>
           <small>Model weighted score</small>
         </article>
       </section>
 
       <section className="pi-filter-row" aria-label="Property filters">
-        <label>
-          <span>Market</span>
-          <select
-            value={filters.market}
-            onChange={(event) => {
-              setPage(1)
-              setFilters((current) => ({ ...current, market: event.target.value }))
-            }}
-          >
-            {model.marketOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Property Type</span>
-          <select
-            value={filters.propertyType}
-            onChange={(event) => {
-              setPage(1)
-              setFilters((current) => ({ ...current, propertyType: event.target.value }))
-            }}
-          >
-            {model.propertyTypeOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Owner Type</span>
-          <select
-            value={filters.ownerType}
-            onChange={(event) => {
-              setPage(1)
-              setFilters((current) => ({ ...current, ownerType: event.target.value }))
-            }}
-          >
-            {model.ownerTypeOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Sort</span>
-          <select
-            value={`${sort.column}:${sort.ascending ? 'asc' : 'desc'}`}
-            onChange={(event) => {
-              const [column, direction] = event.target.value.split(':')
-              setSort({ column, ascending: direction === 'asc' })
-            }}
-          >
-            <option value="final_acquisition_score:desc">Final Acquisition Score</option>
-            <option value="equity_percent:desc">Equity %</option>
-            <option value="equity_amount:desc">Equity Amount</option>
-            <option value="estimated_value:desc">Estimated Value</option>
-            <option value="updated_at:desc">Last Updated</option>
-          </select>
-        </label>
+        <PiGlassSelect
+          label="Market"
+          value={filters.market ?? 'All Markets'}
+          options={model.marketOptions}
+          searchable
+          onChange={(value) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, market: value }))
+          }}
+        />
+        <PiGlassSelect
+          label="Property Type"
+          value={filters.propertyType ?? 'All Types'}
+          options={model.propertyTypeOptions}
+          onChange={(value) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, propertyType: value }))
+          }}
+        />
+        <PiGlassSelect
+          label="Owner Type"
+          value={filters.ownerType ?? 'All Owners'}
+          options={model.ownerTypeOptions}
+          onChange={(value) => {
+            setPage(1)
+            setFilters((current) => ({ ...current, ownerType: value }))
+          }}
+        />
+        <PiGlassSelect
+          label="Sort"
+          value={`${sort.column}:${sort.ascending ? 'asc' : 'desc'}`}
+          options={[
+            'final_acquisition_score:desc',
+            'equity_percent:desc',
+            'equity_amount:desc',
+            'estimated_value:desc',
+            'updated_at:desc',
+          ]}
+          onChange={(value) => {
+            const [column, direction] = value.split(':')
+            setPage(1)
+            setSort({ column, ascending: direction === 'asc' })
+          }}
+        />
         <div className="pi-view-toggle">
           {(Object.keys(VIEW_LABELS) as PropertyWorkspaceView[]).map((mode) => (
             <button
@@ -557,11 +641,15 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </div>
       </section>
 
-      {loading && (
+      {loading && model.properties.length === 0 && (
         <div className="pi-loading">
           <Icon name="radar" />
           <p>Loading property intelligence...</p>
         </div>
+      )}
+
+      {refreshing && model.properties.length > 0 && (
+        <div className="pi-refresh-banner" aria-live="polite">Refreshing filtered results…</div>
       )}
 
       {!loading && error && (
@@ -572,7 +660,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </div>
       )}
 
-      {!loading && !error && view !== 'table' && view !== 'map' && view !== 'raw' && (
+      {(!loading || model.properties.length > 0) && !error && view !== 'table' && view !== 'map' && view !== 'raw' && (
         <main className="pi-property-grid" aria-label="Properties">
           {visibleRecords.map((property) => (
             <PropertyCard
@@ -589,7 +677,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </main>
       )}
 
-      {!loading && !error && view === 'table' && (
+      {(!loading || model.properties.length > 0) && !error && view === 'table' && (
         <section className="pi-table-view">
           <table className="pi-table">
             <thead>
@@ -612,7 +700,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </section>
       )}
 
-      {!loading && !error && view === 'map' && (
+      {(!loading || model.properties.length > 0) && !error && view === 'map' && (
         <section className="pi-map-view">
           <header>
             <h3>Map Intelligence</h3>
@@ -639,7 +727,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </section>
       )}
 
-      {!loading && !error && view === 'raw' && (
+      {(!loading || model.properties.length > 0) && !error && view === 'raw' && (
         <section className="pi-raw-view">
           <header>
             <h3>Raw View</h3>
@@ -674,7 +762,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
         </section>
       )}
 
-      {!loading && !error && visibleRecords.length === 0 && (
+      {!loading && !refreshing && !error && visibleRecords.length === 0 && (
         <div className="pi-empty-panel">
           <Icon name="filter" />
           <h3>No properties found</h3>
@@ -691,7 +779,7 @@ export const PropertiesPage = ({ workspaceStatus, fallbackMarketOptions = [] }: 
           Previous
         </button>
         <span>
-          Page {page} · Showing {model.properties.length} of {totalCount}
+          Page {page} · {refreshing ? 'Updating' : 'Showing'} {model.properties.length > 0 || !loading ? model.properties.length : '…'} of {displayTotalCount}
         </span>
         <button
           type="button"

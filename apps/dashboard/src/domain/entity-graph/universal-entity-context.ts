@@ -124,9 +124,14 @@ export function parseEntityGraphDeepLink(pathname: string): UniversalEntityConte
   return null
 }
 
+function preserveSearchParams(path: string): string {
+  if (typeof window === 'undefined') return path
+  const search = window.location.search
+  return search ? `${path}${search}` : path
+}
+
 export function syncUniversalContextToUrl(context: UniversalEntityContext, mode: 'push' | 'replace' = 'replace'): void {
-  const link = buildEntityGraphDeepLink(context)
-  if (!link) return
+  const link = preserveSearchParams(buildEntityGraphDeepLink(context) ?? '/entity-graph')
   if (mode === 'push') pushRoutePath(link)
   else replaceRoutePath(link)
 }
@@ -135,8 +140,14 @@ export function mergeUniversalContexts(
   current: UniversalEntityContext,
   patch: Partial<UniversalEntityContext>,
 ): UniversalEntityContext {
-  const next = { ...current, ...patch }
   if (patch.entityType && patch.entityId) {
+    const next: UniversalEntityContext = {
+      ...EMPTY_UNIVERSAL_ENTITY_CONTEXT,
+      entityType: patch.entityType,
+      entityId: patch.entityId,
+      threadKey: patch.threadKey ?? current.threadKey,
+      opportunityId: patch.opportunityId ?? current.opportunityId,
+    }
     if (patch.entityType === 'property') next.propertyId = patch.entityId
     if (patch.entityType === 'master_owner') next.masterOwnerId = patch.entityId
     if (patch.entityType === 'prospect') next.prospectId = patch.entityId
@@ -144,6 +155,10 @@ export function mergeUniversalContexts(
       next.contactMethodType = patch.entityType
       next.contactMethodId = patch.entityId
     }
+    if (patch.propertyId) next.propertyId = patch.propertyId
+    if (patch.masterOwnerId) next.masterOwnerId = patch.masterOwnerId
+    if (patch.prospectId) next.prospectId = patch.prospectId
+    return next
   }
-  return next
+  return { ...current, ...patch }
 }

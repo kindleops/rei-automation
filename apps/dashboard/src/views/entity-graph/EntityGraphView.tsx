@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { pushRoutePath } from '../../app/router'
 import type { EntityGraphAction } from '../../domain/entity-graph/entity-graph.types'
+import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
 import {
-  activeInboxFromUniversalContext,
+  EMPTY_UNIVERSAL_ENTITY_CONTEXT,
   parseEntityGraphDeepLink,
   syncUniversalContextToUrl,
 } from '../../domain/entity-graph/universal-entity-context'
@@ -10,7 +10,6 @@ import {
   getUniversalEntityContextSnapshot,
   setUniversalEntityContextSnapshot,
   subscribeUniversalEntityContext,
-  UNIVERSAL_ENTITY_CONTEXT_EVENT,
 } from '../../domain/entity-graph/universal-entity-context-store'
 import type { UniversalEntityContext } from '../../domain/entity-graph/entity-graph.types'
 import { EntityGraphWorkspace } from '../../modules/entity-graph/EntityGraphWorkspace'
@@ -41,7 +40,7 @@ export function EntityGraphView() {
   useEffect(() => {
     const handlePopState = () => {
       const parsed = parseEntityGraphDeepLink(window.location.pathname)
-      if (parsed) setUniversalEntityContextSnapshot(parsed)
+      setUniversalEntityContextSnapshot(parsed ?? EMPTY_UNIVERSAL_ENTITY_CONTEXT)
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -53,30 +52,7 @@ export function EntityGraphView() {
   }, [])
 
   const handleAction = useCallback((action: EntityGraphAction, context: UniversalEntityContext) => {
-    if (action === 'open_in_map' || action === 'show_on_map') {
-      setUniversalEntityContextSnapshot(context)
-      pushRoutePath('/map')
-      window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: context }))
-      return
-    }
-    if (action === 'open_deal_intelligence') {
-      setUniversalEntityContextSnapshot(context)
-      pushRoutePath(context.propertyId ? `/deal-intelligence` : '/deal-intelligence')
-      return
-    }
-    if (action === 'open_comp_intelligence') {
-      pushRoutePath('/comp-intelligence')
-      return
-    }
-    if (action === 'open_buyer_match') {
-      pushRoutePath('/buyer-match')
-      return
-    }
-    if (action === 'create_manual_draft' || action === 'open_thread' || action === 'contact_owner' || action === 'contact_person') {
-      setUniversalEntityContextSnapshot(context)
-      pushRoutePath('/conversation')
-      window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: activeInboxFromUniversalContext(context, 'entity_graph') }))
-    }
+    routeEntityGraphAction(action, context)
   }, [])
 
   return (

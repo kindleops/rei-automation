@@ -121,6 +121,7 @@ import {
 } from './active-context'
 import { EntityGraphWorkspace } from '../entity-graph/EntityGraphWorkspace'
 import type { EntityGraphAction } from '../../domain/entity-graph/entity-graph.types'
+import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
 import {
   activeInboxFromUniversalContext,
   EMPTY_UNIVERSAL_ENTITY_CONTEXT,
@@ -3010,42 +3011,30 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         || (context.prospectId && thread.prospectId === context.prospectId),
       )
 
-    if (action === 'open_thread' || action === 'open_conversation') {
-      if (threadMatch) handleSelect(threadMatch.id)
-      else if (context.threadKey) setActiveContext({ threadKey: context.threadKey, ...activeInboxFromUniversalContext(context, 'list') }, { openThread: true })
-      return
-    }
-
-    if (action === 'create_manual_draft' || action === 'contact_owner' || action === 'contact_person' || action === 'email') {
-      if (threadMatch) {
-        handleSelect(threadMatch.id)
-        focusWorkspaceView('sms_thread')
-        return
-      }
-      setActiveContext(activeInboxFromUniversalContext(context, 'list'), { openThread: true, focusView: 'sms_thread' })
-      return
-    }
-
-    if (action === 'open_deal_intelligence') {
-      if (threadMatch) handleOpenDealIntelligence(threadMatch.id)
-      else if (context.propertyId) setActiveContext({ propertyId: context.propertyId, ...activeInboxFromUniversalContext(context, 'list') }, { preserveCurrentViews: true })
-      setSelectedWorkspaceViews(['deal_intelligence'])
-      return
-    }
-
-    if (action === 'show_on_map' || action === 'open_in_map') {
-      setSelectedWorkspaceViews(['command_map'])
-      return
-    }
-
-    if (action === 'open_comp_intelligence') {
-      setSelectedWorkspaceViews(['comp_intelligence'])
-      return
-    }
-
-    if (action === 'open_buyer_match') {
-      setSelectedWorkspaceViews(['buyer_match'])
-      return
+    const routed = routeEntityGraphAction(action, context, {
+      onOpenThread: () => {
+        if (threadMatch) handleSelect(threadMatch.id)
+        else if (context.threadKey) setActiveContext({ threadKey: context.threadKey, ...activeInboxFromUniversalContext(context, 'list') }, { openThread: true })
+      },
+      onOpenConversationDraft: () => {
+        if (threadMatch) {
+          handleSelect(threadMatch.id)
+          focusWorkspaceView('sms_thread')
+          return
+        }
+        setActiveContext(activeInboxFromUniversalContext(context, 'list'), { openThread: true, focusView: 'sms_thread' })
+      },
+      onOpenDealIntelligence: () => {
+        if (threadMatch) handleOpenDealIntelligence(threadMatch.id)
+        else if (context.propertyId) setActiveContext({ propertyId: context.propertyId, ...activeInboxFromUniversalContext(context, 'list') }, { preserveCurrentViews: true })
+        setSelectedWorkspaceViews(['deal_intelligence'])
+      },
+      onOpenMap: () => setSelectedWorkspaceViews(['command_map']),
+      onOpenCompIntelligence: () => setSelectedWorkspaceViews(['comp_intelligence']),
+      onOpenBuyerMatch: () => setSelectedWorkspaceViews(['buyer_match']),
+    })
+    if (!routed) {
+      if (DEV) console.warn('[InboxPage] unhandled entity graph action', action)
     }
   }, [focusWorkspaceView, handleOpenDealIntelligence, handleSelect, setActiveContext, threads])
 
@@ -3068,7 +3057,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   useEffect(() => {
     const handlePopState = () => {
       const parsed = parseEntityGraphDeepLink(window.location.pathname)
-      if (parsed) handleUniversalEntityContextChange(parsed)
+      if (parsed) handleUniversalEntityContextChange(parsed, { pushHistory: false })
+      else handleUniversalEntityContextChange(EMPTY_UNIVERSAL_ENTITY_CONTEXT, { pushHistory: false })
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
