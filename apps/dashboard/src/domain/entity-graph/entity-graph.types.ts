@@ -19,7 +19,7 @@ export type UniversalEntityType =
   | 'zip'
   | null
 
-export type EntityGraphVisualMode = 'table' | 'cards' | 'graph' | 'map'
+export type EntityGraphVisualMode = 'table' | 'cards' | 'graph'
 
 export type UniversalEntityContext = {
   entityType: UniversalEntityType
@@ -55,17 +55,31 @@ export type EntitySearchResult = {
   }
 }
 
-export type EntityGraphSearchResponse = {
+export type EntityGraphPagination = {
+  cursor: number
+  pageSize: number
+  total: number
+  hasMore: boolean
+  nextCursor: number | null
+  previousCursor?: number | null
+}
+
+export type EntityGraphListResponse = {
   ok: boolean
   results: EntitySearchResult[]
-  countsByType: Record<string, number>
-  pagination: {
-    cursor: number
-    pageSize: number
-    total: number
-    hasMore: boolean
-    nextCursor: number | null
-  }
+  pagination: EntityGraphPagination
+}
+
+export type EntityGraphTabCounts = {
+  properties: number
+  master_owners: number
+  people: number
+  organizations: number
+  contact_methods: number
+  phones: number
+  emails: number
+  markets: number
+  zips: number
 }
 
 export type ContactLadderEntry = {
@@ -138,6 +152,7 @@ export type EntityGraphAction =
   | 'open_comp_intelligence'
   | 'open_buyer_match'
   | 'show_on_map'
+  | 'open_in_map'
   | 'run_decision_engine'
   | 'add_to_campaign'
   | 'open_opportunity'

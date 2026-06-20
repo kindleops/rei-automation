@@ -705,6 +705,19 @@ export function fetchEntityGraphSearch(
   return callBackend(`/api/cockpit/entity-graph/search${queryString ? `?${queryString}` : ''}`, { signal })
 }
 
+export function fetchEntityGraphBrowse(
+  queryString = '',
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend(`/api/cockpit/entity-graph/browse${queryString ? `?${queryString}` : ''}`, { signal })
+}
+
+export function fetchEntityGraphCounts(
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  return callBackend('/api/cockpit/entity-graph/counts', { signal })
+}
+
 export function fetchEntityGraphDossier(
   type: string,
   id: string,

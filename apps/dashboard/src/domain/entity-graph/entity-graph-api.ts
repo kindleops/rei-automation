@@ -1,5 +1,5 @@
 import * as backendClient from '../../lib/api/backendClient'
-import type { EntityGraphDossier, EntityGraphSearchResponse } from './entity-graph.types'
+import type { EntityGraphDossier, EntityGraphListResponse, EntityGraphTabCounts } from './entity-graph.types'
 
 const dossierCache = new Map<string, { fetchedAt: number; data: EntityGraphDossier }>()
 const DOSSIER_TTL_MS = 60_000
@@ -27,23 +27,78 @@ function dossierPath(type: string, id: string): string {
   }
 }
 
-export async function searchEntityGraph(
-  params: Record<string, string | number | undefined>,
-  signal?: AbortSignal,
-): Promise<EntityGraphSearchResponse> {
+function buildQueryString(params: Record<string, string | number | undefined>): string {
   const qs = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue
     qs.set(key, String(value))
   }
-  const res = await backendClient.callBackend<EntityGraphSearchResponse>(
+  return qs.toString()
+}
+
+function normalizeListResponse(body: EntityGraphListResponse | null | undefined): EntityGraphListResponse {
+  if (!body) {
+    return {
+      ok: false,
+      results: [],
+      pagination: { cursor: 0, pageSize: 25, total: 0, hasMore: false, nextCursor: null },
+    }
+  }
+  return {
+    ok: Boolean(body.ok),
+    results: body.results ?? [],
+    pagination: body.pagination ?? { cursor: 0, pageSize: 25, total: 0, hasMore: false, nextCursor: null },
+  }
+}
+
+export async function browseEntityGraph(
+  params: Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphListResponse> {
+  const qs = buildQueryString(params)
+  const res = await backendClient.callBackend<EntityGraphListResponse>(
+    `/api/cockpit/entity-graph/browse?${qs}`,
+    { signal },
+  )
+  if (!res.ok || !res.data) {
+    throw new Error(res.message || res.error || 'entity_graph_browse_failed')
+  }
+  return normalizeListResponse(res.data)
+}
+
+export async function searchEntityGraph(
+  params: Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphListResponse> {
+  const qs = buildQueryString(params)
+  const res = await backendClient.callBackend<EntityGraphListResponse>(
     `/api/cockpit/entity-graph/search?${qs}`,
     { signal },
   )
   if (!res.ok || !res.data) {
     throw new Error(res.message || res.error || 'entity_graph_search_failed')
   }
-  return res.data
+  return normalizeListResponse(res.data)
+}
+
+export async function fetchEntityGraphList(
+  params: Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphListResponse> {
+  const query = String(params.q ?? params.query ?? '').trim()
+  if (query) return searchEntityGraph({ ...params, q: query }, signal)
+  return browseEntityGraph(params, signal)
+}
+
+export async function fetchEntityGraphTabCounts(signal?: AbortSignal): Promise<EntityGraphTabCounts> {
+  const res = await backendClient.callBackend<{ ok: boolean; counts: EntityGraphTabCounts }>(
+    '/api/cockpit/entity-graph/counts',
+    { signal },
+  )
+  if (!res.ok || !res.data?.counts) {
+    throw new Error(res.message || res.error || 'entity_graph_counts_failed')
+  }
+  return res.data.counts
 }
 
 export async function fetchEntityGraphDossier(

@@ -10,38 +10,40 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: linear-gradient(165deg, rgba(9, 13, 21, 0.92), rgba(7, 16, 26, 0.88));
+  background: linear-gradient(165deg, rgba(9, 13, 21, 0.94), rgba(7, 16, 26, 0.9));
   border-radius: 18px;
   overflow: hidden;
+  position: relative;
 }
 
 .nx-entity-graph.is-light-mode {
-  background: linear-gradient(165deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.92));
+  background: linear-gradient(165deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
 }
 
 .nx-entity-graph__header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px 10px;
+  gap: 10px;
+  padding: 12px 14px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(18px);
+  flex-wrap: wrap;
 }
 
 .nx-entity-graph__title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .nx-entity-graph__title-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
   display: grid;
   place-items: center;
   background: rgba(var(--nx-accent-rgb, 56 189 248), 0.16);
@@ -49,17 +51,18 @@
 }
 
 .nx-entity-graph__search {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
 }
 
 .nx-entity-graph__search input {
   width: 100%;
+  min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 9px 12px;
   font-size: 13px;
   outline: none;
 }
@@ -72,8 +75,10 @@
 .nx-entity-graph__tabs {
   display: flex;
   gap: 6px;
-  padding: 8px 16px;
+  padding: 6px 14px 10px;
   overflow-x: auto;
+  scrollbar-width: thin;
+  flex-shrink: 0;
 }
 
 .nx-entity-graph__tab {
@@ -81,11 +86,15 @@
   background: rgba(255, 255, 255, 0.03);
   color: inherit;
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .nx-entity-graph__tab.is-active {
@@ -93,46 +102,71 @@
   background: rgba(var(--nx-accent-rgb, 56 189 248), 0.14);
 }
 
+.nx-entity-graph__tab-count {
+  opacity: 0.72;
+  font-size: 10px;
+}
+
 .nx-entity-graph__body {
   flex: 1;
   min-height: 0;
   display: grid;
-  gap: 12px;
-  padding: 0 16px 16px;
+  gap: 10px;
+  padding: 0 14px 14px;
 }
 
 .nx-entity-graph.is-layout-peek .nx-entity-graph__body {
   grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
-.nx-entity-graph.is-layout-explorer .nx-entity-graph__body,
+.nx-entity-graph.is-layout-explorer .nx-entity-graph__body {
+  grid-template-columns: minmax(260px, 38%) minmax(0, 1fr);
+}
+
 .nx-entity-graph.is-layout-workspace .nx-entity-graph__body {
-  grid-template-columns: minmax(240px, 34%) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 26%) minmax(0, 1fr);
 }
 
-.nx-entity-graph.is-layout-command .nx-entity-graph__body {
-  grid-template-columns: minmax(220px, 24%) minmax(0, 1fr) minmax(280px, 30%);
+.nx-entity-graph.is-layout-workspace .nx-entity-graph__body.is-graph-visible {
+  grid-template-columns: minmax(200px, 22%) minmax(0, 1fr) minmax(220px, 26%);
 }
 
-.nx-entity-graph__panel {
+.nx-entity-graph.is-layout-command .nx-entity-graph__body.is-mode-table,
+.nx-entity-graph.is-layout-command .nx-entity-graph__body.is-mode-cards {
+  grid-template-columns: 1fr;
+}
+
+.nx-entity-graph.is-layout-command .nx-entity-graph__body.is-mode-graph {
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+}
+
+.nx-entity-graph__results-panel,
+.nx-entity-graph__dossier-panel,
+.nx-entity-graph__graph-panel {
   min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(16px);
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .nx-entity-graph__panel-header {
-  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  opacity: 0.8;
+  opacity: 0.85;
+  flex-shrink: 0;
 }
 
 .nx-entity-graph__panel-body {
@@ -142,23 +176,90 @@
   padding: 10px;
 }
 
+.nx-entity-graph__pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.nx-entity-graph__pagination-controls {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.nx-entity-graph__pagination-controls button {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.nx-entity-graph__pagination-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nx-entity-graph__subtype-switch {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.nx-entity-graph__subtype-switch button {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.nx-entity-graph__subtype-switch button.is-active {
+  background: rgba(var(--nx-accent-rgb, 56 189 248), 0.14);
+}
+
+.nx-entity-graph__card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.nx-entity-graph__card-grid.is-compact {
+  grid-template-columns: 1fr;
+}
+
+.nx-entity-graph__result-card,
 .nx-entity-graph__result {
   width: 100%;
   text-align: left;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 12px;
   padding: 10px 12px;
-  margin-bottom: 8px;
   color: inherit;
   cursor: pointer;
 }
 
+.nx-entity-graph__result-card:hover,
+.nx-entity-graph__result-card.is-selected,
 .nx-entity-graph__result:hover,
 .nx-entity-graph__result.is-selected {
-  border-color: rgba(var(--nx-accent-rgb, 56 189 248), 0.35);
+  border-color: rgba(var(--nx-accent-rgb, 56 189 248), 0.4);
   background: rgba(var(--nx-accent-rgb, 56 189 248), 0.08);
 }
+
+.nx-entity-graph__result-card[data-entity-type='property'].is-selected { border-color: rgba(var(--eg-property), 0.55); }
+.nx-entity-graph__result-card[data-entity-type='master_owner'].is-selected { border-color: rgba(var(--eg-owner), 0.55); }
+.nx-entity-graph__result-card[data-entity-type='prospect'].is-selected { border-color: rgba(var(--eg-prospect), 0.55); }
 
 .nx-entity-graph__result-title {
   font-size: 13px;
@@ -169,6 +270,15 @@
   font-size: 11px;
   opacity: 0.72;
   margin-top: 2px;
+}
+
+.nx-entity-graph__result-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 .nx-entity-graph__badges {
@@ -185,22 +295,55 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.nx-entity-graph__table-wrap {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.nx-entity-graph__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.nx-entity-graph__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(9, 13, 21, 0.96);
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.nx-entity-graph__table td {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
+.nx-entity-graph__table tr.is-selected td {
+  background: rgba(var(--nx-accent-rgb, 56 189 248), 0.08);
+}
+
 .nx-entity-graph__identity {
-  padding: 14px;
-  border-radius: 14px;
+  padding: 12px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .nx-entity-graph__identity h3 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .nx-entity-graph__identity-grid {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   font-size: 12px;
 }
 
@@ -208,11 +351,31 @@
   opacity: 0.7;
 }
 
+.nx-entity-graph__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.nx-entity-graph__metric {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+}
+
+.nx-entity-graph__metric span {
+  display: block;
+  opacity: 0.65;
+  margin-bottom: 2px;
+}
+
 .nx-entity-graph__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0;
+  gap: 6px;
+  margin: 10px 0;
 }
 
 .nx-entity-graph__action {
@@ -220,31 +383,31 @@
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.nx-entity-graph__action:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.nx-entity-graph__action.is-primary {
+  background: rgba(var(--nx-accent-rgb, 56 189 248), 0.18);
 }
 
 .nx-entity-graph__ladder {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .nx-entity-graph__ladder-item {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 10px;
+  gap: 2px;
   padding: 8px 10px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.05);
   cursor: pointer;
+  text-align: left;
+  color: inherit;
 }
 
 .nx-entity-graph__ladder-item.is-ineligible {
@@ -253,8 +416,8 @@
 
 .nx-entity-graph__mode-switch {
   display: flex;
-  gap: 6px;
-  margin-left: auto;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .nx-entity-graph__mode-btn {
@@ -265,6 +428,7 @@
   padding: 6px 10px;
   font-size: 10px;
   cursor: pointer;
+  text-transform: capitalize;
 }
 
 .nx-entity-graph__mode-btn.is-active {
@@ -273,22 +437,37 @@
 
 .nx-entity-graph__graph-canvas {
   position: relative;
-  min-height: 220px;
+  min-height: 240px;
   height: 100%;
   overflow: hidden;
+  border-radius: 12px;
+}
+
+.nx-entity-graph__graph-canvas.is-interactive {
+  cursor: grab;
+}
+
+.nx-entity-graph__graph-stage {
+  position: relative;
+  width: 640px;
+  height: 420px;
+  transform-origin: center center;
 }
 
 .nx-entity-graph__graph-node {
   position: absolute;
   transform: translate(-50%, -50%);
-  border-radius: 12px;
-  padding: 8px 10px;
+  border-radius: 10px;
+  padding: 7px 9px;
   font-size: 10px;
   font-weight: 700;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
   cursor: pointer;
   white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nx-entity-graph__graph-node.is-active {
@@ -300,41 +479,68 @@
 .nx-entity-graph__graph-node[data-type='prospect'] { border-color: rgba(var(--eg-prospect), 0.5); }
 .nx-entity-graph__graph-node[data-type='phone'] { border-color: rgba(var(--eg-phone), 0.5); }
 .nx-entity-graph__graph-node[data-type='email'] { border-color: rgba(var(--eg-email), 0.5); }
-.nx-entity-graph__graph-node[data-type='organization'] { border-color: rgba(var(--eg-org), 0.5); }
-.nx-entity-graph__graph-node[data-type='market'],
-.nx-entity-graph__graph-node[data-type='zip'] { border-color: rgba(var(--eg-market), 0.5); }
 
-.nx-entity-graph__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.nx-entity-graph__table th {
-  position: sticky;
-  top: 0;
-  background: rgba(9, 13, 21, 0.95);
-  text-align: left;
-  padding: 8px 10px;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.nx-entity-graph__table td {
-  padding: 8px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.nx-entity-graph__empty {
-  padding: 24px;
-  text-align: center;
-  opacity: 0.65;
-  font-size: 13px;
-}
-
+.nx-entity-graph__empty,
 .nx-entity-graph__loading {
-  padding: 16px;
+  padding: 20px;
+  text-align: center;
   font-size: 12px;
-  opacity: 0.7;
+  opacity: 0.72;
+}
+
+.nx-entity-graph__skeleton-list {
+  display: grid;
+  gap: 8px;
+}
+
+.nx-entity-graph__skeleton-card {
+  height: 72px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  background-size: 200% 100%;
+  animation: nx-eg-shimmer 1.2s infinite;
+}
+
+@keyframes nx-eg-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.nx-entity-graph__peek-preview {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 10px;
+}
+
+.nx-entity-graph__drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(420px, 92vw);
+  height: 100%;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 20, 0.92);
+  backdrop-filter: blur(20px);
+  z-index: 4;
+  overflow: auto;
+  padding: 12px;
+}
+
+.nx-entity-graph__drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.nx-entity-graph__drawer-close {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.nx-entity-graph.is-drawer-open .nx-entity-graph__body {
+  padding-right: min(430px, 92vw);
 }

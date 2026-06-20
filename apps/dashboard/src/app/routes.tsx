@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { FullscreenAppShell } from '../shared/FullscreenAppShell'
 import { InboxView } from '../views/inbox/InboxView'
+import { EntityGraphView } from '../views/entity-graph/EntityGraphView'
 
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
 import { loadAcquisitionWorkspace } from '../domain/acquisition/acquisition.adapter'
@@ -158,56 +159,56 @@ const entityGraphRoute = defineRoute<null>({
   path: '/entity-graph',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphPropertyRoute = defineRoute<null>({
   path: '/entity-graph/property/:property_id',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphOwnerRoute = defineRoute<null>({
   path: '/entity-graph/owner/:master_owner_id',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphProspectRoute = defineRoute<null>({
   path: '/entity-graph/prospect/:prospect_id',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphContactRoute = defineRoute<null>({
   path: '/entity-graph/contact/:type/:id',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphOrganizationRoute = defineRoute<null>({
   path: '/entity-graph/organization/:id',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphMarketRoute = defineRoute<null>({
   path: '/entity-graph/market/:market_key',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const entityGraphZipRoute = defineRoute<null>({
   path: '/entity-graph/zip/:zip',
   title: 'NEXUS | Entity Graph',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="list" routeMode="fullscreen" />,
+  render: () => <EntityGraphView />,
 })
 
 const routes = [

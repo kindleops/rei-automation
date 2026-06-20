@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import { fetchEntityGraphDossier, searchEntityGraph } from '../../domain/entity-graph/entity-graph-api'
+import { fetchEntityGraphDossier, fetchEntityGraphList, fetchEntityGraphTabCounts } from '../../domain/entity-graph/entity-graph-api'
 import type {
   ContactLadderEntry,
   EntityGraphAction,
   EntityGraphDossier,
   EntityGraphTab,
+  EntityGraphTabCounts,
   EntityGraphVisualMode,
   EntitySearchResult,
   UniversalEntityContext,
@@ -15,25 +16,57 @@ import {
   syncUniversalContextToUrl,
   universalContextFromSearchResult,
 } from '../../domain/entity-graph/universal-entity-context'
+import { EntityGraphDossierPanel } from './EntityGraphDossierPanel'
 import './entity-graph.css'
 
 type LayoutMode = 'peek' | 'explorer' | 'workspace' | 'command'
 
-const TAB_OPTIONS: Array<{ key: EntityGraphTab; label: string }> = [
-  { key: 'properties', label: 'Properties' },
-  { key: 'master_owners', label: 'Master Owners' },
-  { key: 'people', label: 'People' },
-  { key: 'organizations', label: 'Organizations' },
-  { key: 'contact_methods', label: 'Contact Methods' },
-  { key: 'markets', label: 'Markets' },
-  { key: 'zips', label: 'ZIPs' },
+const TAB_OPTIONS: Array<{ key: EntityGraphTab; label: string; countKey: keyof EntityGraphTabCounts }> = [
+  { key: 'properties', label: 'Properties', countKey: 'properties' },
+  { key: 'master_owners', label: 'Master Owners', countKey: 'master_owners' },
+  { key: 'people', label: 'People', countKey: 'people' },
+  { key: 'organizations', label: 'Organizations', countKey: 'organizations' },
+  { key: 'contact_methods', label: 'Contact Methods', countKey: 'contact_methods' },
+  { key: 'markets', label: 'Markets', countKey: 'markets' },
+  { key: 'zips', label: 'ZIPs', countKey: 'zips' },
 ]
 
-const LAYOUT_CLASS: Record<LayoutMode, string> = {
-  peek: 'is-layout-peek',
-  explorer: 'is-layout-explorer',
-  workspace: 'is-layout-workspace',
-  command: 'is-layout-command',
+const TABLE_COLUMNS: Record<EntityGraphTab, Array<{ key: string; label: string }>> = {
+  properties: [
+    { key: 'title', label: 'Address' },
+    { key: 'subtitle', label: 'Location' },
+    { key: 'badges', label: 'Market' },
+  ],
+  master_owners: [
+    { key: 'title', label: 'Owner' },
+    { key: 'subtitle', label: 'Portfolio' },
+    { key: 'badges', label: 'Type' },
+  ],
+  people: [
+    { key: 'title', label: 'Person' },
+    { key: 'subtitle', label: 'Occupation' },
+    { key: 'badges', label: 'Signals' },
+  ],
+  organizations: [
+    { key: 'title', label: 'Organization' },
+    { key: 'subtitle', label: 'Role' },
+    { key: 'badges', label: 'Type' },
+  ],
+  contact_methods: [
+    { key: 'title', label: 'Contact' },
+    { key: 'subtitle', label: 'Owner' },
+    { key: 'badges', label: 'Status' },
+  ],
+  markets: [
+    { key: 'title', label: 'Market' },
+    { key: 'linked', label: 'Properties' },
+    { key: 'badges', label: 'Type' },
+  ],
+  zips: [
+    { key: 'title', label: 'ZIP' },
+    { key: 'subtitle', label: 'Market' },
+    { key: 'linked', label: 'Properties' },
+  ],
 }
 
 export type EntityGraphWorkspaceProps = {
@@ -56,49 +89,9 @@ function entityTypeLabel(type: string): string {
   return type.replace(/_/g, ' ')
 }
 
-function renderIdentity(dossier: EntityGraphDossier | null) {
-  if (!dossier?.identity) return null
-  const id = dossier.identity
-  return (
-    <div className="nx-entity-graph__identity">
-      <h3>{id.masterOwner || dossier.summary?.display_name as string || dossier.summary?.property_address_full as string || dossier.entityId}</h3>
-      <div className="nx-entity-graph__identity-grid">
-        {id.talkingTo && <div><span>Talking to:</span> {id.talkingTo}{id.talkingToRelationship ? ` · ${id.talkingToRelationship}` : ''}</div>}
-        {id.propertyContext && <div><span>Property:</span> {id.propertyContext}</div>}
-        {id.contactMethod && <div><span>Channel:</span> {id.contactMethod}</div>}
-      </div>
-    </div>
-  )
-}
-
-function ContactLadder({
-  ladder,
-  onSelect,
-}: {
-  ladder?: { phones: ContactLadderEntry[]; emails: ContactLadderEntry[] }
-  onSelect: (entry: ContactLadderEntry) => void
-}) {
-  if (!ladder) return null
-  const items = [...ladder.phones, ...ladder.emails]
-  if (items.length === 0) return null
-
-  return (
-    <div className="nx-entity-graph__ladder">
-      {items.map((entry) => (
-        <button
-          key={`${entry.type}:${entry.id}`}
-          type="button"
-          className={`nx-entity-graph__ladder-item${entry.eligible ? '' : ' is-ineligible'}`}
-          onClick={() => onSelect(entry)}
-          disabled={!entry.eligible}
-        >
-          <div>{entry.value}</div>
-          <div>{entry.type === 'phone' ? 'Phone' : 'Email'} · Rank {entry.rank ?? '—'}</div>
-          <div>{entry.wrongNumber ? 'Wrong Number' : entry.eligible ? 'Eligible' : 'Ineligible'}</div>
-        </button>
-      ))}
-    </div>
-  )
+function formatCount(value?: number): string {
+  if (value === undefined || value === null) return '…'
+  return value.toLocaleString()
 }
 
 function RelationshipGraphView({
@@ -108,62 +101,103 @@ function RelationshipGraphView({
   dossier: EntityGraphDossier | null
   onNodeSelect: (nodeId: string, nodeType: string, entityId: string) => void
 }) {
+  const [zoom, setZoom] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const dragRef = useRef<{ x: number; y: number } | null>(null)
+
   const graph = dossier?.graph
   if (!graph || graph.nodes.length === 0) {
     return <div className="nx-entity-graph__empty">Select an entity to render its local relationship network.</div>
   }
 
-  const width = 420
-  const height = 280
+  const width = 640
+  const height = 420
   const centerX = width / 2
   const centerY = height / 2
-  const radius = Math.min(width, height) * 0.34
+  const radius = Math.min(width, height) * 0.32
 
   const positioned = graph.nodes.map((node, index) => {
     const isCenter = Boolean(node.meta?.active)
     if (isCenter) return { ...node, x: centerX, y: centerY }
-    const angle = (index / Math.max(graph.nodes.length - 1, 1)) * Math.PI * 2
+    const angle = ((index - 1) / Math.max(graph.nodes.length - 2, 1)) * Math.PI * 2
     return {
       ...node,
       x: centerX + Math.cos(angle) * radius,
       y: centerY + Math.sin(angle) * radius,
     }
   })
-
   const byId = new Map(positioned.map((node) => [node.id, node]))
 
   return (
-    <div className="nx-entity-graph__graph-canvas" style={{ width: '100%', height }}>
-      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
-        {graph.edges.map((edge) => {
-          const from = byId.get(edge.from)
-          const to = byId.get(edge.to)
-          if (!from || !to) return null
-          return <line key={`${edge.from}-${edge.to}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="rgba(255,255,255,0.12)" />
+    <div
+      className="nx-entity-graph__graph-canvas is-interactive"
+      style={{ height: '100%', minHeight: 280 }}
+      onWheel={(event) => {
+        event.preventDefault()
+        setZoom((current) => Math.min(2, Math.max(0.5, current + (event.deltaY < 0 ? 0.08 : -0.08))))
+      }}
+      onMouseDown={(event) => {
+        dragRef.current = { x: event.clientX - offset.x, y: event.clientY - offset.y }
+      }}
+      onMouseMove={(event) => {
+        if (!dragRef.current) return
+        setOffset({ x: event.clientX - dragRef.current.x, y: event.clientY - dragRef.current.y })
+      }}
+      onMouseUp={() => { dragRef.current = null }}
+      onMouseLeave={() => { dragRef.current = null }}
+    >
+      <div
+        className="nx-entity-graph__graph-stage"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
+      >
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="nx-entity-graph__graph-svg">
+          {graph.edges.map((edge) => {
+            const from = byId.get(edge.from)
+            const to = byId.get(edge.to)
+            if (!from || !to) return null
+            const midX = (from.x + to.x) / 2
+            const midY = (from.y + to.y) / 2
+            return (
+              <g key={`${edge.from}-${edge.to}`}>
+                <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="rgba(255,255,255,0.14)" />
+                <text x={midX} y={midY} fill="rgba(255,255,255,0.45)" fontSize="9" textAnchor="middle">{edge.label}</text>
+              </g>
+            )
+          })}
+        </svg>
+        {positioned.map((node) => {
+          const [, entityId] = node.id.includes(':') ? node.id.split(':') : [node.type, node.id]
+          return (
+            <button
+              key={node.id}
+              type="button"
+              className={`nx-entity-graph__graph-node${node.meta?.active ? ' is-active' : ''}`}
+              data-type={node.type}
+              style={{ left: node.x, top: node.y }}
+              onClick={() => onNodeSelect(node.id, node.type, entityId)}
+              title={node.label}
+            >
+              {node.label}
+            </button>
+          )
         })}
-      </svg>
-      {positioned.map((node) => {
-        const [, entityId] = node.id.includes(':') ? node.id.split(':') : [node.type, node.id]
-        return (
-          <button
-            key={node.id}
-            type="button"
-            className={`nx-entity-graph__graph-node${node.meta?.active ? ' is-active' : ''}`}
-            data-type={node.type}
-            style={{ left: node.x, top: node.y }}
-            onClick={() => onNodeSelect(node.id, node.type, entityId)}
-            title={node.label}
-          >
-            {node.label}
-          </button>
-        )
-      })}
+      </div>
+    </div>
+  )
+}
+
+function ResultSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <div className="nx-entity-graph__skeleton-list">
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="nx-entity-graph__skeleton-card" />
+      ))}
     </div>
   )
 }
 
 export function EntityGraphWorkspace({
-  paneWidth = '50',
+  paneWidth = '100',
   themeMode = 'dark',
   universalContext,
   onUniversalContextChange,
@@ -172,16 +206,22 @@ export function EntityGraphWorkspace({
 }: EntityGraphWorkspaceProps) {
   const layoutMode = resolveLayoutMode(paneWidth)
   const [activeTab, setActiveTab] = useState<EntityGraphTab>('properties')
+  const [contactSubtype, setContactSubtype] = useState<'phone' | 'email'>('phone')
   const [visualMode, setVisualMode] = useState<EntityGraphVisualMode>(layoutMode === 'peek' ? 'cards' : 'table')
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [results, setResults] = useState<EntitySearchResult[]>([])
-  const [countsByType, setCountsByType] = useState<Record<string, number>>({})
-  const [searchLoading, setSearchLoading] = useState(false)
+  const [cursor, setCursor] = useState(0)
+  const [pagination, setPagination] = useState({ cursor: 0, pageSize: 25, total: 0, hasMore: false, nextCursor: null as number | null, previousCursor: null as number | null })
+  const [tabCounts, setTabCounts] = useState<EntityGraphTabCounts | null>(null)
+  const [listLoading, setListLoading] = useState(true)
   const [dossier, setDossier] = useState<EntityGraphDossier | null>(null)
   const [dossierLoading, setDossierLoading] = useState(false)
-  const searchAbortRef = useRef<AbortController | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const listAbortRef = useRef<AbortController | null>(null)
   const dossierAbortRef = useRef<AbortController | null>(null)
+
+  const pageSize = layoutMode === 'command' ? 40 : layoutMode === 'peek' ? 12 : 25
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280)
@@ -189,41 +229,59 @@ export function EntityGraphWorkspace({
   }, [query])
 
   useEffect(() => {
-    if (!debouncedQuery && layoutMode === 'peek') {
-      setResults([])
-      return
-    }
-
-    searchAbortRef.current?.abort()
     const controller = new AbortController()
-    searchAbortRef.current = controller
-    setSearchLoading(true)
+    void fetchEntityGraphTabCounts(controller.signal)
+      .then(setTabCounts)
+      .catch(() => setTabCounts(null))
+    return () => controller.abort()
+  }, [])
 
-    void searchEntityGraph(
-      { q: debouncedQuery, tab: activeTab, page_size: layoutMode === 'command' ? 40 : 20 },
+  useEffect(() => {
+    setCursor(0)
+  }, [activeTab, debouncedQuery, contactSubtype])
+
+  useEffect(() => {
+    listAbortRef.current?.abort()
+    const controller = new AbortController()
+    listAbortRef.current = controller
+    setListLoading(true)
+
+    void fetchEntityGraphList(
+      {
+        tab: activeTab,
+        q: debouncedQuery || undefined,
+        cursor,
+        page_size: pageSize,
+        subtype: activeTab === 'contact_methods' ? contactSubtype : undefined,
+      },
       controller.signal,
     )
       .then((response) => {
         if (controller.signal.aborted) return
         setResults(response.results)
-        setCountsByType(response.countsByType)
+        setPagination(response.pagination)
       })
       .catch(() => {
-        if (!controller.signal.aborted) setResults([])
+        if (!controller.signal.aborted) {
+          setResults([])
+          setPagination((current) => ({ ...current, total: 0, hasMore: false, nextCursor: null }))
+        }
       })
       .finally(() => {
-        if (!controller.signal.aborted) setSearchLoading(false)
+        if (!controller.signal.aborted) setListLoading(false)
       })
 
     return () => controller.abort()
-  }, [activeTab, debouncedQuery, layoutMode])
+  }, [activeTab, contactSubtype, cursor, debouncedQuery, pageSize])
 
   const selectedType = universalContext.entityType
   const selectedId = universalContext.entityId
+  const hasSelection = Boolean(selectedType && selectedId)
 
   useEffect(() => {
     if (!selectedType || !selectedId) {
       setDossier(null)
+      setDrawerOpen(false)
       return
     }
 
@@ -234,20 +292,28 @@ export function EntityGraphWorkspace({
 
     void fetchEntityGraphDossier(selectedType, selectedId, { signal: controller.signal })
       .then((next) => {
-        if (!controller.signal.aborted) setDossier(next)
+        if (!controller.signal.aborted) {
+          setDossier(next)
+          if (layoutMode === 'command' && (visualMode === 'table' || visualMode === 'cards')) {
+            setDrawerOpen(true)
+          }
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setDossierLoading(false)
       })
 
     return () => controller.abort()
-  }, [selectedId, selectedType])
+  }, [layoutMode, selectedId, selectedType, visualMode])
 
   const handleSelectResult = useCallback((result: EntitySearchResult) => {
     const next = universalContextFromSearchResult(result)
     onUniversalContextChange(next, { pushHistory: true })
     syncUniversalContextToUrl(next, 'push')
-  }, [onUniversalContextChange])
+    if (layoutMode === 'command' && (visualMode === 'table' || visualMode === 'cards')) {
+      setDrawerOpen(true)
+    }
+  }, [layoutMode, onUniversalContextChange, visualMode])
 
   const handleGraphNodeSelect = useCallback((_nodeId: string, nodeType: string, entityId: string) => {
     const next = mergeUniversalContexts(universalContext, {
@@ -274,24 +340,145 @@ export function EntityGraphWorkspace({
     const list: Array<{ key: EntityGraphAction; label: string; disabled?: boolean }> = []
     if (ctx.threadKey) list.push({ key: 'open_thread', label: 'Open Existing Thread' })
     else list.push({ key: 'create_manual_draft', label: 'Create Manual Draft' })
-    if (ctx.propertyId) {
+    if (ctx.propertyId || ctx.entityType === 'property') {
       list.push({ key: 'open_deal_intelligence', label: 'Open Deal Intelligence' })
-      list.push({ key: 'show_on_map', label: 'Show on Map' })
+      list.push({ key: 'open_in_map', label: 'Open in Map' })
       list.push({ key: 'open_comp_intelligence', label: 'Open Comp Intelligence' })
       list.push({ key: 'open_buyer_match', label: 'Open Buyer Match' })
     }
-    if (ctx.masterOwnerId) list.push({ key: 'contact_owner', label: 'Contact Owner' })
+    if (ctx.masterOwnerId || ctx.entityType === 'master_owner') {
+      list.push({ key: 'open_in_map', label: 'Open Portfolio in Map' })
+      list.push({ key: 'contact_owner', label: 'Contact Owner' })
+    }
+    if (ctx.entityType === 'market' || ctx.entityType === 'zip') {
+      list.push({ key: 'open_in_map', label: 'Open in Map' })
+    }
     if (ctx.prospectId) list.push({ key: 'contact_person', label: 'Contact This Person' })
     if (ctx.contactMethodType === 'email') list.push({ key: 'email', label: 'Email' })
     return list
   }, [universalContext])
 
-  const showGraphPanel = layoutMode === 'workspace' || layoutMode === 'command'
-  const showResultsRail = layoutMode !== 'peek' || debouncedQuery.length > 0
-  const showDossier = layoutMode !== 'peek' || Boolean(selectedId)
+  const effectiveVisualMode: EntityGraphVisualMode = layoutMode === 'peek' ? 'cards' : visualMode
+  const showModeSwitcher = layoutMode === 'command'
+  const showGraph = (layoutMode === 'workspace' && hasSelection) || (layoutMode === 'command' && visualMode === 'graph' && hasSelection)
+  const showSideDossier = layoutMode === 'explorer' || layoutMode === 'workspace' || (layoutMode === 'command' && visualMode === 'graph')
+  const showPeekPreview = layoutMode === 'peek' && hasSelection
+  const showDrawer = layoutMode === 'command' && drawerOpen && hasSelection && (visualMode === 'table' || visualMode === 'cards')
+  const showResultsFullWidth = layoutMode === 'command' && visualMode !== 'graph'
+
+  const columns = TABLE_COLUMNS[activeTab]
+
+  const renderResultCards = () => (
+    <div className={`nx-entity-graph__card-grid${layoutMode === 'peek' ? ' is-compact' : ''}`}>
+      {results.map((result) => (
+        <button
+          key={`${result.entityType}:${result.entityId}`}
+          type="button"
+          className={`nx-entity-graph__result-card${selectedType === result.entityType && selectedId === result.entityId ? ' is-selected' : ''}`}
+          data-entity-type={result.entityType}
+          onClick={() => handleSelectResult(result)}
+        >
+          <div className="nx-entity-graph__result-title">{result.title}</div>
+          {result.subtitle && <div className="nx-entity-graph__result-sub">{result.subtitle}</div>}
+          <div className="nx-entity-graph__badges">
+            <span className="nx-entity-graph__badge">{entityTypeLabel(result.entityType)}</span>
+            {result.badges.slice(0, 2).map((badge) => (
+              <span key={badge} className="nx-entity-graph__badge">{badge}</span>
+            ))}
+          </div>
+          <div className="nx-entity-graph__result-metrics">
+            {result.linkedCounts.properties !== undefined && <span>{result.linkedCounts.properties} properties</span>}
+            {result.linkedCounts.prospects !== undefined && <span>{result.linkedCounts.prospects} people</span>}
+            {result.linkedCounts.contacts !== undefined && <span>{result.linkedCounts.contacts} contacts</span>}
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+
+  const renderResultTable = () => (
+    <div className="nx-entity-graph__table-wrap">
+      <table className="nx-entity-graph__table">
+        <thead>
+          <tr>
+            {columns.map((column) => <th key={column.key}>{column.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((result) => (
+            <tr
+              key={`${result.entityType}:${result.entityId}`}
+              className={selectedType === result.entityType && selectedId === result.entityId ? 'is-selected' : ''}
+              onClick={() => handleSelectResult(result)}
+            >
+              <td>
+                <div className="nx-entity-graph__result-title">{result.title}</div>
+                {columnHasSubtitle(result) && <div className="nx-entity-graph__result-sub">{result.subtitle}</div>}
+              </td>
+              <td>{result.subtitle || result.linkedCounts.properties || '—'}</td>
+              <td>{result.badges.join(', ') || entityTypeLabel(result.entityType)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+
+  function columnHasSubtitle(result: EntitySearchResult) {
+    return Boolean(result.subtitle)
+  }
+
+  const renderPagination = () => (
+    <div className="nx-entity-graph__pagination">
+      <span>{pagination.total.toLocaleString()} records</span>
+      <span>Page {Math.floor(cursor / pageSize) + 1}</span>
+      <div className="nx-entity-graph__pagination-controls">
+        <button
+          type="button"
+          disabled={cursor <= 0 || listLoading}
+          onClick={() => setCursor((current) => Math.max(current - pageSize, 0))}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          disabled={!pagination.hasMore || listLoading}
+          onClick={() => setCursor((current) => pagination.nextCursor ?? current + pageSize)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  )
+
+  const renderResultsPanel = () => (
+    <div className="nx-entity-graph__results-panel">
+      <div className="nx-entity-graph__panel-header">
+        <span>{debouncedQuery ? 'Search Results' : TAB_OPTIONS.find((tab) => tab.key === activeTab)?.label}</span>
+        {renderPagination()}
+      </div>
+      {activeTab === 'contact_methods' && (
+        <div className="nx-entity-graph__subtype-switch">
+          <button type="button" className={contactSubtype === 'phone' ? 'is-active' : ''} onClick={() => setContactSubtype('phone')}>Phones</button>
+          <button type="button" className={contactSubtype === 'email' ? 'is-active' : ''} onClick={() => setContactSubtype('email')}>Emails</button>
+        </div>
+      )}
+      <div className="nx-entity-graph__panel-body">
+        {listLoading && <ResultSkeleton count={layoutMode === 'peek' ? 4 : 8} />}
+        {!listLoading && results.length === 0 && (
+          <div className="nx-entity-graph__empty">
+            {debouncedQuery ? 'No records matched this search.' : 'No records found for this entity type.'}
+          </div>
+        )}
+        {!listLoading && results.length > 0 && (
+          effectiveVisualMode === 'table' ? renderResultTable() : renderResultCards()
+        )}
+      </div>
+    </div>
+  )
 
   return (
-    <section className={`nx-workspace-surface nx-entity-graph ${LAYOUT_CLASS[layoutMode]}${themeMode === 'light' ? ' is-light-mode' : ''}`}>
+    <section className={`nx-workspace-surface nx-entity-graph is-layout-${layoutMode}${themeMode === 'light' ? ' is-light-mode' : ''}${showDrawer ? ' is-drawer-open' : ''}`}>
       <header className="nx-entity-graph__header">
         <div className="nx-entity-graph__title">
           <span className="nx-entity-graph__title-icon"><Icon name="grid" /></span>
@@ -301,13 +488,13 @@ export function EntityGraphWorkspace({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search address, owner, prospect, phone, email, market, ZIP…"
+            placeholder="Search address, owner, person, phone, email…"
             aria-label="Entity Graph search"
           />
         </div>
-        {layoutMode === 'command' && (
+        {showModeSwitcher && (
           <div className="nx-entity-graph__mode-switch">
-            {(['table', 'cards', 'graph', 'map'] as EntityGraphVisualMode[]).map((mode) => (
+            {(['table', 'cards', 'graph'] as EntityGraphVisualMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -331,127 +518,88 @@ export function EntityGraphWorkspace({
             onClick={() => setActiveTab(tab.key)}
           >
             {tab.label}
-            {countsByType[tab.key] ? ` · ${countsByType[tab.key]}` : ''}
+            <span className="nx-entity-graph__tab-count">{formatCount(tabCounts?.[tab.countKey])}</span>
           </button>
         ))}
       </div>
 
-      <div className="nx-entity-graph__body">
-        {showResultsRail && (
-          <div className="nx-entity-graph__panel">
-            <div className="nx-entity-graph__panel-header">Results</div>
-            <div className="nx-entity-graph__panel-body">
-              {searchLoading && <div className="nx-entity-graph__loading">Searching canonical records…</div>}
-              {!searchLoading && results.length === 0 && (
-                <div className="nx-entity-graph__empty">Search canonical entities server-side. No client table loads.</div>
-              )}
-              {visualMode === 'table' && results.length > 0 && (
-                <table className="nx-entity-graph__table">
-                  <thead>
-                    <tr>
-                      <th>Entity</th>
-                      <th>Type</th>
-                      <th>Links</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((result) => (
-                      <tr key={`${result.entityType}:${result.entityId}`} onClick={() => handleSelectResult(result)} style={{ cursor: 'pointer' }}>
-                        <td>
-                          <div>{result.title}</div>
-                          <div className="nx-entity-graph__result-sub">{result.subtitle}</div>
-                        </td>
-                        <td>{entityTypeLabel(result.entityType)}</td>
-                        <td>{Object.values(result.linkedCounts).reduce((sum, n) => sum + (n || 0), 0)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {visualMode !== 'table' && results.map((result) => (
-                <button
-                  key={`${result.entityType}:${result.entityId}`}
-                  type="button"
-                  className={`nx-entity-graph__result${selectedType === result.entityType && selectedId === result.entityId ? ' is-selected' : ''}`}
-                  onClick={() => handleSelectResult(result)}
-                >
-                  <div className="nx-entity-graph__result-title">{result.title}</div>
-                  {result.subtitle && <div className="nx-entity-graph__result-sub">{result.subtitle}</div>}
-                  <div className="nx-entity-graph__badges">
-                    <span className="nx-entity-graph__badge">{entityTypeLabel(result.entityType)}</span>
-                    {result.badges.slice(0, 2).map((badge) => (
-                      <span key={badge} className="nx-entity-graph__badge">{badge}</span>
-                    ))}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className={`nx-entity-graph__body is-mode-${layoutMode === 'command' ? visualMode : effectiveVisualMode}${showGraph ? ' is-graph-visible' : ''}`}>
+        {showResultsFullWidth && layoutMode === 'command' && visualMode === 'graph' ? null : (
+          (layoutMode !== 'command' || visualMode !== 'graph') && renderResultsPanel()
         )}
 
-        {showGraphPanel && (
-          <div className="nx-entity-graph__panel">
-            <div className="nx-entity-graph__panel-header">Relationship Graph</div>
-            <div className="nx-entity-graph__panel-body">
-              <RelationshipGraphView dossier={dossier} onNodeSelect={handleGraphNodeSelect} />
-            </div>
-          </div>
-        )}
-
-        {showDossier && (
-          <div className="nx-entity-graph__panel">
+        {showSideDossier && layoutMode !== 'peek' && (
+          <div className="nx-entity-graph__dossier-panel">
             <div className="nx-entity-graph__panel-header">Selected Record</div>
-            <div className="nx-entity-graph__panel-body">
-              {dossierLoading && <div className="nx-entity-graph__loading">Loading dossier…</div>}
-              {!dossierLoading && !dossier && <div className="nx-entity-graph__empty">Select an entity to inspect relationships and contact ladder.</div>}
-              {!dossierLoading && dossier && (
-                <>
-                  {renderIdentity(dossier)}
-                  <div className="nx-entity-graph__actions">
-                    {actions.map((action) => (
-                      <button
-                        key={action.key}
-                        type="button"
-                        className="nx-entity-graph__action"
-                        disabled={action.disabled}
-                        onClick={() => onAction?.(action.key, universalContext)}
-                      >
-                        {action.label}
-                      </button>
-                    ))}
-                  </div>
-                  <ContactLadder ladder={dossier.contactLadder} onSelect={handleContactSelect} />
-                  {dossier.threads && dossier.threads.length > 0 && (
-                    <div className="nx-entity-graph__ladder" style={{ marginTop: 12 }}>
-                      {dossier.threads.slice(0, 6).map((thread) => (
-                        <button
-                          key={String(thread.thread_key)}
-                          type="button"
-                          className="nx-entity-graph__ladder-item"
-                          onClick={() => onSelectThreadKey?.(String(thread.thread_key))}
-                        >
-                          <div>Thread {String(thread.thread_key).slice(-8)}</div>
-                          <div>{String(thread.last_message_body || '').slice(0, 80)}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {layoutMode === 'peek' && selectedId && (
-                    <button
-                      type="button"
-                      className="nx-entity-graph__action"
-                      style={{ marginTop: 12 }}
-                      onClick={() => onAction?.('open_deal_intelligence', universalContext)}
-                    >
-                      Open Full Record
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+            <EntityGraphDossierPanel
+              dossier={dossier}
+              loading={dossierLoading}
+              universalContext={universalContext}
+              actions={actions}
+              onAction={onAction}
+              onContactSelect={handleContactSelect}
+              onSelectThreadKey={onSelectThreadKey}
+            />
+          </div>
+        )}
+
+        {layoutMode === 'command' && visualMode === 'graph' && (
+          <div className="nx-entity-graph__graph-panel">
+            {hasSelection ? (
+              <RelationshipGraphView dossier={dossier} onNodeSelect={handleGraphNodeSelect} />
+            ) : (
+              <div className="nx-entity-graph__empty">Select an entity to explore its relationship neighborhood.</div>
+            )}
+          </div>
+        )}
+
+        {showGraph && layoutMode !== 'command' && (
+          <div className="nx-entity-graph__graph-panel">
+            <div className="nx-entity-graph__panel-header">Relationship Graph</div>
+            <RelationshipGraphView dossier={dossier} onNodeSelect={handleGraphNodeSelect} />
+          </div>
+        )}
+
+        {showPeekPreview && (
+          <div className="nx-entity-graph__peek-preview">
+            <EntityGraphDossierPanel
+              dossier={dossier}
+              loading={dossierLoading}
+              universalContext={universalContext}
+              actions={actions}
+              onAction={onAction}
+              onContactSelect={handleContactSelect}
+              onSelectThreadKey={onSelectThreadKey}
+              compact
+            />
+            <button
+              type="button"
+              className="nx-entity-graph__action is-primary"
+              onClick={() => onAction?.('open_deal_intelligence', universalContext)}
+            >
+              Open Full Record
+            </button>
           </div>
         )}
       </div>
+
+      {showDrawer && (
+        <aside className="nx-entity-graph__drawer" role="dialog" aria-label="Selected entity dossier">
+          <header className="nx-entity-graph__drawer-header">
+            <strong>Selected Record</strong>
+            <button type="button" className="nx-entity-graph__drawer-close" onClick={() => setDrawerOpen(false)}>Close</button>
+          </header>
+          <EntityGraphDossierPanel
+            dossier={dossier}
+            loading={dossierLoading}
+            universalContext={universalContext}
+            actions={actions}
+            onAction={onAction}
+            onContactSelect={handleContactSelect}
+            onSelectThreadKey={onSelectThreadKey}
+          />
+        </aside>
+      )}
     </section>
   )
 }

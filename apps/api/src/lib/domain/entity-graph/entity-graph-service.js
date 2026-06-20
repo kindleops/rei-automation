@@ -434,57 +434,427 @@ const TAB_ENTITY_TYPES = {
   zips: ['zip'],
 }
 
-export async function searchEntityGraph(params = {}, deps = {}) {
-  const supabase = deps.supabase || defaultSupabase
-  const query = normalizeSearchQuery(params.q || params.query)
-  const entityType = lower(params.entity_type || params.entityType || 'all')
-  const pageSize = int(params.page_size || params.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
-  const cursor = int(params.cursor || params.offset, 0)
-  const tab = lower(params.tab || '')
+function propertyToResult(row, score = 100) {
+  return buildSearchResult({
+    entityType: 'property',
+    entityId: row.property_id,
+    title: row.property_address_full || row.property_id,
+    subtitle: [row.property_address_city, row.property_address_state, row.property_address_zip].filter(Boolean).join(', '),
+    badges: [row.market, row.normalized_asset_class || row.property_type].filter(Boolean),
+    score,
+    linkedCounts: { prospects: 1, contacts: 2 },
+    contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
+  })
+}
 
-  if (!query && !tab) {
-    return {
-      results: [],
-      countsByType: {},
-      pagination: { cursor: 0, pageSize, total: 0, hasMore: false, nextCursor: null },
-    }
-  }
+function ownerToResult(row, score = 100) {
+  return buildSearchResult({
+    entityType: 'master_owner',
+    entityId: row.master_owner_id,
+    title: row.display_name || row.master_owner_id,
+    subtitle: `${row.property_count || 0} properties`,
+    badges: [row.owner_type_guess, row.priority_tier].filter(Boolean),
+    score,
+    linkedCounts: {
+      properties: row.property_count || parseJsonArray(row.joined_property_ids_json).length,
+      prospects: parseJsonArray(row.joined_prospect_ids_json).length,
+      contacts: parseJsonArray(row.joined_phone_ids_json).length + parseJsonArray(row.joined_email_ids_json).length,
+    },
+    contextIds: { masterOwnerId: row.master_owner_id, prospectId: row.best_prospect_id || undefined },
+  })
+}
 
-  const perTypeLimit = Math.max(pageSize, 15)
-  const buckets = []
+function prospectToResult(row, score = 100) {
+  return buildSearchResult({
+    entityType: 'prospect',
+    entityId: row.prospect_id,
+    title: row.full_name || row.first_name || row.prospect_id,
+    subtitle: row.occupation_group || undefined,
+    badges: [row.likely_owner ? 'Likely Owner' : null, row.language_preference].filter(Boolean),
+    score,
+    linkedCounts: {
+      properties: parseJsonArray(row.linked_property_ids_json).length,
+      contacts: parseJsonArray(row.phones_json).length + parseJsonArray(row.emails_json).length,
+    },
+    contextIds: {
+      prospectId: row.prospect_id,
+      masterOwnerId: row.master_owner_id || undefined,
+      propertyId: parseJsonArray(row.linked_property_ids_json)[0] || undefined,
+    },
+  })
+}
 
-  const shouldSearch = (type) => {
-    if (entityType !== 'all' && entityType !== type) return false
-    if (tab && TAB_ENTITY_TYPES[tab] && !TAB_ENTITY_TYPES[tab].includes(type)) return false
-    return true
-  }
+function phoneToResult(row, score = 100) {
+  return buildSearchResult({
+    entityType: 'phone',
+    entityId: row.phone_id,
+    title: row.canonical_e164 || row.phone,
+    subtitle: row.owner_display_name || undefined,
+    badges: [row.phone_type, row.wrong_number_at ? 'Wrong Number' : 'Eligible'].filter(Boolean),
+    score,
+    contextIds: {
+      contactMethodId: row.phone_id,
+      masterOwnerId: row.master_owner_id || undefined,
+      prospectId: row.primary_prospect_id || row.canonical_prospect_id || undefined,
+    },
+  })
+}
 
-  if (shouldSearch('phone')) buckets.push(searchPhones(supabase, query, perTypeLimit))
-  if (shouldSearch('email')) buckets.push(searchEmails(supabase, query, perTypeLimit))
-  if (shouldSearch('property')) buckets.push(searchProperties(supabase, query, perTypeLimit))
-  if (shouldSearch('master_owner')) buckets.push(searchOwners(supabase, query, perTypeLimit))
-  if (shouldSearch('prospect')) buckets.push(searchProspects(supabase, query, perTypeLimit))
-  if (shouldSearch('organization')) buckets.push(searchOrganizations(supabase, query, perTypeLimit))
-  if (shouldSearch('market') || shouldSearch('zip')) buckets.push(searchMarketsAndZips(supabase, query, perTypeLimit))
+function emailToResult(row, score = 100) {
+  return buildSearchResult({
+    entityType: 'email',
+    entityId: row.email_id,
+    title: row.email_normalized || row.email,
+    subtitle: row.owner_display_name || undefined,
+    badges: ['Email'],
+    score,
+    contextIds: {
+      contactMethodId: row.email_id,
+      masterOwnerId: row.master_owner_id || undefined,
+      prospectId: row.primary_prospect_id || undefined,
+    },
+  })
+}
 
-  const merged = dedupeResults(sortResults((await Promise.all(buckets)).flat(), query))
-  const page = merged.slice(cursor, cursor + pageSize)
-  const countsByType = merged.reduce((acc, row) => {
-    acc[row.entityType] = (acc[row.entityType] || 0) + 1
-    return acc
-  }, {})
-
+function paginatedResponse(results, total, cursor, pageSize) {
+  const nextCursor = cursor + pageSize < total ? cursor + pageSize : null
   return {
-    results: page,
-    countsByType,
+    results,
     pagination: {
       cursor,
       pageSize,
-      total: merged.length,
-      hasMore: cursor + pageSize < merged.length,
-      nextCursor: cursor + pageSize < merged.length ? cursor + pageSize : null,
+      total,
+      hasMore: nextCursor !== null,
+      nextCursor,
+      previousCursor: cursor > 0 ? Math.max(cursor - pageSize, 0) : null,
     },
   }
+}
+
+const BROWSE_SORT_COLUMNS = {
+  properties: { default: 'property_address_full', columns: ['property_address_full', 'market', 'final_acquisition_score', 'estimated_value'] },
+  master_owners: { default: 'display_name', columns: ['display_name', 'property_count', 'priority_score', 'portfolio_total_value'] },
+  people: { default: 'full_name', columns: ['full_name', 'contact_score_final', 'sort_rank'] },
+  organizations: { default: 'owner_name', columns: ['owner_name', 'entity_name'] },
+  contact_methods: { default: 'sort_rank', columns: ['sort_rank', 'contact_score_final'] },
+  markets: { default: 'market_key', columns: ['market_key', 'property_count'] },
+  zips: { default: 'zip', columns: ['zip', 'property_count'] },
+}
+
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
+  const { data, error, count } = await supabase
+    .from('properties')
+    .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  if (error) throw error
+  return paginatedResponse((data || []).map((row) => propertyToResult(row)), count || 0, cursor, pageSize)
+}
+
+async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = BROWSE_SORT_COLUMNS.master_owners.columns.includes(sortBy) ? sortBy : 'display_name'
+  const { data, error, count } = await supabase
+    .from('master_owners')
+    .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  if (error) throw error
+  return paginatedResponse((data || []).map((row) => ownerToResult(row)), count || 0, cursor, pageSize)
+}
+
+async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = BROWSE_SORT_COLUMNS.people.columns.includes(sortBy) ? sortBy : 'full_name'
+  const { data, error, count } = await supabase
+    .from('prospects')
+    .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  if (error) throw error
+  return paginatedResponse((data || []).map((row) => prospectToResult(row)), count || 0, cursor, pageSize)
+}
+
+async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = BROWSE_SORT_COLUMNS.organizations.columns.includes(sortBy) ? sortBy : 'owner_name'
+  const { data, error, count } = await supabase
+    .from('sub_owners')
+    .select(SUB_OWNER_SELECT, { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  if (error) throw error
+  const results = (data || []).map((row) => buildSearchResult({
+    entityType: 'organization',
+    entityId: row.sub_owner_id,
+    title: row.entity_name || row.owner_name || row.sub_owner_id,
+    subtitle: row.owner_type || 'Sub-owner entity',
+    badges: ['Organization'],
+    score: 100,
+    contextIds: { masterOwnerId: row.master_owner_id || undefined, propertyId: row.property_id || undefined },
+  }))
+  return paginatedResponse(results, count || 0, cursor, pageSize)
+}
+
+async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype }) {
+  const contactSubtype = lower(subtype || 'phone')
+  if (contactSubtype === 'email') {
+    const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
+    const { data, error, count } = await supabase
+      .from('emails')
+      .select(EMAIL_SUMMARY_SELECT, { count: 'exact' })
+      .order(orderCol, { ascending, nullsFirst: false })
+      .range(cursor, cursor + pageSize - 1)
+    if (error) throw error
+    return paginatedResponse((data || []).map((row) => emailToResult(row)), count || 0, cursor, pageSize)
+  }
+  const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
+  const { data, error, count } = await supabase
+    .from('phones')
+    .select(PHONE_SUMMARY_SELECT, { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  if (error) throw error
+  return paginatedResponse((data || []).map((row) => phoneToResult(row)), count || 0, cursor, pageSize)
+}
+
+async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = sortBy === 'property_count' ? 'property_count' : 'market_key'
+  let data
+  let error
+  let count
+  ;({ data, error, count } = await supabase
+    .from('v_entity_graph_markets')
+    .select('market_key, property_count', { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1))
+  if (error) {
+    const merged = dedupeResults(sortResults(await searchMarketsAndZips(supabase, '', cursor + pageSize + 50), ''))
+      .filter((row) => row.entityType === 'market')
+    const page = merged.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, merged.length, cursor, pageSize)
+  }
+  const results = (data || []).map((row) => buildSearchResult({
+    entityType: 'market',
+    entityId: row.market_key,
+    title: row.market_key,
+    subtitle: 'Market intelligence',
+    badges: ['Market'],
+    score: 100,
+    linkedCounts: { properties: Number(row.property_count) || 0 },
+    contextIds: {},
+  }))
+  return paginatedResponse(results, count || 0, cursor, pageSize)
+}
+
+async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const orderCol = sortBy === 'property_count' ? 'property_count' : 'zip'
+  let data
+  let error
+  let count
+  ;({ data, error, count } = await supabase
+    .from('v_entity_graph_zips')
+    .select('zip, market, property_count', { count: 'exact' })
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1))
+  if (error) {
+    const merged = dedupeResults(sortResults(await searchMarketsAndZips(supabase, '', cursor + pageSize + 50), ''))
+      .filter((row) => row.entityType === 'zip')
+    const page = merged.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, merged.length, cursor, pageSize)
+  }
+  const results = (data || []).map((row) => buildSearchResult({
+    entityType: 'zip',
+    entityId: row.zip,
+    title: `ZIP ${row.zip}`,
+    subtitle: row.market || undefined,
+    badges: ['ZIP'],
+    score: 100,
+    linkedCounts: { properties: Number(row.property_count) || 0 },
+    contextIds: {},
+  }))
+  return paginatedResponse(results, count || 0, cursor, pageSize)
+}
+
+export async function browseEntityGraph(params = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const tab = lower(params.tab || 'properties')
+  const pageSize = int(params.page_size || params.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+  const cursor = int(params.cursor || params.offset, 0)
+  const sortBy = clean(params.sort_by || params.sortBy) || BROWSE_SORT_COLUMNS[tab]?.default || 'id'
+  const ascending = ['1', 'true', 'yes'].includes(lower(params.ascending))
+  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype }
+
+  switch (tab) {
+    case 'properties':
+      return browseProperties(supabase, browseArgs)
+    case 'master_owners':
+      return browseOwners(supabase, browseArgs)
+    case 'people':
+      return browseProspects(supabase, browseArgs)
+    case 'organizations':
+      return browseOrganizations(supabase, browseArgs)
+    case 'contact_methods':
+      return browseContactMethods(supabase, browseArgs)
+    case 'markets':
+      return browseMarkets(supabase, browseArgs)
+    case 'zips':
+      return browseZips(supabase, browseArgs)
+    default:
+      return browseProperties(supabase, browseArgs)
+  }
+}
+
+export async function getEntityGraphCounts(deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const [
+    properties,
+    masterOwners,
+    people,
+    organizations,
+    phones,
+    emails,
+    markets,
+    zips,
+  ] = await Promise.all([
+    supabase.from('properties').select('property_id', { count: 'exact', head: true }),
+    supabase.from('master_owners').select('master_owner_id', { count: 'exact', head: true }),
+    supabase.from('prospects').select('prospect_id', { count: 'exact', head: true }),
+    supabase.from('sub_owners').select('sub_owner_id', { count: 'exact', head: true }),
+    supabase.from('phones').select('phone_id', { count: 'exact', head: true }),
+    supabase.from('emails').select('email_id', { count: 'exact', head: true }),
+    supabase.from('v_entity_graph_markets').select('market_key', { count: 'exact', head: true }).then(async (result) => {
+      if (!result.error) return result
+      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).not('market', 'is', null)
+      return { count: count || 0, error: null }
+    }),
+    supabase.from('v_entity_graph_zips').select('zip', { count: 'exact', head: true }).then(async (result) => {
+      if (!result.error) return result
+      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).not('property_address_zip', 'is', null)
+      return { count: count || 0, error: null }
+    }),
+  ])
+
+  const firstError = [properties, masterOwners, people, organizations, phones, emails, markets, zips]
+    .map((result) => result.error)
+    .find(Boolean)
+  if (firstError) throw firstError
+
+  return {
+    properties: properties.count || 0,
+    master_owners: masterOwners.count || 0,
+    people: people.count || 0,
+    organizations: organizations.count || 0,
+    contact_methods: (phones.count || 0) + (emails.count || 0),
+    phones: phones.count || 0,
+    emails: emails.count || 0,
+    markets: markets.count || 0,
+    zips: zips.count || 0,
+  }
+}
+
+export async function searchEntityGraph(params = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const query = normalizeSearchQuery(params.q || params.query)
+  const pageSize = int(params.page_size || params.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+  const cursor = int(params.cursor || params.offset, 0)
+  const tab = lower(params.tab || 'properties')
+  const subtype = lower(params.subtype || 'phone')
+
+  if (!query) {
+    return browseEntityGraph(params, deps)
+  }
+
+  if (tab === 'properties') {
+    const q = query
+    const like = `%${q}%`
+    const addressLike = `%${normalizeAddressSearch(q)}%`
+    let dbQuery = supabase
+      .from('properties')
+      .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
+      .or([
+        `property_id.eq.${q}`,
+        `property_export_id.ilike.${like}`,
+        `property_address_full.ilike.${like}`,
+        `property_address_full.ilike.${addressLike}`,
+        `property_address_city.ilike.${like}`,
+        `property_address_state.ilike.${like}`,
+        `property_address_zip.ilike.${like}`,
+      ].join(','))
+      .order('final_acquisition_score', { ascending: false, nullsFirst: false })
+      .range(cursor, cursor + pageSize - 1)
+    const { data, error, count } = await dbQuery
+    if (error) throw error
+    const results = (data || []).map((row) => propertyToResult(
+      row,
+      lower(row.property_id) === lower(q) ? 1000 : 500,
+    ))
+    return paginatedResponse(dedupeResults(sortResults(results, query)), count || results.length, cursor, pageSize)
+  }
+
+  if (tab === 'master_owners') {
+    const like = `%${query}%`
+    const { data, error, count } = await supabase
+      .from('master_owners')
+      .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
+      .or(`display_name.ilike.${like},master_owner_id.ilike.${like},full_name.ilike.${like},entity_name.ilike.${like}`)
+      .order('priority_score', { ascending: false, nullsFirst: false })
+      .range(cursor, cursor + pageSize - 1)
+    if (error) throw error
+    const results = (data || []).map((row) => ownerToResult(row, lower(row.master_owner_id) === lower(query) ? 1000 : 500))
+    return paginatedResponse(dedupeResults(sortResults(results, query)), count || results.length, cursor, pageSize)
+  }
+
+  if (tab === 'people') {
+    const like = `%${query}%`
+    const { data, error, count } = await supabase
+      .from('prospects')
+      .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
+      .or(`full_name.ilike.${like},prospect_id.ilike.${like},canonical_prospect_id.ilike.${like},first_name.ilike.${like}`)
+      .order('contact_score_final', { ascending: false, nullsFirst: false })
+      .range(cursor, cursor + pageSize - 1)
+    if (error) throw error
+    const results = (data || []).map((row) => prospectToResult(row, lower(row.prospect_id) === lower(query) ? 1000 : 500))
+    return paginatedResponse(dedupeResults(sortResults(results, query)), count || results.length, cursor, pageSize)
+  }
+
+  if (tab === 'organizations') {
+    const merged = dedupeResults(sortResults(await searchOrganizations(supabase, query, pageSize + cursor), query))
+    const page = merged.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, merged.length, cursor, pageSize)
+  }
+
+  if (tab === 'contact_methods') {
+    if (subtype === 'email' || query.includes('@')) {
+      const merged = dedupeResults(sortResults(await searchEmails(supabase, query, pageSize + cursor), query))
+      const page = merged.slice(cursor, cursor + pageSize)
+      return paginatedResponse(page, merged.length, cursor, pageSize)
+    }
+    const merged = dedupeResults(sortResults(await searchPhones(supabase, query, pageSize + cursor), query))
+    const page = merged.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, merged.length, cursor, pageSize)
+  }
+
+  if (tab === 'markets' || tab === 'zips') {
+    const merged = dedupeResults(sortResults(await searchMarketsAndZips(supabase, query, pageSize + cursor), query))
+    const filtered = tab === 'markets'
+      ? merged.filter((row) => row.entityType === 'market')
+      : merged.filter((row) => row.entityType === 'zip')
+    const page = filtered.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, filtered.length, cursor, pageSize)
+  }
+
+  const perTypeLimit = Math.max(pageSize, 15)
+  const buckets = await Promise.all([
+    searchPhones(supabase, query, perTypeLimit),
+    searchEmails(supabase, query, perTypeLimit),
+    searchProperties(supabase, query, perTypeLimit),
+    searchOwners(supabase, query, perTypeLimit),
+    searchProspects(supabase, query, perTypeLimit),
+    searchOrganizations(supabase, query, perTypeLimit),
+    searchMarketsAndZips(supabase, query, perTypeLimit),
+  ])
+  const merged = dedupeResults(sortResults(buckets.flat(), query))
+  const page = merged.slice(cursor, cursor + pageSize)
+  return paginatedResponse(page, merged.length, cursor, pageSize)
 }
 
 async function fetchThreadsForContext(supabase, { propertyId, masterOwnerId, prospectId, phoneId, emailId }) {
