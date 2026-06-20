@@ -1,11 +1,12 @@
 import type { EntityGraphTab, EntitySearchResult } from '../../domain/entity-graph/entity-graph.types'
+import type { SelectedEntity } from '../../domain/entity-graph/selected-entity'
+import { resultMatchesSelection } from '../../domain/entity-graph/selected-entity'
 import { TABLE_COLUMNS, renderTableRowCells } from './entity-graph-ui-helpers'
 
 type Props = {
   tab: EntityGraphTab
   results: EntitySearchResult[]
-  selectedType: string | null
-  selectedId: string | null
+  selectedEntity: SelectedEntity
   sortBy: string
   ascending: boolean
   onSelect: (result: EntitySearchResult) => void
@@ -15,8 +16,7 @@ type Props = {
 export function EntityGraphTableView({
   tab,
   results,
-  selectedType,
-  selectedId,
+  selectedEntity,
   sortBy,
   ascending,
   onSelect,
@@ -48,7 +48,7 @@ export function EntityGraphTableView({
         <tbody>
           {results.map((result) => {
             const cells = renderTableRowCells(tab, result)
-            const isSelected = selectedType === result.entityType && selectedId === result.entityId
+            const isSelected = resultMatchesSelection(result, selectedEntity)
             return (
               <tr
                 key={`${result.entityType}:${result.entityId}`}

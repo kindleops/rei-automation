@@ -19,10 +19,15 @@ import {
   replaceEntityGraphWorkspaceQuery,
 } from '../../domain/entity-graph/entity-graph-workspace-state'
 import {
-  mergeUniversalContexts,
-  syncUniversalContextToUrl,
-  universalContextFromSearchResult,
-} from '../../domain/entity-graph/universal-entity-context'
+  EMPTY_SELECTED_ENTITY,
+  dossierApiType,
+  dossierMatchesSelection,
+  selectedEntityFromGraphNode,
+  selectedEntityFromResult,
+  selectedEntityToContext,
+  tabAllowsSelectedEntity,
+  type SelectedEntity,
+} from '../../domain/entity-graph/selected-entity'
 import { EntityGraphCardsView } from './EntityGraphCardsView'
 import { EntityGraphFiltersPanel } from './EntityGraphFilters'
 import { EntityGraphHeader } from './EntityGraphHeader'
@@ -69,8 +74,6 @@ function ResultSkeleton({ count = 6 }: { count?: number }) {
 export function EntityGraphWorkspace({
   paneWidth = '100',
   themeMode = 'dark',
-  universalContext,
-  onUniversalContextChange,
   onAction,
   onSelectThreadKey,
 }: EntityGraphWorkspaceProps) {
@@ -91,6 +94,9 @@ export function EntityGraphWorkspace({
   const [ascending, setAscending] = useState(initialWorkspace.ascending)
   const [inspectorOpen, setInspectorOpen] = useState(initialWorkspace.inspectorOpen)
   const [graphFocusOnly, setGraphFocusOnly] = useState(initialWorkspace.graphFocusOnly)
+
+  const [selectedEntity, setSelectedEntity] = useState<SelectedEntity>(EMPTY_SELECTED_ENTITY)
+  const [selectedResult, setSelectedResult] = useState<EntitySearchResult | null>(null)
 
   const [results, setResults] = useState<EntitySearchResult[]>([])
   const [cursor, setCursor] = useState(initialWorkspace.cursor)
@@ -114,12 +120,16 @@ export function EntityGraphWorkspace({
   const listRequestGenerationRef = useRef(0)
   const dossierRequestGenerationRef = useRef(0)
   const listQueryKeyRef = useRef('')
+  const querySignatureRef = useRef('')
 
   const pageSize = layoutMode === 'command' ? 40 : layoutMode === 'peek' ? 12 : 25
-  const selectedType = universalContext.entityType
-  const selectedId = universalContext.entityId
-  const hasSelection = Boolean(selectedType && selectedId)
+  const hasSelection = Boolean(selectedEntity.type && selectedEntity.id)
   const activeFilterCount = countActiveFilters(filters)
+  const actionContext = useMemo(
+    () => selectedEntityToContext(selectedEntity, selectedResult),
+    [selectedEntity, selectedResult],
+  )
+  const matchedDossier = dossierMatchesSelection(dossier, selectedEntity) ? dossier : null
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280)
@@ -186,14 +196,28 @@ export function EntityGraphWorkspace({
   }, [results, listLoading])
 
   const querySignature = `${activeTab}|${debouncedQuery}|${contactSubtype}|${JSON.stringify(filters)}|${sortBy}|${ascending}`
-  const querySignatureRef = useRef(querySignature)
   const listQueryKey = `${querySignature}|${cursor}|${pageSize}`
+
   useEffect(() => {
     if (querySignatureRef.current !== querySignature) {
       querySignatureRef.current = querySignature
       setCursor(0)
+      setResults([])
+      setPagination((current) => ({ ...current, total: 0, hasMore: false, nextCursor: null }))
+      setSelectedEntity(EMPTY_SELECTED_ENTITY)
+      setSelectedResult(null)
+      setDossier(null)
+      setListLoading(true)
     }
   }, [querySignature])
+
+  useEffect(() => {
+    if (!tabAllowsSelectedEntity(activeTab, selectedEntity)) {
+      setSelectedEntity(EMPTY_SELECTED_ENTITY)
+      setSelectedResult(null)
+      setDossier(null)
+    }
+  }, [activeTab, selectedEntity])
 
   useEffect(() => {
     listAbortRef.current?.abort()
@@ -241,9 +265,10 @@ export function EntityGraphWorkspace({
     return () => controller.abort()
   }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, filters, listQueryKey, pageSize, sortBy])
 
-  const dossierQueryKey = `${listQueryKey}|${selectedType ?? ''}|${selectedId ?? ''}`
+  const dossierQueryKey = `${listQueryKey}|${selectedEntity.type ?? ''}|${selectedEntity.id ?? ''}`
   useEffect(() => {
-    if (!selectedType || !selectedId) {
+    const apiType = dossierApiType(selectedEntity)
+    if (!apiType || !selectedEntity.id) {
       setDossier(null)
       setDossierLoading(false)
       return
@@ -255,12 +280,18 @@ export function EntityGraphWorkspace({
     const generation = ++dossierRequestGenerationRef.current
     const requestKey = dossierQueryKey
     setDossierLoading(true)
+    setDossier(null)
 
-    void fetchEntityGraphDossier(selectedType, selectedId, { signal: controller.signal, force: true })
+    void fetchEntityGraphDossier(apiType, selectedEntity.id, { signal: controller.signal, force: true })
       .then((next) => {
         if (controller.signal.aborted || generation !== dossierRequestGenerationRef.current) return
         if (requestKey !== dossierQueryKey) return
         setDossier(next)
+      })
+      .catch(() => {
+        if (controller.signal.aborted || generation !== dossierRequestGenerationRef.current) return
+        if (requestKey !== dossierQueryKey) return
+        setDossier(null)
       })
       .finally(() => {
         if (controller.signal.aborted || generation !== dossierRequestGenerationRef.current) return
@@ -269,50 +300,38 @@ export function EntityGraphWorkspace({
       })
 
     return () => controller.abort()
-  }, [dossierQueryKey, selectedId, selectedType])
-
-  useEffect(() => {
-    if (querySignatureRef.current !== querySignature) {
-      setDossier(null)
-    }
-  }, [querySignature])
+  }, [dossierQueryKey, selectedEntity.id, selectedEntity.type])
 
   const handleSelectResult = useCallback((result: EntitySearchResult) => {
-    const next = universalContextFromSearchResult(result)
-    onUniversalContextChange(next, { pushHistory: false })
-    syncUniversalContextToUrl(next, 'replace')
+    setSelectedEntity(selectedEntityFromResult(result))
+    setSelectedResult(result)
     setInspectorOpen(true)
-  }, [onUniversalContextChange])
+  }, [])
 
-  const handleGraphNodeSelect = useCallback((_nodeId: string, nodeType: string, entityId: string) => {
-    const patch: Partial<UniversalEntityContext> = {
-      entityType: nodeType as UniversalEntityContext['entityType'],
-      entityId,
-    }
-    if (nodeType === 'property') patch.propertyId = entityId
-    if (nodeType === 'master_owner') patch.masterOwnerId = entityId
-    if (nodeType === 'prospect') patch.prospectId = entityId
-    if (nodeType === 'phone' || nodeType === 'email') {
-      patch.contactMethodType = nodeType
-      patch.contactMethodId = entityId
-    }
-    const next = mergeUniversalContexts(universalContext, patch)
-    onUniversalContextChange(next, { pushHistory: false })
-    syncUniversalContextToUrl(next, 'replace')
+  const handleGraphNodeSelect = useCallback((nodeId: string, nodeType: string, entityId: string) => {
+    setSelectedEntity(selectedEntityFromGraphNode(nodeType, entityId))
+    setSelectedResult(null)
     setInspectorOpen(true)
-  }, [onUniversalContextChange, universalContext])
+  }, [])
 
   const handleContactSelect = useCallback((entry: ContactLadderEntry) => {
-    const next = mergeUniversalContexts(universalContext, {
-      entityType: entry.type,
-      entityId: entry.id,
-      contactMethodType: entry.type,
-      contactMethodId: entry.id,
-      prospectId: entry.prospectId ?? universalContext.prospectId,
-    })
-    onUniversalContextChange(next, { pushHistory: false })
-    syncUniversalContextToUrl(next, 'replace')
-  }, [onUniversalContextChange, universalContext])
+    setSelectedEntity({ type: entry.type, id: entry.id })
+    setSelectedResult(null)
+  }, [])
+
+  const handleTabChange = useCallback((tab: EntityGraphTab) => {
+    setActiveTab(tab)
+    setSelectedEntity(EMPTY_SELECTED_ENTITY)
+    setSelectedResult(null)
+    setDossier(null)
+  }, [])
+
+  const handleCloseInspector = useCallback(() => {
+    setInspectorOpen(false)
+    setSelectedEntity(EMPTY_SELECTED_ENTITY)
+    setSelectedResult(null)
+    setDossier(null)
+  }, [])
 
   const handleSort = useCallback((column: string) => {
     setSortBy((current) => {
@@ -326,8 +345,8 @@ export function EntityGraphWorkspace({
   }, [])
 
   const actions = useMemo(
-    () => buildEntityGraphActions(universalContext, dossier?.threads?.length ?? 0),
-    [dossier?.threads?.length, universalContext],
+    () => buildEntityGraphActions(actionContext, matchedDossier?.threads?.length ?? 0),
+    [actionContext, matchedDossier?.threads?.length],
   )
 
   const effectiveVisualMode: EntityGraphVisualMode = layoutMode === 'peek' ? 'cards' : visualMode
@@ -364,7 +383,7 @@ export function EntityGraphWorkspace({
         tabCounts={tabCounts}
         resultCount={pagination.total}
         activeFilterCount={activeFilterCount}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         onQueryChange={setQuery}
         onVisualModeChange={setVisualMode}
         onOpenFilters={() => {
@@ -424,8 +443,7 @@ export function EntityGraphWorkspace({
                 <EntityGraphTableView
                   tab={activeTab}
                   results={results}
-                  selectedType={selectedType}
-                  selectedId={selectedId}
+                  selectedEntity={selectedEntity}
                   sortBy={sortBy}
                   ascending={ascending}
                   onSelect={handleSelectResult}
@@ -436,8 +454,7 @@ export function EntityGraphWorkspace({
                 <EntityGraphCardsView
                   tab={activeTab}
                   results={results}
-                  selectedType={selectedType}
-                  selectedId={selectedId}
+                  selectedEntity={selectedEntity}
                   compact={layoutMode === 'peek' || listCompact}
                   onSelect={handleSelectResult}
                 />
@@ -462,9 +479,9 @@ export function EntityGraphWorkspace({
                 <strong>Loading graph…</strong>
                 <span>Fetching relationships for the selected record.</span>
               </div>
-            ) : hasSelection && dossier ? (
+            ) : hasSelection && matchedDossier ? (
               <EntityGraphRelationshipGraph
-                dossier={dossier}
+                dossier={matchedDossier}
                 focusOnly={graphFocusOnly}
                 onNodeSelect={handleGraphNodeSelect}
               />
@@ -480,11 +497,12 @@ export function EntityGraphWorkspace({
 
       <EntityGraphInspector
         open={inspectorOpen && hasSelection}
-        dossier={dossier}
+        selectedEntity={selectedEntity}
+        dossier={matchedDossier}
         loading={dossierLoading}
-        universalContext={universalContext}
+        actionContext={actionContext}
         actions={actions}
-        onClose={() => setInspectorOpen(false)}
+        onClose={handleCloseInspector}
         onAction={onAction}
         onContactSelect={handleContactSelect}
         onSelectThreadKey={onSelectThreadKey}

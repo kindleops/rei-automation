@@ -1,7 +1,9 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   canonicalMarketKey,
+  clampCoveragePct,
   clean,
+  computeContactCoverage,
   formatContactMethodPresentation,
   formatPropertySummary,
   formatReadablePhone,
@@ -361,24 +363,38 @@ async function searchMarketsAndZips(supabase, query, limit) {
   const like = `%${q}%`
   const { data: markets } = await supabase
     .from('properties')
-    .select('market')
-    .ilike('market', like)
-    .not('market', 'is', null)
-    .limit(20)
-  const uniqueMarkets = [...new Set((markets || []).map((row) => clean(row.market)).filter(Boolean))]
-  for (const market of uniqueMarkets.slice(0, limit)) {
+    .select('market, market_region, property_address_city, property_address_state')
+    .or(`market.ilike.${like},market_region.ilike.${like}`)
+    .limit(40)
+  const canonicalSeen = new Set()
+  for (const row of markets || []) {
+    const resolved = resolveEntityGraphMarket({
+      market: row.market,
+      marketRegion: row.market_region,
+      city: row.property_address_city,
+      state: row.property_address_state,
+    })
+    const canonical = resolved.canonicalKey
+    if (!canonical || canonicalSeen.has(canonical)) continue
+    canonicalSeen.add(canonical)
+    if (canonicalSeen.size > limit) break
     const { count } = await supabase
       .from('properties')
       .select('property_id', { count: 'exact', head: true })
-      .eq('market', market)
+      .or(`market.eq.${row.market},market_region.eq.${row.market_region || row.market}`)
     results.push(buildSearchResult({
       entityType: 'market',
-      entityId: market,
-      title: market,
-      subtitle: 'Market intelligence',
-      badges: ['Market'],
-      score: lower(market) === lower(q) ? 850 : 400,
+      entityId: canonical,
+      title: resolved.displayMarket,
+      subtitle: resolved.state || undefined,
+      badges: [resolved.isUnmapped ? 'Unmapped Locality' : 'Canonical Market'],
+      score: lower(canonical).includes(lower(q)) ? 850 : 400,
       linkedCounts: { properties: count || 0 },
+      details: {
+        marketLabel: resolved.displayMarket,
+        isUnmapped: resolved.isUnmapped,
+        state: resolved.state || undefined,
+      },
       contextIds: {},
     }))
   }
@@ -474,12 +490,21 @@ function propertyToResult(row, score = 100) {
   })
 }
 
+function ownerContactCoverage(row) {
+  const linkedPeople = parseJsonArray(row.joined_prospect_ids_json).length
+  if (linkedPeople <= 0) return null
+  if (row.contactability_score !== null && row.contactability_score !== undefined) {
+    return clampCoveragePct(row.contactability_score)
+  }
+  return null
+}
+
 function ownerToResult(row, score = 100) {
   const phoneCount = parseJsonArray(row.joined_phone_ids_json).length
   const emailCount = parseJsonArray(row.joined_email_ids_json).length
   const propertyCount = row.property_count || parseJsonArray(row.joined_property_ids_json).length
   const contactCount = phoneCount + emailCount
-  const coverage = propertyCount > 0 ? Math.round((contactCount / propertyCount) * 100) : undefined
+  const coverage = ownerContactCoverage(row)
   return buildSearchResult({
     entityType: 'master_owner',
     entityId: row.master_owner_id,
@@ -522,20 +547,45 @@ function classifyOwnershipEntity(row) {
   return 'Other/Unknown'
 }
 
+function prospectDisplayTitle(row) {
+  const name = row.full_name || row.first_name || row.prospect_id
+  const shortId = String(row.prospect_id || row.canonical_prospect_id || '').slice(-6)
+  if (!shortId) return name
+  return `${name} · …${shortId}`
+}
+
+function prospectDisplaySubtitle(row) {
+  const occupation = normalizeOccupationLabel(row)
+  const ownerName = clean(row.owner_display_name)
+  const propertyCount = parseJsonArray(row.linked_property_ids_json).length
+  const contactCount = parseJsonArray(row.phones_json).length + parseJsonArray(row.emails_json).length
+  const parts = []
+  if (ownerName) parts.push(ownerName)
+  if (propertyCount > 0) parts.push(`${propertyCount} ${propertyCount === 1 ? 'property' : 'properties'}`)
+  if (contactCount > 0) parts.push(`${contactCount} ${contactCount === 1 ? 'contact' : 'contacts'}`)
+  if (parts.length > 0) return parts.join(' · ')
+  if (occupation) return occupation
+  return undefined
+}
+
 function prospectToResult(row, score = 100) {
   const occupation = normalizeOccupationLabel(row)
-  const location = [row.primary_market, row.owner_display_name].filter(Boolean).join(' · ')
-  const shortId = String(row.prospect_id || '').slice(-6)
   return buildSearchResult({
     entityType: 'prospect',
     entityId: row.prospect_id,
-    title: row.full_name || row.first_name || row.prospect_id,
-    subtitle: occupation || location || `ID …${shortId}`,
-    badges: [row.likely_owner ? 'Likely Owner' : null, row.language_preference, occupation ? null : `…${shortId}`].filter(Boolean),
+    title: prospectDisplayTitle(row),
+    subtitle: prospectDisplaySubtitle(row),
+    badges: [row.likely_owner ? 'Likely Owner' : null, row.language_preference, occupation].filter(Boolean),
     score,
     linkedCounts: {
       properties: parseJsonArray(row.linked_property_ids_json).length,
       contacts: parseJsonArray(row.phones_json).length + parseJsonArray(row.emails_json).length,
+    },
+    details: {
+      occupation: occupation || undefined,
+      language: row.language_preference || undefined,
+      shortId: String(row.prospect_id || '').slice(-6) || undefined,
+      ownerName: clean(row.owner_display_name) || undefined,
     },
     contextIds: {
       prospectId: row.prospect_id,
@@ -697,13 +747,28 @@ function sumMetric(existing, row, key) {
   return Number(current) + Number(incoming)
 }
 
+function marketCoveragePct(row) {
+  const people = Number(row.people_count)
+  const reachablePeople = row.reachable_people
+  if (Number.isFinite(people) && people > 0 && reachablePeople !== null && reachablePeople !== undefined) {
+    return computeContactCoverage({ linkedPeople: people, reachablePeople })
+  }
+  if (row.contact_coverage_pct !== null && row.contact_coverage_pct !== undefined) {
+    return clampCoveragePct(row.contact_coverage_pct)
+  }
+  return null
+}
+
 function mergeCanonicalMarkets(rows) {
   const merged = new Map()
   for (const row of rows) {
     const rawKey = String(row.market_key || row.canonical_market || '')
+    const sampleLocality = clean(row.sample_locality || rawKey)
+    const cityGuess = sampleLocality.includes(',') ? clean(sampleLocality.split(',')[0]) : sampleLocality
     const resolved = resolveEntityGraphMarket({
-      market: row.sample_locality || rawKey,
+      market: sampleLocality || rawKey,
       marketRegion: row.canonical_market || row.market_region || rawKey,
+      city: cityGuess,
       state: row.state,
     })
     const canonical = resolved.canonicalKey || rawKey
@@ -717,11 +782,12 @@ function mergeCanonicalMarkets(rows) {
       reachable_phones: 0,
       reachable_emails: 0,
       reachable_contacts: 0,
+      reachable_people: 0,
       high_equity_count: 0,
       distressed_count: 0,
       avg_acquisition_score: null,
       contact_coverage_pct: null,
-      sample_locality: row.sample_locality || rawKey,
+      sample_locality: sampleLocality || rawKey,
       state: resolved.state || row.state || null,
       _score_weight: 0,
     }
@@ -730,6 +796,7 @@ function mergeCanonicalMarkets(rows) {
     existing.people_count = sumMetric(existing, row, 'people_count') ?? 0
     existing.reachable_phones = sumMetric(existing, row, 'reachable_phones') ?? 0
     existing.reachable_emails = sumMetric(existing, row, 'reachable_emails') ?? 0
+    existing.reachable_people = sumMetric(existing, row, 'reachable_people') ?? existing.reachable_people
     existing.reachable_contacts = sumMetric(existing, row, 'reachable_contacts')
       ?? (Number(existing.reachable_phones) + Number(existing.reachable_emails))
     existing.high_equity_count = sumMetric(existing, row, 'high_equity_count') ?? 0
@@ -743,14 +810,91 @@ function mergeCanonicalMarkets(rows) {
         ? ((prior * priorWeight) + (Number(row.avg_acquisition_score) * weight)) / existing._score_weight
         : row.avg_acquisition_score
     }
-    if (existing.owner_count > 0) {
-      existing.contact_coverage_pct = Math.round((existing.reachable_contacts / existing.owner_count) * 1000) / 10
-    }
+    existing.contact_coverage_pct = marketCoveragePct(existing)
     merged.set(canonical, existing)
   }
   return [...merged.values()]
     .map(({ _score_weight, ...row }) => row)
     .sort((a, b) => b.property_count - a.property_count)
+}
+
+async function aggregateCanonicalMarketsFromProperties(supabase) {
+  const merged = new Map()
+  let offset = 0
+  const pageSize = 5000
+  while (true) {
+    const { data, error } = await supabase
+      .from('properties')
+      .select('market, market_region, property_address_city, property_address_state, master_owner_id, final_acquisition_score, equity_percent, tax_delinquent, active_lien')
+      .range(offset, offset + pageSize - 1)
+    if (error || !data?.length) break
+    for (const row of data) {
+      const resolved = resolveEntityGraphMarket({
+        market: row.market,
+        marketRegion: row.market_region,
+        city: row.property_address_city,
+        state: row.property_address_state,
+      })
+      const key = resolved.canonicalKey
+      const existing = merged.get(key) || {
+        market_key: key,
+        canonical_market: resolved.displayMarket,
+        is_unmapped: resolved.isUnmapped,
+        property_count: 0,
+        owner_count: 0,
+        people_count: 0,
+        reachable_phones: 0,
+        reachable_emails: 0,
+        reachable_contacts: 0,
+        reachable_people: 0,
+        high_equity_count: 0,
+        distressed_count: 0,
+        avg_acquisition_score: null,
+        contact_coverage_pct: null,
+        sample_locality: row.property_address_city || row.market || key,
+        state: resolved.state || row.property_address_state || null,
+        _owners: new Set(),
+        _score_sum: 0,
+        _score_count: 0,
+      }
+      existing.property_count += 1
+      if (row.master_owner_id) existing._owners.add(row.master_owner_id)
+      if (Number(row.equity_percent) >= 50) existing.high_equity_count += 1
+      if (row.tax_delinquent || row.active_lien) existing.distressed_count += 1
+      if (Number.isFinite(Number(row.final_acquisition_score))) {
+        existing._score_sum += Number(row.final_acquisition_score)
+        existing._score_count += 1
+      }
+      merged.set(key, existing)
+    }
+    if (data.length < pageSize) break
+    offset += pageSize
+  }
+  return [...merged.values()].map((row) => {
+    const avg = row._score_count > 0 ? Math.round((row._score_sum / row._score_count) * 100) / 100 : null
+    const { _owners, _score_sum, _score_count, ...rest } = row
+    return {
+      ...rest,
+      owner_count: _owners.size,
+      avg_acquisition_score: avg,
+      contact_coverage_pct: null,
+    }
+  }).sort((a, b) => b.property_count - a.property_count)
+}
+
+async function getCanonicalMarketAggregates(supabase) {
+  const rows = await fetchMarketAggregateRows(supabase)
+  const merged = mergeCanonicalMarkets(rows)
+  const [{ count: propertyCount }, marketRowCount] = await Promise.all([
+    supabase.from('properties').select('property_id', { count: 'exact', head: true }),
+    Promise.resolve(merged.length),
+  ])
+  const totalProps = propertyCount || 0
+  const suspicious = marketRowCount > 500 && totalProps > 0 && marketRowCount > totalProps * 0.2
+  if (!rows.length || suspicious) {
+    return aggregateCanonicalMarketsFromProperties(supabase)
+  }
+  return merged
 }
 
 async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
@@ -866,18 +1010,14 @@ async function fetchMarketAggregateRows(supabase) {
 }
 
 async function countCanonicalMarkets(supabase) {
-  const rows = await fetchMarketAggregateRows(supabase)
-  return mergeCanonicalMarkets(rows).length
+  const aggregates = await getCanonicalMarketAggregates(supabase)
+  return aggregates.length
 }
 
 function marketRowToResult(row) {
   const canonical = String(row.canonical_market || row.market_key || '')
   const state = row.state || null
-  const coverage = row.contact_coverage_pct ?? (
-    row.owner_count > 0 && row.reachable_contacts !== undefined
-      ? Math.round((Number(row.reachable_contacts) / Number(row.owner_count)) * 1000) / 10
-      : undefined
-  )
+  const coverage = marketCoveragePct(row)
   return buildSearchResult({
     entityType: 'market',
     entityId: canonical,
@@ -911,8 +1051,7 @@ function marketRowToResult(row) {
 }
 
 async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
-  const rows = await fetchMarketAggregateRows(supabase)
-  let mergedRows = mergeCanonicalMarkets(rows)
+  let mergedRows = await getCanonicalMarketAggregates(supabase)
   if (filters.market) {
     const needle = lower(filters.market)
     mergedRows = mergedRows.filter((row) =>
@@ -968,11 +1107,7 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
       const marketResolved = row.market
         ? resolveEntityGraphMarket({ market: row.market, marketRegion: row.market })
         : null
-      const coverage = row.contact_coverage_pct ?? (
-        row.owner_count > 0 && row.reachable_contacts !== undefined
-          ? Math.round((Number(row.reachable_contacts) / Number(row.owner_count)) * 1000) / 10
-          : undefined
-      )
+      const coverage = marketCoveragePct(row)
       return buildSearchResult({
         entityType: 'zip',
         entityId: row.zip,
@@ -986,12 +1121,16 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
           prospects: row.people_count ?? undefined,
           reachableContacts: row.reachable_contacts ?? undefined,
           contacts: row.reachable_contacts ?? undefined,
-          contactCoverage: coverage,
+          contactCoverage: coverage ?? undefined,
           avgAcquisitionScore: row.avg_acquisition_score ?? undefined,
+          highEquity: row.high_equity_count ?? undefined,
+          distressed: row.distressed_count ?? undefined,
         },
         details: {
           marketLabel: marketResolved?.displayMarket || row.market || undefined,
-          contactCoverage: coverage,
+          contactCoverage: coverage ?? undefined,
+          highEquityCount: row.high_equity_count ?? undefined,
+          distressedCount: row.distressed_count ?? undefined,
         },
         contextIds: {},
       })
@@ -1622,10 +1761,16 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     },
   )
 
+  const propertyPresentation = formatPropertySummary(property)
   return {
     entityType: 'property',
     entityId: propertyId,
-    summary: property,
+    summary: {
+      ...property,
+      marketLabel: propertyPresentation.marketLabel,
+      marketKey: propertyPresentation.marketKey,
+      isUnmappedMarket: propertyPresentation.isUnmappedMarket,
+    },
     owner,
     prospects: prospects || [],
     portfolio: portfolioProperties,
@@ -1777,18 +1922,54 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
     case 'contact':
       return loadContactNeighborhood(supabase, entityType === 'contact' ? 'phone' : entityType, entityId)
     case 'organization': {
+      const { data: sub } = await supabase.from('sub_owners').select(SUB_OWNER_SELECT).eq('sub_owner_id', entityId).maybeSingle()
+      if (sub) {
+        const owner = sub.master_owner_id
+          ? (await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', sub.master_owner_id).maybeSingle()).data
+          : null
+        const propertyIds = owner ? parseJsonArray(owner.joined_property_ids_json) : []
+        let properties = []
+        if (propertyIds.length > 0) {
+          const { data } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).in('property_id', propertyIds.slice(0, 25))
+          properties = data || []
+        } else if (sub.master_owner_id) {
+          const { data } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('master_owner_id', sub.master_owner_id).limit(25)
+          properties = data || []
+        }
+        const prospects = owner
+          ? (await supabase.from('prospects').select(PROSPECT_SUMMARY_SELECT).eq('master_owner_id', owner.master_owner_id).limit(20)).data || []
+          : []
+        const contactLadder = owner
+          ? await fetchContactLadder(supabase, { masterOwnerId: owner.master_owner_id })
+          : { phones: [], emails: [] }
+        const graph = buildGraphNodesEdges(
+          { id: `organization:${entityId}`, type: 'organization', label: sub.owner_name || sub.sub_owner_id },
+          { properties, prospects, phones: contactLadder.phones, emails: contactLadder.emails, threads: [], owner },
+        )
+        return {
+          entityType: 'organization',
+          entityId,
+          summary: sub,
+          owner,
+          properties,
+          prospects,
+          contactLadder,
+          portfolio: owner ? {
+            propertyCount: owner.property_count || properties.length,
+            totalValue: owner.portfolio_total_value,
+            totalEquity: owner.portfolio_total_equity,
+          } : { propertyCount: properties.length },
+          identity: {
+            masterOwner: owner?.display_name || null,
+            propertyContext: properties[0]?.property_address_full || null,
+          },
+          graph,
+          timeline: [],
+        }
+      }
       const ownerDossier = await loadOwnerNeighborhood(supabase, entityId)
       if (ownerDossier) return { ...ownerDossier, entityType: 'organization' }
-      const { data: sub } = await supabase.from('sub_owners').select(SUB_OWNER_SELECT).eq('sub_owner_id', entityId).maybeSingle()
-      if (!sub) return null
-      return {
-        entityType: 'organization',
-        entityId,
-        summary: sub,
-        owner: sub.master_owner_id ? (await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', sub.master_owner_id).maybeSingle()).data : null,
-        graph: { nodes: [{ id: `organization:${entityId}`, type: 'organization', label: sub.owner_name || sub.sub_owner_id, meta: { active: true } }], edges: [] },
-        timeline: [],
-      }
+      return null
     }
     case 'market': {
       const [sampleRes, metrics] = await Promise.all([

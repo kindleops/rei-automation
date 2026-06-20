@@ -5,6 +5,8 @@ import {
   resolveEntityGraphMarket,
   formatPropertySummary,
   formatContactMethodPresentation,
+  computeContactCoverage,
+  clampCoveragePct,
 } from '@/lib/domain/entity-graph/entity-graph-normalize.js'
 
 test('Tulsa, OK stays Tulsa — not Dallas', () => {
@@ -88,6 +90,65 @@ test('property summary never renders leading comma address', () => {
   assert.equal(summary.subtitle, 'Tulsa, OK, 74104')
   assert.equal(summary.units, undefined)
   assert.equal(summary.assetType, 'SFR')
+})
+
+test('Columbus, OH property is not mapped to Tampa when market_region is wrong', () => {
+  const result = resolveEntityGraphMarket({
+    market: 'Columbus, OH',
+    marketRegion: 'Tampa, FL',
+    city: 'Columbus',
+    state: 'OH',
+  })
+  assert.match(result.displayMarket, /Unmapped · Columbus, OH|Columbus, OH/)
+  assert.notEqual(result.displayMarket, 'Tampa, FL')
+})
+
+test('Tampa, FL property stays Tampa', () => {
+  const result = resolveEntityGraphMarket({
+    market: 'Tampa, FL',
+    marketRegion: 'Tampa, FL',
+    city: 'Tampa',
+    state: 'FL',
+  })
+  assert.equal(result.displayMarket, 'Tampa, FL')
+})
+
+test('Durham, NC is not mapped to Charlotte when market_region is wrong', () => {
+  const result = resolveEntityGraphMarket({
+    market: 'Durham, NC',
+    marketRegion: 'Charlotte, NC',
+    city: 'Durham',
+    state: 'NC',
+  })
+  assert.match(result.displayMarket, /Unmapped · Durham, NC|Durham, NC/)
+  assert.notEqual(result.displayMarket, 'Charlotte, NC')
+})
+
+test('Charlotte, NC property stays Charlotte', () => {
+  const result = resolveEntityGraphMarket({
+    market: 'Charlotte, NC',
+    marketRegion: 'Charlotte, NC',
+    city: 'Charlotte',
+    state: 'NC',
+  })
+  assert.equal(result.displayMarket, 'Charlotte, NC')
+})
+
+test('contact coverage returns null with no linked people', () => {
+  assert.equal(computeContactCoverage({ linkedPeople: 0, reachablePeople: 0 }), null)
+})
+
+test('contact coverage for one reachable person', () => {
+  assert.equal(computeContactCoverage({ linkedPeople: 1, reachablePeople: 1 }), 100)
+})
+
+test('contact coverage for partial reachability', () => {
+  assert.equal(computeContactCoverage({ linkedPeople: 4, reachablePeople: 2 }), 50)
+})
+
+test('contact coverage never exceeds 100%', () => {
+  assert.equal(clampCoveragePct(700), 100)
+  assert.equal(computeContactCoverage({ linkedPeople: 1, reachablePeople: 7 }), 100)
 })
 
 test('contact method presentation humanizes phone type and eligibility', () => {

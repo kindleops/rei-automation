@@ -90,11 +90,48 @@ export function formatCurrency(value?: number | null): string {
 
 export function contactCoverageLabel(result: EntitySearchResult): string {
   const coverage = result.linkedCounts.contactCoverage
-  if (coverage !== undefined && coverage !== null) return `${Math.round(coverage)}%`
-  const properties = result.linkedCounts.properties ?? 0
-  const contacts = result.linkedCounts.reachableContacts ?? result.linkedCounts.contacts ?? 0
-  if (!properties) return '—'
-  return `${Math.round((contacts / properties) * 100)}%`
+  if (coverage === undefined || coverage === null) return '—'
+  const clamped = Math.min(100, Math.round(Number(coverage)))
+  if (!Number.isFinite(clamped)) return '—'
+  return `${clamped}%`
+}
+
+export function formatMetricLabel(key: string): string {
+  const labels: Record<string, string> = {
+    acquisition: 'Acquisition Score',
+    motivation: 'Motivation',
+    equityPercent: 'Equity',
+    equity: 'Equity',
+    propertyCount: 'Portfolio',
+    totalValue: 'Portfolio Value',
+    totalEquity: 'Portfolio Equity',
+  }
+  return labels[key] || key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).trim()
+}
+
+export function formatMetricValue(key: string, value: unknown): string {
+  if (value === undefined || value === null || value === '') return '—'
+  if (key === 'equityPercent' || key === 'equity') {
+    const num = Number(value)
+    return Number.isFinite(num) ? `${Math.round(num)}%` : String(value)
+  }
+  if (key === 'propertyCount') {
+    const count = Number(value)
+    if (!Number.isFinite(count)) return '—'
+    return `${count} ${count === 1 ? 'property' : 'properties'}`
+  }
+  if (typeof value === 'number') {
+    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 10_000) return value.toLocaleString()
+    return String(Math.round(value * 10) / 10)
+  }
+  return String(value)
+}
+
+export function pluralCount(count: number | undefined | null, singular: string, plural?: string): string {
+  if (count === undefined || count === null) return '—'
+  const label = count === 1 ? singular : (plural ?? `${singular}s`)
+  return `${count.toLocaleString()} ${label}`
 }
 
 export function renderTableRowCells(tab: EntityGraphTab, result: EntitySearchResult): string[] {
@@ -130,8 +167,8 @@ export function renderTableRowCells(tab: EntityGraphTab, result: EntitySearchRes
         result.title,
         result.badges.slice(0, 2).join(' · ') || '—',
         d.language ?? result.badges.find((b) => b.length <= 3) ?? '—',
-        d.occupation ?? result.subtitle ?? '—',
-        '—',
+        d.occupation ?? '—',
+        d.ownerName ?? '—',
         formatCell(result.linkedCounts.properties),
         formatCell(result.linkedCounts.contacts),
         result.linkedCounts.contacts ? 'Reachable' : '—',

@@ -96,6 +96,15 @@ export function EntityGraphRelationshipGraph({
   }
 
   const byId = new Map(positioned.map((node) => [node.id, node]))
+  const activeId = visibleGraph.nodes.find((n) => n.meta?.active)?.id ?? selectedId
+  const relatedIds = new Set<string>()
+  if (activeId) {
+    relatedIds.add(activeId)
+    for (const edge of visibleGraph.edges) {
+      if (edge.from === activeId) relatedIds.add(edge.to)
+      if (edge.to === activeId) relatedIds.add(edge.from)
+    }
+  }
 
   const recenter = () => {
     setZoom(1)
@@ -158,7 +167,7 @@ export function EntityGraphRelationshipGraph({
           <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="eg-graph__svg">
             <defs>
               <marker id="eg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148, 163, 184, 0.65)" />
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
               </marker>
             </defs>
             {visibleGraph.edges.map((edge) => {
@@ -167,11 +176,21 @@ export function EntityGraphRelationshipGraph({
               if (!from || !to) return null
               const midX = (from.x + to.x) / 2
               const midY = (from.y + to.y) / 2
+              const isHighlighted = activeId && (edge.from === activeId || edge.to === activeId)
+              const isFaded = activeId && !isHighlighted
+              const showLabel = isHighlighted || hoveredId === edge.from || hoveredId === edge.to
               return (
-                <g key={`${edge.from}-${edge.to}`}>
-                  <line className="eg-graph__edge" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
-                  {edge.label && (
-                    <text className="eg-graph__edge-label" x={midX} y={midY}>{edge.label}</text>
+                <g key={`${edge.from}-${edge.to}`} style={{ color: 'rgba(148, 163, 184, 0.85)' }}>
+                  <line
+                    className={`eg-graph__edge${isHighlighted ? ' is-highlighted' : ''}${isFaded ? ' is-faded' : ''}`}
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    markerEnd="url(#eg-arrow)"
+                  />
+                  {edge.label && showLabel && (
+                    <text className="eg-graph__edge-label" x={midX} y={midY - 4}>{edge.label}</text>
                   )}
                 </g>
               )
@@ -180,12 +199,14 @@ export function EntityGraphRelationshipGraph({
           {positioned.map((node) => {
             const [, entityId] = node.id.includes(':') ? node.id.split(':') : [node.type, node.id]
             const isActive = node.meta?.active || selectedId === node.id
+            const isRelated = activeId && relatedIds.has(node.id) && !isActive
+            const isFaded = activeId && !relatedIds.has(node.id)
             return (
               <button
                 key={node.id}
                 type="button"
                 data-graph-node={node.id}
-                className={`eg-graph__node${isActive ? ' is-active' : ''}${hoveredId === node.id ? ' is-hovered' : ''}`}
+                className={`eg-graph__node${isActive ? ' is-active' : ''}${isRelated ? ' is-related' : ''}${isFaded ? ' is-faded' : ''}${hoveredId === node.id ? ' is-hovered' : ''}`}
                 data-type={node.type}
                 style={{
                   left: node.x,

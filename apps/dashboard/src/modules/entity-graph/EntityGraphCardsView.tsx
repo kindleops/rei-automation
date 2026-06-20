@@ -1,11 +1,12 @@
 import type { EntityGraphTab, EntitySearchResult } from '../../domain/entity-graph/entity-graph.types'
+import type { SelectedEntity } from '../../domain/entity-graph/selected-entity'
+import { resultMatchesSelection } from '../../domain/entity-graph/selected-entity'
 import { contactCoverageLabel, formatCell, formatCurrency } from './entity-graph-ui-helpers'
 
 type Props = {
   tab: EntityGraphTab
   results: EntitySearchResult[]
-  selectedType: string | null
-  selectedId: string | null
+  selectedEntity: SelectedEntity
   compact?: boolean
   onSelect: (result: EntitySearchResult) => void
 }
@@ -27,12 +28,12 @@ function primaryMetric(tab: EntityGraphTab, result: EntitySearchResult): string 
   }
 }
 
-export function EntityGraphCardsView({ tab, results, selectedType, selectedId, compact, onSelect }: Props) {
+export function EntityGraphCardsView({ tab, results, selectedEntity, compact, onSelect }: Props) {
   return (
     <div className={`eg-card-grid${compact ? ' is-compact' : ''}`}>
       {results.map((result) => {
         const d = result.details ?? {}
-        const isSelected = selectedType === result.entityType && selectedId === result.entityId
+        const isSelected = resultMatchesSelection(result, selectedEntity)
         return (
           <button
             key={`${result.entityType}:${result.entityId}`}

@@ -250,9 +250,48 @@ export function formatContactMethodPresentation(row, entityType = 'phone') {
   }
 }
 
+function isTrustedCanonicalRegion(region, { city, state, raw }) {
+  if (!region || !looksLikeMetroLabel(region)) return false
+
+  const regionState = marketStateFromLabel(region)
+  const propertyState = normalizeState(state)
+  if (propertyState && regionState && propertyState !== regionState) return false
+
+  const cityClean = cleanAddressPart(city)
+  const propertyStateForKey = propertyState || regionState
+  const cityKey = cityClean && propertyStateForKey ? lower(`${cityClean}, ${propertyStateForKey}`) : ''
+  const rawKey = lower(normalizeMarketLabel(raw))
+
+  if (cityKey && CITY_TO_CANONICAL_MARKET[cityKey] === region) return true
+  if (cityKey && NORMALIZED_ALIASES.get(cityKey) === region) return true
+  if (rawKey && lower(region) === rawKey) return true
+
+  const regionCity = lower(cleanAddressPart(region.split(',')[0]))
+  const propCity = lower(cityClean)
+  if (propCity && regionCity && propCity === regionCity) return true
+
+  return false
+}
+
+export function computeContactCoverage({ linkedPeople, reachablePeople } = {}) {
+  const people = Number(linkedPeople)
+  const reachable = Number(reachablePeople)
+  if (!Number.isFinite(people) || people <= 0) return null
+  if (!Number.isFinite(reachable) || reachable < 0) return null
+  const pct = (reachable / people) * 100
+  return Math.min(100, Math.round(pct * 10) / 10)
+}
+
+export function clampCoveragePct(value) {
+  if (value === null || value === undefined) return null
+  const num = Number(value)
+  if (!Number.isFinite(num)) return null
+  return Math.min(100, Math.round(num * 10) / 10)
+}
+
 /**
- * Resolve canonical market without phone-routing cluster guessing.
- * Order: trusted market_region → explicit city map → MARKET_ALIASES → verified metro → unmapped locality.
+ * Single authoritative market resolver for Entity Graph.
+ * Order: trusted stored canonical → explicit city map → aliases → verified metro label → unmapped locality.
  */
 export function resolveEntityGraphMarket({ market, marketRegion, city, state } = {}) {
   const region = normalizeMarketLabel(marketRegion)
@@ -260,7 +299,7 @@ export function resolveEntityGraphMarket({ market, marketRegion, city, state } =
   const cityClean = cleanAddressPart(city)
   const stateClean = normalizeState(state) || marketStateFromLabel(raw) || marketStateFromLabel(region)
 
-  if (region && looksLikeMetroLabel(region)) {
+  if (isTrustedCanonicalRegion(region, { city: cityClean, state: stateClean, raw })) {
     return {
       canonicalKey: region,
       displayMarket: region,
@@ -269,8 +308,20 @@ export function resolveEntityGraphMarket({ market, marketRegion, city, state } =
     }
   }
 
+  const cityStateKey = cityClean && stateClean ? lower(`${cityClean}, ${stateClean}`) : ''
   const rawKey = lower(raw)
-  if (CITY_TO_CANONICAL_MARKET[rawKey]) {
+
+  if (cityStateKey && CITY_TO_CANONICAL_MARKET[cityStateKey]) {
+    const canonical = CITY_TO_CANONICAL_MARKET[cityStateKey]
+    return {
+      canonicalKey: canonical,
+      displayMarket: canonical,
+      isUnmapped: false,
+      state: marketStateFromLabel(canonical),
+    }
+  }
+
+  if (rawKey && CITY_TO_CANONICAL_MARKET[rawKey]) {
     const canonical = CITY_TO_CANONICAL_MARKET[rawKey]
     return {
       canonicalKey: canonical,
@@ -280,7 +331,7 @@ export function resolveEntityGraphMarket({ market, marketRegion, city, state } =
     }
   }
 
-  const alias = NORMALIZED_ALIASES.get(rawKey)
+  const alias = NORMALIZED_ALIASES.get(cityStateKey) || NORMALIZED_ALIASES.get(rawKey)
   if (alias) {
     return {
       canonicalKey: alias,
@@ -290,7 +341,7 @@ export function resolveEntityGraphMarket({ market, marketRegion, city, state } =
     }
   }
 
-  if (raw && looksLikeMetroLabel(raw)) {
+  if (raw && looksLikeMetroLabel(raw) && (!stateClean || !marketStateFromLabel(raw) || marketStateFromLabel(raw) === stateClean)) {
     return {
       canonicalKey: raw,
       displayMarket: raw,
