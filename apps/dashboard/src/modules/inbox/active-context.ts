@@ -39,6 +39,18 @@ export type ActiveInboxContextSource =
   | 'calendar'
   | 'live_activity'
 
+export type UniversalEntityType =
+  | 'property'
+  | 'master_owner'
+  | 'prospect'
+  | 'sub_owner'
+  | 'phone'
+  | 'email'
+  | 'organization'
+  | 'market'
+  | 'zip'
+  | null
+
 export type ActiveInboxContext = {
   sellerId?: string
   threadKey?: string
@@ -56,6 +68,11 @@ export type ActiveInboxContext = {
   sellerName?: string
   sourceView?: ActiveInboxContextSource
   intent?: ActiveInboxContextIntent
+  entityType?: UniversalEntityType
+  entityId?: string | null
+  contactMethodType?: 'phone' | 'email' | null
+  contactMethodId?: string | null
+  opportunityId?: string | null
 }
 
 export type SetActiveContextOptions = {
