@@ -267,8 +267,16 @@ export const AdvancedFiltersModal = ({
 
           <div className="nx-ifm-main">
             <div className="nx-ifm-search">
-              <Icon name="search" />
-              <input type="text" placeholder="Search filters in this group…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <span className="nx-ifm-search-icon" aria-hidden="true">
+                <Icon name="search" size={17} className="nx-ifm-search-icon-svg" />
+              </span>
+              <input
+                type="text"
+                className="nx-ifm-search-input"
+                placeholder="Search filters in this group…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
             <div className="nx-ifm-fields">{groupFields.map(renderField)}</div>
           </div>
