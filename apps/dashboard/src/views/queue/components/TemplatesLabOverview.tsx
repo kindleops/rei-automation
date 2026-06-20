@@ -20,32 +20,33 @@ export function TemplatesLabOverview({ templates }: TemplatesLabOverviewProps) {
     total: templates.length,
     healthy: templates.filter(t => t.health === 'healthy').length,
     watch: templates.filter(t => t.health === 'watch').length,
-    degraded: templates.filter(t => t.health === 'degraded' || t.health === 'critical').length,
+    degraded: templates.filter(t => t.health === 'degraded').length,
+    critical: templates.filter(t => t.health === 'critical').length,
     lowSample: templates.filter(t => t.health === 'insufficient' || t.sent < 5).length,
     idle: templates.filter(t => t.usage === 0).length,
   }
 
+  const tiles = [
+    { label: 'Tracked', val: stats.total, tone: 'primary' },
+    { label: 'Healthy', val: stats.healthy, tone: 'green' },
+    { label: 'Watch', val: stats.watch, tone: 'amber' },
+    { label: 'Degraded', val: stats.degraded, tone: 'amber' },
+    { label: 'Critical', val: stats.critical, tone: 'red' },
+    { label: 'Low Sample', val: stats.lowSample, tone: 'muted' },
+    { label: 'No Usage', val: stats.idle, tone: 'muted' },
+  ]
+
   return (
-    <div className="occ-tpl-overview">
-      <header className="occ-tpl-overview__head">
-        <span>Template Performance Lab</span>
-        <span>{stats.total} tracked</span>
-      </header>
-      <div className="occ-tpl-overview__grid">
-        {[
-          { label: 'Healthy', val: stats.healthy, tone: 'green' },
-          { label: 'Watch', val: stats.watch, tone: 'amber' },
-          { label: 'Degraded', val: stats.degraded, tone: 'red' },
-          { label: 'Low Sample', val: stats.lowSample, tone: 'muted' },
-          { label: 'No Usage', val: stats.idle, tone: 'muted' },
-        ].map(s => (
-          <div key={s.label} className={cls('occ-tpl-overview__stat', `is-${s.tone}`)}>
-            <span className="occ-tpl-overview__val">{s.val}</span>
-            <span className="occ-tpl-overview__lbl">{s.label}</span>
+    <div className="occ-metric-strip occ-metric-strip--templates">
+      <span className="occ-metric-strip__title">Template Performance Lab</span>
+      <div className="occ-metric-strip__tiles">
+        {tiles.map(t => (
+          <div key={t.label} className={cls('occ-metric-strip__tile', `is-${t.tone}`)}>
+            <span className="occ-metric-strip__val">{t.val}</span>
+            <span className="occ-metric-strip__lbl">{t.label}</span>
           </div>
         ))}
       </div>
-      <p className="occ-tpl-overview__note">Health reflects sample size — low volume is never labeled elite.</p>
     </div>
   )
 }

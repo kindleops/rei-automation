@@ -1,3 +1,5 @@
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
+
 interface FailureCommandHeaderProps {
   total: number
   retryable: number
@@ -12,28 +14,37 @@ interface FailureCommandHeaderProps {
 export function FailureCommandHeader({
   total, retryable, nonRetryable, compliance, provider, config, webhook, unknown,
 }: FailureCommandHeaderProps) {
+  const categories = [
+    { label: 'Compliance', val: compliance, tone: 'red' },
+    { label: 'Provider', val: provider, tone: 'red' },
+    { label: 'Configuration', val: config, tone: 'amber' },
+    { label: 'Webhook', val: webhook, tone: 'amber' },
+    { label: 'Unknown', val: unknown, tone: 'muted' },
+  ]
+
   return (
     <header className="occ-failure-command__header">
-      <div className="occ-failure-command__title">
-        <span>Exception Command Center</span>
-        <span className="occ-failure-command__total">{total} affected rows</span>
-      </div>
-      <div className="occ-failure-command__split">
-        <div className="occ-failure-split is-green">
-          <span className="occ-failure-split__val">{retryable}</span>
-          <span className="occ-failure-split__lbl">Retryable</span>
+      <div className="occ-metric-strip occ-metric-strip--failure">
+        <div className="occ-metric-strip__tiles">
+          <div className="occ-metric-strip__tile is-primary">
+            <span className="occ-metric-strip__val">{total}</span>
+            <span className="occ-metric-strip__lbl">Affected Rows</span>
+          </div>
+          <div className="occ-metric-strip__tile is-green">
+            <span className="occ-metric-strip__val">{retryable}</span>
+            <span className="occ-metric-strip__lbl">Retryable</span>
+          </div>
+          <div className="occ-metric-strip__tile is-red">
+            <span className="occ-metric-strip__val">{nonRetryable}</span>
+            <span className="occ-metric-strip__lbl">Non-retryable</span>
+          </div>
+          {categories.map(c => (
+            <div key={c.label} className={cls('occ-metric-strip__tile', `is-${c.tone}`)}>
+              <span className="occ-metric-strip__val">{c.val}</span>
+              <span className="occ-metric-strip__lbl">{c.label}</span>
+            </div>
+          ))}
         </div>
-        <div className="occ-failure-split is-red">
-          <span className="occ-failure-split__val">{nonRetryable}</span>
-          <span className="occ-failure-split__lbl">Non-retryable</span>
-        </div>
-      </div>
-      <div className="occ-failure-command__categories">
-        <span>Compliance {compliance}</span>
-        <span>Provider {provider}</span>
-        <span>Config {config}</span>
-        <span>Webhook {webhook}</span>
-        <span>Unknown {unknown}</span>
       </div>
     </header>
   )

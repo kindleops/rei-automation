@@ -1989,7 +1989,9 @@
   --occ-red:        #f87171;
 
   width: 100%;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4796,4 +4798,178 @@
 .occ-row-intel__hist { color: var(--occ-dim); font-size: 10px; margin-top: 4px; }
 [data-nexus-theme="light"] .occ-root.is-recovery .occ-row-wrap.is-selected .occ-row-main {
   background: color-mix(in srgb, var(--occ-accent) 8%, #fff) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   V8 — Final refinement: shell fill, metric strips, tab layouts
+   ══════════════════════════════════════════════════════════════════ */
+
+.occ-root.is-recovery {
+  background: var(--occ-bg);
+}
+
+.occ-metric-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  margin: 0 8px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--occ-border);
+  background: color-mix(in srgb, var(--occ-panel) 94%, transparent);
+  flex-shrink: 0;
+}
+.occ-metric-strip__title {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--occ-dim);
+  white-space: nowrap;
+}
+.occ-metric-strip__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.occ-metric-strip__tile {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 52px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--occ-border);
+  background: rgba(255,255,255,0.03);
+}
+.occ-metric-strip__val {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.occ-metric-strip__lbl {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--occ-dim);
+  white-space: nowrap;
+}
+.occ-metric-strip__tile.is-primary .occ-metric-strip__val { color: var(--occ-text); }
+.occ-metric-strip__tile.is-green .occ-metric-strip__val { color: var(--occ-green); }
+.occ-metric-strip__tile.is-amber .occ-metric-strip__val { color: var(--occ-amber); }
+.occ-metric-strip__tile.is-red .occ-metric-strip__val { color: var(--occ-red); }
+.occ-metric-strip__tile.is-muted .occ-metric-strip__val { color: var(--occ-muted); }
+
+.occ-asset-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: var(--occ-dim);
+  flex-shrink: 0;
+}
+.occ-insp-hist {
+  font-size: 10px;
+  color: var(--occ-dim);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.occ-tpl-layout,
+.occ-senders-layout,
+.occ-market-layout,
+.occ-failure-command {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  gap: 6px;
+}
+.occ-tpl-layout > .occ-module,
+.occ-senders-layout > .occ-module,
+.occ-market-layout > .occ-module {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.occ-module-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.occ-failure-command {
+  min-height: 0;
+}
+.occ-failure-command__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  gap: 8px;
+  overflow: hidden;
+}
+.occ-failure-cards {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.occ-failure-dossier {
+  min-height: 0;
+  overflow-y: auto;
+}
+.occ-fleet-strip__ops {
+  display: block;
+  font-size: 8px;
+  color: var(--occ-dim);
+  margin-top: 2px;
+}
+.occ-fleet-strip__metrics.is-sub {
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.occ-timeline-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.occ-timeline-content {
+  flex: 1;
+  min-width: 0;
+}
+
+[data-nexus-theme="light"] .occ-root.is-recovery {
+  background: #eef1f6 !important;
+}
+[data-nexus-theme="light"] .occ-metric-strip,
+[data-nexus-theme="light"] .occ-fleet-strip__card {
+  background: rgba(255,255,255,0.92) !important;
+  border-color: rgba(15,23,42,0.1) !important;
+}
+[data-nexus-theme="light"] .occ-asset-icon {
+  background: rgba(15,23,42,0.05);
+  color: #475569;
+}
+[data-nexus-theme="light"] .nx-fullscreen-app-shell.is-view-queue .occ-root {
+  background: #eef1f6;
+}
+
+[data-nexus-theme="red_ops"] .occ-root.is-recovery {
+  background: transparent;
 }

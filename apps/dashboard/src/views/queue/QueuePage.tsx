@@ -17,6 +17,7 @@ import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis, StageCod
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { Icon } from '../../shared/icons'
+import { resolveAssetTypeIcon } from '../../shared/asset-type-icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'
 import { buildContextFromQueueItem } from '../../modules/inbox/active-context'
@@ -39,10 +40,14 @@ import {
   isDelivered,
   isFailed,
   isSent,
+  isManualMessage,
   isNonRetryableRow,
   pct,
+  resolveMessageLanguage,
+  resolveMessageSource,
   resolveSellerIdentity,
   resolveStatusPresentation,
+  resolveTemplateLabel,
   templateHealthWithSample,
   type BulkActionPreview,
   type QueueDensity,
@@ -208,8 +213,9 @@ function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
   const detail = new Map<string, { markets: Set<string>; senders: Set<string> }>()
   const map = new Map<string, TemplateStat>()
   for (const i of items) {
-    const id = i.templateId ?? i.selectedTemplateId ?? 'no-template'
-    const name = i.templateName || 'No Template'
+    const manual = isManualMessage(i)
+    const id = manual ? 'manual-reply' : (i.templateId ?? i.selectedTemplateId ?? 'no-template')
+    const name = manual ? 'Manual Reply' : (i.templateName || 'No Template')
     const s = map.get(id) ?? {
       id, name, usage: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0,
       violations21610: 0, deliveryPct: 0, failPct: 0, health: 'healthy', healthLabel: 'Healthy',
@@ -248,6 +254,9 @@ function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
     const sample = templateHealthWithSample(s.sent, s.failPct)
     s.health = sample.health === 'insufficient' ? 'insufficient' : sample.health
     s.healthLabel = sample.label
+    ;(s as TemplateStat & { healthReason?: string }).healthReason = sample.health === 'insufficient'
+      ? `Low sample (n=${s.sent}) — health not rated elite`
+      : `${sample.label} — ${s.failPct}% failure over ${s.sent} sends`
     return s
   }).sort((a, b) => b.usage - a.usage)
 }
@@ -265,9 +274,11 @@ interface SenderStat {
   violations21610: number
   deliveryPct: number
   failPct: number
-  health: 'healthy' | 'watch' | 'degraded' | 'critical'
+  health: 'healthy' | 'watch' | 'degraded' | 'critical' | 'blocked'
+  performanceLabel: string
+  operationalLabel: string
   lastUsed: string | null
-  state: 'active' | 'paused' | 'degraded' | 'blocked'
+  state: 'active' | 'paused' | 'degraded' | 'blocked' | 'unregistered'
 }
 
 function buildSenderStats(items: QueueItem[]): SenderStat[] {
@@ -294,9 +305,14 @@ function buildSenderStats(items: QueueItem[]): SenderStat[] {
   return Array.from(map.values()).map(s => {
     s.deliveryPct = pct(s.delivered, s.sent)
     s.failPct = pct(s.failed, s.sent)
-    s.health = s.violations21610 > 0 ? 'critical' : healthFromPct(s.failPct)
-    const hasActive = items.some(i => i.fromPhoneNumber === s.phone && ['scheduled', 'queued', 'ready'].includes(i.status))
-    s.state = s.violations21610 > 0 ? 'blocked' : s.health === 'critical' ? 'degraded' : hasActive ? 'active' : 'paused'
+    const hasActive = items.some(i => i.fromPhoneNumber === s.phone && ['scheduled', 'queued', 'ready', 'sending'].includes(i.status))
+    s.state = s.violations21610 > 0 ? 'blocked' : s.sent === 0 ? 'unregistered' : hasActive ? 'active' : 'paused'
+    s.health = s.violations21610 > 0 ? 'blocked' : healthFromPct(s.failPct)
+    s.performanceLabel = `Performance: ${s.deliveryPct}% delivered`
+    s.operationalLabel = s.state === 'active' ? 'Routing available'
+      : s.state === 'paused' ? 'Current routing: unavailable'
+      : s.state === 'blocked' ? 'Blocked — compliance hold'
+      : 'Unregistered in range'
     return s
   }).sort((a, b) => (b.sent + b.delivered) - (a.sent + a.delivered))
 }
@@ -312,17 +328,23 @@ interface MarketStat {
   blocked: number
   optOuts: number
   deliveryPct: number
-  health: 'healthy' | 'watch' | 'degraded' | 'critical'
-  configured: boolean   // present in the textgrid sender registry
-  senderExists: boolean // ≥1 textgrid number owns this market
-  active: boolean       // ≥1 non-paused sender in this market
+  health: 'healthy' | 'watch' | 'degraded' | 'critical' | 'idle'
+  performanceHealth: string
+  senderReadiness: string
+  suggestedAction: string
+  exceptionCount: number
+  configured: boolean
+  senderExists: boolean
+  active: boolean
 }
 
 function buildMarketStats(items: QueueItem[], directory: ConfiguredMarket[] = []): MarketStat[] {
   const map = new Map<string, MarketStat>()
   const make = (m: string): MarketStat => ({
     market: m, total: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0,
-    deliveryPct: 0, health: 'healthy', configured: false, senderExists: false, active: false,
+    deliveryPct: 0, health: 'healthy', performanceHealth: 'idle', senderReadiness: 'No registered sender',
+    suggestedAction: 'Register an active sender for this market', exceptionCount: 0,
+    configured: false, senderExists: false, active: false,
   })
 
   // Seed every configured market so zero-row markets still render.
@@ -347,7 +369,20 @@ function buildMarketStats(items: QueueItem[], directory: ConfiguredMarket[] = []
   }
   return Array.from(map.values()).map(s => {
     s.deliveryPct = pct(s.delivered, s.sent)
-    s.health = healthFromPct(pct(s.failed, s.sent))
+    const failHealth = healthFromPct(pct(s.failed, s.sent))
+    s.performanceHealth = s.total === 0 ? 'idle' : failHealth
+    s.senderReadiness = !s.senderExists ? 'No registered sender' : s.active ? 'Ready' : 'Paused sender'
+    s.exceptionCount = items.filter(i => i.market === s.market && (isFailed(i.status) || BLOCKED_STATUSES.has(i.status))).length
+    if (!s.senderExists) {
+      s.health = 'critical'
+      s.suggestedAction = 'Assign and activate a TextGrid sender'
+    } else if (!s.active && s.total > 0) {
+      s.health = failHealth === 'healthy' ? 'watch' : failHealth
+      s.suggestedAction = 'Resume sender or reroute queue rows'
+    } else {
+      s.health = s.total === 0 ? 'idle' : failHealth
+      s.suggestedAction = s.exceptionCount > 0 ? 'Review market exceptions in Failure Taxonomy' : 'No action required'
+    }
     return s
   }).sort((a, b) => b.total - a.total || a.market.localeCompare(b.market))
 }
@@ -976,7 +1011,9 @@ const SendersModule = ({
         senders={stats.map(s => ({
           phone: s.phone, market: s.market, sent: s.sent, delivered: s.delivered, failed: s.failed,
           deliveryPct: s.deliveryPct, failPct: s.failPct, violations21610: s.violations21610,
-          optOuts: s.optOuts, state: s.state, health: s.health, lastUsed: s.lastUsed ? relTime(s.lastUsed) : null,
+          optOuts: s.optOuts, state: s.state, health: s.health,
+          performanceLabel: s.performanceLabel, operationalLabel: s.operationalLabel,
+          lastUsed: s.lastUsed ? relTime(s.lastUsed) : null,
         }))}
         selectedPhone={selectedPhone}
         onSelect={onSelectPhone}
@@ -1019,11 +1056,12 @@ const SendersModule = ({
               {s.deliveryPct}%
             </div>
             <div className="occ-module-col occ-col-badge">
-              <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.health}</span>
+              <span className={cls('occ-state-badge', `is-${STATE_TONE[s.state] ?? 'muted'}`)}>{s.state}</span>
+              <small>{s.performanceLabel}</small>
             </div>
             <div className="occ-module-col occ-col-small">{relTime(s.lastUsed)}</div>
             <div className="occ-module-col occ-col-badge">
-              <span className={cls('occ-state-badge', `is-${STATE_TONE[s.state] ?? 'muted'}`)}>{s.state}</span>
+              <small className="occ-seller-meta">{s.operationalLabel}</small>
             </div>
           </button>
         ))}
@@ -1156,6 +1194,8 @@ const FAILURE_META: Record<string, { category: string; retryable: boolean; suppr
 // Maps a row to its failure cause, including blocked/paused rows that have no
 // classifier output.
 const deriveFailureCause = (i: QueueItem): string | null => {
+  if (isManualMessage(i) && (i.failureCategory === 'missing_template' || i.diagnosticFlags.includes('MISSING_TEMPLATE'))) return null
+  if (isDelivered(i.status) && i.failureCategory === 'missing_template') return null
   if (i.failureCategory) return i.failureCategory
   if (i.status === 'paused_name_missing') return 'paused_name_missing'
   if (BLOCKED_STATUSES.has(i.status)) return 'blocked_by_guard'
@@ -1305,13 +1345,19 @@ const FailureModule = ({
           </div>
           <div className="occ-failure-dossier__preview">
             <span className="occ-failure-dossier__preview-title">Affected rows (sample)</span>
-            {previewRows.map(row => (
-              <div key={row.id} className="occ-failure-preview-row">
-                <strong>{truncate(displayName(row), 20)}</strong>
-                <span>{truncate(row.propertyAddress, 18)}</span>
-                <span className="occ-mono">…{(row.fromPhoneNumber ?? '').slice(-4)}</span>
-              </div>
-            ))}
+            {previewRows.map(row => {
+              const id = resolveSellerIdentity(row)
+              const asset = resolveAssetTypeIcon(row.propertyType)
+              return (
+                <div key={row.id} className="occ-failure-preview-row">
+                  <span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={9} /></span>
+                  <strong>{truncate(id.primary, 20)}</strong>
+                  {id.phoneEnding && <span className="occ-contact-badge">{id.phoneEnding}</span>}
+                  <span>{truncate(row.propertyAddress, 18)}</span>
+                  <span>{resolveTemplateLabel(row)}</span>
+                </div>
+              )
+            })}
           </div>
           <button type="button" className="occ-action-btn is-primary" onClick={() => onFilterCause(selected.cause)}>
             Open {selected.count} rows in Queue
@@ -1443,6 +1489,8 @@ const EventTimelineModule = ({
             {group.label && <div className="occ-timeline-group__label">{truncate(group.label, 40)}</div>}
             {group.items.map((i, idx) => {
               const statusView = resolveStatusPresentation(i)
+              const identity = resolveSellerIdentity(i)
+              const asset = resolveAssetTypeIcon(i.propertyType)
               const iconName = EVENT_ICON[i.status] ?? 'zap'
               const exactTime = i.lastEventAt ?? i.updatedAt
               const prev = idx > 0 ? group.items[idx - 1] : null
@@ -1456,7 +1504,7 @@ const EventTimelineModule = ({
                 <button
                   type="button"
                   className={cls('occ-timeline-row', selectedEventId === i.id && 'is-selected')}
-                  onClick={() => { onSelectEvent(i); onSelectItem(i.id) }}
+                  onClick={() => onSelectEvent(selectedEventId === i.id ? null : i)}
                   title={exactTime ? new Date(exactTime).toLocaleString() : undefined}
                 >
                   <div className={cls('occ-timeline-icon', `is-${statusView.tone}`)}>
@@ -1465,19 +1513,20 @@ const EventTimelineModule = ({
                   <div className="occ-timeline-connector" />
                   <div className="occ-timeline-content">
                     <div className="occ-timeline-main">
-                      <strong className="occ-timeline-seller">{truncate(displayName(i), 24)}</strong>
+                      <span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={10} /></span>
+                      <strong className="occ-timeline-seller">{truncate(identity.primary, 24)}</strong>
+                      {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
                       <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
                     </div>
                     <div className="occ-timeline-meta">
                       <span>{truncate(i.propertyAddress, 18)}</span>
                       <span>· {truncate(i.market, 12)}</span>
                       {i.stageLabel && <span>· {truncate(i.stageLabel, 10)} T{i.touchNumber}</span>}
-                      {i.templateName && i.templateName !== 'Template not attached' && (
-                        <span>· {truncate(i.templateName, 14)}</span>
-                      )}
+                      <span>· {truncate(resolveMessageSource(i), 14)}</span>
+                      <span>· {truncate(resolveTemplateLabel(i), 14)}</span>
                       {i.fromPhoneNumber && <span>· …{i.fromPhoneNumber.slice(-4)}</span>}
                     </div>
-                    <div className="occ-timeline-expl">{statusView.blocking || i.lastEventType || 'Queue event recorded'}</div>
+                    <div className="occ-timeline-expl">{statusView.hasCurrentException ? statusView.blocking : i.lastEventType || 'Queue event recorded'}</div>
                   </div>
                   <span className="occ-timeline-time">{relTime(exactTime)}</span>
                 </button>
@@ -1539,18 +1588,20 @@ const QueueRow = ({
 }) => {
   const identity = resolveSellerIdentity(item)
   const statusView = resolveStatusPresentation(item)
+  const asset = resolveAssetTypeIcon(item.propertyType)
   const failTone = item.failureGroup ? (FAILURE_TONE[item.failureGroup] ?? 'amber') : null
   const stageLabel = resolveStageLabel(item)
   const stageTone = item.stageCode ? (STAGE_TONE[item.stageCode] ?? 'muted') : 'muted'
   const cityState = [item.propertyCity, item.propertyState].filter(Boolean).join(', ')
-  const workflowLane = item.automationSource || item.rowSource?.replace(/_/g, ' ') || 'Queue'
+  const workflowLane = resolveMessageSource(item)
   const hasHistorical = statusView.historicalWarnings.length > 0
   const isOverdue = item.overdue
   const contactOk = item.smsEligible !== false && item.routingAllowed !== false
+  const currentFailure = statusView.hasCurrentException ? statusView.blocking : null
 
   return (
     <div className={cls('occ-row-wrap', isSelected && 'is-selected', isExpanded && 'is-expanded', `is-density-${density}`)}>
-      <div className={cls('occ-row', `is-status-${statusView.tone}`, isSelected && 'is-selected', hasHistorical && 'has-hist-warn')}>
+      <div className={cls('occ-row', `is-status-${statusView.tone}`, isSelected && 'is-selected')}>
         <label className="occ-row-check" onClick={e => e.stopPropagation()}>
           <input type="checkbox" checked={isChecked} onChange={() => onCheck(item.id)} aria-label={`Select ${identity.primary}`} />
         </label>
@@ -1562,8 +1613,8 @@ const QueueRow = ({
         >
           <div className="occ-cell occ-cell--seller" title={identity.primary}>
             <div className="occ-seller-line">
-              <span className={cls('occ-identity-glyph', `is-${identity.glyph}`)} aria-hidden="true">
-                <Icon name={identity.glyph === 'property' ? 'home' : 'user'} size={10} />
+              <span className="occ-asset-icon" title={asset.label} aria-hidden="true">
+                <Icon name={asset.icon} size={10} />
               </span>
               <strong>{truncate(identity.primary, 26)}</strong>
               {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
@@ -1571,7 +1622,7 @@ const QueueRow = ({
             </div>
             {identity.secondary && <small className="occ-seller-sub">{truncate(identity.secondary, 24)}</small>}
             <small>{truncate(item.propertyAddress, 28)}</small>
-            {cityState && <small className="occ-seller-meta">{cityState}</small>}
+            {cityState && <small className="occ-seller-meta">{cityState}{workflowLane ? ` · ${truncate(workflowLane, 16)}` : ''}</small>}
           </div>
           <div className="occ-cell occ-cell--stage">
             {item.stageCode
@@ -1585,8 +1636,8 @@ const QueueRow = ({
             <small>{truncate(item.market, 14)}</small>
             {item.campaignTargetId && <small className="occ-seller-meta">Target linked</small>}
           </div>
-          <div className="occ-cell occ-cell--template" title={item.templateName}>
-            <span>{truncate(item.templateName, 20)}</span>
+          <div className="occ-cell occ-cell--template" title={resolveTemplateLabel(item)}>
+            <span>{truncate(resolveTemplateLabel(item), 20)}</span>
             {item.templateId && <small className="occ-mono">{truncate(item.templateId, 16)}</small>}
             <small>{item.language?.toUpperCase()}</small>
           </div>
@@ -1600,16 +1651,16 @@ const QueueRow = ({
           </div>
           <div className="occ-cell occ-cell--status">
             <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
-            {statusView.blocking && <small className="occ-block-cause">{truncate(statusView.blocking, 22)}</small>}
+            {currentFailure && <small className="occ-block-cause">{truncate(currentFailure, 22)}</small>}
             {hasHistorical && (
               <span className="occ-hist-warn" title={statusView.historicalWarnings.join(' · ')}>
-                <Icon name="alert-circle" size={10} />
+                <Icon name="clock" size={10} />
               </span>
             )}
           </div>
           <div className="occ-cell occ-cell--failure">
-            {statusView.blocking && isFailed(item.status)
-              ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{truncate(statusView.blocking, 18)}</span>
+            {currentFailure
+              ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{truncate(currentFailure, 18)}</span>
               : <span className="occ-fail-pill is-muted">—</span>}
           </div>
           <div className="occ-cell occ-cell--event" title={item.lastEventAt ?? undefined}>
@@ -1875,6 +1926,7 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   // ── Row + global actions ─────────────────────────────────────────────────
   const handleAction = useCallback(async (action: string, id: string) => {
     if (action === 'deselect') { setSelectedId(null); setExpandedId(null); return }
+    if (action === 'deselect-event') { setSelectedEventItem(null); return }
 
     if (action === 'retry-all-failed') {
       setConfirmPreview(null)
@@ -2020,26 +2072,90 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   const selectedTemplateDock = useMemo(() => {
     if (!selectedTemplateId) return null
     const s = templateStatsMemo.find(t => t.id === selectedTemplateId)
-    return s ? { id: s.id, name: s.name, sent: s.sent, delivered: s.delivered, failed: s.failed, healthLabel: s.healthLabel, sampleBody: s.sampleBody } : null
-  }, [selectedTemplateId, templateStatsMemo])
+    if (!s) return null
+    const isManual = s.id === 'no-template' || s.name.toLowerCase().includes('manual')
+    return {
+      id: s.id, name: s.name, sent: s.sent, delivered: s.delivered, failed: s.failed,
+      blocked: s.blocked, optOuts: s.optOuts, usage: s.usage, deliveryPct: s.deliveryPct, failPct: s.failPct,
+      healthLabel: s.healthLabel,
+      healthReason: (s as TemplateStat & { healthReason?: string }).healthReason ?? s.healthLabel,
+      sampleBody: s.sampleBody, stageLabel: s.stageLabel, useCase: s.useCase,
+      language: s.language?.toUpperCase() || (() => {
+        const sample = items.find(i => (isManualMessage(i) ? 'manual-reply' : (i.templateId ?? 'no-template')) === s.id)
+        return sample ? resolveMessageLanguage(sample) : 'Unknown'
+      })(),
+      markets: s.markets, senders: s.senders, firstSeen: s.firstSeen, lastSeen: s.lastSeen, isManual,
+    }
+  }, [selectedTemplateId, templateStatsMemo, items])
 
   const selectedSenderDock = useMemo(() => {
     if (!selectedSenderPhone) return null
     const s = senderStatsMemo.find(x => x.phone === selectedSenderPhone)
-    return s ? { phone: s.phone, market: s.market, state: s.state, deliveryPct: s.deliveryPct, failPct: s.failPct, violations21610: s.violations21610 } : null
+    return s ? {
+      phone: s.phone, market: s.market, state: s.state, operationalLabel: s.operationalLabel,
+      performanceLabel: s.performanceLabel, sent: s.sent, delivered: s.delivered, failed: s.failed,
+      deliveryPct: s.deliveryPct, failPct: s.failPct, violations21610: s.violations21610,
+      optOuts: s.optOuts, lastUsed: s.lastUsed ? relTime(s.lastUsed) : null,
+    } : null
   }, [selectedSenderPhone, senderStatsMemo])
 
   const selectedMarketDock = useMemo(() => {
     if (!selectedMarketName) return null
     const s = marketStatsMemo.find(x => x.market === selectedMarketName)
-    return s ? { market: s.market, total: s.total, deliveryPct: s.deliveryPct, health: s.health, senderExists: s.senderExists } : null
+    return s ? {
+      market: s.market, total: s.total, sent: s.sent, delivered: s.delivered, failed: s.failed,
+      deliveryPct: s.deliveryPct, health: s.health, performanceHealth: s.performanceHealth,
+      senderReadiness: s.senderReadiness, senderExists: s.senderExists, active: s.active,
+      optOuts: s.optOuts, exceptionCount: s.exceptionCount, suggestedAction: s.suggestedAction,
+    } : null
   }, [selectedMarketName, marketStatsMemo])
 
   const selectedFailureDock = useMemo(() => {
     if (!selectedFailureCause) return null
     const s = failureStatsMemo.find(x => x.cause === selectedFailureCause)
-    return s ? { cause: s.cause, label: s.label, count: s.count, retryable: s.retryable, action: s.action } : null
+    return s ? {
+      cause: s.cause, label: s.label, count: s.count, retryable: s.retryable, action: s.action,
+      category: s.category, markets: s.markets, senders: s.senders,
+    } : null
   }, [selectedFailureCause, failureStatsMemo])
+
+  const tabOverview = useMemo(() => {
+    const lowestTpl = [...templateStatsMemo].filter(t => t.sent >= 5).sort((a, b) => b.failPct - a.failPct)[0]
+    const topFail = [...failureStatsMemo].sort((a, b) => b.count - a.count)[0]
+    const oneHourAgo = Date.now() - 3600000
+    const eventsLastHour = items.filter(i => i.lastEventAt && new Date(i.lastEventAt).getTime() > oneHourAgo).length
+    const latestEvent = items.filter(i => i.lastEventAt).sort((a, b) => new Date(b.lastEventAt!).getTime() - new Date(a.lastEventAt!).getTime())[0]
+    return {
+      templates: {
+        total: templateStatsMemo.length,
+        healthy: templateStatsMemo.filter(t => t.health === 'healthy').length,
+        degraded: templateStatsMemo.filter(t => t.health === 'degraded' || t.health === 'critical').length,
+        lowest: lowestTpl ? `${truncate(lowestTpl.name, 18)} (${lowestTpl.failPct}% fail)` : undefined,
+      },
+      senders: {
+        active: senderStatsMemo.filter(s => s.state === 'active').length,
+        paused: senderStatsMemo.filter(s => s.state === 'paused').length,
+        blocked: senderStatsMemo.filter(s => s.state === 'blocked').length,
+        capacity: model?.safeCapacityRemaining,
+      },
+      markets: {
+        ready: marketStatsMemo.filter(m => m.senderExists && m.active && m.health === 'healthy').length,
+        degraded: marketStatsMemo.filter(m => m.health === 'degraded' || m.health === 'critical').length,
+        noSender: marketStatsMemo.filter(m => !m.senderExists).length,
+      },
+      failures: {
+        retryable: failureStatsMemo.filter(f => f.retryable).reduce((n, f) => n + f.count, 0),
+        nonRetryable: failureStatsMemo.filter(f => !f.retryable).reduce((n, f) => n + f.count, 0),
+        top: topFail ? `${topFail.label} (${topFail.count})` : undefined,
+      },
+      events: {
+        perHour: eventsLastHour,
+        delivered: items.filter(i => i.status === 'delivered').length,
+        failed: items.filter(i => isFailed(i.status)).length,
+        latest: latestEvent?.lastEventAt ? relTime(latestEvent.lastEventAt) : undefined,
+      },
+    }
+  }, [templateStatsMemo, senderStatsMemo, marketStatsMemo, failureStatsMemo, items, model?.safeCapacityRemaining])
 
   const filterTabs: Array<{ key: StatusBucket; label: string; count: number; tone?: string }> = [
     { key: 'all', label: 'All', count: kpi.total },
@@ -2199,7 +2315,15 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
                 role="tab"
                 aria-selected={section === s.key}
                 className={cls('occ-section-tab', section === s.key && 'is-active')}
-                onClick={() => { setSection(s.key); if (s.key !== 'queue') setSelectedId(null) }}
+                onClick={() => {
+                  setSection(s.key)
+                  if (s.key !== 'queue') setSelectedId(null)
+                  if (s.key !== 'templates') setSelectedTemplateId(null)
+                  if (s.key !== 'senders') setSelectedSenderPhone(null)
+                  if (s.key !== 'market') setSelectedMarketName(null)
+                  if (s.key !== 'failures') setSelectedFailureCause(null)
+                  if (s.key !== 'events') setSelectedEventItem(null)
+                }}
               >
                 <Icon name={s.icon as any} size={13} />
                 <span>{s.label}</span>
@@ -2440,13 +2564,14 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
             items={items}
             kpi={kpi}
             model={model}
-            selectedItem={selectedItem}
-            selectedTemplate={selectedTemplateDock}
-            selectedSender={selectedSenderDock}
-            selectedMarket={selectedMarketDock}
-            selectedFailure={selectedFailureDock}
-            selectedEvent={selectedEventItem}
-            topException={exceptionsMemo[0] ?? null}
+            runnableCount={runnableCount}
+            selectedItem={section === 'queue' ? selectedItem : null}
+            selectedTemplate={section === 'templates' ? selectedTemplateDock : null}
+            selectedSender={section === 'senders' ? selectedSenderDock : null}
+            selectedMarket={section === 'market' ? selectedMarketDock : null}
+            selectedFailure={section === 'failures' ? selectedFailureDock : null}
+            selectedEvent={section === 'events' ? selectedEventItem : null}
+            tabOverview={tabOverview}
             onAction={handleAction}
             onViewFailureRows={c => { setCauseFilter(c); setSection('queue'); setStatusFilter('failed') }}
           />

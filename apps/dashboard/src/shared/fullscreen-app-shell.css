@@ -37,9 +37,28 @@
 .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell {
   flex: 1 1 auto;
   min-height: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 24%),
-    #090d15;
+  background: transparent;
+}
+
+.nx-fullscreen-app-shell.is-view-queue {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  background: transparent;
+}
+
+[data-nexus-theme="light"] .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell.is-view-queue {
+  background: #fbfcff;
+}
+
+[data-nexus-theme="dark"] .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell.is-view-queue,
+[data-nexus-theme="satellite"] .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell.is-view-queue,
+[data-nexus-theme="monochrome"] .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell.is-view-queue {
+  background: transparent;
+}
+
+[data-nexus-theme="red_ops"] .nx-premium-inbox.is-route-fullscreen > .nx-fullscreen-app-shell.is-view-queue {
+  background: transparent;
 }
 
 .nx-fullscreen-app-shell.is-view-deal_intelligence,

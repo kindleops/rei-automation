@@ -9,6 +9,8 @@ export interface MarketOverviewData {
   active: boolean
   failed: number
   optOuts: number
+  performanceHealth?: string
+  senderReadiness?: string
 }
 
 interface MarketHealthOverviewProps {
@@ -17,41 +19,33 @@ interface MarketHealthOverviewProps {
 
 export function MarketHealthOverview({ markets }: MarketHealthOverviewProps) {
   const buckets = {
-    healthy: markets.filter(m => m.health === 'healthy' && m.total > 0).length,
+    healthy: markets.filter(m => m.health === 'healthy' && m.total > 0 && m.senderExists && m.active).length,
     watch: markets.filter(m => m.health === 'watch').length,
     degraded: markets.filter(m => m.health === 'degraded' || m.health === 'critical').length,
     noSender: markets.filter(m => !m.senderExists).length,
     idle: markets.filter(m => m.total === 0).length,
   }
-  const total = markets.length || 1
+
+  const tiles = [
+    { label: 'Markets', val: markets.length, tone: 'primary' },
+    { label: 'Healthy', val: buckets.healthy, tone: 'green' },
+    { label: 'Watch', val: buckets.watch, tone: 'amber' },
+    { label: 'Degraded', val: buckets.degraded, tone: 'red' },
+    { label: 'No Registered Sender', val: buckets.noSender, tone: 'red' },
+    { label: 'No Activity', val: buckets.idle, tone: 'muted' },
+  ]
 
   return (
-    <div className="occ-market-overview">
-      <header className="occ-market-overview__head">
-        <span>Market Intelligence</span>
-        <span>{markets.length} markets</span>
-      </header>
-      <div className="occ-market-overview__buckets">
-        {[
-          { key: 'healthy', label: 'Healthy', count: buckets.healthy, tone: 'green' },
-          { key: 'watch', label: 'Watch', count: buckets.watch, tone: 'amber' },
-          { key: 'degraded', label: 'Degraded', count: buckets.degraded, tone: 'red' },
-          { key: 'noSender', label: 'No Sender', count: buckets.noSender, tone: 'red' },
-          { key: 'idle', label: 'No Activity', count: buckets.idle, tone: 'muted' },
-        ].map(b => (
-          <div key={b.key} className={cls('occ-market-bucket', `is-${b.tone}`)}>
-            <span className="occ-market-bucket__val">{b.count}</span>
-            <span className="occ-market-bucket__lbl">{b.label}</span>
+    <div className="occ-metric-strip occ-metric-strip--market">
+      <span className="occ-metric-strip__title">Market Intelligence</span>
+      <div className="occ-metric-strip__tiles">
+        {tiles.map(t => (
+          <div key={t.label} className={cls('occ-metric-strip__tile', `is-${t.tone}`)}>
+            <span className="occ-metric-strip__val">{t.val}</span>
+            <span className="occ-metric-strip__lbl">{t.label}</span>
           </div>
         ))}
       </div>
-      <div className="occ-market-dist-bar" aria-hidden="true">
-        {buckets.healthy > 0 && <span className="is-green" style={{ flex: buckets.healthy }} />}
-        {buckets.watch > 0 && <span className="is-amber" style={{ flex: buckets.watch }} />}
-        {buckets.degraded > 0 && <span className="is-red" style={{ flex: buckets.degraded }} />}
-        {buckets.noSender > 0 && <span className="is-muted" style={{ flex: buckets.noSender }} />}
-      </div>
-      <p className="occ-market-overview__note">Distribution from loaded page/range · {total} configured</p>
     </div>
   )
 }

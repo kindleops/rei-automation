@@ -17,18 +17,58 @@ export const isDelivered = (s: string) => DELIVERED_STATUSES.has(s)
 export const isFailed = (s: string) => FAILED_STATUSES.has(s)
 export const isSent = (s: string) => SENT_STATUSES.has(s)
 
-const INVALID_NAMES = new Set(['unknown contact', 'unknown seller', 'unknown', '—', '-'])
+const INVALID_NAMES = new Set([
+  'unknown contact', 'unknown seller', 'unknown owner', 'unknown', '—', '-', 'no phone',
+])
 
 const clean = (v: string | null | undefined): string => String(v ?? '').trim()
 
-const looksLikePhone = (v: string) => /^\+?\d[\d\s().-]{6,}$/.test(v)
+const looksLikePhone = (v: string) => /^\+?\d[\d\s().-]{6,}$/.test(v) || /^\d{10,}$/.test(v.replace(/\D/g, ''))
 
-const isTrustedFullName = (name: string): boolean => {
+const isResolvableName = (name: string): boolean => {
   const t = clean(name)
   if (!t || INVALID_NAMES.has(t.toLowerCase())) return false
   if (looksLikePhone(t)) return false
-  const parts = t.split(/\s+/).filter(Boolean)
-  return parts.length >= 2 || t.length >= 14
+  return true
+}
+
+export const isManualMessage = (item: QueueItem): boolean =>
+  item.stageCode === 'manual_reply'
+  || item.rowSource === 'manual'
+  || item.useCase?.toLowerCase().includes('manual') === true
+  || item.automationSource?.toLowerCase().includes('manual') === true
+  || (Boolean(item.messageText?.trim()) && !item.templateId && item.rowSource !== 'campaign')
+
+export const resolveMessageSource = (item: QueueItem): string => {
+  if (item.stageCode === 'manual_reply' || item.rowSource === 'manual') return 'Manual Reply'
+  if (item.rowSource === 'auto_reply' || item.stageCode === 'auto_reply') return 'Auto Reply'
+  if (item.campaignName) return item.campaignName
+  if (item.automationSource) return item.automationSource
+  return item.useCase || 'Queue'
+}
+
+export const resolveTemplateLabel = (item: QueueItem): string => {
+  if (isManualMessage(item)) return 'Manual Reply'
+  if (item.templateName && item.templateName !== 'Template not attached') return item.templateName
+  return '—'
+}
+
+export const resolveMessageLanguage = (item: QueueItem): string => {
+  if (item.language === 'en') return 'EN'
+  if (item.language === 'es') return 'ES'
+  const text = item.messageText?.trim() ?? ''
+  if (!text) return 'Unknown'
+  if (/[¿¡áéíóúñ]/i.test(text) || /\b(hola|gracias|señor|buenos)\b/i.test(text)) return 'ES'
+  if (/^[a-zA-Z0-9\s.,!?'"\-–—()]+$/.test(text) && text.length >= 12) return 'EN'
+  return 'Unknown'
+}
+
+const pickFirstName = (candidates: Array<string | null | undefined>): string | null => {
+  for (const candidate of candidates) {
+    const t = clean(candidate)
+    if (isResolvableName(t)) return t
+  }
+  return null
 }
 
 export interface SellerIdentity {
@@ -44,51 +84,39 @@ export const resolveSellerIdentity = (item: QueueItem): SellerIdentity => {
   const targetSnap = (md.target_snapshot && typeof md.target_snapshot === 'object' ? md.target_snapshot : {}) as Record<string, unknown>
   const candidateSnap = (md.candidate_snapshot && typeof md.candidate_snapshot === 'object' ? md.candidate_snapshot : {}) as Record<string, unknown>
 
-  const activeProspect = clean(
-    item.activeProspectFullName
-    || String(targetSnap.prospect_full_name ?? targetSnap.active_prospect_full_name ?? ''),
-  )
-  const bestProspect = clean(
-    item.sellerFullNameResolved
-    || item.sellerFullName
-    || item.sellerDisplayName
-    || String(targetSnap.seller_full_name ?? ''),
-  )
+  const phone = clean(item.toPhoneNumber || item.phone)
+  const phoneEnding = phone && !phone.toLowerCase().includes('no phone') ? `…${phone.replace(/\D/g, '').slice(-4)}` : null
+
+  const primary = pickFirstName([
+    item.activeProspectFullName,
+    String(targetSnap.prospect_full_name ?? targetSnap.active_prospect_full_name ?? ''),
+    String(candidateSnap.prospect_full_name ?? ''),
+    item.sellerFullNameResolved,
+    item.sellerFullName,
+    item.sellerDisplayName,
+    item.sellerName,
+    String(targetSnap.seller_full_name ?? ''),
+    String(candidateSnap.seller_full_name ?? ''),
+    item.masterOwnerDisplayName,
+    String(candidateSnap.owner_display_name ?? targetSnap.owner_display_name ?? ''),
+    String(md.property_owner_name ?? targetSnap.property_owner_name ?? ''),
+    String(md.thread_participant_name ?? md.participant_name ?? ''),
+    String(md.contact_owner_name ?? md.contact_method_owner ?? ''),
+  ]) ?? 'Unknown owner'
+
   const masterOwner = clean(
     item.masterOwnerDisplayName
     || String(candidateSnap.owner_display_name ?? targetSnap.owner_display_name ?? ''),
-  )
-  const phone = clean(item.toPhoneNumber || item.phone)
-  const phoneEnding = phone ? `…${phone.replace(/\D/g, '').slice(-4)}` : null
-
-  const ordered = [activeProspect, bestProspect, masterOwner, phone, 'Unknown Contact']
-  let primary = 'Unknown Contact'
-  for (const candidate of ordered) {
-    const t = clean(candidate)
-    if (!t) continue
-    if (candidate === phone || looksLikePhone(t)) {
-      primary = t
-      break
-    }
-    if (isTrustedFullName(t) || candidate === 'Unknown Contact') {
-      primary = t
-      break
-    }
-    if (!primary || primary === 'Unknown Contact') primary = t
-  }
+  ) || null
 
   let secondary: string | null = null
-  if (activeProspect && primary !== activeProspect && isTrustedFullName(activeProspect)) {
-    secondary = activeProspect
-  } else if (masterOwner && primary !== masterOwner && isTrustedFullName(masterOwner)) {
-    secondary = masterOwner
-  } else if (bestProspect && primary !== bestProspect && isTrustedFullName(bestProspect)) {
-    secondary = bestProspect
-  }
+  const prospect = pickFirstName([item.activeProspectFullName, String(targetSnap.prospect_full_name ?? '')])
+  if (prospect && prospect !== primary) secondary = prospect
+  else if (masterOwner && masterOwner !== primary && isResolvableName(masterOwner)) secondary = masterOwner
 
-  const glyph: SellerIdentity['glyph'] = item.linkedPropertyId ? 'property' : primary !== 'Unknown Contact' ? 'person' : 'unknown'
+  const glyph: SellerIdentity['glyph'] = primary === 'Unknown owner' ? 'unknown' : item.linkedPropertyId ? 'property' : 'person'
 
-  return { primary, secondary, masterOwner: masterOwner || null, phoneEnding, glyph }
+  return { primary, secondary, masterOwner, phoneEnding, glyph }
 }
 
 export const displayName = (item: QueueItem): string => resolveSellerIdentity(item).primary
@@ -104,6 +132,15 @@ export interface StatusPresentation {
   tone: string
   blocking: string | null
   historicalWarnings: string[]
+  hasCurrentException: boolean
+}
+
+const FLAG_LABELS: Record<string, string> = {
+  MISSING_TEMPLATE: 'Missing Template',
+  MISSING_OWNER: 'Missing Owner',
+  MISSING_MESSAGE_EVENT: 'Message Event Missing',
+  MISSING_PROVIDER_ID: 'Missing Provider ID',
+  MISSING_PROPERTY: 'Missing Property',
 }
 
 export const resolveStatusPresentation = (item: QueueItem): StatusPresentation => {
@@ -117,30 +154,52 @@ export const resolveStatusPresentation = (item: QueueItem): StatusPresentation =
     incident_quarantine: 'red', expired: 'muted', replied_before_send: 'green',
   }
 
+  const manual = isManualMessage(item)
+  const delivered = isDelivered(item.status)
+  const terminal = delivered || item.status === 'cancelled' || item.status === 'replied_before_send'
   const historicalWarnings: string[] = []
+
   for (const flag of item.diagnosticFlags) {
-    if (flag === 'MISSING_TEMPLATE' && item.status === 'delivered') historicalWarnings.push('Missing Template (historical)')
-    else if (flag === 'MISSING_MESSAGE_EVENT' && ['delivered', 'sent'].includes(item.status)) historicalWarnings.push('Message Event Missing')
-    else if (flag === 'MISSING_PROVIDER_ID' && item.status === 'delivered') historicalWarnings.push('Missing Provider ID')
-    else if (!['MISSING_TEMPLATE', 'MISSING_MESSAGE_EVENT', 'MISSING_PROVIDER_ID'].includes(flag)) {
-      historicalWarnings.push(flag.replace(/_/g, ' '))
+    if (manual && (flag === 'MISSING_TEMPLATE' || flag === 'MISSING_OWNER')) continue
+    if (terminal || delivered) {
+      if (flag === 'MISSING_TEMPLATE' || flag === 'MISSING_OWNER' || flag === 'MISSING_MESSAGE_EVENT' || flag === 'MISSING_PROVIDER_ID') {
+        historicalWarnings.push(`${FLAG_LABELS[flag] ?? flag.replace(/_/g, ' ')} (historical)`)
+        continue
+      }
     }
+    if (!terminal && flag === 'MISSING_TEMPLATE' && manual) continue
+    if (!terminal && !delivered) historicalWarnings.push(FLAG_LABELS[flag] ?? flag.replace(/_/g, ' '))
+  }
+
+  if (delivered && item.failedReason && !isFailed(item.status)) {
+    historicalWarnings.push(`Provider failure (historical): ${item.failedReason}`)
   }
 
   let blocking: string | null = null
   if (BLOCKED_STATUSES.has(item.status)) {
     blocking = item.blockedReason || item.pausedReason || item.guardReason || 'Blocked by queue guard'
   } else if (isFailed(item.status) && item.failureCategory) {
-    blocking = FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')
+    if (!(manual && item.failureCategory === 'missing_template')) {
+      blocking = FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')
+    }
   } else if (item.status === 'approval') {
     blocking = item.approvalReason || 'Operator approval required'
+  } else if (!delivered && !manual && item.failureCategory === 'missing_template') {
+    blocking = FAILURE_LABEL.missing_template ?? 'Missing template'
   }
+
+  const hasCurrentException = Boolean(blocking)
+
+  let tone = toneMap[item.status] ?? 'muted'
+  if (delivered) tone = 'green'
+  else if (item.status === 'sent' && item.deliveryStatus === 'pending') tone = 'green'
 
   return {
     primary: formatDisplayStatus(item.status),
-    tone: toneMap[item.status] ?? 'muted',
-    blocking,
+    tone,
+    blocking: hasCurrentException ? blocking : null,
     historicalWarnings,
+    hasCurrentException,
   }
 }
 
@@ -372,7 +431,7 @@ const EXCEPTION_PRIORITY: Array<{ key: string; label: string; urgency: Exception
   { key: 'blacklist_pair_21610', label: 'Compliance / 21610', urgency: 'critical', match: i => i.failureCategory === 'blacklist_pair_21610', action: 'Suppress sender↔recipient pair' },
   { key: 'recipient_opted_out', label: 'Opt-out conflict', urgency: 'critical', match: i => i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'suppression_blocked', action: 'Honor opt-out — do not retry' },
   { key: 'carrier', label: 'Provider rejection', urgency: 'high', match: i => i.failureGroup === 'Carrier' && isFailed(i.status), action: 'Review carrier failure and retry if eligible' },
-  { key: 'missing_template', label: 'Missing template', urgency: 'high', match: i => i.failureCategory === 'missing_template' || i.diagnosticFlags.includes('MISSING_TEMPLATE'), action: 'Attach template and re-queue' },
+  { key: 'missing_template', label: 'Missing template', urgency: 'high', match: i => !isManualMessage(i) && !isDelivered(i.status) && (i.failureCategory === 'missing_template' || i.diagnosticFlags.includes('MISSING_TEMPLATE')), action: 'Attach template and re-queue' },
   { key: 'message_event_missing', label: 'Message-event reconciliation', urgency: 'medium', match: i => i.diagnosticFlags.includes('MISSING_MESSAGE_EVENT'), action: 'Reconcile delivery webhook' },
   { key: 'approval', label: 'Approval required', urgency: 'medium', match: i => i.status === 'approval', action: 'Review and approve send' },
   { key: 'unknown', label: 'Unknown failure', urgency: 'low', match: i => isFailed(i.status) && !i.failureCategory, action: 'Inspect raw failure before bulk retry' },
