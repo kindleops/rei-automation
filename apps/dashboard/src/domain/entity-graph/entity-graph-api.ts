@@ -60,7 +60,7 @@ export async function browseEntityGraph(
     `/api/cockpit/entity-graph/browse?${qs}`,
     { signal },
   )
-  if (!res.ok || !res.data) {
+  if (!res.ok) {
     throw new Error(res.message || res.error || 'entity_graph_browse_failed')
   }
   return normalizeListResponse(res.data)
@@ -75,7 +75,7 @@ export async function searchEntityGraph(
     `/api/cockpit/entity-graph/search?${qs}`,
     { signal },
   )
-  if (!res.ok || !res.data) {
+  if (!res.ok) {
     throw new Error(res.message || res.error || 'entity_graph_search_failed')
   }
   return normalizeListResponse(res.data)
@@ -96,7 +96,8 @@ export async function fetchEntityGraphTabCounts(signal?: AbortSignal): Promise<E
     { signal },
   )
   if (!res.ok || !res.data?.counts) {
-    throw new Error(res.message || res.error || 'entity_graph_counts_failed')
+    const message = res.ok ? 'entity_graph_counts_failed' : (res.message || res.error || 'entity_graph_counts_failed')
+    throw new Error(message)
   }
   return res.data.counts
 }
