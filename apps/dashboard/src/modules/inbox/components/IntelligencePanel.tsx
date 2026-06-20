@@ -43,6 +43,8 @@ import { detectPropertyCategory } from '../helpers/propertyHelpers'
 import { WatchBell } from '../../../shared/WatchBell'
 import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../../lib/data/censusData'
 import type { CensusData } from '../../../lib/data/censusData'
+import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
+import '../../deal-intelligence/deal-intelligence-25.css'
 
 const formatMoney = formatCurrency
 const fmtPhone = formatPhone
@@ -3888,7 +3890,7 @@ const BuyerSignalBar = ({ label, value, tone = 'blue', showBar = true, trend }: 
   )
 }
 
-const CompactDealIntelligenceCapsule = ({
+const _CompactDealIntelligenceCapsule = ({
   thread,
   snapshot,
   messages,
@@ -5899,18 +5901,33 @@ export const IntelligencePanel = ({
     : 'workspace'
   return (
     <aside className={cls('nx-intelligence-panel', `is-mode-${panelClassMode}`, `is-layout-${layoutMode}`, `is-panel-${panelMode}`)}>
-      <header className="nx-intel-header">
-        <span className="nx-section-label">DEAL COMMAND DOSSIER</span>
-        {onCollapse ? (
+      {layoutMode !== 'compact' ? (
+        <header className="nx-intel-header">
+          <span className="nx-section-label">DEAL COMMAND DOSSIER</span>
+          {onCollapse ? (
+            <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
+              <Icon name="close" />
+            </button>
+          ) : null}
+        </header>
+      ) : onCollapse ? (
+        <header className="nx-intel-header is-compact-only">
           <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
             <Icon name="close" />
           </button>
-        ) : null}
-      </header>
+        </header>
+      ) : null}
 
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
-          <CompactDealIntelligenceCapsule thread={thread} snapshot={snapshot} messages={messages} dealContext={dealContext} onOpenComps={onOpenComps} />
+          <DealIntelligence25Panel
+            threadKey={thread.threadKey}
+            propertyId={dealContext?.identity?.property_id || thread.propertyId}
+            prospectId={dealContext?.identity?.prospect_id || thread.prospectId}
+            masterOwnerId={dealContext?.identity?.master_owner_id || thread.masterOwnerId}
+            canonicalE164={dealContext?.identity?.canonical_e164 || thread.canonicalE164}
+            fallbackAddress={snapshot.fullAddress || thread.propertyAddress || thread.displayAddress}
+          />
         ) : layoutMode === 'medium' ? (
           <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} dealContext={dealContext} onOpenComps={onOpenComps} />
         ) : (
@@ -5932,3 +5949,6 @@ export const IntelligencePanel = ({
     </aside>
   )
 }
+
+/** @deprecated Legacy 25% capsule — preserved for 50/75/100 reference paths */
+export { _CompactDealIntelligenceCapsule as CompactDealIntelligenceCapsuleLegacy }
