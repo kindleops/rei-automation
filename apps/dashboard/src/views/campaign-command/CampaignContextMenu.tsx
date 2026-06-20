@@ -5,16 +5,9 @@ import type { CampaignSummary } from './campaigns.types'
 
 const ACTION_LABELS: Record<string, string> = {
   open: 'Open',
-  edit: 'Edit',
-  duplicate: 'Duplicate',
   rename: 'Rename',
-  pause: 'Pause',
-  resume: 'Resume',
-  schedule: 'Schedule',
-  reschedule: 'Reschedule',
-  activate: 'Activate',
-  build_targets: 'Build Targets',
-  queue_batch: 'Queue Batch',
+  duplicate: 'Duplicate',
+  restore: 'Restore',
   archive: 'Archive',
   delete_draft: 'Delete Draft',
 }

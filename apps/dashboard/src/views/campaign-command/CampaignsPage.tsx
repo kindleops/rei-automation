@@ -14,7 +14,15 @@ import {
   updateCampaignDraft,
 } from './campaigns.adapter'
 import { executeCampaignAction } from './campaign-actions'
-import { computeCampaignHealth, computeCampaignReadiness, matchesListFilter, type CampaignListFilter } from './campaign-health'
+import {
+  computeCampaignHealth,
+  computeCampaignReadiness,
+  getDetailActions,
+  getPrimaryAction,
+  matchesListFilter,
+  type CampaignListFilter,
+} from './campaign-health'
+import { CampaignActivationModal } from './components/CampaignActivationModal'
 import { computeCampaignCostMetrics, formatCostUsd } from './campaign-cost'
 import { CreateCampaignModal } from './CreateCampaignModal'
 import { CampaignScheduleModal } from './CampaignScheduleModal'
@@ -36,6 +44,7 @@ import type {
   CampaignCommandState,
 } from './campaigns.types'
 import './campaigns.css'
+import './campaign-command.css'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -157,15 +166,15 @@ export type HealthLevel = 'healthy' | 'caution' | 'dangerous' | 'not_started' | 
 
 export const computeHealth = computeCampaignHealth
 
-export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary | null }) => {
+export const CampaignIntelligenceRail = ({ campaign }: { campaign: CampaignSummary | null }) => {
   if (!campaign) {
     return (
-      <div className="ccc__health-sidebar">
-        <div className="ccc__hs-header">
-          <div className="ccc__hs-title">Campaign Health</div>
+      <div className="ccc__intel-rail">
+        <div className="ccc__intel-header">
+          <div className="ccc__intel-title">Campaign Intelligence</div>
         </div>
         <div style={{ padding: 16, color: 'var(--text-2)', fontSize: 11, textAlign: 'center', marginTop: 24 }}>
-          Select a campaign to view health analysis
+          Select a campaign for launch readiness and health
         </div>
       </div>
     )
@@ -173,6 +182,7 @@ export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary 
 
   const { level, score, issues, label: levelLabel, sampleSufficient } = computeHealth(campaign)
   const readiness = computeCampaignReadiness(campaign)
+  const isPreLaunch = campaign.sent_count === 0
 
   const failRate = campaign.sent_count > 0
     ? (campaign.failed_count / campaign.sent_count) * 100
@@ -213,44 +223,56 @@ export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary 
   ]
 
   return (
-    <div className="ccc__health-sidebar">
-      <div className="ccc__hs-header">
-        <div className="ccc__hs-title">Campaign Health</div>
-        <div className="ccc__hs-score-block">
-          <div className={cls('ccc__hs-score-ring', `is-${level}`)}>{score ?? '—'}</div>
-          <div className={cls('ccc__hs-score-label', `is-${level}`)}>{levelLabel}</div>
-          {issues.length === 0 && (
-            <div className="ccc__hs-score-reason">All systems nominal</div>
-          )}
-        </div>
+    <div className="ccc__intel-rail">
+      <div className="ccc__intel-header">
+        <div className="ccc__intel-title">Campaign Intelligence</div>
+        {!isPreLaunch && (
+          <div className="ccc__hs-score-block" style={{ marginTop: 10 }}>
+            <div className={cls('ccc__hs-score-ring', `is-${level}`)}>{score ?? '—'}</div>
+            <div className={cls('ccc__hs-score-label', `is-${level}`)}>{levelLabel}</div>
+          </div>
+        )}
       </div>
 
-      <div className="ccc__hs-body">
-        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 8 }}>Metrics</div>
-        {metrics.map((m) => (
-          <div key={m.label} className="ccc__hs-metric">
-            <span className="ccc__hs-metric-label">{m.label}</span>
-            <span className={cls('ccc__hs-metric-value', m.variant)}>{m.value}</span>
-          </div>
-        ))}
-      </div>
-
-      {issues.length > 0 && (
-        <div className="ccc__hs-issues">
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 6 }}>
-            Issues ({issues.length})
-          </div>
-          {issues.map((issue, i) => {
-            const isCritical = issue.includes('critically') || issue.includes('exceed')
-            return (
-              <div key={i} className="ccc__hs-issue">
-                <div className={cls('ccc__hs-issue-dot', isCritical ? 'is-critical' : 'is-warn')} />
-                <span>{issue}</span>
+      <div className="ccc__intel-body">
+        {isPreLaunch ? (
+          <>
+            <div className={cls('ccc__intel-card', `is-${readiness.level === 'ready' ? 'ready' : readiness.level === 'warnings' ? 'warn' : 'blocked'}`)}>
+              <div className="ccc__intel-card-label">Launch Readiness</div>
+              <div className="ccc__intel-card-value">{readiness.label}</div>
+            </div>
+            <div className="ccc__intel-card">
+              <div className="ccc__intel-card-label">Target Snapshot</div>
+              <div className="ccc__intel-metric-row"><span>Total</span><strong>{fmt(campaign.total_targets)}</strong></div>
+              <div className="ccc__intel-metric-row"><span>Ready</span><strong>{fmt(campaign.ready_targets)}</strong></div>
+              <div className="ccc__intel-metric-row"><span>Scheduled</span><strong>{fmt(campaign.scheduled_targets)}</strong></div>
+            </div>
+            <div className="ccc__intel-card">
+              <div className="ccc__intel-card-label">Schedule</div>
+              <div className="ccc__intel-card-value">{campaign.next_send_at ? fmtRelative(campaign.next_send_at) : 'Not scheduled'}</div>
+            </div>
+            {readiness.blockers.map((b) => (
+              <div key={b} className="ccc__intel-issue"><span>⛔</span>{b}</div>
+            ))}
+            {readiness.warnings.map((w) => (
+              <div key={w} className="ccc__intel-issue"><span>⚠</span>{w}</div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 4 }}>Metrics</div>
+            {metrics.map((m) => (
+              <div key={m.label} className="ccc__hs-metric">
+                <span className="ccc__hs-metric-label">{m.label}</span>
+                <span className={cls('ccc__hs-metric-value', m.variant)}>{m.value}</span>
               </div>
-            )
-          })}
-        </div>
-      )}
+            ))}
+            {issues.map((issue, i) => (
+              <div key={i} className="ccc__intel-issue">{issue}</div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -895,23 +917,7 @@ const LogsTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
-export const primaryAction = (campaign: CampaignSummary): { label: string; variant: string; action: string } => {
-  if (campaign.status === 'active' || campaign.status === 'live_limited') {
-    return { label: 'Pause', variant: 'is-danger', action: 'pause' }
-  }
-  if (campaign.status === 'paused') return { label: 'Resume', variant: 'is-primary', action: 'resume' }
-  if (['draft', 'built', 'ready', 'previewed'].includes(campaign.status) && campaign.total_targets === 0) {
-    return { label: 'Build Targets', variant: 'is-blue', action: 'build_targets' }
-  }
-  if (campaign.status === 'scheduled') return { label: 'Activate Now', variant: 'is-primary', action: 'activate' }
-  if (['built', 'ready', 'previewed', 'queued'].includes(campaign.status)) {
-    return { label: 'Schedule', variant: 'is-blue', action: 'schedule' }
-  }
-  if (campaign.status === 'draft' && campaign.total_targets > 0) {
-    return { label: 'Review Launch', variant: 'is-primary', action: 'schedule' }
-  }
-  return { label: 'Activate', variant: 'is-primary', action: 'activate' }
-}
+
 
 export const DetailPanel = ({
   campaign,
@@ -944,7 +950,7 @@ export const DetailPanel = ({
 
   if (!campaign) {
     return (
-      <div className="ccc__detail-panel">
+      <div className="ccc__detail-panel ccc-glass-workspace">
         <div className="ccc__detail-empty">
           <div className="ccc__detail-empty-icon"><Icon name="send" size={36} /></div>
           <div className="ccc__detail-empty-title">Select a Campaign</div>
@@ -954,14 +960,7 @@ export const DetailPanel = ({
     )
   }
 
-  const pAction = primaryAction(campaign)
-
-  // Compute Queue Batch button logic
-  const health = computeHealth(campaign)
-  const canQueueBatch =
-    campaign.ready_targets > 0 &&
-    health.level !== 'dangerous' &&
-    !['paused', 'archived', 'completed', 'failed'].includes(campaign.status)
+  const detailActions = getDetailActions(campaign)
 
   const scopeLabel = (() => {
     switch (commandState.displayScope) {
@@ -974,7 +973,7 @@ export const DetailPanel = ({
   })()
 
   return (
-    <div className="ccc__detail-panel">
+    <div className="ccc__detail-panel ccc-glass-workspace">
       {/* Context Breadcrumb */}
       {commandState.displayScope !== 'campaign' && (
         <div style={{ padding: '8px 16px 0', fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1014,27 +1013,25 @@ export const DetailPanel = ({
           </span>
         </div>
         <div className="ccc__detail-actions">
-          <button className={cls('ccc-btn', pAction.variant)} onClick={() => onAction(pAction.action, campaign)}>
-            <Icon name={pAction.action === 'pause' ? 'pause' : 'play'} size={11} />
-            {pAction.label}
-          </button>
-          
-          <button 
-            className="ccc-btn is-blue" 
-            onClick={() => {
-              if (canQueueBatch) onAction('queue-batch', campaign)
-            }}
-            disabled={!canQueueBatch}
-            title={!canQueueBatch ? 'Cannot queue batch: Check health issues or ready targets' : ''}
-          >
-            <Icon name="zap" size={11} />
-            Queue Batch ({fmt(campaign.ready_targets)})
-          </button>
-          
-          <button className="ccc-btn" onClick={() => onAction('schedule', campaign)}>
-            <Icon name="calendar" size={11} />
-            Schedule
-          </button>
+          {detailActions.map((act) => (
+            <button
+              key={act.id}
+              className={cls('ccc-btn', act.variant)}
+              onClick={() => onAction(act.id, campaign)}
+            >
+              <Icon
+                name={
+                  act.id === 'pause' ? 'pause'
+                    : act.id === 'queue_batch' ? 'zap'
+                      : act.id === 'schedule' || act.id === 'reschedule' ? 'calendar'
+                        : act.id === 'build_targets' ? 'users'
+                          : 'play'
+                }
+                size={11}
+              />
+              {act.id === 'queue_batch' ? `Queue Batch (${fmt(campaign.ready_targets)})` : act.label}
+            </button>
+          ))}
           <button className="ccc-btn" onClick={() => onAction('refresh', campaign)}>
             <Icon name="refresh-cw" size={11} />
             Refresh
@@ -1080,6 +1077,7 @@ export const DetailPanel = ({
 
 export const CampaignListPanel = ({
   campaigns,
+  allCampaigns,
   loading,
   selectedId,
   onSelect,
@@ -1090,6 +1088,7 @@ export const CampaignListPanel = ({
   setStatusFilter,
 }: {
   campaigns: CampaignSummary[]
+  allCampaigns: CampaignSummary[]
   loading: boolean
   selectedId: string | null
   onSelect: (c: CampaignSummary | null) => void
@@ -1113,8 +1112,16 @@ export const CampaignListPanel = ({
     { key: 'needs_attention', label: 'Attention' },
   ]
 
+  const filterCounts = useMemo(() => {
+    const count = (key: CampaignListFilter) =>
+      key === 'all' ? allCampaigns.length : allCampaigns.filter((c) => matchesListFilter(c, key)).length
+    return Object.fromEntries(
+      statusFilters.map((f) => [f.key, count(f.key)]),
+    ) as Record<CampaignListFilter, number>
+  }, [allCampaigns, statusFilters])
+
   return (
-    <div className="ccc__list-panel">
+    <div className="ccc__list-panel ccc-glass-rail">
       <div className="ccc__list-toolbar">
         <div className="ccc__list-search">
           <Icon name="search" size={11} />
@@ -1125,14 +1132,20 @@ export const CampaignListPanel = ({
           />
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 4, padding: '5px 10px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+      <div className="ccc__filter-bar">
         {statusFilters.map((f) => (
-          <button key={f.key} className={cls('ccc__chip', statusFilter === f.key && 'is-active')} onClick={() => setStatusFilter(f.key)}>
+          <button
+            key={f.key}
+            type="button"
+            className={cls('ccc__filter-segment', statusFilter === f.key && 'is-active')}
+            onClick={() => setStatusFilter(f.key)}
+          >
             {f.label}
+            <span className="ccc__filter-count">{filterCounts[f.key] ?? 0}</span>
           </button>
         ))}
       </div>
-      <div style={{ padding: '5px 12px', fontSize: 9, color: 'var(--text-2)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--border)', background: 'rgba(8,11,18,0.4)' }}>
+      <div style={{ padding: '5px 12px', fontSize: 9, color: 'var(--text-2)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--border)' }}>
         {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
       </div>
       <div className="ccc__list-scroll">
@@ -1147,7 +1160,7 @@ export const CampaignListPanel = ({
           </div>
         ) : (
           campaigns.map((c) => {
-            const pAction = primaryAction(c)
+            const pAction = getPrimaryAction(c)
             const isSelected = c.id === selectedId
             const health = computeHealth(c)
             return (
@@ -1194,7 +1207,7 @@ export const CampaignListPanel = ({
                   />
                   <button
                     className={cls('ccc__list-action-btn', pAction.variant)}
-                    onClick={() => onCampaignAction(pAction.action, c)}
+                    onClick={() => onCampaignAction(pAction.id, c)}
                   >
                     {pAction.label}
                   </button>
@@ -1229,6 +1242,7 @@ export const CampaignsPage = () => {
   const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>('create')
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
   const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
+  const [activationCampaign, setActivationCampaign] = useState<CampaignSummary | null>(null)
   const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(undefined)
   
   const [commandState, setCommandState] = useState<CampaignCommandState>({
@@ -1299,6 +1313,9 @@ export const CampaignsPage = () => {
       setScheduleCampaign(campaign)
       setScheduleMode(mode)
     },
+    onOpenActivate: (campaign: CampaignSummary) => {
+      setActivationCampaign(campaign)
+    },
     onSelectTab: (campaignId: string, tab: string) => {
       setCommandState((prev) => ({ ...prev, activeCampaignId: campaignId }))
       setDetailTab(tab as CampaignDetailTab)
@@ -1361,7 +1378,7 @@ export const CampaignsPage = () => {
   }
 
   return (
-    <div className="ccc">
+    <div className="ccc ccc--glass">
       {/* Header */}
       <div className="ccc__header">
         <div className="ccc__brand">
@@ -1418,6 +1435,7 @@ export const CampaignsPage = () => {
       <div className="ccc__body">
         <CampaignListPanel
           campaigns={campaigns}
+          allCampaigns={model?.campaigns ?? []}
           loading={loading}
           selectedId={commandState.activeCampaignId}
           onSelect={handleSelectCampaign}
@@ -1436,7 +1454,7 @@ export const CampaignsPage = () => {
           initialTab={detailTab}
         />
 
-        <CampaignHealthSidebar campaign={selectedCampaign} />
+        <CampaignIntelligenceRail campaign={selectedCampaign} />
       </div>
 
       {isCreateModalOpen && (
@@ -1465,6 +1483,24 @@ export const CampaignsPage = () => {
           mode={scheduleMode}
           onClose={() => setScheduleCampaign(null)}
           onSuccess={() => load({ silent: true })}
+        />
+      )}
+
+      {activationCampaign && (
+        <CampaignActivationModal
+          campaign={activationCampaign}
+          onClose={() => setActivationCampaign(null)}
+          onSuccess={(result) => {
+            emitNotification({
+              title: result.idempotent ? 'Already activated' : 'Campaign activated',
+              detail: result.idempotent
+                ? 'Idempotent replay — no duplicate queue rows.'
+                : `${result.inserted} inserted · ${result.skipped} skipped`,
+              severity: 'success',
+            })
+            setActivationCampaign(null)
+            void load({ silent: true })
+          }}
         />
       )}
     </div>

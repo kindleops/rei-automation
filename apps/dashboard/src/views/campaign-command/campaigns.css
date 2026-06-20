@@ -940,7 +940,8 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  background: rgba(8, 11, 18, 0.45);
+  background: color-mix(in srgb, var(--bg-panel-solid) 72%, transparent);
+  backdrop-filter: blur(22px) saturate(155%);
 }
 
 .ccc__health-sidebar::-webkit-scrollbar { width: 3px; }
@@ -954,7 +955,8 @@
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  background: rgba(8, 11, 18, 0.45);
+  background: color-mix(in srgb, var(--bg-panel-solid) 55%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
   flex-shrink: 0;
 }
 

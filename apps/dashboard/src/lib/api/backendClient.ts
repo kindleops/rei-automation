@@ -1425,11 +1425,17 @@ export interface CampaignLifecycleResponse {
   to?: string
   degraded?: boolean
   error?: string
+  message?: string
+  blockers?: string[]
+  inserted?: number
+  skipped?: number
+  idempotent?: boolean
+  queue_result?: Record<string, unknown>
 }
 
 export function setCampaignLifecycle(
   campaignId: string,
-  action: 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive',
+  action: 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive' | 'restore',
   payload: Record<string, unknown> = {},
 ): Promise<BackendResult<CampaignLifecycleResponse>> {
   return callBackend<CampaignLifecycleResponse>(`/api/cockpit/campaigns/${campaignId}/lifecycle`, {

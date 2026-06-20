@@ -6754,10 +6754,260 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   }
 }
 
+const ACTIVATION_BLOCKER_MESSAGES = Object.freeze({
+  auto_queue_disabled_without_operator_action: 'Auto-queue is disabled. Enable it or pass explicit_operator_action.',
+  campaign_emergency_stop_active: 'Campaign emergency stop is active.',
+  global_emergency_stop_active: 'Global emergency stop is active.',
+  confirm_live_required: 'confirm_live is required for live queue writes.',
+  auto_send_must_remain_disabled: 'auto_send_enabled must remain disabled for guarded launch.',
+  auto_reply_must_remain_disabled: 'auto_reply must remain disabled for guarded launch.',
+  campaign_execution_locked: 'Another worker holds the campaign execution lock.',
+})
+
+function formatActivationBlocker(blocker = '') {
+  const raw = clean(blocker)
+  if (!raw) return ''
+  if (ACTIVATION_BLOCKER_MESSAGES[raw]) return ACTIVATION_BLOCKER_MESSAGES[raw]
+
+  const normalized = raw.toLowerCase()
+  if (normalized.startsWith('missing_cap:')) {
+    const cap = raw.split(':').slice(1).join(':') || 'launch cap'
+    return `Campaign is missing required launch cap: ${cap.replace(/_/g, ' ')}.`
+  }
+  if (normalized.startsWith('campaign_status_not_queueable:')) {
+    const status = raw.split(':').slice(1).join(':') || 'unknown'
+    if (status === 'draft') return 'Build targets and move the campaign out of draft before activating.'
+    return `Campaign status "${status}" is not queueable for activation.`
+  }
+  if (
+    normalized.includes('routing_blocked') ||
+    normalized.includes('no_valid_textgrid_number') ||
+    normalized.includes('missing_sender_route') ||
+    normalized.includes('sender_coverage') ||
+    normalized.includes('no_sender')
+  ) {
+    return 'No active sender route covers this audience.'
+  }
+  if (
+    normalized.includes('no_reachable') ||
+    normalized.includes('missing_phone') ||
+    normalized.includes('no_valid_phone') ||
+    normalized.includes('no_best_phone') ||
+    normalized.includes('no_phone') ||
+    normalized.includes('zero_targets') ||
+    normalized.includes('no_targets')
+  ) {
+    return 'No reachable contacts match this campaign audience.'
+  }
+  return raw.replace(/_/g, ' ')
+}
+
+function formatActivationBlockers(blockers = []) {
+  return [...new Set((blockers || []).map(formatActivationBlocker).filter(Boolean))]
+}
+
+async function countCampaignTargets(supabase, campaignId, { readyOnly = false } = {}) {
+  let query = supabase
+    .from('campaign_targets')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId)
+  if (readyOnly) query = query.eq('target_status', 'ready')
+  const { count, error } = await query
+  if (error) throw error
+  return Number(count || 0)
+}
+
+async function countCampaignQueueRows(supabase, campaignId) {
+  const { count, error } = await supabase
+    .from('send_queue')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId)
+  if (error) throw error
+  return Number(count || 0)
+}
+
+/**
+ * Activation with initial queue hydration: validates audience, writes the first
+ * live batch via createCampaignQueuePlan, then walks lifecycle to active.
+ */
+export async function activateCampaignWithHydration(campaignId, input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  if (!campaignId) return { ok: false, error: 'campaign_id_required' }
+
+  const reason = clean(input.reason) || 'operator:activate'
+  const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
+  const idempotencyKey = clean(input.activation_idempotency_key || input.activationIdempotencyKey)
+
+  const detail = await getCampaign(campaignId, deps)
+  const campaign = detail.campaign
+  if (!campaign) return { ok: false, error: 'campaign_not_found' }
+
+  const totalTargets = await countCampaignTargets(supabase, campaignId)
+  if (!totalTargets) {
+    return {
+      ok: false,
+      error: 'no_targets',
+      blockers: ['No campaign targets exist. Build targets before activating.'],
+      inserted: 0,
+      skipped: 0,
+    }
+  }
+
+  const readyTargets = await countCampaignTargets(supabase, campaignId, { readyOnly: true })
+  const existingQueueRows = await countCampaignQueueRows(supabase, campaignId)
+  const status = normalizeCampaignStatus(campaign.status)
+
+  if (!isQueueableStatus(campaign.status)) {
+    const blockers = formatActivationBlockers([`campaign_status_not_queueable:${status}`])
+    return { ok: false, error: 'campaign_not_queueable', blockers, inserted: 0, skipped: 0 }
+  }
+
+  const storedIdempotencyKey = clean(campaign.last_activation_idempotency_key)
+  const activationStatuses = new Set(['queued', 'scheduled', 'activating', 'active'])
+  if (
+    idempotencyKey &&
+    storedIdempotencyKey === idempotencyKey &&
+    activationStatuses.has(status) &&
+    (existingQueueRows > 0 || status === 'active')
+  ) {
+    return {
+      ok: true,
+      idempotent: true,
+      campaign_id: campaignId,
+      queue_result: null,
+      lifecycle_result: { ok: true, campaign, from: status, to: status },
+      inserted: 0,
+      skipped: 0,
+      blockers: [],
+      from: status,
+      to: status,
+      campaign,
+    }
+  }
+
+  const batchLimit = asPositiveInteger(
+    input.batch_max ?? input.batchMax ?? input.limit ?? input.max_targets ?? campaign.batch_max,
+    null
+  )
+
+  let queueResult = null
+  let inserted = 0
+  let skipped = 0
+
+  if (!existingQueueRows) {
+    if (!readyTargets) {
+      return {
+        ok: false,
+        error: 'no_ready_targets',
+        blockers: ['No ready targets are available for the initial activation batch.'],
+        inserted: 0,
+        skipped: 0,
+      }
+    }
+
+    queueResult = await createCampaignQueuePlan(campaignId, {
+      ...input,
+      dry_run: false,
+      no_send: false,
+      confirm_live: true,
+      create_send_queue_rows: true,
+      explicit_operator_action: true,
+      batch_max: batchLimit,
+      max_targets: batchLimit,
+      limit: batchLimit,
+    }, deps)
+
+    inserted = Number(queueResult?.send_queue_rows_created || queueResult?.queue_rows_created || 0)
+    skipped = Number(queueResult?.skipped_count || 0)
+    const rawBlockers = queueResult?.blockers || queueResult?.exact_blockers || []
+    const queueRowsAfterPlan = await countCampaignQueueRows(supabase, campaignId)
+
+    if (rawBlockers.length && queueRowsAfterPlan === 0) {
+      return {
+        ok: false,
+        error: 'activation_blocked',
+        blockers: formatActivationBlockers(rawBlockers),
+        queue_result: queueResult,
+        lifecycle_result: null,
+        inserted,
+        skipped,
+      }
+    }
+  }
+
+  const queueRowsBeforeActivate = await countCampaignQueueRows(supabase, campaignId)
+  if (!queueRowsBeforeActivate) {
+    return {
+      ok: false,
+      error: 'activation_no_queue_rows',
+      blockers: ['Activation requires at least one send_queue row, but none were created.'],
+      queue_result: queueResult,
+      lifecycle_result: null,
+      inserted,
+      skipped,
+    }
+  }
+
+  const lifecycleResult = await activateCampaign(supabase, campaignId, { reason, scheduledFor })
+  if (!lifecycleResult.ok) {
+    return {
+      ok: false,
+      error: lifecycleResult.error || 'activation_lifecycle_failed',
+      blockers: [],
+      queue_result: queueResult,
+      lifecycle_result: lifecycleResult,
+      inserted,
+      skipped,
+      from: lifecycleResult.from || null,
+      to: lifecycleResult.to || 'active',
+    }
+  }
+
+  if (idempotencyKey) {
+    await supabase
+      .from('campaigns')
+      .update({
+        last_activation_idempotency_key: idempotencyKey,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', campaignId)
+  }
+
+  await recordCampaignEvent({
+    campaign_id: campaignId,
+    event_type: 'campaign.activated',
+    severity: 'success',
+    title: 'Campaign activated',
+    description: `Activated with ${inserted} queue rows inserted; ${skipped} targets skipped; ${queueRowsBeforeActivate} total queue rows.`,
+    metadata: {
+      activation_idempotency_key: idempotencyKey || null,
+      inserted,
+      skipped,
+      queue_row_count: queueRowsBeforeActivate,
+      blockers: queueResult?.blockers || [],
+      from: lifecycleResult.from || null,
+      to: lifecycleResult.to || 'active',
+    },
+  }, deps)
+
+  return {
+    ok: true,
+    campaign_id: campaignId,
+    queue_result: queueResult,
+    lifecycle_result: lifecycleResult,
+    inserted,
+    skipped,
+    blockers: [],
+    from: lifecycleResult.from || null,
+    to: lifecycleResult.to || 'active',
+    campaign: lifecycleResult.campaign || null,
+  }
+}
+
 /**
  * Operator lifecycle controls. Maps a human action to a canonical state
  * transition and routes it through the concurrency-safe state machine.
- * STATE only — does not enqueue or send (that is createCampaignQueuePlan).
+ * `activate` also hydrates the initial queue batch; other actions are STATE only.
  */
 const CAMPAIGN_LIFECYCLE_ACTIONS = {
   preview: 'built',
@@ -6774,6 +7024,7 @@ const CAMPAIGN_LIFECYCLE_ACTIONS = {
   complete: 'completed',
   fail: 'failed',
   archive: 'archived',
+  restore: 'draft',
 }
 
 export async function applyCampaignLifecycleAction(campaignId, input = {}, deps = {}) {
@@ -6786,12 +7037,66 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
   const reason = clean(input.reason) || `operator:${action || target}`
   const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
 
-  // `activate` is a higher-level intent that drives all the way to active via
-  // the legal path; the rest are single edges.
-  const result = action === 'activate'
-    ? await activateCampaign(supabase, campaignId, { reason, scheduledFor })
-    : await transitionCampaignStatus(supabase, campaignId, target, { reason, scheduledFor })
+  if (action === 'activate') {
+    const result = await activateCampaignWithHydration(campaignId, input, deps)
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.error,
+        blockers: result.blockers || [],
+        queue_result: result.queue_result || null,
+        lifecycle_result: result.lifecycle_result || null,
+        inserted: result.inserted ?? 0,
+        skipped: result.skipped ?? 0,
+        from: result.from || null,
+        to: result.to || null,
+      }
+    }
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action,
+      from: result.from || result.lifecycle_result?.from || null,
+      to: result.to || result.lifecycle_result?.to || 'active',
+      campaign: result.campaign || result.lifecycle_result?.campaign || null,
+      queue_result: result.queue_result,
+      lifecycle_result: result.lifecycle_result,
+      inserted: result.inserted,
+      skipped: result.skipped,
+      blockers: result.blockers || [],
+      idempotent: Boolean(result.idempotent),
+      degraded: Boolean(result.lifecycle_result?.degraded),
+    }
+  }
 
+  if (action === 'restore') {
+    const detail = await getCampaign(campaignId, deps)
+    const from = normalizeCampaignStatus(detail.campaign?.status)
+    if (from !== 'archived') {
+      return { ok: false, error: 'restore_requires_archived', from, to: 'draft' }
+    }
+    const result = await transitionCampaignStatus(supabase, campaignId, 'draft', { reason })
+    if (!result.ok) return { ok: false, error: result.error, from: result.from || from, to: 'draft' }
+    await recordCampaignEvent({
+      campaign_id: campaignId,
+      event_type: 'campaign.restored',
+      severity: 'info',
+      title: 'Campaign restored',
+      description: 'Archived campaign restored to draft for editing.',
+      metadata: { from, to: 'draft' },
+    }, deps)
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action,
+      from,
+      to: result.campaign?.status || 'draft',
+      campaign: result.campaign || null,
+      degraded: Boolean(result.degraded),
+    }
+  }
+
+  const result = await transitionCampaignStatus(supabase, campaignId, target, { reason, scheduledFor })
   if (!result.ok) return { ok: false, error: result.error, from: result.from || null, to: result.to || target }
   return {
     ok: true,

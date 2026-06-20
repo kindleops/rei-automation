@@ -19,8 +19,17 @@ export type CampaignReadiness = {
   warnings: string[]
 }
 
+export type CampaignActionDef = {
+  id: string
+  label: string
+  variant?: string
+  icon?: string
+}
+
 const PRE_LAUNCH: CampaignStatus[] = ['draft', 'previewed', 'ready', 'built']
 const LIVE: CampaignStatus[] = ['active', 'activating', 'live_limited', 'scheduled', 'queued', 'paused']
+
+const READY_STATUSES: CampaignStatus[] = ['ready', 'built', 'previewed']
 
 export function hasExecutionSample(campaign: CampaignSummary): boolean {
   return campaign.sent_count >= 10
@@ -140,8 +149,137 @@ export function canDeleteDraft(campaign: CampaignSummary): boolean {
   )
 }
 
-export function canArchiveCampaign(_campaign: CampaignSummary): boolean {
+export function canArchiveCampaign(campaign: CampaignSummary): boolean {
+  if (campaign.status === 'archived') return false
+  if (campaign.status === 'active' || campaign.status === 'live_limited') {
+    return campaign.ready_targets === 0
+  }
   return true
+}
+
+export function canQueueBatch(campaign: CampaignSummary): boolean {
+  if (!['active', 'live_limited', 'queued', 'scheduled', 'built', 'ready', 'previewed'].includes(campaign.status)) {
+    return false
+  }
+  if (campaign.ready_targets <= 0) return false
+  const health = computeCampaignHealth(campaign)
+  return health.level !== 'dangerous'
+}
+
+export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
+  switch (campaign.status) {
+    case 'draft':
+      if (campaign.total_targets === 0) {
+        return { id: 'build_targets', label: 'Build Targets', variant: 'is-blue' }
+      }
+      return { id: 'build_targets', label: 'Build Targets', variant: 'is-blue' }
+    case 'built':
+    case 'ready':
+    case 'previewed':
+      return { id: 'activate', label: 'Activate', variant: 'is-primary' }
+    case 'scheduled':
+      return { id: 'activate', label: 'Activate Now', variant: 'is-primary' }
+    case 'active':
+    case 'live_limited':
+      return { id: 'queue_batch', label: 'Queue Batch', variant: 'is-blue' }
+    case 'paused':
+      return { id: 'resume', label: 'Resume', variant: 'is-primary' }
+    case 'completed':
+      return { id: 'archive', label: 'Archive', variant: '' }
+    case 'archived':
+      return { id: 'restore', label: 'Restore', variant: 'is-primary' }
+    default:
+      return { id: 'open', label: 'Open', variant: '' }
+  }
+}
+
+export function getDetailActions(campaign: CampaignSummary): CampaignActionDef[] {
+  const actions: CampaignActionDef[] = []
+
+  switch (campaign.status) {
+    case 'draft':
+      actions.push(
+        { id: 'build_targets', label: 'Build Targets', variant: 'is-blue' },
+        { id: 'archive', label: 'Archive', variant: '' },
+      )
+      break
+    case 'built':
+    case 'ready':
+    case 'previewed':
+      actions.push(
+        { id: 'schedule', label: 'Schedule', variant: 'is-blue' },
+        { id: 'activate', label: 'Activate', variant: 'is-primary' },
+        { id: 'archive', label: 'Archive', variant: '' },
+      )
+      break
+    case 'scheduled':
+      actions.push(
+        { id: 'reschedule', label: 'Reschedule', variant: 'is-blue' },
+        { id: 'activate', label: 'Activate Now', variant: 'is-primary' },
+        { id: 'pause', label: 'Pause', variant: '' },
+        { id: 'archive', label: 'Archive', variant: '' },
+      )
+      break
+    case 'active':
+    case 'live_limited':
+      if (canQueueBatch(campaign)) {
+        actions.push({ id: 'queue_batch', label: 'Queue Batch', variant: 'is-blue' })
+      }
+      actions.push({ id: 'pause', label: 'Pause', variant: 'is-danger' })
+      if (canArchiveCampaign(campaign)) {
+        actions.push({ id: 'archive', label: 'Archive', variant: '' })
+      }
+      break
+    case 'paused':
+      actions.push(
+        { id: 'resume', label: 'Resume', variant: 'is-primary' },
+        { id: 'reschedule', label: 'Reschedule', variant: 'is-blue' },
+        { id: 'archive', label: 'Archive', variant: '' },
+      )
+      break
+    case 'completed':
+      actions.push(
+        { id: 'duplicate', label: 'Duplicate', variant: '' },
+        { id: 'archive', label: 'Archive', variant: '' },
+      )
+      break
+    case 'archived':
+      actions.push(
+        { id: 'restore', label: 'Restore', variant: 'is-primary' },
+        { id: 'duplicate', label: 'Duplicate', variant: '' },
+      )
+      break
+    default:
+      break
+  }
+
+  return actions
+}
+
+/** Overflow menu — lifecycle-neutral utilities only; never Activate/Queue on archived. */
+export function getAvailableCampaignActions(campaign: CampaignSummary): string[] {
+  const actions: string[] = ['open']
+
+  if (campaign.status !== 'archived') {
+    actions.push('rename')
+  }
+
+  actions.push('duplicate')
+
+  if (campaign.status === 'archived') {
+    actions.push('restore')
+    return actions
+  }
+
+  if (canDeleteDraft(campaign)) {
+    actions.push('delete_draft')
+  }
+
+  if (canArchiveCampaign(campaign)) {
+    actions.push('archive')
+  }
+
+  return actions
 }
 
 export type CampaignListFilter =
@@ -158,7 +296,7 @@ export type CampaignListFilter =
 export function matchesListFilter(campaign: CampaignSummary, filter: CampaignListFilter): boolean {
   if (filter === 'all') return true
   if (filter === 'draft') return campaign.status === 'draft'
-  if (filter === 'ready') return ['ready', 'built', 'previewed'].includes(campaign.status)
+  if (filter === 'ready') return READY_STATUSES.includes(campaign.status)
   if (filter === 'scheduled') return campaign.status === 'scheduled'
   if (filter === 'live') return ['active', 'activating', 'live_limited', 'queued'].includes(campaign.status)
   if (filter === 'paused') return campaign.status === 'paused'
@@ -169,28 +307,4 @@ export function matchesListFilter(campaign: CampaignSummary, filter: CampaignLis
     return health.issues.length > 0 || health.level === 'dangerous' || health.level === 'caution'
   }
   return true
-}
-
-export function getAvailableCampaignActions(campaign: CampaignSummary): string[] {
-  const actions: string[] = ['open', 'duplicate']
-  if (campaign.status === 'active' || campaign.status === 'live_limited') {
-    actions.push('pause')
-  }
-  if (campaign.status === 'paused') actions.push('resume')
-  if (['scheduled', 'built', 'ready', 'previewed', 'draft'].includes(campaign.status)) {
-    actions.push('schedule', 'reschedule')
-  }
-  if (['built', 'ready', 'previewed', 'scheduled', 'queued'].includes(campaign.status)) {
-    actions.push('activate')
-  }
-  if (['draft', 'built', 'ready', 'previewed'].includes(campaign.status)) {
-    actions.push('build_targets', 'edit')
-  }
-  if (campaign.ready_targets > 0 && ['built', 'ready', 'scheduled', 'active', 'paused'].includes(campaign.status)) {
-    actions.push('queue_batch')
-  }
-  if (canDeleteDraft(campaign)) actions.push('delete_draft')
-  else actions.push('archive')
-  if (campaign.status !== 'draft') actions.push('rename')
-  return actions
 }

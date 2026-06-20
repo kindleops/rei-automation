@@ -7,7 +7,7 @@ import { Icon } from '../../shared/icons'
 import { emitNotification } from '../../shared/NotificationToast'
 import { loadCampaigns, fetchCampaignTargets } from './campaigns.adapter'
 import { executeCampaignAction } from './campaign-actions'
-import { matchesListFilter, type CampaignListFilter } from './campaign-health'
+import { getPrimaryAction, matchesListFilter, type CampaignListFilter } from './campaign-health'
 import type { CampaignModel, CampaignSummary, CampaignTarget, CampaignDetailTab, CampaignCommandState } from './campaigns.types'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
@@ -19,12 +19,12 @@ import {
   fmtPct,
   fmtRelative,
   KpiStrip,
-  CampaignHealthSidebar,
+  CampaignIntelligenceRail,
   CampaignListPanel,
   DetailPanel,
-  primaryAction,
 } from './CampaignsPage'
 import './campaigns.css'
+import './campaign-command.css'
 import './inbox-campaign-view.css'
 
 const LinkedChip = ({
@@ -81,7 +81,7 @@ const CompactList = ({
       {loading ? (
         [1, 2, 3].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 44, marginBottom: 4, borderRadius: 4 }} />)
       ) : campaigns.map((c) => {
-        const pAction = primaryAction(c)
+        const pAction = getPrimaryAction(c)
         return (
           <div key={c.id} className={cls('icv-compact__row', linkedId === c.id && 'is-linked')}>
             <div className={cls('icv-compact__dot', `is-${c.status}`)} />
@@ -91,7 +91,7 @@ const CompactList = ({
                 <span>{fmt(c.ready_targets)} ready</span>
               </div>
             </div>
-            <button className={cls('icv-btn icv-btn--xs', pAction.variant)} onClick={() => onAction(pAction.action, c)}>
+            <button className={cls('icv-btn icv-btn--xs', pAction.variant)} onClick={() => onAction(pAction.id, c)}>
               {pAction.label}
             </button>
           </div>
@@ -271,6 +271,7 @@ export const InboxCampaignView = ({
       <div className="ccc__body">
         <CampaignListPanel
           campaigns={campaigns}
+          allCampaigns={model?.campaigns ?? []}
           loading={loading}
           selectedId={commandState.activeCampaignId}
           onSelect={(c) => setCommandState({ activeCampaignId: c?.id ?? null, activeCampaignContext: null, displayScope: 'campaign' })}
@@ -287,7 +288,7 @@ export const InboxCampaignView = ({
           onAction={handleAction}
           initialTab={detailTab}
         />
-        {showHealthSidebar && <CampaignHealthSidebar campaign={selectedCampaign} />}
+        {showHealthSidebar && <CampaignIntelligenceRail campaign={selectedCampaign} />}
       </div>
 
       {isCreateModalOpen && (

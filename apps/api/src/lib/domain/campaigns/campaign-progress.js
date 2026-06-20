@@ -29,6 +29,16 @@ function rpcFunctionMissing(error) {
   )
 }
 
+function schemaObjectMissing(error) {
+  if (!error) return false
+  const code = error.code || ''
+  const msg = `${error.message || ''} ${error.details || ''}`.toLowerCase()
+  return (
+    code === '42703' ||
+    msg.includes('column') && msg.includes('does not exist')
+  )
+}
+
 function pct(numerator, denominator) {
   if (!denominator) return 0
   return Math.round((Number(numerator) / Number(denominator)) * 1000) / 10
@@ -116,11 +126,19 @@ export async function getCampaignRuntimeSummary(campaignId, deps = {}) {
   if (error && !rpcFunctionMissing(error)) return { ok: false, error: error.message || 'summary_failed' }
 
   // Fallback: read counters off the campaign row and derive rates in JS.
-  const { data: c, error: cErr } = await supabase
+  const progressSelect = 'id,name,status,scheduled_for,activated_at,paused_at,completed_at,failed_at,failure_reason,last_transition_at,activation_attempt_count,execution_heartbeat_at,hydration_cursor,progress_synced_at,queued_count,sent_count,delivered_count,failed_count,replied_count,positive_count,opt_out_count'
+  let { data: c, error: cErr } = await supabase
     .from('campaigns')
-    .select('id,name,status,scheduled_for,activated_at,paused_at,completed_at,failed_at,failure_reason,last_transition_at,activation_attempt_count,execution_heartbeat_at,hydration_cursor,progress_synced_at,queued_count,sent_count,delivered_count,failed_count,replied_count,positive_count,opt_out_count')
+    .select(progressSelect)
     .eq('id', campaignId)
     .maybeSingle()
+  if (cErr && schemaObjectMissing(cErr)) {
+    ;({ data: c, error: cErr } = await supabase
+      .from('campaigns')
+      .select('id,name,status,scheduled_for,activated_at,paused_at,completed_at,failed_at,failure_reason,last_transition_at')
+      .eq('id', campaignId)
+      .maybeSingle())
+  }
   if (cErr) return { ok: false, error: cErr.message || 'campaign_read_failed' }
   if (!c) return { ok: false, error: 'campaign_not_found' }
 

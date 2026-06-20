@@ -66,7 +66,7 @@ const TRANSITIONS = Object.freeze({
   paused: ['active', 'scheduled', 'completed', 'archived'],
   failed: ['paused', 'activating', 'archived'],
   completed: ['archived'],
-  archived: [],
+  archived: ['draft'],
 })
 
 export function normalizeCampaignStatus(raw) {

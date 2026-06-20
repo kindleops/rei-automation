@@ -33,7 +33,19 @@ import {
 
 export type CampaignLifecycleAction =
   | 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation'
-  | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive'
+  | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive' | 'restore'
+
+export type ActivationResult = {
+  ok: boolean
+  error?: string
+  message?: string
+  blockers?: string[]
+  inserted?: number
+  skipped?: number
+  idempotent?: boolean
+  from?: string | null
+  to?: string | null
+}
 
 // ── Supabase loaders ────────────────────────────────────────────────────────────
 
@@ -732,6 +744,19 @@ export const queueBatch = async (
   }
 }
 
+function parseLifecycleBlockers(upstream: unknown): string[] {
+  if (!upstream || typeof upstream !== 'object') return []
+  const u = upstream as Record<string, unknown>
+  const blockers = (u.blockers ?? u.exact_blockers) as string[] | undefined
+  return Array.isArray(blockers) ? blockers : []
+}
+
+function lifecycleErrorMessage(res: { message?: string; error?: string; upstream?: unknown }): string {
+  const blockers = parseLifecycleBlockers(res.upstream)
+  if (blockers.length) return blockers.join(' · ')
+  return res.message || res.error || 'lifecycle_action_failed'
+}
+
 // Operator lifecycle controls — pause / resume / archive / schedule / activate / …
 export const campaignLifecycle = async (
   campaignId: string,
@@ -740,9 +765,34 @@ export const campaignLifecycle = async (
 ) => {
   const res = await setCampaignLifecycle(campaignId, action, payload)
   if (!res.ok) {
-    throw new Error(res.message || res.error || `lifecycle_${action}_failed`)
+    throw new Error(lifecycleErrorMessage(res))
   }
   return res.data
+}
+
+export const activateCampaignWithReview = async (
+  campaignId: string,
+  payload: Record<string, unknown> = {},
+): Promise<ActivationResult> => {
+  const res = await setCampaignLifecycle(campaignId, 'activate', payload)
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: res.error,
+      message: lifecycleErrorMessage(res),
+      blockers: parseLifecycleBlockers(res.upstream),
+    }
+  }
+  const data = res.data
+  return {
+    ok: true,
+    blockers: data.blockers ?? [],
+    inserted: data.inserted ?? Number((data.queue_result as Record<string, unknown> | undefined)?.send_queue_rows_created ?? 0),
+    skipped: data.skipped ?? 0,
+    idempotent: data.idempotent,
+    from: data.from ?? null,
+    to: data.to ?? 'active',
+  }
 }
 
 export const cloneCampaign = async (campaignId: string, name?: string): Promise<string> => {

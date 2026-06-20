@@ -7,14 +7,21 @@ import {
   queueBatch,
   type CampaignLifecycleAction,
 } from './campaigns.adapter'
-import { computeCampaignHealth, canDeleteDraft } from './campaign-health'
+import { canDeleteDraft, canQueueBatch, computeCampaignHealth } from './campaign-health'
 import type { CampaignSummary } from './campaigns.types'
 
 export type CampaignActionCallbacks = {
   onRefresh: () => void | Promise<void>
   onOpenBuilder?: (campaign: CampaignSummary, mode: 'edit' | 'build' | 'schedule') => void
   onOpenSchedule?: (campaign: CampaignSummary, mode: 'schedule' | 'reschedule') => void
+  onOpenActivate?: (campaign: CampaignSummary) => void
   onSelectTab?: (campaignId: string, tab: string) => void
+}
+
+const pendingActions = new Set<string>()
+
+function actionKey(action: string, campaignId: string): string {
+  return `${action}:${campaignId}`
 }
 
 const LIFECYCLE_MAP: Record<string, CampaignLifecycleAction> = {
@@ -29,6 +36,7 @@ const LIFECYCLE_MAP: Record<string, CampaignLifecycleAction> = {
   cancel: 'unschedule',
   archive: 'archive',
   complete: 'complete',
+  restore: 'restore',
 }
 
 export async function executeCampaignAction(
@@ -37,6 +45,9 @@ export async function executeCampaignAction(
   callbacks: CampaignActionCallbacks,
   payload: Record<string, unknown> = {},
 ): Promise<boolean> {
+  const key = actionKey(action, campaign.id)
+  if (pendingActions.has(key)) return false
+
   try {
     if (action === 'refresh') {
       await callbacks.onRefresh()
@@ -53,12 +64,13 @@ export async function executeCampaignAction(
         callbacks.onOpenBuilder?.(campaign, 'build')
         return true
       }
+      pendingActions.add(key)
       const res = await buildCampaignTargetSnapshots(campaign.id, {
         limit: Math.max(campaign.total_targets, campaign.ready_targets, 500),
       })
       emitNotification({
         title: `Built ${res.built_count} targets`,
-        detail: `"${campaign.campaign_name}" snapshot v${(res.preview as any)?.build_version ?? 'latest'}`,
+        detail: `"${campaign.campaign_name}" snapshot v${(res.preview as Record<string, unknown> | undefined)?.build_version ?? 'latest'}`,
         severity: 'success',
       })
       await callbacks.onRefresh()
@@ -75,6 +87,19 @@ export async function executeCampaignAction(
       return true
     }
 
+    if (action === 'activate' || action === 'activate-now' || action === 'start') {
+      if (['archived', 'completed', 'failed'].includes(campaign.status)) {
+        emitNotification({
+          title: 'Cannot activate',
+          detail: `Campaign is ${campaign.status}. Restore or duplicate first.`,
+          severity: 'warning',
+        })
+        return false
+      }
+      callbacks.onOpenActivate?.(campaign)
+      return true
+    }
+
     if (action === 'view_targets') {
       callbacks.onSelectTab?.(campaign.id, 'targets')
       return true
@@ -86,43 +111,36 @@ export async function executeCampaignAction(
     }
 
     if (action === 'queue-batch' || action === 'queue_batch') {
-      const health = computeCampaignHealth(campaign)
-      if (health.level === 'dangerous') {
+      if (!canQueueBatch(campaign)) {
+        const health = computeCampaignHealth(campaign)
         emitNotification({
           title: 'Cannot Queue Batch',
-          detail: health.issues[0] ?? 'Campaign health is critical',
-          severity: 'critical',
-        })
-        return false
-      }
-      if (['paused', 'archived', 'completed', 'failed'].includes(campaign.status)) {
-        emitNotification({
-          title: 'Cannot Queue Batch',
-          detail: `Campaign is ${campaign.status}`,
+          detail: health.issues[0] ?? `Campaign is ${campaign.status} or has no ready targets`,
           severity: 'warning',
         })
         return false
       }
-      if (!campaign.ready_targets) {
-        emitNotification({
-          title: 'Nothing to queue',
-          detail: 'Build targets first — 0 ready targets.',
-          severity: 'warning',
-        })
-        return false
-      }
+      pendingActions.add(key)
       const res = await queueBatch(campaign.id, {
         limit: campaign.ready_targets,
         respect_send_window: true,
         interval_seconds: campaign.send_interval_seconds || 15,
       })
-      if (res.blockers?.length) {
-        emitNotification({ title: 'Queue blocked', detail: res.blockers.join(', '), severity: 'warning' })
+      const inserted = res.queued ?? 0
+      if (res.blockers?.length && inserted === 0) {
+        emitNotification({ title: 'Queue blocked', detail: res.blockers.join(' · '), severity: 'warning' })
       } else {
+        const result = res.result as Record<string, unknown> | undefined
+        const skipped = Number(result?.skipped_count ?? 0)
+        const blocked = Number(result?.blocked_count ?? 0)
         emitNotification({
-          title: `Queued ${res.queued} sends`,
-          detail: `"${campaign.campaign_name}" staged. Activate to go live.`,
-          severity: 'success',
+          title: inserted > 0 ? `Queued ${inserted} sends` : 'No new rows queued',
+          detail: [
+            inserted > 0 ? `${inserted} inserted` : null,
+            skipped > 0 ? `${skipped} skipped` : null,
+            blocked > 0 ? `${blocked} blocked` : null,
+          ].filter(Boolean).join(' · ') || `"${campaign.campaign_name}" batch complete`,
+          severity: inserted > 0 ? 'success' : 'warning',
         })
       }
       await callbacks.onRefresh()
@@ -130,10 +148,12 @@ export async function executeCampaignAction(
     }
 
     if (LIFECYCLE_MAP[action]) {
+      pendingActions.add(key)
       const lifecycleAction = LIFECYCLE_MAP[action]
       const result = await campaignLifecycle(campaign.id, lifecycleAction, payload)
+      const label = lifecycleAction === 'restore' ? 'restored to draft' : (result.to ?? lifecycleAction)
       emitNotification({
-        title: `"${campaign.campaign_name}" → ${result.to ?? lifecycleAction}`,
+        title: `"${campaign.campaign_name}" → ${label}`,
         severity: ['pause', 'cancel', 'archive', 'unschedule'].includes(action) ? 'warning' : 'success',
       })
       await callbacks.onRefresh()
@@ -141,6 +161,7 @@ export async function executeCampaignAction(
     }
 
     if (action === 'clone' || action === 'duplicate') {
+      pendingActions.add(key)
       const newId = await cloneCampaign(campaign.id)
       emitNotification({
         title: 'Campaign duplicated',
@@ -160,6 +181,11 @@ export async function executeCampaignAction(
         })
         return false
       }
+      const confirmed = window.confirm(
+        `Delete draft "${campaign.campaign_name}"? This cannot be undone.`,
+      )
+      if (!confirmed) return false
+      pendingActions.add(key)
       const res = await deleteCampaign(campaign.id)
       emitNotification({
         title: res.archived ? 'Campaign archived' : 'Campaign deleted',
@@ -176,10 +202,12 @@ export async function executeCampaignAction(
     return true
   } catch (err) {
     emitNotification({
-      title: `Action failed: ${action}`,
+      title: action === 'activate' ? 'Activation failed' : `Action failed: ${action}`,
       detail: err instanceof Error ? err.message : String(err),
       severity: 'critical',
     })
     return false
+  } finally {
+    pendingActions.delete(key)
   }
 }

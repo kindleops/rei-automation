@@ -50,6 +50,10 @@ export const CampaignScheduleModal = ({
       emitNotification({ title: 'Invalid schedule time', severity: 'warning' })
       return
     }
+    if (new Date(iso).getTime() < Date.now() - 60_000) {
+      emitNotification({ title: 'Schedule must be in the future', severity: 'warning' })
+      return
+    }
     try {
       setBusy(true)
       await campaignLifecycle(campaign.id, 'schedule', {
@@ -77,22 +81,24 @@ export const CampaignScheduleModal = ({
   }
 
   const modal = (
-    <div className="cmp-modal-overlay" onClick={onClose}>
-      <div className="cmp-schedule-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="cmp-schedule-modal__header">
-          <Icon name="calendar" size={16} />
+    <div className="ccm-glass-overlay" onClick={busy ? undefined : onClose}>
+      <div className="ccm-glass-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="ccm-glass-modal__header">
+          <div className="ccm-glass-modal__icon">
+            <Icon name="calendar" size={18} />
+          </div>
           <div>
             <h3>{mode === 'reschedule' ? 'Reschedule Campaign' : 'Schedule Campaign'}</h3>
             <p>{campaign.campaign_name}</p>
           </div>
-          <button type="button" className="cmp-modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="ccm-glass-modal__close" onClick={onClose} disabled={busy} aria-label="Close">
             <Icon name="close" size={14} />
           </button>
         </div>
 
-        <div className="cmp-schedule-modal__body">
-          <label className="cmp-schedule-field">
-            <span>First send (operator local time)</span>
+        <div className="ccm-schedule-body">
+          <label className="ccm-schedule-field">
+            <span>First send date &amp; time</span>
             <input
               type="datetime-local"
               value={scheduledAt}
@@ -100,8 +106,8 @@ export const CampaignScheduleModal = ({
             />
           </label>
 
-          <label className="cmp-schedule-field">
-            <span>Timezone semantics</span>
+          <label className="ccm-schedule-field">
+            <span>Timezone behavior</span>
             <select
               value={timezoneMode}
               onChange={(e) => setTimezoneMode(e.target.value as 'operator' | 'recipient_local')}
@@ -111,17 +117,42 @@ export const CampaignScheduleModal = ({
             </select>
           </label>
 
-          <div className="cmp-schedule-hint">
+          <div className="ccm-schedule-summary">
+            <div className="ccm-schedule-summary-item">
+              <span>Ready targets</span>
+              <strong>{campaign.ready_targets.toLocaleString()}</strong>
+            </div>
+            <div className="ccm-schedule-summary-item">
+              <span>Send spacing</span>
+              <strong>{campaign.send_interval_seconds}s</strong>
+            </div>
+            <div className="ccm-schedule-summary-item">
+              <span>Pacing</span>
+              <strong>Preserved from config</strong>
+            </div>
+            <div className="ccm-schedule-summary-item">
+              <span>Queue hydration</span>
+              <strong>On activation</strong>
+            </div>
+          </div>
+
+          {campaign.ready_targets === 0 && (
+            <div className="ccm-schedule-hint" style={{ borderColor: 'var(--warning)', color: 'var(--text-0)' }}>
+              Warning: zero ready targets — build targets before scheduling sends.
+            </div>
+          )}
+
+          <div className="ccm-schedule-hint">
             Pacing and daily cap from campaign configuration are preserved. Queue hydration occurs on activation.
           </div>
         </div>
 
-        <div className="cmp-schedule-modal__footer">
+        <div className="ccm-glass-modal__footer">
           <button type="button" className="ccc-btn" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button type="button" className="ccc-btn is-primary" onClick={handleSubmit} disabled={busy}>
-            {busy ? 'Saving…' : mode === 'reschedule' ? 'Reschedule' : 'Schedule'}
+            {busy ? 'Saving…' : mode === 'reschedule' ? 'Confirm Reschedule' : 'Confirm Schedule'}
           </button>
         </div>
       </div>

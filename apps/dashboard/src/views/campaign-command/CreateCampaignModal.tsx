@@ -1342,7 +1342,7 @@ export const CreateCampaignModal = ({
   }
 
   const LOADER_STAGES = [
-    'Loading approved targeting fields',
+    'Loading targeting catalog',
     'Resolving property universe',
     'Loading sender routes',
     'Preparing campaign builder',
@@ -1351,9 +1351,10 @@ export const CreateCampaignModal = ({
   if (isCatalogLoading || !catalog || !activeDomainDefinition) {
     return createPortal(
       <div className="cmp-studio-overlay">
-        <div className="cmp-studio">
-          <div className="cmp-studio-loading cmp-studio-loading--staged">
-            <div className="cmp-studio-loading__title">Campaign Builder</div>
+        <div className="cmp-studio" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100%' }}>
+          <div className="cmp-studio-loading cmp-studio-loading--staged cmp-studio-loading--premium">
+            <div className="cmp-studio-loading__pulse" aria-hidden />
+            <div className="cmp-studio-loading__title">Initializing Campaign Builder</div>
             <ul className="cmp-studio-loading__steps">
               {LOADER_STAGES.map((label, i) => (
                 <li key={label} className={loadStage > i ? 'is-done' : loadStage === i ? 'is-active' : ''}>
@@ -2624,17 +2625,25 @@ const BackendStatusStrip = ({
         {previewMeta && (
           <span className="cmp-operator-strip__item">Updated {previewMeta.ts}</span>
         )}
-        <button
-          type="button"
-          className={`cmp-developer-toggle ${developerMode ? 'is-active' : ''}`}
-          onClick={() => {
-            const next = !developerMode
-            onDeveloperModeChange(next)
-            if (!next) setExpanded(false)
-          }}
-        >
-          Developer Mode
-        </button>
+        <div className="cmp-operator-toggle" role="group" aria-label="View mode">
+          <button
+            type="button"
+            className={!developerMode ? 'is-active' : ''}
+            onClick={() => {
+              onDeveloperModeChange(false)
+              setExpanded(false)
+            }}
+          >
+            Operator
+          </button>
+          <button
+            type="button"
+            className={developerMode ? 'is-active' : ''}
+            onClick={() => onDeveloperModeChange(true)}
+          >
+            Developer
+          </button>
+        </div>
       </div>
 
       {developerMode && (
@@ -3002,9 +3011,8 @@ const ReachFunnelStep = ({
   <div className={`cmp-reach-funnel-step ${accent ? 'is-accent' : ''}`} role="listitem" title={hint}>
     <div className="cmp-reach-funnel-node" />
     <div className="cmp-reach-funnel-content">
-      <span>{label}</span>
-      <strong>{value === undefined || value === null ? '—' : formatNumber(value)}</strong>
-      {hint ? <em>{hint}</em> : null}
+      <span className="cmp-reach-funnel-label">{label}</span>
+      <strong className="cmp-reach-funnel-value">{value === undefined || value === null ? '—' : formatNumber(value)}</strong>
     </div>
     {!isLast ? <div className="cmp-reach-funnel-connector" /> : null}
   </div>
