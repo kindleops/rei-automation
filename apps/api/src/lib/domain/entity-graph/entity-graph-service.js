@@ -42,7 +42,7 @@ const PROSPECT_SUMMARY_SELECT = [
   'contact_score_final', 'phone_score_final', 'email_score_final', 'best_phone', 'best_email',
   'language_preference', 'gender', 'marital_status', 'education_model', 'likely_owner',
   'likely_renting', 'person_flags_text', 'linked_property_ids_json', 'phones_json', 'emails_json',
-  'sort_rank', 'source_slot',
+  'rank_position', 'source_slot',
 ].join(',')
 
 const PHONE_SUMMARY_SELECT = [
@@ -59,8 +59,8 @@ const EMAIL_SUMMARY_SELECT = [
 ].join(',')
 
 const SUB_OWNER_SELECT = [
-  'sub_owner_id', 'master_owner_id', 'owner_name', 'entity_name', 'owner_type',
-  'mailing_address', 'property_id',
+  'sub_owner_id', 'master_owner_id', 'owner_name', 'owner_entity_id', 'owner_address_full',
+  'owner_address_city', 'owner_address_state', 'owner_address_zip',
 ].join(',')
 
 function buildSearchResult({
@@ -198,7 +198,7 @@ async function searchOwners(supabase, query, limit) {
   const { data } = await supabase
     .from('master_owners')
     .select(OWNER_SUMMARY_SELECT)
-    .or(`display_name.ilike.${like},master_owner_id.ilike.${like},full_name.ilike.${like},entity_name.ilike.${like}`)
+    .or(`display_name.ilike.${like},master_owner_id.ilike.${like}`)
     .limit(limit)
   for (const row of data || []) {
     results.push(buildSearchResult({
@@ -405,19 +405,18 @@ async function searchOrganizations(supabase, query, limit) {
   const { data: subs } = await supabase
     .from('sub_owners')
     .select(SUB_OWNER_SELECT)
-    .or(`owner_name.ilike.${like},entity_name.ilike.${like},sub_owner_id.ilike.${like}`)
+    .or(`owner_name.ilike.${like},sub_owner_id.ilike.${like},owner_entity_id.ilike.${like}`)
     .limit(limit)
   for (const row of subs || []) {
     results.push(buildSearchResult({
       entityType: 'organization',
       entityId: row.sub_owner_id,
-      title: row.entity_name || row.owner_name || row.sub_owner_id,
-      subtitle: row.owner_type || 'Sub-owner entity',
+      title: row.owner_name || row.sub_owner_id,
+      subtitle: row.owner_address_full || 'Sub-owner entity',
       badges: ['Sub-owner'],
       score: 360,
       contextIds: {
         masterOwnerId: row.master_owner_id || undefined,
-        propertyId: row.property_id || undefined,
       },
     }))
   }
@@ -534,8 +533,8 @@ function paginatedResponse(results, total, cursor, pageSize) {
 const BROWSE_SORT_COLUMNS = {
   properties: { default: 'property_address_full', columns: ['property_address_full', 'market', 'final_acquisition_score', 'estimated_value'] },
   master_owners: { default: 'display_name', columns: ['display_name', 'property_count', 'priority_score', 'portfolio_total_value'] },
-  people: { default: 'full_name', columns: ['full_name', 'contact_score_final', 'sort_rank'] },
-  organizations: { default: 'owner_name', columns: ['owner_name', 'entity_name'] },
+  people: { default: 'full_name', columns: ['full_name', 'contact_score_final', 'rank_position'] },
+  organizations: { default: 'owner_name', columns: ['owner_name', 'owner_entity_id'] },
   contact_methods: { default: 'sort_rank', columns: ['sort_rank', 'contact_score_final'] },
   markets: { default: 'market_key', columns: ['market_key', 'property_count'] },
   zips: { default: 'zip', columns: ['zip', 'property_count'] },
@@ -585,11 +584,11 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
   const results = (data || []).map((row) => buildSearchResult({
     entityType: 'organization',
     entityId: row.sub_owner_id,
-    title: row.entity_name || row.owner_name || row.sub_owner_id,
-    subtitle: row.owner_type || 'Sub-owner entity',
+    title: row.owner_name || row.sub_owner_id,
+    subtitle: row.owner_address_full || 'Sub-owner entity',
     badges: ['Organization'],
     score: 100,
-    contextIds: { masterOwnerId: row.master_owner_id || undefined, propertyId: row.property_id || undefined },
+    contextIds: { masterOwnerId: row.master_owner_id || undefined },
   }))
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
@@ -645,16 +644,45 @@ async function browseMarkets(supabase, { cursor, pageSize, sortBy, ascending }) 
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
 
+async function fetchZipDistinctCount(supabase) {
+  const { data, error } = await supabase.rpc('entity_graph_zip_distinct_count')
+  if (!error && data !== null && data !== undefined) return Number(data) || 0
+
+  const { count, error: viewError } = await supabase
+    .from('v_entity_graph_zips')
+    .select('zip', { count: 'exact', head: true })
+  if (!viewError) return count || 0
+  return 0
+}
+
 async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('entity_graph_browse_zips', {
+    p_offset: cursor,
+    p_limit: pageSize,
+    p_ascending: ascending,
+  })
+
+  if (!rpcError && Array.isArray(rpcRows)) {
+    const total = await fetchZipDistinctCount(supabase)
+    const results = rpcRows.map((row) => buildSearchResult({
+      entityType: 'zip',
+      entityId: row.zip,
+      title: `ZIP ${row.zip}`,
+      subtitle: row.market || undefined,
+      badges: ['ZIP'],
+      score: 100,
+      linkedCounts: { properties: Number(row.property_count) || 0 },
+      contextIds: {},
+    }))
+    return paginatedResponse(results, total, cursor, pageSize)
+  }
+
   const orderCol = sortBy === 'property_count' ? 'property_count' : 'zip'
-  let data
-  let error
-  let count
-  ;({ data, error, count } = await supabase
+  const { data, error, count } = await supabase
     .from('v_entity_graph_zips')
     .select('zip, market, property_count', { count: 'exact' })
     .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1))
+    .range(cursor, cursor + pageSize - 1)
   if (error) {
     const merged = dedupeResults(sortResults(await searchMarketsAndZips(supabase, '', cursor + pageSize + 50), ''))
       .filter((row) => row.entityType === 'zip')
@@ -726,10 +754,13 @@ export async function getEntityGraphCounts(deps = {}) {
       const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).not('market', 'is', null)
       return { count: count || 0, error: null }
     }),
-    supabase.from('v_entity_graph_zips').select('zip', { count: 'exact', head: true }).then(async (result) => {
-      if (!result.error) return result
-      const { count } = await supabase.from('properties').select('property_id', { count: 'exact', head: true }).not('property_address_zip', 'is', null)
-      return { count: count || 0, error: null }
+    supabase.rpc('entity_graph_zip_distinct_count').then(async (result) => {
+      if (!result.error && result.data !== null && result.data !== undefined) {
+        return { count: Number(result.data) || 0, error: null }
+      }
+      const viewResult = await supabase.from('v_entity_graph_zips').select('zip', { count: 'exact', head: true })
+      if (!viewResult.error) return viewResult
+      return { count: 0, error: null }
     }),
   ])
 
@@ -795,7 +826,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     const { data, error, count } = await supabase
       .from('master_owners')
       .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
-      .or(`display_name.ilike.${like},master_owner_id.ilike.${like},full_name.ilike.${like},entity_name.ilike.${like}`)
+      .or(`display_name.ilike.${like},master_owner_id.ilike.${like}`)
       .order('priority_score', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     if (error) throw error
@@ -858,18 +889,44 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 }
 
 async function fetchThreadsForContext(supabase, { propertyId, masterOwnerId, prospectId, phoneId, emailId }) {
+  const select = 'thread_key, property_id, master_owner_id, prospect_id, seller_phone, canonical_e164, latest_message_at, latest_message_body, status'
   let query = supabase
     .from('inbox_thread_state')
-    .select('thread_key, property_id, master_owner_id, prospect_id, phone_id, email_id, last_message_at, last_message_body, inbox_status')
-    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .select(select)
+    .order('latest_message_at', { ascending: false, nullsFirst: false })
     .limit(25)
 
-  if (phoneId) query = query.eq('phone_id', phoneId)
-  else if (emailId) query = query.eq('email_id', emailId)
-  else if (propertyId) query = query.eq('property_id', propertyId)
-  else if (prospectId) query = query.eq('prospect_id', prospectId)
-  else if (masterOwnerId) query = query.eq('master_owner_id', masterOwnerId)
-  else return []
+  if (phoneId) {
+    const { data: phone } = await supabase
+      .from('phones')
+      .select('canonical_e164, phone')
+      .eq('phone_id', phoneId)
+      .maybeSingle()
+    const e164 = clean(phone?.canonical_e164 || phone?.phone)
+    if (!e164) return []
+    query = query.or(`canonical_e164.eq.${e164},seller_phone.eq.${e164},thread_key.eq.${e164}`)
+  } else if (emailId) {
+    const { data: email } = await supabase
+      .from('emails')
+      .select('master_owner_id, primary_prospect_id, canonical_prospect_id')
+      .eq('email_id', emailId)
+      .maybeSingle()
+    if (email?.primary_prospect_id || email?.canonical_prospect_id) {
+      query = query.eq('prospect_id', email.primary_prospect_id || email.canonical_prospect_id)
+    } else if (email?.master_owner_id) {
+      query = query.eq('master_owner_id', email.master_owner_id)
+    } else {
+      return []
+    }
+  } else if (propertyId) {
+    query = query.eq('property_id', propertyId)
+  } else if (prospectId) {
+    query = query.eq('prospect_id', prospectId)
+  } else if (masterOwnerId) {
+    query = query.eq('master_owner_id', masterOwnerId)
+  } else {
+    return []
+  }
 
   const { data, error } = await query
   if (error) throw error
@@ -1246,7 +1303,7 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
         entityId,
         summary: sub,
         owner: sub.master_owner_id ? (await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', sub.master_owner_id).maybeSingle()).data : null,
-        graph: { nodes: [{ id: `organization:${entityId}`, type: 'organization', label: sub.entity_name || sub.owner_name, meta: { active: true } }], edges: [] },
+        graph: { nodes: [{ id: `organization:${entityId}`, type: 'organization', label: sub.owner_name || sub.sub_owner_id, meta: { active: true } }], edges: [] },
         timeline: [],
       }
     }

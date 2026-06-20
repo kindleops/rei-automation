@@ -259,7 +259,10 @@ export function EntityGraphWorkspace({
       .then((response) => {
         if (controller.signal.aborted) return
         setResults(response.results)
-        setPagination(response.pagination)
+        setPagination({
+          ...response.pagination,
+          previousCursor: response.pagination.previousCursor ?? null,
+        })
       })
       .catch(() => {
         if (!controller.signal.aborted) {
@@ -364,7 +367,6 @@ export function EntityGraphWorkspace({
   const showSideDossier = layoutMode === 'explorer' || layoutMode === 'workspace' || (layoutMode === 'command' && visualMode === 'graph')
   const showPeekPreview = layoutMode === 'peek' && hasSelection
   const showDrawer = layoutMode === 'command' && drawerOpen && hasSelection && (visualMode === 'table' || visualMode === 'cards')
-  const showResultsFullWidth = layoutMode === 'command' && visualMode !== 'graph'
 
   const columns = TABLE_COLUMNS[activeTab]
 
@@ -524,11 +526,9 @@ export function EntityGraphWorkspace({
       </div>
 
       <div className={`nx-entity-graph__body is-mode-${layoutMode === 'command' ? visualMode : effectiveVisualMode}${showGraph ? ' is-graph-visible' : ''}`}>
-        {showResultsFullWidth && layoutMode === 'command' && visualMode === 'graph' ? null : (
-          (layoutMode !== 'command' || visualMode !== 'graph') && renderResultsPanel()
-        )}
+        {(layoutMode !== 'command' || visualMode !== 'graph') && renderResultsPanel()}
 
-        {showSideDossier && layoutMode !== 'peek' && (
+        {showSideDossier && (
           <div className="nx-entity-graph__dossier-panel">
             <div className="nx-entity-graph__panel-header">Selected Record</div>
             <EntityGraphDossierPanel
