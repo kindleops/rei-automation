@@ -4,6 +4,7 @@ import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
+import { resolveThreadTemperature } from '../status-visuals'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
@@ -113,16 +114,29 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   return 'sending'
 }
 
-const deliveryBadgeLabel = (badge: DeliveryBadge): string => {
+const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string } => {
   switch (badge) {
-    case 'sending': return 'Sending'
-    case 'sent': return 'Sent'
-    case 'delivered': return 'Delivered'
-    case 'failed': return 'Failed'
-    case 'scheduled': return 'Scheduled'
-    case 'cancelled': return 'Cancelled'
-    default: return badge
+    case 'sending': return { icon: '◷', label: 'Sending' }
+    case 'sent': return { icon: '✓', label: 'Sent' }
+    case 'delivered': return { icon: '✓✓', label: 'Delivered' }
+    case 'failed': return { icon: '!', label: 'Failed' }
+    case 'scheduled': return { icon: '◷', label: 'Scheduled' }
+    case 'cancelled': return { icon: '×', label: 'Cancelled' }
+    default: return { icon: '•', label: badge }
   }
+}
+
+const isUnknownValue = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase()
+  return !normalized || normalized === 'unknown' || normalized === 'unknown market' || normalized === '—'
+}
+
+const formatFlagLabel = (flag: string): string => (flag === 'Absentee' ? 'Absentee Owner' : flag)
+
+interface PropertyChip {
+  key: string
+  label: string
+  className?: string
 }
 
 const threadRecord = (thread: InboxWorkflowThread): Record<string, unknown> =>
@@ -175,7 +189,7 @@ const resolveConversationPropertyFlags = (thread: InboxWorkflowThread): string[]
 
   const addIf = (condition: boolean, label: string) => { if (condition) flags.add(label) }
 
-  addIf(Boolean((thread as { absenteeOwner?: boolean }).absenteeOwner || (decision as { absentee_owner?: boolean }).absentee_owner), 'Absentee')
+  addIf(Boolean((thread as { absenteeOwner?: boolean }).absenteeOwner || (decision as { absentee_owner?: boolean }).absentee_owner), 'Absentee Owner')
   addIf(Boolean((thread as { probate?: boolean }).probate || (decision as { probate?: boolean }).probate), 'Probate')
   addIf(Boolean((thread as { vacant?: boolean }).vacant || (decision as { vacant?: boolean }).vacant), 'Vacant')
   addIf(Boolean((thread as { highEquity?: boolean }).highEquity || (decision as { high_equity?: boolean }).high_equity), 'High Equity')
@@ -183,7 +197,7 @@ const resolveConversationPropertyFlags = (thread: InboxWorkflowThread): string[]
   if (typeText.includes('multi')) flags.add('Multifamily')
   if (typeText.includes('commercial')) flags.add('Commercial')
 
-  const order = ['Absentee', 'Probate', 'High Equity', 'Vacant', 'Multifamily', 'Commercial']
+  const order = ['Absentee Owner', 'Probate', 'High Equity', 'Vacant', 'Multifamily', 'Commercial']
   return order.filter((label) => flags.has(label))
 }
 
@@ -454,23 +468,35 @@ export const ChatThread = ({
   const atmosphereClass = getAtmosphereClass(thread, isSuppressed)
 
   const propertyTypeRaw = readString(thread, 'propertyType', 'property_type')
-  const propertyTypeLabel = resolvePropertyTypeLabel(propertyTypeRaw) || propertyTypeRaw || '—'
+  const propertyTypeLabel = resolvePropertyTypeLabel(propertyTypeRaw) || (isUnknownValue(propertyTypeRaw) ? '' : propertyTypeRaw)
   const unitCount = readNumber(thread, 'unitCount', 'unit_count', 'units', 'number_of_units', 'units_count')
   const estimatedValue = readNumber(thread, 'estimatedValue', 'estimated_value')
   const equityAmount = readNumber(thread, 'equityAmount', 'equity_amount')
   const equityPercent = readNumber(thread, 'equityPercent', 'equity_percent')
   const buildingCondition = resolveBuildingCondition(thread)
   const propertyFlags = resolveConversationPropertyFlags(thread)
-  const visibleFlags = propertyFlags.slice(0, 2)
-  const overflowFlagCount = Math.max(0, propertyFlags.length - visibleFlags.length)
-  const threadLanguage = readString(
-    thread,
-    'language',
-    'detected_language',
-    'seller_language',
-    'preferred_language',
-  ) || sellerLanguageLabel || 'Unknown'
+  const visibleFlags = propertyFlags.slice(0, 2).map(formatFlagLabel)
+  const overflowFlagCount = Math.max(0, propertyFlags.length - 2)
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
+  const cleanMarket = market && !isUnknownValue(market) ? market : ''
+  const threadTemperature = resolveThreadTemperature(thread)
+  const temperatureClass = threadTemperature === 'hot'
+    ? 'is-temp-hot'
+    : threadTemperature === 'warm'
+      ? 'is-temp-warm'
+      : 'is-temp-cold'
+
+  const propertyChips: PropertyChip[] = []
+  if (cleanMarket) propertyChips.push({ key: 'market', label: cleanMarket, className: 'is-market' })
+  if (propertyTypeLabel) propertyChips.push({ key: 'type', label: propertyTypeLabel })
+  if (unitCount != null && unitCount > 1) propertyChips.push({ key: 'units', label: `${unitCount} Units` })
+  if (estimatedValue) propertyChips.push({ key: 'value', label: `Value ${formatCompactMoney(estimatedValue)}` })
+  if (equityDisplay !== '—') propertyChips.push({ key: 'equity', label: `Equity ${equityDisplay}` })
+  if (buildingCondition) propertyChips.push({ key: 'condition', label: buildingCondition })
+  visibleFlags.forEach((flag) => propertyChips.push({ key: `flag-${flag}`, label: flag, className: 'is-flag' }))
+  if (overflowFlagCount > 0) propertyChips.push({ key: 'flags-more', label: `+${overflowFlagCount}`, className: 'is-flag' })
+  if (isSuppressed) propertyChips.push({ key: 'suppressed', label: 'Suppressed', className: 'is-status' })
+  if (backgroundLoading) propertyChips.push({ key: 'sync', label: 'Syncing…' })
 
   const renderHeaderActions = (withLabels = false) => (
     <>
@@ -519,67 +545,64 @@ export const ChatThread = ({
     <div className={cls('nx-chat-container', `is-layout-${layoutMode}`, atmosphereClass)}>
       <div className="nx-chat-atmosphere" aria-hidden="true" />
 
-      <header className="nx-chat-header-v2">
-        <div className="nx-chat-header-v2__left nx-conv-header-primary">
-          <div className="nx-conv-header-identity">
-            <span className="nx-conv-header-name">{ownerName}</span>
-            {isRecovered && import.meta.env.DEV && (
-              <span className="nx-chat-recovered-badge" title="Recovered from local selection history fallback.">
-                Recovered
-              </span>
-            )}
-            {phoneNumber && (
-              <span className="nx-conv-header-phone">
-                <Icon name="phone" />
-                {phoneNumber}
-              </span>
-            )}
-            {import.meta.env.DEV && (
-              <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug thread">
-                <Icon name="cpu" />
-              </button>
+      <header className={cls('nx-conv-header', temperatureClass)}>
+        <div className="nx-conv-header__glow" aria-hidden="true" />
+
+        <div className="nx-conv-layer-a">
+          <div className="nx-conv-layer-a__identity">
+            <h2 className="nx-conv-seller-name">{ownerName}</h2>
+            <div className="nx-conv-identity-row">
+              {phoneNumber && (
+                <span className="nx-conv-identity-phone">
+                  <Icon name="phone" />
+                  {phoneNumber}
+                </span>
+              )}
+              {cleanMarket && (
+                <span className="nx-conv-identity-market">
+                  <Icon name="pin" />
+                  {cleanMarket}
+                </span>
+              )}
+              {isRecovered && import.meta.env.DEV && (
+                <span className="nx-chat-recovered-badge" title="Recovered from local selection history fallback.">
+                  Recovered
+                </span>
+              )}
+              {import.meta.env.DEV && (
+                <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug thread">
+                  <Icon name="cpu" />
+                </button>
+              )}
+            </div>
+            {propertyAddress && (
+              <div className="nx-conv-identity-address">{propertyAddress}</div>
             )}
           </div>
 
-          {propertyAddress && (
-            <div className="nx-conv-header-address">{propertyAddress}</div>
+          {isCompact ? (
+            <details className="nx-chat-actions-disclosure">
+              <summary aria-label="Thread actions"><Icon name="more" /></summary>
+              <div className="nx-chat-actions-disclosure__menu">
+                {renderHeaderActions(true)}
+              </div>
+            </details>
+          ) : (
+            <div className="nx-conv-layer-a__actions">
+              {renderHeaderActions(false)}
+            </div>
           )}
-
-          <div className="nx-conv-header-metrics" aria-label="Property context">
-            {market && <span className="nx-conv-metric is-accent">{market}</span>}
-            <span className="nx-conv-metric">{propertyTypeLabel}</span>
-            {unitCount != null && unitCount > 1 && (
-              <span className="nx-conv-metric">{unitCount} Units</span>
-            )}
-            <span className="nx-conv-metric">Value {formatCompactMoney(estimatedValue)}</span>
-            <span className="nx-conv-metric">Equity {equityDisplay}</span>
-            {buildingCondition && <span className="nx-conv-metric">{buildingCondition}</span>}
-            <span className="nx-conv-metric">{threadLanguage}</span>
-            {visibleFlags.map((flag) => (
-              <span key={flag} className="nx-conv-metric is-flag">{flag}</span>
-            ))}
-            {overflowFlagCount > 0 && (
-              <span className="nx-conv-metric is-flag">+{overflowFlagCount}</span>
-            )}
-            {isSuppressed && (
-              <span className="nx-conv-metric is-flag"><Icon name="slash" /> Suppressed</span>
-            )}
-            {backgroundLoading && (
-              <span className="nx-conv-metric"><Icon name="activity" style={{ width: 10, height: 10 }} /> Syncing</span>
-            )}
-          </div>
         </div>
 
-        {isCompact ? (
-          <details className="nx-chat-actions-disclosure">
-            <summary aria-label="Thread actions"><Icon name="more" /></summary>
-            <div className="nx-chat-actions-disclosure__menu">
-              {renderHeaderActions(true)}
+        {propertyChips.length > 0 && (
+          <div className="nx-conv-layer-b">
+            <div className="nx-conv-property-strip" aria-label="Property intelligence">
+              {propertyChips.map((chip) => (
+                <span key={chip.key} className={cls('nx-conv-chip', chip.className)}>
+                  {chip.label}
+                </span>
+              ))}
             </div>
-          </details>
-        ) : (
-          <div className="nx-chat-header-v2__actions">
-            {renderHeaderActions(false)}
           </div>
         )}
       </header>
@@ -685,8 +708,12 @@ export const ChatThread = ({
 
                     {isOutbound && (
                       <div className="nx-delivery-row">
-                        <span className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}>
-                          {deliveryBadgeLabel(deliveryBadge)}
+                        <span
+                          className={cls('nx-delivery-pill', `is-${deliveryBadge}`)}
+                          title={deliveryBadge === 'failed' && msg.error ? String(msg.error) : undefined}
+                        >
+                          <span className="nx-delivery-pill__icon" aria-hidden="true">{deliveryBadgeMeta(deliveryBadge).icon}</span>
+                          <span>{deliveryBadgeMeta(deliveryBadge).label}</span>
                         </span>
 
                         {isScheduled && queueId && (
@@ -717,29 +744,27 @@ export const ChatThread = ({
 
                   {!isOutbound && (
                     isTranslatingThread ? (
-                      <div className="nx-translate-badge is-translating" title="Translating…">
+                      <div className="nx-translate-meta is-translating" aria-live="polite">
                         <span className="nx-translate-badge__spinner" />
                         <span>Translating…</span>
                       </div>
                     ) : isMessageTranslated ? (
-                      <div
-                        className="nx-translate-badge is-translated"
-                        title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translated from ${sellerLanguageLabel}` : 'Translated'}
-                      >
+                      <div className="nx-translate-meta is-translated">
                         <Icon name="globe" />
-                        <span>Translated</span>
+                        <span>
+                          {sellerLanguageLabel && sellerLanguageLabel !== 'Unknown'
+                            ? `Translated from ${sellerLanguageLabel}`
+                            : 'Translated'}
+                        </span>
+                        <button type="button" onClick={() => onTranslateThread?.()}>Show Original</button>
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="nx-translate-badge is-available"
-                        title={sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? `Translate from ${sellerLanguageLabel}` : 'Translate message'}
-                        onClick={() => onTranslateThread?.()}
-                      >
+                    ) : sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? (
+                      <div className="nx-translate-meta is-available">
                         <Icon name="globe" />
-                        <span>Translate</span>
-                      </button>
-                    )
+                        <span>{sellerLanguageLabel}</span>
+                        <button type="button" onClick={() => onTranslateThread?.()}>Show Translation</button>
+                      </div>
+                    ) : null
                   )}
 
                   <div className="nx-bubble-hover-actions">

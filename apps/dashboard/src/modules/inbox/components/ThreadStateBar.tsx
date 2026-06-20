@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Icon } from '../../../shared/icons'
+import type { IconName } from '../../../shared/icons'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { updateThreadState } from '../../../lib/api/backendClient'
 import {
@@ -19,14 +22,12 @@ import {
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-// ── DropdownPill ─────────────────────────────────────────────────────────────
-
 interface PillOption<T extends string> {
   value: T
   visual: PillVisual
 }
 
-interface DropdownPillProps<T extends string> {
+interface GlassControlProps<T extends string> {
   label: string
   value: T
   options: PillOption<T>[]
@@ -35,9 +36,11 @@ interface DropdownPillProps<T extends string> {
   disabled: boolean
   onChange: (next: T) => void
   className?: string
+  compact?: boolean
+  icon?: IconName
 }
 
-function DropdownPill<T extends string>({
+function GlassControl<T extends string>({
   label,
   value,
   options,
@@ -46,76 +49,122 @@ function DropdownPill<T extends string>({
   disabled,
   onChange,
   className,
-}: DropdownPillProps<T>) {
+  compact = false,
+  icon,
+}: GlassControlProps<T>) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const current = options.find((o) => o.value === value) ?? options[0]
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) {
+      setMenuPos(null)
+      return
+    }
+    const update = () => {
+      const rect = btnRef.current?.getBoundingClientRect()
+      if (!rect) return
+      setMenuPos({ top: rect.bottom + 6, left: rect.left, minWidth: Math.max(rect.width, 168) })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (btnRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onDown)
-    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+    }
   }, [open])
 
-  const pillStyle = current && !error
-    ? { color: current.visual.color, background: current.visual.bg, borderColor: current.visual.border }
+  const dotColor = error ? '#ff453a' : current?.visual.color ?? 'var(--nx-accent, #3b82f6)'
+  const btnStyle = current && !error
+    ? ({
+        '--ctrl-color': current.visual.color,
+        '--ctrl-bg': current.visual.bg,
+        '--ctrl-border': current.visual.border,
+        color: current.visual.color,
+        borderColor: current.visual.border,
+        background: `color-mix(in srgb, ${current.visual.bg} 72%, transparent)`,
+      } as React.CSSProperties)
     : error
-      ? { color: '#ff453a', background: 'rgba(255,69,58,0.1)', borderColor: 'rgba(255,69,58,0.3)' }
-      : {}
+      ? { color: '#ff453a', borderColor: 'rgba(255,69,58,0.3)', background: 'rgba(255,69,58,0.08)' }
+      : undefined
+
+  const menu = open && menuPos && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="nx-conv-dropdown-portal"
+        role="listbox"
+        aria-label={label}
+        style={{ top: menuPos.top, left: menuPos.left, minWidth: menuPos.minWidth }}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            role="option"
+            aria-selected={opt.value === value}
+            className={cls('nx-conv-dropdown-option', opt.value === value && 'is-selected')}
+            onClick={() => { onChange(opt.value); setOpen(false) }}
+          >
+            <span className="nx-conv-dropdown-option__dot" style={{ background: opt.visual.color }} />
+            <span>{opt.visual.label}</span>
+            {opt.value === value && <span className="nx-conv-dropdown-option__check">✓</span>}
+          </button>
+        ))}
+      </div>,
+      document.body,
+    )
+    : null
 
   return (
-    <div
-      ref={rootRef}
-      className={cls('nx-state-pill-wrap', open && 'is-open', pending && 'is-pending', error && 'is-error', className)}
-      title={label}
-    >
+    <div className={cls('nx-conv-glass-control', open && 'is-open', className)}>
       <button
+        ref={btnRef}
         type="button"
-        className="nx-state-pill"
-        style={pillStyle}
+        className={cls('nx-conv-glass-btn', compact && 'is-compact')}
+        style={btnStyle}
         onClick={() => !disabled && setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`${label}: ${current?.visual.label}`}
+        aria-label={`${label}: ${error ? 'Failed' : current?.visual.label}`}
         disabled={disabled}
       >
         {pending
-          ? <span className="nx-state-pill__spinner" aria-hidden="true" />
-          : <span className="nx-state-pill__dot" style={{ background: error ? '#ff453a' : current?.visual.color }} />
+          ? <span className="nx-conv-glass-btn__spinner" aria-hidden="true" />
+          : icon
+            ? <Icon name={icon} />
+            : <span className="nx-conv-glass-btn__dot" style={{ background: dotColor }} />
         }
-        <span className="nx-state-pill__label">{error ? 'Failed' : current?.visual.label}</span>
-        {!disabled && <span className="nx-state-pill__caret" aria-hidden="true">▾</span>}
+        <span>{error ? 'Failed' : current?.visual.label}</span>
+        {!disabled && <span className="nx-conv-glass-btn__caret" aria-hidden="true">▾</span>}
       </button>
-
-      {open && (
-        <div className="nx-state-pill__dropdown" role="listbox" aria-label={label}>
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="option"
-              aria-selected={opt.value === value}
-              className={cls('nx-state-pill__option', opt.value === value && 'is-selected')}
-              style={{ '--opt-color': opt.visual.color, '--opt-bg': opt.visual.bg } as React.CSSProperties}
-              onClick={() => { onChange(opt.value); setOpen(false) }}
-            >
-              <span className="nx-state-pill__option-dot" style={{ background: opt.visual.color }} />
-              <span>{opt.visual.label}</span>
-              {opt.value === value && <span className="nx-state-pill__option-check" aria-hidden="true">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
+      {menu}
     </div>
   )
 }
 
-// ── Option lists (stable, module-level) ──────────────────────────────────────
+const AUTOPILOT_SHORT_LABELS: Record<AutopilotMode, string> = {
+  autopilot_on: 'Autopilot',
+  autopilot_paused: 'Paused',
+  manual_only: 'Manual',
+}
 
 const STATUS_OPTIONS: PillOption<ThreadStatus>[] = (Object.keys(threadStatusVisuals) as ThreadStatus[]).map(
   (v) => ({ value: v, visual: threadStatusVisuals[v] }),
@@ -125,16 +174,19 @@ const STAGE_OPTIONS: PillOption<ThreadStage>[] = (Object.keys(threadStageVisuals
   (v) => ({ value: v, visual: threadStageVisuals[v] }),
 )
 
-// Temperature: Hot / Warm / Cold only (Dead is a system state, not operator-set)
 const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = (['hot', 'warm', 'cold'] as ThreadTemperature[]).map(
   (v) => ({ value: v, visual: threadTemperatureVisuals[v] }),
 )
 
 const AUTO_OPTIONS: PillOption<AutopilotMode>[] = (Object.keys(autopilotModeVisuals) as AutopilotMode[]).map(
-  (v) => ({ value: v, visual: autopilotModeVisuals[v] }),
+  (v) => ({
+    value: v,
+    visual: {
+      ...autopilotModeVisuals[v],
+      label: AUTOPILOT_SHORT_LABELS[v],
+    },
+  }),
 )
-
-// ── Pill state with optimistic update + rollback ──────────────────────────────
 
 function useOptimisticField<T extends string>(initial: T) {
   const [value, setValue] = useState<T>(initial)
@@ -150,7 +202,7 @@ function useOptimisticField<T extends string>(initial: T) {
     const result = await persist()
     setPending(false)
     if (!result.ok) {
-      setValue(previousRef.current) // rollback
+      setValue(previousRef.current)
       setError(true)
       setTimeout(() => setError(false), 3000)
     }
@@ -160,8 +212,6 @@ function useOptimisticField<T extends string>(initial: T) {
 
   return { value, pending, error, commit, reset }
 }
-
-// ── ThreadStateBar ────────────────────────────────────────────────────────────
 
 export interface ThreadStateBarProps {
   thread: InboxWorkflowThread
@@ -177,7 +227,6 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
   const temperature = useOptimisticField<ThreadTemperature>(resolveThreadTemperature(thread))
   const autopilot = useOptimisticField<AutopilotMode>(resolveAutopilotMode(thread))
 
-  // Reset all fields when the thread identity changes
   const prevKeyRef = useRef(thread.id)
   if (prevKeyRef.current !== thread.id) {
     prevKeyRef.current = thread.id
@@ -196,45 +245,50 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
   const anyPending = status.pending || stage.pending || temperature.pending || autopilot.pending
 
   return (
-    <div className={cls('nx-thread-state-bar', anyPending && 'is-syncing')} aria-label="Thread state controls">
-      <DropdownPill
-        label="Status"
-        value={status.value}
-        options={STATUS_OPTIONS}
-        pending={status.pending}
-        error={status.error}
-        disabled={disabled}
-        className="nx-pill--status"
-        onChange={(next) => status.commit(next, () => persist({ conversation_status: next }))}
-      />
-      <DropdownPill
-        label="Stage"
-        value={stage.value}
-        options={STAGE_OPTIONS}
-        pending={stage.pending}
-        error={stage.error}
-        disabled={disabled}
-        className="nx-pill--stage"
-        onChange={(next) => stage.commit(next, () => persist({ seller_stage: next }))}
-      />
-      <DropdownPill
-        label="Temperature"
-        value={temperature.value}
-        options={TEMP_OPTIONS}
-        pending={temperature.pending}
-        error={temperature.error}
-        disabled={disabled}
-        className="nx-pill--temperature"
-        onChange={(next) => temperature.commit(next, () => persist({ temperature: next }))}
-      />
-      <DropdownPill
-        label="Autopilot"
+    <div className={cls('nx-conv-command-strip', anyPending && 'is-syncing')} aria-label="Universal thread controls">
+      <div className="nx-conv-command-strip__primary">
+        <GlassControl
+          label="Conversation status"
+          value={status.value}
+          options={STATUS_OPTIONS}
+          pending={status.pending}
+          error={status.error}
+          disabled={disabled}
+          className="nx-ctrl--status"
+          onChange={(next) => status.commit(next, () => persist({ conversation_status: next }))}
+        />
+        <GlassControl
+          label="Acquisition stage"
+          value={stage.value}
+          options={STAGE_OPTIONS}
+          pending={stage.pending}
+          error={stage.error}
+          disabled={disabled}
+          className="nx-ctrl--stage"
+          onChange={(next) => stage.commit(next, () => persist({ seller_stage: next }))}
+        />
+        <GlassControl
+          label="Lead temperature"
+          value={temperature.value}
+          options={TEMP_OPTIONS}
+          pending={temperature.pending}
+          error={temperature.error}
+          disabled={disabled}
+          className="nx-ctrl--temperature"
+          onChange={(next) => temperature.commit(next, () => persist({ temperature: next }))}
+        />
+      </div>
+      <div className="nx-conv-command-strip__spacer" aria-hidden="true" />
+      <GlassControl
+        label="Automation state"
         value={autopilot.value}
         options={AUTO_OPTIONS}
         pending={autopilot.pending}
         error={autopilot.error}
         disabled={disabled}
-        className="nx-pill--autopilot"
+        className="nx-conv-auto-control"
+        compact
+        icon="zap"
         onChange={(next) => autopilot.commit(next, () => persist({ autopilot_mode: next }))}
       />
     </div>
