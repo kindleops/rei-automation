@@ -2,23 +2,21 @@ export type BuyerMarketSignal = 'Strong' | 'Active' | 'Balanced' | 'Thin' | 'No 
 
 export type EngineProgressStage =
   | 'resolving_property'
-  | 'loading_comps'
+  | 'selecting_comps'
+  | 'calculating_valuation'
   | 'measuring_buyer_demand'
   | 'evaluating_seller_pressure'
   | 'comparing_strategies'
   | 'building_offer_stack'
-  | 'decision_ready'
+  | 'finalizing_decision'
 
-export interface DealIntelligenceIdentity {
-  thread_key: string
-  property_id?: string
-  prospect_id?: string
-  master_owner_id?: string
-  canonical_e164?: string
-  market?: string | null
-  zip?: string | null
-  latitude?: number | null
-  longitude?: number | null
+export interface BaselineScores {
+  acquisition_score?: number | null
+  deal_strength_score?: number | null
+  motivation_score?: number | null
+  distress_score?: number | null
+  ai_score?: number | null
+  label?: string
 }
 
 export interface DealIntelligenceProperty {
@@ -40,19 +38,31 @@ export interface DealIntelligenceProperty {
   equity_amount?: number | null
   equity_percentage?: number | null
   loan_balance?: number | null
+  ownership_years?: number | null
   property_flags?: string[]
+  property_flags_overflow?: number
   street_view_url?: string | null
   satellite_url?: string | null
   latitude?: number | null
   longitude?: number | null
   acquisition_score?: number | null
+  deal_strength_score?: number | null
+  motivation_score?: number | null
+  distress_score?: number | null
+  ai_score?: number | null
 }
 
 export interface DealIntelligenceDecisionSnapshot {
   acquisition_score?: number | null
+  deal_strength_score?: number | null
+  motivation_score?: number | null
+  distress_score?: number | null
+  ai_score?: number | null
   heat_score?: number | null
   recommended_cash_offer?: number | null
+  minimum_acceptable_offer?: number | null
   engine_status?: string
+  engine_available?: boolean
   valuation_range?: {
     low?: number | null
     mid?: number | null
@@ -61,46 +71,34 @@ export interface DealIntelligenceDecisionSnapshot {
   }
   equity_amount?: number | null
   equity_percentage?: number | null
+  repair_estimate?: number | null
+  value?: number | null
+  condition?: string | null
   best_strategy?: string | null
+  decision_tier?: string | null
+  confidence?: number | null
   expected_assignment_fee?: number | null
   buyer_demand_score?: number | null
   liquidity_score?: number | null
+  buyer_market_signal?: string | null
+  owner_priority?: number | null
   largest_risk?: { label: string; score?: number | null } | null
   recommended_next_action?: string | null
-}
-
-export interface DealIntelligenceBuyerMarket {
-  status: string
-  signal?: BuyerMarketSignal
-  geographic_level_used?: string | null
-  fallback_attempted?: string[]
-  purchase_count?: number | null
-  buyer_count?: number | null
-  corporate_buyer_count?: number | null
-  repeat_buyer_count?: number | null
-  avg_purchase_price?: number | null
-  median_purchase_price?: number | null
-  ppsf?: number | null
-  ppu?: number | null
-  liquidity_score?: number | null
-  velocity_score?: number | null
-  investor_demand_score?: number | null
-  buyer_heat_score?: number | null
-  dominant_buyer_type?: string | null
-  dominant_strategy?: string | null
-  data_freshness?: string | null
+  engine_computed_at?: string | null
 }
 
 export interface DealIntelligenceDossier {
-  identity: DealIntelligenceIdentity
+  identity: Record<string, unknown>
+  location?: Record<string, unknown>
   property: DealIntelligenceProperty
+  baseline_scores?: BaselineScores
   prospect: Record<string, unknown>
   master_owner: Record<string, unknown>
   phone: Record<string, unknown>
   acquisition_decision: Record<string, unknown>
   decision_snapshot: DealIntelligenceDecisionSnapshot
   comps: Record<string, unknown>
-  buyer_market: DealIntelligenceBuyerMarket
+  buyer_market: Record<string, unknown>
   buyer_matches: Record<string, unknown>
   census: Record<string, unknown>
   activity_timeline: Array<Record<string, unknown>>
@@ -110,10 +108,11 @@ export interface DealIntelligenceDossier {
 
 export const ENGINE_STAGE_LABELS: Record<EngineProgressStage, string> = {
   resolving_property: 'Resolving property',
-  loading_comps: 'Loading comps',
-  measuring_buyer_demand: 'Measuring buyer demand',
+  selecting_comps: 'Selecting comparable sales',
+  calculating_valuation: 'Calculating valuation range',
+  measuring_buyer_demand: 'Measuring investor demand',
   evaluating_seller_pressure: 'Evaluating seller pressure',
-  comparing_strategies: 'Comparing strategies',
+  comparing_strategies: 'Comparing acquisition strategies',
   building_offer_stack: 'Building offer stack',
-  decision_ready: 'Decision ready',
+  finalizing_decision: 'Finalizing decision',
 }

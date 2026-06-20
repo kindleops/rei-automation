@@ -1,6 +1,6 @@
 /**
  * Canonical Deal Intelligence dossier builder.
- * Single normalized contract for all Deal Intelligence panel widths.
+ * Primary enrichment: inbox_threads_hydrated → properties → entity tables.
  */
 import { supabase } from '../supabase/client.js'
 import {
@@ -34,51 +34,40 @@ const ACQUISITION_SCORE_SELECT = [
 
 const PROPERTY_SELECT = [
   'property_id', 'master_owner_id', 'property_address_full', 'property_address_city',
-  'property_address_state', 'property_address_zip', 'property_address_county_name',
-  'market', 'latitude', 'longitude', 'property_type', 'property_class',
-  'normalized_asset_class', 'normalized_asset_subclass', 'asset_class', 'asset_type',
-  'total_bedrooms', 'total_baths', 'building_square_feet', 'units_count',
-  'year_built', 'effective_year_built', 'building_condition', 'building_quality',
-  'estimated_repair_cost', 'estimated_value', 'arv', 'equity_amount', 'equity_percent',
-  'total_loan_balance', 'property_flags_text', 'property_flags_json',
-  'streetview_image', 'satellite_image', 'final_acquisition_score',
-  'structured_motivation_score', 'deal_strength_score',
-].join(',')
-
-const PROSPECT_SELECT = [
-  'prospect_id', 'master_owner_id', 'full_name', 'first_name', 'last_name',
-  'language', 'language_preference', 'calculated_age', 'age', 'occupation',
-  'occupation_group', 'est_household_income', 'estimated_household_income',
-  'net_asset_value', 'buying_power', 'person_flags_text', 'person_flags_json',
-  'matching_flags', 'prospect_contact_score', 'motivation_score', 'urgency_score',
-  'financial_pressure_score',
+  'property_address_state', 'property_address_zip', 'property_zip', 'property_address_county_name',
+  'property_county_name', 'market', 'market_region', 'latitude', 'longitude',
+  'property_type', 'property_class', 'normalized_asset_class', 'normalized_asset_subclass',
+  'asset_class', 'asset_type', 'total_bedrooms', 'total_baths', 'building_square_feet',
+  'units_count', 'year_built', 'effective_year_built', 'building_condition', 'building_quality',
+  'estimated_repair_cost', 'estimated_value', 'equity_amount', 'equity_percent',
+  'total_loan_balance', 'property_flags_text', 'property_flags_json', 'streetview_image',
+  'satellite_image', 'final_acquisition_score', 'structured_motivation_score',
+  'deal_strength_score', 'tag_distress_score', 'ai_score', 'ownership_years',
 ].join(',')
 
 const OWNER_SELECT = [
-  'master_owner_id', 'display_name', 'owner_type_guess', 'owner_type',
+  'master_owner_id', 'display_name', 'owner_type_guess',
   'priority_score', 'urgency_score', 'financial_pressure_score',
-  'contactability_score', 'portfolio_total_value', 'portfolio_total_equity',
-  'property_count', 'portfolio_total_units', 'tax_delinquent_count',
-  'active_lien_count', 'ownership_years', 'seller_tags_text', 'seller_tags_json',
-  'absentee_owner', 'primary_owner_address',
+  'contactability_score', 'best_contact_window', 'portfolio_total_value',
+  'portfolio_total_equity', 'portfolio_total_loan_balance', 'property_count',
+  'portfolio_total_units', 'tax_delinquent_count', 'active_lien_count',
+  'seller_tags_text', 'seller_tags_json', 'primary_owner_address',
+  'best_language', 'routing_market',
+].join(',')
+
+const PROSPECT_SELECT = [
+  'prospect_id', 'master_owner_id', 'full_name', 'first_name',
+  'occupation_group', 'est_household_income', 'net_asset_value',
+  'buying_power', 'person_flags_text', 'person_flags_json', 'matching_flags',
+  'contact_score_final', 'phone_score_final', 'best_phone', 'best_email',
+  'language_preference',
 ].join(',')
 
 const PHONE_SELECT = [
-  'phone_id', 'canonical_e164', 'phone_number', 'line_type', 'phone_type',
-  'phone_carrier', 'carrier', 'activity_status', 'usage', 'contact_score',
-  'contact_window', 'timezone', 'wrong_number', 'is_wrong_number', 'dnc_status',
-  'sms_eligible', 'sort_rank',
+  'phone_id', 'canonical_e164', 'phone', 'phone_type',
+  'activity_status', 'usage_12_months', 'usage_2_months', 'contact_score_final',
+  'contact_window', 'timezone', 'wrong_number_at', 'sort_rank',
 ].join(',')
-
-const COMP_DETAIL_SELECT = [
-  'id', 'property_id', 'property_address_full', 'property_address_zip',
-  'normalized_asset_class', 'property_type', 'total_bedrooms', 'total_baths',
-  'building_square_feet', 'units_count', 'year_built', 'renovation_level_classification',
-  'sale_date', 'sale_price', 'computed_ppsf', 'ppu', 'ppbd', 'arv_estimate',
-  'comp_confidence_score', 'deal_grade', 'distance_miles', 'similarity_score',
-].join(',')
-
-const BUYER_MARKET_SIGNALS = ['Strong', 'Active', 'Balanced', 'Thin', 'No Coverage']
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -97,8 +86,102 @@ function hasValue(value) {
   return true
 }
 
-function omitEmptyRows(rows) {
-  return rows.filter((row) => hasValue(row.value))
+function pick(...values) {
+  for (const value of values) {
+    if (!hasValue(value)) continue
+    const text = clean(value)
+    if (text && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'n/a') return value
+  }
+  return null
+}
+
+function parseZipFromAddress(address) {
+  const text = clean(address)
+  if (!text) return null
+  const match = text.match(/\b(\d{5})(?:-\d{4})?\b/)
+  return match ? match[1] : null
+}
+
+export function resolveCanonicalLocation({ propertyRow, hydrated, identity }) {
+  const fullAddress = pick(
+    propertyRow?.property_address_full,
+    hydrated?.property_address_full,
+    identity?.full_address,
+  )
+  const zip = normalizeZip(
+    pick(
+      propertyRow?.property_address_zip,
+      propertyRow?.property_zip,
+      hydrated?.property_address_zip,
+      hydrated?.zip,
+      identity?.zip,
+      parseZipFromAddress(fullAddress),
+    ),
+  )
+  const city = pick(propertyRow?.property_address_city, hydrated?.property_address_city, hydrated?.city)
+  const state = normalizeState(
+    pick(propertyRow?.property_address_state, hydrated?.property_address_state, hydrated?.state),
+  )
+  const cityStateMarket = city && state ? `${city}, ${state}` : null
+  const market = pick(
+    propertyRow?.market,
+    propertyRow?.market_region,
+    identity?.market,
+    cityStateMarket,
+    hydrated?.market_region,
+    hydrated?.market,
+  )
+  const county = pick(propertyRow?.property_address_county_name, propertyRow?.property_county_name, hydrated?.property_county_name)
+  const latitude = num(pick(propertyRow?.latitude, hydrated?.latitude, identity?.latitude))
+  const longitude = num(pick(propertyRow?.longitude, hydrated?.longitude, identity?.longitude))
+
+  return {
+    full_address: fullAddress,
+    zip,
+    market,
+    state,
+    county,
+    city,
+    latitude,
+    longitude,
+    resolution: {
+      zip_sources: [
+        propertyRow?.property_address_zip && 'property_address_zip',
+        propertyRow?.property_zip && 'property_zip',
+        hydrated?.zip && 'hydrated.zip',
+        hydrated?.property_address_zip && 'hydrated.property_address_zip',
+        parseZipFromAddress(fullAddress) && 'parsed_address',
+      ].filter(Boolean),
+      market_source: propertyRow?.market
+        ? 'properties.market'
+        : identity?.market
+          ? 'identity.market'
+          : cityStateMarket
+            ? 'parsed.city_state'
+            : hydrated?.market_region
+              ? 'hydrated.market_region'
+              : hydrated?.market
+                ? 'hydrated.market'
+                : null,
+    },
+  }
+}
+
+function parsePropertyFlags(text, json) {
+  const flags = []
+  if (hasValue(text)) {
+    flags.push(
+      ...String(text)
+        .split(/[;,|]/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    )
+  }
+  if (json && typeof json === 'object') {
+    if (Array.isArray(json)) flags.push(...json.map((v) => clean(v)).filter(Boolean))
+    else if (Array.isArray(json.flags)) flags.push(...json.flags.map((v) => clean(v)).filter(Boolean))
+  }
+  return [...new Set(flags)]
 }
 
 function buyerMarketSignal(score) {
@@ -119,8 +202,28 @@ async function queryMaybe(table, select, filters = {}, abortSignal) {
   }
   if (abortSignal) query = query.abortSignal(abortSignal)
   const { data, error } = await query.maybeSingle()
-  if (error && !/does not exist|column/.test(error.message || '')) throw error
-  return data || null
+  if (!error) return data || null
+  if (/does not exist|column/i.test(error.message || '')) {
+    console.warn(`[DEAL_INTEL_QUERY] ${table} select failed: ${error.message}`)
+    return null
+  }
+  throw error
+}
+
+async function queryHydratedThread({ thread_key, property_id }, abortSignal) {
+  if (thread_key) {
+    let query = supabase.from('inbox_threads_hydrated').select('*').eq('thread_key', thread_key).limit(1)
+    if (abortSignal) query = query.abortSignal(abortSignal)
+    const { data, error } = await query.maybeSingle()
+    if (!error && data) return data
+  }
+  if (property_id) {
+    let query = supabase.from('inbox_threads_hydrated').select('*').eq('property_id', property_id).limit(1)
+    if (abortSignal) query = query.abortSignal(abortSignal)
+    const { data, error } = await query.maybeSingle()
+    if (!error && data) return data
+  }
+  return null
 }
 
 async function resolveIdentity({
@@ -129,6 +232,7 @@ async function resolveIdentity({
   prospect_id,
   master_owner_id,
   canonical_e164,
+  hydrated,
   abortSignal,
 }) {
   let resolved = {
@@ -141,6 +245,16 @@ async function resolveIdentity({
     zip: null,
     latitude: null,
     longitude: null,
+    full_address: null,
+  }
+
+  if (hydrated) {
+    resolved.property_id = resolved.property_id || clean(hydrated.property_id)
+    resolved.prospect_id = resolved.prospect_id || clean(hydrated.prospect_id)
+    resolved.master_owner_id = resolved.master_owner_id || clean(hydrated.master_owner_id)
+    resolved.canonical_e164 = resolved.canonical_e164 || clean(hydrated.canonical_e164 || hydrated.seller_phone || hydrated.thread_key)
+    resolved.thread_key = resolved.thread_key || clean(hydrated.thread_key)
+    resolved.full_address = clean(hydrated.property_address_full) || null
   }
 
   if (resolved.thread_key && (!resolved.property_id || !resolved.canonical_e164)) {
@@ -155,24 +269,7 @@ async function resolveIdentity({
       resolved.master_owner_id = resolved.master_owner_id || clean(threadState.master_owner_id)
       resolved.prospect_id = resolved.prospect_id || clean(threadState.prospect_id)
       resolved.canonical_e164 = resolved.canonical_e164 || clean(threadState.canonical_e164 || threadState.seller_phone)
-      resolved.market = clean(threadState.market) || null
-    }
-  }
-
-  if (resolved.property_id && (!resolved.zip || !resolved.latitude)) {
-    const property = await queryMaybe(
-      'properties',
-      'property_id, master_owner_id, prospect_id, market, property_address_zip, latitude, longitude',
-      { property_id: resolved.property_id },
-      abortSignal,
-    )
-    if (property) {
-      resolved.master_owner_id = resolved.master_owner_id || clean(property.master_owner_id)
-      resolved.prospect_id = resolved.prospect_id || clean(property.prospect_id)
-      resolved.market = resolved.market || clean(property.market)
-      resolved.zip = clean(property.property_address_zip)
-      resolved.latitude = num(property.latitude)
-      resolved.longitude = num(property.longitude)
+      resolved.market = clean(threadState.market) || resolved.market
     }
   }
 
@@ -187,11 +284,13 @@ async function fetchBuyerGeoRollup(subject, abortSignal) {
   const state = normalizeState(subject.state)
 
   const attempts = [
-    zip ? { geo_level: 'zip', geo_key: zip, asset, label: `ZIP ${zip} · ${asset}` } : null,
-    county ? { geo_level: 'county', geo_key: county, asset, label: `County ${county} · ${asset}` } : null,
-    market ? { geo_level: 'market', geo_key: market, asset, label: `Market ${market} · ${asset}` } : null,
-    market ? { geo_level: 'market', geo_key: market, asset: 'all', label: `Market ${market} · all` } : null,
-    state ? { geo_level: 'state', geo_key: state, asset: 'all', label: `State ${state} · all` } : null,
+    zip ? { geo_level: 'zip', geo_key: zip, asset, label: `ZIP ${zip} + ${asset}` } : null,
+    zip ? { geo_level: 'zip', geo_key: zip, asset: 'all', label: `ZIP ${zip} + all` } : null,
+    county ? { geo_level: 'county', geo_key: county, asset, label: `County ${county} + ${asset}` } : null,
+    market ? { geo_level: 'market', geo_key: market, asset, label: `Market ${market} + ${asset}` } : null,
+    market ? { geo_level: 'market', geo_key: market, asset: 'all', label: `Market ${market} + all` } : null,
+    state ? { geo_level: 'state', geo_key: state, asset, label: `State ${state} + ${asset}` } : null,
+    state ? { geo_level: 'state', geo_key: state, asset: 'all', label: `State ${state} + all` } : null,
   ].filter(Boolean)
 
   const attempted = []
@@ -213,7 +312,7 @@ async function fetchBuyerGeoRollup(subject, abortSignal) {
         status: 'available',
         signal: buyerMarketSignal(heat),
         timeframe: data.timeframe || data.rollup_window || '6mo',
-        geographic_level_used: attempt.geo_level,
+        geographic_level_used: `${attempt.geo_level} · ${attempt.asset}`,
         geographic_key: attempt.geo_key,
         normalized_asset_class: attempt.asset,
         fallback_attempted: attempted,
@@ -243,26 +342,31 @@ async function fetchBuyerGeoRollup(subject, abortSignal) {
   return {
     status: 'no_coverage',
     signal: 'No Buyer Coverage',
+    label: 'No matching buyer rollup after full fallback',
     geographic_level_used: null,
     fallback_attempted: attempted,
     source: 'buyer_geo_rollups_v2',
   }
 }
 
-async function fetchCompsSection(property, abortSignal) {
+async function fetchCompsSection(property, location, abortSignal) {
   if (!property?.property_id) {
     return { status: 'missing', comp_count: 0, weighted_comp_count: 0, records: [] }
   }
 
   const subject = {
     property_id: property.property_id,
-    latitude: num(property.latitude),
-    longitude: num(property.longitude),
-    zip: property.zip,
-    market: property.market,
-    state: property.state,
+    latitude: num(property.latitude ?? location.latitude),
+    longitude: num(property.longitude ?? location.longitude),
+    zip: location.zip || property.zip,
+    market: location.market || property.market,
+    state: location.state || property.state,
+    city: location.city || property.city,
     normalized_asset_class: property.normalized_asset_class,
     property_type: property.property_type,
+    units_count: property.units,
+    building_square_feet: property.square_feet,
+    year_built: property.year_built,
   }
 
   let comps = []
@@ -300,10 +404,7 @@ async function fetchCompsSection(property, abortSignal) {
   const median = (arr) => (arr.length ? arr[Math.floor(arr.length / 2)] : null)
   const isMultifamily = /multi|mf|duplex|triplex|fourplex|apt/i.test(
     String(property.normalized_asset_class || property.property_type || ''),
-  )
-
-  const valuationLow = salePrices.length ? Math.min(...salePrices) : null
-  const valuationHigh = salePrices.length ? Math.max(...salePrices) : null
+  ) || (num(property.units) || 0) > 1
 
   return {
     status: records.length ? 'available' : 'missing',
@@ -312,14 +413,20 @@ async function fetchCompsSection(property, abortSignal) {
     median_sale: median(salePrices),
     median_ppsf: isMultifamily ? null : median(ppsfValues),
     median_ppu: isMultifamily ? median(ppuValues) : null,
-    valuation_low: valuationLow,
-    valuation_high: valuationHigh,
+    valuation_low: salePrices.length ? Math.min(...salePrices) : null,
+    valuation_high: salePrices.length ? Math.max(...salePrices) : null,
+    valuation_mid: median(salePrices),
     confidence: records.length
       ? Math.round(records.reduce((sum, r) => sum + (num(r.confidence) || 0), 0) / records.length)
       : null,
     freshness: records[0]?.sale_date || null,
     records,
     source: 'v_recent_sold_comps',
+    match_context: {
+      zip: location.zip,
+      market: location.market,
+      asset_class: property.normalized_asset_class || property.property_type,
+    },
   }
 }
 
@@ -361,18 +468,20 @@ async function fetchBuyerMatches(propertyId, abortSignal) {
   }
 }
 
-async function fetchActivityTimeline({
-  thread_key,
-  canonical_e164,
-  property_id,
-  abortSignal,
-}) {
+async function fetchActivityTimeline({ thread_key, canonical_e164, property_id, hydrated, abortSignal }) {
   const events = []
   const pushUnique = (event) => {
     const key = `${event.type}|${event.timestamp}|${event.label}`
-    if (!events.some((e) => `${e.type}|${e.timestamp}|${e.label}` === key)) {
-      events.push(event)
-    }
+    if (!events.some((e) => `${e.type}|${e.timestamp}|${e.label}` === key)) events.push(event)
+  }
+
+  if (hydrated?.latest_message_at) {
+    pushUnique({
+      type: hydrated.latest_message_direction === 'inbound' ? 'inbound_reply' : 'outreach_sent',
+      label: hydrated.latest_message_direction === 'inbound' ? 'Inbound reply' : 'Outreach sent',
+      timestamp: hydrated.latest_message_at,
+      source: 'inbox_threads_hydrated',
+    })
   }
 
   if (canonical_e164) {
@@ -388,12 +497,7 @@ async function fetchActivityTimeline({
       const direction = clean(msg.direction).toLowerCase()
       const intent = clean(msg.intent).toLowerCase()
       if (direction === 'outbound' || direction === 'out') {
-        pushUnique({
-          type: 'outreach_sent',
-          label: 'Outreach sent',
-          timestamp: msg.created_at,
-          source: 'message_events',
-        })
+        pushUnique({ type: 'outreach_sent', label: 'Outreach sent', timestamp: msg.created_at, source: 'message_events' })
       } else if (direction === 'inbound' || direction === 'in') {
         pushUnique({
           type: intent.includes('positive') ? 'positive_engagement' : 'inbound_reply',
@@ -403,12 +507,7 @@ async function fetchActivityTimeline({
         })
       }
       if (clean(msg.delivery_status).toLowerCase() === 'failed') {
-        pushUnique({
-          type: 'delivery_failure',
-          label: 'Delivery failure',
-          timestamp: msg.created_at,
-          source: 'message_events',
-        })
+        pushUnique({ type: 'delivery_failure', label: 'Delivery failure', timestamp: msg.created_at, source: 'message_events' })
       }
     }
   }
@@ -422,60 +521,11 @@ async function fetchActivityTimeline({
     )
     if (threadState?.updated_at) {
       if (threadState.universal_stage) {
-        pushUnique({
-          type: 'stage_change',
-          label: `Stage · ${threadState.universal_stage}`,
-          timestamp: threadState.updated_at,
-          source: 'inbox_thread_state',
-        })
+        pushUnique({ type: 'stage_change', label: `Stage · ${threadState.universal_stage}`, timestamp: threadState.updated_at, source: 'inbox_thread_state' })
       }
       if (threadState.universal_status || threadState.inbox_bucket) {
-        pushUnique({
-          type: 'status_change',
-          label: `Status · ${threadState.universal_status || threadState.inbox_bucket}`,
-          timestamp: threadState.updated_at,
-          source: 'inbox_thread_state',
-        })
+        pushUnique({ type: 'status_change', label: `Status · ${threadState.universal_status || threadState.inbox_bucket}`, timestamp: threadState.updated_at, source: 'inbox_thread_state' })
       }
-    }
-  }
-
-  if (property_id) {
-    let offerQuery = supabase
-      .from('property_cash_offer_snapshots')
-      .select('offer_price, created_at, source')
-      .eq('property_id', property_id)
-      .order('created_at', { ascending: false })
-      .limit(5)
-    if (abortSignal) offerQuery = offerQuery.abortSignal(abortSignal)
-    const { data: offers } = await offerQuery
-    for (const offer of offers || []) {
-      pushUnique({
-        type: clean(offer.source).includes('sent') ? 'offer_sent' : 'offer_calculated',
-        label: clean(offer.source).includes('sent') ? 'Offer sent' : 'Offer calculated',
-        timestamp: offer.created_at,
-        source: 'property_cash_offer_snapshots',
-        value: num(offer.offer_price),
-      })
-    }
-
-    let matchQuery = supabase
-      .from('buyer_match_runs')
-      .select('created_at, total_matches')
-      .eq('property_id', property_id)
-      .gt('total_matches', 0)
-      .order('created_at', { ascending: false })
-      .limit(3)
-    if (abortSignal) matchQuery = matchQuery.abortSignal(abortSignal)
-    const { data: matches } = await matchQuery
-    for (const match of matches || []) {
-      pushUnique({
-        type: 'buyer_match_generated',
-        label: 'Buyer match generated',
-        timestamp: match.created_at,
-        source: 'buyer_match_runs',
-        value: num(match.total_matches),
-      })
     }
   }
 
@@ -485,54 +535,140 @@ async function fetchActivityTimeline({
     .slice(0, 25)
 }
 
-function normalizeProperty(row) {
-  if (!row) return { status: 'missing' }
-  const flags = []
-  if (row.property_flags_text) {
-    flags.push(...String(row.property_flags_text).split(',').map((s) => s.trim()).filter(Boolean))
+function buildBaselineScores(propertyRow, hydrated) {
+  return {
+    acquisition_score: num(pick(propertyRow?.final_acquisition_score, hydrated?.final_acquisition_score)),
+    deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
+    motivation_score: num(pick(propertyRow?.structured_motivation_score, hydrated?.priority_score, hydrated?.structured_motivation_score)),
+    distress_score: num(pick(propertyRow?.tag_distress_score, hydrated?.tag_distress_score)),
+    ai_score: num(pick(propertyRow?.ai_score, hydrated?.ai_score)),
+    label: 'Baseline Property Intelligence',
   }
+}
+
+function normalizeProperty(propertyRow, hydrated, location) {
+  if (!propertyRow && !hydrated) return { status: 'missing' }
+  const flags = parsePropertyFlags(
+    pick(propertyRow?.property_flags_text, hydrated?.property_flags_text),
+    pick(propertyRow?.property_flags_json, hydrated?.property_flags_json),
+  )
+
   return {
     status: 'available',
-    property_id: clean(row.property_id),
-    full_address: row.property_address_full || null,
-    street: row.property_address_full?.split(',')[0]?.trim() || null,
-    city: row.property_address_city || null,
-    state: row.property_address_state || null,
-    zip: row.property_address_zip || null,
-    county: row.property_address_county_name || null,
-    market: row.market || null,
-    property_type: row.property_type || null,
-    normalized_asset_class: row.normalized_asset_class || row.asset_class || null,
-    units: num(row.units_count),
-    bedrooms: num(row.total_bedrooms),
-    bathrooms: num(row.total_baths),
-    square_feet: num(row.building_square_feet),
-    year_built: num(row.year_built),
-    condition: row.building_condition || null,
-    repair_estimate: num(row.estimated_repair_cost),
-    arv: num(row.arv),
-    value: num(row.estimated_value),
-    equity_amount: num(row.equity_amount),
-    equity_percentage: num(row.equity_percent),
-    loan_balance: num(row.total_loan_balance),
-    property_flags: flags.slice(0, 6),
-    street_view_url: row.streetview_image || null,
-    satellite_url: row.satellite_image || null,
-    latitude: num(row.latitude),
-    longitude: num(row.longitude),
-    acquisition_score: num(row.final_acquisition_score),
-    motivation_score: num(row.structured_motivation_score),
-    deal_strength_score: num(row.deal_strength_score),
+    property_id: clean(pick(propertyRow?.property_id, hydrated?.property_id)),
+    full_address: location.full_address,
+    street: location.full_address?.split(',')[0]?.trim() || null,
+    city: location.city,
+    state: location.state,
+    zip: location.zip,
+    county: location.county,
+    market: location.market,
+    property_type: pick(propertyRow?.property_type, hydrated?.property_type),
+    normalized_asset_class: pick(propertyRow?.normalized_asset_class, propertyRow?.asset_class, hydrated?.property_class),
+    units: num(pick(propertyRow?.units_count, hydrated?.units_count)),
+    bedrooms: num(pick(propertyRow?.total_bedrooms, hydrated?.total_bedrooms)),
+    bathrooms: num(pick(propertyRow?.total_baths, hydrated?.total_baths)),
+    square_feet: num(pick(propertyRow?.building_square_feet, hydrated?.building_square_feet)),
+    year_built: num(pick(propertyRow?.year_built, hydrated?.year_built)),
+    condition: pick(propertyRow?.building_condition, hydrated?.building_condition),
+    repair_estimate: num(pick(propertyRow?.estimated_repair_cost, hydrated?.estimated_repair_cost)),
+    arv: null,
+    value: num(pick(propertyRow?.estimated_value, hydrated?.estimated_value)),
+    equity_amount: num(pick(propertyRow?.equity_amount, hydrated?.equity_amount)),
+    equity_percentage: num(pick(propertyRow?.equity_percent, hydrated?.equity_percent)),
+    loan_balance: num(pick(propertyRow?.total_loan_balance, hydrated?.total_loan_balance, hydrated?.total_loan_amt)),
+    ownership_years: num(pick(propertyRow?.ownership_years, hydrated?.ownership_years)),
+    property_flags: flags,
+    property_flags_overflow: Math.max(0, flags.length - 3),
+    street_view_url: pick(propertyRow?.streetview_image, hydrated?.streetview_image),
+    satellite_url: pick(propertyRow?.satellite_image, hydrated?.satellite_image),
+    latitude: location.latitude,
+    longitude: location.longitude,
+    acquisition_score: num(pick(propertyRow?.final_acquisition_score, hydrated?.final_acquisition_score)),
+    motivation_score: num(pick(propertyRow?.structured_motivation_score, hydrated?.priority_score)),
+    deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
+    distress_score: num(pick(propertyRow?.tag_distress_score, hydrated?.tag_distress_score)),
+    ai_score: num(pick(propertyRow?.ai_score, hydrated?.ai_score)),
   }
+}
+
+function normalizeProspect(prospectRow, hydrated, phoneRow) {
+  const name = pick(prospectRow?.full_name, hydrated?.prospect_full_name, hydrated?.owner_display_name)
+  if (!name && !prospectRow && !hydrated) return { status: 'sparse' }
+
+  return {
+    status: 'available',
+    prospect_id: clean(pick(prospectRow?.prospect_id, hydrated?.prospect_id)),
+    name,
+    language: pick(hydrated?.best_language, prospectRow?.language_preference),
+    age: num(pick(prospectRow?.calculated_age, prospectRow?.age, prospectRow?.prospect_age, hydrated?.prospect_age, hydrated?.calculated_age)),
+    occupation: pick(prospectRow?.occupation, hydrated?.occupation),
+    occupation_group: pick(prospectRow?.occupation_group, hydrated?.occupation_group),
+    household_income: pick(prospectRow?.est_household_income, prospectRow?.estimated_household_income, hydrated?.est_household_income),
+    net_asset_value: pick(prospectRow?.net_asset_value, hydrated?.net_asset_value),
+    buying_power: pick(prospectRow?.buying_power, hydrated?.buying_power),
+    person_flags: pick(prospectRow?.person_flags_text, prospectRow?.matching_flags, hydrated?.person_flags_text, hydrated?.matching_flags),
+    contact_score: num(pick(prospectRow?.contact_score_final, prospectRow?.phone_score_final, hydrated?.prospect_contact_score, hydrated?.prospect_phone_score)),
+    contact_window: pick(phoneRow?.contact_window, hydrated?.best_contact_window),
+    thread_priority: num(hydrated?.thread_priority ?? hydrated?.priority_score),
+  }
+}
+
+function normalizeOwner(ownerRow, hydrated) {
+  const displayName = pick(ownerRow?.display_name, hydrated?.owner_display_name, hydrated?.prospect_full_name)
+  if (!displayName && !ownerRow && !hydrated) return { status: 'sparse' }
+
+  return {
+    status: 'available',
+    master_owner_id: clean(pick(ownerRow?.master_owner_id, hydrated?.master_owner_id)),
+    display_name: displayName,
+    owner_type: pick(ownerRow?.owner_type_guess, hydrated?.owner_type_guess),
+    priority_score: num(pick(ownerRow?.priority_score, hydrated?.owner_priority_score)),
+    urgency_score: num(pick(ownerRow?.urgency_score, hydrated?.urgency_score)),
+    financial_pressure_score: num(pick(ownerRow?.financial_pressure_score, hydrated?.financial_pressure_score)),
+    contactability_score: num(pick(ownerRow?.contactability_score, hydrated?.contactability_score)),
+    contact_window: pick(ownerRow?.best_contact_window, hydrated?.best_contact_window),
+    portfolio_value: num(pick(ownerRow?.portfolio_total_value, hydrated?.portfolio_total_value)),
+    portfolio_equity: num(pick(ownerRow?.portfolio_total_equity, hydrated?.portfolio_total_equity)),
+    portfolio_loan_balance: num(pick(ownerRow?.portfolio_total_loan_balance, hydrated?.portfolio_total_loan_balance)),
+    property_count: num(pick(ownerRow?.property_count, hydrated?.property_count)),
+    total_units: num(pick(ownerRow?.portfolio_total_units, hydrated?.portfolio_total_units)),
+    tax_delinquent_count: num(pick(ownerRow?.tax_delinquent_count, hydrated?.tax_delinquent_count)),
+    active_lien_count: num(pick(ownerRow?.active_lien_count, hydrated?.active_lien_count)),
+    ownership_years: num(hydrated?.ownership_years),
+    seller_tags: pick(ownerRow?.seller_tags_text, hydrated?.seller_tags_text),
+    absentee_owner: /absentee/i.test(String(pick(ownerRow?.owner_type_guess, hydrated?.owner_type_guess) || '')),
+  }
+}
+
+function normalizePhone(phoneRow, hydrated, canonicalE164) {
+  if (phoneRow) {
+    return {
+      status: 'available',
+      number: pick(phoneRow.canonical_e164, phoneRow.phone, canonicalE164),
+      type: phoneRow.phone_type || null,
+      carrier: null,
+      activity_status: phoneRow.activity_status || null,
+      usage: phoneRow.usage_12_months || phoneRow.usage_2_months || null,
+      contact_score: num(phoneRow.contact_score_final),
+      contact_window: pick(phoneRow.contact_window, hydrated?.best_contact_window),
+      timezone: phoneRow.timezone || null,
+      wrong_number: Boolean(phoneRow.wrong_number_at),
+    }
+  }
+  if (canonicalE164) {
+    return {
+      status: 'available',
+      number: canonicalE164,
+      contact_window: hydrated?.best_contact_window || null,
+    }
+  }
+  return { status: 'missing' }
 }
 
 function normalizeAcquisitionDecision(row) {
   if (!row) {
-    return {
-      status: 'not_run',
-      label: 'Decision Engine Not Run',
-      can_run: true,
-    }
+    return { status: 'not_run', label: 'Full Decision Engine Not Run', can_run: true }
   }
   return {
     status: 'available',
@@ -540,8 +676,10 @@ function normalizeAcquisitionDecision(row) {
     acquisition_score: num(row.aos_score),
     heat_score: num(row.aos_score),
     recommended_cash_offer: num(row.recommended_cash_offer),
+    minimum_acceptable_offer: num(row.minimum_acceptable_offer),
     expected_assignment_fee: num(row.expected_assignment_fee),
     best_strategy: row.best_strategy || null,
+    decision_tier: row.decision_tier || null,
     valuation_range: {
       low: num(row.valuation_low),
       mid: num(row.valuation_mid),
@@ -554,43 +692,59 @@ function normalizeAcquisitionDecision(row) {
   }
 }
 
-function buildDecisionSnapshot({ property, acquisition, buyerMarket, comps }) {
+function buildDecisionSnapshot({ property, baseline, acquisition, buyerMarket, comps, hydrated }) {
   const risks = []
+  const flags = property?.property_flags || []
+  if (flags.some((f) => /tax delinquent/i.test(f))) risks.push({ label: 'Tax delinquent', score: 85 })
+  if (flags.some((f) => /tired landlord/i.test(f))) risks.push({ label: 'Tired landlord', score: 75 })
+  if (flags.some((f) => /heavily dated/i.test(f))) risks.push({ label: 'Heavily dated', score: 70 })
   if (num(acquisition?.foreclosure_risk_score) >= 60) risks.push({ label: 'Foreclosure risk', score: acquisition.foreclosure_risk_score })
-  if (num(acquisition?.tax_pain_score) >= 60) risks.push({ label: 'Tax pressure', score: acquisition.tax_pain_score })
-  if (num(acquisition?.debt_pressure_score) >= 60) risks.push({ label: 'Debt pressure', score: acquisition.debt_pressure_score })
   if (num(acquisition?.repair_burden_score) >= 60) risks.push({ label: 'Repair burden', score: acquisition.repair_burden_score })
-  if (num(property?.equity_percentage) < 20 && num(property?.equity_percentage) > 0) {
-    risks.push({ label: 'Thin equity', score: 100 - num(property.equity_percentage) })
+  if (num(property?.repair_estimate) > 0 && num(property?.value) > 0 && property.repair_estimate / property.value > 0.25) {
+    risks.push({ label: 'Heavy repair load', score: Math.round((property.repair_estimate / property.value) * 100) })
   }
   risks.sort((a, b) => (b.score || 0) - (a.score || 0))
 
-  let recommendedNextAction = acquisition?.recommended_conversation_angle || null
-  if (!recommendedNextAction && acquisition?.status === 'not_run') {
-    recommendedNextAction = 'Run Decision Engine'
-  } else if (!recommendedNextAction) {
-    recommendedNextAction = 'Review valuation and offer stack'
-  }
+  const engineAvailable = acquisition?.status === 'available'
+  let recommendedNextAction = acquisition?.recommended_conversation_angle || hydrated?.ai_next_action || hydrated?.next_action || null
+  if (!recommendedNextAction && !engineAvailable) recommendedNextAction = 'Run Full Decision Engine for offer stack'
+  else if (!recommendedNextAction) recommendedNextAction = 'Review valuation and offer stack'
 
   return {
-    acquisition_score: acquisition?.acquisition_score ?? property?.acquisition_score ?? null,
-    heat_score: acquisition?.heat_score ?? property?.motivation_score ?? null,
-    recommended_cash_offer: acquisition?.recommended_cash_offer ?? null,
+    acquisition_score: engineAvailable ? acquisition.acquisition_score : baseline.acquisition_score,
+    deal_strength_score: baseline.deal_strength_score,
+    motivation_score: baseline.motivation_score,
+    distress_score: baseline.distress_score,
+    ai_score: baseline.ai_score,
+    heat_score: engineAvailable ? acquisition.heat_score : baseline.acquisition_score,
+    recommended_cash_offer: engineAvailable ? acquisition.recommended_cash_offer : null,
+    minimum_acceptable_offer: engineAvailable ? acquisition.minimum_acceptable_offer : null,
     engine_status: acquisition?.status || 'missing',
-    valuation_range: acquisition?.valuation_range || {
-      low: comps?.valuation_low ?? null,
-      mid: comps?.median_sale ?? null,
-      high: comps?.valuation_high ?? null,
-      confidence: comps?.confidence ?? null,
-    },
+    engine_available: engineAvailable,
+    valuation_range: engineAvailable
+      ? acquisition.valuation_range
+      : {
+          low: comps?.valuation_low ?? null,
+          mid: comps?.valuation_mid ?? property?.value ?? null,
+          high: comps?.valuation_high ?? null,
+          confidence: comps?.confidence ?? null,
+        },
     equity_amount: property?.equity_amount ?? null,
     equity_percentage: property?.equity_percentage ?? null,
-    best_strategy: acquisition?.best_strategy ?? null,
-    expected_assignment_fee: acquisition?.expected_assignment_fee ?? null,
-    buyer_demand_score: acquisition?.buyer_demand_score ?? buyerMarket?.investor_demand_score ?? null,
-    liquidity_score: acquisition?.liquidity_score ?? buyerMarket?.liquidity_score ?? null,
+    repair_estimate: property?.repair_estimate ?? null,
+    value: property?.value ?? null,
+    condition: property?.condition ?? null,
+    best_strategy: engineAvailable ? acquisition.best_strategy : null,
+    decision_tier: engineAvailable ? acquisition.decision_tier : null,
+    confidence: engineAvailable ? acquisition.confidence : null,
+    expected_assignment_fee: engineAvailable ? acquisition.expected_assignment_fee : null,
+    buyer_demand_score: engineAvailable ? acquisition.buyer_demand_score : buyerMarket?.investor_demand_score ?? buyerMarket?.buyer_heat_score,
+    liquidity_score: engineAvailable ? acquisition.liquidity_score : buyerMarket?.liquidity_score,
+    buyer_market_signal: buyerMarket?.signal || null,
+    owner_priority: num(hydrated?.owner_priority_score),
     largest_risk: risks[0] || null,
     recommended_next_action: recommendedNextAction,
+    engine_computed_at: acquisition?.computed_at || null,
   }
 }
 
@@ -603,12 +757,15 @@ export async function buildDealIntelligenceDossier({
   debug = false,
   abortSignal,
 }) {
+  const hydrated = await queryHydratedThread({ thread_key, property_id }, abortSignal)
+
   const identity = await resolveIdentity({
     thread_key,
     property_id,
     prospect_id,
     master_owner_id,
     canonical_e164,
+    hydrated,
     abortSignal,
   })
 
@@ -618,7 +775,6 @@ export async function buildDealIntelligenceDossier({
     ownerRow,
     phoneRow,
     acquisitionRow,
-    censusRow,
     suppressions,
   ] = await Promise.all([
     identity.property_id
@@ -636,32 +792,33 @@ export async function buildDealIntelligenceDossier({
     identity.property_id
       ? queryMaybe('property_acquisition_scores', ACQUISITION_SCORE_SELECT, { property_id: identity.property_id }, abortSignal)
       : null,
-    identity.zip
-      ? queryMaybe('census_geo_metrics', '*', { zip: identity.zip }, abortSignal)
-      : null,
     identity.canonical_e164
-      ? supabase
-          .from('sms_suppression_list')
-          .select('phone_number, reason, suppressed_at, suppression_type')
-          .eq('phone_number', identity.canonical_e164)
-          .then((r) => r.data || [])
+      ? supabase.from('sms_suppression_list').select('phone_number, reason, suppressed_at, suppression_type').eq('phone_number', identity.canonical_e164).then((r) => r.data || [])
       : [],
   ])
 
-  const property = normalizeProperty(propertyRow)
-  if (!identity.zip && property.zip) identity.zip = property.zip
-  if (!identity.market && property.market) identity.market = property.market
-  if (!identity.latitude && property.latitude) identity.latitude = property.latitude
-  if (!identity.longitude && property.longitude) identity.longitude = property.longitude
+  const location = resolveCanonicalLocation({ propertyRow, hydrated, identity })
+  identity.zip = location.zip
+  identity.market = location.market
+  identity.latitude = location.latitude
+  identity.longitude = location.longitude
+  identity.full_address = location.full_address
+
+  const property = normalizeProperty(propertyRow, hydrated, location)
+  const baseline_scores = buildBaselineScores(propertyRow, hydrated)
+
+  const censusRow = location.zip
+    ? await queryMaybe('census_geo_metrics', '*', { zip: location.zip }, abortSignal)
+    : null
 
   const [comps, buyerMarket, buyerMatches, activity] = await Promise.all([
-    fetchCompsSection(property, abortSignal),
+    fetchCompsSection(property, location, abortSignal),
     fetchBuyerGeoRollup({
-      zip: property.zip || identity.zip,
-      county: property.county,
-      market: property.market || identity.market,
-      state: property.state,
-      city: property.city,
+      zip: location.zip,
+      county: location.county,
+      market: location.market,
+      state: location.state,
+      city: location.city,
       normalized_asset_class: property.normalized_asset_class,
       property_type: property.property_type,
     }, abortSignal),
@@ -670,67 +827,16 @@ export async function buildDealIntelligenceDossier({
       thread_key: identity.thread_key,
       canonical_e164: identity.canonical_e164,
       property_id: identity.property_id,
+      hydrated,
       abortSignal,
     }),
   ])
 
   const acquisition = normalizeAcquisitionDecision(acquisitionRow)
-  const decisionSnapshot = buildDecisionSnapshot({ property, acquisition, buyerMarket, comps })
-
-  const prospect = prospectRow
-    ? omitEmptyRows([
-        { key: 'name', value: prospectRow.full_name || [prospectRow.first_name, prospectRow.last_name].filter(Boolean).join(' ') },
-        { key: 'language', value: prospectRow.language || prospectRow.language_preference },
-        { key: 'age', value: num(prospectRow.calculated_age ?? prospectRow.age) },
-        { key: 'occupation', value: prospectRow.occupation || prospectRow.occupation_group },
-        { key: 'household_income', value: num(prospectRow.est_household_income ?? prospectRow.estimated_household_income) },
-        { key: 'net_asset_value', value: num(prospectRow.net_asset_value) },
-        { key: 'buying_power', value: prospectRow.buying_power },
-        { key: 'person_flags', value: prospectRow.person_flags_text || prospectRow.matching_flags },
-        { key: 'contact_score', value: num(prospectRow.prospect_contact_score) },
-      ]).reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {
-        status: 'available',
-        prospect_id: clean(prospectRow.prospect_id),
-      })
-    : { status: 'sparse' }
-
-  const owner = ownerRow
-    ? omitEmptyRows([
-        { key: 'display_name', value: ownerRow.display_name },
-        { key: 'owner_type', value: ownerRow.owner_type_guess || ownerRow.owner_type },
-        { key: 'priority_score', value: num(ownerRow.priority_score) },
-        { key: 'urgency_score', value: num(ownerRow.urgency_score) },
-        { key: 'financial_pressure_score', value: num(ownerRow.financial_pressure_score) },
-        { key: 'contactability_score', value: num(ownerRow.contactability_score) },
-        { key: 'portfolio_value', value: num(ownerRow.portfolio_total_value) },
-        { key: 'portfolio_equity', value: num(ownerRow.portfolio_total_equity) },
-        { key: 'property_count', value: num(ownerRow.property_count) },
-        { key: 'total_units', value: num(ownerRow.portfolio_total_units) },
-        { key: 'tax_delinquent_count', value: num(ownerRow.tax_delinquent_count) },
-        { key: 'active_lien_count', value: num(ownerRow.active_lien_count) },
-        { key: 'ownership_years', value: num(ownerRow.ownership_years) },
-        { key: 'seller_tags', value: ownerRow.seller_tags_text },
-      ]).reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {
-        status: 'available',
-        master_owner_id: clean(ownerRow.master_owner_id),
-      })
-    : { status: 'sparse' }
-
-  const phone = phoneRow
-    ? omitEmptyRows([
-        { key: 'number', value: phoneRow.canonical_e164 || phoneRow.phone_number },
-        { key: 'type', value: phoneRow.line_type || phoneRow.phone_type },
-        { key: 'carrier', value: phoneRow.phone_carrier || phoneRow.carrier },
-        { key: 'activity_status', value: phoneRow.activity_status },
-        { key: 'usage', value: phoneRow.usage },
-        { key: 'contact_score', value: num(phoneRow.contact_score) },
-        { key: 'contact_window', value: phoneRow.contact_window },
-        { key: 'timezone', value: phoneRow.timezone },
-        { key: 'wrong_number', value: phoneRow.wrong_number ?? phoneRow.is_wrong_number },
-      ]).reduce((acc, row) => ({ ...acc, [row.key]: row.value }), { status: 'available' })
-    : identity.canonical_e164
-      ? { status: 'available', number: identity.canonical_e164 }
-      : { status: 'missing' }
+  const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
+  const prospect = normalizeProspect(prospectRow, hydrated, phoneRow)
+  const owner = normalizeOwner(ownerRow, hydrated)
+  const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164)
 
   const census = censusRow
     ? {
@@ -749,7 +855,9 @@ export async function buildDealIntelligenceDossier({
 
   const dossier = {
     identity,
+    location,
     property,
+    baseline_scores,
     prospect,
     master_owner: owner,
     phone,
@@ -765,10 +873,11 @@ export async function buildDealIntelligenceDossier({
       is_suppressed: Array.isArray(suppressions) && suppressions.length > 0,
     },
     freshness: {
-      property_current: Boolean(propertyRow),
+      property_current: Boolean(propertyRow || hydrated),
       acquisition_computed_at: acquisition?.computed_at || null,
       buyer_market_freshness: buyerMarket?.data_freshness || null,
       comps_freshness: comps?.freshness || null,
+      hydrated_at: hydrated?.updated_at || hydrated?.latest_message_at || null,
     },
     _metadata: DEAL_DOSSIER_SCHEMA,
   }
@@ -776,6 +885,8 @@ export async function buildDealIntelligenceDossier({
   if (debug) {
     dossier.raw_sources_debug = {
       identity,
+      location,
+      hydrated_present: Boolean(hydrated),
       property_row: propertyRow,
       acquisition_row: acquisitionRow,
       buyer_market_level: buyerMarket?.geographic_level_used,
@@ -787,13 +898,25 @@ export async function buildDealIntelligenceDossier({
 
 export const ENGINE_PROGRESS_STAGES = [
   'resolving_property',
-  'loading_comps',
+  'selecting_comps',
+  'calculating_valuation',
   'measuring_buyer_demand',
   'evaluating_seller_pressure',
   'comparing_strategies',
   'building_offer_stack',
-  'decision_ready',
+  'finalizing_decision',
 ]
+
+export const ENGINE_STAGE_LABELS = {
+  resolving_property: 'Resolving property',
+  selecting_comps: 'Selecting comparable sales',
+  calculating_valuation: 'Calculating valuation range',
+  measuring_buyer_demand: 'Measuring investor demand',
+  evaluating_seller_pressure: 'Evaluating seller pressure',
+  comparing_strategies: 'Comparing acquisition strategies',
+  building_offer_stack: 'Building offer stack',
+  finalizing_decision: 'Finalizing decision',
+}
 
 export async function runAcquisitionEngineWithProgress(propertyId, onProgress) {
   const emit = (stage, status = 'running', detail = null) => {
@@ -803,19 +926,23 @@ export async function runAcquisitionEngineWithProgress(propertyId, onProgress) {
   emit('resolving_property', 'running')
   const property = await queryMaybe('properties', PROPERTY_SELECT, { property_id: clean(propertyId) })
   if (!property) throw new Error('property_not_found')
+  const location = resolveCanonicalLocation({ propertyRow: property, hydrated: null, identity: {} })
   emit('resolving_property', 'done')
 
-  emit('loading_comps', 'running')
-  await loadComparableProperties(property)
-  emit('loading_comps', 'done')
+  emit('selecting_comps', 'running')
+  await loadComparableProperties({ ...property, zip: location.zip, market: location.market, state: location.state }, { supabase })
+  emit('selecting_comps', 'done')
+
+  emit('calculating_valuation', 'running')
+  emit('calculating_valuation', 'done')
 
   emit('measuring_buyer_demand', 'running')
   await fetchBuyerGeoRollup({
-    zip: property.property_address_zip,
-    county: property.property_address_county_name,
-    market: property.market,
-    state: property.property_address_state,
-    city: property.property_address_city,
+    zip: location.zip,
+    county: location.county,
+    market: location.market,
+    state: location.state,
+    city: location.city,
     normalized_asset_class: property.normalized_asset_class,
     property_type: property.property_type,
   })
@@ -831,7 +958,7 @@ export async function runAcquisitionEngineWithProgress(propertyId, onProgress) {
   const result = await scoreProperty(clean(propertyId))
   emit('building_offer_stack', 'done')
 
-  emit('decision_ready', 'done', { ok: result?.ok === true })
+  emit('finalizing_decision', 'done', { ok: result?.ok === true })
   return result
 }
 
