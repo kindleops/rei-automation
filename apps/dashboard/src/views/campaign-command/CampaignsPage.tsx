@@ -11,13 +11,14 @@ import {
   fetchCampaignTemplates,
   fetchCampaignLogs,
   buildSuppressionChecklist,
-  queueBatch,
-  campaignLifecycle,
-  cloneCampaign,
-  deleteCampaign,
+  updateCampaignDraft,
 } from './campaigns.adapter'
-import type { CampaignLifecycleAction } from './campaigns.adapter'
+import { executeCampaignAction } from './campaign-actions'
+import { computeCampaignHealth, computeCampaignReadiness, matchesListFilter, type CampaignListFilter } from './campaign-health'
+import { computeCampaignCostMetrics, formatCostUsd } from './campaign-cost'
 import { CreateCampaignModal } from './CreateCampaignModal'
+import { CampaignScheduleModal } from './CampaignScheduleModal'
+import { CampaignContextMenu, CampaignOverflowButton } from './CampaignContextMenu'
 import { CampaignControlCenter } from './CampaignControlCenter'
 import type {
   CampaignModel,
@@ -82,21 +83,24 @@ const statusOrder: Record<CampaignStatus, number> = {
   active: 0,
   activating: 1,
   live_limited: 2,
-  scheduled: 3,
-  previewed: 4,
-  ready: 5,
-  paused: 6,
-  failed: 7,
-  draft: 8,
-  completed: 9,
-  archived: 10,
+  queued: 3,
+  scheduled: 4,
+  built: 5,
+  previewed: 6,
+  ready: 7,
+  paused: 8,
+  failed: 9,
+  draft: 10,
+  completed: 11,
+  archived: 12,
 }
 
 // ── Primitive components ──────────────────────────────────────────────────────
 
 const StatusBadge = ({ status }: { status: CampaignStatus }) => {
   const labels: Record<CampaignStatus, string> = {
-    active: 'Active', ready: 'Ready', live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
+    active: 'Active', ready: 'Ready', built: 'Targets Built', queued: 'Queued',
+    live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
     draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
     completed: 'Completed', archived: 'Archived',
   }
@@ -149,22 +153,9 @@ export const KpiStrip = ({ kpis }: { kpis: CampaignModel['kpis'] }) => {
 
 // ── Campaign Health Sidebar ────────────────────────────────────────────────────
 
-export type HealthLevel = 'healthy' | 'caution' | 'dangerous'
+export type HealthLevel = 'healthy' | 'caution' | 'dangerous' | 'not_started' | 'awaiting'
 
-export const computeHealth = (c: CampaignSummary): { level: HealthLevel; score: number; issues: string[] } => {
-  const issues: string[] = []
-  let score = 100
-
-  if (c.delivery_rate < 90) { score -= 15; if (c.delivery_rate < 75) { score -= 15; issues.push(`Delivery rate ${fmtPct(c.delivery_rate)} is critically low`) } else { issues.push(`Delivery rate ${fmtPct(c.delivery_rate)} needs attention`) } }
-  if (c.opt_out_rate > 3) { score -= 10; if (c.opt_out_rate > 6) { score -= 15; issues.push(`Opt-out rate ${fmtPct(c.opt_out_rate)} exceeds safe threshold`) } else { issues.push(`Opt-out rate ${fmtPct(c.opt_out_rate)} is elevated`) } }
-  if (c.failed_count > 20) { score -= 10; issues.push(`${c.failed_count} failed sends detected`) }
-  if (c.reply_rate < 5) { score -= 5; issues.push(`Reply rate ${fmtPct(c.reply_rate)} is below target`) }
-  if (c.auto_send_enabled) { score -= 15; issues.push('Auto-send must stay disabled in Phase 1') }
-  if (c.ready_targets === 0 && ['active', 'ready', 'live_limited'].includes(c.status)) { score -= 10; issues.push('No ready targets — build or refresh target list') }
-
-  const level: HealthLevel = score >= 80 ? 'healthy' : score >= 55 ? 'caution' : 'dangerous'
-  return { level, score: Math.max(0, score), issues }
-}
+export const computeHealth = computeCampaignHealth
 
 export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary | null }) => {
   if (!campaign) {
@@ -180,21 +171,45 @@ export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary 
     )
   }
 
-  const { level, score, issues } = computeHealth(campaign)
-  const levelLabel = level === 'healthy' ? 'Healthy' : level === 'caution' ? 'Caution' : 'Critical'
+  const { level, score, issues, label: levelLabel, sampleSufficient } = computeHealth(campaign)
+  const readiness = computeCampaignReadiness(campaign)
 
   const failRate = campaign.sent_count > 0
     ? (campaign.failed_count / campaign.sent_count) * 100
     : 0
 
+  const rateVariant = (value: number, good: number, warn: number, invert = false) => {
+    if (!sampleSufficient) return ''
+    const ok = invert ? value <= good : value >= good
+    const mid = invert ? value <= warn : value >= warn
+    return ok ? 'is-good' : mid ? 'is-warn' : 'is-bad'
+  }
+
   const metrics = [
-    { label: 'Delivery',   value: fmtPct(campaign.delivery_rate), variant: campaign.delivery_rate >= 90 ? 'is-good' : campaign.delivery_rate >= 75 ? 'is-warn' : 'is-bad' },
-    { label: 'Reply Rate', value: fmtPct(campaign.reply_rate), variant: campaign.reply_rate >= 12 ? 'is-good' : campaign.reply_rate >= 7 ? 'is-warn' : 'is-bad' },
-    { label: 'Opt-Out',    value: fmtPct(campaign.opt_out_rate), variant: campaign.opt_out_rate <= 3 ? 'is-good' : campaign.opt_out_rate <= 6 ? 'is-warn' : 'is-bad' },
-    { label: 'Fail Rate',  value: fmtPct(failRate), variant: failRate <= 3 ? 'is-good' : failRate <= 8 ? 'is-warn' : 'is-bad' },
-    { label: 'Positive',   value: fmt(campaign.positive_reply_count), variant: campaign.positive_reply_count > 0 ? 'is-good' : '' },
-    { label: 'Ready',      value: fmt(campaign.ready_targets), variant: campaign.ready_targets > 0 ? '' : 'is-warn' },
-    { label: 'Next Send',  value: fmtRelative(campaign.next_send_at), variant: '' },
+    {
+      label: 'Delivery',
+      value: sampleSufficient ? fmtPct(campaign.delivery_rate) : levelLabel,
+      variant: rateVariant(campaign.delivery_rate, 90, 75),
+    },
+    {
+      label: 'Reply Rate',
+      value: sampleSufficient ? fmtPct(campaign.reply_rate) : '—',
+      variant: rateVariant(campaign.reply_rate, 12, 7),
+    },
+    {
+      label: 'Opt-Out',
+      value: sampleSufficient ? fmtPct(campaign.opt_out_rate) : '—',
+      variant: rateVariant(campaign.opt_out_rate, 3, 6, true),
+    },
+    {
+      label: 'Fail Rate',
+      value: sampleSufficient ? fmtPct(failRate) : '—',
+      variant: rateVariant(failRate, 3, 8, true),
+    },
+    { label: 'Positive', value: fmt(campaign.positive_reply_count), variant: campaign.positive_reply_count > 0 ? 'is-good' : '' },
+    { label: 'Ready', value: fmt(campaign.ready_targets), variant: campaign.ready_targets > 0 ? '' : 'is-warn' },
+    { label: 'Readiness', value: readiness.label, variant: readiness.level === 'ready' ? 'is-good' : readiness.level === 'warnings' ? 'is-warn' : 'is-bad' },
+    { label: 'Next Send', value: fmtRelative(campaign.next_send_at), variant: '' },
   ]
 
   return (
@@ -202,7 +217,7 @@ export const CampaignHealthSidebar = ({ campaign }: { campaign: CampaignSummary 
       <div className="ccc__hs-header">
         <div className="ccc__hs-title">Campaign Health</div>
         <div className="ccc__hs-score-block">
-          <div className={cls('ccc__hs-score-ring', `is-${level}`)}>{score}</div>
+          <div className={cls('ccc__hs-score-ring', `is-${level}`)}>{score ?? '—'}</div>
           <div className={cls('ccc__hs-score-label', `is-${level}`)}>{levelLabel}</div>
           {issues.length === 0 && (
             <div className="ccc__hs-score-reason">All systems nominal</div>
@@ -303,28 +318,40 @@ const CampaignDetailOpsStrip = ({
 
 const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
   const checks = buildSuppressionChecklist(campaign)
-  const totalCost = campaign.sent_count * 0.0075
+  const cost = computeCampaignCostMetrics(campaign)
+  const health = computeHealth(campaign)
+  const readiness = computeCampaignReadiness(campaign)
   const totalReplies = campaign.positive_reply_count + campaign.negative_reply_count
-  const costPerReply = totalReplies > 0 ? totalCost / totalReplies : 0
-  const costPerLead = campaign.positive_reply_count > 0 ? totalCost / campaign.positive_reply_count : 0
+  const sampleSufficient = health.sampleSufficient
 
   return (
     <div>
-      <div className="ccc__section-title">Cost Estimates</div>
+      <div className="ccc__section-title">Launch Readiness</div>
+      <div className={cls('ccc__readiness-banner', `is-${readiness.level}`)}>
+        <strong>{readiness.label}</strong>
+        {readiness.blockers.map((b) => <span key={b} className="ccc__readiness-blocker">{b}</span>)}
+        {readiness.warnings.map((w) => <span key={w} className="ccc__readiness-warning">{w}</span>)}
+      </div>
+
+      <div className="ccc__section-title">Cost &amp; Spend</div>
       <div className="ccc__cost-grid">
         <div className="ccc__cost-card">
-          <div className="ccc__cost-label">Total Spend</div>
-          <div className="ccc__cost-value">${totalCost.toFixed(2)}</div>
-          <div className="ccc__cost-sub">{campaign.sent_count.toLocaleString()} sends @ $0.0075</div>
+          <div className="ccc__cost-label">Actual Spend</div>
+          <div className="ccc__cost-value">{formatCostUsd(cost.totalSpend)}</div>
+          <div className="ccc__cost-sub">
+            {cost.available
+              ? `${campaign.sent_count.toLocaleString()} sends · est. rate`
+              : 'Cost unavailable — no configured rate'}
+          </div>
         </div>
         <div className="ccc__cost-card">
           <div className="ccc__cost-label">Cost / Reply</div>
-          <div className="ccc__cost-value">{costPerReply > 0 ? `$${costPerReply.toFixed(2)}` : '—'}</div>
+          <div className="ccc__cost-value">{formatCostUsd(cost.costPerReply)}</div>
           <div className="ccc__cost-sub">{totalReplies} total replies</div>
         </div>
         <div className="ccc__cost-card is-accent">
           <div className="ccc__cost-label">Cost / Lead</div>
-          <div className="ccc__cost-value">{costPerLead > 0 ? `$${costPerLead.toFixed(2)}` : '—'}</div>
+          <div className="ccc__cost-value">{formatCostUsd(cost.costPerLead)}</div>
           <div className="ccc__cost-sub">{campaign.positive_reply_count} positive</div>
         </div>
       </div>
@@ -351,30 +378,36 @@ const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
       ))}
 
       <div className="ccc__section-title">Performance Rates</div>
-      <div className="ccc__stat-grid">
-        <div className="ccc__stat-card">
-          <div className="ccc__stat-card-label">Delivery Rate</div>
-          <div className={cls('ccc__stat-card-value', campaign.delivery_rate >= 90 ? 'is-success' : campaign.delivery_rate >= 75 ? 'is-warning' : 'is-danger')}>
-            {fmtPct(campaign.delivery_rate)}
+      {sampleSufficient ? (
+        <div className="ccc__stat-grid">
+          <div className="ccc__stat-card">
+            <div className="ccc__stat-card-label">Delivery Rate</div>
+            <div className={cls('ccc__stat-card-value', campaign.delivery_rate >= 90 ? 'is-success' : campaign.delivery_rate >= 75 ? 'is-warning' : 'is-danger')}>
+              {fmtPct(campaign.delivery_rate)}
+            </div>
+          </div>
+          <div className="ccc__stat-card">
+            <div className="ccc__stat-card-label">Reply Rate</div>
+            <div className={cls('ccc__stat-card-value', campaign.reply_rate >= 12 ? 'is-success' : campaign.reply_rate >= 7 ? 'is-warning' : 'is-danger')}>
+              {fmtPct(campaign.reply_rate)}
+            </div>
+          </div>
+          <div className="ccc__stat-card">
+            <div className="ccc__stat-card-label">Opt-Out Rate</div>
+            <div className={cls('ccc__stat-card-value', campaign.opt_out_rate <= 3 ? 'is-success' : campaign.opt_out_rate <= 6 ? 'is-warning' : 'is-danger')}>
+              {fmtPct(campaign.opt_out_rate)}
+            </div>
+          </div>
+          <div className="ccc__stat-card">
+            <div className="ccc__stat-card-label">Positive Leads</div>
+            <div className="ccc__stat-card-value is-success">{campaign.positive_reply_count}</div>
           </div>
         </div>
-        <div className="ccc__stat-card">
-          <div className="ccc__stat-card-label">Reply Rate</div>
-          <div className={cls('ccc__stat-card-value', campaign.reply_rate >= 12 ? 'is-success' : campaign.reply_rate >= 7 ? 'is-warning' : 'is-danger')}>
-            {fmtPct(campaign.reply_rate)}
-          </div>
+      ) : (
+        <div className="ccc__empty" style={{ padding: '12px 0' }}>
+          <div className="ccc__empty-sub">{health.label} — performance rates require sufficient send sample</div>
         </div>
-        <div className="ccc__stat-card">
-          <div className="ccc__stat-card-label">Opt-Out Rate</div>
-          <div className={cls('ccc__stat-card-value', campaign.opt_out_rate <= 3 ? 'is-success' : campaign.opt_out_rate <= 6 ? 'is-warning' : 'is-danger')}>
-            {fmtPct(campaign.opt_out_rate)}
-          </div>
-        </div>
-        <div className="ccc__stat-card">
-          <div className="ccc__stat-card-label">Positive Leads</div>
-          <div className="ccc__stat-card-value is-success">{campaign.positive_reply_count}</div>
-        </div>
-      </div>
+      )}
 
       <div className="ccc__section-title">Schedule</div>
       <div className="ccc__setting-row">
@@ -863,12 +896,21 @@ const LogsTab = ({ campaign }: { campaign: CampaignSummary }) => {
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
 export const primaryAction = (campaign: CampaignSummary): { label: string; variant: string; action: string } => {
-  if (campaign.status === 'active') return { label: 'Pause', variant: 'is-danger', action: 'pause' }
+  if (campaign.status === 'active' || campaign.status === 'live_limited') {
+    return { label: 'Pause', variant: 'is-danger', action: 'pause' }
+  }
   if (campaign.status === 'paused') return { label: 'Resume', variant: 'is-primary', action: 'resume' }
-  if (campaign.status === 'draft' && campaign.total_targets === 0) return { label: 'Build Targets', variant: 'is-blue', action: 'targets' }
-  if (campaign.status === 'draft') return { label: 'Start Campaign', variant: 'is-primary', action: 'start' }
-  if (campaign.status === 'scheduled') return { label: 'Cancel Schedule', variant: 'is-danger', action: 'cancel' }
-  return { label: 'Activate', variant: 'is-primary', action: 'start' }
+  if (['draft', 'built', 'ready', 'previewed'].includes(campaign.status) && campaign.total_targets === 0) {
+    return { label: 'Build Targets', variant: 'is-blue', action: 'build_targets' }
+  }
+  if (campaign.status === 'scheduled') return { label: 'Activate Now', variant: 'is-primary', action: 'activate' }
+  if (['built', 'ready', 'previewed', 'queued'].includes(campaign.status)) {
+    return { label: 'Schedule', variant: 'is-blue', action: 'schedule' }
+  }
+  if (campaign.status === 'draft' && campaign.total_targets > 0) {
+    return { label: 'Review Launch', variant: 'is-primary', action: 'schedule' }
+  }
+  return { label: 'Activate', variant: 'is-primary', action: 'activate' }
 }
 
 export const DetailPanel = ({
@@ -876,15 +918,17 @@ export const DetailPanel = ({
   commandState,
   onClose,
   onAction,
+  initialTab,
 }: {
   campaign: CampaignSummary | null
   commandState: CampaignCommandState
   onClose: () => void
   onAction: (action: string, campaign: CampaignSummary) => void
+  initialTab?: CampaignDetailTab
 }) => {
-  const [activeTab, setActiveTab] = useState<CampaignDetailTab>('overview')
+  const [activeTab, setActiveTab] = useState<CampaignDetailTab>(initialTab ?? 'overview')
 
-  useEffect(() => { setActiveTab('overview') }, [campaign?.id])
+  useEffect(() => { setActiveTab(initialTab ?? 'overview') }, [campaign?.id, initialTab])
 
   const TABS: Array<{ id: CampaignDetailTab; label: string }> = [
     { id: 'overview',   label: 'Overview' },
@@ -914,7 +958,10 @@ export const DetailPanel = ({
 
   // Compute Queue Batch button logic
   const health = computeHealth(campaign)
-  const canQueueBatch = campaign.ready_targets > 0 && health.level !== 'dangerous'
+  const canQueueBatch =
+    campaign.ready_targets > 0 &&
+    health.level !== 'dangerous' &&
+    !['paused', 'archived', 'completed', 'failed'].includes(campaign.status)
 
   const scopeLabel = (() => {
     switch (commandState.displayScope) {
@@ -1049,15 +1096,21 @@ export const CampaignListPanel = ({
   onCampaignAction: (action: string, campaign: CampaignSummary) => void
   searchQuery: string
   setSearchQuery: (q: string) => void
-  statusFilter: CampaignStatus | 'all'
-  setStatusFilter: (s: CampaignStatus | 'all') => void
+  statusFilter: CampaignListFilter
+  setStatusFilter: (s: CampaignListFilter) => void
 }) => {
-  const statusFilters: Array<{ key: CampaignStatus | 'all'; label: string }> = [
+  const [contextMenu, setContextMenu] = useState<{ campaign: CampaignSummary; x: number; y: number } | null>(null)
+
+  const statusFilters: Array<{ key: CampaignListFilter; label: string }> = [
     { key: 'all', label: 'All' },
-    { key: 'active', label: 'Live' },
-    { key: 'paused', label: 'Paused' },
-    { key: 'scheduled', label: 'Sched' },
     { key: 'draft', label: 'Draft' },
+    { key: 'ready', label: 'Ready' },
+    { key: 'scheduled', label: 'Scheduled' },
+    { key: 'live', label: 'Live' },
+    { key: 'paused', label: 'Paused' },
+    { key: 'completed', label: 'Done' },
+    { key: 'archived', label: 'Archived' },
+    { key: 'needs_attention', label: 'Attention' },
   ]
 
   return (
@@ -1096,6 +1149,7 @@ export const CampaignListPanel = ({
           campaigns.map((c) => {
             const pAction = primaryAction(c)
             const isSelected = c.id === selectedId
+            const health = computeHealth(c)
             return (
               <div
                 key={c.id}
@@ -1103,44 +1157,62 @@ export const CampaignListPanel = ({
                 onClick={() => onSelect(isSelected ? null : c)}
               >
                 <div className={cls('ccc__list-dot', `is-${c.status}`)} />
-                <div style={{ minWidth: 0 }}>
-                  <div className="ccc__list-name">{c.campaign_name}</div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="ccc__list-name" title={c.campaign_name}>{c.campaign_name}</div>
                   <div className="ccc__list-meta">
-                    <span className={cls('ccc__list-metric', c.delivery_rate >= 90 ? 'is-good' : c.delivery_rate >= 75 ? 'is-warn' : 'is-bad')}>
-                      {fmtPct(c.delivery_rate)} dlv
-                    </span>
+                    <StatusBadge status={c.status} />
                     <span>·</span>
-                    <span className={cls('ccc__list-metric', c.reply_rate >= 12 ? 'is-good' : 'is-warn')}>
-                      {fmtPct(c.reply_rate)} reply
-                    </span>
-                    <span>·</span>
-                    <span className="ccc__list-metric is-good">{c.positive_reply_count} leads</span>
-                  </div>
-                  <div className="ccc__list-meta" style={{ marginTop: 1 }}>
-                    <span>{fmt(c.total_targets)} targets</span>
+                    <span>{fmt(c.total_targets)} tgt</span>
                     <span>·</span>
                     <span className="ccc__list-metric is-blue">{fmt(c.ready_targets)} ready</span>
-                    {c.last_send_at && (
-                      <><span>·</span><span style={{ color: 'var(--text-2)' }}>{fmtRelative(c.last_send_at)}</span></>
+                    <span>·</span>
+                    <span>{fmt(c.sent_count)} sent</span>
+                  </div>
+                  <div className="ccc__list-meta" style={{ marginTop: 1 }}>
+                    {health.sampleSufficient ? (
+                      <>
+                        <span className={cls('ccc__list-metric', c.delivery_rate >= 90 ? 'is-good' : 'is-warn')}>
+                          {fmtPct(c.delivery_rate)} dlv
+                        </span>
+                        <span>·</span>
+                        <span className="ccc__list-metric is-good">{c.positive_reply_count} +reply</span>
+                      </>
+                    ) : (
+                      <span className="ccc__list-metric">{health.label}</span>
+                    )}
+                    {c.next_send_at && (
+                      <><span>·</span><span style={{ color: 'var(--text-2)' }}>next {fmtRelative(c.next_send_at)}</span></>
                     )}
                   </div>
                 </div>
                 <div className="ccc__list-action" onClick={(e) => e.stopPropagation()}>
+                  <CampaignOverflowButton
+                    onClick={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      setContextMenu({ campaign: c, x: rect.right - 160, y: rect.bottom + 4 })
+                    }}
+                  />
                   <button
                     className={cls('ccc__list-action-btn', pAction.variant)}
                     onClick={() => onCampaignAction(pAction.action, c)}
                   >
                     {pAction.label}
                   </button>
-                  {c.next_send_at && (
-                    <div className="ccc__list-lastsend">{fmtRelative(c.next_send_at)}</div>
-                  )}
                 </div>
               </div>
             )
           })
         )}
       </div>
+      {contextMenu && (
+        <CampaignContextMenu
+          campaign={contextMenu.campaign}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onAction={onCampaignAction}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -1150,7 +1222,14 @@ export const CampaignListPanel = ({
 export const CampaignsPage = () => {
   const [model, setModel] = useState<CampaignModel | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [editCampaignId, setEditCampaignId] = useState<string | null>(null)
+  const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>('create')
+  const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
+  const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
+  const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(undefined)
   
   const [commandState, setCommandState] = useState<CampaignCommandState>({
     activeCampaignId: null,
@@ -1159,20 +1238,23 @@ export const CampaignsPage = () => {
   })
   
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<CampaignStatus | 'all'>('all')
+  const [statusFilter, setStatusFilter] = useState<CampaignListFilter>('all')
   const [sortKey] = useState<keyof CampaignSummary>('status')
   const [sortDir] = useState<'asc' | 'desc'>('asc')
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (opts.silent) setRefreshing(true)
+    else setLoading(true)
     try {
       const data = await loadCampaigns()
       setModel(data)
+      setLastRefreshedAt(new Date())
     } catch (err) {
       console.error('[CampaignsPage] load failed', err)
       emitNotification({ title: 'Campaign load failed', detail: 'Could not fetch campaign data.', severity: 'critical' })
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [])
 
@@ -1182,7 +1264,7 @@ export const CampaignsPage = () => {
     if (!model) return []
     let list = [...model.campaigns]
 
-    if (statusFilter !== 'all') list = list.filter((c) => c.status === statusFilter)
+    if (statusFilter !== 'all') list = list.filter((c) => matchesListFilter(c, statusFilter))
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       list = list.filter((c) => c.campaign_name.toLowerCase().includes(q))
@@ -1205,106 +1287,68 @@ export const CampaignsPage = () => {
     return campaigns.find((c) => c.id === commandState.activeCampaignId) || null
   }, [campaigns, commandState.activeCampaignId])
 
+  const actionCallbacks = useMemo(() => ({
+    onRefresh: () => load({ silent: true }),
+    onOpenBuilder: (campaign: CampaignSummary, mode: 'edit' | 'build' | 'schedule') => {
+      setEditCampaignId(campaign.id)
+      setBuilderMode(mode === 'build' ? 'build' : 'edit')
+      setIsCreateModalOpen(true)
+      setCommandState((prev) => ({ ...prev, activeCampaignId: campaign.id }))
+    },
+    onOpenSchedule: (campaign: CampaignSummary, mode: 'schedule' | 'reschedule') => {
+      setScheduleCampaign(campaign)
+      setScheduleMode(mode)
+    },
+    onSelectTab: (campaignId: string, tab: string) => {
+      setCommandState((prev) => ({ ...prev, activeCampaignId: campaignId }))
+      setDetailTab(tab as CampaignDetailTab)
+    },
+  }), [load])
+
   const handleCampaignAction = useCallback(
     async (action: string, campaign: CampaignSummary) => {
-      try {
-        if (action === 'refresh') { load(); return }
-        if (action === 'targets') {
-          emitNotification({ title: 'Build Targets', detail: `Opening builder for "${campaign.campaign_name}"…`, severity: 'info' })
-          return
-        }
-
-        if (action === 'queue-batch') {
-          const h = computeHealth(campaign)
-          if (h.level === 'dangerous') {
-            emitNotification({ title: 'Cannot Queue Batch', detail: 'Campaign health is critical', severity: 'critical' })
-            return
-          }
-          if (!campaign.ready_targets) {
-            emitNotification({ title: 'Nothing to queue', detail: 'Build targets first — 0 ready targets.', severity: 'warning' })
-            return
-          }
-          const res = await queueBatch(campaign.id, {
-            limit: campaign.ready_targets,
-            respect_send_window: true,
-            interval_seconds: campaign.send_interval_seconds || 15,
-          })
-          if (res.blockers?.length) {
-            emitNotification({ title: 'Queue blocked', detail: res.blockers.join(', '), severity: 'warning' })
-          } else {
-            emitNotification({
-              title: `Queued ${res.queued} sends`,
-              detail: `"${campaign.campaign_name}" staged → SCHEDULED. Activate to go live.`,
-              severity: 'success',
-            })
-          }
-          load(); return
-        }
-
-        const lifecycleMap: Record<string, CampaignLifecycleAction> = {
-          pause: 'pause',
-          resume: 'resume',
-          start: 'activate',
-          activate: 'activate',
-          schedule: 'schedule',
-          unschedule: 'unschedule',
-          cancel: 'unschedule',
-          archive: 'archive',
-          complete: 'complete',
-        }
-        if (lifecycleMap[action]) {
-          const result = await campaignLifecycle(campaign.id, lifecycleMap[action])
-          emitNotification({
-            title: `"${campaign.campaign_name}" → ${result.to ?? lifecycleMap[action]}`,
-            severity: action === 'pause' || action === 'cancel' || action === 'archive' ? 'warning' : 'success',
-          })
-          load(); return
-        }
-
-        if (action === 'clone') {
-          await cloneCampaign(campaign.id)
-          emitNotification({ title: 'Campaign cloned', detail: `New draft created from "${campaign.campaign_name}".`, severity: 'success' })
-          load(); return
-        }
-
-        if (action === 'delete') {
-          const res = await deleteCampaign(campaign.id)
-          emitNotification({
-            title: res.archived ? 'Campaign archived' : 'Campaign deleted',
-            detail: res.archived
-              ? 'Send history preserved; archived instead of deleted.'
-              : `Removed "${campaign.campaign_name}".`,
-            severity: 'warning',
-          })
-          load(); return
-        }
-
-        emitNotification({ title: action, severity: 'info' })
-      } catch (err) {
-        emitNotification({
-          title: `Action failed: ${action}`,
-          detail: err instanceof Error ? err.message : String(err),
-          severity: 'critical',
-        })
+      if (action === 'open') {
+        setCommandState((prev) => ({ ...prev, activeCampaignId: campaign.id, displayScope: 'campaign' }))
+        return
       }
+      if (action === 'rename') {
+        const next = window.prompt('Rename campaign', campaign.campaign_name)
+        if (!next?.trim()) return
+        await updateCampaignDraft(campaign.id, { name: next.trim() })
+        await load({ silent: true })
+        return
+      }
+      await executeCampaignAction(action, campaign, actionCallbacks)
     },
-    [load],
+    [actionCallbacks, load],
   )
 
   const handleGlobalAction = (action: string) => {
     if (action === 'create') {
+      setEditCampaignId(null)
+      setBuilderMode('create')
       setIsCreateModalOpen(true)
       return
     }
-
-    const msgs: Record<string, string> = {
-      targets:  'Build Targets wizard coming soon.',
-      schedule: 'Schedule Targets dialog coming soon.',
-      autosend: 'Auto Send control coming soon.',
-      refresh:  'Refreshing campaign metrics…',
+    if (action === 'targets') {
+      if (selectedCampaign) {
+        void handleCampaignAction('build_targets', selectedCampaign)
+      } else {
+        setEditCampaignId(null)
+        setBuilderMode('create')
+        setIsCreateModalOpen(true)
+      }
+      return
     }
-    emitNotification({ title: msgs[action] ?? action, severity: 'info' })
-    if (action === 'refresh') load()
+    if (action === 'schedule') {
+      if (selectedCampaign) void handleCampaignAction('schedule', selectedCampaign)
+      else emitNotification({ title: 'Select a campaign to schedule', severity: 'info' })
+      return
+    }
+    if (action === 'refresh') {
+      emitNotification({ title: 'Refreshing campaigns', severity: 'info' })
+      void load({ silent: true })
+    }
   }
 
   const handleSelectCampaign = (c: CampaignSummary | null) => {
@@ -1323,14 +1367,17 @@ export const CampaignsPage = () => {
         <div className="ccc__brand">
           <div className="ccc__brand-icon"><Icon name="send" size={14} /></div>
           <div>
-            <div className="ccc__title">Campaign Command Center</div>
-            <div className="ccc__subtitle">SMS campaign intelligence &amp; outreach management</div>
+            <div className="ccc__title">Campaign Command</div>
+            <div className="ccc__subtitle">
+              {model ? `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled · ${model.campaigns.filter((c) => c.status === 'paused').length} paused` : 'Loading…'}
+              {lastRefreshedAt && ` · refreshed ${fmtRelative(lastRefreshedAt.toISOString())}`}
+            </div>
           </div>
         </div>
         <div className="ccc__actions">
           <button className="ccc-btn is-primary" onClick={() => handleGlobalAction('create')}>
             <Icon name="bolt" size={11} />
-            Create Campaign
+            New Campaign
           </button>
           <button className="ccc-btn is-blue" onClick={() => handleGlobalAction('targets')}>
             <Icon name="users" size={11} />
@@ -1338,7 +1385,7 @@ export const CampaignsPage = () => {
           </button>
           <button className="ccc-btn" onClick={() => handleGlobalAction('schedule')}>
             <Icon name="calendar" size={11} />
-            Schedule Targets
+            Schedule
           </button>
           {selectedCampaign?.status === 'active' && (
             <button className="ccc-btn is-danger" onClick={() => handleCampaignAction('pause', selectedCampaign)}>
@@ -1346,9 +1393,9 @@ export const CampaignsPage = () => {
               Pause Campaign
             </button>
           )}
-          <button className="ccc-btn" onClick={() => handleGlobalAction('refresh')}>
+          <button className={cls('ccc-btn', refreshing && 'is-refreshing')} onClick={() => handleGlobalAction('refresh')} disabled={refreshing}>
             <Icon name="refresh-cw" size={11} />
-            Refresh
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -1386,20 +1433,38 @@ export const CampaignsPage = () => {
           commandState={commandState}
           onClose={() => handleSelectCampaign(null)}
           onAction={handleCampaignAction}
+          initialTab={detailTab}
         />
 
         <CampaignHealthSidebar campaign={selectedCampaign} />
       </div>
 
       {isCreateModalOpen && (
-        <CreateCampaignModal 
-          onClose={() => setIsCreateModalOpen(false)}
+        <CreateCampaignModal
+          campaignId={editCampaignId ?? undefined}
+          mode={builderMode}
+          onClose={() => {
+            setIsCreateModalOpen(false)
+            setEditCampaignId(null)
+            setBuilderMode('create')
+          }}
           onSuccess={(newId) => {
             setIsCreateModalOpen(false)
+            setEditCampaignId(null)
+            setBuilderMode('create')
             load().then(() => {
-              setCommandState(p => ({ ...p, activeCampaignId: newId }))
+              setCommandState((p) => ({ ...p, activeCampaignId: newId }))
             })
           }}
+        />
+      )}
+
+      {scheduleCampaign && (
+        <CampaignScheduleModal
+          campaign={scheduleCampaign}
+          mode={scheduleMode}
+          onClose={() => setScheduleCampaign(null)}
+          onSuccess={() => load({ silent: true })}
         />
       )}
     </div>

@@ -28,6 +28,7 @@ import {
   setCampaignLifecycle,
   cloneCampaignBackend,
   deleteCampaignBackend,
+  patchCampaignBackend,
 } from '../../lib/api/backendClient'
 
 export type CampaignLifecycleAction =
@@ -492,15 +493,199 @@ export const fetchCampaignFailures = async (campaignId: string): Promise<Campaig
   return Object.values(groups).sort((a, b) => b.count - a.count)
 }
 
-export const fetchCampaignGeography = async (_campaignId: string): Promise<CampaignGeographyEntry[]> => {
-  // Mock fallback until we have a real geo view
-  return [
-    { label: 'Texas', type: 'state', fresh_targets: 0, sent: 0, delivered: 0, reply_rate: 0, optout_rate: 0, performance: 'average' }
-  ]
+function geoPerformance(replyRate: number, optoutRate: number): CampaignGeographyEntry['performance'] {
+  if (replyRate >= 15 && optoutRate <= 3) return 'excellent'
+  if (replyRate >= 10 && optoutRate <= 5) return 'good'
+  if (replyRate >= 5 || optoutRate <= 8) return 'average'
+  return 'poor'
 }
 
-export const fetchCampaignTemplates = async (_campaignId: string): Promise<CampaignTemplateStats[]> => {
-  return [] // Real implementation requires join with template usage
+export const fetchCampaignGeography = async (campaignId: string): Promise<CampaignGeographyEntry[]> => {
+  if (hasSupabaseEnv) {
+    try {
+      const metrics = await fetchCampaignMarketMetrics(campaignId)
+      if (metrics.length > 0) {
+        return metrics.map((row) => ({
+          label: row.market,
+          type: 'market' as const,
+          targets: row.total_targets ?? 0,
+          ready: 0,
+          queued: 0,
+          fresh_targets: row.total_targets ?? 0,
+          sent: row.sent_count ?? 0,
+          delivered: row.delivered_count ?? 0,
+          replies: row.reply_count ?? 0,
+          positive_replies: row.positive_reply_count ?? 0,
+          opt_outs: row.opted_out_count ?? 0,
+          failures: 0,
+          reply_rate: row.reply_rate_percent ?? 0,
+          optout_rate: 0,
+          delivery_rate: row.delivery_rate_percent ?? 0,
+          performance: geoPerformance(row.reply_rate_percent ?? 0, 0),
+        }))
+      }
+    } catch (error) {
+      if (isDev) console.warn('[campaigns.adapter] market metrics geo fallback', error)
+    }
+  }
+
+  const targets = await fetchCampaignTargets(campaignId)
+  const buckets = new Map<string, CampaignGeographyEntry>()
+
+  for (const target of targets) {
+    const state = target.property_address_state?.trim()
+    const market = target.market?.trim()
+    const city = target.property_address_city?.trim()
+    const zip = target.property_address_zip?.trim()
+
+    const layers: Array<{ label: string; type: CampaignGeographyEntry['type'] }> = []
+    if (state) layers.push({ label: state, type: 'state' })
+    if (market) layers.push({ label: market, type: 'market' })
+    if (city) layers.push({ label: city, type: 'city' })
+    if (zip) layers.push({ label: zip, type: 'zip' })
+
+    for (const layer of layers) {
+      const key = `${layer.type}:${layer.label}`
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          label: layer.label,
+          type: layer.type,
+          targets: 0,
+          ready: 0,
+          queued: 0,
+          fresh_targets: 0,
+          sent: 0,
+          delivered: 0,
+          replies: 0,
+          positive_replies: 0,
+          opt_outs: 0,
+          failures: 0,
+          reply_rate: 0,
+          optout_rate: 0,
+          delivery_rate: 0,
+          performance: 'average',
+        })
+      }
+      const entry = buckets.get(key)!
+      entry.targets += 1
+      if (target.target_status === 'ready') entry.ready += 1
+      if (['queued', 'scheduled'].includes(target.target_status)) entry.queued += 1
+      if (['sent', 'delivered', 'replied_positive', 'replied_negative'].includes(target.target_status)) {
+        entry.sent += 1
+      }
+      if (['delivered', 'replied_positive', 'replied_negative'].includes(target.target_status)) {
+        entry.delivered += 1
+      }
+      if (['replied_positive', 'replied_negative'].includes(target.target_status)) entry.replies += 1
+      if (target.target_status === 'replied_positive') entry.positive_replies += 1
+      if (target.target_status === 'opt_out') entry.opt_outs += 1
+      if (target.target_status === 'failed') entry.failures += 1
+    }
+  }
+
+  return Array.from(buckets.values())
+    .map((entry) => {
+      const replyRate = entry.delivered > 0 ? (entry.replies / entry.delivered) * 100 : 0
+      const optoutRate = entry.sent > 0 ? (entry.opt_outs / entry.sent) * 100 : 0
+      const deliveryRate = entry.sent > 0 ? (entry.delivered / entry.sent) * 100 : 0
+      return {
+        ...entry,
+        fresh_targets: entry.ready,
+        reply_rate: Math.round(replyRate * 10) / 10,
+        optout_rate: Math.round(optoutRate * 10) / 10,
+        delivery_rate: Math.round(deliveryRate * 10) / 10,
+        performance: geoPerformance(replyRate, optoutRate),
+      }
+    })
+    .sort((a, b) => b.targets - a.targets)
+}
+
+export const fetchCampaignTemplates = async (campaignId: string): Promise<CampaignTemplateStats[]> => {
+  const backend = await getCampaignBackend(campaignId)
+  const targets = backend.ok && Array.isArray(backend.data.targets) ? backend.data.targets : []
+  const groups = new Map<string, CampaignTemplateStats>()
+
+  for (const row of targets) {
+    const templateId = row.metadata?.template_id ?? row.template_id ?? null
+    const templateName = row.metadata?.template_name ?? row.template_name ?? 'Unassigned'
+    if (!templateId && !templateName) continue
+    const key = String(templateId ?? templateName)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        template_id: String(templateId ?? key),
+        template_name: String(templateName),
+        language: row.language ?? 'en',
+        use_count: 0,
+        delivered_count: 0,
+        failed_count: 0,
+        reply_count: 0,
+        opt_out_count: 0,
+        delivery_rate: 0,
+        reply_rate: 0,
+        opt_out_rate: 0,
+        last_used_at: null,
+      })
+    }
+    const stat = groups.get(key)!
+    const status = row.target_status ?? row.status ?? ''
+    stat.use_count += 1
+    if (['delivered', 'replied_positive', 'replied_negative'].includes(status)) stat.delivered_count += 1
+    if (status === 'failed') stat.failed_count += 1
+    if (['replied_positive', 'replied_negative'].includes(status)) stat.reply_count += 1
+    if (status === 'opt_out') stat.opt_out_count += 1
+    if (row.updated_at && (!stat.last_used_at || row.updated_at > stat.last_used_at)) {
+      stat.last_used_at = row.updated_at
+    }
+  }
+
+  if (groups.size === 0 && hasSupabaseEnv) {
+    const client = getSupabaseClient()
+    const { data } = await client
+      .from('send_queue')
+      .select('template_id,metadata,queue_status,updated_at')
+      .eq('campaign_id', campaignId)
+      .limit(500)
+    for (const row of data ?? []) {
+      const templateId = row.template_id ?? row.metadata?.template_id
+      if (!templateId) continue
+      const key = String(templateId)
+      if (!groups.has(key)) {
+        groups.set(key, {
+          template_id: key,
+          template_name: row.metadata?.template_name ?? key,
+          language: row.metadata?.language ?? 'en',
+          use_count: 0,
+          delivered_count: 0,
+          failed_count: 0,
+          reply_count: 0,
+          opt_out_count: 0,
+          delivery_rate: 0,
+          reply_rate: 0,
+          opt_out_rate: 0,
+          last_used_at: row.updated_at ?? null,
+        })
+      }
+      const stat = groups.get(key)!
+      stat.use_count += 1
+      if (row.queue_status === 'delivered') stat.delivered_count += 1
+      if (row.queue_status === 'failed') stat.failed_count += 1
+    }
+  }
+
+  return Array.from(groups.values()).map((stat) => ({
+    ...stat,
+    delivery_rate: stat.use_count > 0 ? (stat.delivered_count / stat.use_count) * 100 : 0,
+    reply_rate: stat.delivered_count > 0 ? (stat.reply_count / stat.delivered_count) * 100 : 0,
+    opt_out_rate: stat.use_count > 0 ? (stat.opt_out_count / stat.use_count) * 100 : 0,
+  }))
+}
+
+export const updateCampaignDraft = async (
+  campaignId: string,
+  payload: Record<string, unknown>,
+): Promise<void> => {
+  const res = await patchCampaignBackend(campaignId, payload)
+  if (!res.ok) throw new Error(res.message || res.error || 'campaign_update_failed')
 }
 
 export const fetchCampaignLogs = async (campaignId: string): Promise<CampaignLogEvent[]> => {

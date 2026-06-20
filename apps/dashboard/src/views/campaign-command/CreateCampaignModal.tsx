@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom'
 import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, CreateCampaignPayload } from './campaigns.types'
 import { buildCampaignTargetSnapshots, createCampaign, launchCampaign } from './campaigns.adapter'
+import { getCampaignBackend } from '../../lib/api/backendClient'
 import {
   CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
@@ -28,6 +29,8 @@ import './campaign-pacing.css'
 interface CreateCampaignModalProps {
   onClose: () => void
   onSuccess: (newCampaignId: string) => void
+  campaignId?: string
+  mode?: 'create' | 'edit' | 'build'
 }
 
 type FilterStatus = 'editing_new' | 'editing_saved' | 'active'
@@ -614,7 +617,12 @@ const getLaunchSummaryValue = (
   return (summary as Record<string, unknown>)[key as string] ?? (result as Record<string, unknown>)[key as string]
 }
 
-export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalProps) => {
+export const CreateCampaignModal = ({
+  onClose,
+  onSuccess,
+  campaignId,
+  mode: _mode = 'create',
+}: CreateCampaignModalProps) => {
   const [draft, setDraft] = useState<CampaignWizardDraft>(() => createDefaultDraft())
   const [filterStatuses, setFilterStatuses] = useState<Record<string, FilterStatus>>({})
   const [catalog, setCatalog] = useState<CampaignFieldCatalog | null>(null)
@@ -630,7 +638,8 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   const [isLaunching, setIsLaunching] = useState(false)
   const [fieldPickerState, setFieldPickerState] = useState<{ domain: CampaignDomainKey; category: string } | null>(null)
   const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
-  const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null)
+  const [savedCampaignId, setSavedCampaignId] = useState<string | null>(campaignId ?? null)
+  const [loadStage, setLoadStage] = useState(0)
   const [launchSettings, setLaunchSettings] = useState<LaunchSettings>(() => createDefaultLaunchSettings())
   const [launchPanelExpanded, setLaunchPanelExpanded] = useState(false)
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
@@ -657,9 +666,13 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
   useEffect(() => {
     let cancelled = false
     setIsCatalogLoading(true)
+    setLoadStage(1)
     getFieldCatalog()
       .then((data) => {
-        if (!cancelled) setCatalog(data)
+        if (!cancelled) {
+          setCatalog(data)
+          setLoadStage(2)
+        }
       })
       .catch((error) => {
         console.error('[CreateCampaignModal] catalog load failed', error)
@@ -670,6 +683,33 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
       })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (!campaignId) return
+    let cancelled = false
+    setLoadStage(3)
+    getCampaignBackend(campaignId)
+      .then((res) => {
+        if (cancelled || !res.ok || !res.data.campaign) return
+        const c = res.data.campaign as Record<string, unknown>
+        const meta = (c.metadata as Record<string, unknown>) ?? {}
+        const filters = (meta.target_filters as CampaignFilterGroups) ?? createEmptyFilterGroups()
+        setDraft((prev) => ({
+          ...prev,
+          name: String(c.name ?? prev.name),
+          description: String(c.description ?? prev.description),
+          template_use_case: String(c.objective ?? prev.template_use_case),
+          stage_code: String(c.stage_code ?? prev.stage_code),
+          target_filters: filters,
+        }))
+        setSavedCampaignId(campaignId)
+        setLoadStage(4)
+      })
+      .catch((err) => {
+        console.error('[CreateCampaignModal] campaign load failed', err)
+      })
+    return () => { cancelled = true }
+  }, [campaignId])
 
   const runPreview = useCallback((reason: 'auto' | 'manual' = 'auto') => {
     const sequence = previewSequenceRef.current + 1
@@ -1301,11 +1341,27 @@ export const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalP
     )
   }
 
+  const LOADER_STAGES = [
+    'Loading approved targeting fields',
+    'Resolving property universe',
+    'Loading sender routes',
+    'Preparing campaign builder',
+  ]
+
   if (isCatalogLoading || !catalog || !activeDomainDefinition) {
     return createPortal(
       <div className="cmp-studio-overlay">
         <div className="cmp-studio">
-          <div className="cmp-studio-loading">Loading catalog...</div>
+          <div className="cmp-studio-loading cmp-studio-loading--staged">
+            <div className="cmp-studio-loading__title">Campaign Builder</div>
+            <ul className="cmp-studio-loading__steps">
+              {LOADER_STAGES.map((label, i) => (
+                <li key={label} className={loadStage > i ? 'is-done' : loadStage === i ? 'is-active' : ''}>
+                  {label}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>,
       document.body,

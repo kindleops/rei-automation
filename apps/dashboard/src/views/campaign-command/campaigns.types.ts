@@ -1,6 +1,8 @@
 export type CampaignStatus =
   | 'active'
   | 'ready'
+  | 'built'
+  | 'queued'
   | 'live_limited'
   | 'paused'
   | 'scheduled'
@@ -226,12 +228,20 @@ export interface CampaignMarketMetric {
 
 export interface CampaignGeographyEntry {
   label: string
-  type: 'state' | 'county' | 'market'
+  type: 'state' | 'county' | 'market' | 'city' | 'zip'
+  targets: number
+  ready: number
+  queued: number
   fresh_targets: number
   sent: number
   delivered: number
+  replies: number
+  positive_replies: number
+  opt_outs: number
+  failures: number
   reply_rate: number
   optout_rate: number
+  delivery_rate: number
   performance: 'excellent' | 'good' | 'average' | 'poor'
 }
 
