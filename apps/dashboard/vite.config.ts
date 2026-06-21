@@ -597,10 +597,23 @@ const buyerActivityPlugin = (env: Record<string, string>): Plugin => ({
   },
 })
 
+function resolveBackendProxyTarget(env: Record<string, string>, mode: string): string {
+  const configured = (env.VITE_BACKEND_API_URL || '').trim()
+  if (mode !== 'development') {
+    return configured || 'http://localhost:3000'
+  }
+  // Local API dev server runs on 3000 by default. Port 3001 is often a stale
+  // secondary instance with a corrupted .next cache that returns HTML 500s.
+  if (!configured || /localhost:3001\b/.test(configured)) {
+    return 'http://localhost:3000'
+  }
+  return configured
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const backendProxyTarget = env.VITE_BACKEND_API_URL || 'http://localhost:3000'
+  const backendProxyTarget = resolveBackendProxyTarget(env, mode)
   return {
     plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {

@@ -305,16 +305,32 @@ export async function callBackend<T = unknown>(
   })
 
   if (!response.ok) {
+    if (parseError && (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html'))) {
+      const nextMessage = bodyText.match(/"message":"((?:\\.|[^"\\])*)"/)?.[1]?.replace(/\\u003c/g, '<').replace(/\\n/g, '\n')
+      const hint = nextMessage
+        ? `Backend crash: ${nextMessage.slice(0, 240)}`
+        : 'Backend returned an HTML error page instead of JSON.'
+      return {
+        ok: false,
+        status: response.status,
+        error: 'BACKEND_HTML_ERROR',
+        message: `[${response.status}] ${hint} — ${url}. Ensure apps/api is running on port 3000 (rm -rf apps/api/.next && npm run dev if stale).`,
+        upstream: { html_preview: bodyText.slice(0, 400) },
+      }
+    }
+
     const b = (body as Record<string, unknown>) ?? {}
     const reason = b['reason']
     const error = b['error']
     const message = b['message']
+    const traceId = b['trace_id']
     const canonical = [reason, error, message].find((value) => typeof value === 'string' && value.trim().length > 0)
+    const traceSuffix = typeof traceId === 'string' && traceId ? ` (trace: ${traceId})` : ''
     return {
       ok: false,
       status: response.status,
       error: String(canonical ?? response.statusText ?? 'BACKEND_ERROR'),
-      message: `[${response.status}] ${String(canonical ?? response.statusText ?? 'BACKEND_ERROR')} — ${url}${bodyText ? ` (body: ${bodyText.slice(0, 200)})` : ''}`,
+      message: `[${response.status}] ${String(canonical ?? response.statusText ?? 'BACKEND_ERROR')}${traceSuffix} — ${url}${bodyText && !parseError ? ` (body: ${bodyText.slice(0, 200)})` : ''}`,
       upstream: body,
     }
   }
