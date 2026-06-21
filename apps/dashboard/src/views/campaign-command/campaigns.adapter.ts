@@ -136,6 +136,7 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       blocked_reason_counts: row.blocked_reason_counts ?? {},
       health_score: Number(row.health_score ?? 0),
       health_status: row.health_status ?? 'caution',
+      execution_proof: (row.execution_proof as CampaignSummary['execution_proof']) ?? null,
     }
 }
 
@@ -736,10 +737,22 @@ function parseLifecycleBlockers(upstream: unknown): string[] {
   return Array.isArray(blockers) ? blockers : []
 }
 
-function lifecycleErrorMessage(res: { message?: string; error?: string; upstream?: unknown }): string {
-  const blockers = parseLifecycleBlockers(res.upstream)
+function lifecycleErrorMessage(res: { message?: string; error?: string; upstream?: unknown; data?: Record<string, unknown> }): string {
+  const upstream = (res.upstream && typeof res.upstream === 'object') ? res.upstream as Record<string, unknown> : {}
+  const data = (res.data && typeof res.data === 'object') ? res.data : {}
+  const blockers = parseLifecycleBlockers(upstream) || parseLifecycleBlockers(data)
   if (blockers.length) return blockers.join(' · ')
-  return res.message || res.error || 'lifecycle_action_failed'
+
+  const from = String(data.from ?? upstream.from ?? '')
+  const to = String(data.to ?? upstream.to ?? '')
+  const err = String(res.error || data.error || upstream.error || '')
+  if (err === 'illegal_campaign_transition' && from) {
+    return `Transition not allowed: ${from}${to ? ` → ${to}` : ''}`
+  }
+  if (err === 'reschedule_requires_pause') {
+    return String(data.message || upstream.message || 'Pause the campaign before rescheduling.')
+  }
+  return String(data.message || upstream.message || res.message || err || 'lifecycle_action_failed')
 }
 
 // Operator lifecycle controls — pause / resume / archive / schedule / activate / …

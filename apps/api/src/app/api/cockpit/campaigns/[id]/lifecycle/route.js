@@ -4,10 +4,24 @@ import { applyCampaignLifecycleAction } from '@/lib/domain/campaigns/campaign-au
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
 
 function withCors(request, payload, status = 200) {
   return NextResponse.json(payload, { status, headers: corsHeaders(request) })
+}
+
+function lifecycleHttpStatus(result = {}) {
+  const error = String(result.error || '')
+  if (error === 'campaign_not_found') return 404
+  if (
+    error === 'campaign_status_missing' ||
+    error === 'illegal_campaign_transition' ||
+    error === 'reschedule_requires_pause' ||
+    error === 'restore_requires_archived'
+  ) {
+    return 409
+  }
+  return 400
 }
 
 async function campaignIdFromParams(params) {
@@ -32,8 +46,7 @@ export async function POST(request, { params }) {
     const body = await parseJsonSafe(request)
     const result = await applyCampaignLifecycleAction(campaignId, body)
     if (!result.ok) {
-      const status = result.error === 'illegal_campaign_transition' ? 409 : 400
-      return withCors(request, result, status)
+      return withCors(request, result, lifecycleHttpStatus(result))
     }
     return withCors(request, result, 200)
   } catch (error) {

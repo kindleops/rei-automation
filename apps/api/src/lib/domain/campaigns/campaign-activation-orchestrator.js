@@ -47,15 +47,41 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       })
     }
 
+    const { count: activeQueueCount } = await supabase
+      .from('send_queue')
+      .select('id', { count: 'exact', head: true })
+      .eq('campaign_id', campaignId)
+      .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending'])
+
+    if (status === 'active' && (campaign.activated_at || Number(activeQueueCount || 0) > 0 || Number(campaign.queued_count || 0) > 0)) {
+      await recomputeCampaignProgress(campaignId, deps)
+      recordStep('complete', { idempotent: true, queue_rows: activeQueueCount })
+      return {
+        ok: true,
+        idempotent: true,
+        campaign_id: campaignId,
+        campaign,
+        steps,
+        inserted: 0,
+        skipped: 0,
+        blockers: [],
+        from: 'active',
+        to: 'active',
+      }
+    }
+
     if (idempotencyKey && clean(campaign.last_activation_idempotency_key) === idempotencyKey && ['active', 'activating', 'queued'].includes(status)) {
       return {
         ok: true,
         idempotent: true,
         campaign_id: campaignId,
+        campaign,
         steps,
         inserted: 0,
         skipped: 0,
         blockers: [],
+        from: status,
+        to: status,
       }
     }
 
@@ -102,9 +128,12 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     await recomputeCampaignProgress(campaignId, deps)
     recordStep('complete', { inserted: result.inserted, skipped: result.skipped })
 
+    const { data: refreshedCampaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+
     return {
       ok: true,
       campaign_id: campaignId,
+      campaign: refreshedCampaign || result.campaign || null,
       idempotent: Boolean(result.idempotent),
       steps,
       inserted: result.inserted ?? 0,
@@ -112,6 +141,7 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       blockers: result.blockers || [],
       from: result.from,
       to: result.to || 'active',
+      lifecycle_result: result.lifecycle_result || null,
       queue_result: result.queue_result || null,
       readiness,
     }

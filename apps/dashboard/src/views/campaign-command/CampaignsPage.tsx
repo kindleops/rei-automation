@@ -107,17 +107,25 @@ const statusOrder: Record<CampaignStatus, number> = {
 
 // ── Primitive components ──────────────────────────────────────────────────────
 
-const StatusBadge = ({ status }: { status: CampaignStatus }) => {
+const StatusBadge = ({
+  status,
+  executionProof,
+}: {
+  status: CampaignStatus
+  executionProof?: CampaignSummary['execution_proof']
+}) => {
   const labels: Record<CampaignStatus, string> = {
     active: 'Active', ready: 'Ready', built: 'Targets Built', queued: 'Queued',
     live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
     draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
     completed: 'Completed', archived: 'Archived',
   }
+  const proofActive = status === 'active' && executionProof?.proof_mode
+  const label = proofActive ? 'Active — Proof No-Send' : (labels[status] ?? status)
   return (
-    <span className={cls('ccc-status', `is-${status}`)}>
+    <span className={cls('ccc-status', `is-${status}`, proofActive && 'is-proof')}>
       <span className="ccc-status__dot" />
-      {labels[status] ?? status}
+      {label}
     </span>
   )
 }
@@ -1031,7 +1039,7 @@ export const DetailPanel = ({
           </button>
         </div>
         <div className="ccc__detail-meta-row">
-          <StatusBadge status={campaign.status} />
+          <StatusBadge status={campaign.status} executionProof={campaign.execution_proof} />
           <span>·</span>
           <span>{campaign.total_targets.toLocaleString()} targets</span>
           <span>·</span>
@@ -1206,7 +1214,7 @@ export const CampaignListPanel = ({
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="ccc__list-name" title={c.campaign_name}>{c.campaign_name}</div>
                   <div className="ccc__list-meta">
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={c.status} executionProof={c.execution_proof} />
                     <span>·</span>
                     <span>{fmt(c.total_targets)} tgt</span>
                     <span>·</span>

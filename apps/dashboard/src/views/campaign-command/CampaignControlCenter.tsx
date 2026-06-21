@@ -113,8 +113,9 @@ export function CampaignControlCenter({
   }, [load])
 
   // Light poll — only while live and the tab is visible.
-  const status = summary?.status ?? campaign.status
+  const status = campaign.status
   const isLive = LIVE_STATES.has(status)
+  const proof = campaign.execution_proof
   useEffect(() => {
     if (!isLive) return
     const tick = () => {
@@ -151,11 +152,14 @@ export function CampaignControlCenter({
     }
   }, [campaignId, load, onLifecycleChange, status])
 
-  const meta = STATUS_META[status] ?? { label: status, tone: 'idle' as Tone }
+  const proofActive = status === 'active' && proof?.proof_mode
+  const meta = proofActive
+    ? { label: 'Active — Proof No-Send', tone: 'live' as Tone }
+    : (STATUS_META[status] ?? { label: status, tone: 'idle' as Tone })
 
   // Derived counters (no fake values — fall back to the list summary when the
   // progress engine has not been populated/migrated yet).
-  const queued = summary?.queued_count ?? campaign.queued_targets ?? 0
+  const queued = proof?.hydrated_rows ?? summary?.queued_count ?? campaign.canonical_queued_count ?? campaign.queued_targets ?? 0
   const sent = summary?.sent_count ?? campaign.sent_count ?? 0
   const delivered = summary?.delivered_count ?? campaign.delivered_count ?? 0
   const replied = summary?.replied_count ?? campaign.reply_count ?? 0
@@ -225,6 +229,25 @@ export function CampaignControlCenter({
 
       {error && !summary && (
         <div className="ccc-exec__error">Progress unavailable: {error}</div>
+      )}
+
+      {proof && (
+        <div className="ccc-exec__proof">
+          <div className="ccc-exec__section-label">Execution truth</div>
+          <div className="ccc-exec__proof-grid">
+            <div><span>Campaign state</span><strong>{proof.campaign_state}</strong></div>
+            <div><span>Hydrated rows</span><strong>{fmtNum(proof.hydrated_rows)}</strong></div>
+            <div><span>Live-send rows</span><strong>{fmtNum(proof.live_send_rows)}</strong></div>
+            <div><span>Proof / no-send rows</span><strong>{fmtNum(proof.proof_no_send_rows)}</strong></div>
+            <div><span>SMS eligible</span><strong>{fmtNum(proof.sms_eligible)}</strong></div>
+            <div><span>Routing allowed</span><strong>{fmtNum(proof.routing_allowed)}</strong></div>
+            <div><span>Next proof row</span><strong>{fmtClock(proof.next_scheduled_proof_row)}</strong></div>
+            <div><span>Transmission</span><strong>{proof.transmission_enabled ? 'enabled' : 'disabled'}</strong></div>
+          </div>
+          {proof.no_messages_will_transmit && (
+            <div className="ccc-exec__proof-note">No messages will transmit — all hydrated rows are proof/no-send.</div>
+          )}
+        </div>
       )}
 
       {/* Hydration / execution progress */}

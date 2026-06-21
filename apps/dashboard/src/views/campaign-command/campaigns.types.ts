@@ -15,6 +15,19 @@ export type CampaignStatus =
 
 export type LaunchReadinessLevel = 'ready' | 'warnings' | 'blocked' | 'unknown'
 
+export interface CampaignExecutionProof {
+  campaign_state: string
+  hydrated_rows: number
+  live_send_rows: number
+  proof_no_send_rows: number
+  sms_eligible: number
+  routing_allowed: number
+  transmission_enabled: boolean
+  next_scheduled_proof_row: string | null
+  no_messages_will_transmit: boolean
+  proof_mode: boolean
+}
+
 export interface CampaignRecipientMetrics {
   matched_property_count?: number | null
   target_row_count?: number
@@ -43,6 +56,7 @@ export interface CampaignSummary {
   launch_blockers?: string[]
   launch_blocker_codes?: string[]
   recipient_metrics?: CampaignRecipientMetrics | null
+  execution_proof?: CampaignExecutionProof | null
   sent_count: number
   delivered_count: number
   failed_count: number

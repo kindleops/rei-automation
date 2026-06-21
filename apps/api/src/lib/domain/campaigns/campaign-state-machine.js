@@ -56,18 +56,67 @@ export const LEGACY_STATUS_ALIASES = Object.freeze({
  * edge set. Canonical path: draft -> built -> queued -> scheduled -> activating
  * -> active. `built` is set by Build Targets; `queued` by the live queue write.
  */
+/** Canonical edges — keep in sync with campaign_status_transitions migration seed. */
 const TRANSITIONS = Object.freeze({
   draft: ['built', 'scheduled', 'archived'],
-  built: ['queued', 'scheduled', 'draft', 'archived'],
+  built: ['queued', 'scheduled', 'activating', 'draft', 'archived'],
   queued: ['scheduled', 'built', 'draft', 'paused', 'archived'],
   scheduled: ['activating', 'active', 'queued', 'draft', 'paused', 'archived'],
   activating: ['active', 'failed', 'paused'],
-  active: ['paused', 'completed', 'failed'],
-  paused: ['active', 'scheduled', 'completed', 'archived'],
-  failed: ['paused', 'activating', 'archived'],
+  active: ['paused', 'completed', 'failed', 'archived'],
+  paused: ['active', 'activating', 'scheduled', 'completed', 'archived'],
+  failed: ['built', 'scheduled', 'paused', 'activating', 'archived'],
   completed: ['archived'],
   archived: ['draft'],
 })
+
+export const CAMPAIGN_LIFECYCLE_SELECT = [
+  'id',
+  'status',
+  'scheduled_for',
+  'built_at',
+  'scheduled_at',
+  'activating_at',
+  'activated_at',
+  'paused_at',
+  'failed_at',
+  'archived_at',
+  'auto_queue_enabled',
+  'auto_send_enabled',
+  'metadata',
+  'queued_count',
+  'sent_count',
+  'last_transition_from',
+  'last_transition_reason',
+  'last_activation_idempotency_key',
+  'activation_attempt_count',
+].join(',')
+
+export async function loadCampaignForLifecycle(supabase, campaignId) {
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select(CAMPAIGN_LIFECYCLE_SELECT)
+    .eq('id', campaignId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return { ok: false, error: 'campaign_not_found', campaign: null }
+  const rawStatus = data.status
+  if (rawStatus == null || String(rawStatus).trim() === '') {
+    return {
+      ok: false,
+      error: 'campaign_status_missing',
+      campaign_id: campaignId,
+      campaign: data,
+      diagnostics: { campaign_id: campaignId, status: rawStatus },
+    }
+  }
+  return {
+    ok: true,
+    campaign: data,
+    status: normalizeCampaignStatus(rawStatus),
+    raw_status: String(rawStatus).trim().toLowerCase(),
+  }
+}
 
 export function normalizeCampaignStatus(raw) {
   const value = String(raw ?? '').trim().toLowerCase()
@@ -146,6 +195,21 @@ export async function transitionCampaignStatus(supabase, campaignId, toStatus, o
   const reason = options.reason ?? null
   const scheduledFor = options.scheduledFor ?? options.scheduled_for ?? null
 
+  const loaded = await loadCampaignForLifecycle(supabase, campaignId)
+  if (!loaded.ok) return { ok: false, error: loaded.error, to, diagnostics: loaded.diagnostics }
+  const from = loaded.status
+  const rawFrom = loaded.raw_status
+
+  if (from === to) {
+    const patch = {}
+    if (to === 'scheduled' && scheduledFor) patch.scheduled_for = scheduledFor
+    if (Object.keys(patch).length) {
+      const { data } = await supabase.from('campaigns').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', campaignId).select('*').maybeSingle()
+      return { ok: true, idempotent: true, campaign: data || loaded.campaign, from, to }
+    }
+    return { ok: true, idempotent: true, campaign: loaded.campaign, from, to }
+  }
+
   // Canonical path: advisory-locked, edge-validated DB function.
   const { data, error } = await supabase.rpc('campaign_transition_status', {
     p_campaign_id: campaignId,
@@ -156,15 +220,35 @@ export async function transitionCampaignStatus(supabase, campaignId, toStatus, o
 
   if (!error) {
     const campaign = Array.isArray(data) ? data[0] : data
-    return { ok: true, campaign: campaign || null, to, from: campaign?.last_transition_from ?? null }
+    return {
+      ok: true,
+      campaign: campaign || null,
+      to,
+      from: campaign?.last_transition_from ?? from,
+      raw_from: rawFrom,
+    }
   }
 
+  const errMsg = `${error.message || ''}`
+  if (errMsg.includes('campaign_not_found')) {
+    return { ok: false, error: 'campaign_not_found', from, to, campaign_id: campaignId }
+  }
+  if (errMsg.includes('campaign_status_missing')) {
+    return { ok: false, error: 'campaign_status_missing', from, to, campaign_id: campaignId, diagnostics: { status: loaded.campaign?.status } }
+  }
   if (illegalTransition(error)) {
-    return { ok: false, error: 'illegal_campaign_transition', to }
+    const match = errMsg.match(/illegal_campaign_transition:([^-]+)(?:\s*->\s*(.+))?/)
+    return {
+      ok: false,
+      error: 'illegal_campaign_transition',
+      from: match?.[1]?.trim() || from,
+      to: match?.[2]?.trim() || to,
+      message: `Transition not allowed: ${from} → ${to}`,
+    }
   }
 
   if (!rpcFunctionMissing(error)) {
-    return { ok: false, error: error.message || 'transition_failed', to }
+    return { ok: false, error: error.message || 'transition_failed', from, to }
   }
 
   // Degraded fallback (pre-migration): validate edge in JS, guarded update.

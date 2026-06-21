@@ -30,6 +30,7 @@ import {
   CAMPAIGN_STATES,
   isLiveCampaignStatus,
   isQueueableStatus,
+  loadCampaignForLifecycle,
   normalizeCampaignStatus,
   transitionCampaignStatus,
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
@@ -5205,7 +5206,115 @@ export async function previewCampaignTargets(input = {}, deps = {}) {
   }, diagnostics, effectiveOptions.include_diagnostics)
 }
 
-function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null) {
+async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) {
+  const campaignStatus = campaign?.status || 'draft'
+  const [{ data: activeRows, error: activeError }, { data: proofRows, error: proofError }] = await Promise.all([
+    supabase
+      .from('send_queue')
+      .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata')
+      .eq('campaign_id', campaignId)
+      .in('queue_status', ACTIVE_QUEUE_STATUSES),
+    supabase
+      .from('send_queue')
+      .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata,created_at')
+      .eq('campaign_id', campaignId)
+      .filter('metadata->>launch_mode', 'eq', 'proof_hydration_no_send')
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ])
+  if (activeError) throw activeError
+  if (proofError) throw proofError
+
+  let proofNoSendRows = 0
+  let liveSendRows = 0
+  let smsEligible = 0
+  let routingAllowed = 0
+  let nextScheduledProofRow = null
+
+  for (const row of activeRows || []) {
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    const noSend = asBoolean(metadata.no_send ?? metadata.proof_no_send, false)
+    if (noSend) {
+      proofNoSendRows += 1
+      if (row.scheduled_for && (!nextScheduledProofRow || row.scheduled_for < nextScheduledProofRow)) {
+        nextScheduledProofRow = row.scheduled_for
+      }
+    } else {
+      liveSendRows += 1
+    }
+    if (row.sms_eligible) smsEligible += 1
+    if (row.routing_allowed) routingAllowed += 1
+  }
+
+  let hydratedRows = (activeRows || []).length
+  const canonicalQueued = Number(campaign?.queued_count || 0)
+  const canonicalSent = Number(campaign?.sent_count || 0)
+  if (hydratedRows === 0 && normalizeCampaignStatus(campaignStatus) === 'active' && canonicalQueued > 0) {
+    hydratedRows = canonicalQueued
+  }
+
+  if (proofNoSendRows === 0 && (proofRows || []).length > 0) {
+    const latestBatchAt = proofRows[0]?.created_at || null
+    const latestBatch = latestBatchAt
+      ? (proofRows || []).filter((row) => row.created_at === latestBatchAt)
+      : (proofRows || []).slice(0, 5)
+    proofNoSendRows = latestBatch.length
+    for (const row of latestBatch) {
+      if (row.scheduled_for && (!nextScheduledProofRow || row.scheduled_for < nextScheduledProofRow)) {
+        nextScheduledProofRow = row.scheduled_for
+      }
+    }
+  }
+
+  const proofMode =
+    (proofNoSendRows > 0 && liveSendRows === 0) ||
+    (
+      normalizeCampaignStatus(campaignStatus) === 'active' &&
+      !asBoolean(campaign?.auto_send_enabled, false) &&
+      canonicalQueued > 0 &&
+      canonicalSent === 0 &&
+      liveSendRows === 0
+    )
+
+  if (proofMode && proofNoSendRows === 0 && canonicalQueued > 0) {
+    proofNoSendRows = canonicalQueued
+  }
+  if (proofMode && hydratedRows < proofNoSendRows) {
+    hydratedRows = proofNoSendRows
+  }
+
+  return {
+    campaign_state: normalizeCampaignStatus(campaignStatus),
+    hydrated_rows: hydratedRows,
+    live_send_rows: liveSendRows,
+    proof_no_send_rows: proofNoSendRows,
+    sms_eligible: smsEligible,
+    routing_allowed: routingAllowed,
+    transmission_enabled: false,
+    next_scheduled_proof_row: nextScheduledProofRow,
+    no_messages_will_transmit: proofMode,
+    proof_mode: proofMode,
+  }
+}
+
+async function reloadCampaignRow(supabase, campaignId) {
+  const { data, error } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+async function cancelPendingCampaignQueueRows(supabase, campaignId) {
+  const { data, error } = await supabase
+    .from('send_queue')
+    .update({ queue_status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('campaign_id', campaignId)
+    .in('queue_status', ['queued', 'scheduled', 'ready', 'pending', 'approved', 'processing'])
+    .select('id')
+  if (error) throw error
+  return data?.length || 0
+}
+
+function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null, executionProof = null) {
   const status = clean(campaign.status || 'draft')
   const counts = countBucket?.statuses ? { ...countBucket.statuses } : {}
   const blockedByReason = countBucket?.blocked ? { ...countBucket.blocked } : {}
@@ -5264,7 +5373,19 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     health_score: ready > 0 ? 90 : targets.length > 0 ? 70 : 40,
     health_status: ready > 0 ? 'healthy' : targets.length > 0 ? 'caution' : 'dangerous',
     blocked_reason_counts: blockedByReason,
+    execution_proof: executionProof || null,
   }
+}
+
+async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
+  const proofByCampaign = new Map()
+  const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean)
+  if (!campaignIds.length) return proofByCampaign
+
+  for (const campaign of campaigns) {
+    proofByCampaign.set(campaign.id, await fetchCampaignExecutionProof(supabase, campaign.id, campaign))
+  }
+  return proofByCampaign
 }
 
 export async function listCampaigns(deps = {}) {
@@ -5278,9 +5399,11 @@ export async function listCampaigns(deps = {}) {
   const ids = (campaigns || []).map((campaign) => campaign.id)
   let windows = []
   let countMap = new Map()
+  let proofByCampaign = new Map()
   if (ids.length) {
     const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
     countMap = await fetchCampaignTargetStatusCounts(ids, deps)
+    proofByCampaign = await fetchExecutionProofByCampaign(supabase, campaigns || [])
     const windowRes = await supabase
       .from('campaign_send_windows')
       .select('*')
@@ -5289,12 +5412,19 @@ export async function listCampaigns(deps = {}) {
       .limit(1000)
     if (!windowRes.error) windows = windowRes.data || []
   }
-  const summaries = (campaigns || []).map((campaign) => mapCampaignSummary(
-    campaign,
-    [],
-    windows.filter((window) => window.campaign_id === campaign.id),
-    countMap.get(campaign.id) || null,
-  ))
+  const summaries = (campaigns || []).map((campaign) => {
+    const proofBase = proofByCampaign.get(campaign.id) || null
+    const executionProof = proofBase
+      ? { campaign_state: normalizeCampaignStatus(campaign.status), ...proofBase }
+      : null
+    return mapCampaignSummary(
+      campaign,
+      [],
+      windows.filter((window) => window.campaign_id === campaign.id),
+      countMap.get(campaign.id) || null,
+      executionProof,
+    )
+  })
   return {
     ok: true,
     campaigns: summaries,
@@ -5350,7 +5480,8 @@ export async function getCampaign(campaignId, deps = {}) {
     computeCampaignRecipientMetrics(campaignId, deps),
     evaluateCampaignLaunchReadiness(campaignId, deps),
   ])
-  const summary = mapCampaignSummary(campaign, [], windows || [], countMap.get(campaignId) || null)
+  const executionProof = await fetchCampaignExecutionProof(supabase, campaignId, campaign)
+  const summary = mapCampaignSummary(campaign, [], windows || [], countMap.get(campaignId) || null, executionProof)
   summary.recipient_metrics = recipientMetrics.ok ? recipientMetrics : null
   summary.launch_readiness = launchReadiness.ok ? launchReadiness.launch_readiness : 'unknown'
   summary.launch_blockers = launchReadiness.blockers || []
@@ -6935,6 +7066,22 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
     return { ok: false, error: 'campaign_not_queueable', blockers, inserted: 0, skipped: 0 }
   }
 
+  if (status === 'active' && (campaign.activated_at || existingQueueRows > 0 || Number(campaign.queued_count || 0) > 0)) {
+    return {
+      ok: true,
+      idempotent: true,
+      campaign_id: campaignId,
+      queue_result: null,
+      lifecycle_result: { ok: true, campaign, from: status, to: status },
+      inserted: 0,
+      skipped: 0,
+      blockers: [],
+      from: status,
+      to: status,
+      campaign,
+    }
+  }
+
   const storedIdempotencyKey = clean(campaign.last_activation_idempotency_key)
   const activationStatuses = new Set(['queued', 'scheduled', 'activating', 'active'])
   if (
@@ -7129,13 +7276,14 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
         to: result.to || null,
       }
     }
+    const campaign = result.campaign || await reloadCampaignRow(supabase, campaignId)
     return {
       ok: true,
       campaign_id: campaignId,
       action,
-      from: result.from || result.lifecycle_result?.from || null,
-      to: result.to || result.lifecycle_result?.to || 'active',
-      campaign: result.campaign || result.lifecycle_result?.campaign || null,
+      from: result.from || result.lifecycle_result?.from || campaign?.status || null,
+      to: result.to || result.lifecycle_result?.to || campaign?.status || 'active',
+      campaign,
       queue_result: result.queue_result,
       lifecycle_result: result.lifecycle_result,
       inserted: result.inserted,
@@ -7146,46 +7294,153 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
     }
   }
 
+  const loaded = await loadCampaignForLifecycle(supabase, campaignId)
+  if (!loaded.ok) {
+    return {
+      ok: false,
+      error: loaded.error,
+      campaign_id: campaignId,
+      diagnostics: loaded.diagnostics || null,
+      from: loaded.campaign?.status ?? null,
+      to: null,
+    }
+  }
+  const fromStatus = loaded.status
+
   const target = CAMPAIGN_LIFECYCLE_ACTIONS[action] || (CAMPAIGN_STATES.includes(clean(input.to_status)) ? clean(input.to_status) : null)
-  if (!target) return { ok: false, error: `unknown_lifecycle_action:${action || input.to_status || ''}` }
+  if (!target) return { ok: false, error: `unknown_lifecycle_action:${action || input.to_status || ''}`, from: fromStatus }
 
   if (action === 'restore') {
-    const detail = await getCampaign(campaignId, deps)
-    const from = normalizeCampaignStatus(detail.campaign?.status)
-    if (from !== 'archived') {
-      return { ok: false, error: 'restore_requires_archived', from, to: 'draft' }
+    if (fromStatus !== 'archived') {
+      return { ok: false, error: 'restore_requires_archived', from: fromStatus, to: 'draft' }
     }
     const result = await transitionCampaignStatus(supabase, campaignId, 'draft', { reason })
-    if (!result.ok) return { ok: false, error: result.error, from: result.from || from, to: 'draft' }
+    if (!result.ok) return { ok: false, error: result.error, from: result.from || fromStatus, to: 'draft' }
+    const campaign = result.campaign || await reloadCampaignRow(supabase, campaignId)
     await recordCampaignEvent({
       campaign_id: campaignId,
       event_type: 'campaign.restored',
       severity: 'info',
       title: 'Campaign restored',
       description: 'Archived campaign restored to draft for editing.',
-      metadata: { from, to: 'draft' },
+      metadata: { from: fromStatus, to: 'draft' },
     }, deps)
     return {
       ok: true,
       campaign_id: campaignId,
       action,
-      from,
-      to: result.campaign?.status || 'draft',
-      campaign: result.campaign || null,
+      from: fromStatus,
+      to: campaign?.status || 'draft',
+      campaign,
       degraded: Boolean(result.degraded),
     }
   }
 
+  const isReschedule = action === 'reschedule' || asBoolean(input.reschedule, false)
+  if ((action === 'schedule' && isReschedule) || action === 'reschedule') {
+    if (['active', 'activating'].includes(fromStatus)) {
+      return {
+        ok: false,
+        error: 'reschedule_requires_pause',
+        from: fromStatus,
+        to: 'scheduled',
+        message: 'Pause the campaign before rescheduling an active launch.',
+      }
+    }
+  }
+
+  if (action === 'schedule' && fromStatus === 'scheduled' && scheduledFor && loaded.campaign?.scheduled_for) {
+    const existingMs = new Date(loaded.campaign.scheduled_for).getTime()
+    const nextMs = new Date(scheduledFor).getTime()
+    if (Number.isFinite(existingMs) && Number.isFinite(nextMs) && existingMs === nextMs) {
+      return {
+        ok: true,
+        idempotent: true,
+        campaign_id: campaignId,
+        action,
+        from: fromStatus,
+        to: 'scheduled',
+        campaign: loaded.campaign,
+      }
+    }
+  }
+
+  if (action === 'pause' && fromStatus === 'paused') {
+    return {
+      ok: true,
+      idempotent: true,
+      campaign_id: campaignId,
+      action,
+      from: 'paused',
+      to: 'paused',
+      campaign: loaded.campaign,
+    }
+  }
+
+  if (action === 'resume' && fromStatus === 'active') {
+    return {
+      ok: true,
+      idempotent: true,
+      campaign_id: campaignId,
+      action,
+      from: 'active',
+      to: 'active',
+      campaign: loaded.campaign,
+    }
+  }
+
+  if (action === 'archive' && fromStatus === 'archived') {
+    return {
+      ok: true,
+      idempotent: true,
+      campaign_id: campaignId,
+      action,
+      from: 'archived',
+      to: 'archived',
+      campaign: loaded.campaign,
+      queue_rows_cancelled: 0,
+    }
+  }
+
+  let queueRowsCancelled = 0
+  if (action === 'archive' && fromStatus !== 'archived') {
+    queueRowsCancelled = await cancelPendingCampaignQueueRows(supabase, campaignId)
+  }
+
   const result = await transitionCampaignStatus(supabase, campaignId, target, { reason, scheduledFor })
-  if (!result.ok) return { ok: false, error: result.error, from: result.from || null, to: result.to || target }
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.error,
+      from: result.from || fromStatus,
+      to: result.to || target,
+      message: result.message || null,
+      diagnostics: result.diagnostics || null,
+    }
+  }
+
+  const campaign = result.campaign || await reloadCampaignRow(supabase, campaignId)
+  if (action === 'archive' && queueRowsCancelled > 0) {
+    await recordCampaignEvent({
+      campaign_id: campaignId,
+      event_type: 'campaign.archived',
+      severity: 'warning',
+      title: 'Campaign archived',
+      description: `Archived with ${queueRowsCancelled} pending queue rows cancelled.`,
+      metadata: { queue_rows_cancelled: queueRowsCancelled, from: fromStatus },
+    }, deps)
+  }
+
   return {
     ok: true,
     campaign_id: campaignId,
     action: action || null,
-    from: result.from || null,
-    to: result.campaign?.status || result.to || target,
-    campaign: result.campaign || null,
+    from: result.from || fromStatus,
+    to: campaign?.status || result.to || target,
+    campaign,
+    idempotent: Boolean(result.idempotent),
     degraded: Boolean(result.degraded),
+    queue_rows_cancelled: queueRowsCancelled || undefined,
   }
 }
 

@@ -5815,6 +5815,40 @@
 .ccc-exec__refresh:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-soft); }
 .ccc-exec__refresh:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.ccc-status.is-proof {
+  background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
+  color: var(--accent-blue);
+}
+
+.ccc-exec__proof {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 6%, transparent);
+}
+.ccc-exec__proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+.ccc-exec__proof-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.ccc-exec__proof-grid strong {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+.ccc-exec__proof-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--accent-blue);
+}
+
 .ccc-exec__error {
   font-size: 11px; color: var(--danger);
   padding: 8px 10px; border-radius: 6px;
