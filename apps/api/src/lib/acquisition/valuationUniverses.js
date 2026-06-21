@@ -70,6 +70,11 @@ function buyerArchetype(raw) {
 
 /** Classify the transaction channel + the universe it feeds. */
 export function classifyChannel(raw) {
+  // Prefer the deterministic channel/universe resolved by the V3 comp loader
+  // (identity-aware). Falls back to inline heuristics for non-enriched rows.
+  if (raw.v3_universe_hint) {
+    return { channel: raw.v3_channel ?? raw.transaction_channel ?? 'UNKNOWN', universe: raw.v3_universe_hint };
+  }
   const docType = lower(raw.document_type ?? raw.last_sale_doc_type ?? '');
   const priceSrc = lower(raw.sale_price_source ?? raw.purchase_price_source ?? '');
   const hasMls = num(raw.mls_sold_price) > 0 || /mls|listing|realtor/.test(priceSrc);

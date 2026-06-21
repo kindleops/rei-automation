@@ -38,7 +38,7 @@ const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
 ]);
 
-export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date() }) {
+export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null }) {
   const classification = classifyAssetLane(subjectRow);
   const { universes, family } = buildValuationUniverses(subjectRow, qualification, buyerPurchases, now);
   const reconciliation = reconcileValuation(universes, family);
@@ -177,6 +177,16 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     value_classification: confidence.value_classification,
     auto_offer_ready_criteria_met: confidence.auto_offer_ready_criteria_met,
     auto_offer_eligible: confidence.auto_offer_eligible,
+    // Item 5A: transaction-level vs property-level anomaly materiality.
+    transaction_anomaly_present: confidence.transaction_anomaly_present,
+    transaction_anomaly_count: confidence.transaction_anomaly_count,
+    transaction_anomaly_material: confidence.transaction_anomaly_material,
+    material_anomaly_reasons: confidence.material_anomaly_reasons,
+    nonmaterial_warning_reasons: confidence.nonmaterial_warning_reasons,
+    clean_independent_transaction_count: confidence.clean_independent_transaction_count,
+    clean_effective_sample_size: confidence.clean_effective_sample_size,
+    clean_universe_confidence: confidence.clean_universe_confidence,
+    loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),
     rejected_comps: (qualification.rejected ?? []).slice(0, 50),

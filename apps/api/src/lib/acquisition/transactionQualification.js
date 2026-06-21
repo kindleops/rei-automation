@@ -95,6 +95,13 @@ export function qualifyTransaction(subject, tx, anchors) {
   const sqft = num(tx.raw?.building_square_feet) ?? num(tx.raw?.sqft) ?? null;
   const units = resolveUnitCount(tx.raw ?? {});
 
+  // --- pricing eligibility (V3 loader): non-sale / foreclosure / nominal /
+  // IDENTITY_UNRESOLVED transactions are excluded from PRICING (they may still
+  // feed demand signals), without weakening any other gate. Undefined => no-op.
+  if (tx.raw?.v3_pricing_eligible === false) {
+    add(ST.EXCLUDE, 'not_pricing_eligible', tx.raw?.channel_reasons ?? null);
+  }
+
   // --- price presence / nominal -----------------------------------------
   if (consideration === null) {
     add(ST.EXCLUDE, 'missing_or_invalid_consideration');

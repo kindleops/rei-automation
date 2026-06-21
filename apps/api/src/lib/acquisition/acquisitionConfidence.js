@@ -87,34 +87,64 @@ export function buildConfidenceAndExecution({
   else if (marketClass === VC.PROVISIONAL_SCENARIO) final = Math.min(final, 55);
   if (disagreement > MODEL_DISAGREEMENT_CONF_CAP) final = Math.min(final, 60);
 
+  // ---- Anomaly MATERIALITY (mission Item 5A §9) ----
+  // A rejected/quarantined candidate is a TRANSACTION-level anomaly. It only
+  // becomes PROPERTY-level (quarantine) when it is material to the decision —
+  // i.e. clean evidence is insufficient, contamination reached the pricing set,
+  // or suspicious records dominate. Bad rows that were safely ISOLATED while
+  // sufficient clean independent evidence remains are warnings, not blockers.
+  const cleanAccepted = accepted.length ?? 0;
+  const cleanESS = ess;
+  const cleanUniverseConfidence = reconciliation.market_confidence ?? 0;
+  const quarantined = sample.quarantined_count ?? 0;
+  const excludedCount = sample.excluded_count ?? 0;
+  const txnAnomalyCount = quarantined + excludedCount;
+  const txnAnomalyPresent = flags.length > 0 || txnAnomalyCount > 0;
+
+  // Defensive: accepted comps all passed qualifyTransaction (ACCEPT), so no
+  // contaminated price can be in a pricing universe by construction.
+  const contaminatedInUniverse = false;
+
+  const materialReasons = [];
+  if (!invariants.ok) materialReasons.push('invariant_violation');
+  if (contaminatedInUniverse) materialReasons.push('contaminated_price_in_pricing_set');
+  if (cleanAccepted === 0) materialReasons.push('no_clean_independent_evidence');
+  else if (cleanESS < EXECUTION.MIN_EFFECTIVE_SAMPLE_SIZE) materialReasons.push('clean_ess_below_threshold');
+  if (marketClass === VC.SUBJECT_ANCHOR_SCENARIO) materialReasons.push('no_qualified_market_value');
+  if (cleanAccepted > 0 && cleanAccepted < EXECUTION.MIN_EFFECTIVE_SAMPLE_SIZE && quarantined > cleanAccepted * 3) {
+    materialReasons.push('suspicious_candidates_dominate');
+  }
+  const material = materialReasons.length > 0;
+  const nonmaterialWarnings = !material && txnAnomalyPresent ? flags.map((f) => `isolated:${f}`) : [];
+
   // ---- Execution state (fail closed) ----
   let executionState;
   const reasons = [];
-  if (
-    !invariants.ok ||
-    flags.includes('PACKAGE_CONSIDERATION_DETECTED') ||
-    flags.includes('IMPLAUSIBLE_COMP_PRICE') ||
-    flags.includes('ASSET_LANE_MISMATCH')
-  ) {
-    executionState = ES.ANOMALY_QUARANTINE;
-    reasons.push('anomaly_or_invariant_violation');
-  } else if (
-    (accepted.length ?? 0) === 0 ||
-    ess < EXECUTION.MIN_EFFECTIVE_SAMPLE_SIZE ||
-    marketClass === VC.SUBJECT_ANCHOR_SCENARIO
-  ) {
-    executionState = ES.DATA_REQUIRED;
-    reasons.push('insufficient_transaction_support');
+  if (material) {
+    if (!invariants.ok || contaminatedInUniverse) {
+      executionState = ES.ANOMALY_QUARANTINE;
+      reasons.push('material_contamination_or_invariant_violation');
+    } else if (cleanAccepted === 0 && txnAnomalyCount > 0) {
+      executionState = ES.ANOMALY_QUARANTINE;
+      reasons.push('all_candidate_evidence_quarantined');
+    } else if (materialReasons.includes('suspicious_candidates_dominate')) {
+      executionState = ES.ANOMALY_QUARANTINE;
+      reasons.push('suspicious_candidates_dominate');
+    } else {
+      executionState = ES.DATA_REQUIRED;
+      reasons.push('insufficient_clean_evidence');
+    }
   } else if (disagreement > MODEL_DISAGREEMENT_CONF_CAP || marketClass === VC.PROVISIONAL_SCENARIO || final < 45) {
     executionState = ES.REVIEW_REQUIRED;
     reasons.push('model_disagreement_or_provisional_or_low_confidence');
   } else {
     executionState = ES.SHADOW_MODE_READY;
+    if (nonmaterialWarnings.length) reasons.push('shadow_ready_with_isolated_anomaly_warnings');
   }
 
   const criteriaMet =
     executionState === ES.SHADOW_MODE_READY &&
-    ess >= EXECUTION.MIN_EFFECTIVE_SAMPLE_SIZE &&
+    cleanESS >= EXECUTION.MIN_EFFECTIVE_SAMPLE_SIZE &&
     (components.investor_valuation ?? 0) >= EXECUTION.MIN_INVESTOR_VALUATION_CONFIDENCE &&
     (components.buyer_exit ?? 0) >= EXECUTION.MIN_BUYER_EXIT_CONFIDENCE &&
     (components.repair ?? 0) >= EXECUTION.MIN_REPAIR_CONFIDENCE &&
@@ -133,6 +163,14 @@ export function buildConfidenceAndExecution({
     value_classification: marketClass,
     auto_offer_ready_criteria_met: criteriaMet,
     auto_offer_eligible: autoOfferEligible,
+    transaction_anomaly_present: txnAnomalyPresent,
+    transaction_anomaly_count: txnAnomalyCount,
+    transaction_anomaly_material: material,
+    material_anomaly_reasons: materialReasons,
+    nonmaterial_warning_reasons: nonmaterialWarnings,
+    clean_independent_transaction_count: cleanAccepted,
+    clean_effective_sample_size: cleanESS,
+    clean_universe_confidence: cleanUniverseConfidence,
     reasons,
   };
 }

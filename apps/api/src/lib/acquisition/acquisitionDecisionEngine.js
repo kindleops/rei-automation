@@ -8,6 +8,7 @@ import {
 import { classifyAssetLane } from './assetClassification.js';
 import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
+import { loadV3CompCandidates } from './compCandidateLoader.js';
 import { readFeatureFlag } from './modelConstants.js';
 
 const SCORE_TABLE = 'property_acquisition_scores';
@@ -2800,6 +2801,8 @@ export function calculateAcquisitionDecision({
   now = new Date(),
   targetAssignmentFee = DEFAULT_TARGET_ASSIGNMENT_FEE,
   v3Enabled = readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED'),
+  v3CompCandidates = null,
+  v3LoaderDiagnostics = null,
 } = {}) {
   const subject =
     rawSubject?.asset_family
@@ -2811,15 +2814,18 @@ export function calculateAcquisitionDecision({
   // When enabled, package/duplicate/lane-mismatched/implausible comps are
   // removed BEFORE scoring so a contaminated consideration can never reach
   // valuation, and the result is gated by hard invariants + an execution state.
+  // Item 5A: the production path supplies identity-enriched candidates via
+  // v3CompCandidates; tests/direct callers without it fall back to rawComps.
   const subjectRow = subject.raw ?? rawSubject ?? subject;
   let v3 = null;
   let compsForScoring = rawComps;
   if (v3Enabled) {
+    const v3Source = Array.isArray(v3CompCandidates) ? v3CompCandidates : rawComps;
     const classification = classifyAssetLane(subjectRow);
     subject.canonical_asset_lane = classification.lane;
-    const qualification = qualifyComps(subjectRow, rawComps);
+    const qualification = qualifyComps(subjectRow, v3Source);
     compsForScoring = qualification.accepted.map((entry) => entry.raw).filter(Boolean);
-    v3 = { classification, qualification };
+    v3 = { classification, qualification, loaderDiagnostics: v3LoaderDiagnostics };
   }
 
   const scored = compsForScoring.map((comp) =>
@@ -2970,6 +2976,7 @@ export function calculateAcquisitionDecision({
       qualification: v3.qualification,
       buyerPurchases,
       now,
+      loaderDiagnostics: v3.loaderDiagnostics,
     });
     v3Block = v3Decision.v3;
     const surfaced = v3Decision.surfaced;
@@ -3582,9 +3589,12 @@ export async function scoreProperty(propertyId, deps = {}) {
     source: 'properties',
     now,
   });
-  const [comps, buyerPurchases] = await Promise.all([
+  const v3Enabled = deps.v3Enabled ?? readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED');
+  const v3Loader = deps.loadV3CompCandidates ?? loadV3CompCandidates;
+  const [comps, buyerPurchases, v3Loaded] = await Promise.all([
     compLoader(subject, deps),
     buyerLoader(subject, deps),
+    v3Enabled ? v3Loader(subject, deps) : Promise.resolve(null),
   ]);
   const targetAssignmentFee = Math.max(
     0,
@@ -3600,6 +3610,9 @@ export async function scoreProperty(propertyId, deps = {}) {
     buyerPurchases,
     now,
     targetAssignmentFee,
+    v3Enabled,
+    v3CompCandidates: v3Loaded?.candidates ?? null,
+    v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
   });
   const row = scoreRowFromDecision(normalizedId, decision, now);
   const score = await persister(row, deps);
