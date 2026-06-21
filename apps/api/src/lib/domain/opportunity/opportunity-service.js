@@ -2,20 +2,31 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js';
 import {
   ACQUISITION_STAGE_CODES,
   ACQUISITION_STAGE_ORDER,
+  UNIVERSAL_STAGE_CODES,
+  UNIVERSAL_STATUS_CODES,
+  UNIVERSAL_TEMPERATURE_CODES,
   buildOpportunityDedupeKey,
   deriveConversationState,
   mapThreadStageToOpportunityStage,
+  mapThreadToUniversalStage,
+  mapThreadToUniversalStatus,
+  mapThreadToUniversalTemperature,
   normalizeAcquisitionStageCode,
   normalizeOpportunityStatus,
   normalizeQueueState,
+  normalizeUniversalStatusCode,
+  normalizeUniversalTemperatureCode,
   normalizeWorkflowState,
   shouldPromoteThreadToOpportunity,
   validateStageTransition,
+  validateStatusTransition,
+  validateTemperatureTransition,
 } from '@/lib/domain/opportunity/opportunity-stage-registry.js';
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
 
 const TABLE = 'acquisition_opportunities';
 const HISTORY_TABLE = 'acquisition_opportunity_history';
+const THREAD_STATE_TABLE = 'deal_thread_state';
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
@@ -89,6 +100,8 @@ function applyFilters(query, params = {}) {
     ['workflow_state', params.workflow_state],
     ['market', params.market],
     ['asset_class', params.asset_class],
+    ['property_type', params.property_type],
+    ['universal_status', params.universal_status],
     ['strategy', params.strategy],
     ['assigned_operator', params.assignee ?? params.assigned_operator],
     ['primary_thread_key', params.thread_key],
@@ -134,16 +147,27 @@ function applyFilters(query, params = {}) {
 export function normalizeOpportunityRow(row = {}) {
   if (!row?.id) return null;
   const reconciled = reconcileAutomationState({ ...row });
+  const hasEngineRun = clean(row.acquisition_engine_run_id) !== '';
+  const universalStatus = normalizeUniversalStatusCode(
+    row.universal_status ?? mapThreadToUniversalStatus(row),
+  );
+  const universalTemperature = normalizeUniversalTemperatureCode(
+    row.temperature ?? mapThreadToUniversalTemperature(row),
+  );
   return {
     ...row,
-    acquisition_stage: normalizeAcquisitionStageCode(row.acquisition_stage),
+    acquisition_stage: normalizeAcquisitionStageCode(
+      row.acquisition_stage || mapThreadToUniversalStage(row),
+    ),
+    universal_status: universalStatus,
     opportunity_status: normalizeOpportunityStatus(reconciled.opportunity_status ?? row.opportunity_status),
     conversation_state: row.conversation_state || deriveConversationState(row),
     queue_state: normalizeQueueState(row.queue_state),
     workflow_state: normalizeWorkflowState(row.workflow_state),
     automation_state: reconciled.automation_state,
     blocker: reconciled.blocker,
-    aos: num(row.aos),
+    temperature: universalTemperature === UNIVERSAL_TEMPERATURE_CODES.UNKNOWN ? null : universalTemperature,
+    aos: hasEngineRun ? num(row.aos) : null,
     confidence: num(row.confidence),
     estimated_value: num(row.estimated_value),
     arv: num(row.arv),
@@ -221,10 +245,13 @@ export async function listOpportunities(params = {}, deps = {}) {
   const { data, error, count } = await query;
   if (error) throw error;
 
+  const hydrateFollowUpEnabled = truthy(params.hydrate_follow_up);
   const rows = [];
   for (const raw of data ?? []) {
     let row = normalizeOpportunityRow(raw);
-    row = await hydrateFollowUp(client, row);
+    if (hydrateFollowUpEnabled) {
+      row = await hydrateFollowUp(client, row);
+    }
     rows.push(row);
   }
 
@@ -256,14 +283,16 @@ export async function getOpportunityById(id, deps = {}) {
 export async function getPipelineMetrics(params = {}, deps = {}) {
   const client = db(deps);
   const { data, error } = await client.from(TABLE).select(
-    'id,acquisition_stage,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker',
+    'id,acquisition_stage,universal_status,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker,acquisition_engine_run_id,temperature',
   );
   if (error) throw error;
 
   const rows = (data ?? []).map(normalizeOpportunityRow);
   const now = Date.now();
   const metrics = {
+    active_leads: 0,
     active_opportunities: 0,
+    priority: 0,
     new_replies: 0,
     qualified: 0,
     offer_ready: 0,
@@ -279,6 +308,7 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
     intent_positive_pct: 0,
     average_stage_age_days: 0,
     by_acquisition_stage: {},
+    by_universal_status: {},
     by_opportunity_status: {},
     by_conversation_state: {},
     by_workflow_state: {},
@@ -293,21 +323,27 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
   for (const row of rows) {
     const status = row.opportunity_status;
     const stage = row.acquisition_stage;
+    const universalStatus = row.universal_status || UNIVERSAL_STATUS_CODES.UNKNOWN;
     metrics.by_acquisition_stage[stage] = (metrics.by_acquisition_stage[stage] ?? 0) + 1;
+    metrics.by_universal_status[universalStatus] = (metrics.by_universal_status[universalStatus] ?? 0) + 1;
     metrics.by_opportunity_status[status] = (metrics.by_opportunity_status[status] ?? 0) + 1;
     metrics.by_conversation_state[row.conversation_state] = (metrics.by_conversation_state[row.conversation_state] ?? 0) + 1;
     metrics.by_workflow_state[row.workflow_state] = (metrics.by_workflow_state[row.workflow_state] ?? 0) + 1;
 
-    if (['active', 'waiting', 'paused'].includes(status)) metrics.active_opportunities += 1;
-    if (row.conversation_state === 'seller_replied' || row.conversation_state === 'needs_reply') metrics.new_replies += 1;
-    if (stage === ACQUISITION_STAGE_CODES.INTEREST_QUALIFICATION && ['active', 'waiting'].includes(status)) metrics.qualified += 1;
-    if (stage === ACQUISITION_STAGE_CODES.DECISION_AND_OFFER) {
+    if (['active', 'waiting', 'paused', 'nurture'].includes(status)) {
+      metrics.active_leads += 1;
+      metrics.active_opportunities += 1;
+    }
+    if (universalStatus === UNIVERSAL_STATUS_CODES.PRIORITY) metrics.priority += 1;
+    if (row.conversation_state === 'needs_reply') metrics.new_replies += 1;
+    if (stage === UNIVERSAL_STAGE_CODES.OFFER_INTEREST && ['active', 'waiting'].includes(status)) metrics.qualified += 1;
+    if (stage === UNIVERSAL_STAGE_CODES.OFFER) {
       metrics.offer_ready += 1;
       metrics.negotiating += 1;
     }
-    if (stage === ACQUISITION_STAGE_CODES.CONTRACT_TO_CLOSE) {
-      metrics.contract_sent += 1;
-      metrics.under_contract += 1;
+    if (stage === UNIVERSAL_STAGE_CODES.FORMAL_CONTRACT) metrics.contract_sent += 1;
+    if (stage === UNIVERSAL_STAGE_CODES.UNDER_CONTRACT) metrics.under_contract += 1;
+    if ([UNIVERSAL_STAGE_CODES.PREPARED_TO_CLOSE, UNIVERSAL_STAGE_CODES.DISPOSITION].includes(stage)) {
       metrics.closing += 1;
     }
     if (status === 'nurture') metrics.nurture += 1;
@@ -354,6 +390,7 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
   if (!dedupeKey) return { ok: false, error: 'dedupe_key_required' };
 
   const mapped = mapThreadStageToOpportunityStage(thread);
+  const hasEngineRun = clean(thread.acquisition_engine_run_id) !== '';
   const row = {
     dedupe_key: dedupeKey,
     master_owner_id: thread.master_owner_id || null,
@@ -362,12 +399,17 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
     related_thread_keys: [thread.thread_key],
     campaign_ids: thread.campaign_id ? [String(thread.campaign_id)] : [],
     acquisition_stage: options.stage || mapped.stage,
+    universal_status: mapped.universal_status,
     opportunity_status: options.status || mapped.status,
     conversation_state: deriveConversationState(thread),
     queue_state: normalizeQueueState(thread.queue_status || thread.automation_status),
     priority: thread.priority || 'normal',
-    temperature: thread.lead_temperature || null,
-    aos: num(thread.final_acquisition_score),
+    temperature: mapped.universal_temperature === UNIVERSAL_TEMPERATURE_CODES.UNKNOWN
+      ? null
+      : mapped.universal_temperature,
+    aos: hasEngineRun ? num(thread.final_acquisition_score) : null,
+    property_state: thread.property_state || null,
+    property_type: thread.property_type || null,
     confidence: num(thread.confidence_score),
     estimated_value: num(thread.estimated_value),
     asking_price: num(thread.cash_offer),
@@ -486,17 +528,161 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
     source: input.source || 'operator',
   }, deps);
 
+  await syncThreadStateFromOpportunity(client, data, {
+    universal_stage: validation.to,
+    source: input.source || 'operator',
+    actor: input.actor || null,
+  });
+
+  return { ok: true, opportunity: normalizeOpportunityRow(data), validation };
+}
+
+async function syncThreadStateFromOpportunity(client, opportunity = {}, patch = {}) {
+  const threadKey = clean(opportunity.primary_thread_key);
+  if (!threadKey) return { ok: false, skipped: true, reason: 'missing_thread_key' };
+
+  const updates = {
+    updated_at: new Date().toISOString(),
+    updated_by: patch.actor || null,
+  };
+
+  if (patch.universal_stage) updates.universal_stage = normalizeAcquisitionStageCode(patch.universal_stage);
+  if (patch.universal_status) updates.universal_status = normalizeUniversalStatusCode(patch.universal_status);
+  if (patch.inbox_bucket) updates.inbox_bucket = clean(patch.inbox_bucket);
+  if (patch.lead_temperature) {
+    const temperature = normalizeUniversalTemperatureCode(patch.lead_temperature);
+    if (temperature !== UNIVERSAL_TEMPERATURE_CODES.UNKNOWN) {
+      updates.lead_temperature = temperature;
+    }
+  }
+
+  if (Object.keys(updates).length <= 2) return { ok: false, skipped: true, reason: 'no_thread_updates' };
+
+  const { error } = await client
+    .from(THREAD_STATE_TABLE)
+    .update(updates)
+    .eq('thread_key', threadKey);
+  if (error) throw error;
+  return { ok: true };
+}
+
+export async function transitionOpportunityStatus(id, input = {}, deps = {}) {
+  const client = db(deps);
+  const { data: current, error } = await client.from(TABLE).select('*').eq('id', id).single();
+  if (error) throw error;
+
+  const validation = validateStatusTransition({
+    fromStatus: current.universal_status,
+    toStatus: input.to_status ?? input.status ?? input.universal_status,
+    reason: input.reason,
+  });
+  if (!validation.ok) return { ok: false, ...validation };
+
+  const now = new Date().toISOString();
+  const updates = {
+    universal_status: validation.to,
+    last_updated_source: input.source || 'operator',
+    last_updated_by: input.actor || null,
+    version: (current.version ?? 1) + 1,
+    updated_at: now,
+  };
+
+  const { data, error: updateError } = await client
+    .from(TABLE)
+    .update(updates)
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (updateError) throw updateError;
+
+  await appendHistory(client, {
+    opportunity_id: id,
+    event_type: 'status_transition',
+    field_name: 'universal_status',
+    previous_value: validation.from,
+    new_value: validation.to,
+    reason: clean(input.reason) || null,
+    actor: input.actor || null,
+    source: input.source || 'operator',
+    idempotency_key: clean(input.idempotency_key)
+      || `status:${id}:${validation.from}->${validation.to}:${now.slice(0, 16)}`,
+  });
+
+  await syncThreadStateFromOpportunity(client, data, {
+    universal_status: validation.to,
+    inbox_bucket: validation.to,
+    source: input.source || 'operator',
+    actor: input.actor || null,
+  });
+
+  return { ok: true, opportunity: normalizeOpportunityRow(data), validation };
+}
+
+export async function transitionOpportunityTemperature(id, input = {}, deps = {}) {
+  const client = db(deps);
+  const { data: current, error } = await client.from(TABLE).select('*').eq('id', id).single();
+  if (error) throw error;
+
+  const validation = validateTemperatureTransition({
+    fromTemperature: current.temperature,
+    toTemperature: input.to_temperature ?? input.temperature,
+    reason: input.reason,
+  });
+  if (!validation.ok) return { ok: false, ...validation };
+
+  const now = new Date().toISOString();
+  const storedTemperature = validation.to === UNIVERSAL_TEMPERATURE_CODES.UNKNOWN
+    ? null
+    : validation.to;
+  const updates = {
+    temperature: storedTemperature,
+    last_updated_source: input.source || 'operator',
+    last_updated_by: input.actor || null,
+    version: (current.version ?? 1) + 1,
+    updated_at: now,
+  };
+
+  const { data, error: updateError } = await client
+    .from(TABLE)
+    .update(updates)
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (updateError) throw updateError;
+
+  await appendHistory(client, {
+    opportunity_id: id,
+    event_type: 'temperature_transition',
+    field_name: 'temperature',
+    previous_value: validation.from,
+    new_value: validation.to,
+    reason: clean(input.reason) || null,
+    actor: input.actor || null,
+    source: input.source || 'operator',
+    idempotency_key: clean(input.idempotency_key)
+      || `temperature:${id}:${validation.from}->${validation.to}:${now.slice(0, 16)}`,
+  });
+
+  if (storedTemperature) {
+    await syncThreadStateFromOpportunity(client, data, {
+      lead_temperature: storedTemperature,
+      source: input.source || 'operator',
+      actor: input.actor || null,
+    });
+  }
+
   return { ok: true, opportunity: normalizeOpportunityRow(data), validation };
 }
 
 export async function updateOpportunity(id, patch = {}, deps = {}) {
   const client = db(deps);
   const allowed = [
-    'opportunity_status', 'priority', 'temperature', 'strategy', 'aos', 'confidence',
+    'opportunity_status', 'universal_status', 'priority', 'temperature', 'strategy', 'aos', 'confidence',
     'estimated_value', 'arv', 'asking_price', 'recommended_offer', 'current_offer',
     'seller_counter', 'offer_to_ask_gap', 'motivation_score', 'cooperation_score',
     'assigned_operator', 'automation_state', 'next_action', 'next_action_due',
     'blocker', 'approval_state', 'latest_intent', 'workflow_state', 'acquisition_engine_run_id',
+    'property_state', 'property_type',
   ];
 
   const updates = {};

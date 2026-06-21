@@ -54,6 +54,28 @@ export async function transitionPipelineStage(
   }))
 }
 
+export async function transitionPipelineStatus(
+  id: string,
+  input: { opportunity_status: string; reason?: string },
+): Promise<{ ok: boolean; opportunity?: PipelineOpportunity; error?: string; message?: string }> {
+  return updatePipelineOpportunity(id, {
+    opportunity_status: input.opportunity_status,
+    reason: input.reason,
+    source: 'operator',
+  })
+}
+
+export async function transitionPipelineTemperature(
+  id: string,
+  input: { temperature: string; reason?: string },
+): Promise<{ ok: boolean; opportunity?: PipelineOpportunity; error?: string; message?: string }> {
+  return updatePipelineOpportunity(id, {
+    temperature: input.temperature,
+    reason: input.reason,
+    source: 'operator',
+  })
+}
+
 export async function updatePipelineOpportunity(
   id: string,
   patch: Record<string, unknown>,
