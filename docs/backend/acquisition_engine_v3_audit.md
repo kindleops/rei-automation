@@ -1,0 +1,217 @@
+# Acquisition Decision Engine — V3 Audit (Phase 0)
+
+**Date:** 2026-06-20
+**Author:** Engine V3 refactor (Phase 0 — audit before implementation)
+**Scope:** Read-only audit of the live `public` schema and the existing engine. **No production data was modified. No migrations were applied. No migration repair was run.**
+**Engine under audit:** `apps/api/src/lib/acquisition/acquisitionDecisionEngine.js` (3,667 lines, single module).
+**DB:** Supabase project `lcppdrmrdfblstpcbgpf` (`real-estate-automation`), Postgres 17.
+
+---
+
+## 1. Executive summary
+
+The V2 engine can emit catastrophically wrong, **autonomously-actionable** offers (a $173M cash offer on a $391K Austin duplex; a $20.99M offer on a $309K Caldwell house). The root cause is **not** a bad formula constant — it is that the engine treats **rows as transactions** and **never validates a comp's consideration against any independent anchor**.
+
+The contamination is **systemic, not anecdotal**. The comp source (`recently_sold_properties`, 55,893 rows) contains **193 distinct "broadcast" considerations repeated across 3,794 parcels** spanning many ZIPs/cities on a single date — i.e., one institutional **package/portfolio price stamped onto every parcel in the package**. `7,470 / 55,893` (~13%) of comp rows carry a `sale_price > $3M`, the overwhelming majority on small SFRs. `buyer_purchase_events_v2` mirrors the same corrupted distribution (it shares lineage).
+
+The good news: **the raw data already contains the fields needed to detect and neutralize this** (`apn_parcel_id`, `buyer_name_clean`/`buyer_key`, `sale_date`/`recording_date`, `document_type`, and a usable buyer registry in `buyer_entities_v2`). The V2 engine simply never used them, and the **primary comp view (`v_recent_sold_comps`) does not expose them**.
+
+---
+
+## 2. Live anomaly reproduction (BEFORE)
+
+Pulled from `public.property_acquisition_scores` (persisted V2 output):
+
+| property_id | address | subject est. value | comp_count | valuation_mid | valuation_conf | recommended_cash_offer | decision_tier |
+|---|---|---:|---:|---:|---:|---:|---|
+| 2136762817 | 5314 Atascosa Dr, Austin TX (Multifamily 2-4, 2u, 1,776sf) | $391,000 | **1** | **$332,498,300** | 55 | **$173,028,700** | CREATIVE_TERMS |
+| 242567952 | 1711 N Illinois Ave, Caldwell ID (SFR, 1,550sf) | $309,000 | 12 | **$30,871,400** | **81** | **$20,994,500** | CREATIVE_TERMS |
+| 2130847744 | 6310 Cambridge Glen Ln, Houston TX (SFR, 1,356sf) | $156,000 | 12 | $208,200 | 69 | $80,900 | CREATIVE_TERMS ✅ plausible |
+
+**Anomaly 1 contaminating comp identified (live):** `2000 E Stassney Ln, Austin TX 78744`, Multi-Family, 2 units, 1,728 sf, `sale_price = $332,500,000`, sale_date 2025-04-09 — **same ZIP (78744) and near-identical physical profile** to the subject duplex. The value `$332,500,000` is **not unique to this row**: it appears on dozens of unrelated SFRs across Fort Worth, Houston, Spring, Humble, Arlington, Pflugerville, Elgin, Hockley, Kennedale on four shared dates (2025-01-16, 04-09, 07-16, 10-22). It is a **broadcast package/sentinel value**, not a duplex sale.
+
+**Anomaly 2 (Caldwell):** the persisted score still shows 12 comps → $30.87M mid, confidence 81, offer $20.99M (computed 2026-06-20). The specific source rows were not reproducible by a narrow value+geo filter today (the comp set is recomputed per run and the underlying data has refreshed), but the **mechanism** — many parcels sharing one package consideration and one date — is reproduced at far larger scale across the table (see §4).
+
+**2130847744 is the "good" control:** its 12 comps were *not* contaminated (the broadcast prices fell outside its radius/window, or were a minority that MAD removed), so its $208K valuation is plausible. This is exactly the case the refactor must **preserve**.
+
+---
+
+## 3. Exact root causes in V2 (with code references)
+
+All line numbers in `apps/api/src/lib/acquisition/acquisitionDecisionEngine.js`.
+
+1. **Rows are treated as independent transactions — no clustering.** `loadComparableProperties` (3391) merges three sources and de-dups on a key of `property_id | address | sale_date | sale_price` (3470-3480). A package sale split across **different** parcels has different `property_id` and `address`, so all N parcels survive as N "independent" comps. There is **no** grouping by `(buyer, date, consideration, document, APN-spread)`. → Anomaly 2 (12 "comps"), and the systemic 3,794-parcel problem.
+
+2. **No independent plausibility anchor.** `adjustedCompPrice` (1165) blends PPSF/PPU/raw and then clamps the result to **the comp's own sale price** `clamp(blended, salePrice*0.55, salePrice*1.65)` (1230). A $332.5M consideration produces a ~$332.5M adjusted comp. Nothing compares the comp to the subject AVM, tax assessment, lane PPSF/PPU ceilings, or neighborhood medians.
+
+3. **Outlier removal is disabled exactly when it's needed.** `removeOutliers` (1348) returns early with **no filtering for `< 5` comps** (1349). Anomaly 1 had **1** comp → straight through. And for `≥ 5` comps it uses median/MAD on `adjusted_price` (1352-1355); when the contamination is the **majority / identical** (a broadcast price), the median *is* the contaminated value and MAD ≈ 0 → nothing is rejected. → Anomaly 2.
+
+4. **Duplication is rewarded as "consistency" and "depth."** `calculateValuation` (1411): `dispersion = stddev/mid`; identical duplicated comps → dispersion ≈ 0 → `consistencyScore = clamp(100 - dispersion*180) = 100` (1433) and `depthScore = clamp(count/8*100) = 100` (1430). This is precisely the **confidence 81 / consistency 100** seen in Anomaly 2. Effective sample size is never corrected for correlated rows.
+
+5. **Contaminated valuation propagates into the investor ceiling and the offer.** `calculateInvestorCeiling` (1538) falls back to `valuation.mid * factor` when no buyer events qualify (1571-1593). `offerCalculation` (2524) sets `valuationCeiling = valuation.mid * maxArvFactor - repairs` (2543) and, when investor confidence `< 45`, blends `valuationCeiling*0.75 + behaviorCeiling*0.25` (2549). For Austin: even though `investor_ceiling_mid` was a sane $424K, the $332.5M valuation dominated 75% of the effective ceiling → **$173M offer**. The offer is **not** bounded by a conservative buyer exit.
+
+6. **Asset lanes are too coarse; mismatched lanes comp freely.** `canonicalAssetType` (580) + `assetFamily` (607) collapse everything into `residential | multifamily | commercial | land | other`. `assetCompatible` (1105) returns true for any same-family pair, so **condo ↔ SFR**, **duplex ↔ 200-unit apartment** (both "multifamily"), and **storage ↔ office ↔ strip** (all "commercial") are mutually eligible. There are no DUPLEX/TRIPLEX/FOURPLEX, MF size-band, storage, retail, office, or land sub-lanes.
+
+7. **Confidence can reach 100 with comps regardless of quality.** `calculateAcquisitionDecision` (2865): `confidenceCap = selected.length ? 100 : 45`. Any non-empty comp set unlocks full confidence.
+
+8. **No hard invariants.** Nothing enforces `offer ≤ conservative buyer exit`, `value ≤ K× anchor`, single-comp share caps, NaN/Infinity guards, or unit normalization.
+
+---
+
+## 4. Systemic contamination scope (live evidence)
+
+`recently_sold_properties` (n = 55,893):
+
+| metric | value |
+|---|---:|
+| rows with `sale_price > $3M` | **7,470** (13.4%) |
+| rows with `sale_price > $50M` | 2,184 |
+| broadcast considerations (same price on ≥4 parcels across ≥3 ZIPs) | **193** |
+| parcels inside those broadcast clusters | **3,794** |
+
+Representative broadcast clusters (one consideration → many unrelated parcels, one date, often one buyer):
+
+| consideration | parcels | distinct ZIPs | distinct cities | date(s) |
+|---:|---:|---:|---:|---|
+| $1,029,832,300 | 89 | 38 | 21 | 2024-04-18 |
+| $751,093,560 | 92 | 18 | 8 | 2025-12-15 |
+| $627,220,020 | 84 | 38 | 21 | 2024-09-30..10-01 |
+| $577,233,300 | 87 | 42 | 25 | 2024-11-26..12-02 |
+| $332,500,000 | (Anomaly 1) | many | many | 4 dates |
+
+`buyer_purchase_events_v2` (n = 55,479) shows an **identical** price histogram (same considerations, same counts, frequently `distinct_buyers = 1`) → it is derived from the same ingest and exhibits the same package-broadcast pattern. These are **real institutional package acquisitions** — extremely valuable as **demand** signals, but the **per-parcel price is fiction**.
+
+---
+
+## 5. Source inventory & grain
+
+Legend — Conf = audit confidence in the field's meaning. ✅ present / ⚠ partial / ❌ absent.
+
+### `properties` (subject; n≈ scored universe) — **rich**
+- **Grain:** one row per subject property. **Price:** `estimated_value`, `mls_current_listing_price`, `sale_price`/`sale_date` (last sale). **Asset:** `asset_class/subclass/subtype/type`, `asset_type_confidence`, `normalized_asset_class`, `land_use`, `county_land_use_code`, `zoning`, `commercial_units`, `multifamily_units`, `storage_units`, `strip_center_units`, `is_vacant_land`, `is_infill_lot`. **Physical:** `building_square_feet`, `lot_square_feet/acreage`, `total_bedrooms/baths`, `year_built/effective_year_built`, `building_condition`, `avg_sqft_per_unit`. **Income:** `monthly_rent`, `rent_estimate`, `gross_monthly_income`, `gross_annual_income`, `noi_estimate`, `cap_rate` (sparse). **Debt/creative:** `total_loan_balance`, `total_loan_amt`, `total_loan_payment`, `lien_position`, `lien_type`, `lienholder_name`, `active_lien`, `equity_amount/percent`. **Distress:** full foreclosure/preforeclosure/auction/default/tax-delinquent. **Parcel:** `apn_parcel_id`. **Buyer/seller identity:** owner only (no transaction counterparties). **Conf:** High.
+- **Limitations:** income/debt fields are sparsely populated; `cap_rate`/`noi_estimate` not reliable for income lanes.
+
+### `recently_sold_properties` (PRIMARY comp base; n=55,893)
+- **Grain:** **one row per parcel**, *not per transaction*. **Price:** `sale_price` (⚠ contains package/broadcast considerations), `mls_sold_price`. **Date:** `sale_date`, `recording_date`. **Buyer identity:** `buyer_name`/`buyer_name_clean`/`buyer_key` ✅. **Seller identity:** `owner_name`/`owner_name_clean`/`owner_key`/`is_corporate_owner`/`out_of_state_owner` ✅. **Doc identity:** ❌ no deed/instrument/document number. **Parcel:** `apn_parcel_id` ✅. **Asset/physical:** `property_type/class`, `county_land_use_code`, `units_count`, `building_square_feet`, beds/baths, year built, `construction_type`, `exterior_walls`, `renovation_level_classification`. **Income:** ❌. **Conf:** High on grain.
+- **Duplication risk:** **HIGH** — package considerations broadcast across many parcels (§4). **Package-sale risk:** **HIGH**. Clustering keys available: `(buyer_key|buyer_name_clean, sale_date, sale_price)` across distinct `apn_parcel_id`.
+
+### `v_recent_sold_comps` (VIEW; the path the engine actually uses via RPC)
+- **Grain:** per parcel (wraps the comp base). **Exposes:** address, lat/lng, `sale_date`, `sale_price`, `mls_*`, `units_count`, physical, `normalized_asset_class`, `computed_ppsf`, `sale_source`, `is_recent_6_months`, `is_usable_comp`.
+- **CRITICAL GAP:** **does NOT expose** `buyer_name/buyer_key`, `owner/seller`, `apn_parcel_id`, `recording_date`, or any document field. → The **primary comp path is structurally blind to transaction identity.** V3 needs an **additive** view extension to surface clustering keys. Interim: cluster by `(sale_price, sale_date, address-batch)` which still catches broadcasts.
+
+### `buyer_comp_properties_v2` (modeled comp; "advanced" source)
+- **Grain:** per parcel. **Rich:** `apn_parcel_id`, `last_sale_doc_type`, `document_type`, `recording_date`, `sale_date`, `sale_price`, `sale_price_source`, `auction_date`, `default_date`, `legal_description`, `total_loan_amount/balance/payment`, `lienholder_name`, `tax_*`, `assessed_*`, `calculated_*_value`, full physical, `hoa_*`, `mls_*`, `ppsf/ppu/ppbd`, `comp_confidence_score`, `deal_grade`, `batch_id`, `source_record_id/source_deal_id`. **Buyer/seller identity:** ❌ (no buyer/seller name columns). **Conf:** High.
+- **Use:** best source for **channel classification** (`document_type`, `sale_price_source`, `auction_date`) and physical detail; lacks counterparty identity for clustering.
+
+### `buyer_purchase_events_v2` (buyer-side fact; n=55,479)
+- **Grain:** per (buyer, parcel) purchase event; **links** to comp via `comp_property_id`, to entity via `buyer_entity_id`. **Identity:** `buyer_key`, `buyer_name`, `buyer_type`, `is_corporate_buyer`, `out_of_state_owner` ✅. **Price:** `purchase_price` (⚠ same broadcast contamination), `purchase_price_source`. **Date:** `purchase_date`, `recording_date`. **Doc:** `document_type`. **Dedup:** `source_dedup_key` ✅. **Conf:** High.
+- **Use:** investor/institutional **demand** and buyer-behavior; cluster by `(buyer_key, purchase_date, purchase_price)`. **Do not** use per-parcel price from package clusters as a comp.
+
+### `buyer_entities_v2` (buyer registry — **already exists**)
+- **Grain:** one row per canonical buyer (`buyer_key`). **Has:** `normalized_buyer_name`, `is_corporate_buyer`, `is_repeat_buyer`, `mailing_address_*`, `purchase_count(_180d/_365d)`, `markets_active`, `counties_active`, `zips_active`, `preferred_asset_classes`, `preferred_price_min/max`, `avg_purchase_price`, `median_purchase_price`, `avg_ppsf`, `avg_units`, `investor_score`, `velocity_score`, `corporate_buyer_score`, `dispo_priority_score`. **Conf:** High.
+- **Use:** the seed for V3 buyer-entity resolution + institutional registry + observed buy-box. Build **on** this, not from scratch. Multiple mailing addresses/subsidiaries per parent will require an additive alias layer.
+
+### `property_valuation_snapshots` (parallel valuation)
+- **Grain:** per property valuation snapshot. **Has:** `estimated_arv`, `median_sale_price/ppsf/ppu`, `low/high_value`, `repair_estimate`, `conservative_offer`, `target_offer`, `max_allowable_offer`, `buyer_exit_price`, `included/excluded_comp_count`, `included/excluded_comps` (jsonb), `comp_methodology`, `asset_class`. **Conf:** Medium (separate lineage; may itself be contaminated downstream).
+
+### `property_acquisition_scores` (engine output)
+- **Columns (live):** `property_id`(text), `valuation_low/mid/high`, `valuation_confidence`, `comp_count`, `weighted_comp_score`, `investor_ceiling_low/mid/high`, `buyer_demand_score`, `liquidity_score`, `estimated_repairs`, `recommended_cash_offer`, `minimum_acceptable_offer`, `expected_assignment_fee`, `subject_to_score`, `seller_finance_score`, `lease_option_score`, `novation_score`, `best_strategy`, `aos_score`, `confidence`, `decision_tier`, `evidence`(jsonb), `computed_at`, `created_at`, the pressure/situation scores, `owner_situation_primary/scores`, `recommended_conversation_angle`, `recommended_offer_stack`(jsonb).
+- **Missing for V3 (additive migration needed):** `engine_version/model_version/formula_version`, `input_data_as_of`, `canonical_asset_lane`+confidence, separate valuation universes (retail/investor/institutional/income/liquidation), `conservative_buyer_exit`, novation/creative term blocks, return metrics, multi-dimensional confidence, `execution_state`, anomaly flags, transaction-cluster summary, active feature flags. **No `scored_at`** (use `computed_at`).
+
+### `census_geo_metrics` (Stage 5 context)
+- **Grain:** per geo (`geo_level` tract/zcta/county, `geoid`). **Allowed:** `median_household_income`, `vacancy_rate`, `renter_rate`, `owner_occupancy_rate`, `median_year_built`, `housing_age`, totals (`total_population/households/housing_units`, occupied/vacant/owner/renter units), pre-computed `*_heat_score`, `acquisition_pressure_score`, `source_year`, `variables`(jsonb), `raw`(jsonb). **Conf:** Medium.
+- **Guardrail:** `variables`/`raw` jsonb may contain protected-class fields — the V3 Census allowlist must read **only** the named market columns above and never iterate `raw`.
+
+### `campaign_target_graph` (downstream consumer)
+- Carries `acquisition_score`, `cash_offer`, `estimated_value`, `equity_*`, owner-financial `net_asset_value`/`buying_power`/`income`. **Risk:** contaminated `cash_offer` propagates here. **Guardrail:** owner-financial fields must **never** reduce intrinsic property value (mission §21/§32).
+
+---
+
+## 6. Comp loader & RPC lineage
+
+`loadComparableProperties` (engine 3391) does:
+1. `rpc('get_comp_candidates_for_subject', { p_subject_property_id, p_radius_miles, p_months_back, p_limit:100 })` → ids → detail from **`v_recent_sold_comps`** (identity-blind). **Primary.**
+2. If RPC empty → fallback scan of `recently_sold_properties` filtered by zip/market/state, `limit 100`.
+3. **Always** also scans `buyer_comp_properties_v2` filtered by zip/market, `limit 150` ("advanced").
+4. Merge + de-dup on `property_id|address|sale_date|sale_price` (does **not** collapse cross-parcel packages).
+
+`loadBuyerPurchases` (3484): `buyer_purchase_events_v2` filtered by zip/market/state, `order purchase_date desc, limit 250`.
+
+**RPC/view definition** for `get_comp_candidates_for_subject` / `v_recent_sold_comps` was not found in `apps/api/supabase/migrations` (only referenced in `20260526174304_create_deal_context_index.sql`) → consistent with the known **migration drift** (repo migrations ≠ prod's real history). The view exists in prod; its definition must be treated as prod-authoritative and extended additively.
+
+---
+
+## 7. PGRST204 / schema-cache risks
+
+- The engine's `SELECT` constants are hand-maintained column lists against tables/views. Adding V3 columns to `property_acquisition_scores` (or selecting new comp columns) **before PostgREST refreshes its schema cache** will throw `PGRST204` on upsert/select.
+- V2 already has partial tolerance: `isOptionalSourceMissing` (3066), `isMissingColumnError` (3070), `missingColumnName` (3078), `optionalEnrichmentQuery` (3111), `optionalQuery` (3192). **Required** sources still throw (correct — must fail loud).
+- **Mitigation for V3:** additive migrations only; new persisted columns must be nullable; the writer must degrade gracefully if a new column is absent (write-subset) and **log loudly** rather than convert a required failure into an empty result. Reload PostgREST schema cache after migration.
+
+---
+
+## 8. Fields available to fix it (feasibility)
+
+Transaction clustering is feasible **today** on the identity-bearing sources:
+- **Sold base / buyer events:** cluster `(buyer_key | buyer_name_clean, sale_date | purchase_date, consideration)` across distinct `apn_parcel_id`/`property_id`; flag **package** when one `(price,date[,buyer])` spans ≥ K parcels or ≥ M ZIPs.
+- **Primary view path:** until `v_recent_sold_comps` is extended, cluster on `(sale_price, sale_date, address-batch)` — still catches every broadcast in §4.
+- **Plausibility anchors (independent of comps):** subject `estimated_value`, `assessed_total_value`, lane PPSF/PPU ceilings, Census `median_home_value`/`median_household_income` (low weight).
+- **Buyer resolution:** `buyer_entities_v2` already provides canonical key, corporate flag, buy-box, velocity.
+
+---
+
+## 9. Remediation → V3 module map
+
+| Failure (§3) | V3 module(s) | Stage |
+|---|---|---|
+| Rows≠transactions; packages | `transactionClustering.js` | 1 |
+| No plausibility anchor; price implausible | `transactionQualification.js`, `modelConstants.js` | 1 |
+| Outlier logic defeated | clustering + qualification (pre-valuation) | 1 |
+| Duplication→fake consistency/depth | effective-sample-size in clustering; confidence model | 1/5 |
+| Contaminated value→ceiling→offer | hard invariants + `offerEconomics.js` (buyer-exit-anchored) | 2 |
+| Coarse asset lanes | `assetClassification.js` | 1 |
+| Confidence cap too loose | `confidenceModel.js` | 5 |
+| No invariants/gates | `acquisitionInvariants.js`, `executionGates.js` | 1/2 |
+
+---
+
+## 10. Safety attestation
+
+- All queries were **read-only** `SELECT`. No `INSERT/UPDATE/DELETE/DDL`. No migrations applied. No `supabase migration repair`. No SMS/queue/provider activity. Production scoring behavior is unchanged by this audit.
+- New V3 code lands as **new modules + tests**, default-off behind feature flags, with **no rewiring of the live engine** until explicitly authorized.
+
+---
+
+## 11. Required migrations (to be generated, not applied)
+
+1. **Additive** columns on `property_acquisition_scores` for V3 lineage/universes/execution-state/anomaly/cluster-summary (§5).
+2. **Additive** extension of `v_recent_sold_comps` to surface `apn_parcel_id`, `buyer_name_clean`/`buyer_key`, `owner_key`, `recording_date`, source lineage (§6) — enables identity-based clustering on the primary path.
+3. (Stage 5) buyer alias/parent layer over `buyer_entities_v2` for institutional registry.
+
+Migration state is **drifted** (repo ≠ prod). Generate files; **do not** apply or repair without explicit authorization and a prod-history reconciliation.
+
+---
+
+## 12. Live join-lineage audit (Item 5A, 2026-06-21)
+
+Proven against prod (read-only) before rewiring the loader.
+
+### Candidate → source identity chain
+- `get_comp_candidates_for_subject(p_subject_property_id, p_radius_miles, p_months_back, p_limit)` returns rows keyed by **`comp_id` (uuid)** plus `property_id`, address, `asset_class` (normalized, e.g. `single_family`), `sale_price`, `sale_date`, `mls_sold_price/date`, beds/baths/sqft/units/year, `building_condition`, `construction_type`, `distance_miles`, `similarity_score`, `comp_confidence_score`. **No buyer / APN / document / recording fields.**
+- **`comp_id` === `v_recent_sold_comps.id` === `buyer_comp_raw_v2.id`** — verified **5000/5000** (and 8/8 on the Houston probe). This is the deterministic primary-path identity key.
+- `v_recent_sold_comps.id` is **NOT** equal to `buyer_comp_properties_v2.id` nor `recently_sold_properties.id` (0/5000 each). Candidate `property_id` matches `recently_sold_properties`/`buyer_comp_properties_v2` only ~1/8 of the time — those are different datasets; do not join candidates to them by `property_id`.
+
+### Identity fields available on `buyer_comp_raw_v2` (by `id`)
+`owner_name` / `owner_1_name` (grantee = comp buyer), `apn_parcel_id`, `document_type` / `last_sale_doc_type`, `recording_date`, `sale_price`/`saleprice`, `mls_sold_price`, `is_corporate_owner`, `out_of_state_owner`, `owner_address_full` (buyer mailing), `total_loan_amt`/`balance`/`payment`, `lienholder_name`, `subdivision_name`, `school_district_name`. Table: 47,985 rows; 40,351 with owner; 31,759 priced+owner.
+
+### Dead / mismatched joins (do NOT use)
+- `buyer_purchase_events_v2.comp_property_id` is **NULL for all 55,479 rows** → the event→comp FK is unusable; cannot enrich comp buyers from purchase events.
+- `recently_sold_properties.buyer_key` (`buyer_…`) ≠ `buyer_entities_v2.buyer_key` (`bk_…`) — different schemes (0/5000).
+- `buyer_entities_v2` joins by **`normalized_buyer_name`** = `lower(strip-entity-suffix(name))` — deterministic but sparse for comp buyers (**208/5000 ≈ 4%**); use only as bonus buy-box/velocity enrichment, never required.
+
+### Cardinality / rates
+- candidate↔`buyer_comp_raw_v2`: **1:1**, ~100% match, collision rate 0 (uuid PK).
+- candidate buyer identity coverage: governed by `buyer_comp_raw_v2.owner_name` (~84% have owner). Rows without owner → `IDENTITY_UNRESOLVED` (pricing eligibility reduced/removed).
+- `sale_price = 0` is common in candidates (non-sales / current-owner records) → channel = NON_SALE, excluded from pricing.
+
+### Decision
+Production-compatible enrichment = `candidate.comp_id → buyer_comp_raw_v2` (batch `.in('id', ids)`), buyer archetype from `owner_name` + `is_corporate_owner`, optional `buyer_entities_v2` by normalized name. **No migration required.** The previously generated `v_recent_sold_comp_identity` (which selected from `recently_sold_properties`) is the **wrong source** for the primary path and is amended in this pass (see §14). The blind `buyer_comp_properties_v2` ZIP pull in the V2 loader is the contamination/cross-lane vector and is removed from the V3 path.

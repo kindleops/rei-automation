@@ -3,11 +3,12 @@ import type { PipelineOpportunity } from '../../../domain/pipeline/pipeline-oppo
 import {
   displayAos,
   displayCurrency,
+  formatUnknownMetric,
   resolvePipelineStage,
   resolvePropertyState,
   resolvePropertyType,
-  resolveSellerStatus,
   resolveTemperature,
+  resolveUniversalStatus,
   stageLabel,
 } from '../../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../../shared/formatters'
@@ -17,6 +18,8 @@ type PanelTab = 'overview' | 'conversation' | 'property' | 'intelligence' | 'wor
 interface PipelineCommandPanelProps {
   opportunity: PipelineOpportunity
   loading?: boolean
+  error?: string | null
+  onRetry?: () => void
   collapsed?: boolean
   onToggleCollapse?: () => void
   onOpenCommandView: (threadId?: string | null) => void
@@ -56,6 +59,8 @@ function Metric({ label, value, tone = 'neutral' }: { label: string; value: stri
 export function PipelineCommandPanel({
   opportunity: opp,
   loading,
+  error,
+  onRetry,
   collapsed,
   onToggleCollapse,
   onOpenCommandView,
@@ -67,11 +72,12 @@ export function PipelineCommandPanel({
   const [tab, setTab] = useState<PanelTab>('overview')
   const threadId = opp.primary_thread_key
   const engineRunId = opp.acquisition_engine_run_id
+  const timeline = opp.activity_timeline ?? []
 
   if (collapsed) {
     return (
       <div className="plv-command-panel plv-command-panel--collapsed">
-        <button type="button" className="plv-command-panel__expand" onClick={onToggleCollapse} title="Expand panel">
+        <button type="button" className="plv-command-panel__expand" onClick={onToggleCollapse} title="Expand panel (])">
           ◀
         </button>
       </div>
@@ -79,20 +85,26 @@ export function PipelineCommandPanel({
   }
 
   return (
-    <div className="plv-command-panel">
+    <div className="plv-command-panel nx-glass-panel">
       <header className="plv-command-panel__header">
         <div>
           <strong>{opp.seller_display_name || 'Unknown Seller'}</strong>
           <span>{opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} matched properties` : (opp.property_address_full || 'Property Unknown')}</span>
         </div>
         {onToggleCollapse && (
-          <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel">
+          <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel (])">
             ▶
           </button>
         )}
       </header>
 
-      {loading && <div className="plv-command-panel__loading">Loading opportunity detail…</div>}
+      {loading && <div className="plv-command-panel__skeleton" aria-live="polite">Loading detail…</div>}
+      {error && !loading && (
+        <div className="plv-command-panel__error" role="alert">
+          <p>{error}</p>
+          {onRetry && <button type="button" className="plv-action-btn" onClick={onRetry}>Retry</button>}
+        </div>
+      )}
 
       <nav className="plv-command-panel__tabs">
         {TABS.map((t) => (
@@ -109,15 +121,16 @@ export function PipelineCommandPanel({
 
       <div className="plv-command-panel__body">
         {tab === 'overview' && (
-          <>
-            <Row label="Stage" value={stageLabel(resolvePipelineStage(opp))} />
-            <Row label="Status" value={stageLabel(resolveSellerStatus(opp))} />
-            <Row label="Temperature" value={resolveTemperature(opp)} />
-            <Row label="Market" value={opp.market || 'Unknown'} />
-            <Row label="Next Action" value={opp.next_action || 'Review'} />
-            <Row label="Last Contact" value={opp.last_contact_at ? formatRelativeTime(opp.last_contact_at) : 'No contact'} />
-            {opp.blocker && <p className="plv-command-panel__blocker">⚠ {opp.blocker}</p>}
-          </>
+          <div className="plv-command-panel__metric-grid">
+            <Metric label="Stage" value={stageLabel(resolvePipelineStage(opp))} tone="cyan" />
+            <Metric label="Status" value={stageLabel(resolveUniversalStatus(opp))} tone="blue" />
+            <Metric label="Temperature" value={stageLabel(resolveTemperature(opp))} tone="amber" />
+            <Metric label="Market" value={opp.market || 'Unknown'} tone="gold" />
+            <Metric label="Property Type" value={resolvePropertyType(opp)} tone="green" />
+            <Metric label="Last Contact" value={opp.last_contact_at ? formatRelativeTime(opp.last_contact_at) : 'No contact'} tone="neutral" />
+            <Metric label="Next Action" value={opp.next_action || 'Review'} tone="blue" />
+            <Metric label="Follow-Up" value={opp.next_follow_up_at ? formatRelativeTime(opp.next_follow_up_at) : (opp.next_action_due ? formatRelativeTime(opp.next_action_due) : 'None')} tone="amber" />
+          </div>
         )}
 
         {tab === 'conversation' && (
@@ -126,6 +139,7 @@ export function PipelineCommandPanel({
             <Row label="Reply State" value={(opp.conversation_state || 'unknown').replace(/_/g, ' ')} />
             <p className="plv-deal-detail__text">{opp.latest_message_preview || 'No recent message.'}</p>
             <button type="button" className="plv-action-btn" onClick={() => onOpenConversation(threadId)}>Open Conversation</button>
+            <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_inbox_thread')}>Open Inbox Thread</button>
           </>
         )}
 
@@ -133,11 +147,21 @@ export function PipelineCommandPanel({
           <>
             <Row label="Address" value={opp.property_address_full || 'Unknown'} />
             <Row label="Property Type" value={resolvePropertyType(opp)} />
+            <Row label="City" value={opp.property_city || 'Unknown'} />
             <Row label="State" value={resolvePropertyState(opp)} />
+            <Row label="ZIP" value={opp.property_zip || 'Unknown'} />
+            <Row label="County" value={opp.property_county || 'Unknown'} />
             <Row label="Market" value={opp.market || 'Unknown'} />
+            <Row label="Units" value={opp.units_count != null ? String(opp.units_count) : 'Unknown'} />
             <Row label="Portfolio" value={opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} properties` : 'Single property'} />
             <Row label="Est. Value" value={displayCurrency(opp.estimated_value, { engineRunId })} />
+            <Row label="Equity" value={displayCurrency(opp.equity_amount, { engineRunId })} />
             <Row label="ARV" value={displayCurrency(opp.arv, { engineRunId })} />
+            <div className="plv-command-panel__actions-inline">
+              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_property')}>Open Property</button>
+              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_map')}>Open Map</button>
+              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_comp_intelligence')}>Comp Intelligence</button>
+            </div>
           </>
         )}
 
@@ -145,12 +169,17 @@ export function PipelineCommandPanel({
           <div className="plv-deal-detail__metrics">
             <Metric label="AOS" value={displayAos(opp)} tone="green" />
             <Metric label="Asking" value={displayCurrency(opp.asking_price, { engineRunId })} tone="gold" />
-            <Metric label="Strategy" value={opp.strategy || 'Not calculated'} tone="blue" />
-            <Metric label="Motivation" value={opp.motivation_score != null ? `${Math.round(opp.motivation_score)}` : 'Unknown'} tone="cyan" />
-            <Metric label="Cooperation" value={opp.cooperation_score != null ? `${Math.round(opp.cooperation_score)}` : 'Unknown'} tone="cyan" />
-            <Metric label="Confidence" value={opp.confidence != null ? `${Math.round(opp.confidence)}%` : 'Unknown'} tone="neutral" />
-            <Metric label="Offer Gap" value={opp.offer_to_ask_gap != null ? displayCurrency(opp.offer_to_ask_gap, { engineRunId }) : 'Not calculated'} tone="amber" />
+            <Metric label="Strategy" value={opp.strategy || (engineRunId ? 'Unknown' : 'Not calculated')} tone="blue" />
+            <Metric label="Motivation" value={formatUnknownMetric(opp.motivation_score, 'score', engineRunId)} tone="cyan" />
+            <Metric label="Cooperation" value={formatUnknownMetric(opp.cooperation_score, 'score', engineRunId)} tone="cyan" />
+            <Metric label="Confidence" value={opp.confidence != null ? `${Math.round(opp.confidence)}%` : 'Not calculated'} tone="neutral" />
+            <Metric label="Offer Gap" value={formatUnknownMetric(opp.offer_to_ask_gap, 'currency', engineRunId)} tone="amber" />
             <Metric label="Recommended Offer" value={displayCurrency(opp.recommended_offer, { engineRunId })} tone="green" />
+            {onRefreshEngine && (
+              <button type="button" className="plv-action-btn is-primary" onClick={() => onRefreshEngine(opp.id)}>
+                {engineRunId ? 'Refresh Analysis' : 'Run Analysis'}
+              </button>
+            )}
           </div>
         )}
 
@@ -162,12 +191,21 @@ export function PipelineCommandPanel({
             <Row label="Follow-Up" value={opp.next_follow_up_at ? formatRelativeTime(opp.next_follow_up_at) : (opp.next_action_due ? formatRelativeTime(opp.next_action_due) : 'None scheduled')} />
             <Row label="Follow-Up Reason" value={opp.follow_up_reason || '—'} />
             {opp.blocker && <p className="plv-command-panel__blocker">{opp.blocker}</p>}
+            <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_workflow_run')}>Open Workflow Run</button>
           </>
         )}
 
         {tab === 'activity' && (
           <div className="plv-command-panel__timeline">
-            {(opp.history ?? []).length > 0 ? (
+            {timeline.length > 0 ? (
+              timeline.map((event) => (
+                <div key={event.id} className="plv-command-panel__event">
+                  <span>{event.label}</span>
+                  <small>{formatRelativeTime(event.timestamp)} · {event.source}</small>
+                  {event.detail && <em>{event.detail}</em>}
+                </div>
+              ))
+            ) : (opp.history ?? []).length > 0 ? (
               opp.history!.map((event) => (
                 <div key={event.id} className="plv-command-panel__event">
                   <span>{event.event_type.replace(/_/g, ' ')}</span>
@@ -183,11 +221,8 @@ export function PipelineCommandPanel({
       </div>
 
       <footer className="plv-command-panel__actions">
-        <button type="button" className="plv-action-btn is-primary" onClick={() => onOpenCommandView(threadId)}>Command View</button>
+        <button type="button" className="plv-action-btn is-primary" onClick={() => onOpenCommandView(threadId)}>Open Conversation</button>
         <button type="button" className="plv-action-btn" onClick={() => onOpenDealIntelligence(threadId)}>Deal Intelligence</button>
-        {onRefreshEngine && (
-          <button type="button" className="plv-action-btn" onClick={() => onRefreshEngine(opp.id)}>Refresh Engine</button>
-        )}
         <button type="button" className="plv-action-btn is-warning" onClick={() => onAction(opp.id, 'pause_automation')}>Pause Automation</button>
         <button type="button" className="plv-action-btn is-danger" onClick={() => onAction(opp.id, 'suppress')}>Suppress</button>
       </footer>

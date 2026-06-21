@@ -188,3 +188,39 @@ export const buildContextFromMessage = (
     intent: 'open_thread',
   }
 }
+
+export type PipelineOpportunityContextInput = {
+  id: string
+  primary_property_id?: string | null
+  primary_thread_key?: string | null
+  master_owner_id?: string | null
+  property_export_id?: string | null
+  seller_display_name?: string | null
+  property_address_full?: string | null
+  market?: string | null
+  workflow_enrollment_id?: string | null
+  acquisition_engine_run_id?: string | null
+  related_thread_keys?: string[] | null
+  campaign_ids?: string[] | null
+}
+
+export const buildContextFromOpportunity = (
+  opportunity: PipelineOpportunityContextInput | null | undefined,
+  sourceView: ActiveInboxContextSource = 'pipeline',
+): ActiveInboxContext => {
+  if (!opportunity?.id) return { sourceView, intent: 'open_seller' }
+  return {
+    opportunityId: text(opportunity.id),
+    sellerId: text(opportunity.master_owner_id),
+    masterOwnerId: text(opportunity.master_owner_id),
+    threadKey: text(opportunity.primary_thread_key),
+    propertyId: text(opportunity.primary_property_id),
+    propertyAddress: text(opportunity.property_address_full),
+    sellerName: text(opportunity.seller_display_name),
+    market: text(opportunity.market),
+    entityType: opportunity.primary_property_id ? 'property' : opportunity.master_owner_id ? 'master_owner' : null,
+    entityId: text(opportunity.primary_property_id || opportunity.master_owner_id),
+    sourceView,
+    intent: opportunity.primary_thread_key ? 'open_thread' : 'open_seller',
+  }
+}

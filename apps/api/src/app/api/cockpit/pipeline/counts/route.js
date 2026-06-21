@@ -46,7 +46,8 @@ export async function GET(request) {
   }
 
   try {
-    const metrics = await getPipelineMetrics()
+    const { searchParams } = new URL(request.url)
+    const metrics = await getPipelineMetrics(Object.fromEntries(searchParams.entries()))
     return NextResponse.json({ ok: true, data: metrics }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
