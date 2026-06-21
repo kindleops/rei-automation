@@ -20,6 +20,8 @@ interface PipelineConfigurableCardProps {
   dragging?: boolean
   mutableView?: boolean
   onClick?: () => void
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: () => void
   onPointerDown?: (e: React.PointerEvent) => void
@@ -43,6 +45,8 @@ export function PipelineConfigurableCard({
   dragging,
   mutableView,
   onClick,
+  onMouseEnter,
+  onMouseLeave,
   onDragStart,
   onDragEnd,
   onPointerDown,
@@ -100,6 +104,8 @@ export function PipelineConfigurableCard({
         dragging && 'is-dragging',
       )}
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.() } }}
       role="button"
       tabIndex={0}

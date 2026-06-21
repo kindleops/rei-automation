@@ -6,7 +6,8 @@ import { fetchPipelineOpportunity } from '../../domain/pipeline/pipeline-opportu
 import type { PipelineSavedView, PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
 import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
 import { universalContextFromOpportunity } from '../../domain/pipeline/pipeline-universal-context'
-import { setUniversalEntityContextSnapshot, UNIVERSAL_ENTITY_CONTEXT_EVENT } from '../../domain/entity-graph/universal-entity-context-store'
+import { setUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
+import { syncPayloadFromOpportunity } from '../../domain/entity-graph/universal-sync'
 import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
@@ -19,6 +20,8 @@ interface PipelineWorkspaceProps {
   layoutMode: ViewLayoutMode
   onSelect: (id: string) => void
   onEstablishContext?: (context: ActiveInboxContext) => void
+  onSyncOpportunity?: (opportunity: PipelineOpportunity, mode: 'select' | 'preview') => void
+  onClearOpportunityPreview?: () => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
@@ -47,6 +50,8 @@ export function PipelineWorkspace({
   layoutMode,
   onSelect,
   onEstablishContext,
+  onSyncOpportunity,
+  onClearOpportunityPreview,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
@@ -94,14 +99,16 @@ export function PipelineWorkspace({
     [opportunities, selectedOpportunityId],
   )
 
-  const syncEntityContext = useCallback((opp: PipelineOpportunity | null) => {
+  const syncEntityContext = useCallback((opp: PipelineOpportunity | null, mode: 'select' | 'preview' = 'select') => {
     if (!opp) return
-    const active = buildContextFromOpportunity(opp, 'pipeline')
+    if (onSyncOpportunity) {
+      onSyncOpportunity(opp, mode)
+      return
+    }
+    const { active, universal } = syncPayloadFromOpportunity(opp)
     onEstablishContext?.(active)
-    const universal = universalContextFromOpportunity(opp)
     setUniversalEntityContextSnapshot(universal)
-    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: universal }))
-  }, [onEstablishContext])
+  }, [onEstablishContext, onSyncOpportunity])
 
   useEffect(() => {
     if (!selectedOpportunityId) {
@@ -200,15 +207,22 @@ export function PipelineWorkspace({
     writeOppToUrl(opportunityId)
     try { localStorage.setItem(STORAGE_KEY, opportunityId) } catch { /* ignore */ }
     const opp = opportunities.find((o) => o.id === opportunityId)
-    if (opp) syncEntityContext(opp)
-    onSelect(opp?.primary_thread_key || opportunityId)
+    if (opp) syncEntityContext(opp, 'select')
+    if (opp?.primary_thread_key) onSelect(opp.primary_thread_key)
+    else if (opp?.id) onSelect(opp.id)
   }, [onSelect, opportunities, syncEntityContext])
+
+  const handlePreviewOpportunity = useCallback((opportunityId: string) => {
+    const opp = opportunities.find((o) => o.id === opportunityId)
+    if (opp) syncEntityContext(opp, 'preview')
+  }, [opportunities, syncEntityContext])
 
   const handleClearSelection = useCallback(() => {
     setSelectedOpportunityId(null)
     writeOppToUrl(null)
     try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
-  }, [])
+    onClearOpportunityPreview?.()
+  }, [onClearOpportunityPreview])
 
   if (error) {
     return (
@@ -247,6 +261,8 @@ export function PipelineWorkspace({
       refreshing={refreshing}
       onGroupByChange={setGroupBy}
       onSelect={handleSelectOpportunity}
+      onPreview={handlePreviewOpportunity}
+      onClearPreview={onClearOpportunityPreview}
       onClearSelection={handleClearSelection}
       onOpenCommandView={onOpenCommandView}
       onOpenDealIntelligence={onOpenDealIntelligence}

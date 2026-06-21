@@ -80,7 +80,8 @@ interface PipelineOpportunityBoardProps {
   refreshing?: boolean
   onGroupByChange: (mode: PipelineGroupByMode) => void
   onSelect: (id: string) => void
-  onClearSelection?: () => void
+  onPreview?: (id: string) => void
+  onClearPreview?: () => void
   onRetryDetail?: () => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
@@ -118,6 +119,8 @@ export function PipelineOpportunityBoard({
   refreshing,
   onGroupByChange,
   onSelect,
+  onPreview,
+  onClearPreview,
   onClearSelection,
   onRetryDetail,
   onOpenCommandView,
@@ -302,6 +305,10 @@ export function PipelineOpportunityBoard({
         dragging={dragCardId === card.opp.id}
         mutableView={mutableView}
         onClick={() => handleCardClick(card.opp.id)}
+        onMouseEnter={() => onPreview?.(card.opp.id)}
+        onMouseLeave={() => {
+          if (card.opp.id !== selectedId) onClearPreview?.()
+        }}
         onReplyAction={() => onOpenCommandView(card.opp.primary_thread_key)}
         onDragStart={(e) => {
           setDragCardId(card.opp.id)

@@ -47,7 +47,7 @@ import {
   dedupeMessages,
   toThreadMessage,
 } from '../../lib/data/inboxData'
-import { normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
+import { getDealContextByProperty, getDealContextByThread, normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
@@ -136,6 +136,18 @@ import {
   setUniversalEntityContextSnapshot,
   subscribeUniversalEntityContext,
 } from '../../domain/entity-graph/universal-entity-context-store'
+import {
+  activeContextMatchesThread,
+  dealContextFromActiveInbox,
+  findThreadByRef,
+  findThreadForActiveContext,
+  mergeSelectedThreadAndDealContext,
+  resolveCanonicalWorkspaceContext,
+  syncPayloadFromOpportunity,
+  syncPayloadFromUniversal,
+  threadStubFromActiveContext,
+} from '../../domain/entity-graph/universal-sync'
+import type { PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
 import {
   applyInboxFilters,
   getAdvancedFilterOptions,
@@ -484,76 +496,6 @@ const computeWorkspaceWidths = (
   } as Record<InboxWorkspaceView, ViewWidthPercent>
 }
 
-// ── Canonical context merge ───────────────────────────────────────────────────
-// Produces a single DealContext that is the richest available merge of the
-// enrichment API result and the live inbox thread row. Rules:
-//   1. dealContext wins when its field is valid (non-null, non-empty, non-"Unknown")
-//   2. selected thread row fills any missing/invalid fields
-//   3. Coordinates (lat/lng) always come from the source that has valid coords
-const INVALID_STRING_VALUES = new Set(['', 'Unknown', 'Unknown Property', 'Unknown Owner', 'Unknown Seller', 'Unknown Address', 'Unknown Market'])
-const isValidStr = (v: unknown): v is string =>
-  typeof v === 'string' && v.trim().length > 0 && !INVALID_STRING_VALUES.has(v.trim())
-const isValidNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0
-const isValidCoord = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) > 0.001
-
-const pickStr = (a: unknown, b: unknown): string => (isValidStr(a) ? (a as string) : isValidStr(b) ? (b as string) : '')
-const pickNum = (a: unknown, b: unknown): number => (isValidNum(a) ? (a as number) : isValidNum(b) ? (b as number) : 0)
-
-function mergeSelectedThreadAndDealContext(
-  thread: InboxWorkflowThread,
-  dc: DealContext | null,
-): DealContext {
-  const t = thread as unknown as Record<string, unknown>
-  const base = dc ?? normalizeDealContext(t)
-
-  const dcLat = isValidCoord(base.latitude) ? base.latitude : (isValidCoord(base.lat) ? base.lat : null)
-  const dcLng = isValidCoord(base.longitude) ? base.longitude : (isValidCoord(base.lng) ? base.lng : null)
-  const tLat = isValidCoord(t.lat) ? t.lat as number : (isValidCoord(t.latitude) ? t.latitude as number : null)
-  const tLng = isValidCoord(t.lng) ? t.lng as number : (isValidCoord(t.longitude) ? t.longitude as number : null)
-  const lat = dcLat ?? tLat ?? 0
-  const lng = dcLng ?? tLng ?? 0
-
-  return {
-    ...base,
-    propertyId: pickStr(base.propertyId, t.property_id || t.propertyId) || base.propertyId,
-    property_id: pickStr(base.property_id, t.property_id) || base.property_id,
-    masterOwnerId: pickStr(base.masterOwnerId, t.master_owner_id || t.ownerId) || base.masterOwnerId,
-    master_owner_id: pickStr(base.master_owner_id, t.master_owner_id) || base.master_owner_id,
-    prospectId: pickStr(base.prospectId, t.prospect_id || t.prospectId) || base.prospectId,
-    prospect_id: pickStr(base.prospect_id, t.prospect_id) || base.prospect_id,
-    ownerName: pickStr(base.ownerName, t.owner_name || t.ownerName),
-    owner_name: pickStr(base.owner_name, t.owner_name || t.ownerName),
-    firstName: pickStr(base.firstName, t.seller_first_name || t.first_name),
-    first_name: pickStr(base.first_name, t.first_name),
-    propertyAddress: pickStr(base.propertyAddress, t.property_address_full || t.propertyAddress || t.subject),
-    property_address_full: pickStr(base.property_address_full, t.property_address_full || t.propertyAddress),
-    market: pickStr(base.market, t.market),
-    market_name: pickStr(base.market_name, t.market || t.market_name),
-    propertyState: pickStr(base.propertyState, t.property_address_state || t.propertyState),
-    propertyZip: pickStr(base.propertyZip, t.property_address_zip || t.propertyZip),
-    latitude: lat,
-    longitude: lng,
-    lat,
-    lng,
-    estimatedValue: pickNum(base.estimatedValue, t.estimated_value),
-    estimated_value: pickNum(base.estimated_value, t.estimated_value),
-    cashOffer: pickNum(base.cashOffer, t.cash_offer),
-    cash_offer: pickNum(base.cash_offer, t.cash_offer),
-    equityPercent: pickNum(base.equityPercent, t.equity_percent),
-    equity_percent: pickNum(base.equity_percent, t.equity_percent),
-    status: pickStr(base.status, t.universal_status),
-    universal_status: pickStr(base.universal_status, t.universal_status),
-    stage: pickStr(base.stage, t.universal_stage),
-    universal_stage: pickStr(base.universal_stage, t.universal_stage),
-    bucket: pickStr(base.bucket, t.inbox_bucket),
-    inbox_bucket: pickStr(base.inbox_bucket, t.inbox_bucket),
-    latestMessageBody: pickStr(base.latestMessageBody, t.latest_message_body || t.latestMessageBody),
-    latest_message_body: pickStr(base.latest_message_body, t.latest_message_body),
-    latestMessageDirection: pickStr(base.latestMessageDirection, t.latest_message_direction),
-    latest_message_direction: pickStr(base.latest_message_direction, t.latest_message_direction),
-  }
-}
-
 const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): QueueCommandMode => {
   const campaignMode = String(diagnostics?.campaign_mode || '').toLowerCase()
   const processorMode = String(diagnostics?.queue_processor_mode || '').toLowerCase()
@@ -579,6 +521,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [activeContext, setActiveContextState] = useState<ActiveInboxContext>({ sourceView: 'inbox' })
+  const [previewContext, setPreviewContext] = useState<ActiveInboxContext | null>(null)
+  const effectiveActiveContext = previewContext ?? activeContext
   const [universalEntityContext, setUniversalEntityContext] = useState<UniversalEntityContext>(() => {
     const deepLink = typeof window !== 'undefined' ? parseEntityGraphDeepLink(window.location.pathname) : null
     return deepLink ?? EMPTY_UNIVERSAL_ENTITY_CONTEXT
@@ -930,6 +874,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const selectedThreadKeySnapshot = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || null) : null
   const selectedIdSnapshot = selected?.id ?? null
 
+  const canonicalSelectedContext = useMemo(
+    () => resolveCanonicalWorkspaceContext({
+      selected,
+      dealContext,
+      activeContext: effectiveActiveContext,
+    }),
+    [selected, dealContext, effectiveActiveContext],
+  )
+
+  const workspaceThread = useMemo(
+    () => selected ?? threadStubFromActiveContext(effectiveActiveContext, canonicalSelectedContext),
+    [selected, effectiveActiveContext, canonicalSelectedContext],
+  )
+
   // Phase 1 trace — fires ONLY when the actual thread identity changes (string key, not object ref)
   useEffect(() => {
     console.log('[SELECTED_KEY_CHANGED]', selectedKeyForEffect)
@@ -946,7 +904,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       selectedThreadFallbackRef.current = selected
     }
   }, [selected, threads])
-  const buyerCommandData = useBuyerCommandData(selected, buyerFilters)
+  const buyerCommandData = useBuyerCommandData(workspaceThread, buyerFilters)
 
   useEffect(() => {
     if (selectedBuyerKey && buyerCommandData.matches.some((match) => match.buyerKey === selectedBuyerKey)) return
@@ -1005,26 +963,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [selected, selectedId, selectedThreadKey])
 
   useEffect(() => {
-    if (!activeContext.threadKey && !activeContext.propertyId && !activeContext.sellerId) return
-    if (selected && (
-      (activeContext.threadKey && (selected.threadKey || selected.id) === activeContext.threadKey)
-      || (activeContext.propertyId && selected.propertyId === activeContext.propertyId)
-      || (activeContext.sellerId && selected.ownerId === activeContext.sellerId)
-    )) {
+    if (!effectiveActiveContext.threadKey && !effectiveActiveContext.propertyId && !effectiveActiveContext.sellerId && !effectiveActiveContext.masterOwnerId) return
+    if (selected && activeContextMatchesThread(effectiveActiveContext, selected)) return
+
+    const match = findThreadForActiveContext(threads, effectiveActiveContext)
+    if (!match) {
+      if (effectiveActiveContext.threadKey) {
+        setSelectedThreadKey(effectiveActiveContext.threadKey)
+      }
       return
     }
-
-    const match = threads.find((thread) =>
-      (activeContext.threadKey && (thread.threadKey || thread.id) === activeContext.threadKey)
-      || (activeContext.propertyId && thread.propertyId === activeContext.propertyId)
-      || (activeContext.sellerId && thread.ownerId === activeContext.sellerId),
-    )
-
-    if (!match) return
     setSelectedId(match.id)
     setSelectedThreadKey(match.threadKey || match.id)
     setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
-  }, [activeContext.propertyId, activeContext.sellerId, activeContext.threadKey, selected, threads])
+  }, [effectiveActiveContext, selected, threads])
 
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
@@ -1093,13 +1045,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const commandIntel = useMemo(
     () => buildThreadCommandIntel(selected, displayedMessages, threadContext, threadIntelligence),
     [displayedMessages, selected, threadContext, threadIntelligence],
-  )
-
-  // Single canonical context passed to all enrichment panels — richest merge of
-  // live thread row + committed dealContext. Always non-null when a thread is selected.
-  const canonicalSelectedContext = useMemo(
-    () => (selected ? mergeSelectedThreadAndDealContext(selected, dealContext) : null),
-    [selected, dealContext],
   )
 
   const liveCommandFeed = useMemo<ThreadCommandIntel[]>(() => {
@@ -1578,7 +1523,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [activeWorkspaceView, advancedFilters.market, commandMapMarket, commandMapTheme, searchQuery, selected?.market, sourceMode, stageFilter, viewFilter])
 
   const setActiveContext = useCallback((nextContext: ActiveInboxContext, options?: SetActiveContextOptions) => {
-    setActiveContextState((current) => ({ ...current, ...nextContext }))
+    setActiveContextState((current) => {
+      const merged = { ...current, ...nextContext }
+      const match = findThreadForActiveContext(threads, merged)
+      if (match) {
+        setSelectedId(match.id)
+        setSelectedThreadKey(match.threadKey || match.id)
+        setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+        selectedThreadFallbackRef.current = match
+      } else if (nextContext.threadKey) {
+        setSelectedThreadKey(nextContext.threadKey)
+      }
+      return merged
+    })
     setUniversalEntityContext((current) => {
       const merged = mergeUniversalContexts(current, {
         entityType: nextContext.entityType ?? (nextContext.propertyId ? 'property' : nextContext.prospectId ? 'prospect' : nextContext.masterOwnerId || nextContext.sellerId ? 'master_owner' : current.entityType),
@@ -1594,18 +1551,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       patchUniversalEntityContextSnapshot(merged, { silent: true })
       return merged
     })
-
-    const nextThreadKey = nextContext.threadKey ?? null
-    if (nextThreadKey) {
-      const match = threads.find((thread) => (thread.threadKey || thread.id) === nextThreadKey || thread.id === nextThreadKey)
-      if (match) {
-        setSelectedId(match.id)
-        setSelectedThreadKey(match.threadKey || match.id)
-        setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
-      } else {
-        setSelectedThreadKey(nextThreadKey)
-      }
-    }
 
     const focusTarget = options?.focusView
       || (options?.openThread ? 'sms_thread' : undefined)
@@ -2956,8 +2901,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [handleThreadAction, selected])
 
   const handleSelect = useCallback((id: string) => {
-    const thread = threads.find((candidate) => candidate.id === id)
-    const threadKey = thread?.threadKey || id
+    setPreviewContext(null)
+    const thread = findThreadByRef(threads, id)
+    const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
     // Immediately clear old messages and show skeleton — effect fetches fresh ones
@@ -2987,7 +2933,85 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   useEffect(() => {
     return subscribeUniversalEntityContext((next) => {
       setUniversalEntityContext(next)
+      const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'pipeline')
+      setActiveContextState((current) => ({ ...current, ...active }))
+      const match = findThreadForActiveContext(threads, active)
+      if (match) {
+        setSelectedId(match.id)
+        setSelectedThreadKey(match.threadKey || match.id)
+        setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+        selectedThreadFallbackRef.current = match
+      } else if (active.threadKey) {
+        setSelectedThreadKey(active.threadKey)
+      }
     })
+  }, [activeContext.sourceView, threads])
+
+  useEffect(() => {
+    const active = effectiveActiveContext
+    const hasAnchor = Boolean(active.threadKey || active.propertyId || active.masterOwnerId || active.sellerId || active.opportunityId)
+    if (!hasAnchor) return
+    if (selected && activeContextMatchesThread(active, selected) && dealContext) return
+
+    let cancelled = false
+    const controller = new AbortController()
+    const fallback = dealContextFromActiveInbox(active)
+    if (fallback && !dealContext) setDealContext(fallback)
+
+    void (async () => {
+      try {
+        let hydrated: DealContext | null = null
+        if (active.threadKey) {
+          hydrated = await getDealContextByThread(active.threadKey, controller.signal)
+        }
+        if (!hydrated && active.propertyId) {
+          hydrated = await getDealContextByProperty(active.propertyId, controller.signal)
+        }
+        if (cancelled || !hydrated) return
+        if (selected && !activeContextMatchesThread(active, selected)) return
+        setDealContext((current) => {
+          if (!current) return hydrated
+          return {
+            ...hydrated,
+            ...current,
+            ownerName: current.ownerName || hydrated.ownerName,
+            propertyAddress: current.propertyAddress || hydrated.propertyAddress,
+            market: current.market || hydrated.market,
+          }
+        })
+      } catch {
+        /* hydration is best-effort */
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [
+    dealContext,
+    effectiveActiveContext.masterOwnerId,
+    effectiveActiveContext.opportunityId,
+    effectiveActiveContext.propertyId,
+    effectiveActiveContext.sellerId,
+    effectiveActiveContext.threadKey,
+    selected,
+  ])
+
+  const syncOpportunityContext = useCallback((opportunity: PipelineOpportunity, mode: 'select' | 'preview') => {
+    const { active, universal } = syncPayloadFromOpportunity(opportunity)
+    if (mode === 'preview') {
+      setPreviewContext(active)
+      patchUniversalEntityContextSnapshot(universal, { silent: true })
+      return
+    }
+    setPreviewContext(null)
+    setActiveContext(active, { preserveCurrentViews: true })
+    setUniversalEntityContextSnapshot(universal)
+  }, [setActiveContext])
+
+  const clearOpportunityPreview = useCallback(() => {
+    setPreviewContext(null)
   }, [])
 
   const handleEntityGraphAction = useCallback((action: EntityGraphAction, context: UniversalEntityContext) => {
@@ -3934,7 +3958,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             <InboxCommandMap
               threads={mapThreads}
               visibleThreads={filtered}
-              selectedThread={selected}
+              selectedThread={workspaceThread}
               selectedThreadMessages={displayedMessages}
               selectedThreadMessagesLoading={messagesLoading}
               quickReplyDraft={draftText}
@@ -3971,7 +3995,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'deal_intelligence') {
       return (
         <IntelligencePanel
-          thread={selected}
+          thread={workspaceThread}
           threadContext={threadContext}
           intelligence={threadIntelligence}
           dealContext={canonicalSelectedContext}
@@ -3979,7 +4003,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           onStageChange={handleStageChange}
           onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
           onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
-          onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
+          onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
           messages={displayedMessages}
           panelMode={paneMode === 'single' ? 'full' : paneWidth === '25' || paneWidth === '50' ? 'half' : 'default'}
@@ -3996,6 +4020,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           layoutMode={layoutMode}
           onSelect={handleSelect}
           onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
+          onSyncOpportunity={syncOpportunityContext}
+          onClearOpportunityPreview={clearOpportunityPreview}
           onOpenCommandView={(threadId) => {
             if (threadId) handleSelect(threadId)
             handleFocusWorkspaceView('sms_thread')
@@ -4023,8 +4049,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         <section className="nx-workspace-surface nx-workspace-surface--calendar">
           <InboxCalendarView
             threads={filtered}
-            selectedThread={selected}
-            selectedId={selected?.id ?? null}
+            selectedThread={workspaceThread}
+            selectedId={workspaceThread?.id ?? null}
             layoutMode={layoutMode}
             onSelectThread={handleSelect}
             onSelectEvent={handleSelectCalendarEvent}
@@ -4046,7 +4072,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
           <CompIntelligenceWorkspace
-            thread={selected}
+            thread={workspaceThread}
             dealContext={canonicalSelectedContext}
             paused={heavyLoadPaused}
             paneWidth={paneWidth}
@@ -4090,7 +4116,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
           <InboxCampaignView
-            selectedThread={selected}
+            selectedThread={workspaceThread}
             paneWidth={paneWidth}
             layoutMode={layoutMode}
           />
@@ -4172,7 +4198,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         topSearchGroups={topSearchGroups}
         topSearchLoading={topSearchLoading}
         onExecuteTopSearchResult={handleExecuteTopSearchResult}
-        selectedThread={selected}
+        selectedThread={workspaceThread}
         isSuppressed={selectedSuppressed}
         notificationCount={data.unreadCount}
         queueProcessorHealth={queueProcessorHealth}
@@ -4371,7 +4397,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           {dossierOpen && (
             <MapDossierDrawer
               mode="dossier"
-              thread={selected}
+              thread={workspaceThread}
               context={threadContext}
               full={dossierFull}
               onToggleFull={() => setDossierFull((full) => !full)}
@@ -4439,7 +4465,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               <InboxCommandMap
                 threads={mapThreads}
                 visibleThreads={filtered}
-                selectedThread={selected}
+                selectedThread={workspaceThread}
                 selectedThreadMessages={displayedMessages}
                 selectedThreadMessagesLoading={messagesLoading}
                 quickReplyDraft={draftText}
@@ -4468,7 +4494,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         </aside>
         ) : showRightCommandPanel ? (
           <IntelligencePanel
-            thread={selected}
+            thread={workspaceThread}
             threadContext={threadContext}
             intelligence={threadIntelligence}
             dealContext={canonicalSelectedContext}
@@ -4476,7 +4502,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onStageChange={handleStageChange}
             onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
             onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
-            onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
+            onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
             onOpenAi={() => setActiveOverlay('ai')}
             messages={displayedMessages}
             panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
