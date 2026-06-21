@@ -40,14 +40,6 @@ export function DailyExecutionSchedule({
 
   return (
     <section className="nx-cal__surface nx-cal__day-timeline">
-      <div className="nx-cal__section-head">
-        <div>
-          <span className="nx-cal__eyebrow">Day View</span>
-          <strong>{anchorDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</strong>
-        </div>
-        <span>{dayEvents.length} items</span>
-      </div>
-
       <div className="nx-cal__day-panels">
         <div className="nx-cal__day-compact-agenda">
           <div><strong>Upcoming</strong> {upcoming.length}</div>

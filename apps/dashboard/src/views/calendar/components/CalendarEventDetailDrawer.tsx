@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import type { CalendarEvent } from '../../../lib/data/calendarData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { formatCurrency, formatRelativeTime } from '../../../shared/formatters'
@@ -29,6 +30,7 @@ type CalendarEventDetailDrawerProps = {
   selectedThread: InboxWorkflowThread | null
   relatedEvents?: CalendarEvent[]
   developerMode?: boolean
+  mobile?: boolean
   onAction: (action: CalendarDrawerAction) => void
   onClose: () => void
 }
@@ -38,92 +40,104 @@ export function CalendarEventDetailDrawer({
   selectedThread,
   relatedEvents = [],
   developerMode = false,
+  mobile = false,
   onAction,
   onClose,
 }: CalendarEventDetailDrawerProps) {
-  if (!event) return null
+  if (!event || typeof document === 'undefined') return null
 
   const actions: Array<{ id: CalendarDrawerAction; label: string; danger?: boolean; disabled?: boolean }> = [
-    { id: 'inbox', label: 'Open Inbox Thread' },
-    { id: 'conversation', label: 'Open Conversation' },
-    { id: 'pipeline', label: 'Open Pipeline' },
-    { id: 'property', label: 'Open Property' },
-    { id: 'map', label: 'Open Map' },
-    { id: 'deal', label: 'Open Deal Intelligence' },
-    { id: 'comp', label: 'Open Comp Intelligence' },
-    { id: 'buyer', label: 'Open Buyer Match' },
-    { id: 'queue', label: 'Open Queue Row', disabled: !event.deepLinkContext?.queue_row_id },
-    { id: 'campaign', label: 'Open Campaign', disabled: !event.deepLinkContext?.campaign_id },
-    { id: 'workflow', label: 'Open Workflow Run', disabled: !event.deepLinkContext?.workflow_enrollment_id },
-    { id: 'contract', label: 'Open Contract / Closing' },
-    { id: 'entity_graph', label: 'Open Entity Graph' },
+    { id: 'deal', label: 'Open Deal' },
+    { id: 'conversation', label: 'Conversation' },
+    { id: 'property', label: 'Property' },
+    { id: 'comp', label: 'Intelligence' },
+    { id: 'queue', label: 'Queue', disabled: !event.deepLinkContext?.queue_row_id },
+    { id: 'workflow', label: 'Workflow', disabled: !event.deepLinkContext?.workflow_enrollment_id },
+    { id: 'campaign', label: 'Campaign', disabled: !event.deepLinkContext?.campaign_id },
     { id: 'reschedule', label: 'Reschedule', disabled: !event.reschedulable },
     { id: 'complete', label: 'Mark Complete', disabled: !event.editable },
     { id: 'cancel', label: 'Cancel', disabled: !event.cancellable, danger: true },
-    { id: 'retry', label: 'Retry', disabled: event.type !== 'sms_failed' && event.type !== 'queue_retry' },
   ]
 
-  return (
-    <aside className="nx-cal__drawer">
-      <div className="nx-cal__drawer-head">
-        <div>
-          <span className="nx-cal__eyebrow">{event.sourceTable.replace(/_/g, ' ')}</span>
-          <strong>{event.title}</strong>
-        </div>
-        <button type="button" className="nx-cal__icon-btn" onClick={onClose} aria-label="Close event drawer">
-          <Icon name="close" />
-        </button>
-      </div>
-
-      <div className="nx-cal__drawer-grid">
-        <div><label>Date / Time</label><strong>{new Date(event.timestamp).toLocaleString()}</strong></div>
-        <div><label>Timezone</label><strong>{event.timezone || 'UTC'}</strong></div>
-        <div><label>Status</label><strong>{event.status.replace(/_/g, ' ')}</strong></div>
-        <div><label>Risk</label><strong>{event.riskState || (event.overdue ? 'overdue' : 'on_track')}</strong></div>
-        <div><label>Seller</label><strong>{event.sellerName}</strong></div>
-        <div><label>Property</label><strong>{event.propertyAddress}</strong></div>
-        <div><label>Market</label><strong>{event.market}</strong></div>
-        <div><label>Stage</label><strong>{event.metadata?.stage ? String(event.metadata.stage) : selectedThread?.conversationStage || '—'}</strong></div>
-        <div><label>Resolution</label><strong>{event.resolutionSource || event.unresolvedReason || 'canonical'}</strong></div>
-        <div><label>Source</label><strong>{event.sourceDomain || event.sourceTable}</strong></div>
-      </div>
-
-      <p className="nx-cal__drawer-copy">{event.description}</p>
-      {event.metadata?.amount ? (
-        <div className="nx-cal__drawer-money">{formatCurrency(Number(event.metadata.amount))}</div>
-      ) : null}
-
-      {relatedEvents.length > 1 ? (
-        <div className="nx-cal__drawer-chain">
-          <span className="nx-cal__eyebrow">Related chain</span>
-          <ol>
-            {relatedEvents.map((related) => (
-              <li key={related.id}>
-                <strong>{related.title}</strong>
-                <span>{formatRelativeTime(related.timestamp)} · {related.status}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
-
-      {developerMode ? (
-        <pre className="nx-cal__drawer-dev">{JSON.stringify({ id: event.id, deepLink: event.deepLinkContext, sourceRecordId: event.sourceRecordId }, null, 2)}</pre>
-      ) : null}
-
-      <div className="nx-cal__drawer-actions">
-        {actions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className={cls('nx-cal__drawer-action', action.danger && 'is-danger')}
-            disabled={action.disabled}
-            onClick={() => onAction(action.id)}
-          >
-            {action.label}
+  return createPortal(
+    <div className={cls('nx-cal__event-backdrop', mobile && 'is-mobile')} role="presentation" onClick={onClose}>
+      <aside
+        className={cls('nx-cal__event-drawer', `is-${event.tone}`, mobile && 'is-bottom-sheet')}
+        role="dialog"
+        aria-label="Event details"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="nx-cal__event-drawer-head">
+          <div className="nx-cal__event-drawer-icon" aria-hidden="true">
+            <Icon name="calendar" />
+          </div>
+          <div>
+            <strong>{event.title}</strong>
+            <span>{new Date(event.timestamp).toLocaleString()} · {event.timezone || 'UTC'}</span>
+            <div className="nx-cal__event-drawer-badges">
+              <em>{event.status.replace(/_/g, ' ')}</em>
+              <em className={event.overdue ? 'is-risk' : ''}>{event.riskState || (event.overdue ? 'overdue' : 'on track')}</em>
+            </div>
+          </div>
+          <button type="button" className="nx-cal__icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="close" />
           </button>
-        ))}
-      </div>
-    </aside>
+        </div>
+
+        <div className="nx-cal__event-drawer-section">
+          <span className="nx-cal__eyebrow">Entity</span>
+          <div className="nx-cal__event-drawer-grid">
+            <div><label>Seller</label><strong>{event.sellerName}</strong></div>
+            <div><label>Property</label><strong>{event.propertyAddress}</strong></div>
+            <div><label>Market</label><strong>{event.market}</strong></div>
+            <div><label>Stage</label><strong>{event.metadata?.stage ? String(event.metadata.stage) : selectedThread?.conversationStage || '—'}</strong></div>
+            <div><label>Status</label><strong>{event.status.replace(/_/g, ' ')}</strong></div>
+            <div><label>Temperature</label><strong>{event.priority || selectedThread?.priority || 'normal'}</strong></div>
+          </div>
+        </div>
+
+        <div className="nx-cal__event-drawer-section">
+          <span className="nx-cal__eyebrow">Source</span>
+          <strong>{event.sourceDomain || event.sourceTable}</strong>
+          {event.description ? <p className="nx-cal__drawer-copy">{event.description}</p> : null}
+          {event.metadata?.amount ? (
+            <div className="nx-cal__drawer-money">{formatCurrency(Number(event.metadata.amount))}</div>
+          ) : null}
+        </div>
+
+        {relatedEvents.length > 1 ? (
+          <div className="nx-cal__event-drawer-section nx-cal__drawer-chain">
+            <span className="nx-cal__eyebrow">Correlation chain</span>
+            <ol>
+              {relatedEvents.map((related) => (
+                <li key={related.id}>
+                  <strong>{related.title}</strong>
+                  <span>{formatRelativeTime(related.timestamp)} · {related.status}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+
+        {developerMode ? (
+          <pre className="nx-cal__drawer-dev">{JSON.stringify({ id: event.id, deepLink: event.deepLinkContext }, null, 2)}</pre>
+        ) : null}
+
+        <div className="nx-cal__event-drawer-actions">
+          {actions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className={cls('nx-cal__drawer-action', action.danger && 'is-danger')}
+              disabled={action.disabled}
+              onClick={() => onAction(action.id)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </aside>
+    </div>,
+    document.body,
   )
 }

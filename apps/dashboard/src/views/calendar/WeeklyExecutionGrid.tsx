@@ -66,14 +66,6 @@ export function WeeklyExecutionGrid({
 
   return (
     <section className="nx-cal__surface nx-cal__week-hourly">
-      <div className="nx-cal__section-head nx-cal__week-sticky-head">
-        <div>
-          <span className="nx-cal__eyebrow">Week View</span>
-          <strong>Seven-day execution grid</strong>
-        </div>
-        <span>{slotMinutes}m grid · {events.length} items</span>
-      </div>
-
       <div className="nx-cal__week-hourly-scroll" ref={scrollRef}>
         <div className="nx-cal__week-hourly-grid">
           <div className="nx-cal__week-hour-labels">

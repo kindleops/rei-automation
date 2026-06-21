@@ -473,9 +473,13 @@
   border-color: rgba(104, 171, 255, 0.24);
   background: rgba(84, 138, 231, 0.12);
 }
-.nx-workspace-surface--queue,
-.nx-workspace-surface--calendar {
+.nx-workspace-surface--queue {
   align-content: start;
+}
+.nx-workspace-surface--calendar {
+  align-content: stretch;
+  min-height: 0;
+  overflow: hidden;
 }
 .nx-workspace-data-row {
   width: 100%;

@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createManualCalendarEvent } from '../../../lib/calendar/calendar-api'
+import { Icon } from '../../../shared/icons'
+
+const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
 type CalendarNewEventModalProps = {
   open: boolean
@@ -12,12 +16,12 @@ type CalendarNewEventModalProps = {
 }
 
 const EVENT_TYPES = [
-  { value: 'manual_task', label: 'Task' },
-  { value: 'manual_call', label: 'Call' },
-  { value: 'manual_meeting', label: 'Meeting' },
-  { value: 'manual_visit', label: 'Property Visit' },
-  { value: 'manual_reminder', label: 'Reminder' },
-  { value: 'seller_follow_up', label: 'Follow-Up' },
+  { value: 'seller_follow_up', label: 'Follow-Up', icon: 'send' as const },
+  { value: 'manual_call', label: 'Call', icon: 'phone' as const },
+  { value: 'manual_meeting', label: 'Meeting', icon: 'users' as const },
+  { value: 'manual_visit', label: 'Property Visit', icon: 'home' as const },
+  { value: 'manual_task', label: 'Task', icon: 'check' as const },
+  { value: 'manual_reminder', label: 'Reminder', icon: 'bell' as const },
 ]
 
 export function CalendarNewEventModal({
@@ -36,10 +40,13 @@ export function CalendarNewEventModal({
   const [endTime, setEndTime] = useState('10:00')
   const [description, setDescription] = useState('')
   const [allDay, setAllDay] = useState(false)
+  const [priority, setPriority] = useState('normal')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
+
+  const selectedType = EVENT_TYPES.find((t) => t.value === eventType) || EVENT_TYPES[0]
 
   const handleSubmit = async () => {
     setSaving(true)
@@ -68,29 +75,57 @@ export function CalendarNewEventModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="nx-cal__modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="nx-cal__modal" role="dialog" aria-label="New event" onClick={(e) => e.stopPropagation()}>
+      <div className="nx-cal__modal nx-cal__modal--premium" role="dialog" aria-label="New event" onClick={(e) => e.stopPropagation()}>
         <div className="nx-cal__modal-head">
-          <strong>New Event</strong>
-          <button type="button" className="nx-cal__icon-btn" onClick={onClose} aria-label="Close">×</button>
+          <div className="nx-cal__modal-head-copy">
+            <span className="nx-cal__modal-icon" aria-hidden="true"><Icon name="spark" /></span>
+            <div>
+              <strong>New Event</strong>
+              <span>{sellerId ? 'Scoped to selected seller' : 'Global calendar event'}</span>
+            </div>
+          </div>
+          <button type="button" className="nx-cal__icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="close" />
+          </button>
         </div>
+
+        <div className="nx-cal__modal-type-grid">
+          {EVENT_TYPES.map((type) => (
+            <button
+              key={type.value}
+              type="button"
+              className={cls('nx-cal__modal-type-card', eventType === type.value && 'is-active')}
+              onClick={() => setEventType(type.value)}
+            >
+              <Icon name={type.icon} />
+              <span>{type.label}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="nx-cal__modal-body">
           <label>
             Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Event title" />
           </label>
-          <label>
-            Type
-            <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
-              {EVENT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-            </select>
-          </label>
-          <label>
-            Date
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          <label>
+          <div className="nx-cal__modal-row">
+            <label>
+              Date
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
+            <label>
+              Priority
+              <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+          </div>
+          <label className="nx-cal__modal-check">
             <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} />
             All day
           </label>
@@ -102,17 +137,30 @@ export function CalendarNewEventModal({
           ) : null}
           <label>
             Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Optional notes" />
           </label>
           {error ? <p className="nx-cal__modal-error">{error}</p> : null}
         </div>
+
+        <div className="nx-cal__modal-preview">
+          <span className="nx-cal__eyebrow">Preview</span>
+          <div className="nx-cal__modal-preview-card">
+            <Icon name={selectedType.icon} />
+            <div>
+              <strong>{title || selectedType.label}</strong>
+              <span>{date || '—'} · {allDay ? 'All day' : `${startTime} – ${endTime}`}</span>
+            </div>
+          </div>
+        </div>
+
         <div className="nx-cal__modal-actions">
-          <button type="button" className="nx-cal__nav-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="nx-cal__nav-btn is-active" disabled={saving || !date} onClick={handleSubmit}>
+          <button type="button" className="nx-cal__cmd-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent" disabled={saving || !date} onClick={handleSubmit}>
             {saving ? 'Saving…' : 'Create Event'}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

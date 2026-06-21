@@ -36,23 +36,14 @@ export function MonthExecutionGrid({
     return map
   }, [events])
 
-  return (
-    <section className="nx-cal__surface nx-cal__month">
-      <div className="nx-cal__section-head">
-        <div>
-          <span className="nx-cal__eyebrow">Month View</span>
-          <strong>{anchorDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</strong>
-        </div>
-        <div className="nx-cal__month-legend">
-          <span className="is-blue">SMS</span>
-          <span className="is-cyan">Reply</span>
-          <span className="is-purple">Offer</span>
-          <span className="is-gold">Closing</span>
-          <span className="is-red">Risk</span>
-        </div>
-      </div>
+  const rowCount = Math.ceil(grid.length / 7)
 
-      <div className="nx-cal__month-weekdays">
+  return (
+    <section
+      className="nx-cal__surface nx-cal__month nx-cal__month-full"
+      style={{ ['--month-rows' as string]: rowCount }}
+    >
+      <div className="nx-cal__month-weekdays nx-cal__month-weekdays--sticky">
         {headers.map((label) => <span key={label}>{label}</span>)}
       </div>
 

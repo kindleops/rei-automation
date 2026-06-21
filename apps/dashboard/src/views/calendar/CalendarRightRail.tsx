@@ -51,9 +51,11 @@ export function CalendarRightRail({ sections, selectedEventId, onSelect }: Calen
   if (visible.every((section) => section.events.length === 0)) {
     return (
       <aside className="calendar-command__rail nx-cal__right-rail">
-        <section className="calendar-command__rail-card nx-cal__surface">
-          <p className="nx-cal__rail-empty">No rail items for the current range and filters.</p>
-        </section>
+        <div className="nx-cal__rail-empty-state">
+          <div className="nx-cal__rail-empty-glyph" aria-hidden="true">◎</div>
+          <strong>Clear horizon</strong>
+          <p>No items in the current range. Adjust layers or navigate to another period.</p>
+        </div>
       </aside>
     )
   }

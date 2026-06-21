@@ -2,14 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getCalendarModeRangeLabel,
   getLastCalendarLoadMeta,
-  loadAutomationSchedule,
-  loadClosingDeadlines,
-  loadContractDeadlines,
   loadDailyCalendar,
   loadGlobalExecutionTimeline,
   loadMonthCalendar,
-  loadOfferFollowUps,
-  loadOverdueExecutionItems,
   loadSelectedSellerTimeline,
   loadTodayExecutionSummary,
   loadWeeklyCalendar,
@@ -27,19 +22,19 @@ import { pushRoutePath } from '../../app/router'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { formatRelativeTime } from '../../shared/formatters'
-import { CalendarHeader, type CalendarRefreshState } from './CalendarHeader'
-import { CalendarModeTabs } from './CalendarModeTabs'
+import { CalendarCommandBar, type CalendarRefreshState } from './CalendarCommandBar'
+import { CalendarExecutionDrawer } from './CalendarExecutionDrawer'
+import { CalendarKpiRibbon } from './CalendarKpiRibbon'
+import { CalendarMobileView } from './CalendarMobileView'
 import { CalendarRightRail } from './CalendarRightRail'
 import { DailyExecutionSchedule } from './DailyExecutionSchedule'
-import { ExecutionSnapshotStrip } from './ExecutionSnapshotStrip'
 import { MonthExecutionGrid } from './MonthExecutionGrid'
-import { SellerCalendarContext } from './SellerCalendarContext'
 import { TimelineExecutionFeed } from './TimelineExecutionFeed'
 import { WeeklyExecutionGrid } from './WeeklyExecutionGrid'
 import { CalendarAgendaView } from './components/CalendarAgendaView'
 import { CalendarEventDetailDrawer, type CalendarDrawerAction } from './components/CalendarEventDetailDrawer'
-import { CalendarLayersMenu } from './components/CalendarLayersMenu'
 import { CalendarNewEventModal } from './components/CalendarNewEventModal'
+import { SellerContextRibbon } from './components/SellerContextRibbon'
 import './calendar-view.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -70,19 +65,6 @@ const buildFilters = (
   threadId: scopeMode === 'selected' ? selectedThread?.id ?? null : null,
 })
 
-const sellerContextStats = (thread: InboxWorkflowThread | null) => {
-  if (!thread) return []
-  return [
-    { label: 'Stage', value: String(thread.conversationStage || thread.inboxStage || 'Unknown').replace(/_/g, ' ') },
-    { label: 'Priority', value: String(thread.priority || 'normal').replace(/_/g, ' ') },
-    { label: 'Automation', value: String(thread.automationState || 'active').replace(/_/g, ' ') },
-    { label: 'Last Reply', value: thread.lastInboundAt ? formatRelativeTime(thread.lastInboundAt) : 'No reply yet' },
-    { label: 'Next Action', value: String((thread as { next_action?: string }).next_action || thread.nextSystemAction || 'Review conversation') },
-    { label: 'Offer / Contract', value: String((thread as { offerStatus?: string }).offerStatus || (thread as { contractStatus?: string }).contractStatus || 'Pending').replace(/_/g, ' ') },
-    { label: 'Title / Closing', value: String((thread as { titleStatus?: string }).titleStatus || (thread as { closingStatus?: string }).closingStatus || 'Not started').replace(/_/g, ' ') },
-  ]
-}
-
 export function CalendarView({
   threads,
   selectedThread,
@@ -92,7 +74,7 @@ export function CalendarView({
   onSelectEvent,
   onOpenDealIntelligence,
 }: InboxCalendarViewProps) {
-  const [viewMode, setViewMode] = useState<CalendarViewMode>('week')
+  const [viewMode, setViewMode] = useState<CalendarViewMode>('month')
   const [scopeMode, setScopeMode] = useState<CalendarScopeMode>('global')
   const [anchorDate, setAnchorDate] = useState<Date>(() => startOfDay(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -109,12 +91,15 @@ export function CalendarView({
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [liveTick, setLiveTick] = useState(0)
   const [railOpen, setRailOpen] = useState(layoutMode === 'full')
+  const [execDrawerOpen, setExecDrawerOpen] = useState(false)
   const [layers, setLayers] = useState<CalendarLayerId[]>(() => loadCalendarLayers())
   const [timezoneMode, setTimezoneMode] = useState<CalendarTimezoneMode>('operator')
   const [agendaSearch, setAgendaSearch] = useState('')
+  const [activeKpi, setActiveKpi] = useState<string | null>(null)
   const [newEventOpen, setNewEventOpen] = useState(false)
   const [developerMode] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('developer_mode') === 'true')
   const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     if (selectedThread && scopeMode === 'global' && layoutMode !== 'compact') {
@@ -123,7 +108,7 @@ export function CalendarView({
   }, [layoutMode, scopeMode, selectedThread])
 
   useEffect(() => {
-    setRailOpen(layoutMode === 'full')
+    setRailOpen(layoutMode === 'full' || layoutMode === 'expanded')
   }, [layoutMode])
 
   useEffect(() => {
@@ -151,10 +136,36 @@ export function CalendarView({
   )
 
   const loadAll = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     abortRef.current?.abort()
-    abortRef.current = new AbortController()
+    const controller = new AbortController()
+    abortRef.current = controller
     setRefreshState('updating')
     setRefreshError(null)
+
+    const watchdog = window.setTimeout(() => {
+      if (requestId === requestIdRef.current) {
+        setRefreshState((state) => (state === 'updating' ? 'error' : state))
+        setRefreshError((err) => err || 'Refresh timed out')
+        window.setTimeout(() => {
+          if (requestId === requestIdRef.current) setRefreshState('live')
+        }, 2000)
+      }
+    }, 12000)
+
+    const withTimeout = async <T,>(promise: Promise<T>, ms = 10000): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<T>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('calendar_request_timeout')), ms)
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
 
     try {
       const loadPrimary =
@@ -170,15 +181,22 @@ export function CalendarView({
                   ? loadCalendarEventsWithFilters(filters)
                   : loadGlobalExecutionTimeline(filters)
 
-      const [primaryEvents, nextSummary, nextOverdue, nextAutomation, nextClosings, nextContracts, nextOffers] = await Promise.all([
-        loadPrimary,
-        loadTodayExecutionSummary(filters),
-        loadOverdueExecutionItems(filters),
-        loadAutomationSchedule(filters),
-        loadClosingDeadlines(filters),
-        loadContractDeadlines(filters),
-        loadOfferFollowUps(filters),
+      const [primaryEvents, nextSummary] = await Promise.all([
+        withTimeout(loadPrimary),
+        withTimeout(loadTodayExecutionSummary(filters), 8000),
       ])
+
+      if (requestId !== requestIdRef.current || controller.signal.aborted) return
+
+      const nextOverdue = primaryEvents.filter((e) => e.overdue).slice(0, 80)
+      const nextAutomation = primaryEvents.filter((e) =>
+        ['scheduled_sms', 'seller_follow_up', 'automation_blocked', 'queue_retry', 'workflow_wake', 'workflow_task'].includes(e.type))
+      const nextClosings = primaryEvents.filter((e) =>
+        ['title_opened', 'title_milestone', 'clear_to_close', 'closing_scheduled'].includes(e.type))
+      const nextContracts = primaryEvents.filter((e) =>
+        ['contract_sent', 'contract_signature_deadline', 'fully_executed_contract'].includes(e.type))
+      const nextOffers = primaryEvents.filter((e) =>
+        ['offer_created', 'offer_sent', 'offer_expiration', 'offer_follow_up'].includes(e.type))
 
       setEvents(primaryEvents)
       setSummaryCards(nextSummary)
@@ -190,10 +208,16 @@ export function CalendarView({
       setLastUpdated(new Date().toISOString())
       setRefreshState('updated')
     } catch (error) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return
       setRefreshError(error instanceof Error ? error.message : 'Refresh failed')
       setRefreshState('error')
     } finally {
-      window.setTimeout(() => setRefreshState('live'), 2500)
+      window.clearTimeout(watchdog)
+      if (requestId === requestIdRef.current) {
+        window.setTimeout(() => {
+          if (requestId === requestIdRef.current) setRefreshState('live')
+        }, 2200)
+      }
     }
   }, [anchorDate, filters, scopeMode, selectedThread?.ownerId, selectedThread?.propertyId, threads, viewMode])
 
@@ -236,9 +260,17 @@ export function CalendarView({
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
   }, [events, selectedEvent])
 
-  const contextStats = useMemo(() => sellerContextStats(selectedThread), [selectedThread])
+  const nextSellerEvent = useMemo(() => {
+    if (!selectedThread) return null
+    const now = Date.now()
+    return events
+      .filter((e) => e.sellerId === selectedThread.ownerId && new Date(e.timestamp).getTime() >= now)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0] ?? null
+  }, [events, selectedThread])
+
   const headerLabel = useMemo(() => getCalendarModeRangeLabel(viewMode, anchorDate), [anchorDate, viewMode])
   const loadMeta = getLastCalendarLoadMeta()
+  const isMobile = layoutMode === 'compact'
 
   const handlePrev = () => {
     if (viewMode === 'day') setAnchorDate((value) => addDays(value, -1))
@@ -341,7 +373,25 @@ export function CalendarView({
     }
   }
 
+  const handleKpiClick = (id: string) => {
+    setActiveKpi(id)
+    if (id === 'overdue') setViewMode('agenda')
+    if (id === 'scheduled-sms') setLayers(['sms'])
+  }
+
   const mainSurface = (() => {
+    if (isMobile) {
+      return (
+        <CalendarMobileView
+          anchorDate={anchorDate}
+          events={events}
+          selectedEventId={selectedEvent?.id ?? null}
+          onSelect={handleSelectEvent}
+          onNewEvent={() => setNewEventOpen(true)}
+          onDateChange={(date) => setAnchorDate(startOfDay(date))}
+        />
+      )
+    }
     if (viewMode === 'day') {
       return (
         <DailyExecutionSchedule
@@ -378,25 +428,33 @@ export function CalendarView({
     }
     if (viewMode === 'agenda') {
       return (
-        <CalendarAgendaView
-          events={events}
-          selectedEventId={selectedEvent?.id ?? null}
-          onSelect={handleSelectEvent}
-          search={agendaSearch}
-        />
+        <div className="nx-cal__agenda-shell">
+          <input
+            className="nx-cal__agenda-search"
+            placeholder="Search agenda…"
+            value={agendaSearch}
+            onChange={(e) => setAgendaSearch(e.target.value)}
+          />
+          <CalendarAgendaView
+            events={events}
+            selectedEventId={selectedEvent?.id ?? null}
+            onSelect={handleSelectEvent}
+            search={agendaSearch}
+          />
+        </div>
       )
     }
     return (
-      <section className="nx-cal__surface">
+      <section className="nx-cal__surface nx-cal__timeline-surface">
         <div className="nx-cal__section-head">
           <div>
             <span className="nx-cal__eyebrow">{scopeMode === 'selected' ? 'Selected Seller' : 'Global'}</span>
-            <strong>Execution timeline</strong>
+            <strong>Execution Timeline</strong>
           </div>
           <span>{events.length}</span>
         </div>
         <TimelineExecutionFeed
-          events={events.slice(0, layoutMode === 'compact' ? 16 : 120)}
+          events={events.slice(0, layoutMode === 'medium' ? 40 : 120)}
           selectedId={selectedEvent?.id ?? null}
           onSelect={handleSelectEvent}
           grouped
@@ -407,120 +465,96 @@ export function CalendarView({
   })()
 
   const railSections = [
-    { id: 'today', title: 'Today Agenda', events: todayAgenda, defaultOpen: true },
+    { id: 'today', title: 'Today', events: todayAgenda, defaultOpen: true },
     { id: 'overdue', title: 'Overdue / Risk', events: overdueItems.slice(0, 12), defaultOpen: true },
-    { id: 'automation', title: 'Automation Schedule', events: automationSchedule.slice(0, 12), defaultOpen: true },
-    { id: 'offers', title: 'Offers / Contracts / Closings', events: [...offerItems, ...contractItems, ...closingItems].slice(0, 12), defaultOpen: false },
+    { id: 'automation', title: 'Upcoming Automation', events: automationSchedule.slice(0, 12), defaultOpen: true },
     { id: 'sends', title: 'Next Scheduled Sends', events: automationSchedule.filter((e) => e.type === 'scheduled_sms').slice(0, 5), defaultOpen: false },
+    { id: 'offers', title: 'Offers / Contracts / Closing', events: [...offerItems, ...contractItems, ...closingItems].slice(0, 12), defaultOpen: false },
     { id: 'followups', title: 'Upcoming Follow-Ups', events: events.filter((e) => e.type.includes('follow')).slice(0, 8), defaultOpen: false },
-    { id: 'entity', title: 'Selected Entity', events: selectedTimeline.slice(0, 8), defaultOpen: Boolean(selectedThread) },
+    { id: 'entity', title: 'Selected Event', events: selectedEvent ? [selectedEvent, ...selectedTimeline.slice(0, 6)] : selectedTimeline.slice(0, 8), defaultOpen: Boolean(selectedThread || selectedEvent) },
   ]
 
   return (
-    <div className={cls('calendar-command', 'nx-cal', `is-${layoutMode}`)}>
-      <CalendarHeader
-        rangeLabel={headerLabel}
-        scopeMode={scopeMode}
-        selectedEnabled={Boolean(selectedThread)}
-        refreshState={refreshState}
-        anchorDate={toIsoDate(anchorDate)}
-        railOpen={railOpen}
-        showRailToggle={layoutMode === 'expanded' || layoutMode === 'full'}
-        timezoneMode={timezoneMode}
-        onToday={() => setAnchorDate(startOfDay(new Date()))}
-        onPrev={handlePrev}
-        onNext={handleNext}
-        onRefresh={() => setLiveTick((value) => value + 1)}
-        onDateChange={(value) => value && setAnchorDate(startOfDay(new Date(value)))}
-        onScopeChange={setScopeMode}
-        onToggleRail={() => setRailOpen((value) => !value)}
-        onTimezoneModeChange={setTimezoneMode}
-        onNewEvent={() => setNewEventOpen(true)}
-        lastSyncedLabel={formatRelativeTime(lastUpdated)}
-        errorMessage={refreshError}
-      />
-
-      <CalendarModeTabs value={viewMode} onChange={setViewMode} />
-
-      <ExecutionSnapshotStrip
-        cards={summaryCards}
-        compact={layoutMode !== 'full'}
-        onCardClick={(id) => {
-          if (id === 'overdue') setViewMode('agenda')
-          if (id === 'scheduled-sms') setLayers(['sms'])
-        }}
-      />
-
-      <div className="nx-cal__toolbar-row">
-        <CalendarLayersMenu
+    <div className={cls('calendar-command', 'nx-cal', `is-${layoutMode}`, `is-view-${viewMode}`)} data-refresh-state={refreshState}>
+      <div className="nx-cal__aurora" aria-hidden="true" />
+      <div className="nx-cal__shell">
+        <CalendarCommandBar
+          rangeLabel={headerLabel}
+          viewMode={viewMode}
+          scopeMode={scopeMode}
+          selectedEnabled={Boolean(selectedThread)}
+          refreshState={refreshState}
+          anchorDate={toIsoDate(anchorDate)}
+          railOpen={railOpen}
+          showRailToggle={!isMobile && (layoutMode === 'expanded' || layoutMode === 'full' || layoutMode === 'medium')}
+          timezoneMode={timezoneMode}
           layers={layers}
-          onChange={(next) => { setLayers(next); saveCalendarLayers(next) }}
-          selectedSellerActive={scopeMode === 'selected' && Boolean(selectedThread)}
-          selectedSellerDisabledReason={!selectedThread ? 'Select a seller in global entity context to scope the calendar.' : null}
+          visibleEventCount={events.length}
+          collapsed={layoutMode === 'medium'}
+          onViewChange={setViewMode}
+          onToday={() => setAnchorDate(startOfDay(new Date()))}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          onRefresh={() => setLiveTick((value) => value + 1)}
+          onDateChange={(value) => value && setAnchorDate(startOfDay(new Date(value)))}
+          onScopeChange={setScopeMode}
+          onToggleRail={() => setRailOpen((value) => !value)}
+          onTimezoneModeChange={setTimezoneMode}
+          onNewEvent={() => setNewEventOpen(true)}
+          onLayersChange={(next) => { setLayers(next); saveCalendarLayers(next) }}
+          lastSyncedLabel={formatRelativeTime(lastUpdated)}
+          errorMessage={refreshError}
         />
-        {viewMode === 'agenda' ? (
-          <input
-            className="nx-cal__agenda-search"
-            placeholder="Search agenda"
-            value={agendaSearch}
-            onChange={(e) => setAgendaSearch(e.target.value)}
+
+        {!isMobile ? (
+          <CalendarKpiRibbon cards={summaryCards} activeId={activeKpi} onCardClick={handleKpiClick} />
+        ) : null}
+
+        {scopeMode === 'selected' && selectedThread ? (
+          <SellerContextRibbon
+            thread={selectedThread}
+            nextEvent={nextSellerEvent}
+            compact={layoutMode === 'compact' || layoutMode === 'medium'}
+            onOpenDeal={() => onOpenDealIntelligence?.(selectedThread.id)}
+            onOpenConversation={() => onSelectThread(selectedThread.id)}
+            onOpenIntelligence={() => onOpenDealIntelligence?.(selectedThread.id)}
+            onClearScope={() => setScopeMode('global')}
           />
         ) : null}
-      </div>
 
-      {scopeMode === 'selected' && selectedThread ? (
-        <SellerCalendarContext
-          thread={selectedThread}
-          stats={contextStats}
-          compact={layoutMode === 'compact' || layoutMode === 'medium'}
-          onBackToGlobal={() => setScopeMode('global')}
-          onOpenDeal={() => onOpenDealIntelligence?.(selectedThread.id)}
-          onOpenConversation={() => onSelectThread(selectedThread.id)}
-        />
-      ) : null}
-
-      <div className={cls('nx-cal__desktop', railOpen && 'has-rail')}>
-        <div className="nx-cal__desktop-main">
-          {mainSurface}
-          {viewMode !== 'timeline' && viewMode !== 'agenda' ? (
-            <section className="nx-cal__surface">
-              <div className="nx-cal__section-head">
-                <div>
-                  <span className="nx-cal__eyebrow">Execution Feed</span>
-                  <strong>Chronological execution chain</strong>
-                </div>
-                <span>{events.length}</span>
-              </div>
-              <TimelineExecutionFeed
-                events={events.slice(0, 24)}
-                selectedId={selectedEvent?.id ?? null}
+        <div className={cls('nx-cal__workspace', railOpen && !isMobile && 'has-rail', layoutMode === 'medium' && 'is-overlay-rail')}>
+          <div className="nx-cal__workspace-main">
+            {mainSurface}
+            {!isMobile && viewMode !== 'timeline' && viewMode !== 'agenda' ? (
+              <CalendarExecutionDrawer
+                open={execDrawerOpen}
+                events={events}
+                selectedEventId={selectedEvent?.id ?? null}
+                onToggle={() => setExecDrawerOpen((v) => !v)}
                 onSelect={handleSelectEvent}
-                grouped
-                compact
               />
-            </section>
+            ) : null}
+          </div>
+
+          {railOpen && !isMobile ? (
+            <CalendarRightRail
+              sections={railSections}
+              selectedEventId={selectedEvent?.id ?? null}
+              onSelect={handleSelectEvent}
+            />
           ) : null}
         </div>
-
-        {railOpen && layoutMode !== 'compact' ? (
-          <CalendarRightRail
-            sections={railSections}
-            selectedEventId={selectedEvent?.id ?? null}
-            onSelect={handleSelectEvent}
-          />
-        ) : null}
       </div>
 
-      {selectedEvent ? (
-        <CalendarEventDetailDrawer
-          event={selectedEvent}
-          selectedThread={selectedThread}
-          relatedEvents={relatedChain}
-          developerMode={developerMode}
-          onAction={handleDrawerAction}
-          onClose={() => setSelectedEvent(null)}
-        />
-      ) : null}
+      <CalendarEventDetailDrawer
+        event={selectedEvent}
+        selectedThread={selectedThread}
+        relatedEvents={relatedChain}
+        developerMode={developerMode}
+        onAction={handleDrawerAction}
+        onClose={() => setSelectedEvent(null)}
+        mobile={isMobile}
+      />
 
       <CalendarNewEventModal
         open={newEventOpen}

@@ -1,17 +1,31 @@
 export const CALENDAR_LAYER_OPTIONS = [
-  { id: 'follow_ups', label: 'Follow-Ups' },
-  { id: 'seller_replies', label: 'Seller Replies' },
-  { id: 'sms', label: 'SMS' },
-  { id: 'email', label: 'Email' },
-  { id: 'workflow', label: 'Workflow' },
-  { id: 'offers', label: 'Offers' },
-  { id: 'contracts', label: 'Contracts' },
-  { id: 'title', label: 'Title' },
-  { id: 'closings', label: 'Closings' },
-  { id: 'buyers', label: 'Buyers' },
-  { id: 'campaigns', label: 'Campaigns' },
-  { id: 'manual_events', label: 'Manual Events' },
-  { id: 'risks', label: 'Risks' },
+  { id: 'follow_ups', label: 'Follow-Ups', category: 'automation' as const },
+  { id: 'seller_replies', label: 'Seller Replies', category: 'communication' as const },
+  { id: 'sms', label: 'SMS', category: 'communication' as const },
+  { id: 'email', label: 'Email', category: 'communication' as const },
+  { id: 'workflow', label: 'Workflow', category: 'automation' as const },
+  { id: 'offers', label: 'Offers', category: 'transactions' as const },
+  { id: 'contracts', label: 'Contracts', category: 'transactions' as const },
+  { id: 'title', label: 'Title', category: 'transactions' as const },
+  { id: 'closings', label: 'Closings', category: 'transactions' as const },
+  { id: 'buyers', label: 'Buyers', category: 'network' as const },
+  { id: 'campaigns', label: 'Campaigns', category: 'automation' as const },
+  { id: 'manual_events', label: 'Manual Events', category: 'network' as const },
+  { id: 'risks', label: 'Risks', category: 'attention' as const },
+] as const
+
+export const CALENDAR_LAYER_CATEGORIES = [
+  { id: 'communication', label: 'Communication', layers: ['seller_replies', 'sms', 'email'] as CalendarLayerId[] },
+  { id: 'automation', label: 'Automation', layers: ['workflow', 'follow_ups', 'campaigns'] as CalendarLayerId[] },
+  { id: 'transactions', label: 'Transactions', layers: ['offers', 'contracts', 'title', 'closings'] as CalendarLayerId[] },
+  { id: 'network', label: 'Network', layers: ['buyers', 'manual_events'] as CalendarLayerId[] },
+  { id: 'attention', label: 'Attention', layers: ['risks'] as CalendarLayerId[] },
+] as const
+
+export const CALENDAR_LAYER_PRESETS = [
+  { id: 'all', label: 'All Layers', layers: () => CALENDAR_LAYER_OPTIONS.map((l) => l.id) },
+  { id: 'ops', label: 'Operations', layers: () => ['seller_replies', 'sms', 'workflow', 'follow_ups', 'offers', 'contracts', 'risks'] as CalendarLayerId[] },
+  { id: 'closing', label: 'Closing Desk', layers: () => ['contracts', 'title', 'closings', 'offers'] as CalendarLayerId[] },
 ] as const
 
 export type CalendarLayerId = (typeof CALENDAR_LAYER_OPTIONS)[number]['id']
