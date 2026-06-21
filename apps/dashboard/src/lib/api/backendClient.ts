@@ -1099,6 +1099,48 @@ export interface CampaignApiSummary {
   health_score: number
   health_status: 'healthy' | 'caution' | 'dangerous'
   blocked_reason_counts?: Record<string, number>
+  canonical_queued_count?: number
+  launch_readiness?: string
+  launch_blockers?: string[]
+  launch_blocker_codes?: string[]
+  recipient_metrics?: Record<string, unknown> | null
+}
+
+export interface CampaignTargetsPageResponse {
+  ok: boolean
+  campaign_id: string
+  page: number
+  page_size: number
+  total_count: number
+  total_pages: number
+  targets: Record<string, unknown>[]
+  error?: string
+}
+
+export function fetchCampaignTargetsPage(
+  campaignId: string,
+  params: {
+    page?: number
+    page_size?: number
+    status?: string
+    market?: string
+    search?: string
+    order_by?: string
+    order_dir?: 'asc' | 'desc'
+  } = {},
+): Promise<BackendResult<CampaignTargetsPageResponse>> {
+  const qs = new URLSearchParams()
+  if (params.page) qs.set('page', String(params.page))
+  if (params.page_size) qs.set('page_size', String(params.page_size))
+  if (params.status) qs.set('status', params.status)
+  if (params.market) qs.set('market', params.market)
+  if (params.search) qs.set('search', params.search)
+  if (params.order_by) qs.set('order_by', params.order_by)
+  if (params.order_dir) qs.set('order_dir', params.order_dir)
+  const query = qs.toString()
+  return callBackend<CampaignTargetsPageResponse>(
+    `/api/cockpit/campaigns/${campaignId}/targets${query ? `?${query}` : ''}`,
+  )
 }
 
 export interface CampaignListResponse {

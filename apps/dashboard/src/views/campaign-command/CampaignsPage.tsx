@@ -3,7 +3,8 @@ import { Icon } from '../../shared/icons'
 import { emitNotification } from '../../shared/NotificationToast'
 import {
   loadCampaigns,
-  fetchCampaignTargets,
+  fetchCampaignTargetsPageData,
+  fetchCampaignDetail,
   fetchCampaignQueue,
   fetchCampaignReplies,
   fetchCampaignFailures,
@@ -463,37 +464,61 @@ const TargetsTab = ({ campaignId }: { campaignId: string }) => {
   const [targets, setTargets] = useState<CampaignTarget[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(50)
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
 
   useEffect(() => {
     let active = true
     setLoading(true)
-    fetchCampaignTargets(campaignId).then((data) => {
-      if (active) setTargets(data)
+    fetchCampaignTargetsPageData(campaignId, {
+      page,
+      page_size: pageSize,
+      status: filter === 'all' ? undefined : filter,
+      search: search.trim() || undefined,
+    }).then((data) => {
+      if (!active) return
+      setTargets(data.targets)
+      setTotalCount(data.total_count)
+      setTotalPages(data.total_pages)
     }).catch(() => {
-      if (active) setTargets([])
+      if (active) {
+        setTargets([])
+        setTotalCount(0)
+        setTotalPages(0)
+      }
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [campaignId])
+  }, [campaignId, filter, page, pageSize, search])
 
-  const filtered = useMemo(() =>
-    filter === 'all' ? targets : targets.filter((t) => t.target_status === filter),
-    [targets, filter],
-  )
-
-  const statusOptions = ['all', 'ready', 'scheduled', 'sent', 'delivered', 'failed', 'opted_out']
+  const statusOptions = ['all', 'ready', 'planned', 'queued', 'scheduled', 'sent', 'delivered', 'failed', 'blocked', 'opted_out']
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="search"
+          className="ccc__chip"
+          placeholder="Search owner, property, phone…"
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          style={{ minWidth: 200, padding: '4px 8px' }}
+        />
         {statusOptions.map((s) => (
-          <button key={s} className={cls('ccc__chip', filter === s && 'is-active')} onClick={() => setFilter(s)}>
+          <button
+            key={s}
+            className={cls('ccc__chip', filter === s && 'is-active')}
+            onClick={() => { setFilter(s); setPage(1) }}
+          >
             {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
           </button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-2)', alignSelf: 'center' }}>
-          {filtered.length} of {targets.length}
+          Page {page} of {Math.max(totalPages, 1)} · {totalCount.toLocaleString()} recipients
         </span>
       </div>
 
@@ -501,68 +526,76 @@ const TargetsTab = ({ campaignId }: { campaignId: string }) => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           {[1, 2, 3, 4].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 36, width: '100%' }} />)}
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="ccc__empty"><div className="ccc__empty-title">No real targets loaded for this campaign yet.</div><div className="ccc__empty-sub">Import or build targets to begin.</div></div>
+      ) : targets.length === 0 ? (
+        <div className="ccc__empty"><div className="ccc__empty-title">No targets match this filter.</div><div className="ccc__empty-sub">Build targets or adjust filters.</div></div>
       ) : (
-        <div className="ccc__targets-scroll">
-          <table className="ccc__targets-table">
-            <thead>
-              <tr>
-                <th>Owner</th>
-                <th>Property</th>
-                <th>Market</th>
-                <th>State</th>
-                <th>Phone</th>
-                <th>Lang</th>
-                <th>Score</th>
-                <th>Status</th>
-                <th>Last Contact</th>
-                <th>Suppressed</th>
-                <th>Template</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.slice(0, 150).map((t) => (
-                <tr key={t.id}>
-                  <td style={{ fontWeight: 600, color: 'var(--text-0)' }}>{t.seller_full_name ?? '—'}</td>
-                  <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-2)' }}>{t.property_address_full ?? '—'}</td>
-                  <td>{t.market ?? '—'}</td>
-                  <td>{t.property_address_state ?? '—'}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 10 }}>{t.canonical_e164 ?? '—'}</td>
-                  <td>
-                    {t.language && (
-                      <span className="ccc__lang-badge">{t.language.toUpperCase()}</span>
-                    )}
-                  </td>
-                  <td>
-                    {t.final_acquisition_score != null && (
-                      <span className={cls('ccc__score-badge', t.final_acquisition_score >= 75 ? 'is-high' : t.final_acquisition_score >= 40 ? 'is-mid' : 'is-low')}>
-                        {t.final_acquisition_score}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={cls('ccc__target-status', `is-${t.target_status}`)}>
-                      {t.target_status.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td style={{ color: 'var(--text-2)', fontSize: 10 }}>{t.last_contact_at ? fmtDate(t.last_contact_at) : '—'}</td>
-                  <td>
-                    {t.suppression_status === 'suppressed' && <span className="ccc__suppressed-badge">SUPP</span>}
-                  </td>
-                  <td style={{ color: 'var(--text-2)', fontSize: 10, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {t.template_name ?? '—'}
-                  </td>
+        <>
+          <div className="ccc__targets-scroll">
+            <table className="ccc__targets-table">
+              <thead>
+                <tr>
+                  <th>Owner</th>
+                  <th>Property</th>
+                  <th>Market</th>
+                  <th>State</th>
+                  <th>Phone</th>
+                  <th>Lang</th>
+                  <th>Score</th>
+                  <th>Status</th>
+                  <th>Last Contact</th>
+                  <th>Suppressed</th>
+                  <th>Template</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length > 150 && (
-            <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-2)', padding: '8px 0' }}>
-              Showing 150 of {filtered.length}
-            </div>
-          )}
-        </div>
+              </thead>
+              <tbody>
+                {targets.map((t) => (
+                  <tr key={t.id}>
+                    <td style={{ fontWeight: 600, color: 'var(--text-0)' }}>{t.seller_full_name ?? '—'}</td>
+                    <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-2)' }}>{t.property_address_full ?? '—'}</td>
+                    <td>{t.market ?? '—'}</td>
+                    <td>{t.property_address_state ?? '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 10 }}>{t.canonical_e164 ?? '—'}</td>
+                    <td>
+                      {t.language && (
+                        <span className="ccc__lang-badge">{t.language.toUpperCase()}</span>
+                      )}
+                    </td>
+                    <td>
+                      {t.final_acquisition_score != null && (
+                        <span className={cls('ccc__score-badge', t.final_acquisition_score >= 75 ? 'is-high' : t.final_acquisition_score >= 40 ? 'is-mid' : 'is-low')}>
+                          {t.final_acquisition_score}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={cls('ccc__target-status', `is-${t.target_status}`)}>
+                        {t.target_status.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text-2)', fontSize: 10 }}>{t.last_contact_at ? fmtDate(t.last_contact_at) : '—'}</td>
+                    <td>
+                      {t.suppression_status === 'suppressed' && <span className="ccc__suppressed-badge">SUPP</span>}
+                    </td>
+                    <td style={{ color: 'var(--text-2)', fontSize: 10, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {t.template_name ?? (t.template_id ? t.template_id : '—')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <button type="button" className="ccc-btn" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Previous
+            </button>
+            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount.toLocaleString()}
+            </span>
+            <button type="button" className="ccc-btn" disabled={page >= totalPages || loading} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
@@ -1297,9 +1330,29 @@ export const CampaignsPage = () => {
     return list
   }, [model, statusFilter, searchQuery, sortKey, sortDir])
 
+  const [enrichedCampaign, setEnrichedCampaign] = useState<CampaignSummary | null>(null)
+
+  useEffect(() => {
+    const id = commandState.activeCampaignId
+    if (!id) {
+      setEnrichedCampaign(null)
+      return
+    }
+    let active = true
+    fetchCampaignDetail(id).then((detail) => {
+      if (active) setEnrichedCampaign(detail)
+    }).catch(() => {
+      if (active) setEnrichedCampaign(null)
+    })
+    return () => { active = false }
+  }, [commandState.activeCampaignId])
+
   const selectedCampaign = useMemo(() => {
-    return campaigns.find((c) => c.id === commandState.activeCampaignId) || null
-  }, [campaigns, commandState.activeCampaignId])
+    const base = campaigns.find((c) => c.id === commandState.activeCampaignId) || null
+    if (!base) return null
+    if (enrichedCampaign?.id === base.id) return { ...base, ...enrichedCampaign }
+    return base
+  }, [campaigns, commandState.activeCampaignId, enrichedCampaign])
 
   const actionCallbacks = useMemo(() => ({
     onRefresh: () => load({ silent: true }),

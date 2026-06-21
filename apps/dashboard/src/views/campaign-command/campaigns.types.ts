@@ -13,6 +13,23 @@ export type CampaignStatus =
   | 'completed'
   | 'archived'
 
+export type LaunchReadinessLevel = 'ready' | 'warnings' | 'blocked' | 'unknown'
+
+export interface CampaignRecipientMetrics {
+  matched_property_count?: number | null
+  target_row_count?: number
+  distinct_master_owner_count?: number
+  unique_phone_count?: number
+  unique_e164_count?: number
+  compliant_recipient_count?: number
+  routable_recipient_count?: number
+  ready_recipient_count?: number
+  planned_count?: number
+  queued_count?: number
+  duplicate_owner_groups?: number
+  duplicate_phone_groups?: number
+}
+
 export interface CampaignSummary {
   id: string
   campaign_name: string
@@ -21,6 +38,11 @@ export interface CampaignSummary {
   ready_targets: number
   scheduled_targets: number
   queued_targets: number
+  canonical_queued_count?: number
+  launch_readiness?: LaunchReadinessLevel
+  launch_blockers?: string[]
+  launch_blocker_codes?: string[]
+  recipient_metrics?: CampaignRecipientMetrics | null
   sent_count: number
   delivered_count: number
   failed_count: number

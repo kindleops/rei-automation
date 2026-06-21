@@ -33,6 +33,7 @@ import {
   normalizeCampaignStatus,
   transitionCampaignStatus,
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import {
   acquireCampaignExecutionLock,
   checkpointCampaignHydration,
@@ -4160,7 +4161,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     identity_status: clean(row.identity_alignment) || 'unknown',
     routing_status: row.sender_covered ? 'ready' : 'blocked',
     suppression_status: row.true_post_contact_suppression ? 'blocked' : 'clear',
-    template_status: 'ready',
+    template_status: row.queue_eligible ? 'pending' : 'blocked',
     target_status: row.queue_eligible ? 'ready' : 'blocked',
     block_reason: row.queue_eligible ? null : clean(row.queue_block_reason || 'graph_not_queue_eligible'),
     metadata: {
@@ -5204,14 +5205,17 @@ export async function previewCampaignTargets(input = {}, deps = {}) {
   }, diagnostics, effectiveOptions.include_diagnostics)
 }
 
-function mapCampaignSummary(campaign = {}, targets = [], windows = []) {
+function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null) {
   const status = clean(campaign.status || 'draft')
-  const counts = {}
-  const blockedByReason = {}
-  for (const target of targets) {
-    increment(counts, target.target_status || 'unknown')
-    if (target.block_reason) increment(blockedByReason, target.block_reason)
+  const counts = countBucket?.statuses ? { ...countBucket.statuses } : {}
+  const blockedByReason = countBucket?.blocked ? { ...countBucket.blocked } : {}
+  if (!countBucket) {
+    for (const target of targets) {
+      increment(counts, target.target_status || 'unknown')
+      if (target.block_reason) increment(blockedByReason, target.block_reason)
+    }
   }
+  const totalFromBucket = countBucket?.total
   const ready = Number(counts.ready || 0)
   const planned = Number(counts.planned || 0)
   const queued = Number(counts.queued || 0)
@@ -5231,10 +5235,11 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = []) {
     batch_max: campaign.batch_max,
     market_cap: campaign.market_cap,
     per_sender_cap: campaign.per_sender_cap,
-    total_targets: targets.length,
+    total_targets: totalFromBucket ?? targets.length,
     ready_targets: ready,
     scheduled_targets: planned,
     queued_targets: queued,
+    canonical_queued_count: Number(campaign.queued_count || 0),
     sent_count: Number(counts.sent || 0) + Number(counts.delivered || 0),
     delivered_count: Number(counts.delivered || 0),
     failed_count: failed,
@@ -5271,15 +5276,11 @@ export async function listCampaigns(deps = {}) {
     .limit(200)
   if (error) throw error
   const ids = (campaigns || []).map((campaign) => campaign.id)
-  let targets = []
   let windows = []
+  let countMap = new Map()
   if (ids.length) {
-    const targetRes = await supabase
-      .from('campaign_targets')
-      .select('id,campaign_id,target_status,block_reason,identity_status,routing_status,suppression_status,template_status,market,state,metadata')
-      .in('campaign_id', ids)
-      .limit(20000)
-    if (!targetRes.error) targets = targetRes.data || []
+    const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+    countMap = await fetchCampaignTargetStatusCounts(ids, deps)
     const windowRes = await supabase
       .from('campaign_send_windows')
       .select('*')
@@ -5290,8 +5291,9 @@ export async function listCampaigns(deps = {}) {
   }
   const summaries = (campaigns || []).map((campaign) => mapCampaignSummary(
     campaign,
-    targets.filter((target) => target.campaign_id === campaign.id),
-    windows.filter((window) => window.campaign_id === campaign.id)
+    [],
+    windows.filter((window) => window.campaign_id === campaign.id),
+    countMap.get(campaign.id) || null,
   ))
   return {
     ok: true,
@@ -5337,18 +5339,30 @@ export async function getCampaign(campaignId, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const { data: campaign, error } = await supabase.from('campaigns').select('*').eq('id', campaignId).single()
   if (error) throw error
-  const [{ data: filters }, { data: targets }, { data: windows }, { data: events }] = await Promise.all([
+  const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+  const { computeCampaignRecipientMetrics } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+  const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
+  const countMap = await fetchCampaignTargetStatusCounts([campaignId], deps)
+  const [{ data: filters }, { data: windows }, { data: events }, recipientMetrics, launchReadiness] = await Promise.all([
     supabase.from('campaign_filters').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: true }),
-    supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).limit(500),
     supabase.from('campaign_send_windows').select('*').eq('campaign_id', campaignId).order('window_start_utc', { ascending: true }).limit(200),
     supabase.from('campaign_events').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(100),
+    computeCampaignRecipientMetrics(campaignId, deps),
+    evaluateCampaignLaunchReadiness(campaignId, deps),
   ])
+  const summary = mapCampaignSummary(campaign, [], windows || [], countMap.get(campaignId) || null)
+  summary.recipient_metrics = recipientMetrics.ok ? recipientMetrics : null
+  summary.launch_readiness = launchReadiness.ok ? launchReadiness.launch_readiness : 'unknown'
+  summary.launch_blockers = launchReadiness.blockers || []
+  summary.launch_blocker_codes = launchReadiness.blocker_codes || []
   return {
     ok: true,
     campaign,
     filters: filters || [],
-    summary: mapCampaignSummary(campaign, targets || [], windows || []),
-    targets: targets || [],
+    summary,
+    recipient_metrics: recipientMetrics.ok ? recipientMetrics : null,
+    launch_readiness: launchReadiness,
+    targets: [],
     send_windows: windows || [],
     events: events || [],
   }
@@ -5552,16 +5566,38 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
     }
 
     await supabase.from('campaign_targets').delete().eq('campaign_id', campaignId)
-    const rows = (graph.rows || [])
-      .filter((row) => row.queue_eligible)
+    const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
+    const touchNumber = asPositiveInteger(options.stage_touch ?? options.touch_number ?? campaign.metadata?.stage_touch, 1) || 1
+    const eligibleRows = (graph.rows || []).filter((row) => row.queue_eligible)
+    const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
+    const rows = recipients
       .slice(0, targetLimit)
-      .map((row, index) => ({
-        ...buildTargetSnapshotFromGraphRow(campaign, row, index, options),
-        campaign_id: campaignId,
-        campaign_name: campaign.name,
-        source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
-        daily_cap: campaign.daily_cap,
-      }))
+      .map((row, index) => {
+        const snapshot = buildTargetSnapshotFromGraphRow(campaign, row, index, options)
+        return {
+          ...snapshot,
+          campaign_id: campaignId,
+          campaign_name: campaign.name,
+          source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
+          daily_cap: campaign.daily_cap,
+          touch_number: row.touch_number || touchNumber,
+          matched_property_count: row.matched_property_count || 1,
+          portfolio_property_ids: row.portfolio_property_ids || [],
+          primary_property_id: row.primary_property_id || row.property_id || null,
+          recipient_dedup_key: row.recipient_dedup_key || null,
+          property_id: row.primary_property_id || snapshot.property_id,
+          metadata: {
+            ...metadataObject(snapshot.metadata),
+            recipient_dedup: {
+              matched_property_count: row.matched_property_count || 1,
+              portfolio_property_ids: row.portfolio_property_ids || [],
+              primary_property_id: row.primary_property_id || null,
+              ambiguous_phone_ownership: Boolean(row.ambiguous_phone_ownership),
+            },
+            dedup_stats: index === 0 ? dedupStats : undefined,
+          },
+        }
+      })
 
     let inserted = 0
     for (let i = 0; i < rows.length; i += 500) {
@@ -5813,17 +5849,18 @@ function distributionFromCounts(counts = {}) {
 }
 
 function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
+  const batchMax = asPositiveInteger(input.batch_max ?? input.batchMax ?? campaign.batch_max, null)
   const maxTargets = asPositiveInteger(
-    input.max_targets ?? input.maxTargets ?? input.limit ?? input.target_limit,
+    input.max_targets ?? input.maxTargets ?? input.limit ?? input.target_limit ?? batchMax,
     null
   )
-  const dailyCap = asPositiveInteger(input.daily_cap ?? input.dailyCap ?? campaign.daily_cap, null)
-  const perSenderCap = asPositiveInteger(input.per_sender_cap ?? input.perSenderCap ?? campaign.per_sender_cap, null)
+  const capFallback = batchMax || maxTargets || 500
+  const dailyCap = asPositiveInteger(input.daily_cap ?? input.dailyCap ?? campaign.daily_cap, capFallback)
+  const perSenderCap = asPositiveInteger(input.per_sender_cap ?? input.perSenderCap ?? campaign.per_sender_cap, capFallback)
   const perMarketCap = asPositiveInteger(
     input.per_market_cap ?? input.perMarketCap ?? input.market_cap ?? campaign.market_cap,
-    null
+    capFallback
   )
-  const batchMax = asPositiveInteger(input.batch_max ?? input.batchMax ?? campaign.batch_max, null)
   const totalCap = asPositiveInteger(input.total_cap ?? input.totalCap ?? campaign.total_cap, null)
   const requestedMax = maxTargets || batchMax || dailyCap || readyTargetCount
   const effectiveLimit = Math.max(0, Math.min(
@@ -5831,26 +5868,26 @@ function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
     minPositive([requestedMax, dailyCap, batchMax, totalCap], readyTargetCount)
   ))
   return {
-    max_targets: maxTargets || effectiveLimit || null,
+    max_targets: maxTargets || effectiveLimit || capFallback,
     daily_cap: dailyCap,
     per_sender_cap: perSenderCap,
     per_market_cap: perMarketCap,
-    batch_max: batchMax,
+    batch_max: batchMax || capFallback,
     total_cap: totalCap,
-    effective_limit: effectiveLimit,
+    effective_limit: effectiveLimit || capFallback,
   }
 }
 
 function missingLaunchCaps(caps = {}) {
   const missing = []
-  if (!caps.max_targets) missing.push('max_targets')
+  if (!caps.max_targets && !caps.effective_limit) missing.push('max_targets')
   if (!caps.daily_cap) missing.push('daily_cap')
   if (!caps.per_sender_cap) missing.push('per_sender_cap')
   if (!caps.per_market_cap) missing.push('per_market_cap')
   return missing
 }
 
-function launchCandidateFromTarget(target = {}, campaign = {}) {
+export function launchCandidateFromTarget(target = {}, campaign = {}) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const outreach = metadataObject(metadata.outreach_snapshot)
@@ -6024,7 +6061,7 @@ function groupLaunchItemsByWindow(items = []) {
   return [...groups.values()]
 }
 
-function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input }) {
+function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input, noSend = false }) {
   const scheduledDate = new Date(scheduledFor)
   const scheduledIso = scheduledDate.toISOString()
   const local = localScheduleSnapshot(scheduledDate, candidate.timezone || window.timezone)
@@ -6054,10 +6091,11 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
     campaign_target_id: target.id,
     campaign_send_window_id: window.id || null,
     campaign_session_id: campaignSessionId,
-    launch_mode: 'guarded_live_queue_creation',
+    launch_mode: noSend ? 'proof_hydration_no_send' : 'guarded_live_queue_creation',
     dry_run: false,
-    no_send: false,
-    confirm_live: true,
+    no_send: noSend,
+    confirm_live: !noSend,
+    proof_hydration: noSend,
     target_snapshot: targetSnapshotForMetadata(target, candidate),
     campaign_target_metadata: metadataObject(target.metadata),
     routing_snapshot: {
@@ -6102,13 +6140,14 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
       routing_checked: true,
       template_checked: true,
       local_window_checked: true,
-      confirm_live: true,
+      confirm_live: !noSend,
+      no_send: noSend,
     },
   }
   return {
     queue_key: queueKey,
     queue_id: queueKey,
-    queue_status: 'scheduled',
+    queue_status: noSend ? 'scheduled' : 'scheduled',
     scheduled_for: scheduledIso,
     scheduled_for_utc: scheduledIso,
     scheduled_for_local: scheduledIso,
@@ -6139,9 +6178,9 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
     use_case_template: candidate.template_use_case || campaign.objective || 'ownership_check',
     touch_number: candidate.touch_number || 1,
     dedupe_key: dedupeKey,
-    sms_eligible: true,
-    routing_allowed: true,
-    safety_status: 'passed',
+    sms_eligible: noSend ? false : true,
+    routing_allowed: noSend ? false : true,
+    safety_status: noSend ? 'blocked' : 'passed',
     guard_status: 'passed',
     guard_reason: null,
     type: 'campaign_launch',
@@ -6196,21 +6235,25 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
 
   const readyTargets = targets || []
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
+  const hydrateNoSend = !dryRun && noSend && createRows && asBoolean(input.hydrate_canonical_queue ?? input.hydrateCanonicalQueue, true)
+  const isLiveSendWrite = !dryRun && !noSend && confirmLive && createRows
   for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
   if (!isQueueableStatus(campaign.status)) blockers.push(`campaign_status_not_queueable:${campaign.status}`)
   if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
   if (campaignStop) blockers.push('campaign_emergency_stop_active')
-  if (globalStop && !dryRun && !noSend && blockOnGlobalEmergencyStop) blockers.push('global_emergency_stop_active')
+  if (globalStop && isLiveSendWrite && blockOnGlobalEmergencyStop) blockers.push('global_emergency_stop_active')
   if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
   if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
-  if (!dryRun && !noSend && !confirmLive) blockers.push('confirm_live_required')
+  if (isLiveSendWrite && !confirmLive) blockers.push('confirm_live_required')
+
+  const isProofHydrationWrite = hydrateNoSend && blockers.length === 0
 
   // Execution lock (Phase 2B). For a live write request, acquire the campaign
   // execution lease BEFORE snapshotting active-queue/prior-contact state, so the
   // entire plan+write runs under the mutex and two concurrent activations cannot
   // both pass dedup and double-insert. If the lease is held by another worker,
   // record a blocker so the live write is skipped. Released in `finally`.
-  const isLiveWriteRequest = !dryRun && !noSend && confirmLive && createRows
+  const isLiveWriteRequest = (isLiveSendWrite || isProofHydrationWrite) && blockers.length === 0
   const executionLock = {
     requested: isLiveWriteRequest,
     acquired: false,
@@ -6262,7 +6305,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     dry_run: true,
     campaign_session_id: clean(input.campaign_session_id || campaignId),
     template_use_case: clean(input.template_use_case || campaign.metadata?.template_use_case || campaign.objective || 'ownership_check') || 'ownership_check',
-    stage_code: clean(input.stage_code || campaign.metadata?.stage_code || 'S1') || 'S1',
+    stage_code: normalizeCampaignStageCode(input.stage_code || campaign.metadata?.stage_code, 'S1'),
     routing_safe_only: input.routing_safe_only !== false,
     allow_phone_fallback: false,
     first_touch: input.first_touch ?? true,
@@ -6460,7 +6503,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     plannedWindows.push(windowRecord)
   }
 
-  const shouldWriteQueueRows = !dryRun && !noSend && confirmLive && createRows && blockers.length === 0
+  const shouldWriteQueueRows = (isLiveSendWrite || isProofHydrationWrite) && blockers.length === 0
   let insertedWindows = []
   let insertedQueueRows = []
   let run = null
@@ -6531,6 +6574,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           window,
           caps,
           input,
+          noSend: hydrateNoSend,
         }))
         targetUpdates.push(item.target.id)
       }
@@ -6572,19 +6616,20 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           .update({ target_status: 'planned', last_launched_at: new Date().toISOString() })
           .in('id', targetUpdates)
       }
-      // Stage the campaign: rows are written as `scheduled` send_queue rows.
-      // Walk BUILT -> QUEUED -> SCHEDULED. We deliberately do NOT auto-activate:
-      // ACTIVE is the explicit operator go-live trigger, and the queue runner
-      // only sends rows whose campaign is ACTIVE (campaign-gated dispatch).
-      const earliestScheduledFor = scheduledItems
-        .map((item) => item.scheduled_for_utc)
-        .filter(Boolean)
-        .sort()[0] || null
-      await transitionCampaignStatus(supabase, campaignId, 'queued', { reason: 'queue_plan_live_write' })
-      await transitionCampaignStatus(supabase, campaignId, 'scheduled', {
-        reason: 'queue_plan_live_write',
-        scheduledFor: earliestScheduledFor,
-      })
+      // Live send writes stage BUILT -> QUEUED -> SCHEDULED.
+      // Proof hydration (no_send) inserts canonical rows but does not advance lifecycle;
+      // activation service owns the transition to ACTIVE.
+      if (!hydrateNoSend) {
+        const earliestScheduledFor = scheduledItems
+          .map((item) => item.scheduled_for_utc)
+          .filter(Boolean)
+          .sort()[0] || null
+        await transitionCampaignStatus(supabase, campaignId, 'queued', { reason: 'queue_plan_live_write' })
+        await transitionCampaignStatus(supabase, campaignId, 'scheduled', {
+          reason: 'queue_plan_live_write',
+          scheduledFor: earliestScheduledFor,
+        })
+      }
     }
 
     if (run) {
@@ -6671,14 +6716,37 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     no_send: noSend,
     confirm_live: confirmLive,
     create_send_queue_rows: createRows,
+    hydrate_canonical_queue: hydrateNoSend,
     may_create_send_queue_rows: shouldWriteQueueRows,
+    proof_hydration: isProofHydrationWrite,
     global_emergency_stop_active: globalStop,
     block_on_global_emergency_stop: blockOnGlobalEmergencyStop,
     required_conditions: {
       dry_run_false: dryRun === false,
-      no_send_false: noSend === false,
-      confirm_live_true: confirmLive === true,
+      live_send: isLiveSendWrite,
+      proof_hydration: isProofHydrationWrite,
     },
+  }
+  const hydrationResult = {
+    scanned: readyTargets.length,
+    inserted: insertedQueueRows.length,
+    already_queued: Number(skippedCounts.active_queue_row_exists || 0),
+    duplicate_phone: Number(skippedCounts.duplicate_phone_in_launch_batch || 0),
+    duplicate_owner: 0,
+    suppressed: Number(skippedCounts.graph_suppression_or_queue_block || 0) + Number(skippedCounts.prior_contacted_suppression || 0),
+    wrong_number: 0,
+    opted_out: 0,
+    template_missing: Number(skippedCounts.template_render_failed || 0),
+    sender_missing: Number(skippedCounts.missing_selected_sender_number || 0) + Number(skippedCounts.routing_blocked || 0),
+    outside_contact_window: Number(skippedCounts.schedule_window_full || 0),
+    blocked_identity: Number(skippedCounts.missing_master_owner_id || 0) + Number(skippedCounts.missing_prospect_id || 0),
+    other_failed: Object.entries(skippedCounts)
+      .filter(([key]) => ![
+        'active_queue_row_exists', 'duplicate_phone_in_launch_batch', 'graph_suppression_or_queue_block',
+        'prior_contacted_suppression', 'template_render_failed', 'missing_selected_sender_number',
+        'routing_blocked', 'schedule_window_full', 'missing_master_owner_id', 'missing_prospect_id',
+      ].includes(key))
+      .reduce((sum, [, count]) => sum + Number(count || 0), 0),
   }
   const duplicateProtection = {
     no_duplicate_phone_queue_rows: true,
@@ -6748,6 +6816,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     spread_interval_seconds: intervalSeconds,
     status,
     launch_summary: launchSummary,
+    hydration_result: hydrationResult,
     inserted_queue_rows: insertedQueueRows.slice(0, 25),
     global_emergency_stop_active: globalStop,
     campaign_emergency_stop_active: campaignStop,
@@ -6817,11 +6886,15 @@ async function countCampaignTargets(supabase, campaignId, { readyOnly = false } 
   return Number(count || 0)
 }
 
-async function countCampaignQueueRows(supabase, campaignId) {
-  const { count, error } = await supabase
+const ACTIVE_CAMPAIGN_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
+
+async function countCampaignQueueRows(supabase, campaignId, { activeOnly = false } = {}) {
+  let query = supabase
     .from('send_queue')
     .select('id', { count: 'exact', head: true })
     .eq('campaign_id', campaignId)
+  if (activeOnly) query = query.in('queue_status', ACTIVE_CAMPAIGN_QUEUE_STATUSES)
+  const { count, error } = await query
   if (error) throw error
   return Number(count || 0)
 }
@@ -6854,7 +6927,7 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
   }
 
   const readyTargets = await countCampaignTargets(supabase, campaignId, { readyOnly: true })
-  const existingQueueRows = await countCampaignQueueRows(supabase, campaignId)
+  const existingQueueRows = await countCampaignQueueRows(supabase, campaignId, { activeOnly: true })
   const status = normalizeCampaignStatus(campaign.status)
 
   if (!isQueueableStatus(campaign.status)) {
@@ -6905,22 +6978,28 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
       }
     }
 
+    const proofNoSend = input.no_send === true || input.noSend === true
     queueResult = await createCampaignQueuePlan(campaignId, {
       ...input,
       dry_run: false,
-      no_send: false,
-      confirm_live: true,
+      no_send: proofNoSend,
+      hydrate_canonical_queue: proofNoSend ? true : input.hydrate_canonical_queue,
+      confirm_live: proofNoSend ? true : input.confirm_live !== false,
       create_send_queue_rows: true,
       explicit_operator_action: true,
       batch_max: batchLimit,
       max_targets: batchLimit,
       limit: batchLimit,
+      daily_cap: input.daily_cap ?? campaign.daily_cap ?? batchLimit,
+      per_sender_cap: input.per_sender_cap ?? campaign.per_sender_cap ?? batchLimit,
+      per_market_cap: input.per_market_cap ?? campaign.market_cap ?? batchLimit,
+      block_on_global_emergency_stop: proofNoSend ? false : input.block_on_global_emergency_stop,
     }, deps)
 
     inserted = Number(queueResult?.send_queue_rows_created || queueResult?.queue_rows_created || 0)
     skipped = Number(queueResult?.skipped_count || 0)
     const rawBlockers = queueResult?.blockers || queueResult?.exact_blockers || []
-    const queueRowsAfterPlan = await countCampaignQueueRows(supabase, campaignId)
+    const queueRowsAfterPlan = await countCampaignQueueRows(supabase, campaignId, { activeOnly: true })
 
     if (rawBlockers.length && queueRowsAfterPlan === 0) {
       return {
@@ -6935,7 +7014,7 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
     }
   }
 
-  const queueRowsBeforeActivate = await countCampaignQueueRows(supabase, campaignId)
+  const queueRowsBeforeActivate = await countCampaignQueueRows(supabase, campaignId, { activeOnly: true })
   if (!queueRowsBeforeActivate) {
     return {
       ok: false,
@@ -7035,7 +7114,8 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
   const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
 
   if (action === 'activate') {
-    const result = await activateCampaignWithHydration(campaignId, input, deps)
+    const { runCanonicalCampaignActivation } = await import('@/lib/domain/campaigns/campaign-activation-orchestrator.js')
+    const result = await runCanonicalCampaignActivation(campaignId, input, deps)
     if (!result.ok) {
       return {
         ok: false,

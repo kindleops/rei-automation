@@ -17,7 +17,7 @@ import type {
 } from './campaigns.types'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getDealContextList } from '../../lib/data/dealContext'
-import { asNumber, asString, isDev } from '../../lib/data/shared'
+import { asString, isDev } from '../../lib/data/shared'
 import {
   createCampaignBackend,
   buildCampaignTargets,
@@ -29,6 +29,8 @@ import {
   cloneCampaignBackend,
   deleteCampaignBackend,
   patchCampaignBackend,
+  fetchCampaignTargetsPage,
+  type CampaignApiSummary,
 } from '../../lib/api/backendClient'
 
 export type CampaignLifecycleAction =
@@ -97,40 +99,50 @@ export const launchCampaign = async (
   throw new Error(res.message || res.error)
 }
 
+function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>): CampaignSummary {
+  const recipientMetrics = row.recipient_metrics as CampaignSummary['recipient_metrics']
+  return {
+      id: row.id,
+      campaign_name: row.campaign_name ?? row.name ?? '',
+      status: row.status as CampaignSummary['status'],
+      total_targets: Number(row.total_targets ?? 0),
+      ready_targets: Number(row.ready_targets ?? 0),
+      scheduled_targets: Number(row.scheduled_targets ?? 0),
+      queued_targets: Number(row.queued_targets ?? 0),
+      canonical_queued_count: Number(row.canonical_queued_count ?? row.queued_targets ?? 0),
+      launch_readiness: (row.launch_readiness as CampaignSummary['launch_readiness']) ?? undefined,
+      launch_blockers: Array.isArray(row.launch_blockers) ? row.launch_blockers : undefined,
+      launch_blocker_codes: Array.isArray(row.launch_blocker_codes) ? row.launch_blocker_codes : undefined,
+      recipient_metrics: recipientMetrics ?? null,
+      sent_count: Number(row.sent_count ?? 0),
+      delivered_count: Number(row.delivered_count ?? 0),
+      failed_count: Number(row.failed_count ?? 0),
+      reply_count: Number(row.reply_count ?? 0),
+      positive_reply_count: Number(row.positive_reply_count ?? 0),
+      negative_reply_count: Number(row.negative_reply_count ?? 0),
+      opt_out_count: Number(row.opt_out_count ?? 0),
+      delivery_rate: Number(row.delivery_rate ?? 0),
+      reply_rate: Number(row.reply_rate ?? 0),
+      positive_rate: Number(row.positive_rate ?? 0),
+      opt_out_rate: Number(row.opt_out_rate ?? 0),
+      failure_rate: Number(row.failure_rate ?? 0),
+      next_send_at: row.next_send_at ?? null,
+      last_send_at: row.last_send_at ?? null,
+      send_interval_seconds: Number(row.send_interval_seconds ?? 60),
+      send_window_start: row.send_window_start ?? null,
+      send_window_end: row.send_window_end ?? null,
+      auto_queue_enabled: Boolean(row.auto_queue_enabled ?? false),
+      auto_send_enabled: Boolean(row.auto_send_enabled ?? false),
+      blocked_reason_counts: row.blocked_reason_counts ?? {},
+      health_score: Number(row.health_score ?? 0),
+      health_status: row.health_status ?? 'caution',
+    }
+}
+
 export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
   const backend = await listCampaignsBackend()
   if (backend.ok && backend.data?.campaigns) {
-    return backend.data.campaigns.map((row: any) => ({
-      id: row.id,
-      campaign_name: row.campaign_name ?? row.name,
-      status: row.status,
-      total_targets: row.total_targets ?? 0,
-      ready_targets: row.ready_targets ?? 0,
-      scheduled_targets: row.scheduled_targets ?? 0,
-      queued_targets: row.queued_targets ?? 0,
-      sent_count: row.sent_count ?? 0,
-      delivered_count: row.delivered_count ?? 0,
-      failed_count: row.failed_count ?? 0,
-      reply_count: row.reply_count ?? 0,
-      positive_reply_count: row.positive_reply_count ?? 0,
-      negative_reply_count: row.negative_reply_count ?? 0,
-      opt_out_count: row.opt_out_count ?? 0,
-      delivery_rate: row.delivery_rate ?? 0,
-      reply_rate: row.reply_rate ?? 0,
-      positive_rate: row.positive_rate ?? 0,
-      opt_out_rate: row.opt_out_rate ?? 0,
-      failure_rate: row.failure_rate ?? 0,
-      next_send_at: row.next_send_at ?? null,
-      last_send_at: row.last_send_at ?? null,
-      send_interval_seconds: row.send_interval_seconds ?? 60,
-      send_window_start: row.send_window_start ?? null,
-      send_window_end: row.send_window_end ?? null,
-      auto_queue_enabled: row.auto_queue_enabled ?? false,
-      auto_send_enabled: row.auto_send_enabled ?? false,
-      blocked_reason_counts: row.blocked_reason_counts ?? {},
-      health_score: row.health_score ?? 0,
-      health_status: row.health_status ?? 'caution',
-    }))
+    return backend.data.campaigns.map((row) => mapCampaignSummaryRow(row as CampaignApiSummary & Record<string, unknown>))
   }
 
   if (!hasSupabaseEnv) return []
@@ -173,118 +185,91 @@ export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
   }))
 }
 
-export const fetchCampaignTargets = async (campaignId: string): Promise<CampaignTarget[]> => {
-  const backend = await getCampaignBackend(campaignId)
-  if (backend.ok && Array.isArray(backend.data.targets)) {
-    return backend.data.targets.map((row: any) => ({
-      id: row.id,
-      campaign_id: row.campaign_id,
-      target_status: row.target_status ?? row.status ?? 'ready',
-      master_owner_id: row.master_owner_id ?? null,
-      property_id: row.property_id ?? null,
-      phone_id: row.phone_id ?? null,
-      canonical_e164: row.to_phone_number ?? row.canonical_e164 ?? null,
-      seller_first_name: row.owner_name?.split(' ')[0] ?? null,
-      seller_full_name: row.owner_name ?? null,
-      property_address_full: row.property_address ?? null,
+export type CampaignTargetsPage = {
+  targets: CampaignTarget[]
+  page: number
+  page_size: number
+  total_count: number
+  total_pages: number
+}
+
+function mapTargetRow(row: Record<string, unknown>, campaignId: string): CampaignTarget {
+  const ownerName = (row.owner_name as string | undefined) ?? null
+  const metadata = (row.metadata as Record<string, unknown> | undefined) ?? {}
+  return {
+      id: row.id as string,
+      campaign_id: (row.campaign_id as string) ?? campaignId,
+      target_status: (row.target_status ?? row.status ?? 'ready') as string,
+      master_owner_id: (row.master_owner_id as string | null) ?? null,
+      property_id: (row.property_id as string | null) ?? null,
+      phone_id: (row.phone_id as string | null) ?? null,
+      canonical_e164: (row.to_phone_number ?? row.canonical_e164 ?? null) as string | null,
+      seller_first_name: ownerName?.split(' ')[0] ?? null,
+      seller_full_name: ownerName,
+      property_address_full: (row.property_address as string | null) ?? null,
       property_address_city: null,
-      property_address_state: row.state ?? null,
+      property_address_state: (row.state as string | null) ?? null,
       property_address_zip: null,
-      market: row.market ?? null,
-      language: row.language ?? null,
-      final_acquisition_score: row.priority_score ?? null,
+      market: (row.market as string | null) ?? null,
+      language: (row.language as string | null) ?? null,
+      final_acquisition_score: row.priority_score != null ? Number(row.priority_score) : null,
       last_contact_at: null,
-      suppression_status: row.suppression_status ?? null,
-      suppression_reason: row.block_reason ?? null,
-      template_id: row.metadata?.template_id ?? null,
-      template_name: row.metadata?.template_name ?? null,
+      suppression_status: (row.suppression_status as string | null) ?? null,
+      suppression_reason: (row.block_reason as string | null) ?? null,
+      template_id: (metadata.template_id as string | null) ?? null,
+      template_name: (metadata.template_name as string | null) ?? null,
       scheduled_for: null,
       sent_at: null,
       delivered_at: null,
-      failed_at: row.target_status === 'failed' ? row.updated_at ?? null : null,
+      failed_at: row.target_status === 'failed' ? (row.updated_at as string | null) ?? null : null,
       replied_at: null,
-    }))
-  }
-
-  try {
-    const { rows } = await getDealContextList({
-      campaign_id: campaignId,
-      limit: 200,
-      order_by: 'queue_scheduled_for',
-    })
-
-    if (rows.length > 0) {
-      return rows.map((row) => ({
-        id: row.campaignTargetId || row.id,
-        campaign_id: campaignId,
-        target_status: asString(row.raw.campaign_target_status, 'ready'),
-        master_owner_id: row.masterOwnerId,
-        property_id: row.propertyId,
-        phone_id: row.phoneId,
-        canonical_e164: row.canonicalE164,
-        seller_first_name: row.ownerName.split(' ')[0] || null,
-        seller_full_name: row.ownerName || null,
-        property_address_full: row.propertyAddress || null,
-        property_address_city: asString(row.raw.property_address_city) || null,
-        property_address_state: asString(row.raw.property_state) || null,
-        property_address_zip: asString(row.raw.property_zip) || null,
-        market: row.market || null,
-        language: asString(row.prospect.language) || null,
-        final_acquisition_score: Number.isFinite(Number(row.raw.final_acquisition_score))
-          ? asNumber(row.raw.final_acquisition_score)
-          : null,
-        last_contact_at: asString(row.raw.latest_message_at) || null,
-        suppression_status: asString(row.raw.suppression_status) || null,
-        suppression_reason: asString(row.raw.suppression_type) || null,
-        template_id: (row.queue.template_id as string | null) || null,
-        template_name: ((row.campaign.campaign as Record<string, unknown> | undefined)?.template_name as string | null) || null,
-        scheduled_for: asString(row.raw.queue_scheduled_for) || null,
-        sent_at: asString(row.queue.sent_at) || null,
-        delivered_at: asString(row.queue.delivered_at) || null,
-        failed_at: asString(row.queue.failed_at) || null,
-        replied_at: asString(row.raw.last_inbound_at) || null,
-      }))
     }
-  } catch (error) {
-    if (isDev) console.warn('[campaigns.adapter] deal-context target fallback', error)
-  }
+}
 
-  const client = getSupabaseClient()
-  const { data, error } = await client
-    .from('sms_campaign_targets')
-    .select('*')
-    .eq('campaign_id', campaignId)
-    .limit(200)
-  if (error) throw error
-  
-  return (data ?? []).map((row: any) => ({
-    id: row.target_id,
-    campaign_id: row.campaign_id,
-    target_status: row.status ?? 'ready',
-    master_owner_id: row.master_owner_id ?? null,
-    property_id: row.property_id ?? null,
-    phone_id: row.phone_id ?? null,
-    canonical_e164: row.phone_number ?? null,
-    seller_first_name: row.owner_name?.split(' ')[0] ?? null,
-    seller_full_name: row.owner_name ?? null,
-    property_address_full: row.property_address ?? null,
-    property_address_city: null,
-    property_address_state: row.state ?? null,
-    property_address_zip: null,
-    market: row.market ?? null,
-    language: row.language ?? null,
-    final_acquisition_score: row.score ?? null,
-    last_contact_at: row.last_contact ?? null,
-    suppression_status: row.suppressed ? 'suppressed' : null,
-    suppression_reason: row.suppression_reason ?? null,
-    template_id: row.template_id ?? null,
-    template_name: row.template_name ?? null,
-    scheduled_for: row.scheduled_for ?? null,
-    sent_at: row.sent_at ?? null,
-    delivered_at: row.delivered_at ?? null,
-    failed_at: row.failed_reason ? new Date().toISOString() : null, // Approximation
-    replied_at: row.reply_status ? new Date().toISOString() : null,
-  }))
+export const fetchCampaignTargetsPageData = async (
+  campaignId: string,
+  options: {
+    page?: number
+    page_size?: number
+    status?: string
+    market?: string
+    search?: string
+  } = {},
+): Promise<CampaignTargetsPage> => {
+  const res = await fetchCampaignTargetsPage(campaignId, {
+    page: options.page ?? 1,
+    page_size: options.page_size ?? 50,
+    status: options.status,
+    market: options.market,
+    search: options.search,
+    order_by: 'priority_score',
+    order_dir: 'desc',
+  })
+  if (!res.ok || !res.data?.ok) {
+    const err = !res.ok ? res : null
+    throw new Error(err?.message || err?.error || 'campaign_targets_page_failed')
+  }
+  const data = res.data
+  return {
+    page: data.page,
+    page_size: data.page_size,
+    total_count: data.total_count,
+    total_pages: data.total_pages,
+    targets: (data.targets || []).map((row) => mapTargetRow(row as Record<string, unknown>, campaignId)),
+  }
+}
+
+export const fetchCampaignTargets = async (campaignId: string): Promise<CampaignTarget[]> => {
+  const page = await fetchCampaignTargetsPageData(campaignId, { page: 1, page_size: 50 })
+  return page.targets
+}
+
+export const fetchCampaignDetail = async (campaignId: string): Promise<CampaignSummary | null> => {
+  const backend = await getCampaignBackend(campaignId)
+  if (backend.ok && backend.data?.summary) {
+    return mapCampaignSummaryRow(backend.data.summary as CampaignApiSummary & Record<string, unknown>)
+  }
+  return null
 }
 
 export const fetchCampaignQueue = async (campaignId: string): Promise<CampaignQueueRow[]> => {

@@ -7,12 +7,16 @@ import type { CampaignSummary } from '../campaigns.types'
 
 type ActivationStep =
   | 'review'
-  | 'validating'
-  | 'locking'
-  | 'queueing'
-  | 'activating'
+  | 'validating_recipients'
+  | 'resolving_templates'
+  | 'resolving_senders'
+  | 'applying_compliance'
+  | 'hydrating_queue'
+  | 'activating_campaign'
   | 'complete'
   | 'failed'
+
+const ACTIVATION_TIMEOUT_MS = 120_000
 
 interface CampaignActivationModalProps {
   campaign: CampaignSummary
@@ -26,10 +30,12 @@ interface CampaignActivationModalProps {
 }
 
 const PROGRESS_STEPS: Array<{ id: ActivationStep; label: string }> = [
-  { id: 'validating', label: 'Validating campaign' },
-  { id: 'locking', label: 'Locking target snapshot' },
-  { id: 'queueing', label: 'Creating Queue batch' },
-  { id: 'activating', label: 'Activating campaign' },
+  { id: 'validating_recipients', label: 'Validating recipients' },
+  { id: 'resolving_templates', label: 'Resolving templates' },
+  { id: 'resolving_senders', label: 'Resolving sender routes' },
+  { id: 'applying_compliance', label: 'Applying compliance guards' },
+  { id: 'hydrating_queue', label: 'Hydrating Queue' },
+  { id: 'activating_campaign', label: 'Activating campaign' },
   { id: 'complete', label: 'Complete' },
 ]
 
@@ -46,29 +52,29 @@ export const CampaignActivationModal = ({
   const [step, setStep] = useState<ActivationStep>('review')
   const [error, setError] = useState<string | null>(null)
   const [blockers, setBlockers] = useState<string[]>([])
+  const [pending, setPending] = useState(false)
   const idempotencyKeyRef = useRef(`activate-${campaign.id}-${Date.now()}`)
-  const busy = step !== 'review' && step !== 'complete' && step !== 'failed'
+  const abortRef = useRef<AbortController | null>(null)
+  const busy = pending
 
   const readiness = useMemo(() => computeCampaignReadiness(campaign), [campaign])
 
   const runActivation = useCallback(async () => {
+    if (pending) return
     setError(null)
     setBlockers([])
-    setStep('validating')
-
-    const advance = async (next: ActivationStep, delay = 280) => {
-      setStep(next)
-      await new Promise((r) => setTimeout(r, delay))
-    }
+    setPending(true)
+    setStep('validating_recipients')
+    abortRef.current?.abort()
+    abortRef.current = new AbortController()
+    const timeout = window.setTimeout(() => abortRef.current?.abort(), ACTIVATION_TIMEOUT_MS)
 
     try {
-      await advance('locking')
-      await advance('queueing')
-
       const result = await activateCampaignWithReview(campaign.id, {
         activation_idempotency_key: idempotencyKeyRef.current,
         confirm_live: true,
-        batch_max: Math.min(campaign.ready_targets || 500, 500),
+        no_send: true,
+        batch_max: Math.min(campaign.ready_targets || 5, 5),
       })
 
       if (!result.ok) {
@@ -81,8 +87,6 @@ export const CampaignActivationModal = ({
         return
       }
 
-      setStep('activating')
-      await new Promise((r) => setTimeout(r, 320))
       setStep('complete')
       onSuccess({
         inserted: result.inserted ?? 0,
@@ -92,10 +96,14 @@ export const CampaignActivationModal = ({
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
+      const isAbort = err instanceof Error && err.name === 'AbortError'
+      setError(isAbort ? 'Activation timed out — check campaign run status and retry.' : msg)
       setStep('failed')
+    } finally {
+      window.clearTimeout(timeout)
+      setPending(false)
     }
-  }, [campaign.id, campaign.ready_targets, onSuccess])
+  }, [campaign.id, campaign.ready_targets, onSuccess, pending])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -106,10 +114,10 @@ export const CampaignActivationModal = ({
   }, [busy, onClose])
 
   const reviewBlockers = [...readiness.blockers, ...blockers]
-  const canConfirm = readiness.level !== 'blocked' && campaign.ready_targets > 0
+  const canConfirm = readiness.level !== 'blocked' && campaign.ready_targets > 0 && campaign.launch_readiness !== 'blocked'
 
   const modal = (
-    <div className="ccm-glass-overlay" onClick={busy ? undefined : onClose}>
+    <div className="ccm-glass-overlay" onClick={onClose}>
       <div className="ccm-glass-modal ccm-activation-modal" onClick={(e) => e.stopPropagation()}>
         <div className="ccm-glass-modal__header">
           <div className="ccm-glass-modal__icon">
@@ -119,7 +127,7 @@ export const CampaignActivationModal = ({
             <h3>Activation Review</h3>
             <p>{campaign.campaign_name}</p>
           </div>
-          <button type="button" className="ccm-glass-modal__close" onClick={onClose} disabled={busy} aria-label="Close">
+          <button type="button" className="ccm-glass-modal__close" onClick={onClose} aria-label="Close">
             <Icon name="close" size={14} />
           </button>
         </div>
@@ -177,7 +185,25 @@ export const CampaignActivationModal = ({
           </>
         )}
 
-        {step !== 'review' && step !== 'failed' && (
+        {step !== 'review' && step !== 'failed' && step !== 'complete' && pending && (
+          <div className="ccm-activation-progress">
+            <ul className="ccm-activation-steps">
+              {PROGRESS_STEPS.map((s) => {
+                const current = stepIndex(step)
+                const idx = stepIndex(s.id)
+                const state = idx < current ? 'is-done' : idx === current ? 'is-active' : ''
+                return (
+                  <li key={s.id} className={state}>
+                    <span className="ccm-activation-step-dot" />
+                    {s.label}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+
+        {step === 'complete' && (
           <div className="ccm-activation-progress">
             <ul className="ccm-activation-steps">
               {PROGRESS_STEPS.map((s) => {
@@ -194,7 +220,7 @@ export const CampaignActivationModal = ({
             </ul>
             {step === 'complete' && (
               <div className="ccm-activation-success">
-                <Icon name="check-circle" size={20} />
+                <Icon name="check" size={20} />
                 Campaign activated successfully
               </div>
             )}
@@ -203,7 +229,7 @@ export const CampaignActivationModal = ({
 
         {step === 'failed' && error && (
           <div className="ccm-activation-error">
-            <Icon name="alert-triangle" size={16} />
+            <Icon name="alert" size={16} />
             <div>
               <strong>Activation failed</strong>
               <p>{error}</p>
@@ -236,7 +262,9 @@ export const CampaignActivationModal = ({
               </button>
             </>
           )}
-          {busy && <span className="ccm-activation-pending">Working…</span>}
+          {busy && step !== 'review' && step !== 'complete' && step !== 'failed' && (
+            <button type="button" className="ccc-btn" onClick={onClose}>Close</button>
+          )}
         </div>
       </div>
     </div>

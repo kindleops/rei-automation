@@ -123,11 +123,29 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   const blockers: string[] = []
   const warnings: string[] = []
 
+  if (campaign.launch_readiness === 'blocked') {
+    return {
+      level: 'blocked',
+      label: 'Blocked',
+      blockers: campaign.launch_blockers?.length
+        ? [...campaign.launch_blockers]
+        : ['Launch blocked — resolve backend blockers'],
+      warnings: [],
+    }
+  }
+
+  if (campaign.launch_readiness === 'warnings') {
+    warnings.push('Partial template or routing resolution — review before live send')
+  }
+
   if (campaign.total_targets === 0) blockers.push('No target snapshot — run Build Targets')
   if (campaign.ready_targets === 0 && campaign.total_targets > 0) {
     warnings.push('Zero ready targets after build — review exclusions')
   }
   if (campaign.auto_send_enabled) blockers.push('Auto-send is disabled in Phase 1')
+  if (campaign.launch_blocker_codes?.includes('template_required')) {
+    blockers.push('Approved template required for campaign stage/language')
+  }
 
   const level: ReadinessLevel =
     blockers.length > 0 ? 'blocked' : warnings.length > 0 ? 'warnings' : 'ready'
