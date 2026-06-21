@@ -49,7 +49,7 @@ export function TimelineExecutionFeed({
   grouped = false,
   compact = false,
   emptyTitle = 'No execution events scheduled for this period.',
-  emptyDescription = 'Connect send queue, message events, offers, contracts, closings, and buyer follow-ups to populate the feed.',
+  emptyDescription = 'No events match the selected range and active filters.',
 }: TimelineExecutionFeedProps) {
   if (events.length === 0) {
     return <CalendarEmptyState title={emptyTitle} description={emptyDescription} compact={compact} />

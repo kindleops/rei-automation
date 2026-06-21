@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server.js';
 import { rescheduleCalendarEvent } from '@/lib/domain/calendar/calendar-nexus-service.js';
 import { corsHeaders, ensureMutationAuth, unauthorizedJson } from '../_shared.js';
-import { parseJsonSafe } from '../../../_shared.js';
+import { parseJsonSafe } from '../../_shared.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

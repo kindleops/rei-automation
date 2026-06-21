@@ -1,16 +1,21 @@
 import type { CalendarScopeMode } from '../../lib/data/calendarData'
+import type { CalendarTimezoneMode } from '../../lib/calendar/calendar-timezone'
 import { Icon } from '../../shared/icons'
+import { CalendarDatePicker } from './components/CalendarDatePicker'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+
+export type CalendarRefreshState = 'live' | 'updating' | 'updated' | 'error'
 
 type CalendarHeaderProps = {
   rangeLabel: string
   scopeMode: CalendarScopeMode
   selectedEnabled: boolean
-  loading: boolean
+  refreshState: CalendarRefreshState
   anchorDate: string
   railOpen: boolean
   showRailToggle: boolean
+  timezoneMode: CalendarTimezoneMode
   onToday: () => void
   onPrev: () => void
   onNext: () => void
@@ -18,17 +23,21 @@ type CalendarHeaderProps = {
   onDateChange: (value: string) => void
   onScopeChange: (value: CalendarScopeMode) => void
   onToggleRail: () => void
-  liveLabel: string
+  onTimezoneModeChange: (value: CalendarTimezoneMode) => void
+  onNewEvent: () => void
+  lastSyncedLabel: string
+  errorMessage?: string | null
 }
 
 export function CalendarHeader({
   rangeLabel,
   scopeMode,
   selectedEnabled,
-  loading,
+  refreshState,
   anchorDate,
   railOpen,
   showRailToggle,
+  timezoneMode,
   onToday,
   onPrev,
   onNext,
@@ -36,14 +45,24 @@ export function CalendarHeader({
   onDateChange,
   onScopeChange,
   onToggleRail,
-  liveLabel,
+  onTimezoneModeChange,
+  onNewEvent,
+  lastSyncedLabel,
+  errorMessage,
 }: CalendarHeaderProps) {
+  const liveLabel = (() => {
+    if (refreshState === 'updating') return 'Updating'
+    if (refreshState === 'error') return 'Error'
+    if (refreshState === 'updated') return `Updated ${lastSyncedLabel}`
+    return 'Live'
+  })()
+
   return (
     <header className="calendar-command__header nx-cal__header">
       <div className="calendar-command__header-copy nx-cal__header-copy">
         <span className="calendar-command__eyebrow nx-cal__eyebrow">Execution Calendar</span>
         <div className="calendar-command__header-title-row nx-cal__header-title-row">
-          <h2>Execution Timeline Command Center</h2>
+          <h2>Temporal Command Center</h2>
           <span className="calendar-command__range-pill nx-cal__range-pill">{rangeLabel}</span>
         </div>
       </div>
@@ -62,6 +81,7 @@ export function CalendarHeader({
             className={cls('calendar-command__chip-btn', 'nx-cal__chip-btn', scopeMode === 'selected' && 'is-active')}
             onClick={() => onScopeChange('selected')}
             disabled={!selectedEnabled}
+            title={!selectedEnabled ? 'Select a seller in global entity context to enable' : undefined}
           >
             Selected Seller
           </button>
@@ -75,16 +95,21 @@ export function CalendarHeader({
           <button type="button" className="calendar-command__icon-btn nx-cal__icon-btn" onClick={onNext} aria-label="Next range">
             <Icon name="chevron-right" />
           </button>
-          <input
-            className="calendar-command__date nx-cal__date"
-            type="date"
-            value={anchorDate}
-            onChange={(event) => onDateChange(event.target.value)}
-            aria-label="Calendar date"
-          />
-          <button type="button" className="calendar-command__nav-btn nx-cal__nav-btn" onClick={onRefresh}>
+          <CalendarDatePicker value={anchorDate} onChange={onDateChange} />
+          <select
+            className="nx-cal__timezone-select"
+            value={timezoneMode}
+            onChange={(e) => onTimezoneModeChange(e.target.value as CalendarTimezoneMode)}
+            aria-label="Timezone display mode"
+          >
+            <option value="operator">Operator Time</option>
+            <option value="property">Property Local Time</option>
+            <option value="recipient">Recipient Local Time</option>
+          </select>
+          <button type="button" className="calendar-command__nav-btn nx-cal__nav-btn" onClick={onNewEvent}>New Event</button>
+          <button type="button" className="calendar-command__nav-btn nx-cal__nav-btn" onClick={onRefresh} disabled={refreshState === 'updating'}>
             <Icon name="refresh-cw" />
-            <span>{loading ? 'Refreshing' : 'Refresh'}</span>
+            <span>{refreshState === 'updating' ? 'Updating' : refreshState === 'error' ? 'Retry' : 'Refresh'}</span>
           </button>
           {showRailToggle ? (
             <button type="button" className={cls('calendar-command__nav-btn', 'nx-cal__nav-btn', railOpen && 'is-active')} onClick={onToggleRail}>
@@ -92,10 +117,11 @@ export function CalendarHeader({
               <span>{railOpen ? 'Hide Rail' : 'Show Rail'}</span>
             </button>
           ) : null}
-          <span className="calendar-command__live nx-cal__live">
+          <span className={cls('calendar-command__live', 'nx-cal__live', refreshState === 'error' && 'is-error', refreshState === 'updating' && 'is-updating')}>
             <span className="calendar-command__live-dot" aria-hidden="true" />
             {liveLabel}
           </span>
+          {errorMessage ? <span className="nx-cal__live-error">{errorMessage}</span> : null}
         </div>
       </div>
     </header>

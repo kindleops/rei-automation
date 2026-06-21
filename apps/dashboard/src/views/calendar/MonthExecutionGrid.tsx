@@ -1,4 +1,6 @@
+import { useMemo, useState } from 'react'
 import type { CalendarEvent } from '../../lib/data/calendarData'
+import { buildMonthGrid, eventDayKey, weekdayHeaders, type WeekStart } from '../../lib/calendar/calendar-date-engine'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -7,27 +9,8 @@ type MonthExecutionGridProps = {
   events: CalendarEvent[]
   selectedEventId: string | null
   onSelect: (event: CalendarEvent) => void
-}
-
-const toStartOfDay = (value: Date) => {
-  const next = new Date(value)
-  next.setHours(0, 0, 0, 0)
-  return next
-}
-
-const toIsoDate = (value: Date) => {
-  const year = value.getFullYear()
-  const month = `${value.getMonth() + 1}`.padStart(2, '0')
-  const day = `${value.getDate()}`.padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const toDateKey = (value: string) => toIsoDate(toStartOfDay(new Date(value)))
-
-const addDays = (value: Date, amount: number) => {
-  const next = new Date(value)
-  next.setDate(next.getDate() + amount)
-  return next
+  onReschedule?: (event: CalendarEvent, dayIso: string) => void
+  weekStart?: WeekStart
 }
 
 export function MonthExecutionGrid({
@@ -35,15 +18,30 @@ export function MonthExecutionGrid({
   events,
   selectedEventId,
   onSelect,
+  onReschedule,
+  weekStart = 0,
 }: MonthExecutionGridProps) {
-  const days = Array.from({ length: 30 }, (_, index) => addDays(anchorDate, index))
+  const [expandedDay, setExpandedDay] = useState<string | null>(null)
+  const grid = useMemo(() => buildMonthGrid(anchorDate, { weekStart, selected: anchorDate }), [anchorDate, weekStart])
+  const headers = weekdayHeaders(weekStart)
+
+  const eventsByDay = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>()
+    for (const event of events) {
+      const key = eventDayKey(event.timestamp)
+      const list = map.get(key) || []
+      list.push(event)
+      map.set(key, list)
+    }
+    return map
+  }, [events])
 
   return (
-    <section className="nx-cal__surface">
+    <section className="nx-cal__surface nx-cal__month">
       <div className="nx-cal__section-head">
         <div>
-          <span className="nx-cal__eyebrow">30-Day View</span>
-          <strong>Upcoming execution window</strong>
+          <span className="nx-cal__eyebrow">Month View</span>
+          <strong>{anchorDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</strong>
         </div>
         <div className="nx-cal__month-legend">
           <span className="is-blue">SMS</span>
@@ -54,39 +52,69 @@ export function MonthExecutionGrid({
         </div>
       </div>
 
-      <div className="nx-cal__month-grid">
-        {days.map((day) => {
-          const dayKey = toIsoDate(day)
-          const dayEvents = events.filter((event) => toDateKey(event.timestamp) === dayKey)
+      <div className="nx-cal__month-weekdays">
+        {headers.map((label) => <span key={label}>{label}</span>)}
+      </div>
+
+      <div className="nx-cal__month-grid is-true-month">
+        {grid.map((cell) => {
+          const dayEvents = eventsByDay.get(cell.iso) || []
+          const overflow = Math.max(0, dayEvents.length - 3)
           return (
-            <div key={dayKey} className="nx-cal__month-cell">
+            <div
+              key={cell.iso}
+              className={cls(
+                'nx-cal__month-cell',
+                !cell.inMonth && 'is-outside',
+                cell.isToday && 'is-today',
+                cell.isSelected && 'is-selected',
+              )}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                const draggedId = (window as unknown as { __nxCalDragId?: string }).__nxCalDragId
+                const event = dayEvents.find((e) => e.id === draggedId) || events.find((e) => e.id === draggedId)
+                if (event?.reschedulable) onReschedule?.(event, cell.iso)
+              }}
+            >
               <div className="nx-cal__month-head">
-                <strong>{day.getDate()}</strong>
-                <span>{day.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                <strong>{cell.date.getDate()}</strong>
               </div>
               <div className="nx-cal__month-body">
                 {dayEvents.length === 0 ? (
-                  <span className="nx-cal__month-empty">No scheduled events</span>
+                  <span className="nx-cal__month-empty">—</span>
                 ) : (
                   <>
-                    <div className="nx-cal__month-dots">
-                      {dayEvents.slice(0, 8).map((event) => (
-                        <button
-                          key={event.id}
-                          type="button"
-                          className={cls('nx-cal__month-dot', `is-${event.tone}`, selectedEventId === event.id && 'is-selected')}
-                          onClick={() => onSelect(event)}
-                          aria-label={`${event.title} for ${event.sellerName}`}
-                        />
-                      ))}
-                    </div>
-                    <div className="nx-cal__month-summary">
-                      <strong>{dayEvents.length}</strong>
-                      <span>{dayEvents[0]?.title ?? 'Events'}</span>
-                    </div>
+                    {dayEvents.slice(0, 3).map((event) => (
+                      <button
+                        key={event.id}
+                        type="button"
+                        draggable={Boolean(event.reschedulable)}
+                        onDragStart={() => { (window as unknown as { __nxCalDragId?: string }).__nxCalDragId = event.id }}
+                        className={cls('nx-cal__month-event', `is-${event.tone}`, selectedEventId === event.id && 'is-selected', !event.reschedulable && 'is-locked')}
+                        onClick={() => onSelect(event)}
+                      >
+                        <span>{new Date(event.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                        <strong>{event.title}</strong>
+                      </button>
+                    ))}
+                    {overflow > 0 ? (
+                      <button type="button" className="nx-cal__month-more" onClick={() => setExpandedDay(cell.iso)}>
+                        +{overflow} more
+                      </button>
+                    ) : null}
                   </>
                 )}
               </div>
+              {expandedDay === cell.iso ? (
+                <div className="nx-cal__month-agenda-pop">
+                  {dayEvents.map((event) => (
+                    <button key={event.id} type="button" className="nx-cal__month-event" onClick={() => onSelect(event)}>
+                      {event.title}
+                    </button>
+                  ))}
+                  <button type="button" onClick={() => setExpandedDay(null)}>Close</button>
+                </div>
+              ) : null}
             </div>
           )
         })}

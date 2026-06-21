@@ -8,9 +8,10 @@ type CalendarModeTabsProps = {
 }
 
 const MODE_OPTIONS: Array<{ key: CalendarViewMode; label: string }> = [
-  { key: 'day', label: 'Daily' },
-  { key: 'week', label: 'Weekly' },
-  { key: 'thirty_day', label: '30-Day' },
+  { key: 'month', label: 'Month' },
+  { key: 'week', label: 'Week' },
+  { key: 'day', label: 'Day' },
+  { key: 'agenda', label: 'Agenda' },
   { key: 'timeline', label: 'Timeline' },
 ]
 
