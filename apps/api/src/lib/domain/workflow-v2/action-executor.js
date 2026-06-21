@@ -192,23 +192,22 @@ async function executeUpdateStage(node, enrollment, deps) {
 
   await updateEnrollmentContext(enrollment.id, { workflow_stage: targetStage, stage: targetStage }, deps);
 
-  let crmUpdate = { attempted: false };
-  const masterOwnerId = clean(enrollment.context?.master_owner_id ?? '');
-  if (masterOwnerId && client?.from) {
-    try {
-      const { error } = await client
-        .from('master_owners')
-        .update({ seller_status: targetStage })
-        .eq('id', masterOwnerId);
-      crmUpdate = {
-        attempted: true,
-        table: 'master_owners',
-        column: 'seller_status',
-        error: error?.message ?? null,
-      };
-    } catch (err) {
-      crmUpdate = { attempted: true, error: err?.message ?? 'crm_update_failed' };
-    }
+  let opportunityUpdate = { attempted: false };
+  try {
+    const { applyWorkflowOpportunityPatch } = await import('@/lib/domain/opportunity/opportunity-service.js');
+    opportunityUpdate = {
+      attempted: true,
+      ...(await applyWorkflowOpportunityPatch({
+        opportunity_id: enrollment.context?.opportunity_id,
+        thread_key: enrollment.context?.thread_id ?? enrollment.context?.conversation_id ?? enrollment.subject_id,
+        stage: targetStage,
+        reason: 'workflow_update_stage',
+        dedupe_key: `wfv2-stage:${enrollment.id}:${targetStage}`,
+        source: 'workflow',
+      }, deps)),
+    };
+  } catch (err) {
+    opportunityUpdate = { attempted: true, ok: false, error: err?.message ?? 'opportunity_update_failed' };
   }
 
   return {
@@ -217,7 +216,7 @@ async function executeUpdateStage(node, enrollment, deps) {
       node_type: node.node_type,
       target_stage: targetStage,
       context_updated: true,
-      crm_update: crmUpdate,
+      opportunity_update: opportunityUpdate,
     },
   };
 }
@@ -723,20 +722,41 @@ async function executeSelectNextContactMethod(node, enrollment, deps) {
 
 async function executeCreateOrUpdateOpportunity(node, enrollment, deps) {
   const ctx = enrollment.context ?? {};
-  const opportunity = {
-    id: clean(node.config?.opportunity_id ?? ctx.opportunity_id ?? '') || null,
-    stage: clean(node.config?.stage ?? ctx.stage ?? ctx.workflow_stage ?? '') || null,
-    property_id: ctx.property_id ?? null,
-    master_owner_id: ctx.master_owner_id ?? null,
-    updated_at: new Date().toISOString(),
-    source: 'workflow_v2_scaffold',
-  };
+  const { applyWorkflowOpportunityPatch } = await import('@/lib/domain/opportunity/opportunity-service.js');
+  const result = await applyWorkflowOpportunityPatch({
+    opportunity_id: clean(node.config?.opportunity_id ?? ctx.opportunity_id ?? ''),
+    thread_key: clean(ctx.thread_id ?? ctx.conversation_id ?? enrollment.subject_id ?? ''),
+    stage: clean(node.config?.stage ?? node.config?.acquisition_stage ?? ctx.stage ?? ctx.workflow_stage ?? ''),
+    status: clean(node.config?.status ?? node.config?.opportunity_status ?? ''),
+    aos: node.config?.aos ?? ctx.aos ?? null,
+    strategy: clean(node.config?.strategy ?? ctx.strategy ?? ''),
+    asking_price: node.config?.asking_price ?? ctx.asking_price ?? null,
+    recommended_offer: node.config?.recommended_offer ?? ctx.recommended_offer ?? null,
+    automation_state: clean(node.config?.automation_state ?? ''),
+    next_action: clean(node.config?.next_action ?? ''),
+    next_action_due: node.config?.next_action_due ?? null,
+    approval_state: clean(node.config?.approval_state ?? ''),
+    reason: clean(node.config?.reason ?? 'workflow_create_or_update_opportunity'),
+    dedupe_key: clean(node.config?.dedupe_key ?? `wfv2-opp:${enrollment.id}:${node.id}`),
+    actor: 'workflow_v2',
+  }, deps);
 
-  await updateEnrollmentContext(enrollment.id, { opportunity, opportunity_id: opportunity.id }, deps);
+  const opportunity = result.opportunity ?? null;
+  if (opportunity?.id) {
+    await updateEnrollmentContext(
+      enrollment.id,
+      { opportunity_id: opportunity.id, opportunity, stage: opportunity.acquisition_stage },
+      deps,
+    );
+  }
 
   return {
-    ...baseResult(node, 'completed', enrollment),
-    action: { node_type: node.node_type, opportunity, scaffolded: true },
+    ...baseResult(node, result.ok ? 'completed' : 'failed', enrollment),
+    action: {
+      node_type: node.node_type,
+      opportunity,
+      error: result.error ?? null,
+    },
   };
 }
 

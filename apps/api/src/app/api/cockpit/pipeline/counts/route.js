@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../_shared.js'
-import { getDealContextCounts } from '@/lib/domain/deal-context/deal-context-service.js'
+import { getPipelineMetrics } from '@/lib/domain/opportunity/opportunity-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -46,10 +46,8 @@ export async function GET(request) {
   }
 
   try {
-    const data = await getDealContextCounts()
-    const counts = data.by_universal_stage || {}
-    
-    return NextResponse.json({ ok: true, data: counts }, { status: 200, headers: cors })
+    const metrics = await getPipelineMetrics()
+    return NextResponse.json({ ok: true, data: metrics }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error.message },

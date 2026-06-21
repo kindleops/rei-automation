@@ -69,7 +69,7 @@ import { IntelligencePanel } from './components/IntelligencePanel'
 import { CompIntelligenceWorkspace } from '../../views/comp-intelligence/CompIntelligenceWorkspace'
 import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
 import { QueuePage } from '../../views/queue/QueuePage'
-import { InboxPipelineView } from '../../views/pipeline/InboxPipelineView'
+import { PipelineWorkspace } from '../../views/pipeline/PipelineWorkspace'
 import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import { MetricsWarRoom } from './components/MetricsWarRoom'
 import type { TemplateActionPayload } from './components/TemplatePopover'
@@ -878,18 +878,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   ], [viewCounts])
 
   const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
-
-  // Pipeline view shows all loaded threads (not just priority-filtered ones).
-  // Search and advanced filters still apply; view filter is intentionally skipped
-  // so the kanban represents the full seller universe, not just unread/high-score threads.
-  const pipelineThreads = useMemo(() => (
-    applyInboxFilters(threads, {
-      search: searchQuery,
-      stage: 'all_stages',
-      view: 'all_conversations',
-      advanced: advancedFilters,
-    }, serverFilterOptions)
-  ), [advancedFilters, searchQuery, serverFilterOptions, threads])
 
   const handleLoadMore = useCallback(async () => {
     await loadMore()
@@ -4003,15 +3991,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'pipeline') {
       return (
-        <InboxPipelineView
-          threads={pipelineThreads}
+        <PipelineWorkspace
           selectedId={selected?.id ?? null}
-          selectedThread={selected}
           layoutMode={layoutMode}
           onSelect={handleSelect}
-          onActivateThread={(thread) => setActiveContext(buildContextFromThread(thread, 'pipeline'), { preserveCurrentViews: true })}
           onOpenCommandView={handleOpenDealIntelligence}
-          onThreadAction={handleOperatorAction}
+          onOpenDealIntelligence={handleOpenDealIntelligence}
+          onAction={handleOperatorAction}
         />
       )
     }
