@@ -156,7 +156,7 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     setError(null)
     try {
       const [list, metricData, globalMetrics, views] = await Promise.all([
-        fetchPipelineOpportunities({ limit: 100, ...scopeParams }),
+        fetchPipelineOpportunities({ limit: 500, hydrate_follow_up: true, ...scopeParams }),
         fetchPipelineMetrics({ scope: viewState.scope }),
         fetchPipelineMetrics({ scope: 'all' }),
         fetchPipelineSavedViews(),

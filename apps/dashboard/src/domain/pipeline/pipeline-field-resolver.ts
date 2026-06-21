@@ -142,8 +142,8 @@ export function resolveFieldValue(
       display = state
       empty = false
       tone = state === 'Needs Reply' || state === 'New Inbound' ? 'unread' : state === 'Seller Replied' ? 'replied' : 'neutral'
-      actionable = state === 'Needs Reply' || state === 'New Inbound'
-      action = actionable ? 'open_conversation' : undefined
+      actionable = false
+      action = undefined
       break
     }
     case 'last_activity_at':

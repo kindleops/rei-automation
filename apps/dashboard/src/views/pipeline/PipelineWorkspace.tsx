@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveInboxContext } from '../../modules/inbox/active-context'
 import { buildContextFromOpportunity } from '../../modules/inbox/active-context'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
@@ -68,6 +68,7 @@ export function PipelineWorkspace({
     opportunities,
     metrics,
     globalTotal,
+    total: scopedTotal,
     savedViews,
     viewState,
     groupBy,
@@ -101,6 +102,8 @@ export function PipelineWorkspace({
   const [detailOpportunity, setDetailOpportunity] = useState<PipelineOpportunity | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'loaded' | 'partial' | 'error'>('idle')
+  const detailRequestRef = useRef(0)
 
   const listOpportunity = useMemo(
     () => opportunities.find((o) => o.id === selectedOpportunityId) ?? null,
@@ -133,28 +136,53 @@ export function PipelineWorkspace({
     if (!selectedOpportunityId) {
       setDetailOpportunity(null)
       setDetailError(null)
+      setDetailLoading(false)
+      setDetailState('idle')
       return
     }
-    let cancelled = false
+
+    const requestId = ++detailRequestRef.current
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000)
+
     setDetailLoading(true)
     setDetailError(null)
-    void fetchPipelineOpportunity(selectedOpportunityId)
+    setDetailState(listOpportunity ? 'partial' : 'loading')
+    if (listOpportunity) setDetailOpportunity(listOpportunity)
+
+    void fetchPipelineOpportunity(selectedOpportunityId, { signal: controller.signal })
       .then((row) => {
-        if (cancelled) return
+        if (requestId !== detailRequestRef.current) return
         setDetailOpportunity(row)
-        syncEntityContext(row, 'select')
+        setDetailState('loaded')
+        setDetailError(null)
       })
       .catch((err) => {
-        if (cancelled) return
-        setDetailError(err instanceof Error ? err.message : 'detail_fetch_failed')
+        if (requestId !== detailRequestRef.current) return
+        const message = err instanceof Error ? err.message : 'detail_fetch_failed'
+        const isAbort = err instanceof Error && err.name === 'AbortError'
+        if (isAbort) {
+          setDetailError('Detail request timed out')
+        } else {
+          setDetailError(message)
+        }
         if (listOpportunity) {
           setDetailOpportunity(listOpportunity)
-          syncEntityContext(listOpportunity, 'select')
+          setDetailState('partial')
+        } else {
+          setDetailState('error')
         }
       })
-      .finally(() => { if (!cancelled) setDetailLoading(false) })
-    return () => { cancelled = true }
-  }, [selectedOpportunityId, listOpportunity, syncEntityContext])
+      .finally(() => {
+        if (requestId !== detailRequestRef.current) return
+        setDetailLoading(false)
+      })
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timeoutId)
+    }
+  }, [selectedOpportunityId, listOpportunity?.id])
 
   useEffect(() => {
     if (!externalContext) return
@@ -282,6 +310,7 @@ export function PipelineWorkspace({
       opportunities={opportunities}
       metrics={metrics}
       globalTotal={globalTotal}
+      scopedTotal={scopedTotal}
       scope={scope}
       onScopeChange={setScope}
       savedViews={savedViews}
@@ -297,7 +326,7 @@ export function PipelineWorkspace({
       onResetView={() => { resetView(); void refresh() }}
       selectedId={selectedOpportunityId}
       selectedOpportunity={detailOpportunity ?? listOpportunity}
-      detailLoading={detailLoading}
+      detailLoading={detailLoading && detailState !== 'partial'}
       detailError={detailError}
       layoutMode={layoutMode}
       groupBy={groupBy}

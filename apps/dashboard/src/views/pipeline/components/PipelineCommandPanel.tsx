@@ -12,6 +12,7 @@ import {
   stageLabel,
 } from '../../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../../shared/formatters'
+import { PipelineUniversalNav } from './PipelineUniversalNav'
 
 type PanelTab = 'overview' | 'conversation' | 'property' | 'intelligence' | 'workflow' | 'activity'
 
@@ -98,8 +99,15 @@ export function PipelineCommandPanel({
         )}
       </header>
 
-      {loading && <div className="plv-command-panel__skeleton" aria-live="polite">Loading detail…</div>}
-      {error && !loading && (
+      <PipelineUniversalNav opportunity={opp} onAction={onAction} compact />
+
+      {loading && (
+        <div className="plv-command-panel__skeleton" aria-live="polite">
+          <span className="plv-command-panel__skeleton-pulse" />
+          Loading detail…
+        </div>
+      )}
+      {error && (
         <div className="plv-command-panel__error" role="alert">
           <p>{error}</p>
           {onRetry && <button type="button" className="plv-action-btn" onClick={onRetry}>Retry</button>}

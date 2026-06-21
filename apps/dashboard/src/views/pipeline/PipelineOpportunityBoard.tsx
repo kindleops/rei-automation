@@ -57,6 +57,7 @@ interface PipelineOpportunityBoardProps {
   opportunities: PipelineOpportunity[]
   metrics: PipelineMetrics | null
   globalTotal?: number
+  scopedTotal?: number
   scope?: PipelineScope
   onScopeChange?: (scope: PipelineScope) => void
   savedViews?: PipelineSavedView[]
@@ -96,6 +97,7 @@ export function PipelineOpportunityBoard({
   opportunities,
   metrics,
   globalTotal = 0,
+  scopedTotal = 0,
   scope = 'active',
   onScopeChange,
   savedViews = [],
@@ -187,10 +189,10 @@ export function PipelineOpportunityBoard({
   [groupDefinitions, groupBy, visibleCards])
 
   const displayStageModels = useMemo(() => {
-    if (dragCardId && mutableView) return stageModels
+    if (mutableView) return stageModels
     const populated = stageModels.filter((s) => s.count > 0)
     return populated.length > 0 ? populated : stageModels
-  }, [stageModels, dragCardId, mutableView])
+  }, [stageModels, mutableView])
 
   const selectedCard = useMemo(
     () => visibleCards.find((c) => c.opp.id === selectedId) ?? null,
@@ -327,7 +329,7 @@ export function PipelineOpportunityBoard({
     const dockOpp = selectedCard?.opp ?? panelOpportunity
     return (
       <div className="plv plv--rail">
-        <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} globalTotal={globalTotal} compact />
+        <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} scopedTotal={scopedTotal} globalTotal={globalTotal} compact />
         <KpiStrip metrics={kpi} compact />
         {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
         <div className="plv-filters">
@@ -335,8 +337,8 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--sm">
           {displayStageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
-              {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+              {s.def.label} <span className="plv-stage-chip__count">{s.count}</span>
             </button>
           ))}
         </div>
@@ -376,8 +378,8 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--md">
           {displayStageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
-              {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+              {s.def.label} <span className="plv-stage-chip__count">{s.count}</span>
             </button>
           ))}
         </div>
@@ -404,7 +406,7 @@ export function PipelineOpportunityBoard({
     <div className={cls('plv', isOps ? 'plv--ops' : isFull ? 'plv--full' : 'plv--focused')}>
       <KpiStrip metrics={kpi} compact={isOps} />
       {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
-      <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} globalTotal={globalTotal} />
+      <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} scopedTotal={scopedTotal} globalTotal={globalTotal} />
       {loading && opportunities.length === 0 && <div className="plv-loading" aria-live="polite">Loading opportunities…</div>}
       {refreshing && opportunities.length > 0 && <div className="plv-refreshing" aria-live="polite">Refreshing…</div>}
 
@@ -475,7 +477,8 @@ export function PipelineOpportunityBoard({
 
       {readOnlyView && (
         <div className="plv-readonly-banner" role="status">
-          Read-only view — drag is disabled for {groupBy.replace(/_/g, ' ')} grouping
+          <span className="plv-lane__readonly-badge">View only</span>
+          <span>Drag is disabled for {groupBy.replace(/_/g, ' ')} grouping</span>
         </div>
       )}
 
@@ -567,23 +570,25 @@ function ScopeBar({
   scope,
   onScopeChange,
   metrics,
+  scopedTotal,
   globalTotal,
   compact,
 }: {
   scope: PipelineScope
   onScopeChange?: (scope: PipelineScope) => void
   metrics: PipelineMetrics | Record<string, number>
+  scopedTotal: number
   globalTotal: number
   compact?: boolean
 }) {
-  const m = metrics as PipelineMetrics
-  const scoped = m.active_opportunities ?? m.total ?? 0
+  const scopeLabel = PIPELINE_SCOPE_OPTIONS.find((o) => o.value === scope)?.label?.toLowerCase() ?? scope
+  const filteredCards = metrics.active_opportunities ?? scopedTotal
   return (
     <div className={cls('plv-scope-bar', compact && 'plv-scope-bar--compact')}>
-      <div className="plv-scope-bar__counts">
-        <strong>{scoped} scoped</strong>
+      <div className="plv-scope-bar__counts" title={`${scopedTotal} opportunities match scope filter · ${filteredCards} cards loaded · ${globalTotal} total in database`}>
+        <strong>{scopedTotal} {scopeLabel} opportunities</strong>
         <span>·</span>
-        <span>{globalTotal} total</span>
+        <span>{globalTotal} total opportunities</span>
       </div>
       {onScopeChange && (
         <div className="plv-scope-bar__options">

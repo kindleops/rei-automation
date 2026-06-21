@@ -1,4 +1,12 @@
 import type { PipelineGroupByMode, PipelineOpportunity } from './pipeline-opportunity.types'
+import {
+  UNIVERSAL_STAGE_LABELS,
+  UNIVERSAL_STAGE_ORDER,
+  UNIVERSAL_STATUS_LABELS,
+  UNIVERSAL_STATUS_ORDER,
+  UNIVERSAL_TEMPERATURE_LABELS,
+  UNIVERSAL_TEMPERATURE_ORDER,
+} from './pipeline-canonical-taxonomy'
 
 export type StageTone = 'cyan' | 'blue' | 'gold' | 'orange' | 'green' | 'red' | 'neutral' | 'amber'
 
@@ -9,37 +17,26 @@ export interface StageDefinition {
   matches?: string[]
 }
 
+const STAGE_TONES: StageTone[] = ['cyan', 'blue', 'gold', 'orange', 'green', 'green', 'green', 'blue', 'green', 'red']
+
 /** Canonical universal acquisition stages (API-aligned). */
-export const UNIVERSAL_PIPELINE_STAGE_GROUPS: StageDefinition[] = [
-  { id: 'ownership_confirmation', label: 'Ownership Confirmation', tone: 'cyan' },
-  { id: 'offer_interest', label: 'Offer Interest', tone: 'blue' },
-  { id: 'asking_price', label: 'Asking Price', tone: 'gold' },
-  { id: 'property_condition', label: 'Property Condition', tone: 'orange' },
-  { id: 'offer', label: 'Offer', tone: 'green' },
-  { id: 'formal_contract', label: 'Formal Contract', tone: 'green' },
-  { id: 'under_contract', label: 'Under Contract', tone: 'green' },
-  { id: 'disposition', label: 'Disposition', tone: 'blue' },
-  { id: 'prepared_to_close', label: 'Prepared to Close', tone: 'green' },
-  { id: 'closed', label: 'Closed', tone: 'red' },
-]
+export const UNIVERSAL_PIPELINE_STAGE_GROUPS: StageDefinition[] = UNIVERSAL_STAGE_ORDER.map((id, i) => ({
+  id,
+  label: UNIVERSAL_STAGE_LABELS[id] ?? id,
+  tone: STAGE_TONES[i] ?? 'neutral',
+}))
 
-export const UNIVERSAL_STATUS_GROUPS: StageDefinition[] = [
-  { id: 'priority', label: 'Priority', tone: 'cyan' },
-  { id: 'waiting', label: 'Waiting', tone: 'blue' },
-  { id: 'cold', label: 'Cold', tone: 'neutral' },
-  { id: 'follow_up', label: 'Follow Up', tone: 'amber' },
-  { id: 'needs_review', label: 'Needs Review', tone: 'amber' },
-  { id: 'unknown', label: 'Unknown', tone: 'neutral' },
-]
+export const UNIVERSAL_STATUS_GROUPS: StageDefinition[] = UNIVERSAL_STATUS_ORDER.map((id, i) => ({
+  id,
+  label: UNIVERSAL_STATUS_LABELS[id] ?? id,
+  tone: (['cyan', 'blue', 'neutral', 'amber', 'amber', 'neutral'] as StageTone[])[i] ?? 'neutral',
+}))
 
-export const TEMPERATURE_GROUPS: StageDefinition[] = [
-  { id: 'hot', label: 'Hot', tone: 'red' },
-  { id: 'warming', label: 'Warming', tone: 'amber' },
-  { id: 'engaged', label: 'Engaged', tone: 'cyan' },
-  { id: 'cold', label: 'Cold', tone: 'cyan' },
-  { id: 'dead', label: 'Dead', tone: 'neutral' },
-  { id: 'unknown', label: 'Unknown', tone: 'neutral' },
-]
+export const TEMPERATURE_GROUPS: StageDefinition[] = UNIVERSAL_TEMPERATURE_ORDER.map((id, i) => ({
+  id,
+  label: UNIVERSAL_TEMPERATURE_LABELS[id] ?? id,
+  tone: (['red', 'amber', 'cyan', 'cyan', 'neutral', 'neutral'] as StageTone[])[i] ?? 'neutral',
+}))
 
 export const QUEUE_STATUS_GROUPS: StageDefinition[] = [
   { id: 'scheduled', label: 'Scheduled', tone: 'blue', matches: ['scheduled'] },
@@ -338,9 +335,11 @@ export function groupDefinitionsForMode(
     const dynamic = Array.from(counts.keys()).filter((k) => !PROPERTY_TYPE_ORDER.includes(k))
     const ordered = [...PROPERTY_TYPE_ORDER, ...dynamic]
     const tones: StageTone[] = ['cyan', 'blue', 'gold', 'orange', 'green', 'red', 'neutral']
-    return ordered
-      .filter((label) => counts.has(label))
-      .map((label, index) => ({ id: label, label, tone: tones[index % tones.length] ?? 'neutral' }))
+    return ordered.map((label, index) => ({
+      id: label,
+      label: label === 'Unknown' ? 'Unclassified' : label,
+      tone: tones[index % tones.length] ?? 'neutral',
+    }))
   }
 
   const counts = new Map<string, number>()

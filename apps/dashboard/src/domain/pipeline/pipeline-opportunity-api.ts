@@ -47,9 +47,12 @@ export async function fetchPipelineMetrics(
   return res.data
 }
 
-export async function fetchPipelineOpportunity(id: string): Promise<PipelineOpportunity> {
+export async function fetchPipelineOpportunity(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<PipelineOpportunity> {
   const res = unwrap<{ ok: boolean; data: PipelineOpportunity }>(
-    await callBackend(`${BASE}/opportunities/${encodeURIComponent(id)}`),
+    await callBackend(`${BASE}/opportunities/${encodeURIComponent(id)}`, { signal: options?.signal }),
   )
   return res.data
 }

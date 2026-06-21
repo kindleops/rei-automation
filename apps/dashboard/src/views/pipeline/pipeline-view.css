@@ -2117,6 +2117,38 @@
   background: rgba(127, 29, 29, 0.35);
 }
 
+.plv-universal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.plv-universal-nav__label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.75);
+}
+.plv-universal-nav__menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.plv-universal-nav__item {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+}
+.plv-universal-nav__item:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .plv-scope-bar,
   .plv-card.is-dragging,
