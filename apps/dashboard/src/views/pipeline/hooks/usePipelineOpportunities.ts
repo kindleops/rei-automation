@@ -3,10 +3,17 @@ import {
   fetchPipelineMetrics,
   fetchPipelineOpportunities,
   fetchPipelineSavedViews,
+  savePipelineView,
   transitionPipelineStage,
   transitionPipelineStatus,
   transitionPipelineTemperature,
 } from '../../../domain/pipeline/pipeline-opportunity-api'
+import type {
+  PipelineCardDesign,
+  PipelineFilterGroup,
+  PipelineSortSpec,
+  PipelineViewState,
+} from '../../../domain/pipeline/pipeline-card-design.types'
 import type {
   PipelineGroupByMode,
   PipelineMetrics,
@@ -15,28 +22,28 @@ import type {
 } from '../../../domain/pipeline/pipeline-opportunity.types'
 import {
   loadPipelineGroupBy,
-  loadPipelineScope,
+  savePipelineGroupBy,
   savePipelineScope,
   type PipelineScope,
 } from '../../../domain/pipeline/pipeline-display-helpers'
-
-const EMPTY_FILTERS: Record<string, string | number | boolean | undefined> = Object.freeze({})
+import {
+  applySavedViewToState,
+  getCardDesignForGroup,
+  loadPipelineViewState,
+  savePipelineViewState,
+  saveCardDesignsByGroup,
+} from '../../../domain/pipeline/pipeline-view-state'
 
 interface UsePipelineOpportunitiesOptions {
   enabled?: boolean
-  filters?: Record<string, string | number | boolean | undefined>
 }
 
-export function usePipelineOpportunities({
-  enabled = true,
-  filters = EMPTY_FILTERS,
-}: UsePipelineOpportunitiesOptions = {}) {
+export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportunitiesOptions = {}) {
   const [opportunities, setOpportunities] = useState<PipelineOpportunity[]>([])
   const [metrics, setMetrics] = useState<PipelineMetrics | null>(null)
   const [globalTotal, setGlobalTotal] = useState(0)
   const [savedViews, setSavedViews] = useState<PipelineSavedView[]>([])
-  const [groupBy, setGroupBy] = useState<PipelineGroupByMode>(loadPipelineGroupBy)
-  const [scope, setScopeState] = useState<PipelineScope>(loadPipelineScope)
+  const [viewState, setViewState] = useState<PipelineViewState>(loadPipelineViewState)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,12 +51,91 @@ export function usePipelineOpportunities({
   const initialLoadDone = useRef(false)
   const requestSeq = useRef(0)
 
-  const scopeParams = useMemo(() => ({ scope, ...filters }), [scope, filters])
+  const scopeParams = useMemo(() => ({
+    scope: viewState.scope,
+    filter_json: JSON.stringify(viewState.filters),
+    sorts: JSON.stringify(viewState.sorts),
+  }), [viewState.scope, viewState.filters, viewState.sorts])
 
-  const setScope = useCallback((next: PipelineScope) => {
-    setScopeState(next)
-    savePipelineScope(next)
+  const setGroupBy = useCallback((mode: PipelineGroupByMode) => {
+    setViewState((prev) => {
+      const cardDesign = getCardDesignForGroup(mode, prev.cardDesignsByGroup)
+      const next = { ...prev, groupBy: mode, cardDesign }
+      savePipelineGroupBy(mode)
+      savePipelineViewState(next)
+      return next
+    })
   }, [])
+
+  const setScope = useCallback((scope: PipelineScope) => {
+    setViewState((prev) => {
+      const next = { ...prev, scope }
+      savePipelineScope(scope)
+      savePipelineViewState(next)
+      return next
+    })
+  }, [])
+
+  const setFilters = useCallback((filters: PipelineFilterGroup) => {
+    setViewState((prev) => {
+      const next = { ...prev, filters }
+      savePipelineViewState(next)
+      return next
+    })
+  }, [])
+
+  const setSorts = useCallback((sorts: PipelineSortSpec[]) => {
+    setViewState((prev) => {
+      const next = { ...prev, sorts }
+      savePipelineViewState(next)
+      return next
+    })
+  }, [])
+
+  const setCardDesign = useCallback((cardDesign: PipelineCardDesign) => {
+    setViewState((prev) => {
+      const cardDesignsByGroup = { ...prev.cardDesignsByGroup, [prev.groupBy]: cardDesign }
+      const next = { ...prev, cardDesign, cardDesignsByGroup }
+      saveCardDesignsByGroup(cardDesignsByGroup)
+      savePipelineViewState(next)
+      return next
+    })
+  }, [])
+
+  const applySavedView = useCallback((view: PipelineSavedView) => {
+    setViewState((prev) => {
+      const next = applySavedViewToState(view, prev)
+      savePipelineGroupBy(next.groupBy)
+      savePipelineScope(next.scope as PipelineScope)
+      savePipelineViewState(next)
+      return next
+    })
+  }, [])
+
+  const persistView = useCallback(async (payload: Partial<PipelineSavedView>) => {
+    const saved = await savePipelineView(payload)
+    setSavedViews((views) => {
+      const idx = views.findIndex((v) => v.view_key === saved.view_key)
+      if (idx >= 0) {
+        const next = [...views]
+        next[idx] = saved
+        return next
+      }
+      return [...views, saved]
+    })
+    return saved
+  }, [])
+
+  const duplicateView = useCallback(async (view: PipelineSavedView) => {
+    await persistView({
+      ...view,
+      view_key: `${view.view_key}_copy_${Date.now()}`,
+      label: `${view.label} (Copy)`,
+      is_system: false,
+      is_pinned: false,
+      duplicate: true,
+    } as Partial<PipelineSavedView> & { duplicate?: boolean })
+  }, [persistView])
 
   const refresh = useCallback(async () => {
     if (!enabled) return
@@ -61,7 +147,7 @@ export function usePipelineOpportunities({
     try {
       const [list, metricData, globalMetrics, views] = await Promise.all([
         fetchPipelineOpportunities({ limit: 100, ...scopeParams }),
-        fetchPipelineMetrics(scopeParams),
+        fetchPipelineMetrics({ scope: viewState.scope }),
         fetchPipelineMetrics({ scope: 'all' }),
         fetchPipelineSavedViews(),
       ])
@@ -80,7 +166,7 @@ export function usePipelineOpportunities({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [enabled, scopeParams])
+  }, [enabled, scopeParams, viewState.scope])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -118,10 +204,20 @@ export function usePipelineOpportunities({
     metrics,
     globalTotal,
     savedViews,
-    groupBy,
+    viewState,
+    groupBy: viewState.groupBy,
+    scope: viewState.scope as PipelineScope,
+    cardDesign: viewState.cardDesign,
+    filters: viewState.filters,
+    sorts: viewState.sorts,
     setGroupBy,
-    scope,
     setScope,
+    setFilters,
+    setSorts,
+    setCardDesign,
+    applySavedView,
+    persistView,
+    duplicateView,
     loading,
     refreshing,
     error,

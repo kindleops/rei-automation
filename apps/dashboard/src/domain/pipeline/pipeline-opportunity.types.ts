@@ -193,9 +193,15 @@ export interface PipelineSavedView {
   description: string | null
   filters: Record<string, unknown>
   group_by: PipelineGroupByMode | string
+  scope?: string
+  sorts?: Array<{ field: string; direction: 'asc' | 'desc'; nulls: 'first' | 'last' }>
+  card_design?: Record<string, unknown>
+  card_designs_by_group?: Record<string, unknown>
+  density?: string
   is_default: boolean
   is_pinned: boolean
   is_shared: boolean
+  is_system?: boolean
 }
 
 export interface PipelineListResult {

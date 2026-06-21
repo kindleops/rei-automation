@@ -25,6 +25,7 @@ import {
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
 import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
+import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
 
 const TABLE = 'acquisition_opportunities';
 const HISTORY_TABLE = 'acquisition_opportunity_history';
@@ -260,10 +261,9 @@ export async function listOpportunities(params = {}, deps = {}) {
 
   let query = client.from(TABLE).select('*', { count: 'exact' });
   query = applyFilters(query, params);
-
-  const orderBy = clean(params.order_by) || 'last_activity_at';
-  const ascending = truthy(params.ascending);
-  query = query.order(orderBy, { ascending, nullsFirst: false }).range(offset, offset + limit - 1);
+  query = applyRegistryFilters(query, params);
+  query = applyRegistrySorts(query, params);
+  query = query.range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
   if (error) throw error;
@@ -836,15 +836,28 @@ export async function listSavedViews(deps = {}) {
 export async function upsertSavedView(input = {}, deps = {}) {
   const client = db(deps);
   const viewKey = clean(input.view_key) || clean(input.label).toLowerCase().replace(/\s+/g, '_');
+
+  const existingRes = await client.from('pipeline_saved_views').select('is_system').eq('view_key', viewKey).maybeSingle();
+  if (existingRes.data?.is_system && !input.duplicate) {
+    throw new Error('system_preset_locked');
+  }
   const row = {
     view_key: viewKey,
     label: clean(input.label) || viewKey,
     description: clean(input.description) || null,
     filters: input.filters && typeof input.filters === 'object' ? input.filters : {},
-    group_by: clean(input.group_by) || 'acquisition_stage',
+    group_by: clean(input.group_by) || 'stage',
+    scope: clean(input.scope) || 'active',
+    sorts: Array.isArray(input.sorts) ? input.sorts : [],
+    card_design: input.card_design && typeof input.card_design === 'object' ? input.card_design : {},
+    card_designs_by_group: input.card_designs_by_group && typeof input.card_designs_by_group === 'object'
+      ? input.card_designs_by_group
+      : {},
+    density: clean(input.density) || 'standard',
     is_default: Boolean(input.is_default),
     is_pinned: Boolean(input.is_pinned),
     is_shared: input.is_shared !== false,
+    is_system: Boolean(input.is_system),
     created_by: clean(input.created_by) || null,
     updated_at: new Date().toISOString(),
   };

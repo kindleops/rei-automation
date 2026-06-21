@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
+import type { PipelineCardDesign, PipelineFilterGroup, PipelineSortSpec, PipelineViewState } from '../../domain/pipeline/pipeline-card-design.types'
 import type { PipelineGroupByMode, PipelineMetrics, PipelineOpportunity, PipelineSavedView } from '../../domain/pipeline/pipeline-opportunity.types'
 import {
-  displayAos,
-  displayCurrency,
   groupDefinitionsForMode,
   groupKeyForOpportunity,
   isFollowUpDue,
@@ -12,45 +11,38 @@ import {
   PIPELINE_SCOPE_OPTIONS,
   portfolioLabel,
   resolvePipelineStage,
-  resolvePropertyType,
   resolveTemperature,
   resolveUniversalStatus,
   stageLabel,
-  stageAgeDays,
   type PipelineScope,
 } from '../../domain/pipeline/pipeline-display-helpers'
-import { formatRelativeTime } from '../../shared/formatters'
+import { resolveReplyAttentionState } from '../../domain/pipeline/pipeline-field-resolver'
 import { PipelineViewSelector } from './components/PipelineViewSelector'
 import { PipelineCommandPanel } from './components/PipelineCommandPanel'
+import { PipelineConfigurableCard } from './components/PipelineConfigurableCard'
+import { PipelineCardDesigner } from './components/PipelineCardDesigner'
+import { PipelineSortBuilder } from './components/PipelineSortBuilder'
+import { PipelineFilterBuilder } from './components/PipelineFilterBuilder'
+import { PipelineViewManager } from './components/PipelineViewManager'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 const DRAG_THRESHOLD_PX = 6
 
-type SortMode = 'priority' | 'recent' | 'value' | 'stage_age'
-
 interface OppCard {
   opp: PipelineOpportunity
-  sellerName: string
-  address: string
-  market: string
-  hot: boolean
-  unread: boolean
   followUpDue: boolean
   suppressed: boolean
+  needsAttention: boolean
 }
 
 function buildCard(opp: PipelineOpportunity): OppCard {
   return {
     opp,
-    sellerName: opp.seller_display_name || 'Unknown Seller',
-    address: portfolioLabel(opp),
-    market: opp.market || 'Market Unknown',
-    hot: opp.temperature === 'hot' || (opp.aos != null && opp.aos >= 75 && !!opp.acquisition_engine_run_id),
-    unread: opp.conversation_state === 'needs_reply' || opp.conversation_state === 'seller_replied',
     followUpDue: isFollowUpDue(opp),
     suppressed: opp.opportunity_status === 'suppressed' || opp.opportunity_status === 'dead',
+    needsAttention: Boolean(resolveReplyAttentionState(opp)),
   }
 }
 
@@ -67,6 +59,15 @@ interface PipelineOpportunityBoardProps {
   scope?: PipelineScope
   onScopeChange?: (scope: PipelineScope) => void
   savedViews?: PipelineSavedView[]
+  viewState?: PipelineViewState
+  cardDesign?: PipelineCardDesign
+  filters?: PipelineFilterGroup
+  sorts?: PipelineSortSpec[]
+  onFiltersChange?: (filters: PipelineFilterGroup) => void
+  onSortsChange?: (sorts: PipelineSortSpec[]) => void
+  onCardDesignChange?: (design: PipelineCardDesign) => void
+  onPersistView?: (payload: Partial<PipelineSavedView>) => Promise<void>
+  onDuplicateView?: (view: PipelineSavedView) => Promise<void>
   selectedId: string | null
   selectedOpportunity?: PipelineOpportunity | null
   detailLoading?: boolean
@@ -95,6 +96,15 @@ export function PipelineOpportunityBoard({
   scope = 'active',
   onScopeChange,
   savedViews = [],
+  viewState,
+  cardDesign,
+  filters,
+  sorts,
+  onFiltersChange,
+  onSortsChange,
+  onCardDesignChange,
+  onPersistView,
+  onDuplicateView,
   selectedId,
   selectedOpportunity,
   detailLoading,
@@ -116,7 +126,6 @@ export function PipelineOpportunityBoard({
   onApplySavedView,
 }: PipelineOpportunityBoardProps) {
   const [query, setQuery] = useState('')
-  const [sortMode, setSortMode] = useState<SortMode>('recent')
   const [hotOnly, setHotOnly] = useState(false)
   const [followUpOnly, setFollowUpOnly] = useState(false)
   const [showSuppressed, setShowSuppressed] = useState(false)
@@ -127,8 +136,11 @@ export function PipelineOpportunityBoard({
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [dockOpen, setDockOpen] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
-  const [sortOpen, setSortOpen] = useState(false)
+  const [cardDesignerOpen, setCardDesignerOpen] = useState(false)
+  const [viewManagerOpen, setViewManagerOpen] = useState(false)
   const dragStateRef = useRef<{ id: string; startX: number; startY: number; dragging: boolean } | null>(null)
+
+  const activeCardDesign = cardDesign ?? viewState?.cardDesign
 
   const allCards = useMemo(() => opportunities.map(buildCard), [opportunities])
   const mutableView = isGroupByMutable(groupBy)
@@ -139,20 +151,18 @@ export function PipelineOpportunityBoard({
     return allCards
       .filter((c) => {
         if (!showSuppressed && c.suppressed) return false
-        if (hotOnly && !c.hot) return false
+        if (hotOnly && resolveTemperature(c.opp) !== 'hot') return false
         if (followUpOnly && !c.followUpDue) return false
         if (!q) return true
-        return [c.sellerName, c.address, c.market, c.opp.latest_intent, c.opp.next_action]
-          .some((s) => String(s ?? '').toLowerCase().includes(q))
+        return [
+          c.opp.seller_display_name,
+          c.opp.property_address_full,
+          c.opp.market,
+          c.opp.latest_intent,
+          c.opp.next_action,
+        ].some((s) => String(s ?? '').toLowerCase().includes(q))
       })
-      .sort((a, b) => {
-        if (sortMode === 'value') return (b.opp.estimated_value ?? 0) - (a.opp.estimated_value ?? 0)
-        if (sortMode === 'recent') return new Date(b.opp.last_activity_at ?? 0).getTime() - new Date(a.opp.last_activity_at ?? 0).getTime()
-        if (sortMode === 'stage_age') return stageAgeDays(b.opp) - stageAgeDays(a.opp)
-        const pw = (p: string) => (p === 'urgent' ? 4 : p === 'high' ? 3 : p === 'normal' ? 2 : 1)
-        return pw(b.opp.priority) - pw(a.opp.priority)
-      })
-  }, [allCards, query, showSuppressed, hotOnly, followUpOnly, sortMode])
+  }, [allCards, query, showSuppressed, hotOnly, followUpOnly])
 
   const groupDefinitions = useMemo(
     () => groupDefinitionsForMode(groupBy, visibleCards.map((c) => c.opp)),
@@ -251,7 +261,7 @@ export function PipelineOpportunityBoard({
 
   const kpi = metrics ?? {
     active_opportunities: visibleCards.filter((c) => !c.suppressed).length,
-    new_replies: visibleCards.filter((c) => c.unread).length,
+    new_replies: visibleCards.filter((c) => c.needsAttention).length,
     offer_ready: 0,
     follow_ups_due: visibleCards.filter((c) => c.followUpDue).length,
     negotiating: 0,
@@ -261,81 +271,39 @@ export function PipelineOpportunityBoard({
     average_stage_age_days: 0,
   }
 
+  const previewOpp = selectedOpportunity ?? selectedCard?.opp ?? visibleCards[0]?.opp ?? null
+
   const isCompact = layoutMode === 'compact'
   const isMedium = layoutMode === 'medium'
   const isOps = layoutMode === 'expanded'
   const isFull = layoutMode === 'full'
   const activeStage = stageModels.find((s) => s.def.id === activeStageId) ?? stageModels[0]
 
-  const renderCard = (card: OppCard, variant: 'compact' | 'focused' | 'kanban') => (
-    <article
-      key={card.opp.id}
-      className={cls(
-        'plv-card',
-        variant === 'compact' && 'plv-card--compact',
-        variant === 'focused' && 'plv-card--focused',
-        variant === 'kanban' && 'plv-card--kanban',
-        card.opp.id === selectedId && 'is-selected',
-        dragCardId === card.opp.id && 'is-dragging',
-      )}
-      onClick={() => handleCardClick(card.opp.id)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCardClick(card.opp.id) } }}
-      role="button"
-      tabIndex={0}
-      draggable={false}
-    >
-      {mutableView && (
-        <button
-          type="button"
-          className="plv-card__drag-handle"
-          aria-label="Drag to move"
-          draggable
-          onClick={(e) => e.stopPropagation()}
-          onDragStart={(e) => {
-            setDragCardId(card.opp.id)
-            e.dataTransfer.setData('text/plain', card.opp.id)
-            e.dataTransfer.effectAllowed = 'move'
-          }}
-          onDragEnd={endPointerDrag}
-          onPointerDown={(e) => beginPointerDrag(e, card.opp.id)}
-          onPointerMove={movePointerDrag}
-          onPointerUp={endPointerDrag}
-        >
-          ⠿
-        </button>
-      )}
-      <div className="plv-card__accent" />
-      <div className="plv-card__body">
-        <div className="plv-card__seller">{card.sellerName}</div>
-        <div className="plv-card__address">{card.address}</div>
-        <div className="plv-card__chips-row">
-          {card.hot && <span className="plv-chip is-hot">Hot</span>}
-          {card.unread && <span className="plv-chip is-unread">Reply</span>}
-          {card.followUpDue && <span className="plv-chip is-due">Due</span>}
-          {card.opp.blocker && <span className="plv-chip is-suppressed">Block</span>}
-        </div>
-        <div className="plv-card__type">{resolvePropertyType(card.opp)}</div>
-        <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No recent context.'}</div>
-        <div className="plv-card__state-row">
-          <span>{stageLabel(resolvePipelineStage(card.opp))}</span>
-          <span>{stageLabel(resolveUniversalStatus(card.opp))}</span>
-          <span>{stageLabel(resolveTemperature(card.opp))}</span>
-        </div>
-        {variant === 'kanban' && (
-          <div className="plv-card__meta-row">
-            <span className="plv-card__meta-label">AOS</span>
-            <span className="plv-card__meta-val">{displayAos(card.opp)}</span>
-            <span className="plv-card__meta-label">Stage</span>
-            <span className="plv-card__meta-val">{stageLabel(resolvePipelineStage(card.opp))}</span>
-          </div>
-        )}
-        <div className="plv-card__footer">
-          <span className="plv-card__age">{card.opp.last_activity_at ? formatRelativeTime(card.opp.last_activity_at) : '—'}</span>
-          <span className="plv-metric is-green">{displayCurrency(card.opp.asking_price, { engineRunId: card.opp.acquisition_engine_run_id })}</span>
-        </div>
-      </div>
-    </article>
-  )
+  const renderCard = (card: OppCard) => {
+    if (!activeCardDesign) return null
+    return (
+      <PipelineConfigurableCard
+        key={card.opp.id}
+        opp={card.opp}
+        design={activeCardDesign}
+        layoutMode={layoutMode}
+        selected={card.opp.id === selectedId}
+        dragging={dragCardId === card.opp.id}
+        mutableView={mutableView}
+        onClick={() => handleCardClick(card.opp.id)}
+        onReplyAction={() => onOpenCommandView(card.opp.primary_thread_key)}
+        onDragStart={(e) => {
+          setDragCardId(card.opp.id)
+          e.dataTransfer.setData('text/plain', card.opp.id)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+        onDragEnd={endPointerDrag}
+        onPointerDown={(e) => beginPointerDrag(e, card.opp.id)}
+        onPointerMove={movePointerDrag}
+        onPointerUp={endPointerDrag}
+      />
+    )
+  }
 
   if (isCompact) {
     const dockOpp = selectedCard?.opp ?? panelOpportunity
@@ -355,7 +323,7 @@ export function PipelineOpportunityBoard({
           ))}
         </div>
         <div className="plv-card-rail">
-          {(activeStage?.cards ?? []).map((card) => renderCard(card, 'compact'))}
+          {(activeStage?.cards ?? []).map((card) => renderCard(card))}
         </div>
         {dockOpen && dockOpp && (
           <div className="plv-context-dock nx-glass-menu" role="dialog" aria-label="Opportunity context">
@@ -396,7 +364,7 @@ export function PipelineOpportunityBoard({
           ))}
         </div>
         <div className="plv-focused-list">
-          {(activeStage?.cards ?? []).map((card) => renderCard(card, 'focused'))}
+          {(activeStage?.cards ?? []).map((card) => renderCard(card))}
         </div>
         {panelOpportunity && (
           <div className="plv-drawer">
@@ -436,20 +404,29 @@ export function PipelineOpportunityBoard({
           </div>
           <div className="plv-filters__controls">
             <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact={isCompact} />
-            <div className="plv-sort-selector">
-              <button type="button" className="plv-filter-chip nx-glass-menu" onClick={() => setSortOpen((v) => !v)}>
-                Sort: {sortMode.replace('_', ' ')}
-              </button>
-              {sortOpen && (
-                <div className="plv-sort-selector__menu nx-glass-menu">
-                  {(['priority', 'recent', 'value', 'stage_age'] as SortMode[]).map((mode) => (
-                    <button key={mode} type="button" className={cls('plv-sort-selector__option', sortMode === mode && 'is-active')} onClick={() => { setSortMode(mode); setSortOpen(false) }}>
-                      {mode.replace('_', ' ')}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {onSortsChange && sorts && (
+              <PipelineSortBuilder sorts={sorts} onChange={onSortsChange} />
+            )}
+            {onFiltersChange && filters && (
+              <PipelineFilterBuilder filters={filters} onChange={onFiltersChange} />
+            )}
+            <button type="button" className="plv-filter-chip nx-glass-menu" onClick={() => setCardDesignerOpen(true)}>
+              Customize Cards
+            </button>
+            {viewState && onPersistView && onDuplicateView && (
+              <PipelineViewManager
+                open={viewManagerOpen}
+                onClose={() => setViewManagerOpen(false)}
+                viewState={viewState}
+                savedViews={savedViews}
+                onApplyView={(v) => onApplySavedView?.(v)}
+                onSaveView={onPersistView}
+                onDuplicateView={onDuplicateView}
+              />
+            )}
+            <button type="button" className="plv-filter-chip nx-glass-menu" onClick={() => setViewManagerOpen(true)}>
+              Save View
+            </button>
             <button type="button" className={cls('plv-filter-chip', hotOnly && 'is-active')} onClick={() => setHotOnly(!hotOnly)}>Hot</button>
             <button type="button" className={cls('plv-filter-chip', followUpOnly && 'is-active')} onClick={() => setFollowUpOnly(!followUpOnly)}>Due</button>
             <button type="button" className={cls('plv-filter-chip', showSuppressed && 'is-active')} onClick={() => setShowSuppressed(!showSuppressed)}>
@@ -501,7 +478,7 @@ export function PipelineOpportunityBoard({
               </header>
               <div className="plv-lane__body">
                 {stage.cards.length > 0 ? (
-                  stage.cards.map((card) => renderCard(card, 'kanban'))
+                  stage.cards.map((card) => renderCard(card))
                 ) : (
                   <div className="plv-empty-lane"><span className="plv-empty-lane__icon">·</span><span>No deals in {stage.def.label}</span></div>
                 )}
@@ -535,6 +512,18 @@ export function PipelineOpportunityBoard({
           </aside>
         )}
       </div>
+
+      {activeCardDesign && onCardDesignChange && (
+        <PipelineCardDesigner
+          open={cardDesignerOpen}
+          onClose={() => setCardDesignerOpen(false)}
+          design={activeCardDesign}
+          groupBy={groupBy}
+          previewOpp={previewOpp}
+          onChange={onCardDesignChange}
+          onSave={() => onCardDesignChange(activeCardDesign)}
+        />
+      )}
     </div>
   )
 }

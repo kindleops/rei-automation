@@ -56,10 +56,20 @@ export function PipelineWorkspace({
     metrics,
     globalTotal,
     savedViews,
+    viewState,
     groupBy,
     setGroupBy,
     scope,
     setScope,
+    cardDesign,
+    filters,
+    sorts,
+    setFilters,
+    setSorts,
+    setCardDesign,
+    applySavedView,
+    persistView,
+    duplicateView,
     loading,
     refreshing,
     error,
@@ -180,18 +190,8 @@ export function PipelineWorkspace({
   }, [onAction, opportunities, detailOpportunity, refresh, selectedOpportunityId])
 
   const handleApplySavedView = useCallback((view: PipelineSavedView) => {
-    const legacyMap: Record<string, typeof groupBy> = {
-      acquisition_stage: 'stage',
-      opportunity_status: 'status',
-      conversation_state: 'status',
-      queue_execution: 'queue_status',
-      workflow_state: 'workflow_status',
-      follow_up: 'follow_up_state',
-      asset_class: 'property_type',
-    }
-    const next = legacyMap[String(view.group_by)] ?? (view.group_by as typeof groupBy)
-    if (next) setGroupBy(next)
-  }, [setGroupBy])
+    applySavedView(view)
+  }, [applySavedView])
 
   const handleSelectOpportunity = useCallback((opportunityId: string) => {
     setSelectedOpportunityId(opportunityId)
@@ -225,6 +225,15 @@ export function PipelineWorkspace({
       scope={scope}
       onScopeChange={setScope}
       savedViews={savedViews}
+      viewState={viewState}
+      cardDesign={cardDesign}
+      filters={filters}
+      sorts={sorts}
+      onFiltersChange={setFilters}
+      onSortsChange={setSorts}
+      onCardDesignChange={setCardDesign}
+      onPersistView={persistView}
+      onDuplicateView={duplicateView}
       selectedId={selectedOpportunityId}
       selectedOpportunity={detailOpportunity ?? listOpportunity}
       detailLoading={detailLoading}
