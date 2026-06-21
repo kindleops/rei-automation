@@ -32,8 +32,18 @@ export async function fetchPipelineOpportunities(
   }
 }
 
-export async function fetchPipelineMetrics(): Promise<PipelineMetrics> {
-  const res = unwrap<{ ok: boolean; data: PipelineMetrics }>(await callBackend(`${BASE}/counts`))
+export async function fetchPipelineMetrics(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<PipelineMetrics> {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    search.set(key, String(value))
+  }
+  const qs = search.toString()
+  const res = unwrap<{ ok: boolean; data: PipelineMetrics }>(
+    await callBackend(`${BASE}/counts${qs ? `?${qs}` : ''}`),
+  )
   return res.data
 }
 
@@ -56,24 +66,32 @@ export async function transitionPipelineStage(
 
 export async function transitionPipelineStatus(
   id: string,
-  input: { opportunity_status: string; reason?: string },
+  input: { to_status: string; reason?: string; idempotency_key?: string },
 ): Promise<{ ok: boolean; opportunity?: PipelineOpportunity; error?: string; message?: string }> {
-  return updatePipelineOpportunity(id, {
-    opportunity_status: input.opportunity_status,
-    reason: input.reason,
-    source: 'operator',
-  })
+  return unwrap(await callBackend(`${BASE}/opportunities/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      to_status: input.to_status,
+      reason: input.reason,
+      idempotency_key: input.idempotency_key,
+      source: 'operator',
+    }),
+  }))
 }
 
 export async function transitionPipelineTemperature(
   id: string,
-  input: { temperature: string; reason?: string },
+  input: { temperature: string; reason?: string; idempotency_key?: string },
 ): Promise<{ ok: boolean; opportunity?: PipelineOpportunity; error?: string; message?: string }> {
-  return updatePipelineOpportunity(id, {
-    temperature: input.temperature,
-    reason: input.reason,
-    source: 'operator',
-  })
+  return unwrap(await callBackend(`${BASE}/opportunities/${encodeURIComponent(id)}/temperature`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      temperature: input.temperature,
+      reason: input.reason,
+      idempotency_key: input.idempotency_key,
+      source: 'operator',
+    }),
+  }))
 }
 
 export async function updatePipelineOpportunity(

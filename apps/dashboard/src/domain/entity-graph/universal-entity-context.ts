@@ -26,7 +26,7 @@ export function universalContextFromActiveInbox(active: ActiveInboxContext): Uni
     contactMethodType: active.toPhoneNumber ? 'phone' : null,
     contactMethodId: null,
     threadKey: active.threadKey ?? null,
-    opportunityId: null,
+    opportunityId: active.opportunityId ?? null,
   }
 }
 
@@ -37,7 +37,8 @@ export function activeInboxFromUniversalContext(context: UniversalEntityContext,
     propertyId: context.propertyId ?? undefined,
     prospectId: context.prospectId ?? undefined,
     threadKey: context.threadKey ?? undefined,
-    toPhoneNumber: context.contactMethodType === 'phone' ? context.contactMethodId ?? undefined : undefined,
+    opportunityId: context.opportunityId ?? undefined,
+    toPhoneNumber: context.contactMethodType === 'phone' ? context.contactMethodId ?? context.threadKey ?? undefined : undefined,
     sourceView,
     intent: context.threadKey ? 'open_thread' : context.propertyId ? 'open_seller' : undefined,
   }

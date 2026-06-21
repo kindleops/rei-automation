@@ -23,6 +23,8 @@ import {
   validateTemperatureTransition,
 } from '@/lib/domain/opportunity/opportunity-stage-registry.js';
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
+import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
+import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
 
 const TABLE = 'acquisition_opportunities';
 const HISTORY_TABLE = 'acquisition_opportunity_history';
@@ -136,9 +138,30 @@ function applyFilters(query, params = {}) {
     ].join(','));
   }
 
-  const excludeTerminal = params.include_terminal !== 'true' && params.include_terminal !== true;
-  if (excludeTerminal && !clean(params.opportunity_status) && !clean(params.status)) {
-    next = next.not('opportunity_status', 'in', '(dead,archived,suppressed,lost,won)');
+  const scope = clean(params.scope).toLowerCase();
+  if (scope === 'active') {
+    next = next.in('opportunity_status', ['active', 'waiting', 'paused', 'nurture']);
+  } else if (scope === 'needs_attention') {
+    next = next.or([
+      'universal_status.in.(priority,needs_review,follow_up)',
+      'conversation_state.eq.needs_reply',
+    ].join(','));
+  } else if (scope === 'dead') {
+    next = next.eq('opportunity_status', 'dead');
+  } else if (scope === 'suppressed') {
+    next = next.eq('opportunity_status', 'suppressed');
+  } else if (scope === 'closed' || scope === 'archived') {
+    next = next.or([
+      'acquisition_stage.eq.closed',
+      'opportunity_status.in.(archived,won,lost)',
+    ].join(','));
+  } else if (scope === 'all') {
+    // no terminal exclusion
+  } else {
+    const excludeTerminal = params.include_terminal !== 'true' && params.include_terminal !== true;
+    if (excludeTerminal && !clean(params.opportunity_status) && !clean(params.status) && !scope) {
+      next = next.not('opportunity_status', 'in', '(dead,archived,suppressed,lost,won)');
+    }
   }
 
   return next;
@@ -246,13 +269,14 @@ export async function listOpportunities(params = {}, deps = {}) {
   if (error) throw error;
 
   const hydrateFollowUpEnabled = truthy(params.hydrate_follow_up);
-  const rows = [];
-  for (const raw of data ?? []) {
-    let row = normalizeOpportunityRow(raw);
-    if (hydrateFollowUpEnabled) {
-      row = await hydrateFollowUp(client, row);
+  const normalized = (data ?? []).map((raw) => normalizeOpportunityRow(raw)).filter(Boolean);
+  let rows = await batchHydrateOpportunityProperties(client, normalized);
+  if (hydrateFollowUpEnabled) {
+    const hydrated = [];
+    for (const row of rows) {
+      hydrated.push(await hydrateFollowUp(client, row));
     }
-    rows.push(row);
+    rows = hydrated;
   }
 
   return {
@@ -268,6 +292,7 @@ export async function getOpportunityById(id, deps = {}) {
   if (error) throw error;
   if (!data) return null;
   let row = normalizeOpportunityRow(data);
+  [row] = await batchHydrateOpportunityProperties(client, [row]);
   row = await hydrateFollowUp(client, row);
 
   const historyRes = await client
@@ -277,14 +302,17 @@ export async function getOpportunityById(id, deps = {}) {
     .order('created_at', { ascending: false })
     .limit(50);
   row.history = historyRes.data ?? [];
+  row.activity_timeline = await buildOpportunityActivityTimeline(client, row, deps);
   return row;
 }
 
 export async function getPipelineMetrics(params = {}, deps = {}) {
   const client = db(deps);
-  const { data, error } = await client.from(TABLE).select(
-    'id,acquisition_stage,universal_status,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker,acquisition_engine_run_id,temperature',
+  let query = client.from(TABLE).select(
+    'id,acquisition_stage,universal_status,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker,acquisition_engine_run_id,temperature,last_activity_at',
   );
+  query = applyFilters(query, params);
+  const { data, error } = await query;
   if (error) throw error;
 
   const rows = (data ?? []).map(normalizeOpportunityRow);
@@ -335,7 +363,15 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
       metrics.active_opportunities += 1;
     }
     if (universalStatus === UNIVERSAL_STATUS_CODES.PRIORITY) metrics.priority += 1;
-    if (row.conversation_state === 'needs_reply') metrics.new_replies += 1;
+    const lastActivityMs = row.last_activity_at ? new Date(row.last_activity_at).getTime() : 0;
+    const recentReplyWindowMs = 7 * 86400000;
+    const isRecentReply = lastActivityMs > 0 && (Date.now() - lastActivityMs) <= recentReplyWindowMs;
+    if (
+      row.conversation_state === 'needs_reply'
+      || (row.conversation_state === 'seller_replied' && isRecentReply && !['dead', 'suppressed', 'archived'].includes(status))
+    ) {
+      metrics.new_replies += 1;
+    }
     if (stage === UNIVERSAL_STAGE_CODES.OFFER_INTEREST && ['active', 'waiting'].includes(status)) metrics.qualified += 1;
     if (stage === UNIVERSAL_STAGE_CODES.OFFER) {
       metrics.offer_ready += 1;

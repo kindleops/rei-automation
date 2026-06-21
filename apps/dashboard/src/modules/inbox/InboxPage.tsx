@@ -3995,7 +3995,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           selectedId={selected?.id ?? null}
           layoutMode={layoutMode}
           onSelect={handleSelect}
-          onOpenCommandView={handleOpenDealIntelligence}
+          onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
+          onOpenCommandView={(threadId) => {
+            if (threadId) handleSelect(threadId)
+            handleFocusWorkspaceView('sms_thread')
+          }}
           onOpenDealIntelligence={handleOpenDealIntelligence}
           onAction={handleOperatorAction}
         />

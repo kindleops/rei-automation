@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ActiveInboxContext } from '../../modules/inbox/active-context'
+import { buildContextFromOpportunity } from '../../modules/inbox/active-context'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { fetchPipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity-api'
 import type { PipelineSavedView, PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
+import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
+import { universalContextFromOpportunity } from '../../domain/pipeline/pipeline-universal-context'
+import { setUniversalEntityContextSnapshot, UNIVERSAL_ENTITY_CONTEXT_EVENT } from '../../domain/entity-graph/universal-entity-context-store'
+import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
 
@@ -12,6 +18,7 @@ interface PipelineWorkspaceProps {
   selectedId: string | null
   layoutMode: ViewLayoutMode
   onSelect: (id: string) => void
+  onEstablishContext?: (context: ActiveInboxContext) => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
@@ -39,6 +46,7 @@ export function PipelineWorkspace({
   selectedId,
   layoutMode,
   onSelect,
+  onEstablishContext,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
@@ -46,9 +54,12 @@ export function PipelineWorkspace({
   const {
     opportunities,
     metrics,
+    globalTotal,
     savedViews,
     groupBy,
     setGroupBy,
+    scope,
+    setScope,
     loading,
     refreshing,
     error,
@@ -65,25 +76,48 @@ export function PipelineWorkspace({
   })
   const [detailOpportunity, setDetailOpportunity] = useState<PipelineOpportunity | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   const listOpportunity = useMemo(
     () => opportunities.find((o) => o.id === selectedOpportunityId) ?? null,
     [opportunities, selectedOpportunityId],
   )
 
+  const syncEntityContext = useCallback((opp: PipelineOpportunity | null) => {
+    if (!opp) return
+    const active = buildContextFromOpportunity(opp, 'pipeline')
+    onEstablishContext?.(active)
+    const universal = universalContextFromOpportunity(opp)
+    setUniversalEntityContextSnapshot(universal)
+    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: universal }))
+  }, [onEstablishContext])
+
   useEffect(() => {
     if (!selectedOpportunityId) {
       setDetailOpportunity(null)
+      setDetailError(null)
       return
     }
     let cancelled = false
     setDetailLoading(true)
+    setDetailError(null)
     void fetchPipelineOpportunity(selectedOpportunityId)
-      .then((row) => { if (!cancelled) setDetailOpportunity(row) })
-      .catch(() => { if (!cancelled) setDetailOpportunity(listOpportunity) })
+      .then((row) => {
+        if (cancelled) return
+        setDetailOpportunity(row)
+        syncEntityContext(row)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setDetailError(err instanceof Error ? err.message : 'detail_fetch_failed')
+        if (listOpportunity) {
+          setDetailOpportunity(listOpportunity)
+          syncEntityContext(listOpportunity)
+        }
+      })
       .finally(() => { if (!cancelled) setDetailLoading(false) })
     return () => { cancelled = true }
-  }, [selectedOpportunityId, listOpportunity])
+  }, [selectedOpportunityId, listOpportunity, syncEntityContext])
 
   useEffect(() => {
     if (selectedOpportunityId) return
@@ -106,6 +140,31 @@ export function PipelineWorkspace({
     }
     const opp = opportunities.find((o) => o.id === id) ?? detailOpportunity
     const threadId = opp?.primary_thread_key
+    const universal = universalContextFromOpportunity(opp ?? null)
+
+    if (action === 'open_map') {
+      routeEntityGraphAction('show_on_map', universal)
+      pushRoutePath('/map')
+      return
+    }
+    if (action === 'open_property') {
+      if (opp?.primary_property_id) pushRoutePath(`/list?property=${encodeURIComponent(opp.primary_property_id)}`)
+      return
+    }
+    if (action === 'open_comp_intelligence') {
+      routeEntityGraphAction('open_comp_intelligence', universal)
+      return
+    }
+    if (action === 'open_inbox_thread' && threadId) {
+      onSelect(threadId)
+      onOpenCommandView(threadId)
+      return
+    }
+    if (action === 'open_workflow_run') {
+      pushRoutePath('/workflow-studio')
+      return
+    }
+
     if (threadId) {
       await onAction(threadId, action, payload)
     } else {
@@ -139,8 +198,15 @@ export function PipelineWorkspace({
     writeOppToUrl(opportunityId)
     try { localStorage.setItem(STORAGE_KEY, opportunityId) } catch { /* ignore */ }
     const opp = opportunities.find((o) => o.id === opportunityId)
+    if (opp) syncEntityContext(opp)
     onSelect(opp?.primary_thread_key || opportunityId)
-  }, [onSelect, opportunities])
+  }, [onSelect, opportunities, syncEntityContext])
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedOpportunityId(null)
+    writeOppToUrl(null)
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+  }, [])
 
   if (error) {
     return (
@@ -155,16 +221,21 @@ export function PipelineWorkspace({
     <PipelineOpportunityBoard
       opportunities={opportunities}
       metrics={metrics}
+      globalTotal={globalTotal}
+      scope={scope}
+      onScopeChange={setScope}
       savedViews={savedViews}
       selectedId={selectedOpportunityId}
       selectedOpportunity={detailOpportunity ?? listOpportunity}
       detailLoading={detailLoading}
+      detailError={detailError}
       layoutMode={layoutMode}
       groupBy={groupBy}
       loading={loading}
       refreshing={refreshing}
       onGroupByChange={setGroupBy}
       onSelect={handleSelectOpportunity}
+      onClearSelection={handleClearSelection}
       onOpenCommandView={onOpenCommandView}
       onOpenDealIntelligence={onOpenDealIntelligence}
       onAction={handleAction}
@@ -172,6 +243,15 @@ export function PipelineWorkspace({
       onMoveStatus={moveStatus}
       onMoveTemperature={moveTemperature}
       onApplySavedView={handleApplySavedView}
+      onRetryDetail={() => {
+        if (!selectedOpportunityId) return
+        setDetailLoading(true)
+        setDetailError(null)
+        void fetchPipelineOpportunity(selectedOpportunityId)
+          .then((row) => { setDetailOpportunity(row); syncEntityContext(row) })
+          .catch((err) => setDetailError(err instanceof Error ? err.message : 'detail_fetch_failed'))
+          .finally(() => setDetailLoading(false))
+      }}
     />
   )
 }

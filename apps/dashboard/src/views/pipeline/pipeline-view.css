@@ -1517,3 +1517,159 @@
   background: rgba(15, 23, 42, 0.04);
   border-color: rgba(15, 23, 42, 0.08);
 }
+
+/* ── Scope bar + 25% context dock ─────────────────────────────────────────── */
+
+.plv-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.08), rgba(99, 102, 241, 0.06), transparent);
+}
+.plv-scope-bar__counts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+}
+.plv-scope-bar__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.plv-scope-chip {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.plv-scope-chip.is-active {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.14);
+  color: #e0f2fe;
+}
+.plv-context-dock {
+  position: sticky;
+  bottom: 0;
+  margin: 8px;
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  z-index: 6;
+}
+.plv-context-dock__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 18px;
+  cursor: pointer;
+}
+.plv-context-dock__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+.plv-context-dock__chips span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.plv-context-dock__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.plv-card__type {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+.plv-card__state-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.plv-card__state-row span {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+.plv-card__drag-handle {
+  cursor: grab;
+}
+.plv-card.is-dragging {
+  opacity: 0.55;
+  transform: rotate(1deg) scale(0.98);
+}
+.plv-lane.is-drag-over .plv-lane__header {
+  box-shadow: inset 0 -2px 0 rgba(56, 189, 248, 0.65);
+}
+.plv-command-panel__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.plv-command-panel__skeleton,
+.plv-command-panel__error {
+  padding: 10px 14px;
+  font-size: 12px;
+}
+.plv-command-panel__error {
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.25);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+/* Dark mode contrast boost */
+.plv {
+  color: rgba(255, 255, 255, 0.9);
+}
+.plv-card__seller {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.96);
+}
+.plv-lane__name {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Red Ops header gradient */
+[data-nexus-theme='red-ops'] .plv-scope-bar {
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.45), rgba(69, 10, 10, 0.2), transparent);
+  border-bottom-color: rgba(248, 113, 113, 0.22);
+}
+[data-nexus-theme='red-ops'] .plv-command-panel__header {
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.35), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plv-scope-bar,
+  .plv-card.is-dragging,
+  .plv-lane.is-drag-over .plv-lane__header {
+    transition: none;
+    animation: none;
+  }
+}

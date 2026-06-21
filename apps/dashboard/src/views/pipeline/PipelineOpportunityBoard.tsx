@@ -9,10 +9,15 @@ import {
   isFollowUpDue,
   isGroupByMutable,
   isGroupByReadOnly,
+  PIPELINE_SCOPE_OPTIONS,
   portfolioLabel,
   resolvePipelineStage,
+  resolvePropertyType,
+  resolveTemperature,
+  resolveUniversalStatus,
   stageLabel,
   stageAgeDays,
+  type PipelineScope,
 } from '../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../shared/formatters'
 import { PipelineViewSelector } from './components/PipelineViewSelector'
@@ -22,15 +27,6 @@ import './pipeline-view.css'
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 const DRAG_THRESHOLD_PX = 6
-
-const SELLER_STATUS_TO_OPPORTUNITY: Record<string, string> = {
-  suppressed: 'suppressed',
-  wrong_number: 'suppressed',
-  failed: 'dead',
-  auto_blocked: 'paused',
-  awaiting_response: 'waiting',
-  needs_follow_up: 'waiting',
-}
 
 type SortMode = 'priority' | 'recent' | 'value' | 'stage_age'
 
@@ -67,16 +63,22 @@ interface StageModel {
 interface PipelineOpportunityBoardProps {
   opportunities: PipelineOpportunity[]
   metrics: PipelineMetrics | null
+  globalTotal?: number
+  scope?: PipelineScope
+  onScopeChange?: (scope: PipelineScope) => void
   savedViews?: PipelineSavedView[]
   selectedId: string | null
   selectedOpportunity?: PipelineOpportunity | null
   detailLoading?: boolean
+  detailError?: string | null
   layoutMode: ViewLayoutMode
   groupBy: PipelineGroupByMode
   loading?: boolean
   refreshing?: boolean
   onGroupByChange: (mode: PipelineGroupByMode) => void
   onSelect: (id: string) => void
+  onClearSelection?: () => void
+  onRetryDetail?: () => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
@@ -89,16 +91,22 @@ interface PipelineOpportunityBoardProps {
 export function PipelineOpportunityBoard({
   opportunities,
   metrics,
+  globalTotal = 0,
+  scope = 'active',
+  onScopeChange,
   savedViews = [],
   selectedId,
   selectedOpportunity,
   detailLoading,
+  detailError,
   layoutMode,
   groupBy,
   loading,
   refreshing,
   onGroupByChange,
   onSelect,
+  onClearSelection,
+  onRetryDetail,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
@@ -117,6 +125,7 @@ export function PipelineOpportunityBoard({
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
   const [showDetail, setShowDetail] = useState(true)
   const [panelCollapsed, setPanelCollapsed] = useState(false)
+  const [dockOpen, setDockOpen] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [sortOpen, setSortOpen] = useState(false)
   const dragStateRef = useRef<{ id: string; startX: number; startY: number; dragging: boolean } | null>(null)
@@ -188,10 +197,10 @@ export function PipelineOpportunityBoard({
       if (groupBy === 'stage') {
         await onMoveStage(cardId, stageId)
       } else if (groupBy === 'status') {
-        const opportunityStatus = SELLER_STATUS_TO_OPPORTUNITY[stageId] ?? 'active'
-        await onMoveStatus(cardId, opportunityStatus)
+        await onMoveStatus(cardId, stageId)
       } else if (groupBy === 'temperature') {
-        await onMoveTemperature(cardId, stageId)
+        const temp = stageId === 'warm' ? 'warming' : stageId
+        await onMoveTemperature(cardId, temp)
       }
     } catch (err) {
       setTransitionError(err instanceof Error ? err.message : 'Update failed')
@@ -226,7 +235,19 @@ export function PipelineOpportunityBoard({
     onSelect(cardId)
     setShowDetail(true)
     setPanelCollapsed(false)
-  }, [onSelect])
+    if (layoutMode === 'compact') setDockOpen(true)
+  }, [layoutMode, onSelect])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDockOpen(false)
+        onClearSelection?.()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClearSelection])
 
   const kpi = metrics ?? {
     active_opportunities: visibleCards.filter((c) => !c.suppressed).length,
@@ -293,7 +314,13 @@ export function PipelineOpportunityBoard({
           {card.followUpDue && <span className="plv-chip is-due">Due</span>}
           {card.opp.blocker && <span className="plv-chip is-suppressed">Block</span>}
         </div>
+        <div className="plv-card__type">{resolvePropertyType(card.opp)}</div>
         <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No recent context.'}</div>
+        <div className="plv-card__state-row">
+          <span>{stageLabel(resolvePipelineStage(card.opp))}</span>
+          <span>{stageLabel(resolveUniversalStatus(card.opp))}</span>
+          <span>{stageLabel(resolveTemperature(card.opp))}</span>
+        </div>
         {variant === 'kanban' && (
           <div className="plv-card__meta-row">
             <span className="plv-card__meta-label">AOS</span>
@@ -311,8 +338,10 @@ export function PipelineOpportunityBoard({
   )
 
   if (isCompact) {
+    const dockOpp = selectedCard?.opp ?? panelOpportunity
     return (
       <div className="plv plv--rail">
+        <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} globalTotal={globalTotal} compact />
         <KpiStrip metrics={kpi} compact />
         {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
         <div className="plv-filters">
@@ -328,6 +357,25 @@ export function PipelineOpportunityBoard({
         <div className="plv-card-rail">
           {(activeStage?.cards ?? []).map((card) => renderCard(card, 'compact'))}
         </div>
+        {dockOpen && dockOpp && (
+          <div className="plv-context-dock nx-glass-menu" role="dialog" aria-label="Opportunity context">
+            <button type="button" className="plv-context-dock__close" onClick={() => { setDockOpen(false); onClearSelection?.() }} aria-label="Close">×</button>
+            <strong>{dockOpp.seller_display_name || 'Unknown Seller'}</strong>
+            <span>{dockOpp.property_address_full || portfolioLabel(dockOpp)}</span>
+            <div className="plv-context-dock__chips">
+              <span>{stageLabel(resolvePipelineStage(dockOpp))}</span>
+              <span>{stageLabel(resolveUniversalStatus(dockOpp))}</span>
+              <span>{stageLabel(resolveTemperature(dockOpp))}</span>
+            </div>
+            <p>{dockOpp.latest_message_preview || 'No recent message.'}</p>
+            <p className="plv-context-dock__action">{dockOpp.next_action || 'Review'}</p>
+            <div className="plv-context-dock__actions">
+              <button type="button" className="plv-action-btn" onClick={() => onOpenCommandView(dockOpp.primary_thread_key)}>Open Conversation</button>
+              <button type="button" className="plv-action-btn" onClick={() => onOpenDealIntelligence(dockOpp.primary_thread_key)}>Deal Intelligence</button>
+              <button type="button" className="plv-action-btn" onClick={() => onAction(dockOpp.id, 'open_map')}>Map</button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -370,8 +418,9 @@ export function PipelineOpportunityBoard({
     <div className={cls('plv', isOps ? 'plv--ops' : isFull ? 'plv--full' : 'plv--focused')}>
       <KpiStrip metrics={kpi} compact={isOps} />
       {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
-      {loading && <div className="plv-loading">Loading opportunities…</div>}
-      {refreshing && !loading && <div className="plv-refreshing">Refreshing…</div>}
+      <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} globalTotal={globalTotal} />
+      {loading && opportunities.length === 0 && <div className="plv-loading" aria-live="polite">Loading opportunities…</div>}
+      {refreshing && opportunities.length > 0 && <div className="plv-refreshing" aria-live="polite">Refreshing…</div>}
 
       <div className="plv-topbar">
         <div className="plv-filters">
@@ -467,6 +516,8 @@ export function PipelineOpportunityBoard({
               <PipelineCommandPanel
                 opportunity={panelOpportunity}
                 loading={detailLoading}
+                error={detailError}
+                onRetry={onRetryDetail}
                 collapsed={panelCollapsed}
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
                 onOpenCommandView={onOpenCommandView}
@@ -484,6 +535,46 @@ export function PipelineOpportunityBoard({
           </aside>
         )}
       </div>
+    </div>
+  )
+}
+
+function ScopeBar({
+  scope,
+  onScopeChange,
+  metrics,
+  globalTotal,
+  compact,
+}: {
+  scope: PipelineScope
+  onScopeChange?: (scope: PipelineScope) => void
+  metrics: PipelineMetrics | Record<string, number>
+  globalTotal: number
+  compact?: boolean
+}) {
+  const m = metrics as PipelineMetrics
+  const scoped = m.active_opportunities ?? m.total ?? 0
+  return (
+    <div className={cls('plv-scope-bar', compact && 'plv-scope-bar--compact')}>
+      <div className="plv-scope-bar__counts">
+        <strong>{scoped} scoped</strong>
+        <span>·</span>
+        <span>{globalTotal} total</span>
+      </div>
+      {onScopeChange && (
+        <div className="plv-scope-bar__options">
+          {PIPELINE_SCOPE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={cls('plv-scope-chip', scope === opt.value && 'is-active')}
+              onClick={() => onScopeChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -111,7 +111,17 @@ export interface PipelineOpportunity {
   latest_message_preview: string | null
   asset_class: string | null
   property_type: string | null
+  property_type_raw?: string | null
   property_state: string | null
+  property_city?: string | null
+  property_zip?: string | null
+  property_county?: string | null
+  property_export_id?: string | null
+  property_hydrated?: boolean
+  property_match_status?: string | null
+  universal_status?: string | null
+  units_count?: number | null
+  equity_amount?: number | null
   market: string | null
   property_address_full: string | null
   seller_display_name: string | null
@@ -124,8 +134,19 @@ export interface PipelineOpportunity {
   workflow_definition_id?: string | null
   metadata?: Record<string, unknown>
   history?: PipelineOpportunityHistoryEvent[]
+  activity_timeline?: PipelineActivityEvent[]
   /** @deprecated Legacy acquisition taxonomy — do not use for UI grouping. */
   acquisition_stage?: string
+}
+
+export interface PipelineActivityEvent {
+  id: string
+  type: string
+  label: string
+  timestamp: string
+  source: string
+  detail?: string | null
+  actor?: string | null
 }
 
 export interface PipelineOpportunityHistoryEvent {
@@ -142,6 +163,7 @@ export interface PipelineOpportunityHistoryEvent {
 
 export interface PipelineMetrics {
   active_opportunities: number
+  priority?: number
   new_replies: number
   qualified: number
   offer_ready: number

@@ -9,45 +9,36 @@ export interface StageDefinition {
   matches?: string[]
 }
 
-/** Universal pipeline stages — matches InboxPipelineView / v_inbox_enriched. */
-export const PIPELINE_STAGE_GROUPS: StageDefinition[] = [
-  { id: 'ownership_check', label: 'Ownership Check', tone: 'cyan', matches: ['ownership'] },
-  { id: 'interest_probe', label: 'Interest Probe', tone: 'blue', matches: ['interest'] },
-  { id: 'active_communication', label: 'Active Communication', tone: 'blue', matches: ['active', 'seller_response', 'communication'] },
-  { id: 'price_discovery', label: 'Price Discovery', tone: 'gold', matches: ['price'] },
-  { id: 'condition_details', label: 'Condition Details', tone: 'orange', matches: ['condition'] },
-  { id: 'underwriting', label: 'Underwriting', tone: 'orange', matches: ['underwrit'] },
-  { id: 'offer_sent', label: 'Offer Sent', tone: 'green', matches: ['offer', 'negotiat', 'counter'] },
-  { id: 'contract_sent', label: 'Contract Sent', tone: 'green', matches: ['contract'] },
-  { id: 'title_closing', label: 'Title / Closing', tone: 'green', matches: ['title', 'closing'] },
-  { id: 'dead_suppressed', label: 'Dead / Suppressed', tone: 'red', matches: ['dead', 'suppressed', 'closed'] },
+/** Canonical universal acquisition stages (API-aligned). */
+export const UNIVERSAL_PIPELINE_STAGE_GROUPS: StageDefinition[] = [
+  { id: 'ownership_confirmation', label: 'Ownership Confirmation', tone: 'cyan' },
+  { id: 'offer_interest', label: 'Offer Interest', tone: 'blue' },
+  { id: 'asking_price', label: 'Asking Price', tone: 'gold' },
+  { id: 'property_condition', label: 'Property Condition', tone: 'orange' },
+  { id: 'offer', label: 'Offer', tone: 'green' },
+  { id: 'formal_contract', label: 'Formal Contract', tone: 'green' },
+  { id: 'under_contract', label: 'Under Contract', tone: 'green' },
+  { id: 'disposition', label: 'Disposition', tone: 'blue' },
+  { id: 'prepared_to_close', label: 'Prepared to Close', tone: 'green' },
+  { id: 'closed', label: 'Closed', tone: 'red' },
 ]
 
-export const SELLER_STATUS_GROUPS: StageDefinition[] = [
-  { id: 'new', label: 'New', tone: 'cyan', matches: ['new'] },
-  { id: 'not_contacted', label: 'Not Contacted', tone: 'neutral', matches: ['not_contacted'] },
-  { id: 'ownership_check_sent', label: 'Ownership Check Sent', tone: 'blue', matches: ['ownership_check_sent'] },
-  { id: 'message_sent', label: 'Message Sent', tone: 'blue', matches: ['message_sent', 'sent_message'] },
-  { id: 'awaiting_response', label: 'Awaiting Response', tone: 'blue', matches: ['waiting', 'awaiting_response'] },
-  { id: 'seller_replied', label: 'Seller Replied', tone: 'cyan', matches: ['new_reply', 'seller_replied'] },
-  { id: 'positive_intent', label: 'Positive Intent', tone: 'green', matches: ['positive', 'interested'] },
-  { id: 'asking_price_provided', label: 'Asking Price Provided', tone: 'gold', matches: ['asking_price'] },
-  { id: 'needs_follow_up', label: 'Needs Follow-Up', tone: 'amber', matches: ['follow_up'] },
-  { id: 'negotiating', label: 'Negotiating', tone: 'green', matches: ['negotiat'] },
-  { id: 'offer_sent', label: 'Offer Sent', tone: 'green', matches: ['offer_sent'] },
-  { id: 'contract_sent', label: 'Contract Sent', tone: 'green', matches: ['contract_sent'] },
-  { id: 'review_required', label: 'Review Required', tone: 'amber', matches: ['review'] },
-  { id: 'auto_blocked', label: 'Auto Blocked', tone: 'red', matches: ['auto_blocked'] },
-  { id: 'suppressed', label: 'Suppressed', tone: 'red', matches: ['suppressed'] },
-  { id: 'wrong_number', label: 'Wrong Number', tone: 'red', matches: ['wrong_number'] },
-  { id: 'failed', label: 'Failed', tone: 'red', matches: ['failed'] },
+export const UNIVERSAL_STATUS_GROUPS: StageDefinition[] = [
+  { id: 'priority', label: 'Priority', tone: 'cyan' },
+  { id: 'waiting', label: 'Waiting', tone: 'blue' },
+  { id: 'cold', label: 'Cold', tone: 'neutral' },
+  { id: 'follow_up', label: 'Follow Up', tone: 'amber' },
+  { id: 'needs_review', label: 'Needs Review', tone: 'amber' },
+  { id: 'unknown', label: 'Unknown', tone: 'neutral' },
 ]
 
 export const TEMPERATURE_GROUPS: StageDefinition[] = [
   { id: 'hot', label: 'Hot', tone: 'red' },
-  { id: 'warm', label: 'Warm', tone: 'amber' },
+  { id: 'warming', label: 'Warming', tone: 'amber' },
+  { id: 'engaged', label: 'Engaged', tone: 'cyan' },
   { id: 'cold', label: 'Cold', tone: 'cyan' },
   { id: 'dead', label: 'Dead', tone: 'neutral' },
+  { id: 'unknown', label: 'Unknown', tone: 'neutral' },
 ]
 
 export const QUEUE_STATUS_GROUPS: StageDefinition[] = [
@@ -77,18 +68,40 @@ export const WORKFLOW_STATUS_GROUPS: StageDefinition[] = [
 
 export const FOLLOW_UP_STATE_GROUPS: StageDefinition[] = [
   { id: 'due_now', label: 'Due Now', tone: 'amber' },
-  { id: 'scheduled', label: 'Scheduled', tone: 'blue' },
-  { id: 'none', label: 'None', tone: 'neutral' },
+  { id: 'due_today', label: 'Due Today', tone: 'amber' },
+  { id: 'overdue', label: 'Overdue', tone: 'red' },
+  { id: 'upcoming', label: 'Upcoming', tone: 'blue' },
+  { id: 'waiting_on_seller', label: 'Waiting on Seller', tone: 'blue' },
+  { id: 'none', label: 'No Follow-Up', tone: 'neutral' },
+  { id: 'cancelled', label: 'Cancelled', tone: 'neutral' },
 ]
 
 export const PROPERTY_TYPE_ORDER = [
   'Single Family',
-  'Multifamily',
-  'Apartment',
-  'Duplex/Triplex/Quadplex',
+  'Multifamily 2–4',
+  'Multifamily 5+',
+  'Mobile Home',
+  'Condo / Townhome',
   'Land',
-  'Commercial',
+  'Retail / Strip Mall',
+  'Self-Storage',
+  'Office',
+  'Industrial',
+  'Hospitality',
+  'Mixed Use',
+  'Commercial Other',
   'Unknown',
+]
+
+export type PipelineScope = 'active' | 'needs_attention' | 'all' | 'dead' | 'suppressed' | 'closed'
+
+export const PIPELINE_SCOPE_OPTIONS: Array<{ value: PipelineScope; label: string }> = [
+  { value: 'active', label: 'Active' },
+  { value: 'needs_attention', label: 'Needs Attention' },
+  { value: 'all', label: 'All' },
+  { value: 'dead', label: 'Dead' },
+  { value: 'suppressed', label: 'Suppressed' },
+  { value: 'closed', label: 'Closed / Archived' },
 ]
 
 export interface PipelineViewOption {
@@ -125,16 +138,11 @@ const LEGACY_GROUP_BY: Record<string, PipelineGroupByMode> = {
 }
 
 const STORAGE_KEY = 'pipeline_group_by_v2'
+const SCOPE_STORAGE_KEY = 'pipeline_scope_v1'
 
-const ACQUISITION_TO_UNIVERSAL_STAGE: Record<string, string> = {
-  needs_review: 'ownership_check',
-  ownership_confirmation: 'ownership_check',
-  interest_qualification: 'interest_probe',
-  price_discovery: 'price_discovery',
-  underwriting: 'underwriting',
-  decision_and_offer: 'offer_sent',
-  contract_to_close: 'contract_sent',
-}
+const STAGE_LABELS: Record<string, string> = Object.fromEntries(
+  UNIVERSAL_PIPELINE_STAGE_GROUPS.map((s) => [s.id, s.label]),
+)
 
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
 
@@ -152,6 +160,18 @@ export function savePipelineGroupBy(mode: PipelineGroupByMode) {
   try { localStorage.setItem(STORAGE_KEY, mode) } catch { /* ignore */ }
 }
 
+export function loadPipelineScope(): PipelineScope {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY)
+    if (raw && PIPELINE_SCOPE_OPTIONS.some((o) => o.value === raw)) return raw as PipelineScope
+  } catch { /* ignore */ }
+  return 'active'
+}
+
+export function savePipelineScope(scope: PipelineScope) {
+  try { localStorage.setItem(SCOPE_STORAGE_KEY, scope) } catch { /* ignore */ }
+}
+
 export function isGroupByMutable(groupBy: PipelineGroupByMode): boolean {
   return groupBy === 'stage' || groupBy === 'status' || groupBy === 'temperature'
 }
@@ -161,53 +181,58 @@ export function isGroupByReadOnly(groupBy: PipelineGroupByMode): boolean {
 }
 
 export function resolvePipelineStage(opp: PipelineOpportunity): string {
-  const meta = opp.metadata && typeof opp.metadata === 'object' ? opp.metadata : {}
-  const direct = norm(opp.pipeline_stage || meta.pipeline_stage)
-  if (direct && PIPELINE_STAGE_GROUPS.some((s) => s.id === direct)) return direct
-
-  const legacy = norm(opp.acquisition_stage)
-  if (legacy && ACQUISITION_TO_UNIVERSAL_STAGE[legacy]) return ACQUISITION_TO_UNIVERSAL_STAGE[legacy]
-
-  for (const stage of PIPELINE_STAGE_GROUPS) {
-    if (stage.matches?.some((m) => legacy.includes(m) || direct.includes(m))) return stage.id
-  }
-  return 'ownership_check'
+  const code = norm(opp.pipeline_stage || opp.acquisition_stage)
+  if (code && STAGE_LABELS[code]) return code
+  if (code.includes('ownership')) return 'ownership_confirmation'
+  if (code === 'offer_interest' || code === 'interest_qualification' || code === 'interest_probe') return 'offer_interest'
+  if (code.includes('asking') || code === 'price_discovery') return 'asking_price'
+  if (code.includes('condition') || code === 'underwriting') return 'property_condition'
+  if (code.includes('offer') && !code.includes('interest')) return 'offer'
+  if (code.includes('contract') || code === 'formal_contract') return 'formal_contract'
+  if (code === 'under_contract') return 'under_contract'
+  if (code === 'disposition') return 'disposition'
+  if (code.includes('prepared') || code.includes('closing') || code === 'title_closing') return 'prepared_to_close'
+  if (code.includes('closed') || code.includes('dead') || code.includes('suppressed')) return 'closed'
+  return 'ownership_confirmation'
 }
 
-export function resolveSellerStatus(opp: PipelineOpportunity): string {
-  const meta = opp.metadata && typeof opp.metadata === 'object' ? opp.metadata : {}
-  const direct = norm(opp.seller_status || meta.seller_status)
-  if (direct && SELLER_STATUS_GROUPS.some((s) => s.id === direct)) return direct
-
-  const raw = `${direct} ${norm(opp.opportunity_status)} ${norm(opp.conversation_state)} ${norm(opp.latest_intent)}`
-  const match = SELLER_STATUS_GROUPS.find((group) => group.matches?.some((m) => raw.includes(m)))
-  if (match) return match.id
-
-  if (opp.conversation_state === 'seller_replied' || opp.conversation_state === 'needs_reply') return 'seller_replied'
-  if (opp.conversation_state === 'awaiting_seller') return 'awaiting_response'
-  if (opp.opportunity_status === 'suppressed' || opp.opportunity_status === 'dead') return 'suppressed'
-  if (opp.opportunity_status === 'waiting') return 'awaiting_response'
-  return 'new'
+export function resolveUniversalStatus(opp: PipelineOpportunity): string {
+  const direct = norm((opp as { universal_status?: string }).universal_status)
+  if (direct && UNIVERSAL_STATUS_GROUPS.some((s) => s.id === direct)) return direct
+  if (opp.conversation_state === 'needs_reply') return 'priority'
+  if (opp.opportunity_status === 'waiting') return 'waiting'
+  if (opp.opportunity_status === 'dead') return 'cold'
+  if (opp.opportunity_status === 'suppressed') return 'cold'
+  return 'unknown'
 }
 
 export function resolveTemperature(opp: PipelineOpportunity): string {
-  const t = norm(opp.temperature || opp.priority)
-  if (t.includes('hot') || t === 'urgent') return 'hot'
-  if (t.includes('warm') || t === 'high') return 'warm'
-  if (t.includes('dead') || opp.opportunity_status === 'dead') return 'dead'
-  if (t.includes('cold') || t === 'low' || t === 'normal') return 'cold'
-  if (opp.aos != null && opp.aos >= 75) return 'hot'
-  return 'cold'
+  const t = norm(opp.temperature)
+  if (!t) return 'unknown'
+  if (t === 'warm') return 'warming'
+  if (TEMPERATURE_GROUPS.some((g) => g.id === t)) return t
+  if (t.includes('hot')) return 'hot'
+  if (t.includes('warm')) return 'warming'
+  if (t.includes('engag')) return 'engaged'
+  if (t.includes('dead')) return 'dead'
+  if (t.includes('cold')) return 'cold'
+  return 'unknown'
 }
 
 export function resolvePropertyType(opp: PipelineOpportunity): string {
   const meta = opp.metadata && typeof opp.metadata === 'object' ? opp.metadata : {}
-  return String(opp.property_type || meta.property_type || opp.asset_class || 'Unknown')
+  const hydrated = String(opp.property_type || meta.property_type || '').trim()
+  if (hydrated && hydrated !== 'Unknown') return hydrated
+  const raw = String(opp.property_type_raw || opp.asset_class || '').trim()
+  if (raw.toLowerCase() === 'sfr') return 'Single Family'
+  if (raw) return raw
+  return 'Unknown'
 }
 
 export function resolvePropertyState(opp: PipelineOpportunity): string {
   const meta = opp.metadata && typeof opp.metadata === 'object' ? opp.metadata : {}
-  return String(opp.property_state || meta.property_state || meta.state || 'State Unknown')
+  const state = String(opp.property_state || meta.property_state || meta.state || '').trim()
+  return state || 'Unknown'
 }
 
 export function resolveQueueStatus(opp: PipelineOpportunity): string {
@@ -222,8 +247,19 @@ export function resolveWorkflowStatus(opp: PipelineOpportunity): string {
 
 export function resolveFollowUpState(opp: PipelineOpportunity): string {
   const iso = opp.next_action_due || opp.next_follow_up_at
-  if (!iso) return 'none'
-  return new Date(iso).getTime() <= Date.now() ? 'due_now' : 'scheduled'
+  if (!iso) {
+    if (opp.opportunity_status === 'waiting' || opp.conversation_state === 'awaiting_seller') return 'waiting_on_seller'
+    return 'none'
+  }
+  const due = new Date(iso).getTime()
+  const now = Date.now()
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  const endOfToday = startOfToday.getTime() + 86400000
+  if (due < now - 3600000) return 'overdue'
+  if (due <= now) return 'due_now'
+  if (due < endOfToday) return 'due_today'
+  return 'upcoming'
 }
 
 export function displayAos(opp: PipelineOpportunity): string {
@@ -247,6 +283,7 @@ export function formatUnknownMetric(
   engineRunId?: string | null,
 ): string {
   if (value === null || value === undefined) return kind === 'currency' ? 'Unknown' : 'Not calculated'
+  if (value === 0 && kind === 'score' && !engineRunId) return 'Not calculated'
   if (value === 0 && kind === 'currency' && !engineRunId) return 'Unknown'
   if (kind === 'currency') return displayCurrency(value, { engineRunId })
   if (kind === 'percent') return `${Math.round(value)}%`
@@ -254,15 +291,16 @@ export function formatUnknownMetric(
 }
 
 export function stageLabel(code: string): string {
-  return PIPELINE_STAGE_GROUPS.find((s) => s.id === code)?.label
-    ?? SELLER_STATUS_GROUPS.find((s) => s.id === code)?.label
+  return STAGE_LABELS[code]
+    ?? UNIVERSAL_STATUS_GROUPS.find((s) => s.id === code)?.label
+    ?? TEMPERATURE_GROUPS.find((s) => s.id === code)?.label
     ?? code.replace(/_/g, ' ')
 }
 
 export function groupKeyForOpportunity(opp: PipelineOpportunity, groupBy: PipelineGroupByMode): string {
   switch (groupBy) {
     case 'stage': return resolvePipelineStage(opp)
-    case 'status': return resolveSellerStatus(opp)
+    case 'status': return resolveUniversalStatus(opp)
     case 'temperature': return resolveTemperature(opp)
     case 'market': return opp.market || 'Market Unknown'
     case 'state': return resolvePropertyState(opp)
@@ -278,8 +316,8 @@ export function groupDefinitionsForMode(
   groupBy: PipelineGroupByMode,
   opportunities: PipelineOpportunity[],
 ): StageDefinition[] {
-  if (groupBy === 'stage') return PIPELINE_STAGE_GROUPS
-  if (groupBy === 'status') return SELLER_STATUS_GROUPS
+  if (groupBy === 'stage') return UNIVERSAL_PIPELINE_STAGE_GROUPS
+  if (groupBy === 'status') return UNIVERSAL_STATUS_GROUPS
   if (groupBy === 'temperature') return TEMPERATURE_GROUPS
   if (groupBy === 'queue_status') return QUEUE_STATUS_GROUPS
   if (groupBy === 'workflow_status') return WORKFLOW_STATUS_GROUPS
@@ -295,7 +333,7 @@ export function groupDefinitionsForMode(
     const ordered = [...PROPERTY_TYPE_ORDER, ...dynamic]
     const tones: StageTone[] = ['cyan', 'blue', 'gold', 'orange', 'green', 'red', 'neutral']
     return ordered
-      .filter((label) => counts.has(label) || label === 'Unknown')
+      .filter((label) => counts.has(label))
       .map((label, index) => ({ id: label, label, tone: tones[index % tones.length] ?? 'neutral' }))
   }
 
@@ -311,9 +349,8 @@ export function groupDefinitionsForMode(
 }
 
 export function isFollowUpDue(opp: PipelineOpportunity): boolean {
-  const iso = opp.next_action_due || opp.next_follow_up_at
-  if (!iso) return false
-  return new Date(iso).getTime() <= Date.now() + 36 * 3600000
+  const state = resolveFollowUpState(opp)
+  return state === 'due_now' || state === 'due_today' || state === 'overdue'
 }
 
 export function stageAgeDays(opp: PipelineOpportunity): number {
@@ -327,3 +364,12 @@ export function portfolioLabel(opp: PipelineOpportunity): string {
   if (count > 1) return `${count} matched properties`
   return opp.property_address_full || 'Property Unknown'
 }
+
+/** @deprecated Use resolveUniversalStatus */
+export function resolveSellerStatus(opp: PipelineOpportunity): string {
+  return resolveUniversalStatus(opp)
+}
+
+/** @deprecated Legacy stage groups — do not use for grouping */
+export const PIPELINE_STAGE_GROUPS = UNIVERSAL_PIPELINE_STAGE_GROUPS
+export const SELLER_STATUS_GROUPS = UNIVERSAL_STATUS_GROUPS
