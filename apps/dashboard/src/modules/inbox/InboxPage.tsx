@@ -862,8 +862,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (selectedId && fallback.id === selectedId) return fallback
       if (selectedThreadKey && (getConversationThreadIdForThread(fallback) || fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
     }
-    return selectedId ? null : (filtered[0] ?? threads[0] ?? null)
-  }, [filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
+    const hasExternalContext = Boolean(
+      effectiveActiveContext.opportunityId
+      || effectiveActiveContext.propertyId
+      || effectiveActiveContext.threadKey
+      || effectiveActiveContext.masterOwnerId
+      || effectiveActiveContext.sellerId,
+    )
+    if (selectedId || hasExternalContext) return null
+    return filtered[0] ?? threads[0] ?? null
+  }, [effectiveActiveContext.masterOwnerId, effectiveActiveContext.opportunityId, effectiveActiveContext.propertyId, effectiveActiveContext.sellerId, effectiveActiveContext.threadKey, filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
 
   // Keep ref in sync so message effect reads latest thread without it being a dep
   selectedRef.current = selected
@@ -2909,11 +2917,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // Immediately clear old messages and show skeleton — effect fetches fresh ones
     setSelectedMessages([])
     setMessagesLoading(true)
-    setActiveContext(buildContextFromThread(thread ?? null, 'inbox'), { preserveCurrentViews: true })
-    setSelectedId(id)
-    setSelectedThreadKey(thread?.threadKey || thread?.id || null)
-    setLayoutState((current) => ({ ...current, selectedThreadId: id }))
-    if (thread) selectedThreadFallbackRef.current = thread
+    if (thread) {
+      setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+      setSelectedId(thread.id)
+      setSelectedThreadKey(thread.threadKey || thread.id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: thread.id }))
+      selectedThreadFallbackRef.current = thread
+    } else {
+      // Keep pipeline/queue/calendar context — only anchor selection by thread key ref.
+      setSelectedId(id)
+      setSelectedThreadKey(id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: id }))
+    }
     // Mark thread read and clear unread count in canonical state
     if (threadKey) {
       void callBackend('/api/cockpit/inbox/thread-state', {
@@ -2933,6 +2948,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   useEffect(() => {
     return subscribeUniversalEntityContext((next) => {
       setUniversalEntityContext(next)
+      if (!next.opportunityId && !next.propertyId && !next.threadKey && !next.masterOwnerId) return
       const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'pipeline')
       setActiveContextState((current) => ({ ...current, ...active }))
       const match = findThreadForActiveContext(threads, active)
@@ -2943,6 +2959,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         selectedThreadFallbackRef.current = match
       } else if (active.threadKey) {
         setSelectedThreadKey(active.threadKey)
+        setSelectedId(null)
       }
     })
   }, [activeContext.sourceView, threads])
@@ -3006,7 +3023,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     setPreviewContext(null)
+    setMessagesLoading(true)
+    setSelectedMessages([])
     setActiveContext(active, { preserveCurrentViews: true })
+    setUniversalEntityContext(universal)
     setUniversalEntityContextSnapshot(universal)
   }, [setActiveContext])
 
@@ -3052,6 +3072,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   useEffect(() => {
     if (!selected) return
+    // Pipeline (and other cross-app sources) own context until the inbox row matches.
+    if (activeContext.opportunityId && activeContext.sourceView === 'pipeline') {
+      if (!activeContextMatchesThread(activeContext, selected)) return
+    }
     setUniversalEntityContext((current) => {
       const merged = mergeUniversalContexts(current, universalContextFromActiveInbox({
         ...activeContext,

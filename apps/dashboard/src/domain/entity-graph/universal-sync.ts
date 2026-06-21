@@ -206,8 +206,13 @@ export function resolveCanonicalWorkspaceContext(args: {
 export function syncPayloadFromOpportunity(
   opportunity: PipelineOpportunity,
 ): { active: ActiveInboxContext; universal: UniversalEntityContext } {
+  const active = buildContextFromOpportunity(opportunity, 'pipeline')
   return {
-    active: buildContextFromOpportunity(opportunity, 'pipeline'),
+    active: {
+      ...active,
+      entityType: active.propertyId ? 'property' : active.masterOwnerId ? 'master_owner' : active.entityType,
+      entityId: active.propertyId || active.masterOwnerId || active.opportunityId || active.entityId,
+    },
     universal: universalContextFromOpportunity(opportunity),
   }
 }

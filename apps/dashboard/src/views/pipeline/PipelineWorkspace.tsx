@@ -207,10 +207,9 @@ export function PipelineWorkspace({
     writeOppToUrl(opportunityId)
     try { localStorage.setItem(STORAGE_KEY, opportunityId) } catch { /* ignore */ }
     const opp = opportunities.find((o) => o.id === opportunityId)
-    if (opp) syncEntityContext(opp, 'select')
-    if (opp?.primary_thread_key) onSelect(opp.primary_thread_key)
-    else if (opp?.id) onSelect(opp.id)
-  }, [onSelect, opportunities, syncEntityContext])
+    if (!opp) return
+    syncEntityContext(opp, 'select')
+  }, [syncEntityContext, opportunities])
 
   const handlePreviewOpportunity = useCallback((opportunityId: string) => {
     const opp = opportunities.find((o) => o.id === opportunityId)
