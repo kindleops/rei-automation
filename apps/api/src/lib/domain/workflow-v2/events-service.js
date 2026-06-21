@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { processEvent } from '@/lib/domain/workflow-v2/execution-service.js';
+import { cancelFollowUpsOnReply } from '@/lib/domain/workflow-v2/follow-up-service.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -9,6 +10,43 @@ function clean(value) {
 
 function db(deps = {}) {
   return deps.supabase ?? deps.supabaseClient ?? getDefaultSupabaseClient();
+}
+
+const REPLY_EVENT_TYPES = new Set([
+  'inbound_message_received',
+  'seller_replied',
+  'inbound_sms',
+  'inbound_sms_received',
+]);
+
+async function cancelFollowUpsForSubject(subjectId, deps = {}) {
+  const client = db(deps);
+  const subject_id = clean(subjectId);
+  if (!subject_id || !client?.from) return { ok: true, cancelled: 0 };
+
+  const enrollmentsRes = await client
+    .from('workflow_enrollments')
+    .select('id')
+    .eq('subject_id', subject_id)
+    .in('status', ['active', 'waiting', 'paused']);
+  if (enrollmentsRes.error) throw enrollmentsRes.error;
+
+  const enrollments = enrollmentsRes.data ?? [];
+  const results = [];
+  for (const enrollment of enrollments) {
+    try {
+      const result = await cancelFollowUpsOnReply(enrollment.id, deps);
+      results.push({ enrollment_id: enrollment.id, ...result });
+    } catch (err) {
+      results.push({
+        enrollment_id: enrollment.id,
+        ok: false,
+        error: err?.message ?? 'cancel_follow_ups_failed',
+      });
+    }
+  }
+
+  return { ok: true, cancelled: results.length, results };
 }
 
 // Ingest a workflow event, deduplicate it, persist it, then fan out to execution.
@@ -25,11 +63,16 @@ export async function ingestWorkflowEvent(payload = {}, deps = {}) {
     clean(payload.dedupe_key ?? payload.dedupeKey ?? '') ||
     `wfv2-event-${eventType}-${subjectType}-${subjectId}-${crypto.randomUUID().slice(0, 8)}`;
 
-  // Context flows from the caller's top-level "context" field through every hop.
-  // Store it as the event payload so it's auditable in workflow_events, and pass
-  // it explicitly to processEvent so enrollments and actions can read it.
   const eventContext =
     payload.context && typeof payload.context === 'object' ? payload.context : {};
+
+  if (REPLY_EVENT_TYPES.has(eventType)) {
+    try {
+      await cancelFollowUpsForSubject(subjectId, { supabase: client, ...deps });
+    } catch {
+      // Non-fatal — event ingestion continues.
+    }
+  }
 
   const eventRow = {
     event_type: eventType,
@@ -44,14 +87,12 @@ export async function ingestWorkflowEvent(payload = {}, deps = {}) {
   let event;
   const insert = await client.from('workflow_events').insert(eventRow).select('*').single();
   if (insert.error?.code === '23505') {
-    // Duplicate — already processed.
     const existing = await client.from('workflow_events').select('*').eq('dedupe_key', dedupeKey).maybeSingle();
     return { ok: true, event: existing.data, duplicate: true, skipped: true };
   }
   if (insert.error) throw insert.error;
   event = insert.data;
 
-  // Fan out to execution scaffolding.
   let executionResult;
   try {
     executionResult = await processEvent(
@@ -61,7 +102,7 @@ export async function ingestWorkflowEvent(payload = {}, deps = {}) {
         subject_id: subjectId,
         context: eventContext,
       },
-      { supabase: client }
+      { supabase: client },
     );
 
     const newStatus = executionResult.definitions_matched > 0 ? 'matched' : 'no_match';

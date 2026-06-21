@@ -7,6 +7,7 @@
 //     - terminal node reached (enrollment completed)
 //     - no outgoing edges (enrollment completed)
 //     - guard blocks execution (enrollment terminated)
+//     - action.exit_workflow signal received
 //     - MAX_STEPS_PER_TICK safety limit hit
 //
 // processReadyEnrollments(opts, deps):
@@ -25,9 +26,20 @@ import { resolveNextNodeByEdge } from '@/lib/domain/workflow-v2/graph-service.js
 import { calculateNextExecutionAt, describeWait } from '@/lib/domain/workflow-v2/timing-service.js';
 import { evaluateConditionNode } from '@/lib/domain/workflow-v2/condition-evaluator.js';
 import { executeActionNode } from '@/lib/domain/workflow-v2/action-executor.js';
+import { evaluateGuardNode } from '@/lib/domain/workflow-v2/guard-evaluator.js';
+import { persistRunEvent } from '@/lib/domain/workflow-v2/run-events.js';
+import { buildRunDedupeKey, isDuplicateError } from '@/lib/domain/workflow-v2/idempotency.js';
+import { cancelFollowUpsOnReply } from '@/lib/domain/workflow-v2/follow-up-service.js';
 import { isGuardNode, isTriggerNode } from '@/lib/domain/workflow-v2/node-registry.js';
 
 const MAX_STEPS_PER_TICK = 50;
+
+const SELLER_REPLY_EVENT_TYPES = new Set([
+  'seller_replied',
+  'inbound_message_received',
+  'inbound_sms',
+  'inbound_sms_received',
+]);
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -35,6 +47,13 @@ function clean(value) {
 
 function db(deps = {}) {
   return deps.supabase ?? deps.supabaseClient ?? getDefaultSupabaseClient();
+}
+
+function isSellerReplyContext(context = {}) {
+  if (!context || typeof context !== 'object') return false;
+  if (context.seller_replied === true) return true;
+  const eventType = clean(context.event_type ?? context.trigger_event ?? context.last_event_type ?? '');
+  return SELLER_REPLY_EVENT_TYPES.has(eventType);
 }
 
 // ─────────────────────────────────────────────
@@ -78,23 +97,30 @@ async function loadGraph(definitionId, client) {
 // Run record helpers
 // ─────────────────────────────────────────────
 
-async function createRunRecord(client, definition, enrollment) {
-  const { data, error } = await client
-    .from('workflow_runs')
-    .insert({
-      workflow_definition_id: definition.id,
-      enrollment_id: enrollment.id,
-      prospect_id: clean(enrollment.subject_id ?? '') || null,
-      status: 'running',
-      dry_run: false,
-      live_send_enabled: false,
-      context: enrollment.context ?? {},
-      started_at: new Date().toISOString(),
-    })
-    .select('*')
-    .single();
-  if (error) throw error;
-  return data;
+async function createRunRecord(client, definition, enrollment, currentNode = null) {
+  const tick = clean(currentNode?.id ?? enrollment.current_node_id ?? 'entry');
+  const dedupeKey = buildRunDedupeKey(enrollment.id, tick, enrollment.updated_at ?? enrollment.enrolled_at ?? '0');
+
+  const row = {
+    workflow_definition_id: definition.id,
+    enrollment_id: enrollment.id,
+    prospect_id: clean(enrollment.subject_id ?? '') || null,
+    status: 'running',
+    dry_run: false,
+    live_send_enabled: false,
+    context: enrollment.context ?? {},
+    dedupe_key: dedupeKey,
+    started_at: new Date().toISOString(),
+  };
+
+  const insert = await client.from('workflow_runs').insert(row).select('*').single();
+  if (isDuplicateError(insert.error)) {
+    const existing = await client.from('workflow_runs').select('*').eq('dedupe_key', dedupeKey).maybeSingle();
+    if (existing.error) throw existing.error;
+    if (existing.data) return existing.data;
+  }
+  if (insert.error) throw insert.error;
+  return insert.data;
 }
 
 async function finalizeRunRecord(client, runId, status) {
@@ -116,13 +142,28 @@ async function persistRunStep(client, run, definition, node, stepResult, enrollm
     dry_run: false,
     live_send_blocked: stepResult.live_send_blocked === true,
     block_reason: stepResult.block_reason ?? null,
-    // _context snapshot lets you audit exactly what context was visible at this step.
     execution_result: { ...stepResult, _context: enrollment?.context ?? {} },
     started_at: new Date().toISOString(),
     completed_at: new Date().toISOString(),
   };
   const { error } = await client.from('workflow_run_steps').insert(row);
   if (error) throw error;
+}
+
+async function recordStepEvent(client, run, definition, enrollment, node, stepResult) {
+  try {
+    await persistRunEvent(client, {
+      run_id: run.id,
+      enrollment_id: enrollment.id,
+      definition_id: definition.id,
+      workflow_id: definition.id,
+      node,
+      stepResult,
+      event_type: `workflow_v2.step.${stepResult.status ?? 'completed'}`,
+    });
+  } catch {
+    // Run ledger is best-effort; step persistence remains authoritative.
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -138,15 +179,13 @@ async function executeNode(node, enrollment, definition, client, deps) {
     live_send_blocked: false,
   };
 
-  // Trigger: just mark as entered
   if (isTriggerNode(node.node_type)) {
     return { ...base, status: 'triggered' };
   }
 
-  // Timing: calculate wait and signal pause (caller must handle pausing)
   if (node.node_kind === 'timing') {
-    const nextAt = calculateNextExecutionAt(node.config ?? {});
-    const waitDesc = describeWait(node.config ?? {});
+    const nextAt = calculateNextExecutionAt(node.config ?? {}, new Date(), node.node_type, enrollment);
+    const waitDesc = describeWait(node.config ?? {}, node.node_type, enrollment);
     return {
       ...base,
       status: 'waiting',
@@ -155,21 +194,20 @@ async function executeNode(node, enrollment, definition, client, deps) {
     };
   }
 
-  // Guard: evaluate guard condition
   if (isGuardNode(node.node_type)) {
-    const passed = await evaluateGuard(node, enrollment, client);
+    const guardEval = await evaluateGuardNode(node, enrollment, definition, { supabase: client, ...deps });
+    const passed = guardEval.passed === true;
     return {
       ...base,
       status: passed ? 'completed' : 'blocked',
-      guard: { node_type: node.node_type, passed, reason: passed ? 'guard_passed' : 'guard_blocked' },
+      guard: { node_type: node.node_type, passed, reason: guardEval.reason },
       live_send_blocked: false,
       block_reason: passed ? null : `guard_blocked:${node.node_type}`,
     };
   }
 
-  // Condition: evaluate and record branch result (caller reads _condition_result)
   if (node.node_kind === 'condition') {
-    const evaluation = await evaluateConditionNode(node, enrollment, { supabase: client });
+    const evaluation = await evaluateConditionNode(node, enrollment, { supabase: client, ...deps });
     return {
       ...base,
       status: 'completed',
@@ -178,43 +216,21 @@ async function executeNode(node, enrollment, definition, client, deps) {
     };
   }
 
-  // Action
   if (node.node_kind === 'action') {
-    return executeActionNode(node, enrollment, definition, { supabase: client });
+    const actionResult = await executeActionNode(node, enrollment, definition, { supabase: client, ...deps });
+    if (actionResult.live_send_blocked !== true && node.node_type?.startsWith('action.send_')) {
+      return { ...actionResult, live_send_blocked: true };
+    }
+    if (
+      actionResult.live_send_blocked !== true &&
+      (node.node_type?.startsWith('action.enqueue_') || node.node_type === 'action.schedule_follow_up')
+    ) {
+      return { ...actionResult, live_send_blocked: true };
+    }
+    return actionResult;
   }
 
   return { ...base, status: 'scaffolded', note: `node_kind ${node.node_kind} not handled` };
-}
-
-async function evaluateGuard(node, enrollment, client) {
-  // guard.stop_suppression: check if contact is suppressed in message_events
-  if (node.node_type === 'guard.stop_suppression') {
-    const masterOwnerId = clean(enrollment.context?.master_owner_id ?? '');
-    if (!masterOwnerId) return true; // No ID to check → pass through
-    try {
-      const { count } = await client
-        .from('message_events')
-        .select('id', { count: 'exact', head: true })
-        .eq('master_owner_id', masterOwnerId)
-        .eq('is_opt_out', true)
-        .limit(1);
-      return (count ?? 0) === 0; // pass if no opt-out rows
-    } catch {
-      return true; // graceful degradation: pass on error
-    }
-  }
-
-  // guard.quiet_hours: scaffolded — always pass in Phase 2
-  if (node.node_type === 'guard.quiet_hours') {
-    return true;
-  }
-
-  // guard.max_touches: scaffolded — always pass in Phase 2
-  if (node.node_type === 'guard.max_touches') {
-    return true;
-  }
-
-  return true;
 }
 
 // ─────────────────────────────────────────────
@@ -225,29 +241,41 @@ export async function runEnrollment(enrollmentId, deps = {}) {
   const client = db(deps);
   const now = new Date();
 
-  // 1. Load enrollment
-  const enrollment = await loadEnrollmentFull(enrollmentId, client);
+  let enrollment = await loadEnrollmentFull(enrollmentId, client);
   if (!enrollment) return { ok: false, error: 'enrollment_not_found', enrollment_id: enrollmentId };
 
-  // 2. Gate: skip if not runnable
+  if (enrollment.status === 'paused') {
+    return { ok: false, skipped: true, reason: 'enrollment_paused', status: enrollment.status };
+  }
+
   if (!['active', 'waiting'].includes(enrollment.status)) {
     return { ok: false, skipped: true, reason: 'enrollment_not_runnable', status: enrollment.status };
   }
   if (enrollment.status === 'waiting' && enrollment.next_execution_at) {
     if (new Date(enrollment.next_execution_at) > now) {
-      return { ok: false, skipped: true, reason: 'wait_not_yet_due', next_execution_at: enrollment.next_execution_at };
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'wait_not_yet_due',
+        next_execution_at: enrollment.next_execution_at,
+      };
     }
   }
 
-  // 3. Load definition
+  if (isSellerReplyContext(enrollment.context ?? {})) {
+    try {
+      await cancelFollowUpsOnReply(enrollmentId, { supabase: client, ...deps });
+    } catch {
+      // Non-fatal — runner continues even if follow-up cancellation fails.
+    }
+  }
+
   const definition = await loadDefinition(enrollment.workflow_definition_id, client);
   if (!definition) return { ok: false, error: 'workflow_definition_not_found', enrollment_id: enrollmentId };
 
-  // 4. Load graph
   const { nodes, edges } = await loadGraph(enrollment.workflow_definition_id, client);
   const nodesById = new Map(nodes.map((n) => [n.id, n]));
 
-  // 5. Resolve entry node
   let currentNode = enrollment.current_node_id
     ? nodesById.get(enrollment.current_node_id)
     : nodes.find((n) => isTriggerNode(n.node_type));
@@ -256,8 +284,7 @@ export async function runEnrollment(enrollmentId, deps = {}) {
     return { ok: false, error: 'no_entry_node', enrollment_id: enrollmentId };
   }
 
-  // 6. Create run record
-  const run = await createRunRecord(client, definition, enrollment);
+  const run = await createRunRecord(client, definition, enrollment, currentNode);
 
   const stepResults = [];
   let steps = 0;
@@ -267,51 +294,53 @@ export async function runEnrollment(enrollmentId, deps = {}) {
     while (currentNode && steps < MAX_STEPS_PER_TICK) {
       steps++;
 
-      // Execute the node
       const stepResult = await executeNode(currentNode, enrollment, definition, client, deps);
       stepResults.push(stepResult);
       await persistRunStep(client, run, definition, currentNode, stepResult, enrollment);
+      await recordStepEvent(client, run, definition, enrollment, currentNode, stepResult);
 
-      // ── Guard blocked → terminate ──
       if (stepResult.status === 'blocked' && currentNode.node_kind === 'guard') {
         await terminateEnrollment(enrollmentId, stepResult.block_reason ?? 'guard_blocked', { supabase: client });
         runStatus = 'completed';
         break;
       }
 
-      // ── Timing node → pause ──
-      if (currentNode.node_kind === 'timing' && stepResult._pause_until) {
-        const nextNode = resolveNextNodeByEdge(currentNode.id, null, edges, nodesById);
-        // Advance current_node_id to AFTER the timing node so resume continues from next
-        await advanceEnrollment(enrollmentId, nextNode?.id ?? null, { supabase: client });
-        await pauseEnrollmentForWait(enrollmentId, stepResult._pause_until, currentNode.node_type, { supabase: client });
-        runStatus = 'waiting';
-        break;
-      }
-
-      // ── Condition node → route by branch ──
-      let conditionResult = null;
-      if (currentNode.node_kind === 'condition') {
-        conditionResult = stepResult._condition_result ?? false;
-      }
-
-      // ── Resolve next node ──
-      const nextNode = resolveNextNodeByEdge(currentNode.id, conditionResult, edges, nodesById);
-
-      if (!nextNode) {
-        // No outgoing edges → workflow complete
+      if (stepResult.status === 'exit' && currentNode.node_kind === 'action') {
         await completeEnrollment(enrollmentId, { supabase: client });
         runStatus = 'completed';
         break;
       }
 
-      // ── Advance enrollment ──
+      if (currentNode.node_kind === 'timing' && stepResult._pause_until) {
+        const nextNode = resolveNextNodeByEdge(currentNode.id, null, edges, nodesById);
+        await advanceEnrollment(enrollmentId, nextNode?.id ?? null, { supabase: client });
+        await pauseEnrollmentForWait(enrollmentId, stepResult._pause_until, currentNode.node_type, {
+          supabase: client,
+        });
+        runStatus = 'waiting';
+        break;
+      }
+
+      let conditionResult = null;
+      if (currentNode.node_kind === 'condition') {
+        conditionResult = stepResult._condition_result ?? false;
+      }
+
+      const nextNode = resolveNextNodeByEdge(currentNode.id, conditionResult, edges, nodesById);
+
+      if (!nextNode) {
+        await completeEnrollment(enrollmentId, { supabase: client });
+        runStatus = 'completed';
+        break;
+      }
+
       await advanceEnrollment(enrollmentId, nextNode.id, { supabase: client });
+      const reloaded = await loadEnrollmentFull(enrollmentId, client);
+      if (reloaded) enrollment = reloaded;
       currentNode = nextNode;
     }
 
     if (steps >= MAX_STEPS_PER_TICK) {
-      // Hit safety limit — leave enrollment active, scheduler will continue
       runStatus = 'running';
     }
   } catch (err) {

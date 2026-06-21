@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
+import {
+  SYSTEM_WORKFLOW_TEMPLATES,
+  protectSystemTemplateEdit,
+} from '@/lib/domain/workflow-v2/system-templates.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -34,7 +38,7 @@ function normalizeInput(payload = {}, existing = {}) {
   }
 
   const status = clean(payload.status ?? existing.status ?? 'draft');
-  row.status = ['draft', 'active', 'paused', 'archived'].includes(status) ? status : 'draft';
+  row.status = ['draft', 'published', 'active', 'paused', 'archived'].includes(status) ? status : 'draft';
 
   row.live_send_enabled = false;
 
@@ -47,6 +51,20 @@ function normalizeInput(payload = {}, existing = {}) {
       : existing.metadata ?? {};
 
   return row;
+}
+
+function isLockedSystemTemplate(definition = {}) {
+  return definition?.is_locked === true || definition?.is_system_template === true;
+}
+
+function isMetadataEnableToggle(payload = {}) {
+  const keys = Object.keys(payload).filter((key) => payload[key] !== undefined);
+  if (!keys.length) return false;
+  if (!keys.every((key) => key === 'metadata')) return false;
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const metaKeys = Object.keys(metadata);
+  if (!metaKeys.length) return false;
+  return metaKeys.every((key) => ['enabled', 'is_enabled', 'disabled', 'is_active'].includes(key));
 }
 
 // ─────────────────────────────────────────────
@@ -257,6 +275,13 @@ export async function updateDefinition(id, payload = {}, deps = {}) {
     return { ok: false, status: 403, error: 'legacy_workflow_readonly', message: 'Legacy workflows are read-only in Workflow V2.' };
   }
 
+  if (isLockedSystemTemplate(current.definition)) {
+    const lockCheck = protectSystemTemplateEdit(current.definition);
+    if (!lockCheck.ok && !isMetadataEnableToggle(payload)) {
+      return { ok: false, status: 403, ...lockCheck };
+    }
+  }
+
   const patch = normalizeInput(payload, current.definition);
   delete patch.definition_key;
   patch.live_send_enabled = false;
@@ -384,6 +409,23 @@ export async function updateNode(nodeId, payload = {}, deps = {}) {
   if (current.error) throw current.error;
   if (!current.data) return { ok: false, status: 404, error: 'workflow_node_not_found' };
 
+  const definitionRes = await db(deps)
+    .from('workflow_definitions')
+    .select('*')
+    .eq('id', current.data.workflow_definition_id)
+    .maybeSingle();
+  if (definitionRes.error) throw definitionRes.error;
+
+  if (isLockedSystemTemplate(definitionRes.data)) {
+    const lockCheck = protectSystemTemplateEdit(definitionRes.data);
+    const allowedKeys = new Set(['is_active']);
+    const patchKeys = Object.keys(payload).filter((key) => payload[key] !== undefined);
+    const isEnableToggleOnly = patchKeys.length > 0 && patchKeys.every((key) => allowedKeys.has(key));
+    if (!lockCheck.ok && !isEnableToggleOnly) {
+      return { ok: false, status: 403, ...lockCheck };
+    }
+  }
+
   const patch = {};
   if (payload.label !== undefined) patch.label = clean(payload.label ?? '');
   if (payload.config !== undefined && typeof payload.config === 'object') {
@@ -456,4 +498,12 @@ export async function createSenderPool(definitionId, payload = {}, deps = {}) {
   const { data, error } = await db(deps).from('workflow_sender_pools').insert(row).select('*').single();
   if (error) throw error;
   return { ok: true, sender_pool: data };
+}
+
+export function listSystemTemplates() {
+  return {
+    ok: true,
+    templates: SYSTEM_WORKFLOW_TEMPLATES.map((template) => ({ ...template })),
+    total: SYSTEM_WORKFLOW_TEMPLATES.length,
+  };
 }

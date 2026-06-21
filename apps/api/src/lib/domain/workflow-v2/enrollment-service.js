@@ -1,4 +1,5 @@
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
+import { pauseEnrollment } from '@/lib/domain/workflow-v2/run-control.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -197,4 +198,35 @@ export async function findActiveEnrollment(definitionId, subjectType, subjectId,
     .maybeSingle();
   if (error) throw error;
   return { ok: true, enrollment: data ?? null };
+}
+
+export async function pauseEnrollmentEnrollment(enrollmentId, reason = 'manual_pause', deps = {}) {
+  return pauseEnrollment(enrollmentId, reason, deps);
+}
+
+export async function findEnrollmentByDedupe(dedupeKey, deps = {}) {
+  const key = clean(dedupeKey);
+  if (!key) return { ok: false, error: 'dedupe_key_required' };
+
+  const parts = key.split(':');
+  if (parts[0] === 'wfv2-enrollment' && parts.length >= 4) {
+    const [, definitionId, subjectType, subjectId] = parts;
+    const { data, error } = await db(deps)
+      .from('workflow_enrollments')
+      .select('*')
+      .eq('workflow_definition_id', definitionId)
+      .eq('subject_type', subjectType)
+      .eq('subject_id', subjectId)
+      .maybeSingle();
+    if (error) throw error;
+    return { ok: true, enrollment: data ?? null, dedupe_key: key };
+  }
+
+  const { data, error } = await db(deps)
+    .from('workflow_enrollments')
+    .select('*')
+    .contains('context', { enrollment_dedupe_key: key })
+    .maybeSingle();
+  if (error) throw error;
+  return { ok: true, enrollment: data ?? null, dedupe_key: key };
 }

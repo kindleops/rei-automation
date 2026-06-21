@@ -33,6 +33,8 @@
     "proof:no-repeated-questions": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/no-repeated-questions.proof.mjs",
     "proof:stage-progression": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/stage-progression.proof.mjs",
     "proof:seller-temperature": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/seller-temperature.proof.mjs",
+    "proof:wfv2-runtime": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-runtime-proof.test.mjs",
+    "proof:wfv2-ctx": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-context-propagation.test.mjs",
     "start": "next start",
     "discord:register": "node scripts/register-discord-commands.mjs"
   },
