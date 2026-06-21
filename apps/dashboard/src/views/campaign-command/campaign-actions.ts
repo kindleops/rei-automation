@@ -127,16 +127,20 @@ export async function executeCampaignAction(
         interval_seconds: campaign.send_interval_seconds || 15,
       })
       const inserted = res.queued ?? 0
+      const result = res.result as Record<string, unknown> | undefined
+      const proofHydration = Boolean(result?.proof_hydration ?? result?.no_send)
       if (res.blockers?.length && inserted === 0) {
         emitNotification({ title: 'Queue blocked', detail: res.blockers.join(' · '), severity: 'warning' })
       } else {
-        const result = res.result as Record<string, unknown> | undefined
         const skipped = Number(result?.skipped_count ?? 0)
         const blocked = Number(result?.blocked_count ?? 0)
         emitNotification({
-          title: inserted > 0 ? `Queued ${inserted} sends` : 'No new rows queued',
+          title: inserted > 0
+            ? (proofHydration ? `Queued ${inserted} proof rows` : `Queued ${inserted} sends`)
+            : 'No new rows queued',
           detail: [
             inserted > 0 ? `${inserted} inserted` : null,
+            proofHydration ? 'no-send proof hydration' : null,
             skipped > 0 ? `${skipped} skipped` : null,
             blocked > 0 ? `${blocked} blocked` : null,
           ].filter(Boolean).join(' · ') || `"${campaign.campaign_name}" batch complete`,

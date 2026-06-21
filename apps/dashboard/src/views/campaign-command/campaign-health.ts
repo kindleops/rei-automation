@@ -199,7 +199,11 @@ export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
       return { id: 'activate', label: 'Activate Now', variant: 'is-primary' }
     case 'active':
     case 'live_limited':
-      return { id: 'queue_batch', label: 'Queue Batch', variant: 'is-blue' }
+      return {
+        id: 'queue_batch',
+        label: campaign.execution_proof?.proof_mode ? 'Queue Proof Batch' : 'Queue Batch',
+        variant: 'is-blue',
+      }
     case 'paused':
       return { id: 'resume', label: 'Resume', variant: 'is-primary' }
     case 'completed':

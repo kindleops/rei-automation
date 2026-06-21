@@ -5,7 +5,10 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
-import { launchCandidateFromTarget } from '@/lib/domain/campaigns/campaign-automation-service.js'
+async function launchCandidateFromTarget(target, campaign) {
+  const { launchCandidateFromTarget: resolve } = await import('@/lib/domain/campaigns/campaign-automation-service.js')
+  return resolve(target, campaign)
+}
 
 function clean(value) {
   return String(value ?? '').trim()

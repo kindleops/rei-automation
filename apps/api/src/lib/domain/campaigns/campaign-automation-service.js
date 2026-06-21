@@ -6349,8 +6349,13 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       input.respectGlobalEmergencyStopForCreation,
     false
   )
-  const detail = await getCampaign(campaignId, deps)
-  const campaign = detail.campaign
+  const { data: campaign, error: campaignError } = await supabase
+    .from('campaigns')
+    .select('*')
+    .eq('id', campaignId)
+    .single()
+  if (campaignError) throw campaignError
+  if (!campaign) return { ok: false, error: 'campaign_not_found', campaign_id: campaignId, blockers: ['campaign_not_found'] }
   const blockers = []
   const globalStop = await globalEmergencyStopActive(deps)
   const campaignStop = isEmergencyStopActive(campaign.emergency_stop_at)
@@ -6750,16 +6755,20 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       // Live send writes stage BUILT -> QUEUED -> SCHEDULED.
       // Proof hydration (no_send) inserts canonical rows but does not advance lifecycle;
       // activation service owns the transition to ACTIVE.
-      if (!hydrateNoSend) {
+      const campaignStatus = normalizeCampaignStatus(campaign.status)
+      const shouldAdvanceLifecycle = !hydrateNoSend && ['built', 'queued', 'draft'].includes(campaignStatus)
+      if (shouldAdvanceLifecycle) {
         const earliestScheduledFor = scheduledItems
           .map((item) => item.scheduled_for_utc)
           .filter(Boolean)
           .sort()[0] || null
-        await transitionCampaignStatus(supabase, campaignId, 'queued', { reason: 'queue_plan_live_write' })
-        await transitionCampaignStatus(supabase, campaignId, 'scheduled', {
+        const queued = await transitionCampaignStatus(supabase, campaignId, 'queued', { reason: 'queue_plan_live_write' })
+        if (!queued.ok) blockers.push(queued.error || 'lifecycle_transition_failed')
+        const scheduled = await transitionCampaignStatus(supabase, campaignId, 'scheduled', {
           reason: 'queue_plan_live_write',
           scheduledFor: earliestScheduledFor,
         })
+        if (!scheduled.ok) blockers.push(scheduled.error || 'lifecycle_transition_failed')
       }
     }
 
