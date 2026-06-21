@@ -26,6 +26,7 @@ import {
   cancelFollowUpsOnReply,
 } from '@/lib/domain/workflow-v2/follow-up-service.js';
 import { cancelPendingTasks } from '@/lib/domain/workflow-v2/scheduled-tasks.js';
+import { runAcquisitionEngineForEnrollment } from '@/lib/domain/workflow-v2/acquisition-engine-bridge.js';
 
 const CONTEXT_KEYS = [
   'master_owner_id',
@@ -372,25 +373,34 @@ async function executeRunClassification(node, enrollment, deps) {
 }
 
 async function executeRunAcquisitionEngine(node, enrollment, deps) {
-  const ctx = enrollment.context ?? {};
-  const acquisitionOutput =
-    ctx.acquisition_output ??
-    ctx.acquisition_engine_output ?? {
-      best_strategy: ctx.best_strategy ?? 'cash',
-      recommended_cash_offer: ctx.cash_offer ?? null,
-      seller_asking_price: ctx.asking_price ?? null,
-      source: 'workflow_v2_stub',
-    };
+  const mode = clean(node.config?.mode ?? enrollment.context?.acquisition_engine_mode ?? 'full');
+  if (mode) {
+    await updateEnrollmentContext(enrollment.id, { acquisition_engine_mode: mode }, deps);
+  }
 
-  await updateEnrollmentContext(
-    enrollment.id,
-    { acquisition_output: acquisitionOutput, acquisition_engine_output: acquisitionOutput },
-    deps,
-  );
+  const engineResult = await runAcquisitionEngineForEnrollment(enrollment, deps);
+  const refreshed = await db(deps)
+    .from('workflow_enrollments')
+    .select('context')
+    .eq('id', enrollment.id)
+    .maybeSingle();
+  const acquisitionOutput =
+    refreshed.data?.context?.acquisition_engine_output ??
+    refreshed.data?.context?.acquisition_output ??
+    engineResult.acquisition_output ??
+    null;
 
   return {
-    ...baseResult(node, 'completed', enrollment),
-    action: { node_type: node.node_type, acquisition_output: acquisitionOutput },
+    ...baseResult(node, engineResult.ok ? 'completed' : 'failed', enrollment),
+    action: {
+      node_type: node.node_type,
+      run_id: engineResult.run_id ?? null,
+      input_hash: engineResult.input_hash ?? null,
+      reused: engineResult.reused === true,
+      mode,
+      acquisition_output: acquisitionOutput,
+      engine_error: engineResult.engine_error ?? null,
+    },
   };
 }
 
@@ -578,10 +588,43 @@ async function executeSuppressContact(node, enrollment, deps) {
   };
 }
 
-async function executeEnrollSubworkflow(node, enrollment, deps) {
-  const definitionId = clean(
+async function resolveSubworkflowDefinitionId(node, deps) {
+  const directId = clean(
     node.config?.definition_id ?? node.config?.workflow_definition_id ?? node.config?.subworkflow_id ?? '',
   );
+  if (directId) return directId;
+
+  const definitionKey = clean(
+    node.config?.subworkflow_definition_key ?? node.config?.definition_key ?? node.config?.subworkflow_key ?? '',
+  );
+  if (!definitionKey) return '';
+
+  const client = db(deps);
+  if (!client?.from) return '';
+
+  const lookup = await client
+    .from('workflow_definitions')
+    .select('id')
+    .eq('definition_key', definitionKey)
+    .maybeSingle();
+  if (lookup.error) throw lookup.error;
+  return clean(lookup.data?.id ?? '');
+}
+
+async function executeEnrollSubworkflow(node, enrollment, deps) {
+  if (node.config?.blocked === true) {
+    return {
+      ...baseResult(node, 'blocked', enrollment),
+      block_reason: clean(node.config?.blocked_reason ?? 'subworkflow_blocked'),
+      action: {
+        node_type: node.node_type,
+        blocked: true,
+        subworkflow_definition_key: clean(node.config?.subworkflow_definition_key ?? '') || null,
+      },
+    };
+  }
+
+  const definitionId = await resolveSubworkflowDefinitionId(node, deps);
   if (!definitionId) {
     return { ...baseResult(node, 'failed', enrollment), error: 'subworkflow_definition_id_required' };
   }
@@ -598,7 +641,12 @@ async function executeEnrollSubworkflow(node, enrollment, deps) {
 
   return {
     ...baseResult(node, result.ok ? 'completed' : 'failed', enrollment),
-    action: { node_type: node.node_type, subworkflow_enrollment: result },
+    action: {
+      node_type: node.node_type,
+      subworkflow_definition_id: definitionId,
+      subworkflow_definition_key: clean(node.config?.subworkflow_definition_key ?? '') || null,
+      subworkflow_enrollment: result,
+    },
   };
 }
 
@@ -641,16 +689,35 @@ async function executeSelectSender(node, enrollment, deps) {
 }
 
 async function executeSelectNextContactMethod(node, enrollment, deps) {
+  const ctx = enrollment.context ?? {};
   const method = lower(node.config?.method ?? node.config?.contact_method ?? 'sms');
-  await updateEnrollmentContext(
-    enrollment.id,
-    { preferred_contact_method: method, next_contact_method: method },
-    deps,
-  );
+  const attempted = new Set((Array.isArray(ctx.attempted_phones) ? ctx.attempted_phones : []).map(clean));
+  if (ctx.phone) attempted.add(clean(ctx.phone));
+
+  const alternates = Array.isArray(ctx.alternate_phones) ? ctx.alternate_phones : [];
+  const nextPhone = alternates.map(clean).find((phone) => phone && !attempted.has(phone)) ?? null;
+
+  const patch = {
+    preferred_contact_method: method,
+    next_contact_method: method,
+    attempted_phones: [...attempted],
+    selected_alternate_phone: nextPhone,
+  };
+  if (nextPhone) {
+    patch.phone = nextPhone;
+    patch.to_phone = nextPhone;
+  }
+
+  await updateEnrollmentContext(enrollment.id, patch, deps);
 
   return {
     ...baseResult(node, 'completed', enrollment),
-    action: { node_type: node.node_type, next_contact_method: method, scaffolded: true },
+    action: {
+      node_type: node.node_type,
+      next_contact_method: method,
+      selected_alternate_phone: nextPhone,
+      has_alternate_contact: Boolean(nextPhone),
+    },
   };
 }
 

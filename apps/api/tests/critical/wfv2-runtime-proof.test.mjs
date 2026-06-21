@@ -207,6 +207,11 @@ function createFakeSupabase(seed = {}, options = {}) {
       return this;
     }
 
+    delete() {
+      this.op = "delete";
+      return this;
+    }
+
     eq(column, value) {
       this.filters.push({ type: "eq", column, value });
       return this;
@@ -297,6 +302,20 @@ function createFakeSupabase(seed = {}, options = {}) {
           return { data: null, error: null, count: updated.length };
         }
         return { data: single ? updated[0] || null : updated, error: null, count: null };
+      }
+
+      if (this.op === "delete") {
+        const deleted = [];
+        for (let i = table.length - 1; i >= 0; i -= 1) {
+          if (matches(table[i], this.filters)) {
+            deleted.push(table[i]);
+            table.splice(i, 1);
+          }
+        }
+        if (this.countMode && this.headMode) {
+          return { data: null, error: null, count: deleted.length };
+        }
+        return { data: single ? deleted[0] || null : deleted, error: null, count: null };
       }
 
       let selected = table.filter((row) => matches(row, this.filters));
@@ -1249,4 +1268,5 @@ test("system templates: seeds 13 locked versioned workflows", async () => {
   const secondSeed = await seedSystemWorkflowTemplates({ supabase });
   assert.equal(secondSeed.skipped.length, 13);
   assert.equal(secondSeed.seeded.length, 0);
+  assert.ok(secondSeed.graph_version >= 2);
 });

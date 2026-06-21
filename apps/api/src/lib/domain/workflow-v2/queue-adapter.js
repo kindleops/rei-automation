@@ -25,6 +25,8 @@ function workflowMetadata({
   return {
     no_send: true,
     proof_no_send: true,
+    confirm_live: false,
+    sms_eligible: false,
     source: 'workflow_v2',
     workflow_definition_id: clean(workflowDefinitionId) || null,
     enrollment_id: clean(enrollmentId) || null,

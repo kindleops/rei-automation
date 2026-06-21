@@ -3,6 +3,13 @@
 import crypto from 'node:crypto';
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
+import {
+  SYSTEM_GRAPH_VERSION,
+  buildSystemWorkflowGraph,
+  buildMasterOrchestratorGraph,
+  countBusinessActions,
+  MASTER_ORCHESTRATOR_STAGES,
+} from '@/lib/domain/workflow-v2/system-workflow-graphs.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -37,7 +44,7 @@ export const SYSTEM_WORKFLOW_TEMPLATES = Object.freeze([
     key: 'ownership_verification',
     name: 'Ownership Verification',
     description: 'Confirms property ownership before advancing acquisition stages.',
-    trigger_type: 'trigger.inbound_message_received',
+    trigger_type: 'trigger.classification_completed',
   },
   {
     key: 'interest_qualification',
@@ -101,56 +108,58 @@ export const SYSTEM_WORKFLOW_TEMPLATES = Object.freeze([
   },
 ]);
 
-function buildTemplateGraph(template) {
-  const triggerKey = 'trigger';
-  const guardKey = 'guard';
-  const actionKey = 'action';
-  const exitKey = 'exit';
+export function buildTemplateGraph(template) {
+  return buildSystemWorkflowGraph(template.key);
+}
+
+async function replaceDefinitionGraph(client, definitionId, graph, template) {
+  const edgeDelete = await client.from('workflow_edges').delete().eq('workflow_definition_id', definitionId);
+  if (edgeDelete.error) throw edgeDelete.error;
+
+  const nodeDelete = await client.from('workflow_nodes').delete().eq('workflow_definition_id', definitionId);
+  if (nodeDelete.error) throw nodeDelete.error;
+
+  const nodeIdByKey = new Map();
+  for (const node of graph.nodes) {
+    const nodeInsert = await client
+      .from('workflow_nodes')
+      .insert({
+        workflow_definition_id: definitionId,
+        node_key: node.node_key,
+        node_kind: node.node_kind,
+        node_type: node.node_type,
+        label: node.label,
+        config: node.config ?? {},
+        position_x: node.position_x ?? 0,
+        position_y: node.position_y ?? 0,
+        is_active: node.is_active !== false,
+      })
+      .select('*')
+      .single();
+    if (nodeInsert.error) throw nodeInsert.error;
+    nodeIdByKey.set(node.node_key, nodeInsert.data.id);
+  }
+
+  for (const edge of graph.edges) {
+    const sourceId = nodeIdByKey.get(edge.source_node_key);
+    const targetId = nodeIdByKey.get(edge.target_node_key);
+    if (!sourceId || !targetId) continue;
+    const edgeInsert = await client.from('workflow_edges').insert({
+      workflow_definition_id: definitionId,
+      source_node_id: sourceId,
+      target_node_id: targetId,
+      edge_type: edge.edge_type ?? 'next',
+      condition_key: edge.condition_key ?? null,
+      label: edge.condition_key ?? edge.label ?? null,
+      config: { system_template: template.key, seed_id: crypto.randomUUID().slice(0, 8) },
+    });
+    if (edgeInsert.error) throw edgeInsert.error;
+  }
 
   return {
-    nodes: [
-      {
-        node_key: triggerKey,
-        node_kind: 'trigger',
-        node_type: template.trigger_type,
-        label: `${template.name} Trigger`,
-        config: { system_template: template.key },
-        position_x: 0,
-        position_y: 0,
-      },
-      {
-        node_key: guardKey,
-        node_kind: 'guard',
-        node_type: 'guard.workflow_kill_switch',
-        label: 'Kill Switch Guard',
-        config: {},
-        position_x: 0,
-        position_y: 120,
-      },
-      {
-        node_key: actionKey,
-        node_kind: 'action',
-        node_type: 'action.notify_operator',
-        label: `${template.name} Action`,
-        config: { system_template: template.key },
-        position_x: 0,
-        position_y: 240,
-      },
-      {
-        node_key: exitKey,
-        node_kind: 'action',
-        node_type: 'action.exit_workflow',
-        label: 'Exit Workflow',
-        config: {},
-        position_x: 0,
-        position_y: 360,
-      },
-    ],
-    edges: [
-      { source_node_key: triggerKey, target_node_key: guardKey, condition_key: null },
-      { source_node_key: guardKey, target_node_key: actionKey, condition_key: null },
-      { source_node_key: actionKey, target_node_key: exitKey, condition_key: null },
-    ],
+    node_count: graph.nodes.length,
+    edge_count: graph.edges.length,
+    business_action_count: countBusinessActions(graph),
   };
 }
 
@@ -169,6 +178,7 @@ export async function seedSystemWorkflowTemplates(deps = {}) {
   const client = db(deps);
   const seeded = [];
   const skipped = [];
+  const upgraded = [];
 
   for (const template of SYSTEM_WORKFLOW_TEMPLATES) {
     const definitionKey = `system_${normalizeKey(template.key)}`;
@@ -179,8 +189,48 @@ export async function seedSystemWorkflowTemplates(deps = {}) {
       .maybeSingle();
     if (existing.error) throw existing.error;
 
+    const graph = buildTemplateGraph(template);
+
     if (existing.data) {
-      skipped.push({ definition_key: definitionKey, id: existing.data.id });
+      const currentGraphVersion = Number(existing.data.metadata?.graph_version ?? 1);
+      if (currentGraphVersion >= SYSTEM_GRAPH_VERSION) {
+        skipped.push({
+          definition_key: definitionKey,
+          id: existing.data.id,
+          node_count: graph.nodes.length,
+          business_action_count: countBusinessActions(graph),
+        });
+        continue;
+      }
+
+      const graphStats = await replaceDefinitionGraph(client, existing.data.id, graph, template);
+      const nextVersion = Number(existing.data.version ?? 1) + 1;
+      const metadata = {
+        ...(existing.data.metadata ?? {}),
+        system_template_key: template.key,
+        graph_version: SYSTEM_GRAPH_VERSION,
+        graph_upgraded_at: new Date().toISOString(),
+        operational_mode: 'active_safe',
+      };
+
+      const update = await client
+        .from('workflow_definitions')
+        .update({
+          version: nextVersion,
+          trigger_type: template.trigger_type,
+          metadata,
+        })
+        .eq('id', existing.data.id)
+        .select('*')
+        .single();
+      if (update.error) throw update.error;
+
+      upgraded.push({
+        definition_key: definitionKey,
+        id: existing.data.id,
+        version: nextVersion,
+        ...graphStats,
+      });
       continue;
     }
 
@@ -199,6 +249,8 @@ export async function seedSystemWorkflowTemplates(deps = {}) {
         is_locked: true,
         metadata: {
           system_template_key: template.key,
+          graph_version: SYSTEM_GRAPH_VERSION,
+          operational_mode: 'active_safe',
           seeded_at: new Date().toISOString(),
         },
       })
@@ -207,65 +259,24 @@ export async function seedSystemWorkflowTemplates(deps = {}) {
     if (definitionInsert.error) throw definitionInsert.error;
 
     const definition = definitionInsert.data;
-    const graph = buildTemplateGraph(template);
-    const nodeIdByKey = new Map();
+    const graphStats = await replaceDefinitionGraph(client, definition.id, graph, template);
 
-    for (const node of graph.nodes) {
-      const nodeInsert = await client
-        .from('workflow_nodes')
-        .insert({
-          workflow_definition_id: definition.id,
-          node_key: node.node_key,
-          node_kind: node.node_kind,
-          node_type: node.node_type,
-          label: node.label,
-          config: node.config ?? {},
-          position_x: node.position_x ?? 0,
-          position_y: node.position_y ?? 0,
-          is_active: true,
-        })
-        .select('*')
-        .single();
-      if (nodeInsert.error) throw nodeInsert.error;
-      nodeIdByKey.set(node.node_key, nodeInsert.data.id);
-    }
-
-    for (const edge of graph.edges) {
-      const sourceId = nodeIdByKey.get(edge.source_node_key);
-      const targetId = nodeIdByKey.get(edge.target_node_key);
-      if (!sourceId || !targetId) continue;
-      const edgeInsert = await client.from('workflow_edges').insert({
-        workflow_definition_id: definition.id,
-        source_node_id: sourceId,
-        target_node_id: targetId,
-        condition_key: edge.condition_key ?? null,
-        label: edge.condition_key ?? null,
-        config: { system_template: template.key, seed_id: crypto.randomUUID().slice(0, 8) },
-      });
-      if (edgeInsert.error) throw edgeInsert.error;
-    }
-
-    seeded.push({ definition_key: definitionKey, id: definition.id });
+    seeded.push({
+      definition_key: definitionKey,
+      id: definition.id,
+      ...graphStats,
+    });
   }
 
-  return { ok: true, seeded, skipped, total: SYSTEM_WORKFLOW_TEMPLATES.length };
+  return {
+    ok: true,
+    seeded,
+    skipped,
+    upgraded,
+    total: SYSTEM_WORKFLOW_TEMPLATES.length,
+    graph_version: SYSTEM_GRAPH_VERSION,
+  };
 }
-
-const MASTER_ORCHESTRATOR_STAGES = Object.freeze([
-  { key: 'stage_0', label: 'Stage 0 — Intake & Safety', subworkflow_key: 'system_delivery_recovery' },
-  { key: 'stage_1', label: 'Stage 1 — Ownership', subworkflow_key: 'system_ownership_verification' },
-  { key: 'stage_2', label: 'Stage 2 — Interest', subworkflow_key: 'system_interest_qualification' },
-  { key: 'stage_3', label: 'Stage 3 — Pricing', subworkflow_key: 'system_asking_price_extraction' },
-  { key: 'stage_4', label: 'Stage 4 — Underwriting', subworkflow_key: 'system_underwriting_collection' },
-  { key: 'stage_5', label: 'Stage 5 — Offer Engine', subworkflow_key: 'system_acquisition_engine_orchestration' },
-  {
-    key: 'stage_6',
-    label: 'Stage 6 — Contract-to-Close',
-    subworkflow_key: 'system_offer_follow_up',
-    blocked: true,
-    blocked_reason: 'pipeline_and_calendar_not_wired',
-  },
-]);
 
 export async function seedMasterOrchestrator(deps = {}) {
   const client = db(deps);
@@ -276,8 +287,56 @@ export async function seedMasterOrchestrator(deps = {}) {
     .eq('definition_key', definitionKey)
     .maybeSingle();
   if (existing.error) throw existing.error;
+
+  const graph = buildMasterOrchestratorGraph();
+
   if (existing.data) {
-    return { ok: true, skipped: true, definition_key: definitionKey, id: existing.data.id };
+    const currentGraphVersion = Number(existing.data.metadata?.graph_version ?? 1);
+    if (currentGraphVersion >= SYSTEM_GRAPH_VERSION) {
+      return {
+        ok: true,
+        skipped: true,
+        definition_key: definitionKey,
+        id: existing.data.id,
+        node_count: graph.nodes.length,
+        edge_count: graph.edges.length,
+      };
+    }
+
+    const graphStats = await replaceDefinitionGraph(
+      client,
+      existing.data.id,
+      graph,
+      { key: 'master_acquisition_orchestrator' },
+    );
+    const nextVersion = Number(existing.data.version ?? 1) + 1;
+    const update = await client
+      .from('workflow_definitions')
+      .update({
+        version: nextVersion,
+        metadata: {
+          ...(existing.data.metadata ?? {}),
+          system_template_key: 'master_acquisition_orchestrator',
+          graph_version: SYSTEM_GRAPH_VERSION,
+          operational_mode: 'active_safe',
+          orchestrator: true,
+          stages: MASTER_ORCHESTRATOR_STAGES,
+          graph_upgraded_at: new Date().toISOString(),
+        },
+      })
+      .eq('id', existing.data.id)
+      .select('*')
+      .single();
+    if (update.error) throw update.error;
+
+    return {
+      ok: true,
+      upgraded: true,
+      definition_key: definitionKey,
+      id: existing.data.id,
+      version: nextVersion,
+      ...graphStats,
+    };
   }
 
   const definitionInsert = await client
@@ -295,6 +354,7 @@ export async function seedMasterOrchestrator(deps = {}) {
       is_locked: true,
       metadata: {
         system_template_key: 'master_acquisition_orchestrator',
+        graph_version: SYSTEM_GRAPH_VERSION,
         operational_mode: 'active_safe',
         orchestrator: true,
         stages: MASTER_ORCHESTRATOR_STAGES,
@@ -304,73 +364,18 @@ export async function seedMasterOrchestrator(deps = {}) {
     .single();
   if (definitionInsert.error) throw definitionInsert.error;
 
-  const definition = definitionInsert.data;
-  const nodes = [
-    {
-      node_key: 'trigger',
-      node_kind: 'trigger',
-      node_type: 'trigger.manual_enrollment',
-      label: 'Manual Enrollment',
-      position_x: 0,
-      position_y: 0,
-    },
-    ...MASTER_ORCHESTRATOR_STAGES.map((stage, index) => ({
-      node_key: stage.key,
-      node_kind: 'action',
-      node_type: 'action.enroll_subworkflow',
-      label: stage.label,
-      config: {
-        subworkflow_definition_key: stage.subworkflow_key,
-        blocked: stage.blocked === true,
-        blocked_reason: stage.blocked_reason ?? null,
-      },
-      position_x: 0,
-      position_y: 120 + index * 120,
-      is_active: stage.blocked !== true,
-    })),
-    {
-      node_key: 'exit',
-      node_kind: 'action',
-      node_type: 'action.exit_workflow',
-      label: 'Exit Orchestrator',
-      position_x: 0,
-      position_y: 120 + MASTER_ORCHESTRATOR_STAGES.length * 120,
-    },
-  ];
+  const graphStats = await replaceDefinitionGraph(
+    client,
+    definitionInsert.data.id,
+    graph,
+    { key: 'master_acquisition_orchestrator' },
+  );
 
-  const nodeIdByKey = new Map();
-  for (const node of nodes) {
-    const insert = await client
-      .from('workflow_nodes')
-      .insert({
-        workflow_definition_id: definition.id,
-        node_key: node.node_key,
-        node_kind: node.node_kind,
-        node_type: node.node_type,
-        label: node.label,
-        config: node.config ?? {},
-        position_x: node.position_x ?? 0,
-        position_y: node.position_y ?? 0,
-        is_active: node.is_active !== false,
-      })
-      .select('*')
-      .single();
-    if (insert.error) throw insert.error;
-    nodeIdByKey.set(node.node_key, insert.data.id);
-  }
-
-  const chain = ['trigger', ...MASTER_ORCHESTRATOR_STAGES.map((s) => s.key), 'exit'];
-  for (let i = 0; i < chain.length - 1; i += 1) {
-    const sourceId = nodeIdByKey.get(chain[i]);
-    const targetId = nodeIdByKey.get(chain[i + 1]);
-    if (!sourceId || !targetId) continue;
-    await client.from('workflow_edges').insert({
-      workflow_definition_id: definition.id,
-      source_node_id: sourceId,
-      target_node_id: targetId,
-      edge_type: 'next',
-    });
-  }
-
-  return { ok: true, seeded: true, definition_key: definitionKey, id: definition.id };
+  return {
+    ok: true,
+    seeded: true,
+    definition_key: definitionKey,
+    id: definitionInsert.data.id,
+    ...graphStats,
+  };
 }
