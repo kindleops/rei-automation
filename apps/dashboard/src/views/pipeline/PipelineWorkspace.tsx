@@ -70,6 +70,7 @@ export function PipelineWorkspace({
     applySavedView,
     persistView,
     duplicateView,
+    resetView,
     loading,
     refreshing,
     error,
@@ -191,7 +192,8 @@ export function PipelineWorkspace({
 
   const handleApplySavedView = useCallback((view: PipelineSavedView) => {
     applySavedView(view)
-  }, [applySavedView])
+    void refresh()
+  }, [applySavedView, refresh])
 
   const handleSelectOpportunity = useCallback((opportunityId: string) => {
     setSelectedOpportunityId(opportunityId)
@@ -234,6 +236,7 @@ export function PipelineWorkspace({
       onCardDesignChange={setCardDesign}
       onPersistView={persistView}
       onDuplicateView={duplicateView}
+      onResetView={() => { resetView(); void refresh() }}
       selectedId={selectedOpportunityId}
       selectedOpportunity={detailOpportunity ?? listOpportunity}
       detailLoading={detailLoading}

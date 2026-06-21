@@ -30,6 +30,7 @@ import {
   applySavedViewToState,
   getCardDesignForGroup,
   loadPipelineViewState,
+  resetPipelineViewState,
   savePipelineViewState,
   saveCardDesignsByGroup,
 } from '../../../domain/pipeline/pipeline-view-state'
@@ -51,11 +52,13 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
   const initialLoadDone = useRef(false)
   const requestSeq = useRef(0)
 
-  const scopeParams = useMemo(() => ({
-    scope: viewState.scope,
-    filter_json: JSON.stringify(viewState.filters),
-    sorts: JSON.stringify(viewState.sorts),
-  }), [viewState.scope, viewState.filters, viewState.sorts])
+  const scopeParams = useMemo(() => {
+    const params: Record<string, string> = { scope: viewState.scope }
+    const hasFilters = viewState.filters.clauses.length > 0
+    if (hasFilters) params.filter_json = JSON.stringify(viewState.filters)
+    if (viewState.sorts.length > 0) params.sorts = JSON.stringify(viewState.sorts)
+    return params
+  }, [viewState.scope, viewState.filters, viewState.sorts])
 
   const setGroupBy = useCallback((mode: PipelineGroupByMode) => {
     setViewState((prev) => {
@@ -124,6 +127,13 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
       return [...views, saved]
     })
     return saved
+  }, [])
+
+  const resetView = useCallback(() => {
+    const next = resetPipelineViewState()
+    setViewState(next)
+    savePipelineGroupBy(next.groupBy)
+    savePipelineScope(next.scope as PipelineScope)
   }, [])
 
   const duplicateView = useCallback(async (view: PipelineSavedView) => {
@@ -218,6 +228,7 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     applySavedView,
     persistView,
     duplicateView,
+    resetView,
     loading,
     refreshing,
     error,

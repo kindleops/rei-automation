@@ -104,14 +104,6 @@ function applyFilterGroup(query, group) {
 
   if (clauses.length === 0) return query;
 
-  for (const clause of clauses) {
-    if (clause.clauses) {
-      query = applyFilterGroup(query, clause);
-      continue;
-    }
-    query = applyClause(query, clause);
-  }
-
   if (logic === 'or' && clauses.length > 1) {
     const parts = clauses
       .filter((c) => !c.clauses)
@@ -124,10 +116,20 @@ function applyFilterGroup(query, group) {
         if (op === 'is' || op === 'equals') return `${col}.eq.${val}`;
         if (op === 'contains') return `${col}.ilike.%${val}%`;
         if (op === 'is_known') return `${col}.not.is.null`;
+        if (op === 'is_unknown') return `${col}.is.null`;
         return null;
       })
       .filter(Boolean);
-    if (parts.length > 0) query = query.or(parts.join(','));
+    if (parts.length > 0) return query.or(parts.join(','));
+    return query;
+  }
+
+  for (const clause of clauses) {
+    if (clause.clauses) {
+      query = applyFilterGroup(query, clause);
+      continue;
+    }
+    query = applyClause(query, clause);
   }
 
   return query;

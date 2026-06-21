@@ -183,6 +183,12 @@ export function isGroupByReadOnly(groupBy: PipelineGroupByMode): boolean {
 export function resolvePipelineStage(opp: PipelineOpportunity): string {
   const code = norm(opp.pipeline_stage || opp.acquisition_stage)
   if (code && STAGE_LABELS[code]) return code
+  if (code === 'needs_review') return 'ownership_confirmation'
+  if (code === 'interest_qualification') return 'offer_interest'
+  if (code === 'price_discovery') return 'asking_price'
+  if (code === 'underwriting') return 'property_condition'
+  if (code === 'decision_and_offer') return 'offer'
+  if (code === 'contract_to_close') return 'formal_contract'
   if (code.includes('ownership')) return 'ownership_confirmation'
   if (code === 'offer_interest' || code === 'interest_qualification' || code === 'interest_probe') return 'offer_interest'
   if (code.includes('asking') || code === 'price_discovery') return 'asking_price'

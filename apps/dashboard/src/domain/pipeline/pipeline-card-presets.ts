@@ -141,3 +141,45 @@ export function getRecommendedCardDesign(groupBy: PipelineGroupByMode): Pipeline
 export function cloneCardDesign(design: PipelineCardDesign): PipelineCardDesign {
   return JSON.parse(JSON.stringify(design)) as PipelineCardDesign
 }
+
+const SLOT_KEYS = [
+  'accent', 'eyebrow', 'title', 'subtitle',
+  'badge_1', 'badge_2', 'badge_3',
+  'preview', 'metric_1', 'metric_2', 'metric_3', 'footer',
+] as const
+
+/** Ensure persisted/API card designs always have a complete slot map. */
+export function normalizeCardDesign(
+  design: PipelineCardDesign | null | undefined,
+  groupBy?: PipelineGroupByMode,
+): PipelineCardDesign {
+  const fallback = groupBy ? getRecommendedCardDesign(groupBy) : DEFAULT_PIPELINE_CARD_DESIGN
+  if (!design || typeof design !== 'object') return cloneCardDesign(fallback)
+
+  const base = cloneCardDesign(fallback)
+  const merged: PipelineCardDesign = {
+    ...base,
+    ...design,
+    id: design.id || base.id,
+    label: design.label || base.label,
+    density: design.density || base.density,
+    previewLines: design.previewLines === 1 ? 1 : 2,
+    accentSource: design.accentSource ?? base.accentSource,
+    emptyBehavior: design.emptyBehavior === 'hide' ? 'hide' : 'placeholder',
+    slots: { ...base.slots },
+  }
+
+  const rawSlots = design.slots
+  if (rawSlots && typeof rawSlots === 'object') {
+    for (const key of SLOT_KEYS) {
+      const slot = rawSlots[key]
+      if (!slot || typeof slot !== 'object') continue
+      merged.slots[key] = {
+        fieldKey: typeof slot.fieldKey === 'string' ? slot.fieldKey : base.slots[key].fieldKey,
+        disabled: Boolean(slot.disabled),
+      }
+    }
+  }
+
+  return merged
+}

@@ -8,6 +8,7 @@ import {
   resolveMetricSlots,
   resolvePreviewField,
 } from '../../../domain/pipeline/pipeline-field-resolver'
+import { normalizeCardDesign } from '../../../domain/pipeline/pipeline-card-presets'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -50,38 +51,39 @@ export function PipelineConfigurableCard({
   onReplyAction,
 }: PipelineConfigurableCardProps) {
   const tier = layoutTier(layoutMode)
-  const slots = design.slots
-  const density = design.density
+  const resolved = normalizeCardDesign(design)
+  const slots = resolved.slots
+  const density = resolved.density
 
-  const eyebrow = slots.eyebrow.disabled ? null : resolveFieldValue(opp, slots.eyebrow.fieldKey ?? 'property_type_market')
-  const title = resolveFieldValue(opp, slots.title.fieldKey ?? 'seller_display_name')
-  const subtitle = resolveFieldValue(opp, slots.subtitle.fieldKey ?? 'property_address_full')
-  const preview = slots.preview.disabled
+  const eyebrow = slots.eyebrow?.disabled ? null : resolveFieldValue(opp, slots.eyebrow?.fieldKey ?? 'property_type_market')
+  const title = resolveFieldValue(opp, slots.title?.fieldKey ?? 'seller_display_name')
+  const subtitle = resolveFieldValue(opp, slots.subtitle?.fieldKey ?? 'property_address_full')
+  const preview = slots.preview?.disabled
     ? null
-    : resolvePreviewField(opp, slots.preview.fieldKey ?? 'latest_message_preview')
-  const footer = slots.footer.disabled ? null : resolveFieldValue(opp, slots.footer.fieldKey ?? 'last_activity_at')
+    : resolvePreviewField(opp, slots.preview?.fieldKey ?? 'latest_message_preview')
+  const footer = slots.footer?.disabled ? null : resolveFieldValue(opp, slots.footer?.fieldKey ?? 'last_activity_at')
 
   const badgeKeys = [slots.badge_1, slots.badge_2, slots.badge_3]
-    .filter((s) => !s.disabled)
-    .map((s) => s.fieldKey)
+    .filter((s) => s && !s.disabled)
+    .map((s) => s!.fieldKey)
   const badges = resolveBadgeSlots(opp, badgeKeys)
 
   const metricKeys = [slots.metric_1, slots.metric_2, slots.metric_3]
-    .filter((s) => !s.disabled)
-    .map((s) => s.fieldKey)
+    .filter((s) => s && !s.disabled)
+    .map((s) => s!.fieldKey)
   let metrics = resolveMetricSlots(opp, metricKeys)
   if (tier === '75' && metrics.length > 2) metrics = metrics.slice(0, 2)
   if (tier === '50' && metrics.length > 1) metrics = metrics.slice(0, 1)
   if (tier === '25') metrics = []
 
   const tempTone = resolveTemperature(opp)
-  const accentTone = slots.accent.fieldKey === 'pipeline_stage' ? 'stage' : tempTone
+  const accentTone = slots.accent?.fieldKey === 'pipeline_stage' ? 'stage' : tempTone
 
   const showEyebrow = tier !== '25' && eyebrow && !eyebrow.empty
   const showSubtitle = tier !== '25' && subtitle
-  const showPreview = !slots.preview.disabled && preview && tier !== '25'
+  const showPreview = !slots.preview?.disabled && preview && tier !== '25'
   const previewText = preview?.display ?? ''
-  const previewOneLine = tier === '50' || design.previewLines === 1 || density === 'compact'
+  const previewOneLine = tier === '50' || resolved.previewLines === 1 || density === 'compact'
 
   const badgeLimit = tier === '25' ? 1 : tier === '50' ? 2 : 3
   const visibleBadges = badges.slice(0, badgeLimit)

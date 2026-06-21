@@ -17,6 +17,7 @@ import {
   type PipelineScope,
 } from '../../domain/pipeline/pipeline-display-helpers'
 import { resolveReplyAttentionState } from '../../domain/pipeline/pipeline-field-resolver'
+import { DEFAULT_PIPELINE_CARD_DESIGN, normalizeCardDesign } from '../../domain/pipeline/pipeline-card-presets'
 import { PipelineViewSelector } from './components/PipelineViewSelector'
 import { PipelineCommandPanel } from './components/PipelineCommandPanel'
 import { PipelineConfigurableCard } from './components/PipelineConfigurableCard'
@@ -68,6 +69,7 @@ interface PipelineOpportunityBoardProps {
   onCardDesignChange?: (design: PipelineCardDesign) => void
   onPersistView?: (payload: Partial<PipelineSavedView>) => Promise<void>
   onDuplicateView?: (view: PipelineSavedView) => Promise<void>
+  onResetView?: () => void
   selectedId: string | null
   selectedOpportunity?: PipelineOpportunity | null
   detailLoading?: boolean
@@ -105,6 +107,7 @@ export function PipelineOpportunityBoard({
   onCardDesignChange,
   onPersistView,
   onDuplicateView,
+  onResetView,
   selectedId,
   selectedOpportunity,
   detailLoading,
@@ -140,7 +143,10 @@ export function PipelineOpportunityBoard({
   const [viewManagerOpen, setViewManagerOpen] = useState(false)
   const dragStateRef = useRef<{ id: string; startX: number; startY: number; dragging: boolean } | null>(null)
 
-  const activeCardDesign = cardDesign ?? viewState?.cardDesign
+  const activeCardDesign = normalizeCardDesign(
+    cardDesign ?? viewState?.cardDesign ?? DEFAULT_PIPELINE_CARD_DESIGN,
+    groupBy,
+  )
 
   const allCards = useMemo(() => opportunities.map(buildCard), [opportunities])
   const mutableView = isGroupByMutable(groupBy)
@@ -177,6 +183,12 @@ export function PipelineOpportunityBoard({
     })),
   [groupDefinitions, groupBy, visibleCards])
 
+  const displayStageModels = useMemo(() => {
+    if (dragCardId && mutableView) return stageModels
+    const populated = stageModels.filter((s) => s.count > 0)
+    return populated.length > 0 ? populated : stageModels
+  }, [stageModels, dragCardId, mutableView])
+
   const selectedCard = useMemo(
     () => visibleCards.find((c) => c.opp.id === selectedId) ?? null,
     [visibleCards, selectedId],
@@ -185,9 +197,9 @@ export function PipelineOpportunityBoard({
   const panelOpportunity = selectedOpportunity ?? selectedCard?.opp ?? null
 
   useEffect(() => {
-    if (stageModels.some((s) => s.def.id === activeStageId)) return
-    setActiveStageId(stageModels[0]?.def.id ?? '')
-  }, [activeStageId, stageModels])
+    if (displayStageModels.some((s) => s.def.id === activeStageId)) return
+    setActiveStageId(displayStageModels[0]?.def.id ?? '')
+  }, [activeStageId, displayStageModels])
 
   const handleDrop = useCallback(async (e: React.DragEvent, stageId: string) => {
     e.preventDefault()
@@ -277,10 +289,9 @@ export function PipelineOpportunityBoard({
   const isMedium = layoutMode === 'medium'
   const isOps = layoutMode === 'expanded'
   const isFull = layoutMode === 'full'
-  const activeStage = stageModels.find((s) => s.def.id === activeStageId) ?? stageModels[0]
+  const activeStage = displayStageModels.find((s) => s.def.id === activeStageId) ?? displayStageModels[0]
 
   const renderCard = (card: OppCard) => {
-    if (!activeCardDesign) return null
     return (
       <PipelineConfigurableCard
         key={card.opp.id}
@@ -316,7 +327,7 @@ export function PipelineOpportunityBoard({
           <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact />
         </div>
         <div className="plv-stage-chips plv-stage-chips--sm">
-          {stageModels.map((s) => (
+          {displayStageModels.map((s) => (
             <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
               {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
             </button>
@@ -357,7 +368,7 @@ export function PipelineOpportunityBoard({
           <PipelineViewSelector value={groupBy} onChange={onGroupByChange} />
         </div>
         <div className="plv-stage-chips plv-stage-chips--md">
-          {stageModels.map((s) => (
+          {displayStageModels.map((s) => (
             <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
               {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
             </button>
@@ -427,6 +438,11 @@ export function PipelineOpportunityBoard({
             <button type="button" className="plv-filter-chip nx-glass-menu" onClick={() => setViewManagerOpen(true)}>
               Save View
             </button>
+            {onResetView && (
+              <button type="button" className="plv-filter-chip nx-glass-menu" onClick={onResetView}>
+                Reset View
+              </button>
+            )}
             <button type="button" className={cls('plv-filter-chip', hotOnly && 'is-active')} onClick={() => setHotOnly(!hotOnly)}>Hot</button>
             <button type="button" className={cls('plv-filter-chip', followUpOnly && 'is-active')} onClick={() => setFollowUpOnly(!followUpOnly)}>Due</button>
             <button type="button" className={cls('plv-filter-chip', showSuppressed && 'is-active')} onClick={() => setShowSuppressed(!showSuppressed)}>
@@ -456,9 +472,21 @@ export function PipelineOpportunityBoard({
         </div>
       )}
 
+      {!loading && opportunities.length === 0 && (
+        <div className="plv-board-empty" role="status">
+          <strong>No opportunities in this view</strong>
+          <span>Try changing scope, clearing filters, or resetting the view.</span>
+          {onResetView && (
+            <button type="button" className="plv-glass-btn plv-glass-btn--primary" onClick={onResetView}>
+              Reset filters &amp; card layout
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="plv-workspace">
         <div className="plv-board">
-          {stageModels.map((stage) => (
+          {displayStageModels.map((stage) => (
             <div
               key={stage.def.id}
               className={cls('plv-lane', `is-${stage.def.tone}`, readOnlyView && 'is-readonly', dragOverStage === stage.def.id && 'is-drag-over')}
