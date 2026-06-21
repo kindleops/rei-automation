@@ -88,6 +88,59 @@ export function resultMatchesSelection(result: EntitySearchResult, entity: Selec
   return selectionKey(selectedEntityFromResult(result)) === selectionKey(entity)
 }
 
+export function selectedEntityFromUniversalContext(context: UniversalEntityContext): SelectedEntity {
+  if (context.entityType === 'property') {
+    const id = context.propertyId || context.entityId
+    return id ? { type: 'property', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'master_owner') {
+    const id = context.masterOwnerId || context.entityId
+    return id ? { type: 'master_owner', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'prospect') {
+    const id = context.prospectId || context.entityId
+    return id ? { type: 'person', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'organization') {
+    const id = context.masterOwnerId || context.entityId
+    return id ? { type: 'ownership_entity', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'phone' || context.entityType === 'email') {
+    const id = context.contactMethodId || context.entityId
+    return id ? { type: context.entityType, id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'market') {
+    const id = context.entityId
+    return id ? { type: 'market', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.entityType === 'zip') {
+    const id = context.entityId
+    return id ? { type: 'zip', id } : EMPTY_SELECTED_ENTITY
+  }
+  if (context.threadKey) {
+    return { type: 'thread', id: context.threadKey }
+  }
+  if (context.propertyId) {
+    return { type: 'property', id: context.propertyId }
+  }
+  if (context.masterOwnerId) {
+    return { type: 'master_owner', id: context.masterOwnerId }
+  }
+  if (context.prospectId) {
+    return { type: 'person', id: context.prospectId }
+  }
+  return EMPTY_SELECTED_ENTITY
+}
+
+export function universalContextMatchesSelection(
+  context: UniversalEntityContext,
+  entity: SelectedEntity,
+): boolean {
+  const fromContext = selectedEntityFromUniversalContext(context)
+  if (!fromContext.type || !fromContext.id) return !entity.type && !entity.id
+  return selectionKey(fromContext) === selectionKey(entity)
+}
+
 export function selectedEntityToContext(
   entity: SelectedEntity,
   result?: EntitySearchResult | null,

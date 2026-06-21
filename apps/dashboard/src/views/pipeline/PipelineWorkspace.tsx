@@ -7,7 +7,11 @@ import type { PipelineSavedView, PipelineOpportunity } from '../../domain/pipeli
 import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
 import { universalContextFromOpportunity } from '../../domain/pipeline/pipeline-universal-context'
 import { setUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
-import { syncPayloadFromOpportunity } from '../../domain/entity-graph/universal-sync'
+import {
+  findOpportunityForActiveContext,
+  opportunityMatchesActiveContext,
+  syncPayloadFromOpportunity,
+} from '../../domain/entity-graph/universal-sync'
 import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
@@ -22,6 +26,7 @@ interface PipelineWorkspaceProps {
   onEstablishContext?: (context: ActiveInboxContext) => void
   onSyncOpportunity?: (opportunity: PipelineOpportunity, mode: 'select' | 'preview') => void
   onClearOpportunityPreview?: () => void
+  externalContext?: ActiveInboxContext
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
@@ -52,6 +57,7 @@ export function PipelineWorkspace({
   onEstablishContext,
   onSyncOpportunity,
   onClearOpportunityPreview,
+  externalContext,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
@@ -99,8 +105,15 @@ export function PipelineWorkspace({
     [opportunities, selectedOpportunityId],
   )
 
+  const shouldPublishContext = useCallback((opp: PipelineOpportunity) => {
+    if (!externalContext) return true
+    if (externalContext.sourceView === 'pipeline') return true
+    return !opportunityMatchesActiveContext(opp, externalContext)
+  }, [externalContext])
+
   const syncEntityContext = useCallback((opp: PipelineOpportunity | null, mode: 'select' | 'preview' = 'select') => {
     if (!opp) return
+    if (mode === 'select' && !shouldPublishContext(opp)) return
     if (onSyncOpportunity) {
       onSyncOpportunity(opp, mode)
       return
@@ -108,7 +121,7 @@ export function PipelineWorkspace({
     const { active, universal } = syncPayloadFromOpportunity(opp)
     onEstablishContext?.(active)
     setUniversalEntityContextSnapshot(universal)
-  }, [onEstablishContext, onSyncOpportunity])
+  }, [onEstablishContext, onSyncOpportunity, shouldPublishContext])
 
   useEffect(() => {
     if (!selectedOpportunityId) {
@@ -138,12 +151,35 @@ export function PipelineWorkspace({
   }, [selectedOpportunityId, listOpportunity, syncEntityContext])
 
   useEffect(() => {
-    if (selectedOpportunityId) return
+    if (!externalContext) return
+    const matched = findOpportunityForActiveContext(opportunities, externalContext)
+    if (matched) {
+      if (matched.id !== selectedOpportunityId) {
+        setSelectedOpportunityId(matched.id)
+        writeOppToUrl(matched.id)
+      }
+      return
+    }
+    if (
+      selectedOpportunityId
+      && externalContext.sourceView
+      && externalContext.sourceView !== 'pipeline'
+    ) {
+      const current = opportunities.find((o) => o.id === selectedOpportunityId)
+      if (current && !opportunityMatchesActiveContext(current, externalContext)) {
+        setSelectedOpportunityId(null)
+        writeOppToUrl(null)
+      }
+    }
+  }, [externalContext, opportunities, selectedOpportunityId])
+
+  useEffect(() => {
+    if (selectedOpportunityId || externalContext) return
     const fromParent = opportunities.find(
       (o) => o.primary_thread_key === selectedId || o.id === selectedId,
     )?.id
     if (fromParent) setSelectedOpportunityId(fromParent)
-  }, [opportunities, selectedId, selectedOpportunityId])
+  }, [externalContext, opportunities, selectedId, selectedOpportunityId])
 
   const handleAction = useCallback(async (id: string, action: string, payload?: Record<string, unknown>) => {
     if (action === 'refresh') {

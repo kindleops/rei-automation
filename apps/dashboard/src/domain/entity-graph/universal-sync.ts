@@ -1,3 +1,4 @@
+import type { QueueItem } from '../../lib/data/queueData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { getConversationThreadIdForThread } from '../../lib/data/inboxData'
 import { normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
@@ -45,6 +46,103 @@ export function activeContextMatchesThread(
     || (active.sellerId && ownerId && active.sellerId === ownerId)
     || (active.masterOwnerId && ownerId && active.masterOwnerId === ownerId),
   )
+}
+
+export function hasEntityAnchor(active: ActiveInboxContext): boolean {
+  return Boolean(
+    active.opportunityId
+    || active.threadKey
+    || active.propertyId
+    || active.masterOwnerId
+    || active.sellerId
+    || active.queueId,
+  )
+}
+
+export function findQueueItemForActiveContext(
+  items: QueueItem[],
+  active: ActiveInboxContext,
+): QueueItem | undefined {
+  if (!items.length || !hasEntityAnchor(active)) return undefined
+  if (active.queueId) {
+    const byQueue = items.find((item) => item.id === active.queueId || item.queueId === active.queueId)
+    if (byQueue) return byQueue
+  }
+  if (active.messageEventId) {
+    const byEvent = items.find((item) => item.messageEventId === active.messageEventId || item.id === active.messageEventId)
+    if (byEvent) return byEvent
+  }
+  if (active.threadKey) {
+    const byThread = items.find((item) => item.linkedInboxThreadId === active.threadKey)
+    if (byThread) return byThread
+  }
+  if (active.propertyId) {
+    const byProperty = items.find((item) => item.linkedPropertyId === active.propertyId)
+    if (byProperty) return byProperty
+  }
+  const ownerId = active.masterOwnerId || active.sellerId
+  if (ownerId) {
+    return items.find((item) => item.linkedOwnerId === ownerId)
+  }
+  return undefined
+}
+
+export function queueItemMatchesActiveContext(
+  item: QueueItem,
+  active: ActiveInboxContext,
+): boolean {
+  if (active.queueId && (item.id === active.queueId || item.queueId === active.queueId)) return true
+  if (active.messageEventId && (item.messageEventId === active.messageEventId || item.id === active.messageEventId)) return true
+  if (active.threadKey && item.linkedInboxThreadId === active.threadKey) return true
+  if (active.propertyId && item.linkedPropertyId === active.propertyId) return true
+  const ownerId = active.masterOwnerId || active.sellerId
+  if (ownerId && item.linkedOwnerId === ownerId) return true
+  return false
+}
+
+export function findOpportunityForActiveContext(
+  opportunities: PipelineOpportunity[],
+  active: ActiveInboxContext,
+): PipelineOpportunity | undefined {
+  if (!opportunities.length || !hasEntityAnchor(active)) return undefined
+  if (active.opportunityId) {
+    const byId = opportunities.find((o) => o.id === active.opportunityId)
+    if (byId) return byId
+  }
+  if (active.threadKey) {
+    const byThread = opportunities.find((o) => o.primary_thread_key === active.threadKey)
+    if (byThread) return byThread
+  }
+  if (active.propertyId) {
+    const byProperty = opportunities.find((o) => o.primary_property_id === active.propertyId)
+    if (byProperty) return byProperty
+  }
+  const ownerId = active.masterOwnerId || active.sellerId
+  if (ownerId) {
+    return opportunities.find((o) => o.master_owner_id === ownerId)
+  }
+  return undefined
+}
+
+export function resolveInboxHighlightId(
+  threads: InboxWorkflowThread[],
+  selected: InboxWorkflowThread | null,
+  active: ActiveInboxContext,
+): string | null {
+  if (selected?.id) return selected.id
+  return findThreadForActiveContext(threads, active)?.id ?? null
+}
+
+export function opportunityMatchesActiveContext(
+  opportunity: PipelineOpportunity,
+  active: ActiveInboxContext,
+): boolean {
+  if (active.opportunityId && opportunity.id === active.opportunityId) return true
+  if (active.threadKey && opportunity.primary_thread_key === active.threadKey) return true
+  if (active.propertyId && opportunity.primary_property_id === active.propertyId) return true
+  const ownerId = active.masterOwnerId || active.sellerId
+  if (ownerId && opportunity.master_owner_id === ownerId) return true
+  return false
 }
 
 export function findThreadForActiveContext(

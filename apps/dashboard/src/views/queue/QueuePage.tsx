@@ -20,7 +20,11 @@ import { Icon } from '../../shared/icons'
 import { resolveAssetTypeIcon } from '../../shared/asset-type-icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { emitNotification } from '../../shared/NotificationToast'
-import { buildContextFromQueueItem } from '../../modules/inbox/active-context'
+import { buildContextFromQueueItem, type ActiveInboxContext } from '../../modules/inbox/active-context'
+import {
+  findQueueItemForActiveContext,
+  queueItemMatchesActiveContext,
+} from '../../domain/entity-graph/universal-sync'
 import { CommandIntelligenceDock } from './components/CommandIntelligenceDock'
 import { FailureCommandHeader } from './components/FailureCommandHeader'
 import { MarketHealthOverview } from './components/MarketHealthOverview'
@@ -1695,12 +1699,13 @@ const QueueRow = ({
 
 interface QueuePageProps {
   data?: QueueModel
+  externalContext?: ActiveInboxContext
   onSelectItem?: (item: QueueItem) => void
 }
 
 const PAGE_SIZE = 500 // default; overridable via the page-size selector
 
-export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = {}) => {
+export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: QueuePageProps = {}) => {
   const { rootRef, layoutMode, paneWidth } = useQueueLayout()
   const [loading, setLoading] = useState(!initialData)
   const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
@@ -1882,6 +1887,30 @@ export const QueuePage = ({ data: initialData, onSelectItem }: QueuePageProps = 
   }, [items, stageFilter, templateSearch])
 
   const selectedItem = model?.items.find(i => i.id === selectedId) ?? null
+
+  useEffect(() => {
+    if (!externalContext || !items.length) return
+    const matched = findQueueItemForActiveContext(items, externalContext)
+    if (matched) {
+      if (matched.id !== selectedId) {
+        setSelectedId(matched.id)
+        setDossierOpen(true)
+        if (layoutMode === 'medium' || layoutMode === 'compact') setExpandedId(matched.id)
+      }
+      return
+    }
+    if (
+      selectedId
+      && externalContext.sourceView
+      && externalContext.sourceView !== 'queue'
+    ) {
+      const current = items.find((item) => item.id === selectedId)
+      if (current && !queueItemMatchesActiveContext(current, externalContext)) {
+        setSelectedId(null)
+        setExpandedId(null)
+      }
+    }
+  }, [externalContext, items, layoutMode, selectedId])
 
   // ── Row click — select + dispatch global property context ────────────────
   const requestGlobalAction = useCallback((action: string) => {

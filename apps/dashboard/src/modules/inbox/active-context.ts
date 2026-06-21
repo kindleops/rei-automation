@@ -98,13 +98,21 @@ export const buildContextFromThread = (
   intent?: ActiveInboxContextIntent,
 ): ActiveInboxContext => {
   if (!thread) return { sourceView, intent }
+  const propertyId = text((thread as any).propertyId)
+  const masterOwnerId = text((thread as any).ownerId ?? (thread as any).masterOwnerId ?? (thread as any).sellerId)
+  const propertyAddress = text((thread as any).propertyAddress ?? (thread as any).property_address_full ?? (thread as any).subject)
+  const sellerName = text((thread as any).ownerName ?? (thread as any).seller_display_name ?? (thread as any).sellerName)
   return {
-    sellerId: text((thread as any).ownerId ?? (thread as any).sellerId),
+    sellerId: masterOwnerId,
     threadKey: text((thread as any).threadKey ?? thread.id),
-    propertyId: text((thread as any).propertyId),
-    masterOwnerId: text((thread as any).ownerId ?? (thread as any).masterOwnerId),
+    propertyId,
+    masterOwnerId,
     prospectId: text((thread as any).prospectId),
     market: text((thread as any).market ?? (thread as any).marketName),
+    propertyAddress,
+    sellerName,
+    entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+    entityId: propertyId || masterOwnerId || null,
     sourceView,
     intent,
   }
@@ -116,11 +124,13 @@ export const buildContextFromQueueItem = (
   intent: ActiveInboxContextIntent = 'open_queue',
 ): ActiveInboxContext => {
   if (!item) return { sourceView, intent }
+  const propertyId = text(item.linkedPropertyId)
+  const masterOwnerId = text(item.linkedOwnerId)
   return {
-    sellerId: text(item.linkedOwnerId),
+    sellerId: masterOwnerId,
     threadKey: text(item.linkedInboxThreadId),
-    propertyId: text(item.linkedPropertyId),
-    masterOwnerId: text(item.linkedOwnerId),
+    propertyId,
+    masterOwnerId,
     prospectId: text(item.metadata?.prospect_id),
     queueId: text(item.queueId ?? item.id),
     messageEventId: text(item.messageEventId),
@@ -128,6 +138,8 @@ export const buildContextFromQueueItem = (
     toPhoneNumber: text(item.toPhoneNumber ?? item.phone),
     propertyAddress: text(item.propertyAddress),
     sellerName: text(item.sellerFullName ?? item.sellerName),
+    entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+    entityId: propertyId || masterOwnerId || text(item.queueId ?? item.id) || null,
     sourceView,
     intent,
   }
@@ -138,14 +150,21 @@ export const buildContextFromCalendarEvent = (
   sourceView: ActiveInboxContextSource = 'calendar',
 ): ActiveInboxContext => {
   if (!event) return { sourceView }
+  const propertyId = text(event.propertyId)
+  const sellerId = text(event.sellerId)
   return {
-    sellerId: text(event.sellerId),
+    sellerId,
     threadKey: text(event.threadId),
-    propertyId: text(event.propertyId),
+    propertyId,
+    masterOwnerId: sellerId,
     queueId: text(event.metadata?.queue_id),
     messageEventId: text(event.metadata?.message_event_id),
     market: text(event.market),
+    propertyAddress: text((event as { propertyAddress?: string }).propertyAddress),
+    sellerName: text((event as { sellerName?: string }).sellerName),
     date: text(event.timestamp),
+    entityType: propertyId ? 'property' : sellerId ? 'master_owner' : null,
+    entityId: propertyId || sellerId || text(event.threadId) || null,
     sourceView,
     intent: event.type.includes('scheduled') || event.type.includes('follow_up') ? 'open_calendar' : 'open_thread',
   }

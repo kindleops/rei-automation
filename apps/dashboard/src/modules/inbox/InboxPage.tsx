@@ -141,8 +141,10 @@ import {
   dealContextFromActiveInbox,
   findThreadByRef,
   findThreadForActiveContext,
+  hasEntityAnchor,
   mergeSelectedThreadAndDealContext,
   resolveCanonicalWorkspaceContext,
+  resolveInboxHighlightId,
   syncPayloadFromOpportunity,
   syncPayloadFromUniversal,
   threadStubFromActiveContext,
@@ -594,6 +596,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // Stable ref to selected thread — lets message effect depend on key (string) not object reference
   const selectedRef = useRef<InboxWorkflowThread | null>(null)
   const selectedThreadFallbackRef = useRef<InboxWorkflowThread | null>(null)
+  const publishingUniversalRef = useRef(false)
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -862,13 +865,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (selectedId && fallback.id === selectedId) return fallback
       if (selectedThreadKey && (getConversationThreadIdForThread(fallback) || fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
     }
-    const hasExternalContext = Boolean(
-      effectiveActiveContext.opportunityId
-      || effectiveActiveContext.propertyId
-      || effectiveActiveContext.threadKey
-      || effectiveActiveContext.masterOwnerId
-      || effectiveActiveContext.sellerId,
-    )
+    const hasExternalContext = hasEntityAnchor(effectiveActiveContext)
     if (selectedId || hasExternalContext) return null
     return filtered[0] ?? threads[0] ?? null
   }, [effectiveActiveContext.masterOwnerId, effectiveActiveContext.opportunityId, effectiveActiveContext.propertyId, effectiveActiveContext.sellerId, effectiveActiveContext.threadKey, filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
@@ -894,6 +891,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const workspaceThread = useMemo(
     () => selected ?? threadStubFromActiveContext(effectiveActiveContext, canonicalSelectedContext),
     [selected, effectiveActiveContext, canonicalSelectedContext],
+  )
+
+  const inboxHighlightId = useMemo(
+    () => resolveInboxHighlightId(threads, selected, effectiveActiveContext),
+    [threads, selected, effectiveActiveContext],
   )
 
   // Phase 1 trace — fires ONLY when the actual thread identity changes (string key, not object ref)
@@ -1533,6 +1535,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const setActiveContext = useCallback((nextContext: ActiveInboxContext, options?: SetActiveContextOptions) => {
     setActiveContextState((current) => {
       const merged = { ...current, ...nextContext }
+      if (nextContext.sourceView === 'inbox' && nextContext.opportunityId === undefined) {
+        delete merged.opportunityId
+      }
       const match = findThreadForActiveContext(threads, merged)
       if (match) {
         setSelectedId(match.id)
@@ -1544,6 +1549,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       }
       return merged
     })
+    setPreviewContext(null)
     setUniversalEntityContext((current) => {
       const merged = mergeUniversalContexts(current, {
         entityType: nextContext.entityType ?? (nextContext.propertyId ? 'property' : nextContext.prospectId ? 'prospect' : nextContext.masterOwnerId || nextContext.sellerId ? 'master_owner' : current.entityType),
@@ -1554,9 +1560,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         threadKey: nextContext.threadKey ?? current.threadKey,
         contactMethodType: nextContext.contactMethodType ?? current.contactMethodType,
         contactMethodId: nextContext.contactMethodId ?? current.contactMethodId,
-        opportunityId: nextContext.opportunityId ?? current.opportunityId,
+        opportunityId: nextContext.sourceView === 'inbox' && nextContext.opportunityId === undefined
+          ? null
+          : (nextContext.opportunityId ?? current.opportunityId),
       })
-      patchUniversalEntityContextSnapshot(merged, { silent: true })
+      publishingUniversalRef.current = true
+      setUniversalEntityContextSnapshot(merged)
       return merged
     })
 
@@ -2939,6 +2948,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [setActiveContext, threads, viewFilter])
 
   const handleUniversalEntityContextChange = useCallback((next: UniversalEntityContext, options?: { pushHistory?: boolean }) => {
+    publishingUniversalRef.current = true
     setUniversalEntityContext(next)
     setUniversalEntityContextSnapshot(next)
     setActiveContext(activeInboxFromUniversalContext(next, 'entity_graph'), { preserveCurrentViews: true })
@@ -2948,8 +2958,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   useEffect(() => {
     return subscribeUniversalEntityContext((next) => {
       setUniversalEntityContext(next)
-      if (!next.opportunityId && !next.propertyId && !next.threadKey && !next.masterOwnerId) return
-      const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'pipeline')
+      if (publishingUniversalRef.current) {
+        publishingUniversalRef.current = false
+        return
+      }
+      if (!hasEntityAnchor(syncPayloadFromUniversal(next, 'inbox'))) return
+      const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'inbox')
       setActiveContextState((current) => ({ ...current, ...active }))
       const match = findThreadForActiveContext(threads, active)
       if (match) {
@@ -2959,7 +2973,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         selectedThreadFallbackRef.current = match
       } else if (active.threadKey) {
         setSelectedThreadKey(active.threadKey)
-        setSelectedId(null)
       }
     })
   }, [activeContext.sourceView, threads])
@@ -3025,10 +3038,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setPreviewContext(null)
     setMessagesLoading(true)
     setSelectedMessages([])
-    setActiveContext(active, { preserveCurrentViews: true })
+    publishingUniversalRef.current = true
+    setActiveContextState((current) => ({ ...current, ...active }))
     setUniversalEntityContext(universal)
     setUniversalEntityContextSnapshot(universal)
-  }, [setActiveContext])
+    const match = findThreadForActiveContext(threads, active)
+    if (match) {
+      setSelectedId(match.id)
+      setSelectedThreadKey(match.threadKey || match.id)
+      setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+      selectedThreadFallbackRef.current = match
+    } else if (active.threadKey) {
+      setSelectedThreadKey(active.threadKey)
+    }
+  }, [threads])
 
   const clearOpportunityPreview = useCallback(() => {
     setPreviewContext(null)
@@ -3072,8 +3095,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   useEffect(() => {
     if (!selected) return
-    // Pipeline (and other cross-app sources) own context until the inbox row matches.
-    if (activeContext.opportunityId && activeContext.sourceView === 'pipeline') {
+    // Cross-app sources own context until the inbox row matches.
+    if (activeContext.sourceView && activeContext.sourceView !== 'inbox' && hasEntityAnchor(activeContext)) {
       if (!activeContextMatchesThread(activeContext, selected)) return
     }
     setUniversalEntityContext((current) => {
@@ -3208,10 +3231,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     sourceView: 'map'
     intent: 'open_seller' | 'open_queue'
   }) => {
+    const propertyId = context.propertyId
+    const masterOwnerId = context.masterOwnerId
     setActiveContext({
-      propertyId: context.propertyId,
-      masterOwnerId: context.masterOwnerId,
-      sellerId: context.masterOwnerId,
+      propertyId,
+      masterOwnerId,
+      sellerId: masterOwnerId,
+      entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+      entityId: propertyId || masterOwnerId || null,
       sourceView: context.sourceView,
       intent: context.intent,
     }, {
@@ -3891,7 +3918,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     >
       <InboxSidebar
         threads={threads}
-        selectedId={selected?.id ?? null}
+        selectedId={inboxHighlightId}
         activeViewFilter={viewFilter}
         onSelect={handleSelect}
         onThreadAction={handleThreadAction}
@@ -3941,7 +3968,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <InboxConversationTable
           threads={filtered}
-          selectedId={selected?.id ?? null}
+          selectedId={inboxHighlightId}
           sort={tableSort}
           density={paneMode === 'multi' && paneWidth === '75' ? 'compact' : tableDensity}
           layoutMode={layoutMode}
@@ -3966,7 +3993,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onUniversalContextChange={handleUniversalEntityContextChange}
             onAction={handleEntityGraphAction}
             onSelectThreadKey={(threadKey) => {
-              const match = threads.find((thread) => (thread.threadKey || thread.id) === threadKey)
+              const match = findThreadByRef(threads, threadKey)
               if (match) handleSelect(match.id)
               else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'entity_graph') }, { openThread: true })
             }}
@@ -4040,7 +4067,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'pipeline') {
       return (
         <PipelineWorkspace
-          selectedId={selected?.id ?? null}
+          selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
+          externalContext={effectiveActiveContext}
           layoutMode={layoutMode}
           onSelect={handleSelect}
           onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
@@ -4060,6 +4088,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className="nx-workspace-surface nx-workspace-surface--queue">
           <QueuePage
+            externalContext={effectiveActiveContext}
             onSelectItem={queueItem =>
               setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
             }

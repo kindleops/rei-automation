@@ -24,8 +24,10 @@ import {
   dossierMatchesSelection,
   selectedEntityFromGraphNode,
   selectedEntityFromResult,
+  selectedEntityFromUniversalContext,
   selectedEntityToContext,
   tabAllowsSelectedEntity,
+  universalContextMatchesSelection,
   type SelectedEntity,
 } from '../../domain/entity-graph/selected-entity'
 import { EntityGraphCardsView } from './EntityGraphCardsView'
@@ -74,6 +76,8 @@ function ResultSkeleton({ count = 6 }: { count?: number }) {
 export function EntityGraphWorkspace({
   paneWidth = '100',
   themeMode = 'dark',
+  universalContext,
+  onUniversalContextChange,
   onAction,
   onSelectThreadKey,
 }: EntityGraphWorkspaceProps) {
@@ -121,6 +125,7 @@ export function EntityGraphWorkspace({
   const dossierRequestGenerationRef = useRef(0)
   const listQueryKeyRef = useRef('')
   const querySignatureRef = useRef('')
+  const publishingSelectionRef = useRef(false)
 
   const pageSize = layoutMode === 'command' ? 40 : layoutMode === 'peek' ? 12 : 25
   const hasSelection = Boolean(selectedEntity.type && selectedEntity.id)
@@ -302,22 +307,48 @@ export function EntityGraphWorkspace({
     return () => controller.abort()
   }, [dossierQueryKey, selectedEntity.id, selectedEntity.type])
 
+  const publishSelection = useCallback((entity: SelectedEntity, result?: EntitySearchResult | null) => {
+    if (!onUniversalContextChange || !entity.type || !entity.id) return
+    publishingSelectionRef.current = true
+    onUniversalContextChange(selectedEntityToContext(entity, result))
+  }, [onUniversalContextChange])
+
+  useEffect(() => {
+    if (!universalContext) return
+    if (publishingSelectionRef.current) {
+      publishingSelectionRef.current = false
+      return
+    }
+    if (universalContextMatchesSelection(universalContext, selectedEntity)) return
+    const next = selectedEntityFromUniversalContext(universalContext)
+    if (!next.type || !next.id) return
+    setSelectedEntity(next)
+    setSelectedResult(null)
+    if (layoutMode !== 'peek') setInspectorOpen(true)
+  }, [layoutMode, selectedEntity, universalContext])
+
   const handleSelectResult = useCallback((result: EntitySearchResult) => {
-    setSelectedEntity(selectedEntityFromResult(result))
+    const entity = selectedEntityFromResult(result)
+    setSelectedEntity(entity)
     setSelectedResult(result)
     setInspectorOpen(true)
-  }, [])
+    publishSelection(entity, result)
+  }, [publishSelection])
 
   const handleGraphNodeSelect = useCallback((nodeId: string, nodeType: string, entityId: string) => {
-    setSelectedEntity(selectedEntityFromGraphNode(nodeType, entityId))
+    const entity = selectedEntityFromGraphNode(nodeType, entityId)
+    setSelectedEntity(entity)
     setSelectedResult(null)
     setInspectorOpen(true)
-  }, [])
+    publishSelection(entity)
+  }, [publishSelection])
 
   const handleContactSelect = useCallback((entry: ContactLadderEntry) => {
-    setSelectedEntity({ type: entry.type, id: entry.id })
+    const entity = { type: entry.type, id: entry.id } as SelectedEntity
+    setSelectedEntity(entity)
     setSelectedResult(null)
-  }, [])
+    publishSelection(entity)
+  }, [publishSelection])
 
   const handleTabChange = useCallback((tab: EntityGraphTab) => {
     setActiveTab(tab)
