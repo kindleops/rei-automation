@@ -7,6 +7,7 @@ import type {
   WorkflowDryRunStep,
   WorkflowNodeTypeSchema,
   WorkflowStep,
+  WorkflowStudioMode,
 } from '../workflow.types'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -27,6 +28,8 @@ interface WorkflowInspectorV2Props {
   detail: WorkflowDetail | null
   dryRunStep?: WorkflowDryRunStep
   dryRunResult: WorkflowDryRunResult | null
+  readOnly?: boolean
+  studioMode?: WorkflowStudioMode
 }
 
 function titleCase(value: string) {
@@ -77,11 +80,21 @@ const sampleDryRunContext = {
   },
 }
 
+const OPERATOR_TABS: Array<{ id: InspectorTab; label: string }> = [
+  { id: 'general', label: 'Setup' },
+  { id: 'logic', label: 'Paths' },
+  { id: 'safety', label: 'Rules & Safety' },
+  { id: 'data', label: 'Inputs & Outputs' },
+  { id: 'test', label: 'Test Node' },
+]
+
 export const WorkflowInspectorV2 = ({
   node,
   detail,
   dryRunStep,
   dryRunResult,
+  readOnly = false,
+  studioMode = 'canonical',
 }: WorkflowInspectorV2Props) => {
   const [tab, setTab] = useState<InspectorTab>('general')
   const [developerMode, setDeveloperMode] = useState(false)
@@ -113,15 +126,21 @@ export const WorkflowInspectorV2 = ({
 
   const generalFields = useMemo(() => {
     if (!node) return []
-    return [
+    const base = [
       { label: 'Node name', value: node.label },
-      { label: 'Node type', value: titleCase(node.nodeType) },
-      { label: 'Step key', value: node.key },
-      { label: 'Category', value: titleCase(nodeSchema?.category ?? node.nodeType.split(/[._]/)[0] ?? 'node') },
-      { label: 'Kind', value: titleCase(nodeSchema?.node_kind ?? 'node') },
-      { label: 'Communication', value: nodeSchema?.is_communication ? 'Yes' : 'No' },
+      { label: 'Action or trigger', value: titleCase(nodeSchema?.label ?? node.nodeType) },
+      { label: 'Description', value: nodeSchema?.description ?? '—' },
+      { label: 'Enabled', value: node.step?.is_active === false ? 'No' : 'Yes' },
     ]
-  }, [node, nodeSchema])
+    if (developerMode) {
+      base.push(
+        { label: 'Node type', value: node.nodeType },
+        { label: 'Step key', value: node.key },
+        { label: 'Category', value: titleCase(nodeSchema?.category ?? 'node') },
+      )
+    }
+    return base
+  }, [developerMode, node, nodeSchema])
 
   if (!node) {
     return (
@@ -176,14 +195,12 @@ export const WorkflowInspectorV2 = ({
         </label>
       </div>
 
+      {studioMode !== 'canonical' && (
+        <div className="wfs2-inspector__mode">{readOnly ? 'Read-only inspector' : 'Limited editing'}</div>
+      )}
+
       <nav className="wfs2-inspector__tabs" aria-label="Inspector tabs">
-        {([
-          ['general', 'General'],
-          ['logic', 'Logic'],
-          ['safety', 'Safety'],
-          ['data', 'Data'],
-          ['test', 'Test'],
-        ] as const).map(([id, label]) => (
+        {OPERATOR_TABS.map(({ id, label }) => (
           <button
             key={id}
             type="button"

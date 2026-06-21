@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js';
 
-import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../_shared.js';
+import { corsHeaders, ensureMutationAuth, errorPayload, parseJsonSafe } from '../_shared.js';
 import {
   listWorkflowStudioCatalog,
   createWorkflowStudioDraft,
@@ -27,11 +27,7 @@ export async function GET(request) {
     const includeArchived = searchParams.get('include_archived') === 'true';
     return withCors(request, await listWorkflowStudioCatalog({ include_archived: includeArchived }), 200);
   } catch (error) {
-    return withCors(request, {
-      ok: false,
-      error: 'workflows_list_failed',
-      message: error?.message || String(error),
-    }, 500);
+    return withCors(request, errorPayload(request, 'workflows_list_failed', error?.message || String(error)), 500);
   }
 }
 
@@ -44,10 +40,6 @@ export async function POST(request) {
     const result = await createWorkflowStudioDraft(payload);
     return withCors(request, result, result.ok === false ? Number(result.status || 400) : 201);
   } catch (error) {
-    return withCors(request, {
-      ok: false,
-      error: 'workflow_create_failed',
-      message: error?.message || String(error),
-    }, 500);
+    return withCors(request, errorPayload(request, 'workflow_create_failed', error?.message || String(error)), 500);
   }
 }

@@ -17,6 +17,7 @@ import type {
   WorkflowDetail,
   WorkflowDryRunResult,
   WorkflowDryRunStep,
+  WorkflowEdge,
   WorkflowStep,
 } from '../workflow.types'
 
@@ -313,8 +314,14 @@ function autoLayout(nodes: CanvasNodeV2[]) {
   return nodes
 }
 
-export function buildCanvasNodes(detail: WorkflowDetail | null): CanvasNodeV2[] {
-  if (!detail?.steps?.length) return autoLayout(emptyBlueprint.map((node) => ({ ...node })))
+export function buildCanvasNodes(
+  detail: WorkflowDetail | null,
+  options: { offlineDemo?: boolean } = {},
+): CanvasNodeV2[] {
+  if (!detail?.steps?.length) {
+    if (options.offlineDemo) return autoLayout(emptyBlueprint.map((node) => ({ ...node })))
+    return []
+  }
 
   const built = [...detail.steps]
     .sort((a, b) => Number(a.step_order) - Number(b.step_order))
@@ -335,7 +342,23 @@ export function buildCanvasNodes(detail: WorkflowDetail | null): CanvasNodeV2[] 
   return autoLayout(built)
 }
 
-function buildConnections(nodes: CanvasNodeV2[]): CanvasConnectionV2[] {
+function buildConnections(nodes: CanvasNodeV2[], edges: WorkflowEdge[] = []): CanvasConnectionV2[] {
+  if (edges.length) {
+    const byId = new Map(nodes.map((node) => [node.id, node]))
+    const canonical: CanvasConnectionV2[] = []
+    for (const edge of edges) {
+      const from = byId.get(edge.source_node_id)
+      const to = byId.get(edge.target_node_id)
+      if (!from || !to) continue
+      const kind: ConnectionKind =
+        edge.edge_type === 'true' ? 'true' :
+        edge.edge_type === 'false' ? 'false' :
+        'next'
+      canonical.push({ id: edge.id, from, to, kind })
+    }
+    if (canonical.length) return canonical
+  }
+
   const byKey = new Map(nodes.map((node) => [node.key, node]))
   const connections: CanvasConnectionV2[] = []
 
@@ -517,6 +540,7 @@ export interface WorkflowCanvasV2Handle {
   fitView: () => void
   centerView: () => void
   getZoom: () => number
+  syncFromDetail: (detail: WorkflowDetail | null) => void
 }
 
 interface WorkflowCanvasV2Props {
@@ -542,6 +566,8 @@ interface WorkflowCanvasV2Props {
   layoutRevision?: number
   liveOverlay?: ReactNode
   busy?: boolean
+  readOnly?: boolean
+  offlineDemo?: boolean
 }
 
 export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanvasV2Props>(function WorkflowCanvasV2({
@@ -559,10 +585,12 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
   layoutRevision = 0,
   liveOverlay,
   busy,
+  readOnly = false,
+  offlineDemo = false,
 }, ref) {
   const [zoom, setZoom] = useState(0.78)
   const [localNodes, setLocalNodes] = useState<CanvasNodeV2[]>(() =>
-    buildCanvasNodes(detail),
+    buildCanvasNodes(detail, { offlineDemo }),
   )
   const [historyPast, setHistoryPast] = useState<CanvasNodeV2[][]>([])
   const [historyFuture, setHistoryFuture] = useState<CanvasNodeV2[][]>([])
@@ -593,13 +621,16 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
   }, [localNodes])
 
   useEffect(() => {
-    setLocalNodes(buildCanvasNodes(detail))
+    setLocalNodes(buildCanvasNodes(detail, { offlineDemo }))
     setHistoryPast([])
     setHistoryFuture([])
-  }, [detail])
+  }, [detail, offlineDemo])
 
   const nodes = localNodes
-  const connections = useMemo(() => buildConnections(nodes), [nodes])
+  const connections = useMemo(
+    () => buildConnections(nodes, detail?.edges ?? []),
+    [detail?.edges, nodes],
+  )
   const bounds = useMemo(() => graphBounds(nodes), [nodes])
   const dryRunMap = useMemo(() => dryRunByNode(dryRunResult), [dryRunResult])
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
@@ -707,7 +738,12 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
     fitView,
     centerView,
     getZoom: () => zoom,
-  }), [centerView, fitView, historyFuture.length, historyPast.length, redo, undo, zoom])
+    syncFromDetail: (nextDetail) => {
+      setLocalNodes(buildCanvasNodes(nextDetail, { offlineDemo }))
+      setHistoryPast([])
+      setHistoryFuture([])
+    },
+  }), [centerView, fitView, historyFuture.length, historyPast.length, offlineDemo, redo, undo, zoom])
 
   useEffect(() => {
     if (!layoutRevision) return
@@ -739,6 +775,7 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (readOnly) return
     setHoveredEdgeId(null)
 
     const raw = event.dataTransfer.getData('application/x-workflow-node')
@@ -968,6 +1005,18 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
     const height = 116
     const graphWidth = Math.max(1, bounds.maxX - bounds.minX)
     const graphHeight = Math.max(1, bounds.maxY - bounds.minY)
+    const scaleX = (value: number) => ((value - bounds.minX) / graphWidth) * width
+    const scaleY = (value: number) => ((value - bounds.minY) / graphHeight) * height
+
+    const viewport = scrollRef.current
+    const viewRect = viewport
+      ? {
+          x: scaleX(viewport.scrollLeft / zoom),
+          y: scaleY(viewport.scrollTop / zoom),
+          w: Math.max(8, (viewport.clientWidth / zoom / graphWidth) * width),
+          h: Math.max(6, (viewport.clientHeight / zoom / graphHeight) * height),
+        }
+      : null
 
     return {
       width,
@@ -975,13 +1024,22 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
       nodes: nodes.map((node) => ({
         id: node.id,
         family: nodeFamily(node.nodeType),
-        x: ((node.x - bounds.minX) / graphWidth) * width,
-        y: ((node.y - bounds.minY) / graphHeight) * height,
+        x: scaleX(node.x),
+        y: scaleY(node.y),
         w: Math.max(5, (NODE_WIDTH / graphWidth) * width),
         h: Math.max(4, (NODE_HEIGHT / graphHeight) * height),
       })),
+      edges: connections.map((connection) => ({
+        id: connection.id,
+        kind: connection.kind,
+        x1: scaleX(connection.from.x + NODE_WIDTH / 2),
+        y1: scaleY(connection.from.y + NODE_CENTER_Y),
+        x2: scaleX(connection.to.x + NODE_WIDTH / 2),
+        y2: scaleY(connection.to.y + NODE_CENTER_Y),
+      })),
+      viewport: viewRect,
     }
-  }, [bounds, nodes])
+  }, [bounds, connections, nodes, zoom])
 
   return (
     <section className="wfs2-canvas-wrap">
@@ -1278,21 +1336,55 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
         </div>
 
         <svg viewBox={`0 0 ${miniMap.width} ${miniMap.height}`}>
+          {miniMap.edges.map((edge) => (
+            <line
+              key={edge.id}
+              className={cls('wfs2-minimap__edge', `is-${edge.kind}`)}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+            />
+          ))}
           {miniMap.nodes.map((node) => (
             <rect
               key={node.id}
-              className={cls('wfs2-minimap__node', `is-${node.family}`)}
+              className={cls(
+                'wfs2-minimap__node',
+                `is-${node.family}`,
+                selectedNodeId === node.id && 'is-selected',
+              )}
               x={node.x}
               y={node.y}
               width={node.w}
               height={node.h}
               rx="2"
+              onClick={() => {
+                const target = nodes.find((entry) => entry.id === node.id)
+                if (!target || !scrollRef.current) return
+                onSelectNode(target.id)
+                scrollRef.current.scrollTo({
+                  left: Math.max(0, target.x * zoom - scrollRef.current.clientWidth / 2),
+                  top: Math.max(0, target.y * zoom - scrollRef.current.clientHeight / 2),
+                  behavior: 'smooth',
+                })
+              }}
             />
           ))}
+          {miniMap.viewport ? (
+            <rect
+              className="wfs2-minimap__viewport"
+              x={miniMap.viewport.x}
+              y={miniMap.viewport.y}
+              width={miniMap.viewport.w}
+              height={miniMap.viewport.h}
+              rx="2"
+            />
+          ) : null}
         </svg>
       </div>
 
-      {placementMenu && (
+      {placementMenu && !readOnly && (
         <div
           className="wfs2-canvas-placement"
           style={{ left: placementMenu.x, top: placementMenu.y }}

@@ -2477,3 +2477,123 @@
 .light .wfs2-console__table th {
   color: #334155;
 }
+
+.wfs2-nav__menu.is-portal {
+  position: fixed;
+  z-index: 12000;
+}
+
+.wfs2-nav__badge.is-legacy {
+  color: var(--wfs2-amber, #f59e0b);
+}
+
+.wfs2-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 13000;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(4, 8, 18, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+.wfs2-modal {
+  width: min(100%, 34rem);
+  border: 1px solid var(--wfs2-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--wfs2-panel) 88%, transparent);
+  box-shadow: var(--wfs2-shadow);
+}
+
+.wfs2-modal.is-lg { width: min(100%, 42rem); }
+
+.wfs2-modal__head,
+.wfs2-modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+}
+
+.wfs2-modal__body {
+  padding: 0 1rem 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.wfs2-modal__field {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.wfs2-modal__field input,
+.wfs2-modal__field textarea,
+.wfs2-modal__field select {
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--wfs2-text);
+  padding: 0.45rem 0.55rem;
+}
+
+.wfs2-modal__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.wfs2-modal__error {
+  color: var(--wfs2-red);
+  font-size: 0.75rem;
+}
+
+.wfs2__btn.is-danger {
+  color: #fff;
+  background: var(--wfs2-red);
+}
+
+.wfs2-api-error {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: start;
+  margin: 0.5rem 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--wfs2-red) 45%, var(--wfs2-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wfs2-red) 8%, var(--wfs2-panel));
+}
+
+.wfs2-api-error__details {
+  margin: 0.35rem 0 0;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  color: var(--wfs2-muted);
+}
+
+.wfs2__banner.is-warning {
+  border-color: color-mix(in srgb, var(--wfs2-amber, #f59e0b) 50%, var(--wfs2-border));
+}
+
+.wfs2-minimap__edge {
+  stroke: rgba(148, 163, 184, 0.55);
+  stroke-width: 1;
+}
+
+.wfs2-minimap__edge.is-true { stroke: rgba(34, 197, 94, 0.8); }
+.wfs2-minimap__edge.is-false { stroke: rgba(248, 113, 113, 0.8); }
+
+.wfs2-minimap__viewport {
+  fill: rgba(var(--wfs2-accent-rgb), 0.08);
+  stroke: rgba(var(--wfs2-accent-rgb), 0.65);
+  stroke-width: 1;
+}
+
+.wfs2-inspector__mode {
+  margin: 0.35rem 0.55rem 0;
+  font-size: 0.68rem;
+  color: var(--wfs2-amber, #f59e0b);
+}

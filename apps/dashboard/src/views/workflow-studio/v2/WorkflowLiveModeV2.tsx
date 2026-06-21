@@ -19,6 +19,7 @@ const TOKEN_STATUS_CLASS: Record<string, string> = {
 interface WorkflowLiveModeV2Props {
   workflowId: string | null
   enabled: boolean
+  demoMode?: boolean
   nodes: CanvasNodeV2[]
 }
 
@@ -34,6 +35,7 @@ function prefersReducedMotion() {
 export const WorkflowLiveModeV2 = ({
   workflowId,
   enabled,
+  demoMode = false,
   nodes,
 }: WorkflowLiveModeV2Props) => {
   const [tokens, setTokens] = useState<WorkflowLiveToken[]>([])
@@ -43,7 +45,25 @@ export const WorkflowLiveModeV2 = ({
   const reducedMotion = useMemo(() => prefersReducedMotion(), [])
 
   const refresh = useCallback(async () => {
-    if (!workflowId || !enabled) return
+    if (!enabled && !demoMode) return
+    if (demoMode) {
+      const demoTokens = nodes.slice(0, 3).map((node, index) => ({
+        id: `demo-${node.id}`,
+        step_id: node.id,
+        step_key: node.key,
+        label: node.label,
+        status: index === 0 ? 'progressing' : index === 1 ? 'waiting' : 'blocked',
+        seller: 'Demo Seller',
+        property: '123 Demo St',
+        run_id: `demo-run-${index + 1}`,
+        trace_id: `demo-trace-${index + 1}`,
+      })) as WorkflowLiveToken[]
+      setTokens(demoTokens)
+      setError('')
+      setLoading(false)
+      return
+    }
+    if (!workflowId) return
     setLoading(true)
     setError('')
     try {
@@ -63,18 +83,19 @@ export const WorkflowLiveModeV2 = ({
     } finally {
       setLoading(false)
     }
-  }, [enabled, workflowId])
+  }, [demoMode, enabled, nodes, workflowId])
 
   useEffect(() => {
-    if (!enabled || !workflowId) {
+    if (!enabled && !demoMode) {
       setTokens([])
       return undefined
     }
 
     void refresh()
+    if (demoMode) return undefined
     const timer = window.setInterval(() => void refresh(), 4000)
     return () => window.clearInterval(timer)
-  }, [enabled, refresh, workflowId])
+  }, [demoMode, enabled, refresh, workflowId])
 
   const tokensByNode = useMemo(() => {
     const map = new Map<string, WorkflowLiveToken[]>()
@@ -86,10 +107,14 @@ export const WorkflowLiveModeV2 = ({
     return map
   }, [tokens])
 
-  if (!enabled) return null
+  if (!enabled && !demoMode) return null
 
   return (
-    <div className={cls('wfs2-live', reducedMotion && 'is-reduced-motion')} aria-hidden={false}>
+    <div className={cls('wfs2-live', reducedMotion && 'is-reduced-motion', demoMode && 'is-demo')} aria-hidden={false}>
+      {demoMode && (
+        <div className="wfs2-live__banner is-muted">Demo Animation — not real persisted activity</div>
+      )}
+
       {error && (
         <div className="wfs2-live__banner">
           <Icon name="alert" /> {error}
@@ -98,6 +123,10 @@ export const WorkflowLiveModeV2 = ({
 
       {loading && tokens.length === 0 && (
         <div className="wfs2-live__banner is-muted">Syncing live tokens…</div>
+      )}
+
+      {!loading && !demoMode && tokens.length === 0 && (
+        <div className="wfs2-live__banner is-muted">No active runs in this workflow</div>
       )}
 
       {nodes.map((node) => {

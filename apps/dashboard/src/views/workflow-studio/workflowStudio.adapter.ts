@@ -185,19 +185,50 @@ export const insertNodeOnEdge = async (
   workflowId: string,
   payload: Record<string, unknown>,
 ): Promise<WorkflowDetail> => {
+  return mutateWorkflowGraph(workflowId, { operation: 'insert-on-edge', ...payload })
+}
+
+export type GraphMutationOperation =
+  | 'insert-before'
+  | 'insert-after'
+  | 'add-branch'
+  | 'replace'
+  | 'insert-on-edge'
+
+export const mutateWorkflowGraph = async (
+  workflowId: string,
+  payload: Record<string, unknown>,
+): Promise<WorkflowDetail> => {
   const result = await callBackend<WorkflowDetail>(
-    `/api/cockpit/workflows/${encodeURIComponent(workflowId)}/steps/insert-edge`,
+    `/api/cockpit/workflows/${encodeURIComponent(workflowId)}/graph/mutate`,
     { method: 'POST', body: JSON.stringify(payload) },
   )
-  if (!result.ok) throw new Error(result.message || result.error || 'Edge insert failed')
+  if (!result.ok) throw new Error(result.message || result.error || 'Graph mutation failed')
   return unwrapWorkflowResponse<WorkflowDetail>(result as unknown as BackendResult<Record<string, unknown>>)
 }
 
-export const listNodeTypes = async (grouped = true): Promise<WorkflowNodeTypesResponse> => {
-  const qs = grouped ? '?grouped=true' : ''
-  const result = await callBackend<WorkflowNodeTypesResponse>(`/api/workflows/node-types${qs}`)
-  if (!result.ok) throw new Error(result.message || result.error || 'Node types load failed')
+export const listNodeTypes = async (
+  grouped = true,
+  includeInternal = false,
+): Promise<WorkflowNodeTypesResponse> => {
+  const params = new URLSearchParams()
+  if (!grouped) params.set('grouped', 'false')
+  if (includeInternal) params.set('include_internal', 'true')
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const result = await callBackend<WorkflowNodeTypesResponse>(
+    `/api/cockpit/workflows/node-registry${qs}`,
+  )
+  if (!result.ok) throw new Error(result.message || result.error || 'Node registry load failed')
   return result.data
+}
+
+export const cloneLegacyWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {
+  const result = await callBackend<WorkflowDetail>(
+    `/api/cockpit/workflows/${encodeURIComponent(workflowId)}/clone-legacy`,
+    { method: 'POST', body: JSON.stringify({}) },
+  )
+  if (!result.ok) throw new Error(result.message || result.error || 'Legacy clone failed')
+  return unwrapWorkflowResponse<WorkflowDetail>(result as unknown as BackendResult<Record<string, unknown>>)
 }
 
 export const renameWorkflow = async (workflowId: string, name: string): Promise<WorkflowDetail> => {

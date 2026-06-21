@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { Workflow } from '../workflow.types'
+import { workflowKindBadge } from './workflow-studio-mode'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -40,6 +42,7 @@ export type NavigatorAction =
   | 'archive'
   | 'restore'
   | 'delete-draft'
+  | 'clone-legacy'
 
 interface WorkflowNavigatorV2Props {
   workflows: Workflow[]
@@ -86,7 +89,14 @@ function matchesTab(workflow: Workflow, tab: NavigatorTab) {
 }
 
 function menuActions(workflow: Workflow): NavigatorAction[] {
-  const actions: NavigatorAction[] = ['open', 'rename', 'duplicate', 'view-runs', 'view-analytics', 'version-history']
+  const actions: NavigatorAction[] = ['open', 'duplicate', 'view-runs', 'view-analytics', 'version-history']
+
+  if (workflow.is_legacy) {
+    actions.push('clone-legacy', 'archive')
+    return actions
+  }
+
+  actions.splice(1, 0, 'rename')
 
   if (workflow.is_system_template) {
     actions.push('pause')
@@ -124,6 +134,7 @@ const ACTION_LABELS: Record<NavigatorAction, string> = {
   archive: 'Archive',
   restore: 'Restore',
   'delete-draft': 'Delete Draft',
+  'clone-legacy': 'Clone Legacy to V2',
 }
 
 export const WorkflowNavigatorV2 = ({
@@ -138,6 +149,22 @@ export const WorkflowNavigatorV2 = ({
   const [tab, setTab] = useState<NavigatorTab>('all')
   const [query, setQuery] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuId) return
+    const close = () => {
+      setMenuId(null)
+      setMenuAnchor(null)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [menuId])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -187,7 +214,7 @@ export const WorkflowNavigatorV2 = ({
         <Icon name="grid" /> New Workflow
       </button>
 
-      <div className="wfs2-nav__list">
+      <div className="wfs2-nav__list" ref={listRef}>
         {loading && filtered.length === 0 ? (
           <div className="wfs2__empty">Loading workflows…</div>
         ) : filtered.length === 0 ? (
@@ -209,8 +236,11 @@ export const WorkflowNavigatorV2 = ({
                 >
                   <div className="wfs2-nav__card-head">
                     <strong>{workflow.name}</strong>
-                    <span className={cls('wfs2-nav__badge', workflow.is_system_template ? 'is-system' : 'is-custom')}>
-                      {workflow.is_system_template ? 'System' : 'Custom'}
+                    <span className={cls(
+                      'wfs2-nav__badge',
+                      workflow.is_legacy ? 'is-legacy' : workflow.is_system_template ? 'is-system' : 'is-custom',
+                    )}>
+                      {workflowKindBadge(workflow)}
                     </span>
                   </div>
 
@@ -242,36 +272,57 @@ export const WorkflowNavigatorV2 = ({
                     type="button"
                     className="wfs2-nav__menu-btn"
                     aria-label="Workflow actions"
-                    onClick={() => setMenuId(menuOpen ? null : workflow.id)}
+                    onClick={(event) => {
+                      if (menuOpen) {
+                        setMenuId(null)
+                        setMenuAnchor(null)
+                        return
+                      }
+                      const rect = (event.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                      setMenuAnchor(rect)
+                      setMenuId(workflow.id)
+                    }}
                   >
                     <Icon name="more" />
                   </button>
-
-                  {menuOpen && (
-                    <menu className="wfs2-nav__menu">
-                      {menuActions(workflow).map((action) => (
-                        <li key={action}>
-                          <button
-                            type="button"
-                            className={cls(action === 'delete-draft' && 'is-danger')}
-                            disabled={busy || (workflow.is_system_template && action === 'rename')}
-                            onClick={() => {
-                              setMenuId(null)
-                              onAction(workflow, action)
-                            }}
-                          >
-                            {ACTION_LABELS[action]}
-                          </button>
-                        </li>
-                      ))}
-                    </menu>
-                  )}
                 </div>
               </article>
             )
           })
         )}
       </div>
+
+      {menuId && menuAnchor && (() => {
+        const workflow = workflows.find((row) => row.id === menuId)
+        if (!workflow) return null
+        return createPortal(
+          <menu
+            className="wfs2-nav__menu is-portal"
+            style={{
+              top: menuAnchor.bottom + 6,
+              left: Math.max(12, menuAnchor.right - 196),
+            }}
+          >
+            {menuActions(workflow).map((action) => (
+              <li key={action}>
+                <button
+                  type="button"
+                  className={cls(action === 'delete-draft' && 'is-danger')}
+                  disabled={busy || (workflow.is_system_template && action === 'rename')}
+                  onClick={() => {
+                    setMenuId(null)
+                    setMenuAnchor(null)
+                    onAction(workflow, action)
+                  }}
+                >
+                  {ACTION_LABELS[action]}
+                </button>
+              </li>
+            ))}
+          </menu>,
+          document.body,
+        )
+      })()}
     </div>
   )
 }

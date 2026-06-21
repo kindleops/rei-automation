@@ -29,7 +29,12 @@ import {
   seedSystemWorkflowTemplates,
   seedMasterOrchestrator,
   protectSystemTemplateEdit,
+  SYSTEM_WORKFLOW_TEMPLATES,
 } from '@/lib/domain/workflow-v2/system-templates.js';
+import {
+  applyGraphMutation,
+  insertNodeOnEdgeResolved,
+} from '@/lib/domain/workflow-v2/graph-mutations.js';
 
 const OPERATIONAL_MODES = Object.freeze([
   'draft',
@@ -120,6 +125,118 @@ function schemaForNodeType(nodeType) {
     base.safety = { reason: { type: 'string' }, block_terminal: { type: 'boolean', default: true } };
   }
   return { input_schema: base, output_schema: { status: { type: 'string' }, context_patch: { type: 'object' } } };
+}
+
+function presentationMeta(node = {}) {
+  const internal = node.is_system === true || node.internal_only === true;
+  return {
+    operator_exposed: !internal && node.is_enabled !== false,
+    ui_category: node.ui_category ?? node.category,
+    icon: node.icon ?? null,
+    display_order: node.display_order ?? 0,
+    supports_canvas: node.supports_canvas !== false,
+    internal_only: internal,
+    deprecated: node.deprecated === true,
+    replacement_node_type: node.replacement_node_type ?? null,
+  };
+}
+
+export async function listWorkflowNodeRegistry(opts = {}, deps = {}) {
+  const includeInternal = opts.include_internal === true || opts.developer_mode === true;
+  const client = db(deps);
+  const { data: dbRows, error } = await client
+    .from('workflow_node_registry')
+    .select('*')
+    .order('category', { ascending: true });
+
+  let rows = [];
+  if (!error && dbRows?.length) {
+    rows = dbRows;
+  } else {
+    rows = getRegistryRowsForSync();
+  }
+
+  const enriched = rows.map((row) => ({
+    ...row,
+    ...presentationMeta(row),
+  }));
+
+  const operatorNodes = enriched.filter((n) => n.operator_exposed);
+  const internalNodes = enriched.filter((n) => n.internal_only);
+
+  const visible = includeInternal ? enriched : operatorNodes;
+  const categories = {};
+  for (const node of visible) {
+    const cat = node.ui_category ?? node.category ?? 'operations';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push(node);
+  }
+
+  return {
+    ok: true,
+    nodes: visible,
+    categories,
+    counts: {
+      total: enriched.length,
+      operator: operatorNodes.length,
+      internal: internalNodes.length,
+    },
+    source: error ? 'code_registry_fallback' : 'workflow_node_registry',
+  };
+}
+
+export async function cloneLegacyWorkflowToV2(legacyId, deps = {}) {
+  const legacy = await getDefinition(legacyId, deps);
+  if (!legacy.ok || !legacy.is_legacy) {
+    return { ok: false, status: 400, error: 'legacy_workflow_required' };
+  }
+
+  const created = await createDefinition({
+    name: `${legacy.workflow.name} (V2)`,
+    definition_key: `${legacy.workflow.workflow_key}_v2_${Date.now().toString(36)}`,
+    description: legacy.workflow.description,
+    metadata: {
+      channel: legacy.workflow.channel ?? 'multichannel',
+      workflow_type: legacy.workflow.workflow_type ?? 'automation',
+      operational_mode: 'draft',
+      cloned_from_legacy_id: legacyId,
+      market_scope: legacy.workflow.market_scope ?? ['default'],
+      state_scope: legacy.workflow.state_scope ?? ['TX'],
+      language_scope: legacy.workflow.language_scope ?? ['en'],
+    },
+    status: 'draft',
+    trigger_type: 'trigger.lead_entered_workflow',
+  }, deps);
+  if (!created.ok) return created;
+
+  const definitionId = created.definition_id;
+  const steps = legacy.steps ?? [];
+  const keyToId = new Map();
+
+  for (const [index, step] of steps.entries()) {
+    const pos = step.config?.position ?? step.config?.ui ?? {};
+    const nodeRes = await createNode(definitionId, {
+      node_type: step.node_type,
+      label: step.label,
+      node_key: step.step_key,
+      config: step.config ?? {},
+      position_x: pos.x ?? 120 + index * 80,
+      position_y: pos.y ?? 180 + (index % 3) * 90,
+    }, deps);
+    if (nodeRes.ok && nodeRes.node_id) {
+      keyToId.set(step.step_key, nodeRes.node_id);
+    }
+  }
+
+  for (let i = 0; i < steps.length - 1; i += 1) {
+    const fromId = keyToId.get(steps[i].step_key);
+    const toId = keyToId.get(steps[i + 1].step_key);
+    if (fromId && toId) {
+      await createEdge(definitionId, { source_node_id: fromId, target_node_id: toId, edge_type: 'next' }, deps);
+    }
+  }
+
+  return getWorkflowStudioDetail(definitionId, deps);
 }
 
 export function getRegistryRowsForSync() {
@@ -253,18 +370,84 @@ export async function getWorkflowStudioDetail(id, deps = {}) {
 }
 
 export async function createWorkflowStudioDraft(payload = {}, deps = {}) {
+  const operationalMode = clean(payload.operational_mode ?? 'draft') || 'draft';
   const meta = {
     ...(payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
     channel: payload.channel ?? 'multichannel',
     workflow_type: payload.workflow_type ?? 'automation',
-    operational_mode: 'draft',
+    operational_mode: operationalMode,
     market_scope: payload.market_scope ?? ['default'],
     state_scope: payload.state_scope ?? ['TX'],
     language_scope: payload.language_scope ?? ['en'],
+    asset_scope: payload.asset_scope ?? payload.asset_type_scope ?? [],
+    no_send: operationalMode !== 'armed' && operationalMode !== 'live',
   };
-  const result = await createDefinition({ ...payload, metadata: meta, status: 'draft' }, deps);
+  const triggerType = clean(payload.trigger_type ?? payload.trigger ?? 'trigger.lead_entered_workflow');
+  const result = await createDefinition({
+    ...payload,
+    metadata: meta,
+    status: 'draft',
+    trigger_type: triggerType,
+  }, deps);
   if (!result.ok) return result;
-  return getWorkflowStudioDetail(result.definition_id, deps);
+
+  const definitionId = result.definition_id;
+  if (payload.start_from === 'system_template' && payload.template_key) {
+    const template = SYSTEM_WORKFLOW_TEMPLATES?.find?.(
+      (t) => t.template_key === payload.template_key || t.definition_key === payload.template_key,
+    );
+    if (template?.graph) {
+      await seedTemplateGraph(definitionId, template.graph, deps);
+      return getWorkflowStudioDetail(definitionId, deps);
+    }
+  }
+
+  await createNode(definitionId, {
+    node_type: triggerType,
+    label: payload.trigger_label ?? 'Workflow Start',
+    position_x: 120,
+    position_y: 180,
+    config: { step_order: 10 },
+  }, deps);
+
+  return getWorkflowStudioDetail(definitionId, deps);
+}
+
+async function seedTemplateGraph(definitionId, graph, deps) {
+  const client = db(deps);
+  const nodes = graph.nodes ?? [];
+  const edges = graph.edges ?? [];
+  const keyToId = new Map();
+
+  for (const node of nodes) {
+    const row = {
+      workflow_definition_id: definitionId,
+      node_key: node.node_key ?? node.key,
+      node_kind: node.node_kind ?? 'action',
+      node_type: node.node_type,
+      label: node.label,
+      config: node.config ?? {},
+      position_x: node.position_x ?? node.x ?? 0,
+      position_y: node.position_y ?? node.y ?? 0,
+      is_active: node.is_active !== false,
+    };
+    const { data, error } = await client.from('workflow_nodes').insert(row).select('id, node_key').single();
+    if (error) throw error;
+    keyToId.set(data.node_key, data.id);
+  }
+
+  for (const edge of edges) {
+    const sourceId = keyToId.get(edge.source_node_key ?? edge.from);
+    const targetId = keyToId.get(edge.target_node_key ?? edge.to);
+    if (!sourceId || !targetId) continue;
+    await createEdge(definitionId, {
+      source_node_id: sourceId,
+      target_node_id: targetId,
+      edge_type: edge.edge_type ?? 'next',
+      condition_key: edge.condition_key,
+      label: edge.label,
+    }, deps);
+  }
 }
 
 export async function updateWorkflowStudioDraft(id, payload = {}, deps = {}) {
@@ -298,37 +481,14 @@ export async function updateWorkflowStudioNode(nodeId, payload = {}, deps = {}) 
 }
 
 export async function insertNodeOnEdge(definitionId, payload = {}, deps = {}) {
-  const edgeId = clean(payload.edge_id ?? payload.edgeId ?? '');
-  const nodePayload = payload.node ?? payload;
-  if (!edgeId) return { ok: false, status: 400, error: 'edge_id_required' };
+  const raw = await insertNodeOnEdgeResolved(definitionId, payload, deps);
+  if (!raw.ok) return raw;
+  return getWorkflowStudioDetail(definitionId, deps);
+}
 
-  const edgeRes = await db(deps).from('workflow_edges').select('*').eq('id', edgeId).maybeSingle();
-  if (!edgeRes.data) return { ok: false, status: 404, error: 'edge_not_found' };
-  const edge = edgeRes.data;
-
-  const created = await createNode(definitionId, {
-    ...nodePayload,
-    position_x: payload.position_x ?? nodePayload.position_x ?? nodePayload.x ?? 0,
-    position_y: payload.position_y ?? nodePayload.position_y ?? nodePayload.y ?? 0,
-  }, deps);
-  if (!created.ok) return created;
-  const newNodeId = created.node_id;
-
-  await deleteEdge(edgeId, deps);
-  await createEdge(definitionId, {
-    source_node_id: edge.source_node_id,
-    target_node_id: newNodeId,
-    edge_type: edge.edge_type,
-    condition_key: edge.condition_key,
-    label: edge.label,
-    config: edge.config,
-  }, deps);
-  await createEdge(definitionId, {
-    source_node_id: newNodeId,
-    target_node_id: edge.target_node_id,
-    edge_type: 'next',
-  }, deps);
-
+export async function mutateWorkflowGraph(definitionId, payload = {}, deps = {}) {
+  const raw = await applyGraphMutation(definitionId, payload, deps);
+  if (!raw.ok) return raw;
   return getWorkflowStudioDetail(definitionId, deps);
 }
 
@@ -393,32 +553,66 @@ export async function getWorkflowConsole(definitionId, filters = {}, deps = {}) 
     client.from('workflow_enrollments').select('*').eq('workflow_definition_id', definitionId).order('enrolled_at', { ascending: false }).limit(limit),
   ]);
 
+  const nodeLabelByKey = new Map();
+  const { data: graphNodes } = await client
+    .from('workflow_nodes')
+    .select('node_key, label, node_type')
+    .eq('workflow_definition_id', definitionId);
+  for (const n of graphNodes ?? []) {
+    nodeLabelByKey.set(n.node_key, n.label ?? n.node_type);
+  }
+
   for (const step of steps.data ?? []) {
+    const ctx = step.execution_result?._context ?? step.input_context ?? {};
     events.push({
+      id: step.id,
       source: 'workflow_run_steps',
       timestamp: step.completed_at ?? step.started_at ?? step.created_at,
       workflow_id: definitionId,
+      version: step.workflow_version ?? null,
       node_key: step.node_key,
       node_type: step.node_type,
+      node: nodeLabelByKey.get(step.node_key) ?? step.node_key ?? step.node_type,
+      seller: ctx.seller_display_name ?? ctx.seller_name ?? ctx.first_name ?? null,
+      property: ctx.property_address ?? ctx.property_id ?? null,
       status: step.status,
       transition: step.status,
-      duration_ms: null,
-      input_summary: step.execution_result?._context ?? {},
-      output_summary: step.execution_result ?? {},
-      blocker: step.block_reason ?? null,
-      trace_id: step.workflow_run_id,
+      duration_ms: step.duration_ms ?? step.elapsed_ms ?? null,
+      blocker: step.block_reason ?? step.blocker ?? null,
+      retry: step.retry_count ?? 0,
+      trace_id: step.trace_id ?? step.workflow_run_id,
     });
   }
 
   for (const run of runs.data ?? []) {
+    const ctx = run.context ?? {};
     events.push({
+      id: run.id,
       source: 'workflow_runs',
       timestamp: run.completed_at ?? run.started_at,
       workflow_id: definitionId,
+      version: run.workflow_version ?? null,
+      seller: ctx.seller_display_name ?? ctx.seller_name ?? null,
+      property: ctx.property_address ?? null,
       status: run.status,
       transition: run.status,
-      trace_id: run.id,
-      input_summary: run.context ?? {},
+      trace_id: run.trace_id ?? run.id,
+    });
+  }
+
+  for (const enrollment of enrollments.data ?? []) {
+    const ctx = enrollment.context ?? {};
+    events.push({
+      id: enrollment.id,
+      source: 'workflow_enrollments',
+      timestamp: enrollment.enrolled_at ?? enrollment.updated_at,
+      workflow_id: definitionId,
+      seller: ctx.seller_display_name ?? ctx.seller_name ?? enrollment.subject_id,
+      property: ctx.property_address ?? null,
+      status: enrollment.status,
+      transition: enrollment.status,
+      node: enrollment.current_node_id,
+      trace_id: enrollment.id,
     });
   }
 
@@ -429,32 +623,78 @@ export async function getWorkflowConsole(definitionId, filters = {}, deps = {}) 
 
 export async function getWorkflowLiveState(definitionId, deps = {}) {
   const client = db(deps);
-  const { data: enrollments } = await client
-    .from('workflow_enrollments')
-    .select('*')
-    .eq('workflow_definition_id', definitionId)
-    .in('status', ['active', 'waiting', 'paused']);
+  const [{ data: enrollments }, { data: nodes }] = await Promise.all([
+    client
+      .from('workflow_enrollments')
+      .select('*')
+      .eq('workflow_definition_id', definitionId)
+      .in('status', ['active', 'waiting', 'paused']),
+    client
+      .from('workflow_nodes')
+      .select('id, node_key, label, node_type')
+      .eq('workflow_definition_id', definitionId),
+  ]);
+
+  const nodesById = new Map((nodes ?? []).map((n) => [n.id, n]));
 
   const tokens = [];
+  const nodeStates = new Map();
+
   for (const enrollment of enrollments ?? []) {
-    tokens.push({
+    const ctx = enrollment.context ?? {};
+    const current = nodesById.get(enrollment.current_node_id);
+    const tokenStatus =
+      enrollment.status === 'waiting' ? 'waiting' :
+      enrollment.status === 'paused' ? 'blocked' :
+      'progressing';
+
+    const token = {
+      id: enrollment.id,
       enrollment_id: enrollment.id,
+      run_id: enrollment.workflow_run_id ?? enrollment.id,
+      step_id: enrollment.current_node_id,
+      step_key: current?.node_key,
+      node_type: current?.node_type,
+      label: current?.label ?? current?.node_type,
+      status: tokenStatus,
+      seller: ctx.seller_display_name ?? ctx.seller_name ?? enrollment.subject_id,
+      property: ctx.property_address ?? ctx.property_id ?? null,
       subject_id: enrollment.subject_id,
-      status: enrollment.status,
-      current_node_id: enrollment.current_node_id,
-      context: enrollment.context ?? {},
+      context: ctx,
       next_execution_at: enrollment.next_execution_at,
       waiting_reason: enrollment.waiting_reason,
-    });
+      blocker: enrollment.block_reason ?? null,
+      trace_id: enrollment.workflow_run_id ?? enrollment.id,
+      started_at: enrollment.enrolled_at,
+    };
+    tokens.push(token);
+
+    if (current) {
+      const existing = nodeStates.get(current.id) ?? {
+        step_id: current.id,
+        step_key: current.node_key,
+        status: 'idle',
+        token_count: 0,
+        tokens: [],
+      };
+      existing.token_count += 1;
+      existing.tokens.push(token);
+      existing.status = tokenStatus;
+      nodeStates.set(current.id, existing);
+    }
   }
 
   return {
     ok: true,
+    workflow_id: definitionId,
     tokens,
+    nodes: [...nodeStates.values()],
     aggregate: {
-      active: tokens.filter((t) => t.status === 'active').length,
+      active: tokens.filter((t) => t.status === 'progressing').length,
       waiting: tokens.filter((t) => t.status === 'waiting').length,
+      blocked: tokens.filter((t) => t.status === 'blocked').length,
     },
+    updated_at: new Date().toISOString(),
   };
 }
 

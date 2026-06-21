@@ -623,7 +623,12 @@ export default defineConfig(({ mode }) => {
           target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
-        }
+        },
+        '/api/workflows': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
       }
     },
     resolve: {

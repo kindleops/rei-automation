@@ -10,7 +10,8 @@ interface WorkflowConsoleV2Props {
   workflowId: string | null
   open: boolean
   onClose: () => void
-  fallbackEvents?: WorkflowConsoleEvent[]
+  dryRunEvents?: WorkflowConsoleEvent[]
+  apiAvailable?: boolean
 }
 
 function formatTimestamp(value?: string) {
@@ -30,7 +31,8 @@ export const WorkflowConsoleV2 = ({
   workflowId,
   open,
   onClose,
-  fallbackEvents = [],
+  dryRunEvents = [],
+  apiAvailable = true,
 }: WorkflowConsoleV2Props) => {
   const [events, setEvents] = useState<WorkflowConsoleEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -52,11 +54,15 @@ export const WorkflowConsoleV2 = ({
       setEvents(response.events ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Console unavailable')
-      setEvents(fallbackEvents)
+      setEvents([])
     } finally {
       setLoading(false)
     }
-  }, [fallbackEvents, nodeFilter, sellerFilter, statusFilter, workflowId])
+  }, [nodeFilter, sellerFilter, statusFilter, workflowId])
+
+  useEffect(() => {
+    if (dryRunEvents.length) setEvents(dryRunEvents)
+  }, [dryRunEvents])
 
   useEffect(() => {
     if (!open || !workflowId) return
@@ -140,7 +146,13 @@ export const WorkflowConsoleV2 = ({
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={9} className="wfs2-console__empty-row">
-                  {loading ? 'Fetching console events…' : 'No console events for current filters.'}
+                  {loading
+                    ? 'Fetching console events…'
+                    : !apiAvailable
+                      ? 'Workflow API unavailable — console requires persisted events.'
+                      : filtered.length === 0 && events.length === 0
+                        ? 'No persisted events exist for this workflow yet.'
+                        : 'No console events for current filters.'}
                 </td>
               </tr>
             ) : (

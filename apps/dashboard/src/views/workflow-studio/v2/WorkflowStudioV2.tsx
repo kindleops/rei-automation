@@ -6,6 +6,7 @@ import type { WorkflowNodeLibraryItem } from '../WorkflowList'
 import type { Workflow, WorkflowConsoleEvent, WorkflowDetail, WorkflowDryRunResult } from '../workflow.types'
 import {
   archiveWorkflow,
+  cloneLegacyWorkflow,
   cloneWorkflowDraft,
   createWorkflowDraft,
   createWorkflowStep,
@@ -15,12 +16,14 @@ import {
   loadAnalytics,
   loadWorkflowDetail,
   loadWorkflowStudio,
+  mutateWorkflowGraph,
   pauseWorkflowDraft,
   publishWorkflow,
   renameWorkflow,
   restoreWorkflow,
   resumeWorkflowDraft,
   runWorkflowDryRun,
+  type GraphMutationOperation,
 } from '../workflowStudio.adapter'
 import { WorkflowCanvasV2, buildCanvasNodes, type WorkflowCanvasV2Handle } from './WorkflowCanvasV2'
 import { WorkflowCommandBarV2 } from './WorkflowCommandBarV2'
@@ -30,35 +33,29 @@ import { WorkflowLiveModeV2 } from './WorkflowLiveModeV2'
 import { WorkflowNavigatorV2, type NavigatorAction } from './WorkflowNavigatorV2'
 import { WorkflowNodePaletteV2 } from './WorkflowNodePaletteV2'
 import { useWorkflowStudioPrefs, useWorkflowStudioShortcuts } from './workflow-studio-state'
+import { WorkflowApiErrorPanel } from './WorkflowApiErrorPanel'
+import { WorkflowCreateModal, type WorkflowCreatePayload } from './WorkflowCreateModal'
+import { WorkflowGlassModal } from './WorkflowGlassModal'
+import {
+  canMutateGraph,
+  resolveWorkflowStudioMode,
+  studioModeLabel,
+} from './workflow-studio-mode'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
-const friendlyWorkflowError = (err: unknown) => {
+const parseWorkflowError = (err: unknown) => {
   const raw = err instanceof Error ? err.message : String(err || 'Workflow request failed')
-  const status = raw.match(/\[(\d{3})\]/)?.[1]
-  if (raw.includes('/api/cockpit/workflows')) {
-    return `${status ? `[${status}] ` : ''}Workflow API unavailable. Studio preview remains in dry-run guarded mode.`
+  const status = raw.match(/\[(\d{3})\]/)?.[1] ?? null
+  const traceMatch = raw.match(/trace[_-]?id[:\s]+([a-f0-9-]{8,})/i)
+  return {
+    message: raw,
+    status,
+    traceId: traceMatch?.[1] ?? null,
+    apiFailure: raw.includes('/api/cockpit/workflows'),
   }
-  if (raw.includes('<!DOCTYPE') || raw.includes('<html')) {
-    return `${status ? `[${status}] ` : ''}Workflow API returned an HTML error response.`
-  }
-  return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw
-}
-
-const defaultCreatePayload = {
-  name: 'Owner Acquisition Follow-Up',
-  channel: 'sms',
-  workflow_type: 'outbound',
-  status: 'draft',
-  live_send_enabled: false,
-  market_scope: ['default'],
-  state_scope: ['TX'],
-  language_scope: ['en'],
-  daily_cap: 75,
-  hourly_cap: 15,
-  timezone: 'America/Chicago',
 }
 
 const sampleDryRunContext = {
@@ -108,14 +105,23 @@ export const WorkflowStudioV2 = ({
   const [notice, setNotice] = useState('')
   const [railSection, setRailSection] = useState<RailSection>('workflows')
   const [consoleOpen, setConsoleOpen] = useState(false)
-  const [liveMode, setLiveMode] = useState(false)
+  const [liveMode, setLiveMode] = useState<'off' | 'live' | 'demo'>('off')
   const [layoutRevision, setLayoutRevision] = useState(0)
+  const [apiAvailable, setApiAvailable] = useState(true)
+  const [apiError, setApiError] = useState<{ message: string; traceId?: string | null } | null>(null)
+  const [offlineDemo, setOfflineDemo] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<Workflow | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null)
 
   const selectedId = selected?.workflow.id ?? null
 
   const refreshList = useCallback(async () => {
     const model = await loadWorkflowStudio()
     setWorkflows(model.workflows)
+    setApiAvailable(true)
+    setApiError(null)
     return model.workflows
   }, [])
 
@@ -129,7 +135,12 @@ export const WorkflowStudioV2 = ({
       setSelectedNodeId(null)
       setSelectedNodeIds([])
     } catch (err) {
-      setError(friendlyWorkflowError(err))
+      const parsed = parseWorkflowError(err)
+      if (parsed.apiFailure) {
+        setApiAvailable(false)
+        setApiError({ message: parsed.message, traceId: parsed.traceId })
+      }
+      setError(parsed.message)
     } finally {
       setLoading(false)
     }
@@ -145,7 +156,13 @@ export const WorkflowStudioV2 = ({
         if (first && !selected) void loadSelected(first.id)
       })
       .catch((err) => {
-        if (!cancelled) setError(friendlyWorkflowError(err))
+        if (cancelled) return
+        const parsed = parseWorkflowError(err)
+        if (parsed.apiFailure) {
+          setApiAvailable(false)
+          setApiError({ message: parsed.message, traceId: parsed.traceId })
+        }
+        setError(parsed.message)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -177,7 +194,12 @@ export const WorkflowStudioV2 = ({
       setNotice(success)
       await refreshList()
     } catch (err) {
-      setError(friendlyWorkflowError(err))
+      const parsed = parseWorkflowError(err)
+      if (parsed.apiFailure) {
+        setApiAvailable(false)
+        setApiError({ message: parsed.message, traceId: parsed.traceId })
+      }
+      setError(parsed.message)
     } finally {
       setBusy(false)
     }
@@ -188,7 +210,17 @@ export const WorkflowStudioV2 = ({
     return selected.workflow.id
   }
 
-  const canvasNodes = useMemo(() => buildCanvasNodes(selected), [selected])
+  const studioMode = useMemo(
+    () => resolveWorkflowStudioMode(selected, offlineDemo),
+    [offlineDemo, selected],
+  )
+  const graphMutable = canMutateGraph(studioMode, apiAvailable)
+  const modeBanner = studioModeLabel(studioMode)
+
+  const canvasNodes = useMemo(
+    () => buildCanvasNodes(selected, { offlineDemo }),
+    [offlineDemo, selected],
+  )
   const selectedCanvasNode = canvasNodes.find((node) => node.id === selectedNodeId) ?? null
   const selectedDryRunStep = selectedCanvasNode
     ? dryRunResult?.steps.find(
@@ -218,10 +250,52 @@ export const WorkflowStudioV2 = ({
     }))
   }, [dryRunResult, selected?.workflow.name])
 
+  const buildMutationPayload = (
+    item: WorkflowNodeLibraryItem,
+    position: { x: number; y: number },
+    maxOrder: number,
+  ) => ({
+    node_type: item.type,
+    label: item.label,
+    position_x: position.x,
+    position_y: position.y,
+    step_payload: buildWorkflowStepPayload(item, position, maxOrder),
+  })
+
+  const applyGraphPlacement = (
+    item: WorkflowNodeLibraryItem,
+    target: { id: string; x: number; y: number },
+    placement: GraphMutationOperation,
+    position?: { x: number; y: number },
+  ) => {
+    if (!graphMutable) {
+      setError('Graph editing is disabled for this workflow mode.')
+      return
+    }
+    void withBusy(async () => {
+      const workflowId = requireWorkflow()
+      const maxOrder = Math.max(0, ...(selected?.steps ?? []).map((step) => Number(step.step_order) || 0))
+      const coords = position ?? { x: target.x, y: target.y }
+      const detail = await mutateWorkflowGraph(workflowId, {
+        operation: placement,
+        target_node_id: target.id,
+        source_node_id: target.id,
+        branch_kind: placement === 'add-branch' ? 'true' : undefined,
+        ...buildMutationPayload(item, coords, maxOrder + 10),
+      })
+      setSelected(detail)
+      canvasRef.current?.syncFromDetail(detail)
+    }, `${item.label} ${placement.replace(/-/g, ' ')}`)
+  }
+
   const addNodeFromPalette = (
     item: WorkflowNodeLibraryItem,
     position?: { x: number; y: number },
   ) => {
+    if (!graphMutable) {
+      setError('Graph editing is disabled for this workflow mode.')
+      return
+    }
     void withBusy(async () => {
       const workflowId = requireWorkflow()
       const maxOrder = Math.max(0, ...(selected?.steps ?? []).map((step) => Number(step.step_order) || 0))
@@ -238,32 +312,30 @@ export const WorkflowStudioV2 = ({
     }, `${item.label} node added`)
   }
 
-  const insertOnEdge = async (
+  const insertOnEdge = (
     item: WorkflowNodeLibraryItem,
-    connection: { from: { id: string; key: string }; to: { id: string; key: string }; kind: string },
+    connection: { id: string; from: { id: string }; to: { id: string }; kind: string },
     position: { x: number; y: number },
   ) => {
-    const workflowId = requireWorkflow()
-    const payload = {
-      node_type: item.type,
-      label: item.label,
-      position,
-      edge: {
-        from_step_id: connection.from.id,
-        to_step_id: connection.to.id,
-        kind: connection.kind,
-      },
-      step_payload: buildWorkflowStepPayload(item, position, (selected?.steps.length ?? 0) * 10 + 10),
+    if (!graphMutable) {
+      setError('Graph editing is disabled for this workflow mode.')
+      return
     }
-
-    try {
-      const detail = await insertNodeOnEdge(workflowId, payload)
+    void withBusy(async () => {
+      const workflowId = requireWorkflow()
+      const maxOrder = Math.max(0, ...(selected?.steps ?? []).map((step) => Number(step.step_order) || 0))
+      const detail = await insertNodeOnEdge(workflowId, {
+        edge_id: connection.id,
+        edge: {
+          from_step_id: connection.from.id,
+          to_step_id: connection.to.id,
+          kind: connection.kind,
+        },
+        ...buildMutationPayload(item, position, maxOrder + 10),
+      })
       setSelected(detail)
-      setNotice(`${item.label} inserted on edge`)
-      await refreshList()
-    } catch {
-      addNodeFromPalette(item, position)
-    }
+      canvasRef.current?.syncFromDetail(detail)
+    }, `${item.label} inserted on edge`)
   }
 
   const handleNavigatorAction = (workflow: Workflow, action: NavigatorAction) => {
@@ -273,12 +345,16 @@ export const WorkflowStudioV2 = ({
     }
 
     if (action === 'rename') {
-      const nextName = window.prompt('Rename workflow', workflow.name)
-      if (!nextName?.trim()) return
+      setRenameTarget(workflow)
+      setRenameValue(workflow.name)
+      return
+    }
+
+    if (action === 'clone-legacy') {
       void withBusy(async () => {
-        const detail = await renameWorkflow(workflow.id, nextName.trim())
-        if (selectedId === workflow.id) setSelected(detail)
-      }, 'Workflow renamed')
+        const detail = await cloneLegacyWorkflow(workflow.id)
+        setSelected(detail)
+      }, 'Legacy workflow cloned to V2')
       return
     }
 
@@ -346,12 +422,30 @@ export const WorkflowStudioV2 = ({
         setError('Only custom drafts can be deleted.')
         return
       }
-      if (!window.confirm(`Delete draft "${workflow.name}"?`)) return
-      void withBusy(async () => {
-        await deleteWorkflowDraft(workflow.id)
-        if (selectedId === workflow.id) setSelected(null)
-      }, 'Draft deleted')
+      setDeleteTarget(workflow)
     }
+  }
+
+  const submitCreateWorkflow = (payload: WorkflowCreatePayload) => {
+    void withBusy(async () => {
+      const detail = await createWorkflowDraft({
+        name: payload.name,
+        description: payload.description,
+        channel: payload.channel,
+        workflow_type: payload.workflow_type,
+        trigger_type: payload.trigger_type,
+        operational_mode: payload.operational_mode,
+        market_scope: payload.market_scope,
+        state_scope: payload.state_scope,
+        language_scope: payload.language_scope,
+        asset_scope: payload.asset_scope,
+        start_from: payload.start_from,
+        status: 'draft',
+        live_send_enabled: false,
+      })
+      setCreateOpen(false)
+      setSelected(detail)
+    }, 'Draft workflow created')
   }
 
   const runDryRun = () => {
@@ -378,9 +472,9 @@ export const WorkflowStudioV2 = ({
         busy={busy}
         validationCount={validationCount}
         consoleOpen={consoleOpen}
-        liveMode={liveMode}
+        liveMode={liveMode !== 'off'}
         onToggleConsole={() => setConsoleOpen((open) => !open)}
-        onToggleLiveMode={() => setLiveMode((value) => !value)}
+        onToggleLiveMode={() => setLiveMode((value) => (value === 'off' ? 'live' : value === 'live' ? 'demo' : 'off'))}
         onClone={() => withBusy(async () => {
           const detail = await cloneWorkflowDraft(requireWorkflow())
           setSelected(detail)
@@ -405,7 +499,35 @@ export const WorkflowStudioV2 = ({
         }, 'Workflow live mode armed')}
       />
 
-      {(notice || error) && (
+      {!apiAvailable && apiError ? (
+        <WorkflowApiErrorPanel
+          message={apiError.message}
+          traceId={apiError.traceId}
+          onRetry={() => {
+            setLoading(true)
+            void refreshList()
+              .then((rows) => {
+                const first = rows[0]
+                if (first) return loadSelected(first.id)
+              })
+              .finally(() => setLoading(false))
+          }}
+          onOfflineDemo={() => {
+            setOfflineDemo(true)
+            setApiError(null)
+            setError('')
+          }}
+        />
+      ) : null}
+
+      {modeBanner ? (
+        <div className={cls('wfs2__banner', studioMode !== 'canonical' && 'is-warning')}>
+          <Icon name="alert" />
+          <span>{modeBanner}</span>
+        </div>
+      ) : null}
+
+      {(notice || (error && apiAvailable)) && (
         <div className={cls('wfs2__banner', error && 'is-error')}>
           <Icon name={error ? 'alert' : 'check'} />
           <span>{error || notice}</span>
@@ -448,14 +570,15 @@ export const WorkflowStudioV2 = ({
                   loading={loading}
                   busy={busy}
                   onSelect={(workflowId) => void loadSelected(workflowId)}
-                  onCreate={() => withBusy(async () => {
-                    const detail = await createWorkflowDraft(defaultCreatePayload)
-                    setSelected(detail)
-                  }, 'Draft workflow created')}
+                  onCreate={() => setCreateOpen(true)}
                   onAction={handleNavigatorAction}
                 />
               ) : (
-                <WorkflowNodePaletteV2 onAddNode={addNodeFromPalette} disabled={busy || !selected} />
+                <WorkflowNodePaletteV2
+                  onAddNode={addNodeFromPalette}
+                  disabled={busy || !selected || !graphMutable}
+                  offlineDemo={offlineDemo}
+                />
               )}
             </div>
           </aside>
@@ -490,19 +613,19 @@ export const WorkflowStudioV2 = ({
                 placement === 'add-branch' ? { x: target.x, y: target.y + 160 } :
                 placement === 'replace' ? { x: target.x, y: target.y } :
                 { x: target.x + 120, y: target.y }
-              addNodeFromPalette(item, offset)
+              applyGraphPlacement(item, target, placement, offset)
             }}
+            readOnly={!graphMutable}
+            offlineDemo={offlineDemo}
             onDropOnEdge={(item, connection, position) => {
               void insertOnEdge(item, connection, position)
             }}
-            onCreateDraft={() => withBusy(async () => {
-              const detail = await createWorkflowDraft(defaultCreatePayload)
-              setSelected(detail)
-            }, 'Draft workflow created')}
+            onCreateDraft={() => setCreateOpen(true)}
             liveOverlay={(
               <WorkflowLiveModeV2
                 workflowId={selectedId}
-                enabled={liveMode}
+                enabled={liveMode === 'live'}
+                demoMode={liveMode === 'demo'}
                 nodes={canvasNodes}
               />
             )}
@@ -524,6 +647,8 @@ export const WorkflowStudioV2 = ({
               detail={selected}
               dryRunStep={selectedDryRunStep}
               dryRunResult={dryRunResult}
+              readOnly={!graphMutable}
+              studioMode={studioMode}
             />
           </div>
         )}
@@ -544,8 +669,76 @@ export const WorkflowStudioV2 = ({
         workflowId={selectedId}
         open={consoleOpen}
         onClose={() => setConsoleOpen(false)}
-        fallbackEvents={fallbackConsoleEvents}
+        dryRunEvents={fallbackConsoleEvents}
+        apiAvailable={apiAvailable}
       />
+
+      <WorkflowCreateModal
+        open={createOpen}
+        busy={busy}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={submitCreateWorkflow}
+      />
+
+      <WorkflowGlassModal
+        open={Boolean(renameTarget)}
+        title="Rename workflow"
+        onClose={() => setRenameTarget(null)}
+        footer={(
+          <>
+            <button type="button" className="wfs2__btn is-ghost" onClick={() => setRenameTarget(null)}>Cancel</button>
+            <button
+              type="button"
+              className="wfs2__btn is-primary"
+              disabled={!renameValue.trim() || busy}
+              onClick={() => {
+                if (!renameTarget) return
+                void withBusy(async () => {
+                  const detail = await renameWorkflow(renameTarget.id, renameValue.trim())
+                  if (selectedId === renameTarget.id) setSelected(detail)
+                  setRenameTarget(null)
+                }, 'Workflow renamed')
+              }}
+            >
+              Save
+            </button>
+          </>
+        )}
+      >
+        <label className="wfs2-modal__field">
+          <span>Workflow name</span>
+          <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+        </label>
+      </WorkflowGlassModal>
+
+      <WorkflowGlassModal
+        open={Boolean(deleteTarget)}
+        title="Delete draft"
+        subtitle="Only custom drafts without run history can be deleted."
+        onClose={() => setDeleteTarget(null)}
+        footer={(
+          <>
+            <button type="button" className="wfs2__btn is-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button
+              type="button"
+              className="wfs2__btn is-danger"
+              disabled={busy}
+              onClick={() => {
+                if (!deleteTarget) return
+                void withBusy(async () => {
+                  await deleteWorkflowDraft(deleteTarget.id)
+                  if (selectedId === deleteTarget.id) setSelected(null)
+                  setDeleteTarget(null)
+                }, 'Draft deleted')
+              }}
+            >
+              Delete draft
+            </button>
+          </>
+        )}
+      >
+        <p>Delete draft &quot;{deleteTarget?.name}&quot;? This cannot be undone.</p>
+      </WorkflowGlassModal>
 
       {prefs.focusMode && (
         <button

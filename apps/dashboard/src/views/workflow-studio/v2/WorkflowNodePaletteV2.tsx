@@ -55,13 +55,16 @@ function fallbackCategories(): PaletteCategory[] {
 interface WorkflowNodePaletteV2Props {
   onAddNode: (item: WorkflowNodeLibraryItem) => void
   disabled?: boolean
+  offlineDemo?: boolean
 }
 
-export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePaletteV2Props) => {
+export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false }: WorkflowNodePaletteV2Props) => {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
-  const [categories, setCategories] = useState<PaletteCategory[]>(fallbackCategories)
-  const [source, setSource] = useState<'api' | 'fallback'>('fallback')
+  const [categories, setCategories] = useState<PaletteCategory[]>([])
+  const [source, setSource] = useState<'registry' | 'offline_demo' | 'unavailable'>('unavailable')
+  const [counts, setCounts] = useState({ total: 0, operator: 0, internal: 0 })
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -69,25 +72,40 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePalet
       .then((response) => {
         if (cancelled) return
         const grouped = response.categories
-        if (!grouped || !Object.keys(grouped).length) return
+        if (!grouped || !Object.keys(grouped).length) {
+          setLoadError('Node registry returned empty.')
+          return
+        }
 
         const next = Object.entries(grouped).map(([title, nodes]) => ({
           title: titleCase(title),
           items: nodes.map(mapApiNode),
         }))
         setCategories(next)
-        setSource('api')
+        setCounts(response.counts ?? {
+          total: response.nodes?.length ?? 0,
+          operator: response.nodes?.length ?? 0,
+          internal: 0,
+        })
+        setSource('registry')
+        setLoadError('')
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch((err) => {
+        if (cancelled) return
+        if (offlineDemo) {
           setCategories(fallbackCategories())
-          setSource('fallback')
+          setSource('offline_demo')
+          setLoadError('')
+          return
         }
+        setCategories([])
+        setSource('unavailable')
+        setLoadError(err instanceof Error ? err.message : 'Node registry unavailable')
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [offlineDemo])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -124,11 +142,19 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePalet
           <span className="wfs2-palette__kicker">Node Library</span>
           <strong>Drag or click to add</strong>
         </div>
-        <span className="wfs2-palette__count">{totalCount}</span>
+        <span className="wfs2-palette__count">
+          {source === 'registry'
+            ? `${counts.operator || totalCount} operator · ${counts.internal} internal`
+            : totalCount}
+        </span>
       </header>
 
       <div className="wfs2-palette__source">
-        {source === 'api' ? 'Registry API' : 'Embedded fallback'}
+        {source === 'registry'
+          ? `Production registry (${counts.total} total)`
+          : source === 'offline_demo'
+            ? 'Offline Demo catalog'
+            : loadError || 'Registry unavailable'}
       </div>
 
       <div className="wfs2-palette__search-wrap">

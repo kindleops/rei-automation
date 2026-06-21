@@ -1,5 +1,22 @@
+import crypto from 'node:crypto'
+
 import { NextResponse } from 'next/server.js'
 import { requireOpsDashboardAuth } from '@/lib/security/dashboard-auth.js'
+
+export function newTraceId() {
+  return crypto.randomUUID()
+}
+
+export function errorPayload(request, error, message, status = 500, extra = {}) {
+  return {
+    ok: false,
+    error,
+    message,
+    trace_id: newTraceId(),
+    path: request?.url ? new URL(request.url).pathname : null,
+    ...extra,
+  }
+}
 
 const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',

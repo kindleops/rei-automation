@@ -10,6 +10,19 @@ export interface WorkflowRunStats {
   failed_today?: number
 }
 
+export type WorkflowStudioMode = 'canonical' | 'system' | 'legacy' | 'offline_demo' | 'archived'
+
+export interface WorkflowEdge {
+  id: string
+  workflow_definition_id?: string
+  source_node_id: string
+  target_node_id: string
+  edge_type?: string
+  condition_key?: string | null
+  label?: string | null
+  config?: Record<string, unknown>
+}
+
 export interface Workflow {
   id: string
   workflow_key: string
@@ -20,6 +33,8 @@ export interface Workflow {
   status: WorkflowStatus
   live_send_enabled: boolean
   is_v2?: boolean
+  is_legacy?: boolean
+  is_locked?: boolean
   is_system_template?: boolean
   version?: string | number | null
   operational_mode?: WorkflowOperationalMode
@@ -55,10 +70,18 @@ export interface WorkflowNodeTypeSchema {
   safety_schema?: Record<string, unknown>
 }
 
+export interface WorkflowNodeRegistryCounts {
+  total: number
+  operator: number
+  internal: number
+}
+
 export interface WorkflowNodeTypesResponse {
   ok: boolean
   nodes?: WorkflowNodeTypeSchema[]
   categories?: Record<string, WorkflowNodeTypeSchema[]>
+  counts?: WorkflowNodeRegistryCounts
+  source?: string
 }
 
 export interface WorkflowConsoleEvent {
@@ -242,13 +265,20 @@ export interface WorkflowDetail {
   ok: boolean
   workflow: Workflow
   steps: WorkflowStep[]
+  edges?: WorkflowEdge[]
+  nodes?: Array<Record<string, unknown>>
   template_sets: WorkflowTemplateSet[]
   sender_pools: WorkflowSenderPool[]
   runs?: Array<Record<string, unknown>>
+  recent_runs?: Array<Record<string, unknown>>
   audit?: Array<Record<string, unknown>>
   validation?: { ok: boolean; errors: string[]; warnings: string[] }
   translation_languages?: Array<{ code: string; label: string }>
   personalization_tokens?: string[]
+  canonical_model?: string
+  is_legacy?: boolean
+  operational_mode?: WorkflowOperationalMode
+  analytics_summary?: Record<string, unknown>
 }
 
 export interface WorkflowModel {
