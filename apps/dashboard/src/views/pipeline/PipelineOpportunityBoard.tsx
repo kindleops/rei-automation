@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import type { PipelineGroupByMode, PipelineMetrics, PipelineOpportunity, PipelineSavedView } from '../../domain/pipeline/pipeline-opportunity.types'
 import {
+  displayAos,
+  displayCurrency,
   groupDefinitionsForMode,
   groupKeyForOpportunity,
   isFollowUpDue,
+  isGroupByMutable,
+  isGroupByReadOnly,
   portfolioLabel,
-  stageAgeDays,
+  resolvePipelineStage,
   stageLabel,
-  type StageDefinition,
-  displayCurrency,
+  stageAgeDays,
 } from '../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../shared/formatters'
 import { PipelineViewSelector } from './components/PipelineViewSelector'
@@ -17,6 +20,17 @@ import { PipelineCommandPanel } from './components/PipelineCommandPanel'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
+
+const DRAG_THRESHOLD_PX = 6
+
+const SELLER_STATUS_TO_OPPORTUNITY: Record<string, string> = {
+  suppressed: 'suppressed',
+  wrong_number: 'suppressed',
+  failed: 'dead',
+  auto_blocked: 'paused',
+  awaiting_response: 'waiting',
+  needs_follow_up: 'waiting',
+}
 
 type SortMode = 'priority' | 'recent' | 'value' | 'stage_age'
 
@@ -37,7 +51,7 @@ function buildCard(opp: PipelineOpportunity): OppCard {
     sellerName: opp.seller_display_name || 'Unknown Seller',
     address: portfolioLabel(opp),
     market: opp.market || 'Market Unknown',
-    hot: opp.temperature === 'hot' || (opp.aos != null && opp.aos >= 75),
+    hot: opp.temperature === 'hot' || (opp.aos != null && opp.aos >= 75 && !!opp.acquisition_engine_run_id),
     unread: opp.conversation_state === 'needs_reply' || opp.conversation_state === 'seller_replied',
     followUpDue: isFollowUpDue(opp),
     suppressed: opp.opportunity_status === 'suppressed' || opp.opportunity_status === 'dead',
@@ -45,7 +59,7 @@ function buildCard(opp: PipelineOpportunity): OppCard {
 }
 
 interface StageModel {
-  def: StageDefinition
+  def: { id: string; label: string; tone: string }
   cards: OppCard[]
   count: number
 }
@@ -55,15 +69,20 @@ interface PipelineOpportunityBoardProps {
   metrics: PipelineMetrics | null
   savedViews?: PipelineSavedView[]
   selectedId: string | null
+  selectedOpportunity?: PipelineOpportunity | null
+  detailLoading?: boolean
   layoutMode: ViewLayoutMode
   groupBy: PipelineGroupByMode
   loading?: boolean
+  refreshing?: boolean
   onGroupByChange: (mode: PipelineGroupByMode) => void
   onSelect: (id: string) => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
   onMoveStage: (id: string, stageId: string, reason?: string) => Promise<void>
+  onMoveStatus: (id: string, statusId: string, reason?: string) => Promise<void>
+  onMoveTemperature: (id: string, temperatureId: string, reason?: string) => Promise<void>
   onApplySavedView?: (view: PipelineSavedView) => void
 }
 
@@ -72,15 +91,20 @@ export function PipelineOpportunityBoard({
   metrics,
   savedViews = [],
   selectedId,
+  selectedOpportunity,
+  detailLoading,
   layoutMode,
   groupBy,
   loading,
+  refreshing,
   onGroupByChange,
   onSelect,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
   onMoveStage,
+  onMoveStatus,
+  onMoveTemperature,
   onApplySavedView,
 }: PipelineOpportunityBoardProps) {
   const [query, setQuery] = useState('')
@@ -95,8 +119,11 @@ export function PipelineOpportunityBoard({
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [sortOpen, setSortOpen] = useState(false)
+  const dragStateRef = useRef<{ id: string; startX: number; startY: number; dragging: boolean } | null>(null)
 
   const allCards = useMemo(() => opportunities.map(buildCard), [opportunities])
+  const mutableView = isGroupByMutable(groupBy)
+  const readOnlyView = isGroupByReadOnly(groupBy)
 
   const visibleCards = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -136,6 +163,8 @@ export function PipelineOpportunityBoard({
     [visibleCards, selectedId],
   )
 
+  const panelOpportunity = selectedOpportunity ?? selectedCard?.opp ?? null
+
   useEffect(() => {
     if (stageModels.some((s) => s.def.id === activeStageId)) return
     setActiveStageId(stageModels[0]?.def.id ?? '')
@@ -146,37 +175,67 @@ export function PipelineOpportunityBoard({
     const cardId = e.dataTransfer.getData('text/plain')
     setDragCardId(null)
     setDragOverStage(null)
-    if (!cardId || groupBy !== 'acquisition_stage') return
+    if (!cardId || !mutableView) return
 
     const card = visibleCards.find((c) => c.opp.id === cardId)
-    if (!card || card.opp.acquisition_stage === stageId) return
+    if (!card) return
 
-    let reason: string | undefined
-    const fromIdx = groupDefinitions.findIndex((d) => d.id === card.opp.acquisition_stage)
-    const toIdx = groupDefinitions.findIndex((d) => d.id === stageId)
-    if (toIdx < fromIdx || Math.abs(toIdx - fromIdx) > 1) {
-      reason = window.prompt('Reason for stage change (required for skip/backward moves):') || undefined
-      if (!reason) {
-        setTransitionError('Stage change cancelled — reason required.')
-        return
-      }
-    }
+    const currentKey = groupKeyForOpportunity(card.opp, groupBy)
+    if (currentKey === stageId) return
 
     try {
       setTransitionError(null)
-      await onMoveStage(cardId, stageId, reason)
+      if (groupBy === 'stage') {
+        await onMoveStage(cardId, stageId)
+      } else if (groupBy === 'status') {
+        const opportunityStatus = SELLER_STATUS_TO_OPPORTUNITY[stageId] ?? 'active'
+        await onMoveStatus(cardId, opportunityStatus)
+      } else if (groupBy === 'temperature') {
+        await onMoveTemperature(cardId, stageId)
+      }
     } catch (err) {
-      setTransitionError(err instanceof Error ? err.message : 'Stage transition failed')
+      setTransitionError(err instanceof Error ? err.message : 'Update failed')
     }
-  }, [groupBy, groupDefinitions, onMoveStage, visibleCards])
+  }, [groupBy, mutableView, onMoveStage, onMoveStatus, onMoveTemperature, visibleCards])
+
+  const beginPointerDrag = useCallback((e: React.PointerEvent, cardId: string) => {
+    if (!mutableView) return
+    dragStateRef.current = { id: cardId, startX: e.clientX, startY: e.clientY, dragging: false }
+    ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+  }, [mutableView])
+
+  const movePointerDrag = useCallback((e: React.PointerEvent) => {
+    const state = dragStateRef.current
+    if (!state || state.dragging) return
+    const dx = Math.abs(e.clientX - state.startX)
+    const dy = Math.abs(e.clientY - state.startY)
+    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
+      state.dragging = true
+      setDragCardId(state.id)
+    }
+  }, [])
+
+  const endPointerDrag = useCallback(() => {
+    dragStateRef.current = null
+    setDragCardId(null)
+    setDragOverStage(null)
+  }, [])
+
+  const handleCardClick = useCallback((cardId: string) => {
+    if (dragStateRef.current?.dragging) return
+    onSelect(cardId)
+    setShowDetail(true)
+    setPanelCollapsed(false)
+  }, [onSelect])
 
   const kpi = metrics ?? {
     active_opportunities: visibleCards.filter((c) => !c.suppressed).length,
     new_replies: visibleCards.filter((c) => c.unread).length,
-    negotiating: 0,
-    contract_sent: 0,
-    closing: 0,
+    offer_ready: 0,
     follow_ups_due: visibleCards.filter((c) => c.followUpDue).length,
+    negotiating: 0,
+    under_contract: 0,
+    blocked: 0,
     intent_positive_pct: 0,
     average_stage_age_days: 0,
   }
@@ -186,6 +245,70 @@ export function PipelineOpportunityBoard({
   const isOps = layoutMode === 'expanded'
   const isFull = layoutMode === 'full'
   const activeStage = stageModels.find((s) => s.def.id === activeStageId) ?? stageModels[0]
+
+  const renderCard = (card: OppCard, variant: 'compact' | 'focused' | 'kanban') => (
+    <article
+      key={card.opp.id}
+      className={cls(
+        'plv-card',
+        variant === 'compact' && 'plv-card--compact',
+        variant === 'focused' && 'plv-card--focused',
+        variant === 'kanban' && 'plv-card--kanban',
+        card.opp.id === selectedId && 'is-selected',
+        dragCardId === card.opp.id && 'is-dragging',
+      )}
+      onClick={() => handleCardClick(card.opp.id)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCardClick(card.opp.id) } }}
+      role="button"
+      tabIndex={0}
+      draggable={false}
+    >
+      {mutableView && (
+        <button
+          type="button"
+          className="plv-card__drag-handle"
+          aria-label="Drag to move"
+          draggable
+          onClick={(e) => e.stopPropagation()}
+          onDragStart={(e) => {
+            setDragCardId(card.opp.id)
+            e.dataTransfer.setData('text/plain', card.opp.id)
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onDragEnd={endPointerDrag}
+          onPointerDown={(e) => beginPointerDrag(e, card.opp.id)}
+          onPointerMove={movePointerDrag}
+          onPointerUp={endPointerDrag}
+        >
+          ⠿
+        </button>
+      )}
+      <div className="plv-card__accent" />
+      <div className="plv-card__body">
+        <div className="plv-card__seller">{card.sellerName}</div>
+        <div className="plv-card__address">{card.address}</div>
+        <div className="plv-card__chips-row">
+          {card.hot && <span className="plv-chip is-hot">Hot</span>}
+          {card.unread && <span className="plv-chip is-unread">Reply</span>}
+          {card.followUpDue && <span className="plv-chip is-due">Due</span>}
+          {card.opp.blocker && <span className="plv-chip is-suppressed">Block</span>}
+        </div>
+        <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No recent context.'}</div>
+        {variant === 'kanban' && (
+          <div className="plv-card__meta-row">
+            <span className="plv-card__meta-label">AOS</span>
+            <span className="plv-card__meta-val">{displayAos(card.opp)}</span>
+            <span className="plv-card__meta-label">Stage</span>
+            <span className="plv-card__meta-val">{stageLabel(resolvePipelineStage(card.opp))}</span>
+          </div>
+        )}
+        <div className="plv-card__footer">
+          <span className="plv-card__age">{card.opp.last_activity_at ? formatRelativeTime(card.opp.last_activity_at) : '—'}</span>
+          <span className="plv-metric is-green">{displayCurrency(card.opp.asking_price, { engineRunId: card.opp.acquisition_engine_run_id })}</span>
+        </div>
+      </div>
+    </article>
+  )
 
   if (isCompact) {
     return (
@@ -197,19 +320,13 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--sm">
           {stageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
               {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
             </button>
           ))}
         </div>
         <div className="plv-card-rail">
-          {(activeStage?.cards ?? []).map((card) => (
-            <article key={card.opp.id} className={cls('plv-card plv-card--compact', card.opp.id === selectedId && 'is-selected')} onClick={() => onSelect(card.opp.id)} role="button" tabIndex={0}>
-              <div className="plv-card__seller">{card.sellerName}</div>
-              <div className="plv-card__address">{card.address}</div>
-              <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No context'}</div>
-            </article>
-          ))}
+          {(activeStage?.cards ?? []).map((card) => renderCard(card, 'compact'))}
         </div>
       </div>
     )
@@ -225,24 +342,19 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--md">
           {stageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
               {s.def.label} {s.count > 0 && <span className="plv-stage-chip__count">{s.count}</span>}
             </button>
           ))}
         </div>
         <div className="plv-focused-list">
-          {(activeStage?.cards ?? []).map((card) => (
-            <article key={card.opp.id} className={cls('plv-card plv-card--focused', card.opp.id === selectedId && 'is-selected')} onClick={() => onSelect(card.opp.id)} role="button" tabIndex={0}>
-              <div className="plv-card__seller">{card.sellerName}</div>
-              <div className="plv-card__address">{card.address}</div>
-              <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No context'}</div>
-            </article>
-          ))}
+          {(activeStage?.cards ?? []).map((card) => renderCard(card, 'focused'))}
         </div>
-        {selectedCard && (
+        {panelOpportunity && (
           <div className="plv-drawer">
             <PipelineCommandPanel
-              opportunity={selectedCard.opp}
+              opportunity={panelOpportunity}
+              loading={detailLoading}
               onOpenCommandView={onOpenCommandView}
               onOpenConversation={onOpenCommandView}
               onOpenDealIntelligence={onOpenDealIntelligence}
@@ -256,9 +368,10 @@ export function PipelineOpportunityBoard({
 
   return (
     <div className={cls('plv', isOps ? 'plv--ops' : isFull ? 'plv--full' : 'plv--focused')}>
-      <KpiStrip metrics={kpi} compact={isOps || layoutMode === 'medium'} />
+      <KpiStrip metrics={kpi} compact={isOps} />
       {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
       {loading && <div className="plv-loading">Loading opportunities…</div>}
+      {refreshing && !loading && <div className="plv-refreshing">Refreshing…</div>}
 
       <div className="plv-topbar">
         <div className="plv-filters">
@@ -273,7 +386,7 @@ export function PipelineOpportunityBoard({
             />
           </div>
           <div className="plv-filters__controls">
-            <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact={layoutMode === 'compact'} />
+            <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact={isCompact} />
             <div className="plv-sort-selector">
               <button type="button" className="plv-filter-chip nx-glass-menu" onClick={() => setSortOpen((v) => !v)}>
                 Sort: {sortMode.replace('_', ' ')}
@@ -311,57 +424,38 @@ export function PipelineOpportunityBoard({
         )}
       </div>
 
+      {readOnlyView && (
+        <div className="plv-readonly-banner" role="status">
+          Read-only view — drag is disabled for {groupBy.replace(/_/g, ' ')} grouping
+        </div>
+      )}
+
       <div className="plv-workspace">
         <div className="plv-board">
           {stageModels.map((stage) => (
             <div
               key={stage.def.id}
-              className={cls('plv-lane', `is-${stage.def.tone}`, dragOverStage === stage.def.id && 'is-drag-over')}
-              onDragOver={(e) => { e.preventDefault(); setDragOverStage(stage.def.id) }}
+              className={cls('plv-lane', `is-${stage.def.tone}`, readOnlyView && 'is-readonly', dragOverStage === stage.def.id && 'is-drag-over')}
+              onDragOver={(e) => {
+                if (!mutableView) return
+                e.preventDefault()
+                setDragOverStage(stage.def.id)
+              }}
               onDrop={(e) => void handleDrop(e, stage.def.id)}
             >
               <header className="plv-lane__header">
                 <div className="plv-lane__title-row">
                   <span className="plv-lane__name">{stage.def.label}</span>
-                  <span className="plv-lane__count">{stage.count}</span>
+                  <span className={cls('plv-lane__count', stage.count > 0 && `is-${stage.def.tone}`)}>{stage.count}</span>
                 </div>
+                {readOnlyView && <span className="plv-lane__readonly-badge">Read-only</span>}
               </header>
               <div className="plv-lane__body">
-                {stage.cards.map((card) => (
-                  <article
-                    key={card.opp.id}
-                    className={cls('plv-card plv-card--kanban', card.opp.id === selectedId && 'is-selected', dragCardId === card.opp.id && 'is-dragging')}
-                    draggable={groupBy === 'acquisition_stage'}
-                    onDragStart={(e) => { setDragCardId(card.opp.id); e.dataTransfer.setData('text/plain', card.opp.id) }}
-                    onDragEnd={() => { setDragCardId(null); setDragOverStage(null) }}
-                    onClick={() => onSelect(card.opp.id)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="plv-card__accent" />
-                    <div className="plv-card__body">
-                      <div className="plv-card__seller">{card.sellerName}</div>
-                      <div className="plv-card__address">{card.address}</div>
-                      <div className="plv-card__chips-row">
-                        {card.hot && <span className="plv-chip is-hot">Hot</span>}
-                        {card.unread && <span className="plv-chip is-unread">Reply</span>}
-                        {card.followUpDue && <span className="plv-chip is-due">Due</span>}
-                        {card.opp.blocker && <span className="plv-chip is-suppressed">Block</span>}
-                      </div>
-                      <div className="plv-card__snippet">{card.opp.latest_message_preview || 'No recent context.'}</div>
-                      <div className="plv-card__meta-row">
-                        <span className="plv-card__meta-label">AOS</span>
-                        <span className="plv-card__meta-val">{card.opp.aos != null ? Math.round(card.opp.aos) : '—'}</span>
-                        <span className="plv-card__meta-label">Stage</span>
-                        <span className="plv-card__meta-val">{stageLabel(card.opp.acquisition_stage)}</span>
-                      </div>
-                      <div className="plv-card__footer">
-                        <span className="plv-card__age">{card.opp.last_activity_at ? formatRelativeTime(card.opp.last_activity_at) : '—'}</span>
-                        <span className="plv-metric is-green">{displayCurrency(card.opp.asking_price)}</span>
-                      </div>
-                    </div>
-                  </article>
-                ))}
+                {stage.cards.length > 0 ? (
+                  stage.cards.map((card) => renderCard(card, 'kanban'))
+                ) : (
+                  <div className="plv-empty-lane"><span className="plv-empty-lane__icon">·</span><span>No deals in {stage.def.label}</span></div>
+                )}
               </div>
             </div>
           ))}
@@ -369,9 +463,10 @@ export function PipelineOpportunityBoard({
 
         {(isFull || (isOps && showDetail)) && (
           <aside className="plv-detail-panel">
-            {selectedCard ? (
+            {panelOpportunity ? (
               <PipelineCommandPanel
-                opportunity={selectedCard.opp}
+                opportunity={panelOpportunity}
+                loading={detailLoading}
                 collapsed={panelCollapsed}
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
                 onOpenCommandView={onOpenCommandView}
@@ -383,7 +478,7 @@ export function PipelineOpportunityBoard({
               <div className="plv-detail-empty">
                 <span className="plv-detail-empty__icon">◎</span>
                 <strong>Select an opportunity</strong>
-                <p>Overview, intelligence, workflow, and activity appear here.</p>
+                <p>Overview, conversation, property, intelligence, workflow, and activity appear here.</p>
               </div>
             )}
           </aside>

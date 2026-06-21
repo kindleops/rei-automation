@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PipelineGroupByMode } from '../../../domain/pipeline/pipeline-opportunity.types'
-import { PIPELINE_VIEW_OPTIONS, savePipelineGroupBy } from '../../../domain/pipeline/pipeline-display-helpers'
+import {
+  PIPELINE_VIEW_OPTIONS,
+  savePipelineGroupBy,
+  type PipelineViewOption,
+} from '../../../domain/pipeline/pipeline-display-helpers'
 
 interface PipelineViewSelectorProps {
   value: PipelineGroupByMode
   onChange: (value: PipelineGroupByMode) => void
   compact?: boolean
+}
+
+const SECTION_LABELS: Record<PipelineViewOption['section'], string> = {
+  core: 'Core Pipeline',
+  property: 'Property',
+  operations: 'Operations',
 }
 
 export function PipelineViewSelector({ value, onChange, compact }: PipelineViewSelectorProps) {
@@ -27,6 +37,8 @@ export function PipelineViewSelector({ value, onChange, compact }: PipelineViewS
     setOpen(false)
   }
 
+  const sections: PipelineViewOption['section'][] = ['core', 'property', 'operations']
+
   return (
     <div className="plv-view-selector" ref={rootRef}>
       <button
@@ -38,23 +50,35 @@ export function PipelineViewSelector({ value, onChange, compact }: PipelineViewS
       >
         <span className="plv-view-selector__label">{compact ? 'View' : 'Group By'}</span>
         <strong>{selected.label}</strong>
+        {selected.readOnly && <span className="plv-view-selector__readonly">Read-only</span>}
         <span className="plv-view-selector__caret">▾</span>
       </button>
       {open && (
         <div className="plv-view-selector__menu nx-glass-menu" role="listbox">
-          {PIPELINE_VIEW_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className={`plv-view-selector__option${option.value === value ? ' is-active' : ''}`}
-              onClick={() => pick(option.value)}
-            >
-              <span>{option.label}</span>
-              {option.hint && <small>{option.hint}</small>}
-            </button>
-          ))}
+          {sections.map((section) => {
+            const options = PIPELINE_VIEW_OPTIONS.filter((o) => o.section === section)
+            return (
+              <div key={section} className="plv-view-selector__section">
+                <span className="plv-view-selector__section-label">{SECTION_LABELS[section]}</span>
+                {options.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === value}
+                    className={`plv-view-selector__option${option.value === value ? ' is-active' : ''}`}
+                    onClick={() => pick(option.value)}
+                  >
+                    <span className="plv-view-selector__option-row">
+                      <span>{option.label}</span>
+                      {option.readOnly && <em className="plv-view-selector__readonly">Read-only</em>}
+                    </span>
+                    {option.hint && <small>{option.hint}</small>}
+                  </button>
+                ))}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

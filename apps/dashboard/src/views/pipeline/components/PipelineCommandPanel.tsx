@@ -1,12 +1,22 @@
 import { useState } from 'react'
 import type { PipelineOpportunity } from '../../../domain/pipeline/pipeline-opportunity.types'
-import { displayCurrency, stageLabel } from '../../../domain/pipeline/pipeline-display-helpers'
+import {
+  displayAos,
+  displayCurrency,
+  resolvePipelineStage,
+  resolvePropertyState,
+  resolvePropertyType,
+  resolveSellerStatus,
+  resolveTemperature,
+  stageLabel,
+} from '../../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../../shared/formatters'
 
-type PanelTab = 'overview' | 'conversation' | 'intelligence' | 'underwriting' | 'workflow' | 'activity'
+type PanelTab = 'overview' | 'conversation' | 'property' | 'intelligence' | 'workflow' | 'activity'
 
 interface PipelineCommandPanelProps {
   opportunity: PipelineOpportunity
+  loading?: boolean
   collapsed?: boolean
   onToggleCollapse?: () => void
   onOpenCommandView: (threadId?: string | null) => void
@@ -19,8 +29,8 @@ interface PipelineCommandPanelProps {
 const TABS: Array<{ id: PanelTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'conversation', label: 'Conversation' },
+  { id: 'property', label: 'Property' },
   { id: 'intelligence', label: 'Intelligence' },
-  { id: 'underwriting', label: 'Underwriting' },
   { id: 'workflow', label: 'Workflow' },
   { id: 'activity', label: 'Activity' },
 ]
@@ -45,6 +55,7 @@ function Metric({ label, value, tone = 'neutral' }: { label: string; value: stri
 
 export function PipelineCommandPanel({
   opportunity: opp,
+  loading,
   collapsed,
   onToggleCollapse,
   onOpenCommandView,
@@ -55,6 +66,7 @@ export function PipelineCommandPanel({
 }: PipelineCommandPanelProps) {
   const [tab, setTab] = useState<PanelTab>('overview')
   const threadId = opp.primary_thread_key
+  const engineRunId = opp.acquisition_engine_run_id
 
   if (collapsed) {
     return (
@@ -80,6 +92,8 @@ export function PipelineCommandPanel({
         )}
       </header>
 
+      {loading && <div className="plv-command-panel__loading">Loading opportunity detail…</div>}
+
       <nav className="plv-command-panel__tabs">
         {TABS.map((t) => (
           <button
@@ -96,10 +110,9 @@ export function PipelineCommandPanel({
       <div className="plv-command-panel__body">
         {tab === 'overview' && (
           <>
-            <Row label="Stage" value={stageLabel(opp.acquisition_stage)} />
-            <Row label="Status" value={opp.opportunity_status.replace(/_/g, ' ')} />
-            <Row label="Priority" value={opp.priority} />
-            <Row label="Assignee" value={opp.assigned_operator || 'Unassigned'} />
+            <Row label="Stage" value={stageLabel(resolvePipelineStage(opp))} />
+            <Row label="Status" value={stageLabel(resolveSellerStatus(opp))} />
+            <Row label="Temperature" value={resolveTemperature(opp)} />
             <Row label="Market" value={opp.market || 'Unknown'} />
             <Row label="Next Action" value={opp.next_action || 'Review'} />
             <Row label="Last Contact" value={opp.last_contact_at ? formatRelativeTime(opp.last_contact_at) : 'No contact'} />
@@ -110,38 +123,42 @@ export function PipelineCommandPanel({
         {tab === 'conversation' && (
           <>
             <Row label="Intent" value={opp.latest_intent || 'Unknown'} />
-            <Row label="Reply State" value={opp.conversation_state.replace(/_/g, ' ')} />
+            <Row label="Reply State" value={(opp.conversation_state || 'unknown').replace(/_/g, ' ')} />
             <p className="plv-deal-detail__text">{opp.latest_message_preview || 'No recent message.'}</p>
             <button type="button" className="plv-action-btn" onClick={() => onOpenConversation(threadId)}>Open Conversation</button>
           </>
         )}
 
+        {tab === 'property' && (
+          <>
+            <Row label="Address" value={opp.property_address_full || 'Unknown'} />
+            <Row label="Property Type" value={resolvePropertyType(opp)} />
+            <Row label="State" value={resolvePropertyState(opp)} />
+            <Row label="Market" value={opp.market || 'Unknown'} />
+            <Row label="Portfolio" value={opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} properties` : 'Single property'} />
+            <Row label="Est. Value" value={displayCurrency(opp.estimated_value, { engineRunId })} />
+            <Row label="ARV" value={displayCurrency(opp.arv, { engineRunId })} />
+          </>
+        )}
+
         {tab === 'intelligence' && (
           <div className="plv-deal-detail__metrics">
-            <Metric label="AOS" value={opp.aos != null ? String(Math.round(opp.aos)) : 'Pending engine run'} tone="green" />
-            <Metric label="Asking" value={displayCurrency(opp.asking_price)} tone="gold" />
+            <Metric label="AOS" value={displayAos(opp)} tone="green" />
+            <Metric label="Asking" value={displayCurrency(opp.asking_price, { engineRunId })} tone="gold" />
             <Metric label="Strategy" value={opp.strategy || 'Not calculated'} tone="blue" />
             <Metric label="Motivation" value={opp.motivation_score != null ? `${Math.round(opp.motivation_score)}` : 'Unknown'} tone="cyan" />
             <Metric label="Cooperation" value={opp.cooperation_score != null ? `${Math.round(opp.cooperation_score)}` : 'Unknown'} tone="cyan" />
             <Metric label="Confidence" value={opp.confidence != null ? `${Math.round(opp.confidence)}%` : 'Unknown'} tone="neutral" />
-            <Metric label="Offer Gap" value={opp.offer_to_ask_gap != null ? displayCurrency(opp.offer_to_ask_gap) : 'Not calculated'} tone="amber" />
+            <Metric label="Offer Gap" value={opp.offer_to_ask_gap != null ? displayCurrency(opp.offer_to_ask_gap, { engineRunId }) : 'Not calculated'} tone="amber" />
+            <Metric label="Recommended Offer" value={displayCurrency(opp.recommended_offer, { engineRunId })} tone="green" />
           </div>
-        )}
-
-        {tab === 'underwriting' && (
-          <>
-            <Row label="Asset Class" value={opp.asset_class || 'Unknown'} />
-            <Row label="Est. Value" value={displayCurrency(opp.estimated_value)} />
-            <Row label="ARV" value={displayCurrency(opp.arv)} />
-            <Row label="Engine Run" value={opp.acquisition_engine_run_id ? 'Complete' : 'Pending engine run'} />
-          </>
         )}
 
         {tab === 'workflow' && (
           <>
-            <Row label="Workflow State" value={opp.workflow_state.replace(/_/g, ' ')} />
+            <Row label="Workflow State" value={(opp.workflow_state || 'not_enrolled').replace(/_/g, ' ')} />
             <Row label="Automation" value={opp.automation_state} />
-            <Row label="Queue" value={opp.queue_state.replace(/_/g, ' ')} />
+            <Row label="Queue" value={(opp.queue_state || 'not_queued').replace(/_/g, ' ')} />
             <Row label="Follow-Up" value={opp.next_follow_up_at ? formatRelativeTime(opp.next_follow_up_at) : (opp.next_action_due ? formatRelativeTime(opp.next_action_due) : 'None scheduled')} />
             <Row label="Follow-Up Reason" value={opp.follow_up_reason || '—'} />
             {opp.blocker && <p className="plv-command-panel__blocker">{opp.blocker}</p>}

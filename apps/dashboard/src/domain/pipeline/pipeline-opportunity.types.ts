@@ -1,39 +1,50 @@
-export type AcquisitionStageCode =
-  | 'needs_review'
-  | 'ownership_confirmation'
-  | 'interest_qualification'
+/** Universal pipeline dimensions — aligned with v_inbox_enriched / deal_thread_state. */
+
+export type PipelineStageCode =
+  | 'ownership_check'
+  | 'interest_probe'
+  | 'active_communication'
   | 'price_discovery'
+  | 'condition_details'
   | 'underwriting'
-  | 'decision_and_offer'
-  | 'contract_to_close'
+  | 'offer_sent'
+  | 'contract_sent'
+  | 'title_closing'
+  | 'dead_suppressed'
 
-export type OpportunityStatusCode =
-  | 'active'
-  | 'waiting'
-  | 'paused'
-  | 'nurture'
-  | 'won'
-  | 'lost'
-  | 'dead'
-  | 'suppressed'
-  | 'archived'
-
-export type ConversationStateCode =
-  | 'needs_reply'
-  | 'awaiting_seller'
+export type SellerStatusCode =
+  | 'new'
+  | 'not_contacted'
+  | 'ownership_check_sent'
+  | 'message_sent'
+  | 'awaiting_response'
   | 'seller_replied'
-  | 'needs_review'
-  | 'no_recent_activity'
+  | 'positive_intent'
+  | 'asking_price_provided'
+  | 'needs_follow_up'
+  | 'negotiating'
+  | 'offer_sent'
+  | 'contract_sent'
+  | 'review_required'
+  | 'auto_blocked'
+  | 'suppressed'
+  | 'wrong_number'
+  | 'failed'
+
+export type TemperatureCode = 'hot' | 'warm' | 'cold' | 'dead'
 
 export type QueueStateCode =
-  | 'not_queued'
   | 'scheduled'
   | 'queued'
+  | 'ready'
   | 'sending'
   | 'sent'
   | 'delivered'
   | 'failed'
+  | 'blocked'
   | 'cancelled'
+  | 'paused'
+  | 'not_queued'
 
 export type WorkflowStateCode =
   | 'not_enrolled'
@@ -45,18 +56,18 @@ export type WorkflowStateCode =
   | 'completed'
   | 'failed'
 
+export type FollowUpStateCode = 'due_now' | 'scheduled' | 'none'
+
 export type PipelineGroupByMode =
-  | 'acquisition_stage'
-  | 'opportunity_status'
-  | 'conversation_state'
-  | 'queue_execution'
-  | 'workflow_state'
+  | 'stage'
+  | 'status'
+  | 'temperature'
   | 'market'
-  | 'strategy'
-  | 'priority'
-  | 'assignee'
-  | 'follow_up'
-  | 'asset_class'
+  | 'state'
+  | 'property_type'
+  | 'queue_status'
+  | 'workflow_status'
+  | 'follow_up_state'
 
 export interface PipelineOpportunity {
   id: string
@@ -66,11 +77,14 @@ export interface PipelineOpportunity {
   primary_thread_key: string | null
   portfolio_property_count: number
   portfolio_property_ids?: string[]
-  acquisition_stage: AcquisitionStageCode
-  opportunity_status: OpportunityStatusCode
-  conversation_state: ConversationStateCode
-  queue_state: QueueStateCode
-  workflow_state: WorkflowStateCode
+  /** Universal pipeline stage (canonical). */
+  pipeline_stage?: string | null
+  /** Universal seller status (canonical). */
+  seller_status?: string | null
+  opportunity_status: string
+  conversation_state: string | null
+  queue_state: QueueStateCode | string
+  workflow_state: WorkflowStateCode | string
   priority: string
   temperature: string | null
   strategy: string | null
@@ -96,6 +110,8 @@ export interface PipelineOpportunity {
   latest_intent: string | null
   latest_message_preview: string | null
   asset_class: string | null
+  property_type: string | null
+  property_state: string | null
   market: string | null
   property_address_full: string | null
   seller_display_name: string | null
@@ -106,7 +122,10 @@ export interface PipelineOpportunity {
   acquisition_engine_run_id?: string | null
   workflow_enrollment_id?: string | null
   workflow_definition_id?: string | null
+  metadata?: Record<string, unknown>
   history?: PipelineOpportunityHistoryEvent[]
+  /** @deprecated Legacy acquisition taxonomy — do not use for UI grouping. */
+  acquisition_stage?: string
 }
 
 export interface PipelineOpportunityHistoryEvent {
@@ -138,10 +157,11 @@ export interface PipelineMetrics {
   intent_positive_pct: number
   average_stage_age_days: number
   total: number
-  by_acquisition_stage: Record<string, number>
-  by_opportunity_status: Record<string, number>
-  by_conversation_state: Record<string, number>
-  by_workflow_state: Record<string, number>
+  by_pipeline_stage?: Record<string, number>
+  by_seller_status?: Record<string, number>
+  by_opportunity_status?: Record<string, number>
+  by_conversation_state?: Record<string, number>
+  by_workflow_state?: Record<string, number>
 }
 
 export interface PipelineSavedView {
@@ -150,7 +170,7 @@ export interface PipelineSavedView {
   label: string
   description: string | null
   filters: Record<string, unknown>
-  group_by: PipelineGroupByMode
+  group_by: PipelineGroupByMode | string
   is_default: boolean
   is_pinned: boolean
   is_shared: boolean
