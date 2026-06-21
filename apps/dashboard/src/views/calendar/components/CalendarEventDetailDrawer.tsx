@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import type { CalendarEvent } from '../../../lib/data/calendarData'
+import { formatEntitySubtitle } from '../../../lib/calendar/calendar-entity-display'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { formatCurrency, formatRelativeTime } from '../../../shared/formatters'
 import { Icon } from '../../../shared/icons'
@@ -46,17 +47,25 @@ export function CalendarEventDetailDrawer({
 }: CalendarEventDetailDrawerProps) {
   if (!event || typeof document === 'undefined') return null
 
-  const actions: Array<{ id: CalendarDrawerAction; label: string; danger?: boolean; disabled?: boolean }> = [
-    { id: 'deal', label: 'Open Deal' },
-    { id: 'conversation', label: 'Conversation' },
-    { id: 'property', label: 'Property' },
-    { id: 'comp', label: 'Intelligence' },
-    { id: 'queue', label: 'Queue', disabled: !event.deepLinkContext?.queue_row_id },
-    { id: 'workflow', label: 'Workflow', disabled: !event.deepLinkContext?.workflow_enrollment_id },
-    { id: 'campaign', label: 'Campaign', disabled: !event.deepLinkContext?.campaign_id },
+  const ctx = event.deepLinkContext || {}
+  const openActions: Array<{ id: CalendarDrawerAction; label: string; disabled?: boolean }> = [
+    { id: 'conversation', label: 'Open Conversation', disabled: !event.threadId && !selectedThread?.id },
+    { id: 'inbox', label: 'Open Inbox Thread', disabled: !event.threadId },
+    { id: 'deal', label: 'Open Deal Intelligence', disabled: !event.threadId && !event.opportunityId },
+    { id: 'comp', label: 'Open Comp Intelligence', disabled: !event.threadId && !event.opportunityId },
+    { id: 'property', label: 'Open Property', disabled: !event.propertyId && !ctx.property_id },
+    { id: 'map', label: 'Open Map' },
+    { id: 'queue', label: 'Open Queue Item', disabled: !ctx.queue_row_id },
+    { id: 'campaign', label: 'Open Campaign', disabled: !ctx.campaign_id },
+    { id: 'workflow', label: 'Open Workflow Run', disabled: !ctx.workflow_enrollment_id },
+    { id: 'contract', label: 'Open Closing Desk', disabled: !['contract_sent', 'contract_signature_deadline', 'fully_executed_contract', 'title_opened', 'title_milestone', 'clear_to_close', 'closing_scheduled'].includes(event.type) },
+    { id: 'entity_graph', label: 'Open Entity Graph', disabled: !event.sellerId && !ctx.master_owner_id },
+  ].filter((action) => !action.disabled)
+
+  const operatorActions: Array<{ id: CalendarDrawerAction; label: string; danger?: boolean; disabled?: boolean }> = [
     { id: 'reschedule', label: 'Reschedule', disabled: !event.reschedulable },
     { id: 'complete', label: 'Mark Complete', disabled: !event.editable },
-    { id: 'cancel', label: 'Cancel', disabled: !event.cancellable, danger: true },
+    { id: 'cancel', label: 'Cancel Event', disabled: !event.cancellable, danger: true },
   ]
 
   return createPortal(
@@ -86,9 +95,10 @@ export function CalendarEventDetailDrawer({
 
         <div className="nx-cal__event-drawer-section">
           <span className="nx-cal__eyebrow">Entity</span>
+          <p className="nx-cal__intel-meta">{formatEntitySubtitle(event)}</p>
           <div className="nx-cal__event-drawer-grid">
-            <div><label>Seller</label><strong>{event.sellerName}</strong></div>
-            <div><label>Property</label><strong>{event.propertyAddress}</strong></div>
+            <div><label>Seller / Owner</label><strong>{formatEntitySubtitle(event).split(' · ')[0]}</strong></div>
+            <div><label>Property</label><strong>{event.propertyAddress || '—'}</strong></div>
             <div><label>Market</label><strong>{event.market}</strong></div>
             <div><label>Stage</label><strong>{event.metadata?.stage ? String(event.metadata.stage) : selectedThread?.conversationStage || '—'}</strong></div>
             <div><label>Status</label><strong>{event.status.replace(/_/g, ' ')}</strong></div>
@@ -123,8 +133,21 @@ export function CalendarEventDetailDrawer({
           <pre className="nx-cal__drawer-dev">{JSON.stringify({ id: event.id, deepLink: event.deepLinkContext }, null, 2)}</pre>
         ) : null}
 
+        {openActions.length ? (
+          <div className="nx-cal__event-drawer-section">
+            <span className="nx-cal__eyebrow">Open In…</span>
+            <div className="nx-cal__event-drawer-actions nx-cal__event-drawer-actions--open">
+              {openActions.map((action) => (
+                <button key={action.id} type="button" className="nx-cal__drawer-action" onClick={() => onAction(action.id)}>
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="nx-cal__event-drawer-actions">
-          {actions.map((action) => (
+          {operatorActions.map((action) => (
             <button
               key={action.id}
               type="button"

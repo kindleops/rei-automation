@@ -1,4 +1,5 @@
 import type { CalendarEvent } from '../../lib/data/calendarData'
+import { formatEntitySubtitle } from '../../lib/calendar/calendar-entity-display'
 import { formatRelativeTime } from '../../shared/formatters'
 import { Icon, type IconName } from '../../shared/icons'
 import { CalendarEmptyState } from './CalendarEmptyState'
@@ -85,7 +86,7 @@ export function TimelineExecutionFeed({
                     <strong>{event.title}</strong>
                     <span>{formatRelativeTime(event.timestamp)}</span>
                   </div>
-                  <p>{event.sellerName} · {event.propertyAddress}</p>
+                  <p>{formatEntitySubtitle(event)}</p>
                   <div className="calendar-command__timeline-meta nx-cal__timeline-meta">
                     <span>{event.market}</span>
                     <span>{event.sourceTable.replace(/_/g, ' ')}</span>

@@ -55,10 +55,10 @@ export function SellerContextRibbon({
       </div>
 
       <div className="nx-cal__seller-ribbon-actions">
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenDeal}>Deal</button>
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenConversation}>Chat</button>
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenIntelligence}>Intel</button>
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onClearScope}>Clear</button>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenDeal}>Open Deal</button>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenConversation}>Open Conversation</button>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onOpenIntelligence}>Open Intelligence</button>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--sm" onClick={onClearScope}>Clear Scope</button>
       </div>
     </section>
   )

@@ -26,7 +26,8 @@ import { CalendarCommandBar, type CalendarRefreshState } from './CalendarCommand
 import { CalendarExecutionDrawer } from './CalendarExecutionDrawer'
 import { CalendarKpiRibbon } from './CalendarKpiRibbon'
 import { CalendarMobileView } from './CalendarMobileView'
-import { CalendarRightRail } from './CalendarRightRail'
+import { CalendarIntelligenceRail } from './CalendarIntelligenceRail'
+import { filterViewEvents } from '../../lib/calendar/calendar-event-classification'
 import { DailyExecutionSchedule } from './DailyExecutionSchedule'
 import { MonthExecutionGrid } from './MonthExecutionGrid'
 import { TimelineExecutionFeed } from './TimelineExecutionFeed'
@@ -77,7 +78,8 @@ export function CalendarView({
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month')
   const [scopeMode, setScopeMode] = useState<CalendarScopeMode>('global')
   const [anchorDate, setAnchorDate] = useState<Date>(() => startOfDay(new Date()))
-  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [selectedDayIso, setSelectedDayIso] = useState<string>(() => toIsoDate(new Date()))
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>([])
   const [summaryCards, setSummaryCards] = useState<ExecutionSummaryCard[]>([])
   const [overdueItems, setOverdueItems] = useState<CalendarEvent[]>([])
   const [automationSchedule, setAutomationSchedule] = useState<CalendarEvent[]>([])
@@ -198,7 +200,7 @@ export function CalendarView({
       const nextOffers = primaryEvents.filter((e) =>
         ['offer_created', 'offer_sent', 'offer_expiration', 'offer_follow_up'].includes(e.type))
 
-      setEvents(primaryEvents)
+      setAllEvents(primaryEvents)
       setSummaryCards(nextSummary)
       setOverdueItems(nextOverdue)
       setAutomationSchedule(nextAutomation)
@@ -248,25 +250,33 @@ export function CalendarView({
     return selectedSellerHistory.slice(0, 40)
   }, [selectedSellerHistory, selectedThread])
 
-  const todayAgenda = useMemo(() => {
-    const todayKey = toIsoDate(new Date())
-    return events.filter((event) => toIsoDate(new Date(event.timestamp)) === todayKey).slice(0, 14)
-  }, [events])
+  const events = useMemo(
+    () => filterViewEvents(allEvents, viewMode === 'timeline' ? 'timeline' : viewMode),
+    [allEvents, viewMode],
+  )
+
+  const selectedDay = useMemo(() => startOfDay(new Date(`${selectedDayIso}T12:00:00`)), [selectedDayIso])
 
   const relatedChain = useMemo(() => {
     if (!selectedEvent?.correlationId) return []
-    return events
+    return allEvents
       .filter((event) => event.correlationId === selectedEvent.correlationId)
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-  }, [events, selectedEvent])
+  }, [allEvents, selectedEvent])
 
   const nextSellerEvent = useMemo(() => {
     if (!selectedThread) return null
     const now = Date.now()
-    return events
+    return allEvents
       .filter((e) => e.sellerId === selectedThread.ownerId && new Date(e.timestamp).getTime() >= now)
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0] ?? null
-  }, [events, selectedThread])
+  }, [allEvents, selectedThread])
+
+  const handleSelectDay = (iso: string) => {
+    setSelectedDayIso(iso)
+    setAnchorDate(startOfDay(new Date(`${iso}T12:00:00`)))
+    setSelectedEvent(null)
+  }
 
   const headerLabel = useMemo(() => getCalendarModeRangeLabel(viewMode, anchorDate), [anchorDate, viewMode])
   const loadMeta = getLastCalendarLoadMeta()
@@ -297,7 +307,7 @@ export function CalendarView({
     if (!event.reschedulable) return
     const previous = events
     const nextTs = new Date(`${dayIso}T${`${hour}`.padStart(2, '0')}:00:00`).toISOString()
-    setEvents((list) => list.map((item) => item.id === event.id ? { ...item, timestamp: nextTs } : item))
+    setAllEvents((list) => list.map((item) => item.id === event.id ? { ...item, timestamp: nextTs } : item))
     try {
       const result = await rescheduleCalendarEvent({
         source_domain: event.sourceDomain,
@@ -309,7 +319,7 @@ export function CalendarView({
       if (!result.ok) throw new Error(result.error || 'reschedule_failed')
       setLiveTick((v) => v + 1)
     } catch (error) {
-      setEvents(previous)
+      setAllEvents(previous)
       setRefreshError(error instanceof Error ? error.message : 'Reschedule failed')
       setRefreshState('error')
     }
@@ -420,8 +430,11 @@ export function CalendarView({
         <MonthExecutionGrid
           anchorDate={anchorDate}
           events={events}
+          selectedDayIso={selectedDayIso}
           selectedEventId={selectedEvent?.id ?? null}
+          onSelectDay={handleSelectDay}
           onSelect={handleSelectEvent}
+          onCreateTask={(dayIso) => { setSelectedDayIso(dayIso); setNewEventOpen(true) }}
           onReschedule={(event, dayIso) => handleReschedule(event, dayIso)}
         />
       )
@@ -448,13 +461,13 @@ export function CalendarView({
       <section className="nx-cal__surface nx-cal__timeline-surface">
         <div className="nx-cal__section-head">
           <div>
-            <span className="nx-cal__eyebrow">{scopeMode === 'selected' ? 'Selected Seller' : 'Global'}</span>
+            <span className="nx-cal__eyebrow">{scopeMode === 'selected' ? 'Selected Entity' : 'Global'}</span>
             <strong>Execution Timeline</strong>
           </div>
           <span>{events.length}</span>
         </div>
         <TimelineExecutionFeed
-          events={events.slice(0, layoutMode === 'medium' ? 40 : 120)}
+          events={allEvents.slice(0, layoutMode === 'medium' ? 40 : 120)}
           selectedId={selectedEvent?.id ?? null}
           onSelect={handleSelectEvent}
           grouped
@@ -463,16 +476,6 @@ export function CalendarView({
       </section>
     )
   })()
-
-  const railSections = [
-    { id: 'today', title: 'Today', events: todayAgenda, defaultOpen: true },
-    { id: 'overdue', title: 'Overdue / Risk', events: overdueItems.slice(0, 12), defaultOpen: true },
-    { id: 'automation', title: 'Upcoming Automation', events: automationSchedule.slice(0, 12), defaultOpen: true },
-    { id: 'sends', title: 'Next Scheduled Sends', events: automationSchedule.filter((e) => e.type === 'scheduled_sms').slice(0, 5), defaultOpen: false },
-    { id: 'offers', title: 'Offers / Contracts / Closing', events: [...offerItems, ...contractItems, ...closingItems].slice(0, 12), defaultOpen: false },
-    { id: 'followups', title: 'Upcoming Follow-Ups', events: events.filter((e) => e.type.includes('follow')).slice(0, 8), defaultOpen: false },
-    { id: 'entity', title: 'Selected Event', events: selectedEvent ? [selectedEvent, ...selectedTimeline.slice(0, 6)] : selectedTimeline.slice(0, 8), defaultOpen: Boolean(selectedThread || selectedEvent) },
-  ]
 
   return (
     <div className={cls('calendar-command', 'nx-cal', `is-${layoutMode}`, `is-view-${viewMode}`)} data-refresh-state={refreshState}>
@@ -536,13 +539,20 @@ export function CalendarView({
             ) : null}
           </div>
 
-          {railOpen && !isMobile ? (
-            <CalendarRightRail
-              sections={railSections}
-              selectedEventId={selectedEvent?.id ?? null}
-              onSelect={handleSelectEvent}
-            />
-          ) : null}
+        {railOpen && !isMobile ? (
+          <CalendarIntelligenceRail
+            selectedDate={selectedDay}
+            selectedEvent={selectedEvent}
+            events={events}
+            allEvents={allEvents}
+            selectedEventId={selectedEvent?.id ?? null}
+            collapsed={false}
+            onToggleCollapse={() => setRailOpen(false)}
+            onSelect={handleSelectEvent}
+            onAddTask={() => setNewEventOpen(true)}
+            onClearEvent={() => setSelectedEvent(null)}
+          />
+        ) : null}
         </div>
       </div>
 

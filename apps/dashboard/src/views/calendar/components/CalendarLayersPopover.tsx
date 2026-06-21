@@ -62,9 +62,7 @@ export function CalendarLayersPopover({ layers, visibleCount, onChange }: Calend
       >
         <Icon name="layers" />
         <span>Layers</span>
-        {activeCount < allIds.length ? (
-          <span className="nx-cal__cmd-badge">{activeCount}</span>
-        ) : null}
+        <span className="nx-cal__cmd-badge" title={`${activeCount} active layers`}>{activeCount} active</span>
       </button>
 
       {open && typeof document !== 'undefined'

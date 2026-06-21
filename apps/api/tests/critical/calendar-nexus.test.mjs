@@ -60,7 +60,7 @@ test('entity resolver prefers opportunity and thread keys', () => {
 test('unresolved queue recipient fallback label', () => {
   const resolver = createEntityResolver();
   const resolved = resolver.resolve({ source_domain: 'queue' });
-  assert.equal(resolved.sellerName, 'Unresolved Queue Recipient');
+  assert.equal(resolved.sellerName, 'Unresolved queue recipient');
 });
 
 test('canonical event source inventory is documented', () => {

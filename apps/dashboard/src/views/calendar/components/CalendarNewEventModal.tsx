@@ -15,15 +15,6 @@ type CalendarNewEventModalProps = {
   onCreated: () => void
 }
 
-const EVENT_TYPES = [
-  { value: 'seller_follow_up', label: 'Follow-Up', icon: 'send' as const },
-  { value: 'manual_call', label: 'Call', icon: 'phone' as const },
-  { value: 'manual_meeting', label: 'Meeting', icon: 'users' as const },
-  { value: 'manual_visit', label: 'Property Visit', icon: 'home' as const },
-  { value: 'manual_task', label: 'Task', icon: 'check' as const },
-  { value: 'manual_reminder', label: 'Reminder', icon: 'bell' as const },
-]
-
 export function CalendarNewEventModal({
   open,
   defaultDate,
@@ -34,7 +25,7 @@ export function CalendarNewEventModal({
   onCreated,
 }: CalendarNewEventModalProps) {
   const [title, setTitle] = useState('')
-  const [eventType, setEventType] = useState('manual_task')
+  const [eventType, setEventType] = useState<'manual_task' | 'manual_reminder'>('manual_task')
   const [date, setDate] = useState(defaultDate || '')
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('10:00')
@@ -46,8 +37,6 @@ export function CalendarNewEventModal({
 
   if (!open || typeof document === 'undefined') return null
 
-  const selectedType = EVENT_TYPES.find((t) => t.value === eventType) || EVENT_TYPES[0]
-
   const handleSubmit = async () => {
     setSaving(true)
     setError(null)
@@ -55,12 +44,13 @@ export function CalendarNewEventModal({
       const startAt = allDay ? `${date}T00:00:00.000Z` : `${date}T${startTime}:00.000Z`
       const endAt = allDay ? `${date}T23:59:59.000Z` : `${date}T${endTime}:00.000Z`
       await createManualCalendarEvent({
-        title: title || 'Manual Event',
+        title: title || (eventType === 'manual_reminder' ? 'Reminder' : 'Task'),
         event_type: eventType,
         start_at: startAt,
         end_at: endAt,
         all_day: allDay,
         description,
+        priority,
         master_owner_id: sellerId,
         property_id: propertyId,
         thread_key: threadId,
@@ -69,7 +59,7 @@ export function CalendarNewEventModal({
       onCreated()
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create event')
+      setError(err instanceof Error ? err.message : 'Failed to create')
     } finally {
       setSaving(false)
     }
@@ -77,13 +67,13 @@ export function CalendarNewEventModal({
 
   return createPortal(
     <div className="nx-cal__modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="nx-cal__modal nx-cal__modal--premium" role="dialog" aria-label="New event" onClick={(e) => e.stopPropagation()}>
+      <div className="nx-cal__modal nx-cal__modal--premium" role="dialog" aria-label="Add task or reminder" onClick={(e) => e.stopPropagation()}>
         <div className="nx-cal__modal-head">
           <div className="nx-cal__modal-head-copy">
-            <span className="nx-cal__modal-icon" aria-hidden="true"><Icon name="spark" /></span>
+            <span className="nx-cal__modal-icon" aria-hidden="true"><Icon name="check" /></span>
             <div>
-              <strong>New Event</strong>
-              <span>{sellerId ? 'Scoped to selected seller' : 'Global calendar event'}</span>
+              <strong>Add Task or Reminder</strong>
+              <span>{sellerId ? 'Linked to selected entity' : 'Global operator item'}</span>
             </div>
           </div>
           <button type="button" className="nx-cal__icon-btn" onClick={onClose} aria-label="Close">
@@ -91,24 +81,15 @@ export function CalendarNewEventModal({
           </button>
         </div>
 
-        <div className="nx-cal__modal-type-grid">
-          {EVENT_TYPES.map((type) => (
-            <button
-              key={type.value}
-              type="button"
-              className={cls('nx-cal__modal-type-card', eventType === type.value && 'is-active')}
-              onClick={() => setEventType(type.value)}
-            >
-              <Icon name={type.icon} />
-              <span>{type.label}</span>
-            </button>
-          ))}
+        <div className="nx-cal__modal-type-segment">
+          <button type="button" className={cls('nx-cal__modal-segment', eventType === 'manual_task' && 'is-active')} onClick={() => setEventType('manual_task')}>Task</button>
+          <button type="button" className={cls('nx-cal__modal-segment', eventType === 'manual_reminder' && 'is-active')} onClick={() => setEventType('manual_reminder')}>Reminder</button>
         </div>
 
         <div className="nx-cal__modal-body">
           <label>
             Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Event title" />
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={eventType === 'manual_reminder' ? 'Reminder title' : 'Task title'} />
           </label>
           <div className="nx-cal__modal-row">
             <label>
@@ -142,21 +123,10 @@ export function CalendarNewEventModal({
           {error ? <p className="nx-cal__modal-error">{error}</p> : null}
         </div>
 
-        <div className="nx-cal__modal-preview">
-          <span className="nx-cal__eyebrow">Preview</span>
-          <div className="nx-cal__modal-preview-card">
-            <Icon name={selectedType.icon} />
-            <div>
-              <strong>{title || selectedType.label}</strong>
-              <span>{date || '—'} · {allDay ? 'All day' : `${startTime} – ${endTime}`}</span>
-            </div>
-          </div>
-        </div>
-
         <div className="nx-cal__modal-actions">
           <button type="button" className="nx-cal__cmd-btn" onClick={onClose}>Cancel</button>
           <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent" disabled={saving || !date} onClick={handleSubmit}>
-            {saving ? 'Saving…' : 'Create Event'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

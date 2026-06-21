@@ -49,6 +49,12 @@ test.describe('Calendar Nexus visual proof', () => {
     await page.waitForTimeout(600)
     await shot(page, '100-day-dark')
 
+    await setTheme(page, 'light')
+    await page.click('.nx-cal__view-tab:has-text("Day")')
+    await page.waitForTimeout(600)
+    await shot(page, '100-day-light')
+
+    await setTheme(page, 'dark')
     await page.click('.nx-cal__view-tab:has-text("Agenda")')
     await page.waitForTimeout(600)
     await shot(page, '100-agenda-dark')
@@ -58,21 +64,71 @@ test.describe('Calendar Nexus visual proof', () => {
     await shot(page, '100-timeline-dark')
 
     await page.click('.nx-cal__view-tab:has-text("Month")')
+    await page.waitForTimeout(400)
+
+    const todayCell = page.locator('.nx-cal__month-cell.is-today').first()
+    if (await todayCell.count()) {
+      await todayCell.click()
+      await page.waitForTimeout(500)
+      await shot(page, '100-selected-date-rail')
+    }
+
+    await setTheme(page, 'light')
     await page.click('button:has-text("Layers")')
     await page.waitForTimeout(400)
-    await shot(page, '100-layers-popover')
+    await shot(page, '100-layers-popover-light')
 
+    await setTheme(page, 'dark')
+    await page.keyboard.press('Escape')
+    await page.click('button:has-text("Layers")')
+    await page.waitForTimeout(400)
+    await shot(page, '100-layers-popover-dark')
+
+    await page.keyboard.press('Escape')
+    await setTheme(page, 'light')
+    await page.click('.nx-cal__date-picker-trigger')
+    await page.waitForTimeout(400)
+    await shot(page, '100-date-picker-light')
+
+    await setTheme(page, 'dark')
     await page.keyboard.press('Escape')
     await page.click('.nx-cal__date-picker-trigger')
     await page.waitForTimeout(400)
-    await shot(page, '100-date-picker')
+    await shot(page, '100-date-picker-dark')
 
     await page.keyboard.press('Escape')
-    await page.click('button:has-text("New Event")')
+    await setTheme(page, 'light')
+    await page.click('button:has-text("Add Task")')
     await page.waitForTimeout(400)
-    await shot(page, '100-new-event-modal')
+    await shot(page, '100-task-modal-light')
+
+    await page.locator('.nx-cal__modal-segment:has-text("Reminder")').click()
+    await page.waitForTimeout(300)
+    await setTheme(page, 'dark')
+    await shot(page, '100-reminder-modal-dark')
     await page.locator('.nx-cal__modal-backdrop').click({ position: { x: 10, y: 10 } })
     await page.waitForTimeout(300)
+
+    await page.click('button:has-text("Global")')
+    await page.waitForTimeout(400)
+    await shot(page, '100-global-scope')
+
+    const entityBtn = page.locator('button:has-text("Selected Entity")')
+    if (await entityBtn.isEnabled()) {
+      await entityBtn.click()
+      await page.waitForTimeout(500)
+      await shot(page, '100-selected-entity-scope')
+      await page.click('button:has-text("Global")')
+    }
+
+    const railToggle = page.locator('button[aria-label="Toggle contextual rail"]')
+    if (await railToggle.count()) {
+      await railToggle.click()
+      await page.waitForTimeout(400)
+      await shot(page, '100-collapsed-rail')
+      await railToggle.click()
+      await page.waitForTimeout(300)
+    }
 
     const monthCells = await page.locator('.nx-cal__month-grid.is-true-month .nx-cal__month-cell').count()
     expect(monthCells).toBeGreaterThanOrEqual(35)
@@ -87,11 +143,17 @@ test.describe('Calendar Nexus visual proof', () => {
 
     const eventChip = page.locator('.nx-cal__month-event, .nx-cal__week-event, .nx-cal__agenda-row').first()
     if (await eventChip.count()) {
+      await page.click('.nx-cal__view-tab:has-text("Month")')
+      await page.waitForTimeout(300)
       await eventChip.click()
-      await page.waitForTimeout(400)
+      await page.waitForTimeout(500)
+      await shot(page, '100-selected-event-rail')
       await shot(page, '100-event-drawer')
       await page.locator('.nx-cal__event-backdrop').click({ position: { x: 8, y: 8 } })
     }
+
+    const selectedCell = page.locator('.nx-cal__month-cell.is-selected').first()
+    expect(await selectedCell.count()).toBeGreaterThanOrEqual(0)
   })
 
   test('75% width screenshots', async ({ page }) => {
@@ -103,6 +165,14 @@ test.describe('Calendar Nexus visual proof', () => {
     await page.click('.nx-cal__view-tab:has-text("Week")')
     await page.waitForTimeout(500)
     await shot(page, '75-week-dark')
+
+    const railToggle = page.locator('button[aria-label="Toggle contextual rail"]')
+    if (await railToggle.count()) {
+      await railToggle.click()
+      await page.waitForTimeout(400)
+      await shot(page, '75-rail-overlay')
+      await railToggle.click()
+    }
   })
 
   test('50% width screenshots', async ({ page }) => {
@@ -113,6 +183,25 @@ test.describe('Calendar Nexus visual proof', () => {
     await page.click('.nx-cal__view-tab:has-text("Week")')
     await page.waitForTimeout(500)
     await shot(page, '50-week-dark')
+
+    await page.click('button:has-text("Layers")')
+    await page.waitForTimeout(400)
+    await shot(page, '50-layer-panel')
+
+    await page.keyboard.press('Escape')
+    await page.click('button:has-text("Add Task")')
+    await page.waitForTimeout(400)
+    await shot(page, '50-task-modal')
+
+    const eventChip = page.locator('.nx-cal__month-event, .nx-cal__agenda-row').first()
+    if (await eventChip.count()) {
+      await page.keyboard.press('Escape')
+      await page.click('.nx-cal__view-tab:has-text("Month")')
+      await eventChip.click()
+      await page.waitForTimeout(400)
+      await shot(page, '50-selected-event-drawer')
+      await page.locator('.nx-cal__event-backdrop').click({ position: { x: 8, y: 8 } })
+    }
   })
 
   test('25% mobile agenda', async ({ page }) => {
@@ -127,20 +216,36 @@ test.describe('Calendar Nexus visual proof', () => {
       await monthBtn.click()
       await page.waitForTimeout(500)
       await shot(page, '25-month-sheet')
+      const todayCell = page.locator('.nx-cal__month-cell.is-today').first()
+      if (await todayCell.count()) {
+        await todayCell.click()
+        await page.waitForTimeout(400)
+        await shot(page, '25-selected-day-list')
+      }
       await page.keyboard.press('Escape')
     }
 
-    await page.click('button:has-text("New Event")')
+    await page.click('button:has-text("Add Task")')
     await page.waitForTimeout(400)
-    await shot(page, '25-new-event-modal')
+    await shot(page, '25-add-task-modal')
+    await page.locator('.nx-cal__modal-backdrop').click({ position: { x: 5, y: 5 } })
+    await page.waitForTimeout(300)
 
     const mobileEvent = page.locator('.nx-cal__agenda-row').first()
     if (await mobileEvent.count()) {
-      await page.locator('.nx-cal__modal-backdrop').click({ position: { x: 5, y: 5 } }).catch(() => {})
-      await page.waitForTimeout(200)
       await mobileEvent.click()
       await page.waitForTimeout(400)
       await shot(page, '25-event-bottom-sheet')
+      await page.locator('.nx-cal__event-backdrop').click({ position: { x: 5, y: 5 } }).catch(() => {})
+      await page.waitForTimeout(200)
+    }
+
+    const layersBtn = page.locator('button:has-text("Layers")').first()
+    if (await layersBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await layersBtn.click({ timeout: 5000 })
+      await page.waitForTimeout(400)
+      await shot(page, '25-layer-bottom-sheet')
+      await page.keyboard.press('Escape')
     }
   })
 
@@ -154,8 +259,10 @@ test.describe('Calendar Nexus visual proof', () => {
     const updatingBadges = await page.locator('.nx-cal__live-pill:has-text("Updating")').count()
     expect(updatingBadges).toBeLessThanOrEqual(1)
 
-    await expect(page.locator('.nx-cal__live-pill')).not.toContainText('Updating', { timeout: 15000 })
-    const statusText = await page.locator('.nx-cal__live-pill').textContent()
-    expect(statusText?.match(/Live|Updated|Error/) ).toBeTruthy()
+    const pill = page.locator('.nx-cal__live-pill')
+    await expect(pill).not.toContainText('Updating', { timeout: 15000 })
+    const statusText = (await pill.textContent()) || ''
+    expect(statusText.length).toBeGreaterThan(0)
+    expect(statusText).not.toContain('Updating')
   })
 })

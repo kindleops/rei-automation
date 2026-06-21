@@ -93,8 +93,11 @@ export function CalendarMobileView({
           <MonthExecutionGrid
             anchorDate={anchorDate}
             events={events}
+            selectedDayIso={toIsoDate(anchorDate)}
             selectedEventId={selectedEventId}
+            onSelectDay={(iso) => onDateChange(new Date(`${iso}T12:00:00`))}
             onSelect={(event) => { onSelect(event); setMonthSheetOpen(false) }}
+            onCreateTask={() => { onNewEvent(); setMonthSheetOpen(false) }}
           />
         </div>
       ) : null}

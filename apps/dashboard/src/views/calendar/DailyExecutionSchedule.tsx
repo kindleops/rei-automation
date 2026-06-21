@@ -65,7 +65,7 @@ export function DailyExecutionSchedule({
                   }}
                 >
                   {hourEvents.length === 0 ? (
-                    <span className="nx-cal__day-empty">Click to create</span>
+                    <span className="nx-cal__day-slot-hint" aria-hidden="true" />
                   ) : hourEvents.map((event) => (
                     <button
                       key={event.id}

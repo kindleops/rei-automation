@@ -86,8 +86,8 @@ export function CalendarCommandBar({
           <Icon name="calendar" />
         </div>
         <div className="nx-cal__command-copy">
-          <strong>Temporal Command</strong>
-          <span>{rangeLabel}</span>
+          <strong>Execution Calendar</strong>
+          <span>Automation, follow-ups, milestones, and transaction timing · {rangeLabel}</span>
         </div>
       </div>
 
@@ -143,15 +143,15 @@ export function CalendarCommandBar({
             disabled={!selectedEnabled}
             title={!selectedEnabled ? 'Select a seller in global entity context' : undefined}
           >
-            Seller
+            Selected Entity
           </button>
         </div>
 
         <CalendarLayersPopover layers={layers} visibleCount={visibleEventCount} onChange={onLayersChange} />
 
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent" onClick={onNewEvent}>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent" onClick={onNewEvent} aria-label="Add task">
           <Icon name="spark" />
-          <span>New Event</span>
+          <span>Add Task</span>
         </button>
 
         <button

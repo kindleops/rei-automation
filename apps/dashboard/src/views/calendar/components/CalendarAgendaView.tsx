@@ -1,4 +1,5 @@
 import type { CalendarEvent } from '../../../lib/data/calendarData'
+import { formatEntitySubtitle } from '../../../lib/calendar/calendar-entity-display'
 import { formatRelativeTime } from '../../../shared/formatters'
 import { Icon, type IconName } from '../../../shared/icons'
 
@@ -81,7 +82,7 @@ export function CalendarAgendaView({ events, selectedEventId, onSelect, search =
                 <span className="nx-cal__timeline-icon"><Icon name={iconFor(event)} /></span>
                 <span className="nx-cal__agenda-main">
                   <strong>{event.title}</strong>
-                  <small>{event.sellerName} · {event.propertyAddress} · {event.market}</small>
+                  <small>{formatEntitySubtitle(event)}{event.market ? ` · ${event.market}` : ''}</small>
                   <small>{event.sourceTable.replace(/_/g, ' ')} · {event.status.replace(/_/g, ' ')} · {formatRelativeTime(event.timestamp)}</small>
                 </span>
               </button>

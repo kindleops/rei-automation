@@ -120,12 +120,12 @@ export function createEntityResolver() {
       if (!match?.threadKey && !threadKey) unresolvedReasons.push('thread_unresolved');
 
       const fallbackSeller = !sellerName
-        ? (clean(input.source_domain) === 'queue' ? 'Unresolved Queue Recipient' : 'Unknown Seller')
+        ? (clean(input.source_domain) === 'queue' ? 'Unresolved queue recipient' : 'Unresolved event')
         : sellerName;
 
       return {
         sellerName: fallbackSeller,
-        propertyAddress: propertyAddress || 'Property Unknown',
+        propertyAddress: propertyAddress || (propertyId ? 'Property pending resolution' : ''),
         market: market || 'Market Unknown',
         propertyType: match?.propertyType || clean(input.property_type) || null,
         stage: match?.stage || null,
@@ -155,10 +155,10 @@ export function createEntityResolver() {
 
       const seen = new Set();
       for (const event of events) {
-        if (event.seller_name && !event.seller_name.startsWith('Unknown') && !event.seller_name.startsWith('Unresolved')) {
+        if (event.seller_name && !event.seller_name.startsWith('Unknown') && !event.seller_name.startsWith('Unresolved') && event.seller_name !== 'Unresolved event') {
           totals.seller_resolved += 1;
         }
-        if (event.property_address && event.property_address !== 'Property Unknown') totals.property_resolved += 1;
+        if (event.property_address && event.property_address !== 'Property Unknown' && !event.property_address.includes('pending resolution')) totals.property_resolved += 1;
         if (event.market && event.market !== 'Market Unknown') totals.market_resolved += 1;
         if (event.thread_key) totals.thread_resolved += 1;
         if (event.unresolved_reason) totals.unresolved_events += 1;
