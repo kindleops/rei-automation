@@ -1633,7 +1633,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setOlderMessagesLoading(false)
       setThreadContext(null)
       setThreadIntelligence(null)
-      setDealContext(null)
+      if (!hasEntityAnchor(effectiveActiveContext)) {
+        setDealContext(null)
+      }
       setThreadTranslations({})
       setThreadViewMode('original')
       setDetectedThreadLanguage(null)
@@ -2917,6 +2919,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     handleThreadAction(selected, selected.isArchived ? 'unarchive' : 'archive')
   }, [handleThreadAction, selected])
 
+  const anchorThreadSelection = useCallback((id: string) => {
+    const thread = findThreadByRef(threads, id)
+    if (thread) {
+      setSelectedId(thread.id)
+      setSelectedThreadKey(thread.threadKey || thread.id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: thread.id }))
+      selectedThreadFallbackRef.current = thread
+      return
+    }
+    setSelectedId(id)
+    setSelectedThreadKey(id)
+    setLayoutState((current) => ({ ...current, selectedThreadId: id }))
+  }, [threads])
+
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
@@ -4071,6 +4087,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           externalContext={effectiveActiveContext}
           layoutMode={layoutMode}
           onSelect={handleSelect}
+          onAnchorThread={anchorThreadSelection}
           onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
           onSyncOpportunity={syncOpportunityContext}
           onClearOpportunityPreview={clearOpportunityPreview}

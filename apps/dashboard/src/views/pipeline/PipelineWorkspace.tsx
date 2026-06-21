@@ -23,6 +23,7 @@ interface PipelineWorkspaceProps {
   selectedId: string | null
   layoutMode: ViewLayoutMode
   onSelect: (id: string) => void
+  onAnchorThread?: (id: string) => void
   onEstablishContext?: (context: ActiveInboxContext) => void
   onSyncOpportunity?: (opportunity: PipelineOpportunity, mode: 'select' | 'preview') => void
   onClearOpportunityPreview?: () => void
@@ -54,6 +55,7 @@ export function PipelineWorkspace({
   selectedId,
   layoutMode,
   onSelect,
+  onAnchorThread,
   onEstablishContext,
   onSyncOpportunity,
   onClearOpportunityPreview,
@@ -111,9 +113,13 @@ export function PipelineWorkspace({
     return !opportunityMatchesActiveContext(opp, externalContext)
   }, [externalContext])
 
-  const syncEntityContext = useCallback((opp: PipelineOpportunity | null, mode: 'select' | 'preview' = 'select') => {
+  const syncEntityContext = useCallback((
+    opp: PipelineOpportunity | null,
+    mode: 'select' | 'preview' = 'select',
+    options?: { force?: boolean },
+  ) => {
     if (!opp) return
-    if (mode === 'select' && !shouldPublishContext(opp)) return
+    if (mode === 'select' && !options?.force && !shouldPublishContext(opp)) return
     if (onSyncOpportunity) {
       onSyncOpportunity(opp, mode)
       return
@@ -136,14 +142,14 @@ export function PipelineWorkspace({
       .then((row) => {
         if (cancelled) return
         setDetailOpportunity(row)
-        syncEntityContext(row)
+        syncEntityContext(row, 'select')
       })
       .catch((err) => {
         if (cancelled) return
         setDetailError(err instanceof Error ? err.message : 'detail_fetch_failed')
         if (listOpportunity) {
           setDetailOpportunity(listOpportunity)
-          syncEntityContext(listOpportunity)
+          syncEntityContext(listOpportunity, 'select')
         }
       })
       .finally(() => { if (!cancelled) setDetailLoading(false) })
@@ -174,12 +180,12 @@ export function PipelineWorkspace({
   }, [externalContext, opportunities, selectedOpportunityId])
 
   useEffect(() => {
-    if (selectedOpportunityId || externalContext) return
+    if (selectedOpportunityId) return
     const fromParent = opportunities.find(
       (o) => o.primary_thread_key === selectedId || o.id === selectedId,
     )?.id
     if (fromParent) setSelectedOpportunityId(fromParent)
-  }, [externalContext, opportunities, selectedId, selectedOpportunityId])
+  }, [opportunities, selectedId, selectedOpportunityId])
 
   const handleAction = useCallback(async (id: string, action: string, payload?: Record<string, unknown>) => {
     if (action === 'refresh') {
@@ -244,12 +250,15 @@ export function PipelineWorkspace({
     try { localStorage.setItem(STORAGE_KEY, opportunityId) } catch { /* ignore */ }
     const opp = opportunities.find((o) => o.id === opportunityId)
     if (!opp) return
-    syncEntityContext(opp, 'select')
-  }, [syncEntityContext, opportunities])
+    syncEntityContext(opp, 'select', { force: true })
+    const anchor = onAnchorThread ?? onSelect
+    if (opp.primary_thread_key) anchor(opp.primary_thread_key)
+    else if (opp.id) anchor(opp.id)
+  }, [onAnchorThread, onSelect, opportunities, syncEntityContext])
 
   const handlePreviewOpportunity = useCallback((opportunityId: string) => {
     const opp = opportunities.find((o) => o.id === opportunityId)
-    if (opp) syncEntityContext(opp, 'preview')
+    if (opp) syncEntityContext(opp, 'preview', { force: true })
   }, [opportunities, syncEntityContext])
 
   const handleClearSelection = useCallback(() => {
