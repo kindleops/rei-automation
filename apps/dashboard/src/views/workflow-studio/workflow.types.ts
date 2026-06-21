@@ -1,5 +1,14 @@
 export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived'
 export type WorkflowChannel = 'sms' | 'email' | 'rvm' | 'direct_mail' | 'multichannel'
+export type WorkflowOperationalMode = 'draft' | 'armed' | 'live' | 'paused' | 'failed' | 'archived'
+
+export interface WorkflowRunStats {
+  active?: number
+  waiting?: number
+  blocked?: number
+  completed_today?: number
+  failed_today?: number
+}
 
 export interface Workflow {
   id: string
@@ -10,6 +19,13 @@ export interface Workflow {
   workflow_type: string
   status: WorkflowStatus
   live_send_enabled: boolean
+  is_v2?: boolean
+  is_system_template?: boolean
+  version?: string | number | null
+  operational_mode?: WorkflowOperationalMode
+  stats?: WorkflowRunStats
+  last_execution_at?: string | null
+  last_published_at?: string | null
   market_scope?: string[]
   state_scope?: string[]
   property_type_scope?: string[]
@@ -23,6 +39,85 @@ export interface Workflow {
   send_node_count?: number
   created_at?: string
   updated_at?: string
+}
+
+export interface WorkflowNodeTypeSchema {
+  node_type: string
+  node_kind?: string
+  label: string
+  description?: string
+  category?: string
+  is_communication?: boolean
+  requires_guard_before?: boolean
+  is_terminal?: boolean
+  config_schema?: Record<string, unknown>
+  condition_schema?: Record<string, unknown>
+  safety_schema?: Record<string, unknown>
+}
+
+export interface WorkflowNodeTypesResponse {
+  ok: boolean
+  nodes?: WorkflowNodeTypeSchema[]
+  categories?: Record<string, WorkflowNodeTypeSchema[]>
+}
+
+export interface WorkflowConsoleEvent {
+  id?: string
+  timestamp?: string
+  seller?: string
+  property?: string
+  workflow?: string
+  node?: string
+  transition?: string
+  duration_ms?: number
+  blocker?: string | null
+  trace_id?: string | null
+  status?: string
+  [key: string]: unknown
+}
+
+export interface WorkflowConsoleResponse {
+  ok: boolean
+  events?: WorkflowConsoleEvent[]
+  total?: number
+  filters?: Record<string, unknown>
+}
+
+export interface WorkflowLiveToken {
+  id: string
+  step_id?: string
+  step_key?: string
+  node_type?: string
+  label?: string
+  status: 'progressing' | 'waiting' | 'blocked' | 'failed' | 'completed'
+  seller?: string
+  property?: string
+  run_id?: string
+  started_at?: string
+  [key: string]: unknown
+}
+
+export interface WorkflowLiveNodeState {
+  step_id: string
+  step_key?: string
+  status: 'progressing' | 'waiting' | 'blocked' | 'failed' | 'completed' | 'idle'
+  token_count?: number
+  tokens?: WorkflowLiveToken[]
+}
+
+export interface WorkflowLiveStateResponse {
+  ok: boolean
+  workflow_id?: string
+  nodes?: WorkflowLiveNodeState[]
+  tokens?: WorkflowLiveToken[]
+  updated_at?: string
+}
+
+export interface WorkflowAnalyticsResponse {
+  ok: boolean
+  workflow_id?: string
+  metrics?: Record<string, number | string | null>
+  series?: Array<Record<string, unknown>>
 }
 
 export interface WorkflowStep {

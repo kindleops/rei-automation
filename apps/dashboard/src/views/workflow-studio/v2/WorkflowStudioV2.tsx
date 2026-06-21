@@ -1,23 +1,35 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { ViewLayoutMode, ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import { buildWorkflowStepPayload } from '../WorkflowBuilder'
 import type { WorkflowNodeLibraryItem } from '../WorkflowList'
-import type { Workflow, WorkflowDetail, WorkflowDryRunResult } from '../workflow.types'
+import type { Workflow, WorkflowConsoleEvent, WorkflowDetail, WorkflowDryRunResult } from '../workflow.types'
 import {
+  archiveWorkflow,
   cloneWorkflowDraft,
   createWorkflowDraft,
   createWorkflowStep,
+  deleteWorkflowDraft,
+  enableWorkflowLive,
+  insertNodeOnEdge,
+  loadAnalytics,
   loadWorkflowDetail,
   loadWorkflowStudio,
   pauseWorkflowDraft,
+  publishWorkflow,
+  renameWorkflow,
+  restoreWorkflow,
   resumeWorkflowDraft,
   runWorkflowDryRun,
 } from '../workflowStudio.adapter'
-import { WorkflowCanvasV2, buildCanvasNodes } from './WorkflowCanvasV2'
+import { WorkflowCanvasV2, buildCanvasNodes, type WorkflowCanvasV2Handle } from './WorkflowCanvasV2'
 import { WorkflowCommandBarV2 } from './WorkflowCommandBarV2'
+import { WorkflowConsoleV2 } from './WorkflowConsoleV2'
 import { WorkflowInspectorV2 } from './WorkflowInspectorV2'
+import { WorkflowLiveModeV2 } from './WorkflowLiveModeV2'
+import { WorkflowNavigatorV2, type NavigatorAction } from './WorkflowNavigatorV2'
 import { WorkflowNodePaletteV2 } from './WorkflowNodePaletteV2'
+import { useWorkflowStudioPrefs, useWorkflowStudioShortcuts } from './workflow-studio-state'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -82,17 +94,22 @@ export const WorkflowStudioV2 = ({
   paneWidth = '100',
   layoutMode = 'full',
 }: WorkflowStudioV2Props) => {
+  const canvasRef = useRef<WorkflowCanvasV2Handle | null>(null)
+  const { prefs, toggleLeftRail, toggleRightRail, toggleFocusMode } = useWorkflowStudioPrefs()
+
   const [workflows, setWorkflows] = useState<Workflow[]>(data?.workflows ?? [])
   const [selected, setSelected] = useState<WorkflowDetail | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [dryRunResult, setDryRunResult] = useState<WorkflowDryRunResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [railSection, setRailSection] = useState<RailSection>('workflows')
-  const [workflowQuery, setWorkflowQuery] = useState('')
   const [consoleOpen, setConsoleOpen] = useState(false)
+  const [liveMode, setLiveMode] = useState(false)
+  const [layoutRevision, setLayoutRevision] = useState(0)
 
   const selectedId = selected?.workflow.id ?? null
 
@@ -110,6 +127,7 @@ export const WorkflowStudioV2 = ({
       setSelected(detail)
       setDryRunResult(null)
       setSelectedNodeId(null)
+      setSelectedNodeIds([])
     } catch (err) {
       setError(friendlyWorkflowError(err))
     } finally {
@@ -138,6 +156,18 @@ export const WorkflowStudioV2 = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    setLayoutRevision((value) => value + 1)
+  }, [prefs.leftRailCollapsed, prefs.rightRailCollapsed, prefs.focusMode])
+
+  useWorkflowStudioShortcuts({
+    onToggleLeftRail: toggleLeftRail,
+    onToggleRightRail: toggleRightRail,
+    onToggleFocusMode: toggleFocusMode,
+    onUndo: () => canvasRef.current?.undo(),
+    onRedo: () => canvasRef.current?.redo(),
+  })
+
   const withBusy = async (task: () => Promise<void>, success: string) => {
     setBusy(true)
     setError('')
@@ -158,17 +188,6 @@ export const WorkflowStudioV2 = ({
     return selected.workflow.id
   }
 
-  const filteredWorkflows = useMemo(() => {
-    const needle = workflowQuery.trim().toLowerCase()
-    if (!needle) return workflows
-    return workflows.filter(
-      (workflow) =>
-        workflow.name.toLowerCase().includes(needle) ||
-        workflow.workflow_key.toLowerCase().includes(needle) ||
-        workflow.status.toLowerCase().includes(needle),
-    )
-  }, [workflowQuery, workflows])
-
   const canvasNodes = useMemo(() => buildCanvasNodes(selected), [selected])
   const selectedCanvasNode = canvasNodes.find((node) => node.id === selectedNodeId) ?? null
   const selectedDryRunStep = selectedCanvasNode
@@ -182,22 +201,158 @@ export const WorkflowStudioV2 = ({
   const validationCount =
     (selected?.validation?.errors?.length ?? 0) + (selected?.validation?.warnings?.length ?? 0)
 
-const addNodeFromPalette = (item: WorkflowNodeLibraryItem, position?: { x: number; y: number }) => {
-  void withBusy(async () => {
+  const fallbackConsoleEvents = useMemo<WorkflowConsoleEvent[]>(() => {
+    if (!dryRunResult) return []
+    return dryRunResult.steps.map((step, index) => ({
+      id: step.step_id ?? step.step_key ?? `dry-${index}`,
+      timestamp: new Date().toISOString(),
+      seller: String(sampleDryRunContext.context.seller_display_name),
+      property: String(sampleDryRunContext.context.property_address),
+      workflow: selected?.workflow.name,
+      node: step.label,
+      transition: step.status,
+      duration_ms: 120 + index * 40,
+      blocker: step.live_send_blocked ? 'live_send_blocked' : null,
+      trace_id: `dry-run-${index + 1}`,
+      status: step.status,
+    }))
+  }, [dryRunResult, selected?.workflow.name])
+
+  const addNodeFromPalette = (
+    item: WorkflowNodeLibraryItem,
+    position?: { x: number; y: number },
+  ) => {
+    void withBusy(async () => {
+      const workflowId = requireWorkflow()
+      const maxOrder = Math.max(0, ...(selected?.steps ?? []).map((step) => Number(step.step_order) || 0))
+      const index = selected?.steps.length ?? 0
+      const x = position?.x ?? Math.min(1780, 140 + (index * 64))
+      const y = position?.y ?? 170 + ((index % 4) * 76)
+
+      const detail = await createWorkflowStep(
+        workflowId,
+        buildWorkflowStepPayload(item, { x, y }, maxOrder + 10),
+      )
+
+      setSelected(detail)
+    }, `${item.label} node added`)
+  }
+
+  const insertOnEdge = async (
+    item: WorkflowNodeLibraryItem,
+    connection: { from: { id: string; key: string }; to: { id: string; key: string }; kind: string },
+    position: { x: number; y: number },
+  ) => {
     const workflowId = requireWorkflow()
-    const maxOrder = Math.max(0, ...(selected?.steps ?? []).map((step) => Number(step.step_order) || 0))
-    const index = selected?.steps.length ?? 0
-    const x = position?.x ?? Math.min(1780, 140 + (index * 64))
-    const y = position?.y ?? 170 + ((index % 4) * 76)
+    const payload = {
+      node_type: item.type,
+      label: item.label,
+      position,
+      edge: {
+        from_step_id: connection.from.id,
+        to_step_id: connection.to.id,
+        kind: connection.kind,
+      },
+      step_payload: buildWorkflowStepPayload(item, position, (selected?.steps.length ?? 0) * 10 + 10),
+    }
 
-    const detail = await createWorkflowStep(
-      workflowId,
-      buildWorkflowStepPayload(item, { x, y }, maxOrder + 10),
-    )
+    try {
+      const detail = await insertNodeOnEdge(workflowId, payload)
+      setSelected(detail)
+      setNotice(`${item.label} inserted on edge`)
+      await refreshList()
+    } catch {
+      addNodeFromPalette(item, position)
+    }
+  }
 
-    setSelected(detail)
-  }, `${item.label} node added`)
-}
+  const handleNavigatorAction = (workflow: Workflow, action: NavigatorAction) => {
+    if (action === 'open') {
+      void loadSelected(workflow.id)
+      return
+    }
+
+    if (action === 'rename') {
+      const nextName = window.prompt('Rename workflow', workflow.name)
+      if (!nextName?.trim()) return
+      void withBusy(async () => {
+        const detail = await renameWorkflow(workflow.id, nextName.trim())
+        if (selectedId === workflow.id) setSelected(detail)
+      }, 'Workflow renamed')
+      return
+    }
+
+    if (action === 'duplicate') {
+      void withBusy(async () => {
+        const detail = await cloneWorkflowDraft(workflow.id)
+        setSelected(detail)
+      }, 'Workflow duplicated')
+      return
+    }
+
+    if (action === 'view-runs') {
+      void loadSelected(workflow.id)
+      setConsoleOpen(true)
+      return
+    }
+
+    if (action === 'view-analytics') {
+      void withBusy(async () => {
+        await loadAnalytics(workflow.id)
+        setNotice(`Analytics loaded for ${workflow.name}`)
+      }, 'Analytics refreshed')
+      return
+    }
+
+    if (action === 'version-history') {
+      setNotice(`Version history for ${workflow.name} (v${workflow.version ?? '1'})`)
+      return
+    }
+
+    if (action === 'enable') {
+      void withBusy(async () => {
+        const detail = await enableWorkflowLive(workflow.id)
+        if (selectedId === workflow.id) setSelected(detail)
+      }, 'Workflow enabled')
+      return
+    }
+
+    if (action === 'pause') {
+      void withBusy(async () => {
+        const detail = await pauseWorkflowDraft(workflow.id)
+        if (selectedId === workflow.id) setSelected(detail)
+      }, 'Workflow paused')
+      return
+    }
+
+    if (action === 'archive') {
+      void withBusy(async () => {
+        const detail = await archiveWorkflow(workflow.id)
+        if (selectedId === workflow.id) setSelected(detail)
+      }, 'Workflow archived')
+      return
+    }
+
+    if (action === 'restore') {
+      void withBusy(async () => {
+        const detail = await restoreWorkflow(workflow.id)
+        if (selectedId === workflow.id) setSelected(detail)
+      }, 'Workflow restored')
+      return
+    }
+
+    if (action === 'delete-draft') {
+      if (workflow.is_system_template || workflow.status !== 'draft') {
+        setError('Only custom drafts can be deleted.')
+        return
+      }
+      if (!window.confirm(`Delete draft "${workflow.name}"?`)) return
+      void withBusy(async () => {
+        await deleteWorkflowDraft(workflow.id)
+        if (selectedId === workflow.id) setSelected(null)
+      }, 'Draft deleted')
+    }
+  }
 
   const runDryRun = () => {
     void withBusy(async () => {
@@ -208,13 +363,24 @@ const addNodeFromPalette = (item: WorkflowNodeLibraryItem, position?: { x: numbe
   }
 
   return (
-    <section className={cls('wfs2', `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+    <section
+      className={cls(
+        'wfs2',
+        `is-width-${paneWidth}`,
+        `is-layout-${layoutMode}`,
+        prefs.focusMode && 'is-focus-mode',
+        prefs.leftRailCollapsed && 'is-left-collapsed',
+        prefs.rightRailCollapsed && 'is-right-collapsed',
+      )}
+    >
       <WorkflowCommandBarV2
         detail={selected}
         busy={busy}
         validationCount={validationCount}
         consoleOpen={consoleOpen}
+        liveMode={liveMode}
         onToggleConsole={() => setConsoleOpen((open) => !open)}
+        onToggleLiveMode={() => setLiveMode((value) => !value)}
         onClone={() => withBusy(async () => {
           const detail = await cloneWorkflowDraft(requireWorkflow())
           setSelected(detail)
@@ -228,6 +394,15 @@ const addNodeFromPalette = (item: WorkflowNodeLibraryItem, position?: { x: numbe
           setSelected(detail)
         }, 'Workflow resumed')}
         onDryRun={runDryRun}
+        onPublish={() => withBusy(async () => {
+          const detail = await publishWorkflow(requireWorkflow(), { validate: true })
+          setSelected(detail)
+        }, 'Workflow published')}
+        onGoLive={() => withBusy(async () => {
+          const detail = await enableWorkflowLive(requireWorkflow())
+          setSelected(detail)
+          setLiveMode(true)
+        }, 'Workflow live mode armed')}
       />
 
       {(notice || error) && (
@@ -238,130 +413,149 @@ const addNodeFromPalette = (item: WorkflowNodeLibraryItem, position?: { x: numbe
       )}
 
       <div className="wfs2__body">
-        <aside className="wfs2__rail">
-          <div className="wfs2__rail-tabs">
-            <button
-              type="button"
-              className={cls('wfs2__rail-tab', railSection === 'workflows' && 'is-active')}
-              onClick={() => setRailSection('workflows')}
-            >
-              Workflows
-            </button>
-            <button
-              type="button"
-              className={cls('wfs2__rail-tab', railSection === 'nodes' && 'is-active')}
-              onClick={() => setRailSection('nodes')}
-            >
-              Nodes
-            </button>
-          </div>
+        {!prefs.focusMode && !prefs.leftRailCollapsed && (
+          <aside className="wfs2__rail wfs2__rail--left">
+            <div className="wfs2__rail-tabs">
+              <button
+                type="button"
+                className={cls('wfs2__rail-tab', railSection === 'workflows' && 'is-active')}
+                onClick={() => setRailSection('workflows')}
+              >
+                Workflows
+              </button>
+              <button
+                type="button"
+                className={cls('wfs2__rail-tab', railSection === 'nodes' && 'is-active')}
+                onClick={() => setRailSection('nodes')}
+              >
+                Nodes
+              </button>
+              <button
+                type="button"
+                className="wfs2__rail-collapse"
+                onClick={toggleLeftRail}
+                title="Collapse left rail (⌘B)"
+              >
+                <Icon name="chevron-left" />
+              </button>
+            </div>
 
-          <div className="wfs2__rail-body">
-            {railSection === 'workflows' ? (
-              <>
-                <input
-                  className="wfs2__search"
-                  type="search"
-                  placeholder="Search workflows…"
-                  value={workflowQuery}
-                  onChange={(event) => setWorkflowQuery(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="wfs2__btn is-primary"
-                  style={{ width: '100%', marginBottom: '0.55rem' }}
-                  disabled={busy}
-                  onClick={() => withBusy(async () => {
+            <div className="wfs2__rail-body">
+              {railSection === 'workflows' ? (
+                <WorkflowNavigatorV2
+                  workflows={workflows}
+                  selectedId={selectedId}
+                  loading={loading}
+                  busy={busy}
+                  onSelect={(workflowId) => void loadSelected(workflowId)}
+                  onCreate={() => withBusy(async () => {
                     const detail = await createWorkflowDraft(defaultCreatePayload)
                     setSelected(detail)
                   }, 'Draft workflow created')}
-                >
-                  <Icon name="grid" /> New Workflow
-                </button>
-                <div className="wfs2__workflow-list">
-                  {loading && filteredWorkflows.length === 0 ? (
-                    <div className="wfs2__empty">Loading workflows…</div>
-                  ) : filteredWorkflows.length === 0 ? (
-                    <div className="wfs2__empty">No workflows found.</div>
-                  ) : (
-                    filteredWorkflows.map((workflow) => (
-                      <button
-                        key={workflow.id}
-                        type="button"
-                        className={cls('wfs2__workflow-row', selectedId === workflow.id && 'is-selected')}
-                        onClick={() => void loadSelected(workflow.id)}
-                      >
-                        <span className={cls('wfs2__badge', `is-${workflow.status}`)}>{workflow.status}</span>
-                        <strong>{workflow.name}</strong>
-                        <small>{workflow.workflow_key} · {workflow.channel}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            ) : (
-              <WorkflowNodePaletteV2 onAddNode={addNodeFromPalette} disabled={busy || !selected} />
+                  onAction={handleNavigatorAction}
+                />
+              ) : (
+                <WorkflowNodePaletteV2 onAddNode={addNodeFromPalette} disabled={busy || !selected} />
+              )}
+            </div>
+          </aside>
+        )}
+
+        {(prefs.focusMode || prefs.leftRailCollapsed) && (
+          <button
+            type="button"
+            className="wfs2__rail-reveal is-left"
+            onClick={toggleLeftRail}
+            title="Show left rail (⌘B)"
+          >
+            <Icon name="chevron-right" />
+          </button>
+        )}
+
+        <div className="wfs2__canvas-host">
+          <WorkflowCanvasV2
+            ref={canvasRef}
+            detail={selected}
+            dryRunResult={dryRunResult}
+            selectedNodeId={selectedNodeId}
+            selectedNodeIds={selectedNodeIds}
+            onSelectNode={setSelectedNodeId}
+            onSelectNodes={setSelectedNodeIds}
+            busy={busy}
+            layoutRevision={layoutRevision}
+            onDropNode={addNodeFromPalette}
+            onDropOnNode={(item, target, placement) => {
+              const offset =
+                placement === 'insert-before' ? { x: target.x - 120, y: target.y } :
+                placement === 'add-branch' ? { x: target.x, y: target.y + 160 } :
+                placement === 'replace' ? { x: target.x, y: target.y } :
+                { x: target.x + 120, y: target.y }
+              addNodeFromPalette(item, offset)
+            }}
+            onDropOnEdge={(item, connection, position) => {
+              void insertOnEdge(item, connection, position)
+            }}
+            onCreateDraft={() => withBusy(async () => {
+              const detail = await createWorkflowDraft(defaultCreatePayload)
+              setSelected(detail)
+            }, 'Draft workflow created')}
+            liveOverlay={(
+              <WorkflowLiveModeV2
+                workflowId={selectedId}
+                enabled={liveMode}
+                nodes={canvasNodes}
+              />
             )}
+          />
+        </div>
+
+        {!prefs.focusMode && !prefs.rightRailCollapsed && (
+          <div className="wfs2__inspector-wrap">
+            <button
+              type="button"
+              className="wfs2__rail-collapse is-right"
+              onClick={toggleRightRail}
+              title="Collapse right rail (⌘I)"
+            >
+              <Icon name="chevron-right" />
+            </button>
+            <WorkflowInspectorV2
+              node={selectedCanvasNode}
+              detail={selected}
+              dryRunStep={selectedDryRunStep}
+              dryRunResult={dryRunResult}
+            />
           </div>
+        )}
 
-          <footer className="wfs2__rail-footer">
-            <button type="button" className="wfs2__future-link" disabled>Template Library (coming soon)</button>
-            <button type="button" className="wfs2__future-link" disabled>Sender Control (coming soon)</button>
-            <button type="button" className="wfs2__future-link" disabled>Execution Center (coming soon)</button>
-          </footer>
-        </aside>
-
-        <WorkflowCanvasV2
-          detail={selected}
-          dryRunResult={dryRunResult}
-          selectedNodeId={selectedNodeId}
-          onSelectNode={setSelectedNodeId}
-          busy={busy}
-          onDropNode={addNodeFromPalette}
-          onCreateDraft={() => withBusy(async () => {
-            const detail = await createWorkflowDraft(defaultCreatePayload)
-            setSelected(detail)
-          }, 'Draft workflow created')}
-        />
-
-        <WorkflowInspectorV2
-          node={selectedCanvasNode}
-          detail={selected}
-          dryRunStep={selectedDryRunStep}
-          dryRunResult={dryRunResult}
-        />
+        {(prefs.focusMode || prefs.rightRailCollapsed) && (
+          <button
+            type="button"
+            className="wfs2__rail-reveal is-right"
+            onClick={toggleRightRail}
+            title="Show right rail (⌘I)"
+          >
+            <Icon name="chevron-left" />
+          </button>
+        )}
       </div>
 
-      {consoleOpen && (
-        <section className="wfs2-console">
-          <header className="wfs2-console__head">
-            <strong>Execution Console</strong>
-            <span>{dryRunResult ? `${dryRunResult.steps.length} steps` : 'No dry run yet'}</span>
-          </header>
-          <div className="wfs2-console__body">
-            {!dryRunResult ? (
-              <p>Run a dry-run simulation to see node-level execution proof. Live sends remain blocked.</p>
-            ) : (
-              <>
-                <p>
-                  <Icon name="shield" /> no_outbound_messages_sent=
-                  {dryRunResult.no_outbound_messages_sent ? 'true' : 'false'} · live_send_blocked=
-                  {dryRunResult.live_send_blocked ? 'true' : 'false'}
-                </p>
-                {dryRunResult.steps.map((step, index) => (
-                  <div key={step.step_id ?? step.step_key ?? `${step.node_type}-${index}`} className="wfs2-console__step">
-                    <span>{String(index + 1).padStart(2, '0')}</span>
-                    <div>
-                      <strong>{step.label}</strong>
-                      <div>{step.node_type} / {step.status}</div>
-                    </div>
-                    <em>{step.live_send_blocked ? 'Blocked' : 'OK'}</em>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </section>
+      <WorkflowConsoleV2
+        workflowId={selectedId}
+        open={consoleOpen}
+        onClose={() => setConsoleOpen(false)}
+        fallbackEvents={fallbackConsoleEvents}
+      />
+
+      {prefs.focusMode && (
+        <button
+          type="button"
+          className="wfs2__focus-exit"
+          onClick={toggleFocusMode}
+          title="Exit focus mode (⌘⇧F)"
+        >
+          <Icon name="maximize" /> Exit Focus
+        </button>
       )}
     </section>
   )

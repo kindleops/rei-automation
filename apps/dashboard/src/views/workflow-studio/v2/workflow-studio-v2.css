@@ -132,6 +132,108 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.wfs2.is-left-collapsed .wfs2__body,
+.wfs2.is-right-collapsed .wfs2__body {
+  transition: grid-template-columns var(--wfs2-transition);
+}
+
+.wfs2.is-left-collapsed .wfs2__body {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.wfs2.is-right-collapsed .wfs2__body {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.wfs2.is-left-collapsed.is-right-collapsed .wfs2__body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.wfs2.is-focus-mode .wfs2__body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.wfs2__canvas-host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wfs2__inspector-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.wfs2__rail-collapse {
+  justify-self: end;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wfs2-card) 80%, transparent);
+  color: var(--wfs2-muted);
+  width: 1.8rem;
+  height: 1.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wfs2__rail-collapse.is-right {
+  position: absolute;
+  left: -0.9rem;
+  top: 0.7rem;
+  z-index: 4;
+}
+
+.wfs2__rail-reveal {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wfs2-panel) 92%, transparent);
+  color: var(--wfs2-text);
+  width: 1.7rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--wfs2-shadow);
+}
+
+.wfs2__rail-reveal.is-left {
+  left: 0.35rem;
+}
+
+.wfs2__rail-reveal.is-right {
+  right: 0.35rem;
+}
+
+.wfs2__focus-exit {
+  position: absolute;
+  right: 1rem;
+  top: 4.2rem;
+  z-index: 30;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wfs2-panel) 94%, transparent);
+  color: var(--wfs2-text);
+  padding: 0.35rem 0.7rem;
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
 }
 
 .wfs2__rail {
@@ -148,7 +250,7 @@
 
 .wfs2__rail-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   gap: 0.4rem;
   padding: 0.7rem;
   border-bottom: 1px solid var(--wfs2-border);
@@ -195,11 +297,9 @@
   padding: 0.72rem;
 }
 
-.wfs2__rail-footer {
-  border-top: 1px solid var(--wfs2-border);
-  padding: 0.6rem 0.72rem 0.78rem;
-  display: grid;
-  gap: 0.3rem;
+.wfs2__rail--left,
+.wfs2-inspector {
+  backdrop-filter: blur(18px) saturate(1.15);
 }
 
 .wfs2__future-link {
@@ -1264,6 +1364,87 @@
     linear-gradient(180deg, color-mix(in srgb, var(--wfs2-surface) 88%, transparent), var(--wfs2-surface));
 }
 
+.wfs2-console.is-drawer {
+  max-height: 280px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.18);
+}
+
+.wfs2-console__head-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.wfs2-console__filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--wfs2-border);
+}
+
+.wfs2-console__filters label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.66rem;
+  color: var(--wfs2-muted);
+}
+
+.wfs2-console__filters input,
+.wfs2-console__filters select {
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: var(--wfs2-card);
+  color: var(--wfs2-text);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.wfs2-console__notice {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.72rem;
+  border-bottom: 1px solid var(--wfs2-border);
+}
+
+.wfs2-console__notice.is-warn {
+  color: var(--wfs2-gold);
+}
+
+.wfs2-console__table-wrap {
+  overflow: auto;
+  min-height: 0;
+}
+
+.wfs2-console__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+
+.wfs2-console__table th,
+.wfs2-console__table td {
+  padding: 0.38rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--wfs2-border) 70%, transparent);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wfs2-console__table tr.is-blocked td {
+  color: var(--wfs2-gold);
+}
+
+.wfs2-console__trace {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.64rem;
+  color: var(--wfs2-dim);
+}
+
+.wfs2-console__empty-row {
+  text-align: center;
+  color: var(--wfs2-muted);
+  padding: 1rem !important;
+}
+
 .wfs2-console__head {
   display: flex;
   align-items: center;
@@ -1831,4 +2012,468 @@
   to {
     stroke-dashoffset: -56;
   }
+}
+
+/* =========================
+   Navigator
+========================= */
+
+.wfs2-nav__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.55rem;
+}
+
+.wfs2-nav__tab {
+  border: 1px solid var(--wfs2-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wfs2-card) 70%, transparent);
+  color: var(--wfs2-muted);
+  padding: 0.22rem 0.5rem;
+  font-size: 0.64rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wfs2-nav__tab.is-active {
+  color: var(--wfs2-text);
+  border-color: color-mix(in srgb, var(--wfs2-accent) 45%, var(--wfs2-border));
+  background: rgba(var(--wfs2-accent-rgb), 0.12);
+}
+
+.wfs2-nav__create {
+  width: 100%;
+  margin-bottom: 0.55rem;
+}
+
+.wfs2-nav__list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wfs2-nav__card {
+  position: relative;
+  border: 1px solid var(--wfs2-border);
+  border-radius: var(--wfs2-radius-sm);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--wfs2-card) 92%, transparent), var(--wfs2-card));
+  transition: border-color var(--wfs2-transition), box-shadow var(--wfs2-transition), transform var(--wfs2-transition);
+}
+
+.wfs2-nav__card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--wfs2-accent) 35%, var(--wfs2-border));
+  box-shadow: var(--wfs2-glow);
+}
+
+.wfs2-nav__card.is-selected {
+  border-color: color-mix(in srgb, var(--wfs2-accent) 58%, var(--wfs2-border));
+  box-shadow: 0 0 0 1px rgba(var(--wfs2-accent-rgb), 0.14), var(--wfs2-glow);
+}
+
+.wfs2-nav__card-main {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0.55rem 2rem 0.55rem 0.55rem;
+  cursor: pointer;
+}
+
+.wfs2-nav__card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.wfs2-nav__card-head strong {
+  font-size: 0.8rem;
+}
+
+.wfs2-nav__badge {
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wfs2-nav__badge.is-system {
+  background: rgba(115, 167, 255, 0.16);
+  color: var(--wfs2-blue);
+}
+
+.wfs2-nav__badge.is-custom {
+  background: rgba(var(--wfs2-accent-rgb), 0.14);
+  color: var(--wfs2-accent);
+}
+
+.wfs2-nav__meta,
+.wfs2-nav__stats,
+.wfs2-nav__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.64rem;
+  color: var(--wfs2-muted);
+}
+
+.wfs2-nav__stats b {
+  color: var(--wfs2-text);
+}
+
+.wfs2-nav__live.is-on {
+  color: var(--wfs2-green);
+}
+
+.wfs2-nav__menu-wrap {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+}
+
+.wfs2-nav__menu-btn {
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wfs2-panel) 90%, transparent);
+  color: var(--wfs2-muted);
+  width: 1.6rem;
+  height: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wfs2-nav__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.2rem);
+  min-width: 10rem;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 10px;
+  background: var(--wfs2-card-strong);
+  box-shadow: var(--wfs2-shadow);
+  z-index: 20;
+}
+
+.wfs2-nav__menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wfs2-text);
+  text-align: left;
+  padding: 0.38rem 0.45rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.wfs2-nav__menu button:hover {
+  background: rgba(var(--wfs2-accent-rgb), 0.1);
+}
+
+.wfs2-nav__menu button.is-danger {
+  color: var(--wfs2-red);
+}
+
+/* =========================
+   Palette / Command Bar
+========================= */
+
+.wfs2-palette__source {
+  margin-bottom: 0.45rem;
+  font-size: 0.62rem;
+  color: var(--wfs2-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wfs2-cmd__chip.is-system {
+  color: var(--wfs2-blue);
+}
+
+.wfs2-cmd__chip.is-live {
+  color: var(--wfs2-green);
+}
+
+.wfs2__btn.is-accent {
+  border-color: color-mix(in srgb, var(--wfs2-accent) 55%, var(--wfs2-border));
+  color: var(--wfs2-accent);
+}
+
+/* =========================
+   Inspector Test / Dev
+========================= */
+
+.wfs2-inspector__toolbar {
+  padding: 0.45rem 0.55rem 0;
+}
+
+.wfs2-inspector__dev-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--wfs2-muted);
+}
+
+.wfs2-inspector__test-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wfs2-inspector__test-error {
+  color: var(--wfs2-red);
+  font-size: 0.72rem;
+}
+
+.wfs2-inspector__test-result {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wfs2-card) 90%, transparent);
+  font-size: 0.72rem;
+}
+
+/* =========================
+   Canvas Drop / Placement
+========================= */
+
+.wfs2-edge-group.is-drop-target .wfs2-edge {
+  stroke-width: 3.5px;
+  filter: url(#wfs2-edge-glow);
+}
+
+.wfs2-edge-group.is-drop-target .wfs2-edge-shadow {
+  opacity: 0.95;
+}
+
+.wfs2-canvas-placement {
+  position: absolute;
+  z-index: 80;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 9rem;
+  padding: 0.45rem;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--wfs2-card-strong) 96%, transparent);
+  box-shadow: var(--wfs2-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.wfs2-canvas-placement strong {
+  font-size: 0.68rem;
+  color: var(--wfs2-muted);
+  text-transform: uppercase;
+}
+
+.wfs2-canvas-placement button {
+  border: 1px solid var(--wfs2-border);
+  border-radius: 8px;
+  background: var(--wfs2-card);
+  color: var(--wfs2-text);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.wfs2-canvas-placement button.is-cancel {
+  color: var(--wfs2-muted);
+}
+
+.wfs2-canvas-edge-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 4.5rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  background: rgba(var(--wfs2-accent-rgb), 0.18);
+  border: 1px solid rgba(var(--wfs2-accent-rgb), 0.35);
+  color: var(--wfs2-text);
+  font-size: 0.72rem;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.wfs2-canvas-aura {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(var(--wfs2-accent-rgb), 0.08), transparent 42%),
+    radial-gradient(circle at 72% 64%, rgba(115, 167, 255, 0.06), transparent 36%);
+}
+
+.wfs2-edge-group.is-selected .wfs2-edge,
+.wfs2-edge-group.is-active .wfs2-edge {
+  filter: url(#wfs2-edge-glow);
+}
+
+/* =========================
+   Live Overlay
+========================= */
+
+.wfs2-live {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+}
+
+.wfs2-live__banner {
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  background: color-mix(in srgb, var(--wfs2-panel) 92%, transparent);
+  border: 1px solid var(--wfs2-border);
+  font-size: 0.68rem;
+  color: var(--wfs2-muted);
+}
+
+.wfs2-live__node-overlay {
+  position: absolute;
+  pointer-events: none;
+}
+
+.wfs2-live__token {
+  position: absolute;
+  pointer-events: auto;
+  border: 0;
+  background: transparent;
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.wfs2-live__token-core {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  box-shadow: 0 0 14px currentColor;
+}
+
+.wfs2-live__token.is-progressing .wfs2-live__token-core {
+  background: #14b8a6;
+  color: #14b8a6;
+}
+
+.wfs2-live__token.is-waiting .wfs2-live__token-core {
+  background: #f4c75f;
+  color: #f4c75f;
+}
+
+.wfs2-live__token.is-blocked .wfs2-live__token-core {
+  background: #ffb45f;
+  color: #ffb45f;
+}
+
+.wfs2-live__token.is-failed .wfs2-live__token-core {
+  background: #ff7482;
+  color: #ff7482;
+}
+
+.wfs2-live__token.is-completed .wfs2-live__token-core {
+  background: #77df9a;
+  color: #77df9a;
+}
+
+.wfs2-live__token.is-animated {
+  animation: wfs2-token-drift 2.8s ease-in-out infinite;
+  animation-delay: var(--wfs2-token-delay, 0s);
+}
+
+.wfs2-live__overflow {
+  position: absolute;
+  right: 0.2rem;
+  top: 0.2rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.35rem;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.wfs2-live__drawer {
+  position: absolute;
+  right: 0.8rem;
+  top: 3rem;
+  width: min(18rem, 42vw);
+  pointer-events: auto;
+  border: 1px solid var(--wfs2-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wfs2-card-strong) 96%, transparent);
+  box-shadow: var(--wfs2-shadow);
+  backdrop-filter: blur(16px);
+}
+
+.wfs2-live__drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--wfs2-border);
+}
+
+.wfs2-live__drawer-body {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem 0.6rem 0.7rem;
+  font-size: 0.72rem;
+}
+
+.wfs2-live__drawer-body p {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--wfs2-muted);
+}
+
+.wfs2-live__drawer-body b {
+  color: var(--wfs2-text);
+}
+
+.wfs2-live.is-reduced-motion .wfs2-live__token.is-animated {
+  animation: none;
+}
+
+@keyframes wfs2-token-drift {
+  0%,
+  100% {
+    transform: translate(8%, 18%);
+    opacity: 0.85;
+  }
+
+  50% {
+    transform: translate(72%, 42%);
+    opacity: 1;
+  }
+}
+
+[data-nexus-theme='light'] .wfs2-nav__card,
+[data-theme='light'] .wfs2,
+.light .wfs2-nav__card {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+[data-nexus-theme='light'] .wfs2-console__table th,
+[data-theme='light'] .wfs2 .wfs2-console__table th,
+.light .wfs2-console__table th {
+  color: #334155;
 }

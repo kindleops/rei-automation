@@ -250,3 +250,127 @@ export async function seedSystemWorkflowTemplates(deps = {}) {
 
   return { ok: true, seeded, skipped, total: SYSTEM_WORKFLOW_TEMPLATES.length };
 }
+
+const MASTER_ORCHESTRATOR_STAGES = Object.freeze([
+  { key: 'stage_0', label: 'Stage 0 — Intake & Safety', subworkflow_key: 'system_delivery_recovery' },
+  { key: 'stage_1', label: 'Stage 1 — Ownership', subworkflow_key: 'system_ownership_verification' },
+  { key: 'stage_2', label: 'Stage 2 — Interest', subworkflow_key: 'system_interest_qualification' },
+  { key: 'stage_3', label: 'Stage 3 — Pricing', subworkflow_key: 'system_asking_price_extraction' },
+  { key: 'stage_4', label: 'Stage 4 — Underwriting', subworkflow_key: 'system_underwriting_collection' },
+  { key: 'stage_5', label: 'Stage 5 — Offer Engine', subworkflow_key: 'system_acquisition_engine_orchestration' },
+  {
+    key: 'stage_6',
+    label: 'Stage 6 — Contract-to-Close',
+    subworkflow_key: 'system_offer_follow_up',
+    blocked: true,
+    blocked_reason: 'pipeline_and_calendar_not_wired',
+  },
+]);
+
+export async function seedMasterOrchestrator(deps = {}) {
+  const client = db(deps);
+  const definitionKey = 'system_master_acquisition_orchestrator';
+  const existing = await client
+    .from('workflow_definitions')
+    .select('*')
+    .eq('definition_key', definitionKey)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  if (existing.data) {
+    return { ok: true, skipped: true, definition_key: definitionKey, id: existing.data.id };
+  }
+
+  const definitionInsert = await client
+    .from('workflow_definitions')
+    .insert({
+      definition_key: definitionKey,
+      name: 'Master Acquisition Orchestrator',
+      description: 'Coordinates versioned acquisition subworkflows across stages 0–6.',
+      status: 'published',
+      live_send_enabled: false,
+      trigger_type: 'trigger.manual_enrollment',
+      version: 1,
+      published_at: new Date().toISOString(),
+      is_system_template: true,
+      is_locked: true,
+      metadata: {
+        system_template_key: 'master_acquisition_orchestrator',
+        operational_mode: 'active_safe',
+        orchestrator: true,
+        stages: MASTER_ORCHESTRATOR_STAGES,
+      },
+    })
+    .select('*')
+    .single();
+  if (definitionInsert.error) throw definitionInsert.error;
+
+  const definition = definitionInsert.data;
+  const nodes = [
+    {
+      node_key: 'trigger',
+      node_kind: 'trigger',
+      node_type: 'trigger.manual_enrollment',
+      label: 'Manual Enrollment',
+      position_x: 0,
+      position_y: 0,
+    },
+    ...MASTER_ORCHESTRATOR_STAGES.map((stage, index) => ({
+      node_key: stage.key,
+      node_kind: 'action',
+      node_type: 'action.enroll_subworkflow',
+      label: stage.label,
+      config: {
+        subworkflow_definition_key: stage.subworkflow_key,
+        blocked: stage.blocked === true,
+        blocked_reason: stage.blocked_reason ?? null,
+      },
+      position_x: 0,
+      position_y: 120 + index * 120,
+      is_active: stage.blocked !== true,
+    })),
+    {
+      node_key: 'exit',
+      node_kind: 'action',
+      node_type: 'action.exit_workflow',
+      label: 'Exit Orchestrator',
+      position_x: 0,
+      position_y: 120 + MASTER_ORCHESTRATOR_STAGES.length * 120,
+    },
+  ];
+
+  const nodeIdByKey = new Map();
+  for (const node of nodes) {
+    const insert = await client
+      .from('workflow_nodes')
+      .insert({
+        workflow_definition_id: definition.id,
+        node_key: node.node_key,
+        node_kind: node.node_kind,
+        node_type: node.node_type,
+        label: node.label,
+        config: node.config ?? {},
+        position_x: node.position_x ?? 0,
+        position_y: node.position_y ?? 0,
+        is_active: node.is_active !== false,
+      })
+      .select('*')
+      .single();
+    if (insert.error) throw insert.error;
+    nodeIdByKey.set(node.node_key, insert.data.id);
+  }
+
+  const chain = ['trigger', ...MASTER_ORCHESTRATOR_STAGES.map((s) => s.key), 'exit'];
+  for (let i = 0; i < chain.length - 1; i += 1) {
+    const sourceId = nodeIdByKey.get(chain[i]);
+    const targetId = nodeIdByKey.get(chain[i + 1]);
+    if (!sourceId || !targetId) continue;
+    await client.from('workflow_edges').insert({
+      workflow_definition_id: definition.id,
+      source_node_id: sourceId,
+      target_node_id: targetId,
+      edge_type: 'next',
+    });
+  }
+
+  return { ok: true, seeded: true, definition_key: definitionKey, id: definition.id };
+}

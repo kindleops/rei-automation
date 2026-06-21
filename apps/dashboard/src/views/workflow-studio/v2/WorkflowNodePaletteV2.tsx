@@ -1,54 +1,55 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { DragEvent } from 'react'
+import type { IconName } from '../../../shared/icons'
 import { workflowNodeCategories, type WorkflowNodeLibraryItem } from '../WorkflowList'
-
-const SAFETY_TYPES = new Set([
-  'suppress_phone',
-  'suppress_owner',
-  'pause_workflow',
-  'stop_workflow',
-  'cancel_queue',
-  'require_approval',
-])
-
-const CATEGORY_MAP: Record<string, string> = {
-  Triggers: 'Triggers',
-  Communication: 'Communication',
-  Timing: 'Timing',
-  Conditions: 'Conditions',
-  'Deal Intelligence': 'AI / Intelligence',
-  'State & Ops': 'Operations',
-}
+import { listNodeTypes } from '../workflowStudio.adapter'
+import type { WorkflowNodeTypeSchema } from '../workflow.types'
 
 const CATEGORY_META: Record<string, { icon: string; tone: string; hint: string }> = {
-  Triggers: { icon: '⚡', tone: 'trigger', hint: 'Start events' },
-  Communication: { icon: '➤', tone: 'communication', hint: 'SMS, email, RVM' },
-  Conditions: { icon: 'Ⅱ', tone: 'condition', hint: 'Branches & logic' },
-  Timing: { icon: '◷', tone: 'timing', hint: 'Waits & delays' },
-  'AI / Intelligence': { icon: '✦', tone: 'ai', hint: 'AI decisions' },
-  Operations: { icon: '⌘', tone: 'ops', hint: 'CRM updates' },
-  Safety: { icon: '◇', tone: 'safety', hint: 'Guards & approvals' },
+  triggers: { icon: '⚡', tone: 'trigger', hint: 'Start events' },
+  communication: { icon: '➤', tone: 'communication', hint: 'SMS, email, RVM' },
+  conditions: { icon: 'Ⅱ', tone: 'condition', hint: 'Branches & logic' },
+  timing: { icon: '◷', tone: 'timing', hint: 'Waits & delays' },
+  intelligence: { icon: '✦', tone: 'ai', hint: 'AI decisions' },
+  operations: { icon: '⌘', tone: 'ops', hint: 'CRM updates' },
+  control: { icon: '◎', tone: 'ops', hint: 'Flow control' },
+  safety: { icon: '◇', tone: 'safety', hint: 'Guards & approvals' },
+  guards: { icon: '◇', tone: 'safety', hint: 'Safety gates' },
 }
 
-const V2_CATEGORY_ORDER = [
-  'Triggers',
-  'Communication',
-  'Conditions',
-  'Timing',
-  'AI / Intelligence',
-  'Operations',
-  'Safety',
-] as const
-
-type V2Category = (typeof V2_CATEGORY_ORDER)[number]
-
-function resolveCategory(item: WorkflowNodeLibraryItem, sourceTitle: string): V2Category {
-  if (SAFETY_TYPES.has(item.type)) return 'Safety'
-  return (CATEGORY_MAP[sourceTitle] ?? sourceTitle) as V2Category
+const KIND_ICON: Record<string, IconName> = {
+  trigger: 'bolt',
+  action: 'send',
+  condition: 'layout-split',
+  timing: 'clock',
+  guard: 'shield',
 }
 
 interface PaletteCategory {
-  title: V2Category
+  title: string
   items: WorkflowNodeLibraryItem[]
+}
+
+function titleCase(value: string) {
+  return value.replace(/_/g, ' ').replace(/\./g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function mapApiNode(node: WorkflowNodeTypeSchema): WorkflowNodeLibraryItem {
+  const kind = node.node_kind ?? 'action'
+  return {
+    label: node.label,
+    type: node.node_type,
+    icon: KIND_ICON[kind] ?? 'settings',
+    description: node.description ?? `${titleCase(kind)} node`,
+    category: node.category,
+  }
+}
+
+function fallbackCategories(): PaletteCategory[] {
+  return workflowNodeCategories.map((category) => ({
+    title: category.title,
+    items: category.items,
+  }))
 }
 
 interface WorkflowNodePaletteV2Props {
@@ -59,20 +60,33 @@ interface WorkflowNodePaletteV2Props {
 export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePaletteV2Props) => {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [categories, setCategories] = useState<PaletteCategory[]>(fallbackCategories)
+  const [source, setSource] = useState<'api' | 'fallback'>('fallback')
 
-  const categories = useMemo(() => {
-    const bucket = new Map<string, WorkflowNodeLibraryItem[]>()
+  useEffect(() => {
+    let cancelled = false
+    void listNodeTypes(true)
+      .then((response) => {
+        if (cancelled) return
+        const grouped = response.categories
+        if (!grouped || !Object.keys(grouped).length) return
 
-    for (const category of workflowNodeCategories) {
-      for (const item of category.items) {
-        const title = resolveCategory(item, category.title)
-        bucket.set(title, [...(bucket.get(title) ?? []), item])
-      }
+        const next = Object.entries(grouped).map(([title, nodes]) => ({
+          title: titleCase(title),
+          items: nodes.map(mapApiNode),
+        }))
+        setCategories(next)
+        setSource('api')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCategories(fallbackCategories())
+          setSource('fallback')
+        }
+      })
+    return () => {
+      cancelled = true
     }
-
-    return V2_CATEGORY_ORDER
-      .map((title) => ({ title, items: bucket.get(title) ?? [] }))
-      .filter((category) => category.items.length > 0) as PaletteCategory[]
   }, [])
 
   const filtered = useMemo(() => {
@@ -97,7 +111,7 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePalet
     setCollapsed((current) => ({ ...current, [title]: !current[title] }))
   }
 
-  const handleDragStart = (event: React.DragEvent<HTMLButtonElement>, item: WorkflowNodeLibraryItem) => {
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>, item: WorkflowNodeLibraryItem) => {
     event.dataTransfer.effectAllowed = 'copy'
     event.dataTransfer.setData('application/x-workflow-node', JSON.stringify(item))
     event.dataTransfer.setData('text/plain', item.type)
@@ -112,6 +126,10 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePalet
         </div>
         <span className="wfs2-palette__count">{totalCount}</span>
       </header>
+
+      <div className="wfs2-palette__source">
+        {source === 'api' ? 'Registry API' : 'Embedded fallback'}
+      </div>
 
       <div className="wfs2-palette__search-wrap">
         <span>⌕</span>
@@ -132,7 +150,8 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled }: WorkflowNodePalet
       ) : (
         filtered.map((category) => {
           const isCollapsed = collapsed[category.title] ?? false
-          const meta = CATEGORY_META[category.title]
+          const key = category.title.toLowerCase()
+          const meta = CATEGORY_META[key] ?? { icon: '•', tone: 'ops', hint: 'Workflow node' }
 
           return (
             <section key={category.title} className={`wfs2-palette__category is-${meta.tone}`}>

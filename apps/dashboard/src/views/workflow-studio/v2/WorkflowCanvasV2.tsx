@@ -1,11 +1,14 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type DragEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { IconName } from '../../../shared/icons'
@@ -32,6 +35,7 @@ const ROOT_X = 960
 const ROOT_Y = 1180
 
 type ConnectionKind = 'true' | 'false' | 'next'
+type NodePlacementAction = 'insert-before' | 'insert-after' | 'add-branch' | 'replace'
 
 type NodeFamily =
   | 'trigger'
@@ -465,30 +469,111 @@ function graphBounds(nodes: CanvasNodeV2[]) {
   }
 }
 
+function cloneNodes(nodes: CanvasNodeV2[]) {
+  return nodes.map((node) => ({ ...node, step: node.step ? { ...node.step } : undefined }))
+}
+
+function hitTestNode(point: { x: number; y: number }, nodes: CanvasNodeV2[]) {
+  return (
+    [...nodes]
+      .reverse()
+      .find(
+        (node) =>
+          point.x >= node.x &&
+          point.x <= node.x + NODE_WIDTH &&
+          point.y >= node.y &&
+          point.y <= node.y + NODE_HEIGHT,
+      ) ?? null
+  )
+}
+
+function distanceToEdge(point: { x: number; y: number }, connection: CanvasConnectionV2) {
+  const label = edgeLabelPosition(connection)
+  const dx = point.x - label.x
+  const dy = point.y - label.y
+  return Math.hypot(dx, dy)
+}
+
+function hitTestEdge(point: { x: number; y: number }, connections: CanvasConnectionV2[]) {
+  let best: CanvasConnectionV2 | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  for (const connection of connections) {
+    const distance = distanceToEdge(point, connection)
+    if (distance < 72 && distance < bestDistance) {
+      best = connection
+      bestDistance = distance
+    }
+  }
+
+  return best
+}
+
+export interface WorkflowCanvasV2Handle {
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
+  fitView: () => void
+  centerView: () => void
+  getZoom: () => number
+}
+
 interface WorkflowCanvasV2Props {
   detail: WorkflowDetail | null
   dryRunResult: WorkflowDryRunResult | null
   selectedNodeId: string | null
+  selectedNodeIds?: string[]
   onSelectNode: (nodeId: string) => void
+  onSelectNodes?: (nodeIds: string[]) => void
   onCreateDraft?: () => void
   onDropNode?: (item: WorkflowNodeLibraryItem, position: { x: number; y: number }) => void
+  onDropOnNode?: (
+    item: WorkflowNodeLibraryItem,
+    targetNode: CanvasNodeV2,
+    placement: NodePlacementAction,
+  ) => void
+  onDropOnEdge?: (
+    item: WorkflowNodeLibraryItem,
+    connection: CanvasConnectionV2,
+    position: { x: number; y: number },
+  ) => void
+  onDeleteNodes?: (nodeIds: string[]) => void
+  layoutRevision?: number
+  liveOverlay?: ReactNode
   busy?: boolean
 }
 
-export const WorkflowCanvasV2 = ({
+export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanvasV2Props>(function WorkflowCanvasV2({
   detail,
   dryRunResult,
   selectedNodeId,
+  selectedNodeIds = [],
   onSelectNode,
+  onSelectNodes,
   onCreateDraft,
   onDropNode,
+  onDropOnNode,
+  onDropOnEdge,
+  onDeleteNodes,
+  layoutRevision = 0,
+  liveOverlay,
   busy,
-}: WorkflowCanvasV2Props) => {
+}, ref) {
   const [zoom, setZoom] = useState(0.78)
   const [localNodes, setLocalNodes] = useState<CanvasNodeV2[]>(() =>
     buildCanvasNodes(detail),
   )
+  const [historyPast, setHistoryPast] = useState<CanvasNodeV2[][]>([])
+  const [historyFuture, setHistoryFuture] = useState<CanvasNodeV2[][]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null)
+  const [placementMenu, setPlacementMenu] = useState<{
+    item: WorkflowNodeLibraryItem
+    target: CanvasNodeV2
+    x: number
+    y: number
+  } | null>(null)
   const [panStart, setPanStart] = useState<{
     x: number
     y: number
@@ -498,9 +583,19 @@ export const WorkflowCanvasV2 = ({
 
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const clipboardRef = useRef<CanvasNodeV2[]>([])
+  const dragItemRef = useRef<WorkflowNodeLibraryItem | null>(null)
+
+  const pushHistory = useCallback((nextNodes: CanvasNodeV2[]) => {
+    setHistoryPast((past) => [...past.slice(-39), cloneNodes(localNodes)])
+    setHistoryFuture([])
+    setLocalNodes(nextNodes)
+  }, [localNodes])
 
   useEffect(() => {
     setLocalNodes(buildCanvasNodes(detail))
+    setHistoryPast([])
+    setHistoryFuture([])
   }, [detail])
 
   const nodes = localNodes
@@ -508,24 +603,29 @@ export const WorkflowCanvasV2 = ({
   const bounds = useMemo(() => graphBounds(nodes), [nodes])
   const dryRunMap = useMemo(() => dryRunByNode(dryRunResult), [dryRunResult])
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null
+  const selectedIds = useMemo(() => {
+    if (selectedNodeIds.length) return new Set(selectedNodeIds)
+    if (selectedNodeId) return new Set([selectedNodeId])
+    return new Set<string>()
+  }, [selectedNodeId, selectedNodeIds])
 
   useEffect(() => {
     if (!selectedNodeId && nodes[0]) onSelectNode(nodes[0].id)
   }, [nodes, onSelectNode, selectedNodeId])
 
   const selectedConnections = useMemo(() => {
-    if (!selectedNode) return new Set<string>()
+    if (!selectedIds.size) return new Set<string>()
 
     return new Set(
       connections
         .filter(
           (connection) =>
-            connection.from.id === selectedNode.id ||
-            connection.to.id === selectedNode.id,
+            selectedIds.has(connection.from.id) ||
+            selectedIds.has(connection.to.id),
         )
         .map((connection) => connection.id),
     )
-  }, [connections, selectedNode])
+  }, [connections, selectedIds])
 
   const toCanvasPoint = useCallback(
     (event: { clientX: number; clientY: number }) => {
@@ -542,7 +642,7 @@ export const WorkflowCanvasV2 = ({
     [zoom],
   )
 
-  const fitView = () => {
+  const fitView = useCallback(() => {
     const viewport = scrollRef.current
     if (!viewport) return
 
@@ -563,9 +663,9 @@ export const WorkflowCanvasV2 = ({
         behavior: 'smooth',
       })
     })
-  }
+  }, [bounds.maxX, bounds.minX, bounds.maxY, bounds.minY])
 
-  const centerView = () => {
+  const centerView = useCallback(() => {
     const viewport = scrollRef.current
     if (!viewport) return
 
@@ -577,7 +677,44 @@ export const WorkflowCanvasV2 = ({
       top: Math.max(0, centerY - viewport.clientHeight / 2),
       behavior: 'smooth',
     })
-  }
+  }, [bounds.maxX, bounds.minX, bounds.maxY, bounds.minY, zoom])
+
+  const undo = useCallback(() => {
+    setHistoryPast((past) => {
+      if (!past.length) return past
+      const previous = past[past.length - 1]
+      setHistoryFuture((future) => [cloneNodes(localNodes), ...future])
+      setLocalNodes(previous)
+      return past.slice(0, -1)
+    })
+  }, [localNodes])
+
+  const redo = useCallback(() => {
+    setHistoryFuture((future) => {
+      if (!future.length) return future
+      const next = future[0]
+      setHistoryPast((past) => [...past, cloneNodes(localNodes)])
+      setLocalNodes(next)
+      return future.slice(1)
+    })
+  }, [localNodes])
+
+  useImperativeHandle(ref, () => ({
+    undo,
+    redo,
+    canUndo: () => historyPast.length > 0,
+    canRedo: () => historyFuture.length > 0,
+    fitView,
+    centerView,
+    getZoom: () => zoom,
+  }), [centerView, fitView, historyFuture.length, historyPast.length, redo, undo, zoom])
+
+  useEffect(() => {
+    if (!layoutRevision) return
+    window.requestAnimationFrame(() => {
+      fitView()
+    })
+  }, [fitView, layoutRevision])
 
   const zoomToSelected = () => {
     const viewport = scrollRef.current
@@ -595,23 +732,59 @@ export const WorkflowCanvasV2 = ({
     })
   }
 
+  const snapPosition = useCallback((point: { x: number; y: number }) => ({
+    x: snap(Math.max(80, Math.min(CANVAS_WIDTH - NODE_WIDTH - 80, point.x - NODE_WIDTH / 2))),
+    y: snap(Math.max(80, Math.min(CANVAS_HEIGHT - NODE_HEIGHT - 80, point.y - NODE_HEIGHT / 2))),
+  }), [])
+
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    setHoveredEdgeId(null)
 
     const raw = event.dataTransfer.getData('application/x-workflow-node')
-    if (!raw || !onDropNode) return
+    if (!raw) return
 
     try {
       const item = JSON.parse(raw) as WorkflowNodeLibraryItem
       const point = toCanvasPoint(event)
+      const targetNode = hitTestNode(point, nodes)
+      const targetEdge = hitTestEdge(point, connections)
 
-      onDropNode(item, {
-        x: snap(Math.max(80, Math.min(CANVAS_WIDTH - NODE_WIDTH - 80, point.x - NODE_WIDTH / 2))),
-        y: snap(Math.max(80, Math.min(CANVAS_HEIGHT - NODE_HEIGHT - 80, point.y - NODE_HEIGHT / 2))),
-      })
+      if (targetNode && (onDropOnNode || onDropNode)) {
+        const rect = scrollRef.current?.getBoundingClientRect()
+        setPlacementMenu({
+          item,
+          target: targetNode,
+          x: rect ? event.clientX - rect.left : point.x,
+          y: rect ? event.clientY - rect.top : point.y,
+        })
+        return
+      }
+
+      if (targetEdge && onDropOnEdge) {
+        onDropOnEdge(item, targetEdge, snapPosition(point))
+        return
+      }
+
+      if (onDropNode) {
+        onDropNode(item, snapPosition(point))
+      }
     } catch {
       // Ignore malformed drag payloads.
     }
+  }
+
+  const applyPlacement = (placement: NodePlacementAction) => {
+    if (!placementMenu) return
+    const { item, target } = placementMenu
+    setPlacementMenu(null)
+
+    if (onDropOnNode) {
+      onDropOnNode(item, target, placement)
+      return
+    }
+
+    onDropNode?.(item, { x: target.x + 120, y: target.y })
   }
 
   const handleNodePointerDown = (
@@ -621,6 +794,7 @@ export const WorkflowCanvasV2 = ({
     event.stopPropagation()
 
     const point = toCanvasPoint(event)
+    const multi = event.metaKey || event.ctrlKey || event.shiftKey
 
     dragOffsetRef.current = {
       x: point.x - node.x,
@@ -628,7 +802,18 @@ export const WorkflowCanvasV2 = ({
     }
 
     setDraggingId(node.id)
-    onSelectNode(node.id)
+
+    if (multi && onSelectNodes) {
+      const next = selectedIds.has(node.id)
+        ? [...selectedIds].filter((id) => id !== node.id)
+        : [...selectedIds, node.id]
+      onSelectNodes(next)
+      onSelectNode(node.id)
+    } else {
+      onSelectNode(node.id)
+      onSelectNodes?.([node.id])
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -661,11 +846,86 @@ export const WorkflowCanvasV2 = ({
   const handleNodePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     if (draggingId) {
       event.currentTarget.releasePointerCapture(event.pointerId)
+      pushHistory(localNodes)
     }
 
     setDraggingId(null)
     dragOffsetRef.current = null
   }
+
+  const duplicateSelection = useCallback(() => {
+    const selected = nodes.filter((node) => selectedIds.has(node.id))
+    if (!selected.length) return
+
+    const clones = selected.map((node, index) => ({
+      ...node,
+      id: `${node.id}-copy-${Date.now()}-${index}`,
+      key: `${node.key}_copy_${Date.now().toString(36)}`,
+      x: node.x + 48,
+      y: node.y + 48,
+    }))
+
+    pushHistory([...nodes, ...clones])
+    const cloneIds = clones.map((node) => node.id)
+    onSelectNodes?.(cloneIds)
+    onSelectNode(cloneIds[0])
+  }, [localNodes, nodes, onSelectNode, onSelectNodes, pushHistory, selectedIds])
+
+  const deleteSelection = useCallback(() => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    const next = nodes.filter((node) => !selectedIds.has(node.id))
+    pushHistory(next)
+    onDeleteNodes?.(ids)
+    if (next[0]) {
+      onSelectNode(next[0].id)
+      onSelectNodes?.([next[0].id])
+    }
+  }, [nodes, onDeleteNodes, onSelectNode, onSelectNodes, pushHistory, selectedIds])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && ['input', 'textarea', 'select'].includes(target.tagName.toLowerCase())) return
+
+      const meta = event.metaKey || event.ctrlKey
+
+      if (meta && event.key.toLowerCase() === 'c') {
+        clipboardRef.current = nodes.filter((node) => selectedIds.has(node.id))
+        return
+      }
+
+      if (meta && event.key.toLowerCase() === 'v' && clipboardRef.current.length) {
+        event.preventDefault()
+        const pasted = clipboardRef.current.map((node, index) => ({
+          ...node,
+          id: `${node.id}-paste-${Date.now()}-${index}`,
+          key: `${node.key}_paste_${Date.now().toString(36)}`,
+          x: node.x + 72,
+          y: node.y + 72,
+        }))
+        pushHistory([...nodes, ...pasted])
+        const pastedIds = pasted.map((node) => node.id)
+        onSelectNodes?.(pastedIds)
+        onSelectNode(pastedIds[0])
+        return
+      }
+
+      if (meta && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        duplicateSelection()
+        return
+      }
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault()
+        deleteSelection()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [deleteSelection, duplicateSelection, nodes, onSelectNode, onSelectNodes, pushHistory, selectedIds])
 
   const handlePanStart = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
@@ -774,7 +1034,20 @@ export const WorkflowCanvasV2 = ({
       <div
         ref={scrollRef}
         className={cls('wfs2-canvas-scroll', panStart && 'is-panning')}
-        onDragOver={(event) => event.preventDefault()}
+        onDragOver={(event) => {
+          event.preventDefault()
+          const raw = event.dataTransfer.getData('application/x-workflow-node')
+          if (!raw) return
+          try {
+            dragItemRef.current = JSON.parse(raw) as WorkflowNodeLibraryItem
+            const point = toCanvasPoint(event)
+            const edge = hitTestEdge(point, connections)
+            setHoveredEdgeId(edge?.id ?? null)
+          } catch {
+            setHoveredEdgeId(null)
+          }
+        }}
+        onDragLeave={() => setHoveredEdgeId(null)}
         onDrop={handleDrop}
         onPointerDown={handlePanStart}
         onPointerMove={handlePanMove}
@@ -831,7 +1104,8 @@ export const WorkflowCanvasV2 = ({
                 const toRun = dryRunMap.has(connection.to.id) || dryRunMap.has(connection.to.key)
 
                 const selected = selectedConnections.has(connection.id)
-                const active = (fromRun && toRun) || selected
+                const hovered = hoveredEdgeId === connection.id
+                const active = (fromRun && toRun) || selected || hovered
                 const path = edgePath(connection)
                 const pathId = `wfs2-edge-path-${connection.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
                 const label = edgeLabelPosition(connection)
@@ -844,6 +1118,7 @@ export const WorkflowCanvasV2 = ({
                       `is-${connection.kind}`,
                       active && 'is-active',
                       selected && 'is-selected',
+                      hovered && 'is-drop-target',
                     )}
                   >
                     <path
@@ -907,7 +1182,7 @@ export const WorkflowCanvasV2 = ({
               const status = nodeStatus(node, detail, dryStep)
               const family = nodeFamily(node.nodeType)
               const isCondition = family === 'condition'
-              const isSelected = selectedNode?.id === node.id
+              const isSelected = selectedIds.has(node.id)
 
               return (
                 <button
@@ -972,6 +1247,8 @@ export const WorkflowCanvasV2 = ({
               )
             })}
 
+            {liveOverlay}
+
             {!detail && (
               <div className="wfs2-canvas-empty">
                 <strong>Preview mode</strong>
@@ -1014,6 +1291,24 @@ export const WorkflowCanvasV2 = ({
           ))}
         </svg>
       </div>
+
+      {placementMenu && (
+        <div
+          className="wfs2-canvas-placement"
+          style={{ left: placementMenu.x, top: placementMenu.y }}
+        >
+          <strong>Place node</strong>
+          <button type="button" onClick={() => applyPlacement('insert-before')}>Insert Before</button>
+          <button type="button" onClick={() => applyPlacement('insert-after')}>Insert After</button>
+          <button type="button" onClick={() => applyPlacement('add-branch')}>Add Branch</button>
+          <button type="button" onClick={() => applyPlacement('replace')}>Replace</button>
+          <button type="button" className="is-cancel" onClick={() => setPlacementMenu(null)}>Cancel</button>
+        </div>
+      )}
+
+      {hoveredEdgeId && (
+        <div className="wfs2-canvas-edge-hint">Insert Here</div>
+      )}
     </section>
   )
-}
+})

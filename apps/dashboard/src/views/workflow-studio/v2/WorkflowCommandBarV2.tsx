@@ -8,12 +8,16 @@ interface WorkflowCommandBarV2Props {
   detail: WorkflowDetail | null
   busy?: boolean
   validationCount: number
+  consoleOpen: boolean
+  liveMode?: boolean
   onClone: () => void
   onPause: () => void
   onResume: () => void
   onDryRun: () => void
+  onPublish: () => void
+  onGoLive: () => void
   onToggleConsole: () => void
-  consoleOpen: boolean
+  onToggleLiveMode?: () => void
 }
 
 function formatTimestamp(value?: string) {
@@ -28,19 +32,35 @@ function formatTimestamp(value?: string) {
   }).format(date)
 }
 
+function canPublish(workflow?: Workflow) {
+  return workflow?.status === 'draft' || workflow?.operational_mode === 'draft'
+}
+
+function canGoLive(workflow?: Workflow) {
+  if (!workflow) return false
+  if (workflow.is_system_template) return false
+  return workflow.status === 'active' || workflow.operational_mode === 'armed'
+}
+
 export const WorkflowCommandBarV2 = ({
   detail,
   busy,
   validationCount,
+  consoleOpen,
+  liveMode,
   onClone,
   onPause,
   onResume,
   onDryRun,
+  onPublish,
+  onGoLive,
   onToggleConsole,
-  consoleOpen,
+  onToggleLiveMode,
 }: WorkflowCommandBarV2Props) => {
   const workflow: Workflow | undefined = detail?.workflow
   const liveBlocked = workflow?.live_send_enabled !== true
+  const publishable = canPublish(workflow)
+  const liveReady = canGoLive(workflow) && !liveBlocked
 
   return (
     <header className="wfs2-cmd">
@@ -49,26 +69,55 @@ export const WorkflowCommandBarV2 = ({
         <h1>{workflow?.name ?? 'Select or create a workflow'}</h1>
         <div className="wfs2-cmd__chips">
           <span className={cls('wfs2__badge', workflow && `is-${workflow.status}`)}>
-            {workflow?.status ?? 'draft'}
+            {workflow?.operational_mode ?? workflow?.status ?? 'draft'}
           </span>
+          {workflow?.is_system_template && <span className="wfs2-cmd__chip is-system">System</span>}
           <span className="wfs2-cmd__chip"><Icon name="message" /> {workflow?.channel ?? 'sms'}</span>
           <span className="wfs2-cmd__chip"><Icon name="radar" /> {workflow?.workflow_type ?? 'outbound'}</span>
-          <span className="wfs2-cmd__chip is-safe"><Icon name="shield" /> Live blocked</span>
+          <span className="wfs2-cmd__chip"><Icon name="hash" /> v{workflow?.version ?? '1'}</span>
+          <span className={cls('wfs2-cmd__chip', liveBlocked ? 'is-safe' : 'is-live')}>
+            <Icon name="shield" /> {liveBlocked ? 'Live blocked' : 'Live armed'}
+          </span>
           <span className="wfs2-cmd__chip"><Icon name="check" /> {formatTimestamp(workflow?.updated_at)}</span>
         </div>
       </div>
 
       <div className="wfs2-cmd__actions">
-        <button type="button" className="wfs2__btn is-ghost" disabled title="Dry-run mode only">
+        <button
+          type="button"
+          className="wfs2__btn is-ghost"
+          disabled={busy || !detail}
+          onClick={onDryRun}
+          title="Simulate workflow without sending live messages"
+        >
           <Icon name="eye" /> Dry Run
         </button>
-        <button type="button" className="wfs2__btn is-ghost" disabled title="Live sends are disabled by global workflow guards">
+
+        <button
+          type="button"
+          className="wfs2__btn is-ghost"
+          disabled={busy || !detail || !publishable}
+          onClick={onPublish}
+          title="Validate and publish draft to armed state"
+        >
+          <Icon name="check-double" /> Publish {validationCount > 0 ? `(${validationCount})` : ''}
+        </button>
+
+        <button
+          type="button"
+          className={cls('wfs2__btn', liveMode && 'is-primary')}
+          disabled={busy || !detail || !liveReady}
+          onClick={onGoLive}
+          title={liveBlocked ? 'Live sends remain globally blocked' : 'Enable live execution'}
+        >
           <Icon name="zap" /> Live
         </button>
+
         <button type="button" className="wfs2__btn" disabled={busy || !detail} onClick={onClone}>
           <Icon name="layers" /> Clone
         </button>
-        {workflow?.status === 'paused' ? (
+
+        {workflow?.status === 'paused' || workflow?.operational_mode === 'paused' ? (
           <button type="button" className="wfs2__btn" disabled={busy || !detail} onClick={onResume}>
             <Icon name="play" /> Resume
           </button>
@@ -77,20 +126,25 @@ export const WorkflowCommandBarV2 = ({
             <Icon name="pause" /> Pause
           </button>
         )}
+
         <button type="button" className="wfs2__btn is-primary" disabled={busy || !detail} onClick={onDryRun}>
-          <Icon name="play" /> Dry Run
+          <Icon name="play" /> Simulate
         </button>
+
         <button type="button" className="wfs2__btn" disabled={!detail} onClick={onToggleConsole}>
           <Icon name="activity" /> {consoleOpen ? 'Hide Console' : 'Console'}
         </button>
-        <button
-          type="button"
-          className="wfs2__btn"
-          disabled
-          title={liveBlocked ? 'Live sends are blocked' : 'Publish is not enabled in this slice'}
-        >
-          <Icon name="shield" /> Publish {validationCount > 0 ? `(${validationCount})` : ''}
-        </button>
+
+        {onToggleLiveMode && (
+          <button
+            type="button"
+            className={cls('wfs2__btn', liveMode && 'is-accent')}
+            disabled={!detail}
+            onClick={onToggleLiveMode}
+          >
+            <Icon name="radar" /> {liveMode ? 'Live Overlay On' : 'Live Overlay'}
+          </button>
+        )}
       </div>
     </header>
   )
