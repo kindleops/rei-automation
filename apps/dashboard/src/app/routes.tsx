@@ -243,6 +243,7 @@ const legacyRouteAliases: Record<string, string> = {
   '/campaigns': '/campaign-command',
   '/email': '/email-command',
   '/workflows-v2': '/workflow-studio',
+  '/workflow-studio-v1': '/workflow-studio',
 
   '/properties': '/deal-intelligence',
   '/list': '/entity-graph',
