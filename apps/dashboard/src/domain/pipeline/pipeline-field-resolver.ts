@@ -365,10 +365,14 @@ export function resolveMetricSlots(
     if (aosIdx >= 0 && !keys.includes('aos')) keys[aosIdx] = 'aos'
   }
 
+  const seen = new Set<string>()
   for (const key of keys) {
     if (!key) continue
     const val = resolveFieldValue(opp, key)
-    if (val && !val.empty) metrics.push(val)
+    if (val && !val.empty && !seen.has(val.key)) {
+      seen.add(val.key)
+      metrics.push(val)
+    }
   }
   return metrics.slice(0, 3)
 }

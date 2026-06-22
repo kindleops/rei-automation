@@ -175,7 +175,12 @@ export function normalizeCardDesign(
       const slot = rawSlots[key]
       if (!slot || typeof slot !== 'object') continue
       merged.slots[key] = {
-        fieldKey: typeof slot.fieldKey === 'string' ? slot.fieldKey : base.slots[key].fieldKey,
+        fieldKey:
+          slot.fieldKey === null
+            ? null
+            : typeof slot.fieldKey === 'string'
+              ? slot.fieldKey
+              : base.slots[key].fieldKey,
         disabled: Boolean(slot.disabled),
       }
     }

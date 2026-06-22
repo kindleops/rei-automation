@@ -2401,3 +2401,130 @@
 [data-nexus-theme="red_ops"] .ci-pipeline-status.is-ready .ci-pipeline-status__label {
   color: #ff8f8f;
 }
+
+/* ── Emergency layout correction (2026-06-22) ─────────────────────────── */
+
+.ci-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 62%) minmax(320px, 38%);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: 100vw;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ci-workspace__map-col {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ci-panel {
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+.ci-dossier-header,
+.ci-valuation-hero,
+.ci-evidence-card,
+.ci-pipeline-status,
+.ci-command-bar,
+.ci-agent-rail,
+.ci-waterfall {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.ci-workspace.is-pane-50,
+.ci-workspace.is-pane-75 {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(280px, 42vh) minmax(0, 1fr);
+}
+
+.ci-workspace.is-pane-25 {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(220px, 36vh) minmax(0, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .ci-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(300px, 44vh) minmax(0, 1fr);
+  }
+}
+
+[data-nexus-theme="light"] .ci-workspace {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  color: #0f172a;
+}
+
+[data-nexus-theme="light"] .ci-panel {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-left: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: inset 8px 0 24px rgba(15, 23, 42, 0.03);
+}
+
+[data-nexus-theme="light"] .ci-valuation-hero,
+[data-nexus-theme="light"] .ci-evidence-card,
+[data-nexus-theme="light"] .ci-agent-item,
+[data-nexus-theme="light"] .ci-waterfall,
+[data-nexus-theme="light"] .ci-command-bar {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+[data-nexus-theme="light"] .ci-hero-metric__value,
+[data-nexus-theme="light"] .ci-arv-value,
+[data-nexus-theme="light"] .ci-ev-price {
+  color: #0f172a;
+}
+
+[data-nexus-theme="dark"] .ci-workspace,
+:root:not([data-nexus-theme="light"]):not([data-nexus-theme="red_ops"]) .ci-workspace {
+  background: linear-gradient(180deg, #030712 0%, #0b1220 100%);
+  color: rgba(248, 250, 252, 0.96);
+}
+
+[data-nexus-theme="dark"] .ci-panel,
+:root:not([data-nexus-theme="light"]):not([data-nexus-theme="red_ops"]) .ci-panel {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+[data-nexus-theme="dark"] .ci-hero-metric__label,
+[data-nexus-theme="dark"] .ci-agent-output,
+[data-nexus-theme="dark"] .ci-pipeline-status__meta {
+  color: rgba(203, 213, 225, 0.88);
+}
+
+[data-nexus-theme="red_ops"] .ci-hero-metric__label,
+[data-nexus-theme="red_ops"] .ci-agent-output,
+[data-nexus-theme="red_ops"] .ci-pipeline-status__meta {
+  color: rgba(255, 228, 228, 0.82);
+}
+
+.ci-data-gap__footnote {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ci-workspace *,
+  .ci-workspace *::before,
+  .ci-workspace *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

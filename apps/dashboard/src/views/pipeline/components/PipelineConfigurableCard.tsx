@@ -161,8 +161,8 @@ export function PipelineConfigurableCard({
         )}
         {metrics.length > 0 && (
           <div className="plv-card__metrics-row">
-            {metrics.map((m) => (
-              <div key={m.key} className="plv-card__metric" title={m.tooltip}>
+            {metrics.map((m, index) => (
+              <div key={`${m.key}-${index}`} className="plv-card__metric" title={m.tooltip}>
                 <span className="plv-card__meta-label">{m.label}</span>
                 <span className={cls('plv-card__meta-val', m.tone && `is-${m.tone}`)}>{m.display}</span>
               </div>
