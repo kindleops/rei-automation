@@ -34,13 +34,14 @@ import { buildSellerFinance } from './sellerFinanceModel.js';
 import { buildConfidenceAndExecution } from './acquisitionConfidence.js';
 import { buildStrategyRanking } from './acquisitionStrategyRanking.js';
 import { buildResidentialIncomeAnalysis, isIncomeFamily } from './residentialIncomeDecision.js';
+import { buildSelfStorageAnalysis, isSelfStorageLane } from './selfStorageDecision.js';
 import { buildExecutionStateBasis } from './executionStateBasis.js';
 
 const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
 ]);
 
-export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {} }) {
+export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {}, storage = {} }) {
   const classification = classifyAssetLane(subjectRow);
   const { universes, family } = buildValuationUniverses(subjectRow, qualification, buyerPurchases, now);
   const reconciliation = reconcileValuation(universes, family);
@@ -105,6 +106,21 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
         income,
         buyerPurchases,
         finalConfidence: confidence.final_confidence,
+      })
+    : null;
+
+  // ---- Item 5D: additive self-storage analysis (SELF_STORAGE lane only) ----
+  const selfStorage = isSelfStorageLane(classification.lane)
+    ? buildSelfStorageAnalysis({
+        subjectRow,
+        storage: storage.subject ?? storage,
+        storageComps: storage.comps ?? [],
+        storageBuyers: storage.buyers ?? [],
+        capRateEvidence: storage.cap_rate_evidence ?? [],
+        market: storage.market ?? {},
+        competitors: storage.competitors ?? null,
+        pipeline: storage.pipeline ?? null,
+        repairInputs: storage.repair_inputs ?? {},
       })
     : null;
 
@@ -230,6 +246,8 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     strategy_depth_gate: confidence.strategy_depth_gate,
     // Item 5B: residential-income specialization (null for non-income families).
     residential_income: residentialIncome,
+    // Item 5D: self-storage specialization (null for non-storage lanes).
+    self_storage: selfStorage,
     loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),

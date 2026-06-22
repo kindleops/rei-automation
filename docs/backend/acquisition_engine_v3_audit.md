@@ -319,3 +319,118 @@ Across **24,972** properties with `units_count >= 2`:
 | 8 | **Actual operating statements / T-12** | MF 5+ | document upload | Med | Low (large deals only) | ACTUAL (high) | Med | document pipeline | underwritten NOI for 5+ |
 
 **Notes:** No provider rent capability is claimed as available — items #5 and #7 are explicitly gated on *unverified* provider capability. Items #1–#3 are achievable with data/pipelines already in the repo and are the highest-leverage near-term moves; none enable autonomous execution.
+
+---
+
+## Item 5D — Self-Storage Intelligence & Underwriting (live audit, 2026-06-22)
+
+Read-only observations from production Supabase `real-estate-automation`
+(`lcppdrmrdfblstpcbgpf`). No production data was written.
+
+### 1. Inventory & classification
+
+Likely self-storage records identified from `public.properties` by ORing the
+storage boolean flags, the `storage_units` numeric column, and a keyword scan
+over the asset-classification text fields (`property_type`, `asset_class`,
+`asset_subtype`, `normalized_asset_class`, `asset_label`, `land_use`, `zoning`,
+`original_property_type`, `commercial_property_type`). Keywords: self storage,
+mini storage, mini warehouse, storage facility, storage unit(s), climate
+controlled storage, vehicle/RV/boat storage, warehouse storage, storage condo,
+portable storage.
+
+| Signal | Count |
+| --- | ---: |
+| **Likely self-storage properties (any signal)** | **376** |
+| `is_storage` / `is_storage_facility` = true | 372 |
+| `is_self_storage` / `is_self_storage_facility` = true | **0 (never populated)** |
+| `is_mini_storage` / `is_mini_storage_facility` = true | **0 (never populated)** |
+| `storage_units` not null | **0 (never populated)** |
+| keyword-only (no boolean flag) | 4 |
+
+Classification is coarse/binary — only a generic `is_storage` flag is populated.
+The data does **not** distinguish self-storage facility vs. mini-warehouse vs.
+storage condominium vs. portable/mobile-storage business vs. vehicle/RV/boat
+storage. `asset_type_confidence` is null for all 376.
+
+### 2. Markets / states & physical variants
+
+| State | Count | Avg bldg sqft | <10k sqft | 10k–50k | >50k |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CA | 205 | 6,034 | 185 | 15 | 5 |
+| TX | 97 | 24,455 | 30 | 53 | 14 |
+| AZ | 27 | 44,860 | 3 | 14 | 10 |
+| FL | 17 | 26,816 | 5 | 8 | 4 |
+| GA | 13 | 18,136 | 6 | 5 | 2 |
+| NV | 8 | 28,543 | 2 | 5 | 1 |
+| WA | 5 | 56,978 | 0 | 1 | 4 |
+| PA | 3 | 1,629 | 3 | 0 | 0 |
+| MN | 1 | 226 | 1 | 0 | 0 |
+
+**Misclassification / package risk is material.** The CA cohort (205; 90% under
+10k sqft; avg ~6k sqft) is dominated by records too small to be genuine
+multi-building facilities — almost certainly garages, individual storage
+*condominiums*, or properties carrying a storage land-use code rather than
+operating facilities. TX/AZ/FL (avg 24k–45k sqft, majority 10k–50k) are
+physically plausible facilities. **The classifier applies a physical-
+plausibility gate (building/NRSF floor) before treating a storage-flagged record
+as a genuine facility**, and never assumes a storage flag implies an operating
+facility.
+
+### 3. Operating-data coverage (critical finding)
+
+Across all 376 likely-storage records:
+
+| Field | Coverage | Note |
+| --- | ---: | --- |
+| `building_square_feet` (GBA proxy) | 376 / 376 (100%) | gross only — **no NRSF column exists** |
+| `lot_square_feet` | 376 / 376 (100%) | land/expansion proxy |
+| `units_count` > 0 | 111 / 376 (29.5%) | parcel/garage units — **not** storage rentable units |
+| `storage_units` | 0 / 376 | column exists, never populated |
+| `noi_estimate` | 0 / 376 | **no NOI anywhere** |
+| `cap_rate` | 0 / 376 | **no cap rate anywhere** |
+| `monthly_rent` / `rent_estimate` | 0 / 376 | **no rent anywhere** |
+| `mls_current_listing_price` | 0 / 376 | no asking price |
+| occupancy / economic occupancy | n/a | **no column exists** |
+| unit mix / climate-control / drive-up / vehicle spaces | n/a | **no column exists** |
+| expense lines (taxes/ins/payroll/mgmt/utilities/repairs/…) | n/a | **no column exists** |
+| ancillary income (tenant insurance/admin/late/merch/truck) | n/a | **no column exists** |
+| debt terms (balance/rate/maturity/balloon/covenants) | n/a | not on `properties` for storage |
+
+**Zero genuine storage operating data exists in production.** The only known
+facts are physical size (GBA proxy + lot) and a coarse storage flag.
+
+### 4. Qualified comparable transactions
+
+Storage transactions searched in both fact tables by matching `property_type` /
+`normalized_asset_class` against the storage keyword set:
+
+| Source | Storage rows | With price | With sqft | States |
+| --- | ---: | ---: | ---: | ---: |
+| `buyer_comp_raw_v2` | **0** | 0 | 0 | 0 |
+| `buyer_purchase_events_v2` | **0** | 0 | 0 | 0 |
+
+The buyer transaction universe is **residential-only**: `single_family`
+(48,533), `multifamily` (5,046), `apartment` (1,900). No commercial, no
+warehouse, no self-storage transactions at all. Storage buyer-identity coverage
+is 0%; storage package/portfolio rate is undefined (no transactions).
+
+### 5. Source / record-grain summary
+
+| Table / view | Grain | Storage-relevant fields | Source | Coverage | Reliability | Join key | As-of | Underwriting suitability |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `public.properties` | 1 / property | `is_storage*`, `building_square_feet`, `lot_square_feet`, `units_count`, `property_type`, `asset_*`, `land_use`, `zoning` | provider import | size 100%; flags binary; operating 0% | LOW for facility-truth; OK for size | `property_id` | `asset_classified_at` (sparse) | physical size + provisional classification only |
+| `public.buyer_comp_raw_v2` | 1 / comp sale | `property_type`, `normalized_asset_class`, `sale_price`, `building_square_feet`, `property_address_state`, `sale_date` | provider/MLS | 0 storage rows | n/a for storage | identity keys | `sale_date` | none for storage |
+| `public.buyer_purchase_events_v2` | 1 / buyer purchase | `normalized_asset_class`, `purchase_price`, `sqft`, `buyer_type`, `property_state` | derived | 0 storage rows (residential-only) | n/a for storage | `normalized_buyer_name` | event date | none for storage |
+| `public.buyer_entities_v2` | 1 / buyer | `buyer_type`, `preferred_asset_classes[]`, `avg/median_purchase_price` | derived | no storage preference observed | n/a | `normalized_buyer_name` | rollup | none for storage |
+
+### 6. Conclusion → engine behavior
+
+The self-storage model is built to be **correct when evidence exists**, but on
+the **current production inventory it returns DATA_REQUIRED / PROVISIONAL_
+SCENARIO for every record** — never a fabricated qualified value, NOI, cap rate,
+or authorized offer. Item 5D therefore ships deterministic, source-traceable
+storage models + a class-first qualifier that gates on real evidence depth;
+supplements tests with **clearly-labeled deterministic fixtures** (not a
+production sample); and leaves all outbound execution and persistence disabled.
+No storage-specific migration is required — the canonical income snapshot
+(JSONB + structured provenance) absorbs all storage fields (mission §20).
