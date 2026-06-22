@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'node:child_process'
+import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -597,6 +599,21 @@ const buyerActivityPlugin = (env: Record<string, string>): Plugin => ({
   },
 })
 
+function resolveDevGitIdentity() {
+  const repoRoot = path.resolve(process.cwd(), '../..')
+  const read = (command: string) => {
+    try {
+      return String(execSync(command, { cwd: repoRoot, encoding: 'utf8' })).trim()
+    } catch {
+      return 'unknown'
+    }
+  }
+  const commitSha = read('git rev-parse HEAD')
+  const branch = read('git rev-parse --abbrev-ref HEAD')
+  const worktreeId = crypto.createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
+  return { commitSha, branch, worktreeId }
+}
+
 function resolveBackendProxyTarget(env: Record<string, string>, mode: string): string {
   const configured = (env.VITE_BACKEND_API_URL || '').trim()
   if (mode !== 'development') {
@@ -614,8 +631,14 @@ function resolveBackendProxyTarget(env: Record<string, string>, mode: string): s
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendProxyTarget = resolveBackendProxyTarget(env, mode)
+  const devIdentity = resolveDevGitIdentity()
   return {
     plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    define: {
+      'import.meta.env.VITE_DASHBOARD_GIT_SHA': JSON.stringify(devIdentity.commitSha),
+      'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
+      'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,

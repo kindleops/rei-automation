@@ -7,6 +7,7 @@ import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shar
 import { NotificationToasts, NotificationCenter } from '../shared/NotificationToast'
 import { playSound } from '../shared/sounds'
 import { ErrorBoundary } from '../shared/ErrorBoundary'
+import { DevRuntimeDiagnostics } from '../components/dev/DevRuntimeDiagnostics'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
 import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
@@ -589,6 +590,8 @@ export const CommandCenterApp = () => {
         open={notifCenterOpen}
         onClose={() => setNotifCenterOpen(false)}
       />
+
+      <DevRuntimeDiagnostics />
     </div>
   )
 }

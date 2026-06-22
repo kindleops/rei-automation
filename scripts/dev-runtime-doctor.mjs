@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -237,10 +239,135 @@ function checkNextCache() {
   );
 }
 
+const EXPECTED_WORKTREE = clean(
+  process.env.CANONICAL_WORKTREE || "/Users/ryankindle/rei-automation-canonical",
+);
+const EXPECTED_API_PORT = Number(process.env.CANONICAL_API_PORT || 3000);
+const EXPECTED_DASHBOARD_PORT = Number(process.env.CANONICAL_DASHBOARD_PORT || 5173);
+
+function worktreeFingerprint(dirPath) {
+  return crypto.createHash("sha256").update(path.resolve(dirPath)).digest("hex").slice(0, 12);
+}
+
+function readGitValue(command) {
+  try {
+    return clean(execSync(command, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    return "";
+  }
+}
+
+function listListeners(port) {
+  try {
+    const output = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return output
+      .split(/\r?\n/)
+      .slice(1)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function checkCanonicalWorktree() {
+  const resolvedRoot = path.resolve(ROOT);
+  const expected = path.resolve(EXPECTED_WORKTREE);
+  const sameTree = resolvedRoot === expected;
+  mark(
+    "canonical worktree path",
+    sameTree,
+    sameTree ? `cwd=${resolvedRoot}` : `expected=${expected} actual=${resolvedRoot}`,
+    [`cd ${expected}`],
+  );
+  const branch = readGitValue("git rev-parse --abbrev-ref HEAD");
+  mark(
+    "canonical integration branch",
+    branch === "integration/canonical-20260622",
+    branch ? `branch=${branch}` : "branch=unknown",
+    [`cd ${expected}`, "git checkout integration/canonical-20260622"],
+  );
+}
+
+function checkRequiredEnv() {
+  const required = ["OPS_DASHBOARD_SECRET"];
+  for (const key of required) {
+    mark(`required env ${key}`, Boolean(clean(process.env[key])), clean(process.env[key]) ? "present" : "missing", recovery.auth);
+  }
+}
+
+function checkPortInventory() {
+  for (const port of [EXPECTED_API_PORT, EXPECTED_DASHBOARD_PORT]) {
+    const listeners = listListeners(port);
+    mark(
+      `port ${port} has listener`,
+      listeners.length > 0,
+      listeners.length ? listeners.join(" | ") : "no listener",
+      port === EXPECTED_API_PORT
+        ? [`cd ${ROOT}`, "npm --workspace apps/api run dev"]
+        : [`cd ${ROOT}`, "npm --workspace apps/dashboard run dev"],
+    );
+  }
+
+  for (const strayPort of [3001, 3002, 5175, 5176]) {
+    const listeners = listListeners(strayPort);
+    if (listeners.length > 0) {
+      mark(
+        `stray port ${strayPort} idle`,
+        false,
+        listeners.join(" | "),
+        [`# inspect manually: lsof -nP -iTCP:${strayPort} -sTCP:LISTEN`],
+      );
+    } else {
+      mark(`stray port ${strayPort} idle`, true, "no listener");
+    }
+  }
+}
+
+async function checkRuntimeIdentityPairing() {
+  const url = `${BASE_URL}/api/cockpit/dev/runtime-identity`;
+  let response;
+  let json = null;
+  try {
+    response = await fetch(url, {
+      headers: headers(),
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+    const text = await response.text();
+    json = text ? JSON.parse(text) : null;
+  } catch (error) {
+    mark("runtime identity endpoint", false, error?.message || String(error), recovery.deadApi);
+    return;
+  }
+
+  mark("runtime identity endpoint", response.ok && json?.commit_sha, `status=${response.status} sha=${json?.commit_sha || "missing"}`);
+  const localSha = readGitValue("git rev-parse HEAD");
+  mark(
+    "API SHA matches local checkout",
+    Boolean(localSha) && localSha === json?.commit_sha,
+    `local=${localSha || "unknown"} api=${json?.commit_sha || "unknown"}`,
+    recovery.deadApi,
+  );
+  const expectedWorktreeId = worktreeFingerprint(EXPECTED_WORKTREE);
+  mark(
+    "API worktree fingerprint",
+    json?.worktree_id === expectedWorktreeId,
+    `expected=${expectedWorktreeId} api=${json?.worktree_id || "unknown"}`,
+    [`cd ${EXPECTED_WORKTREE}`],
+  );
+}
+
 async function main() {
   console.log(`Dev runtime doctor base=${BASE_URL}`);
+  checkCanonicalWorktree();
+  checkRequiredEnv();
+  checkPortInventory();
   mark("OPS dashboard secret loaded", Boolean(OPS_SECRET), OPS_SECRET ? "present" : "missing", recovery.auth);
   checkNextCache();
+  await checkRuntimeIdentityPairing();
   await checkJsonEndpoint("health", "/api/cockpit/health");
   const liveJson = await checkJsonEndpoint("live inbox", "/api/cockpit/inbox/live?filter=all&limit=5&map=0&timeout_mode=initial_boot");
   const liveRows = Array.isArray(liveJson?.threads) ? liveJson.threads : [];
