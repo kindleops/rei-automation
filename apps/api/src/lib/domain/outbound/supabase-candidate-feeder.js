@@ -2255,6 +2255,10 @@ export async function loadOutboundTouchHistory(candidate = {}, options = {}, dep
 }
 
 export async function resolveNextOutboundTouch(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.resolveNextOutboundTouch === "function") {
+    return deps.resolveNextOutboundTouch(candidate, options, deps);
+  }
+
   const raw = candidate.raw || {};
   
   // 1. Extract candidate state from view fields
