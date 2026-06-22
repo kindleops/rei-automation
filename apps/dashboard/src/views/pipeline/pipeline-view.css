@@ -773,9 +773,9 @@
 /* ── Selected deal panel ─────────────────────────────────────────────────── */
 
 .plv-detail-panel {
-  width: 268px;
-  min-width: 240px;
-  max-width: 420px;
+  width: clamp(340px, 28vw, 400px);
+  min-width: 320px;
+  max-width: 400px;
   border-left: 1px solid rgba(255, 255, 255, 0.05);
   background: var(--nexus-panel-strong);
   display: flex;
@@ -1043,6 +1043,24 @@
   animation: plv-drawer-in 0.2s ease;
 }
 
+.plv-drawer--overlay {
+  top: 0;
+  bottom: 0;
+  left: auto;
+  right: 0;
+  width: min(420px, 92%);
+  height: auto;
+  border-top: none;
+  border-left: 1px solid rgba(72, 138, 236, 0.28);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.45);
+  animation: plv-drawer-side-in 0.2s ease;
+}
+
+@keyframes plv-drawer-side-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
 @keyframes plv-drawer-in {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
@@ -1208,8 +1226,8 @@
 
 /* 100% Full */
 .plv--full .plv-detail-panel {
-  width: clamp(280px, 22vw, 380px);
-  min-width: 280px;
+  width: clamp(340px, 28vw, 400px);
+  min-width: 320px;
 }
 
 /* ── Drag cursor for draggable cards ─────────────────────────────────────── */
@@ -1343,6 +1361,32 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+.plv-command-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.plv-command-panel__hydrate {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(130, 155, 200, 0.65);
+  letter-spacing: 0.02em;
+}
+.plv-command-panel__close {
+  background: transparent;
+  border: none;
+  color: rgba(130, 155, 200, 0.65);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.plv-command-panel__close:hover {
+  color: rgba(230, 240, 255, 0.9);
+  background: rgba(255, 255, 255, 0.06);
 }
 .plv-command-panel__header {
   display: flex;
@@ -1568,6 +1612,48 @@
   background: #ffffff;
   border-color: rgba(15, 23, 42, 0.12);
   color: #0f172a;
+}
+
+[data-nexus-theme='light'] .plv-card__seller,
+[data-nexus-theme='light'] .plv-kpi__value,
+[data-nexus-theme='light'] .plv-lane__name,
+[data-nexus-theme='light'] .plv-scope-bar__counts strong,
+[data-nexus-theme='light'] .plv-command-panel__header strong {
+  color: #0f172a;
+}
+[data-nexus-theme='light'] .plv-card__address,
+[data-nexus-theme='light'] .plv-card__snippet,
+[data-nexus-theme='light'] .plv-kpi__label,
+[data-nexus-theme='light'] .plv-detail-row__label,
+[data-nexus-theme='light'] .plv-command-panel__header span {
+  color: #475569;
+}
+[data-nexus-theme='light'] .plv-card__meta-label,
+[data-nexus-theme='light'] .plv-detail-row__value {
+  color: #334155;
+}
+
+[data-nexus-theme='dark'] .plv-card__seller,
+[data-nexus-theme='dark'] .plv-command-panel__header strong {
+  color: rgba(236, 244, 255, 0.95);
+}
+[data-nexus-theme='dark'] .plv-card__address,
+[data-nexus-theme='dark'] .plv-card__snippet,
+[data-nexus-theme='dark'] .plv-kpi__label {
+  color: rgba(186, 205, 235, 0.82);
+}
+
+[data-nexus-theme='red-ops'] .plv-card__seller,
+[data-nexus-theme='red-ops'] .plv-lane__name {
+  color: rgba(254, 242, 242, 0.95);
+}
+[data-nexus-theme='red-ops'] .plv-card__address,
+[data-nexus-theme='red-ops'] .plv-card__snippet {
+  color: rgba(252, 211, 211, 0.78);
+}
+[data-nexus-theme='red-ops'] .plv-kpi__item {
+  background: rgba(127, 29, 29, 0.22);
+  border-color: rgba(248, 113, 113, 0.18);
 }
 
 [data-nexus-theme='light'] .plv-empty strong {
@@ -1945,12 +2031,29 @@
 
 .plv-card-designer__body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.plv-card-designer__left {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  min-width: 0;
+}
+
+.plv-card-designer__right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-height: calc(90vh - 160px);
+  overflow-y: auto;
 }
 
 .plv-card-designer__preview {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .plv-card-designer__slot-list {
@@ -2025,7 +2128,13 @@
   display: flex;
   gap: 8px;
   margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   flex-wrap: wrap;
+  justify-content: flex-end;
+  position: sticky;
+  bottom: 0;
+  background: inherit;
 }
 
 .plv-view-manager__list {

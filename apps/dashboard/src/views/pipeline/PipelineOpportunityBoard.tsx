@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import type { PipelineCardDesign, PipelineFilterGroup, PipelineSortSpec, PipelineViewState } from '../../domain/pipeline/pipeline-card-design.types'
 import type { PipelineGroupByMode, PipelineMetrics, PipelineOpportunity, PipelineSavedView } from '../../domain/pipeline/pipeline-opportunity.types'
@@ -28,8 +28,6 @@ import { PipelineViewManager } from './components/PipelineViewManager'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
-
-const DRAG_THRESHOLD_PX = 6
 
 interface OppCard {
   opp: PipelineOpportunity
@@ -83,6 +81,7 @@ interface PipelineOpportunityBoardProps {
   onSelect: (id: string) => void
   onPreview?: (id: string) => void
   onClearPreview?: () => void
+  onClearSelection?: () => void
   onRetryDetail?: () => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
@@ -146,7 +145,11 @@ export function PipelineOpportunityBoard({
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [cardDesignerOpen, setCardDesignerOpen] = useState(false)
   const [viewManagerOpen, setViewManagerOpen] = useState(false)
-  const dragStateRef = useRef<{ id: string; startX: number; startY: number; dragging: boolean } | null>(null)
+  const [groupOverrides, setGroupOverrides] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    setGroupOverrides({})
+  }, [groupBy])
 
   const activeCardDesign = normalizeCardDesign(
     cardDesign ?? viewState?.cardDesign ?? DEFAULT_PIPELINE_CARD_DESIGN,
@@ -180,19 +183,19 @@ export function PipelineOpportunityBoard({
     [groupBy, visibleCards],
   )
 
+  const resolveGroupKey = useCallback((opp: PipelineOpportunity) => {
+    return groupOverrides[opp.id] ?? groupKeyForOpportunity(opp, groupBy)
+  }, [groupBy, groupOverrides])
+
   const stageModels = useMemo<StageModel[]>(() =>
     groupDefinitions.map((def) => ({
       def,
-      cards: visibleCards.filter((c) => groupKeyForOpportunity(c.opp, groupBy) === def.id),
-      count: visibleCards.filter((c) => groupKeyForOpportunity(c.opp, groupBy) === def.id).length,
+      cards: visibleCards.filter((c) => resolveGroupKey(c.opp) === def.id),
+      count: visibleCards.filter((c) => resolveGroupKey(c.opp) === def.id).length,
     })),
-  [groupDefinitions, groupBy, visibleCards])
+  [groupDefinitions, resolveGroupKey, visibleCards])
 
-  const displayStageModels = useMemo(() => {
-    if (mutableView) return stageModels
-    const populated = stageModels.filter((s) => s.count > 0)
-    return populated.length > 0 ? populated : stageModels
-  }, [stageModels, mutableView])
+  const displayStageModels = stageModels
 
   const selectedCard = useMemo(
     () => visibleCards.find((c) => c.opp.id === selectedId) ?? null,
@@ -206,6 +209,18 @@ export function PipelineOpportunityBoard({
     setActiveStageId(displayStageModels[0]?.def.id ?? '')
   }, [activeStageId, displayStageModels])
 
+  const handleDragStart = useCallback((e: React.DragEvent, cardId: string) => {
+    if (!mutableView) return
+    setDragCardId(cardId)
+    e.dataTransfer.setData('text/plain', cardId)
+    e.dataTransfer.effectAllowed = 'move'
+  }, [mutableView])
+
+  const handleDragEnd = useCallback(() => {
+    setDragCardId(null)
+    setDragOverStage(null)
+  }, [])
+
   const handleDrop = useCallback(async (e: React.DragEvent, stageId: string) => {
     e.preventDefault()
     const cardId = e.dataTransfer.getData('text/plain')
@@ -216,8 +231,11 @@ export function PipelineOpportunityBoard({
     const card = visibleCards.find((c) => c.opp.id === cardId)
     if (!card) return
 
-    const currentKey = groupKeyForOpportunity(card.opp, groupBy)
+    const currentKey = resolveGroupKey(card.opp)
     if (currentKey === stageId) return
+
+    const previousOverrides = groupOverrides
+    setGroupOverrides((prev) => ({ ...prev, [cardId]: stageId }))
 
     try {
       setTransitionError(null)
@@ -229,41 +247,33 @@ export function PipelineOpportunityBoard({
         const temp = stageId === 'warm' ? 'warming' : stageId
         await onMoveTemperature(cardId, temp)
       }
+      setGroupOverrides((prev) => {
+        const next = { ...prev }
+        delete next[cardId]
+        return next
+      })
     } catch (err) {
-      setTransitionError(err instanceof Error ? err.message : 'Update failed')
+      setGroupOverrides(previousOverrides)
+      const message = err instanceof Error ? err.message : 'Update failed'
+      setTransitionError(message.includes('vendor-chunks') || message.includes('Cannot find module')
+        ? 'Could not save move. Pipeline service may be restarting — retry.'
+        : message)
     }
-  }, [groupBy, mutableView, onMoveStage, onMoveStatus, onMoveTemperature, visibleCards])
-
-  const beginPointerDrag = useCallback((e: React.PointerEvent, cardId: string) => {
-    if (!mutableView) return
-    dragStateRef.current = { id: cardId, startX: e.clientX, startY: e.clientY, dragging: false }
-    ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
-  }, [mutableView])
-
-  const movePointerDrag = useCallback((e: React.PointerEvent) => {
-    const state = dragStateRef.current
-    if (!state || state.dragging) return
-    const dx = Math.abs(e.clientX - state.startX)
-    const dy = Math.abs(e.clientY - state.startY)
-    if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
-      state.dragging = true
-      setDragCardId(state.id)
-    }
-  }, [])
-
-  const endPointerDrag = useCallback(() => {
-    dragStateRef.current = null
-    setDragCardId(null)
-    setDragOverStage(null)
-  }, [])
+  }, [groupBy, groupOverrides, mutableView, onMoveStage, onMoveStatus, onMoveTemperature, resolveGroupKey, visibleCards])
 
   const handleCardClick = useCallback((cardId: string) => {
-    if (dragStateRef.current?.dragging) return
     onSelect(cardId)
     setShowDetail(true)
     setPanelCollapsed(false)
     if (layoutMode === 'compact') setDockOpen(true)
   }, [layoutMode, onSelect])
+
+  const handleCloseInspector = useCallback(() => {
+    setShowDetail(false)
+    setPanelCollapsed(false)
+    setDockOpen(false)
+    onClearSelection?.()
+  }, [onClearSelection])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -312,15 +322,8 @@ export function PipelineOpportunityBoard({
           if (card.opp.id !== selectedId) onClearPreview?.()
         }}
         onReplyAction={() => onOpenCommandView(card.opp.primary_thread_key)}
-        onDragStart={(e) => {
-          setDragCardId(card.opp.id)
-          e.dataTransfer.setData('text/plain', card.opp.id)
-          e.dataTransfer.effectAllowed = 'move'
-        }}
-        onDragEnd={endPointerDrag}
-        onPointerDown={(e) => beginPointerDrag(e, card.opp.id)}
-        onPointerMove={movePointerDrag}
-        onPointerUp={endPointerDrag}
+        onDragStart={(e) => handleDragStart(e, card.opp.id)}
+        onDragEnd={handleDragEnd}
       />
     )
   }
@@ -386,15 +389,19 @@ export function PipelineOpportunityBoard({
         <div className="plv-focused-list">
           {(activeStage?.cards ?? []).map((card) => renderCard(card))}
         </div>
-        {panelOpportunity && (
-          <div className="plv-drawer">
+        {panelOpportunity && showDetail && (
+          <div className="plv-drawer plv-drawer--overlay">
             <PipelineCommandPanel
               opportunity={panelOpportunity}
               loading={detailLoading}
+              hydrating={detailLoading}
+              onClose={handleCloseInspector}
               onOpenCommandView={onOpenCommandView}
               onOpenConversation={onOpenCommandView}
               onOpenDealIntelligence={onOpenDealIntelligence}
               onAction={onAction}
+              onRetry={onRetryDetail}
+              error={detailError}
             />
           </div>
         )}
@@ -475,13 +482,6 @@ export function PipelineOpportunityBoard({
         )}
       </div>
 
-      {readOnlyView && (
-        <div className="plv-readonly-banner" role="status">
-          <span className="plv-lane__readonly-badge">View only</span>
-          <span>Drag is disabled for {groupBy.replace(/_/g, ' ')} grouping</span>
-        </div>
-      )}
-
       {!loading && opportunities.length === 0 && (
         <div className="plv-board-empty" role="status">
           <strong>No opportunities in this view</strong>
@@ -512,7 +512,11 @@ export function PipelineOpportunityBoard({
                   <span className="plv-lane__name">{stage.def.label}</span>
                   <span className={cls('plv-lane__count', stage.count > 0 && `is-${stage.def.tone}`)}>{stage.count}</span>
                 </div>
-                {readOnlyView && <span className="plv-lane__readonly-badge">Read-only</span>}
+                {readOnlyView && (
+                  <span className="plv-lane__readonly-badge" title={`${groupBy.replace(/_/g, ' ')} grouping is read-only — drag to change stage, status, or temperature`}>
+                    Read-only
+                  </span>
+                )}
               </header>
               <div className="plv-lane__body">
                 {stage.cards.length > 0 ? (
@@ -531,10 +535,12 @@ export function PipelineOpportunityBoard({
               <PipelineCommandPanel
                 opportunity={panelOpportunity}
                 loading={detailLoading}
+                hydrating={detailLoading}
                 error={detailError}
                 onRetry={onRetryDetail}
                 collapsed={panelCollapsed}
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
+                onClose={handleCloseInspector}
                 onOpenCommandView={onOpenCommandView}
                 onOpenConversation={onOpenCommandView}
                 onOpenDealIntelligence={onOpenDealIntelligence}

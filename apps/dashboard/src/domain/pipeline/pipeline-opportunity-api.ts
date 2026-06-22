@@ -1,4 +1,5 @@
 import { callBackend } from '../../lib/api/backendClient'
+import { sanitizePipelineError } from './pipeline-operator-error'
 import type {
   PipelineListResult,
   PipelineMetrics,
@@ -9,7 +10,12 @@ import type {
 const BASE = '/api/cockpit/pipeline'
 
 function unwrap<T>(result: Awaited<ReturnType<typeof callBackend>>): T {
-  if (!result.ok) throw new Error(result.message || result.error || 'backend_request_failed')
+  if (!result.ok) {
+    const upstream = result.upstream as Record<string, unknown> | undefined
+    const traceId = typeof upstream?.trace_id === 'string' ? upstream.trace_id : undefined
+    const sanitized = sanitizePipelineError(result.message || result.error, traceId)
+    throw new Error(sanitized.message)
+  }
   return result.data as T
 }
 

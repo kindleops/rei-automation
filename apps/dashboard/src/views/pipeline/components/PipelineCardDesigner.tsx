@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { PipelineCardDesign, CardSlotKey } from '../../../domain/pipeline/pipeline-card-design.types'
 import type { PipelineGroupByMode, PipelineOpportunity } from '../../../domain/pipeline/pipeline-opportunity.types'
 import { CARD_SLOT_KEYS } from '../../../domain/pipeline/pipeline-card-design.types'
@@ -83,110 +84,114 @@ export function PipelineCardDesigner({
   const setDensity = (density: PipelineCardDesign['density']) => onChange({ ...design, density })
   const setPreviewLines = (previewLines: PipelineCardDesign['previewLines']) => onChange({ ...design, previewLines })
 
-  return (
+  return createPortal(
     <div className="plv-card-designer-overlay" role="presentation" onClick={onClose}>
-      <div className="plv-card-designer nx-glass-menu" role="dialog" aria-label="Card designer" onClick={(e) => e.stopPropagation()}>
+      <div className="plv-card-designer nx-glass-menu" role="dialog" aria-label="Card configuration studio" onClick={(e) => e.stopPropagation()}>
         <header className="plv-card-designer__header">
           <div>
-            <strong>Card Designer</strong>
+            <strong>Card Configuration Studio</strong>
             <span className="plv-card-designer__subtitle">{groupBy.replace(/_/g, ' ')} view</span>
           </div>
           <button type="button" className="plv-card-designer__close" onClick={onClose}>×</button>
         </header>
 
         <div className="plv-card-designer__body">
-          <section className="plv-card-designer__preview">
-            <h4>Live Preview</h4>
-            {previewOpp ? (
-              <PipelineConfigurableCard
-                opp={previewOpp}
-                design={design}
-                layoutMode="full"
-              />
-            ) : (
-              <div className="plv-card-designer__preview-empty">Select an opportunity for preview</div>
-            )}
-          </section>
+          <div className="plv-card-designer__left">
+            <section className="plv-card-designer__preview">
+              <h4>Live Preview</h4>
+              {previewOpp ? (
+                <PipelineConfigurableCard
+                  opp={previewOpp}
+                  design={design}
+                  layoutMode="full"
+                />
+              ) : (
+                <div className="plv-card-designer__preview-empty">Select an opportunity for preview</div>
+              )}
+            </section>
 
-          <section className="plv-card-designer__slots">
-            <h4>Card Slots</h4>
-            <div className="plv-card-designer__slot-list">
-              {CARD_SLOT_KEYS.map((slot) => {
-                const cfg = design.slots[slot]
-                const field = cardFields.find((f) => f.key === cfg.fieldKey)
-                return (
-                  <div
-                    key={slot}
-                    className={cls('plv-card-designer__slot', activeSlot === slot && 'is-active', cfg.disabled && 'is-disabled')}
-                    onClick={() => setActiveSlot(slot)}
-                  >
-                    <span className="plv-card-designer__slot-label">{SLOT_LABELS[slot]}</span>
-                    <button type="button" className="plv-glass-select" onClick={(e) => { e.stopPropagation(); cycleField(slot) }}>
-                      {cfg.disabled ? 'Disabled' : field?.label ?? 'None'}
-                    </button>
-                    <button type="button" className="plv-glass-toggle" onClick={(e) => { e.stopPropagation(); toggleSlot(slot) }}>
-                      {cfg.disabled ? 'Off' : 'On'}
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-
-          <section className="plv-card-designer__picker">
-            <h4>Field Picker</h4>
-            {Array.from(grouped.entries()).map(([group, fields]) => (
-              <div key={group} className="plv-card-designer__field-group">
-                <span className="plv-card-designer__group-label">
-                  {PIPELINE_FIELD_GROUP_LABELS[group as keyof typeof PIPELINE_FIELD_GROUP_LABELS] ?? group}
-                </span>
-                <div className="plv-card-designer__field-grid">
-                  {fields.map((f) => (
-                    <button
-                      key={f.key}
-                      type="button"
-                      className={cls(
-                        'plv-card-designer__field-btn',
-                        design.slots[activeSlot]?.fieldKey === f.key && 'is-selected',
-                      )}
-                      title={f.description}
-                      onClick={() => onChange({
-                        ...design,
-                        slots: {
-                          ...design.slots,
-                          [activeSlot]: { fieldKey: f.key, disabled: false },
-                        },
-                      })}
+            <section className="plv-card-designer__slots">
+              <h4>Card Slots</h4>
+              <div className="plv-card-designer__slot-list">
+                {CARD_SLOT_KEYS.map((slot) => {
+                  const cfg = design.slots[slot]
+                  const field = cardFields.find((f) => f.key === cfg.fieldKey)
+                  return (
+                    <div
+                      key={slot}
+                      className={cls('plv-card-designer__slot', activeSlot === slot && 'is-active', cfg.disabled && 'is-disabled')}
+                      onClick={() => setActiveSlot(slot)}
                     >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
+                      <span className="plv-card-designer__slot-label">{SLOT_LABELS[slot]}</span>
+                      <button type="button" className="plv-glass-select" onClick={(e) => { e.stopPropagation(); cycleField(slot) }}>
+                        {cfg.disabled ? 'Disabled' : field?.label ?? 'None'}
+                      </button>
+                      <button type="button" className="plv-glass-toggle" onClick={(e) => { e.stopPropagation(); toggleSlot(slot) }}>
+                        {cfg.disabled ? 'Off' : 'On'}
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </section>
+            </section>
 
-          <section className="plv-card-designer__options">
-            <h4>Display Options</h4>
-            <div className="plv-card-designer__option-row">
-              <span>Density</span>
-              {(['compact', 'standard', 'expanded'] as const).map((d) => (
-                <button key={d} type="button" className={cls('plv-glass-toggle', design.density === d && 'is-active')} onClick={() => setDensity(d)}>
-                  {d}
-                </button>
+            <section className="plv-card-designer__options">
+              <h4>Display Options</h4>
+              <div className="plv-card-designer__option-row">
+                <span>Density</span>
+                {(['compact', 'standard', 'expanded'] as const).map((d) => (
+                  <button key={d} type="button" className={cls('plv-glass-toggle', design.density === d && 'is-active')} onClick={() => setDensity(d)}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+              <div className="plv-card-designer__option-row">
+                <span>Preview lines</span>
+                <button type="button" className={cls('plv-glass-toggle', design.previewLines === 1 && 'is-active')} onClick={() => setPreviewLines(1)}>1 line</button>
+                <button type="button" className={cls('plv-glass-toggle', design.previewLines === 2 && 'is-active')} onClick={() => setPreviewLines(2)}>2 lines</button>
+              </div>
+              <div className="plv-card-designer__option-row">
+                <span>Empty values</span>
+                <button type="button" className={cls('plv-glass-toggle', design.emptyBehavior === 'hide' && 'is-active')} onClick={() => onChange({ ...design, emptyBehavior: 'hide' })}>Hide</button>
+                <button type="button" className={cls('plv-glass-toggle', design.emptyBehavior === 'placeholder' && 'is-active')} onClick={() => onChange({ ...design, emptyBehavior: 'placeholder' })}>Placeholder</button>
+              </div>
+            </section>
+          </div>
+
+          <div className="plv-card-designer__right">
+            <section className="plv-card-designer__picker">
+              <h4>Field Library</h4>
+              {Array.from(grouped.entries()).map(([group, fields]) => (
+                <div key={group} className="plv-card-designer__field-group">
+                  <span className="plv-card-designer__group-label">
+                    {PIPELINE_FIELD_GROUP_LABELS[group as keyof typeof PIPELINE_FIELD_GROUP_LABELS] ?? group}
+                  </span>
+                  <div className="plv-card-designer__field-grid">
+                    {fields.map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        className={cls(
+                          'plv-card-designer__field-btn',
+                          design.slots[activeSlot]?.fieldKey === f.key && 'is-selected',
+                        )}
+                        title={f.description}
+                        onClick={() => onChange({
+                          ...design,
+                          slots: {
+                            ...design.slots,
+                            [activeSlot]: { fieldKey: f.key, disabled: false },
+                          },
+                        })}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </div>
-            <div className="plv-card-designer__option-row">
-              <span>Preview lines</span>
-              <button type="button" className={cls('plv-glass-toggle', design.previewLines === 1 && 'is-active')} onClick={() => setPreviewLines(1)}>1 line</button>
-              <button type="button" className={cls('plv-glass-toggle', design.previewLines === 2 && 'is-active')} onClick={() => setPreviewLines(2)}>2 lines</button>
-            </div>
-            <div className="plv-card-designer__option-row">
-              <span>Empty values</span>
-              <button type="button" className={cls('plv-glass-toggle', design.emptyBehavior === 'hide' && 'is-active')} onClick={() => onChange({ ...design, emptyBehavior: 'hide' })}>Hide</button>
-              <button type="button" className={cls('plv-glass-toggle', design.emptyBehavior === 'placeholder' && 'is-active')} onClick={() => onChange({ ...design, emptyBehavior: 'placeholder' })}>Placeholder</button>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
 
         <footer className="plv-card-designer__footer">
@@ -195,13 +200,15 @@ export function PipelineCardDesigner({
             className="plv-glass-btn plv-glass-btn--ghost"
             onClick={() => onChange(cloneCardDesign(getRecommendedCardDesign(groupBy)))}
           >
-            Reset to recommended
+            Reset to Default
           </button>
+          <button type="button" className="plv-glass-btn" onClick={onClose}>Cancel</button>
           <button type="button" className="plv-glass-btn plv-glass-btn--primary" onClick={() => { onSave(); onClose() }}>
-            Save card design
+            Save
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

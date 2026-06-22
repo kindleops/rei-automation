@@ -14,6 +14,7 @@ import {
 } from '../../domain/entity-graph/universal-sync'
 import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
+import { sanitizePipelineError } from '../../domain/pipeline/pipeline-operator-error'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
 
 const OPP_PARAM = 'opp'
@@ -297,10 +298,14 @@ export function PipelineWorkspace({
   }, [onClearOpportunityPreview])
 
   if (error) {
+    const operatorError = sanitizePipelineError(error)
     return (
-      <div className="plv plv--error">
-        <p>Pipeline unavailable: {error}</p>
-        <button type="button" className="plv-action-btn" onClick={() => void refresh()}>Retry</button>
+      <div className="plv plv--error" role="alert">
+        <p>{operatorError.message}</p>
+        {operatorError.traceId && <small>Trace: {operatorError.traceId}</small>}
+        {operatorError.retryable && (
+          <button type="button" className="plv-action-btn" onClick={() => void refresh()}>Retry</button>
+        )}
       </div>
     )
   }

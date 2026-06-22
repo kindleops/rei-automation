@@ -12,7 +12,6 @@ import {
   stageLabel,
 } from '../../../domain/pipeline/pipeline-display-helpers'
 import { formatRelativeTime } from '../../../shared/formatters'
-import { PipelineUniversalNav } from './PipelineUniversalNav'
 
 type PanelTab = 'overview' | 'conversation' | 'property' | 'intelligence' | 'workflow' | 'activity'
 
@@ -23,6 +22,8 @@ interface PipelineCommandPanelProps {
   onRetry?: () => void
   collapsed?: boolean
   onToggleCollapse?: () => void
+  onClose?: () => void
+  hydrating?: boolean
   onOpenCommandView: (threadId?: string | null) => void
   onOpenConversation: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
@@ -64,6 +65,8 @@ export function PipelineCommandPanel({
   onRetry,
   collapsed,
   onToggleCollapse,
+  onClose,
+  hydrating,
   onOpenCommandView,
   onOpenConversation,
   onOpenDealIntelligence,
@@ -92,19 +95,25 @@ export function PipelineCommandPanel({
           <strong>{opp.seller_display_name || 'Unknown Seller'}</strong>
           <span>{opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} matched properties` : (opp.property_address_full || 'Property Unknown')}</span>
         </div>
-        {onToggleCollapse && (
-          <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel (])">
-            ▶
-          </button>
-        )}
+        <div className="plv-command-panel__header-actions">
+          {hydrating && <span className="plv-command-panel__hydrate" aria-live="polite">Refreshing…</span>}
+          {onToggleCollapse && (
+            <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel">
+              ▶
+            </button>
+          )}
+          {onClose && (
+            <button type="button" className="plv-command-panel__close" onClick={onClose} title="Close inspector" aria-label="Close inspector">
+              ×
+            </button>
+          )}
+        </div>
       </header>
 
-      <PipelineUniversalNav opportunity={opp} onAction={onAction} compact />
-
-      {loading && (
+      {loading && !opp.seller_display_name && !opp.property_address_full && (
         <div className="plv-command-panel__skeleton" aria-live="polite">
           <span className="plv-command-panel__skeleton-pulse" />
-          Loading detail…
+          Loading summary…
         </div>
       )}
       {error && (

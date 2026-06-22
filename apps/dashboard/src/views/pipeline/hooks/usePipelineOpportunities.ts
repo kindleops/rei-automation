@@ -156,7 +156,7 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     setError(null)
     try {
       const [list, metricData, globalMetrics, views] = await Promise.all([
-        fetchPipelineOpportunities({ limit: 500, hydrate_follow_up: true, ...scopeParams }),
+        fetchPipelineOpportunities({ limit: 500, hydrate_follow_up: false, ...scopeParams }),
         fetchPipelineMetrics({ scope: viewState.scope }),
         fetchPipelineMetrics({ scope: 'all' }),
         fetchPipelineSavedViews(),
@@ -192,22 +192,19 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     })
     if (!result.ok) throw new Error(result.message || result.error || 'stage_transition_failed')
     if (result.opportunity) patchOpportunity(id, result.opportunity)
-    void refresh()
-  }, [patchOpportunity, refresh])
+  }, [patchOpportunity])
 
   const moveStatus = useCallback(async (id: string, toStatus: string, reason?: string): Promise<void> => {
     const result = await transitionPipelineStatus(id, { to_status: toStatus, reason })
     if (!result.ok) throw new Error(result.message || result.error || 'status_transition_failed')
     if (result.opportunity) patchOpportunity(id, result.opportunity)
-    void refresh()
-  }, [patchOpportunity, refresh])
+  }, [patchOpportunity])
 
   const moveTemperature = useCallback(async (id: string, toTemperature: string, reason?: string): Promise<void> => {
     const result = await transitionPipelineTemperature(id, { temperature: toTemperature, reason })
     if (!result.ok) throw new Error(result.message || result.error || 'temperature_transition_failed')
     if (result.opportunity) patchOpportunity(id, result.opportunity)
-    void refresh()
-  }, [patchOpportunity, refresh])
+  }, [patchOpportunity])
 
   return {
     opportunities,

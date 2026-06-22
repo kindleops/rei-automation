@@ -24,9 +24,6 @@ interface PipelineConfigurableCardProps {
   onMouseLeave?: () => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: () => void
-  onPointerDown?: (e: React.PointerEvent) => void
-  onPointerMove?: (e: React.PointerEvent) => void
-  onPointerUp?: () => void
   onReplyAction?: () => void
 }
 
@@ -49,9 +46,6 @@ export function PipelineConfigurableCard({
   onMouseLeave,
   onDragStart,
   onDragEnd,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
   onReplyAction,
 }: PipelineConfigurableCardProps) {
   const tier = layoutTier(layoutMode)
@@ -109,24 +103,10 @@ export function PipelineConfigurableCard({
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.() } }}
       role="button"
       tabIndex={0}
-      draggable={false}
+      draggable={mutableView}
+      onDragStart={mutableView ? onDragStart : undefined}
+      onDragEnd={mutableView ? onDragEnd : undefined}
     >
-      {mutableView && (
-        <button
-          type="button"
-          className="plv-card__drag-handle"
-          aria-label="Drag to move"
-          draggable
-          onClick={(e) => e.stopPropagation()}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-        >
-          ⠿
-        </button>
-      )}
       <div className={cls('plv-card__accent', `is-${accentTone}`)} />
       <div className="plv-card__body">
         {showEyebrow && (
