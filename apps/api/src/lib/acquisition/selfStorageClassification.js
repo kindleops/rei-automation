@@ -12,12 +12,15 @@
  * Missing occupancy is NEVER treated as zero occupancy. Pure & deterministic.
  */
 
-import { ASSET_LANES, lower, num } from './modelConstants.js';
+import { ASSET_LANES, lower, num, clean } from './modelConstants.js';
 import { classifyAssetLane } from './assetClassification.js';
 import {
   STORAGE_OPERATIONAL_STATUS as OS,
   STORAGE_FACILITY_TYPE as FT,
   STORAGE_FACILITY_CLASS as FC,
+  STORAGE_RECORD_CLASS as RC,
+  PRICING_ELIGIBLE_RECORD_CLASSES,
+  OPERATING_FACILITY_MIN_CONFIDENCE,
   GENUINE_FACILITY_MIN_GBA_SQFT,
   FACILITY_IMPLAUSIBLE_GBA_SQFT,
   STORAGE_OCCUPANCY_BANDS as OB,
@@ -234,4 +237,132 @@ export function classifyStorageFacilityClass(row = {}) {
     return FC.B;
   }
   return FC.UNKNOWN;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Record-class classification (Item 5D.5 §4)                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Classify WHAT KIND of record this is — hardened against garage / storage-condo
+ * / accessory / miscoded false positives (audit §1: CA cohort is mostly sub-10k
+ * garage/condo noise). A single binary `is_storage` flag is NEVER sufficient for
+ * OPERATING_SELF_STORAGE_FACILITY: a genuine facility additionally needs
+ * plausible size AND a corroborating signal (multiple buildings, units, explicit
+ * self-storage keyword, or operating data).
+ *
+ * @returns {{
+ *   classification, confidence, supporting_signals, contradictory_signals,
+ *   missing_evidence, pricing_eligible, underwriting_eligible
+ * }}
+ */
+export function classifyStorageRecord(row = {}, { hasOperatingData = false } = {}) {
+  const b = blob(row);
+  const support = [];
+  const contra = [];
+  const missing = [];
+
+  const facility = classifySelfStorageFacility(row);
+  if (!facility.is_self_storage) {
+    return result(RC.NOT_SELF_STORAGE, 0, ['no_storage_signal'], [], ['storage_classification']);
+  }
+
+  const gba = resolveGba(row);
+  const nrsf = num(row.net_rentable_square_feet);
+  const size = nrsf ?? gba;
+  const lot = num(row.lot_square_feet) ?? num(row.lot_size_sqft) ?? num(row.land_sqft);
+  const units = num(row.total_units) ?? num(row.units_count) ?? num(row.storage_units);
+  const buildings = num(row.number_of_buildings) ?? num(row.building_count);
+  const btlr = size !== null && lot && lot > 0 ? size / lot : null; // building-to-land ratio
+  const underConstruction = row.under_construction === true || /under construction|proposed|pre.?leasing/.test(b);
+
+  const storageBool = row.is_self_storage === true || row.is_self_storage_facility === true ||
+    row.is_mini_storage === true || row.is_mini_storage_facility === true ||
+    row.is_storage === true || row.is_storage_facility === true;
+  const explicitSelfStorage = /self.?storage|mini.?storage|mini.?warehouse|storage facility/.test(b);
+  const corroboration = (buildings !== null && buildings >= 2) || (units !== null && units > 0) || explicitSelfStorage || hasOperatingData;
+
+  // ---- Disqualifying / specialized buckets first ----
+  if (/portable storage|mobile storage|container (rental|business|sales)|pods?\b/.test(b)) {
+    contra.push('portable_storage_business_keyword');
+    return result(RC.PORTABLE_STORAGE_BUSINESS, 55, ['portable_keyword'], contra, []);
+  }
+  if (/storage cond/.test(b) || (size !== null && size < 2500 && /\bcondo\b/.test(b))) {
+    contra.push('storage_condominium');
+    return result(RC.STORAGE_CONDOMINIUM, 60, ['storage_condo_keyword'], contra, ['operating_facility_evidence']);
+  }
+  if ((/warehouse|distribution|logistics|industrial|flex/.test(b)) && !explicitSelfStorage) {
+    contra.push('warehouse_industrial_dominant');
+    return result(RC.WAREHOUSE_WITH_STORAGE_LABEL, 45, ['warehouse_keyword_storage_label'], contra, ['self_storage_confirmation']);
+  }
+  if (underConstruction) {
+    support.push('under_construction');
+    return result(RC.DEVELOPMENT_SITE, 55, support, contra, ['certificate_of_occupancy']);
+  }
+  if (size === null || size < FACILITY_IMPLAUSIBLE_GBA_SQFT) {
+    if (lot && lot > 0 && (size === null || size < 800)) {
+      return result(RC.LAND_ONLY_STORAGE_USE, 50, ['lot_present_no_building'], ['no_improvements'], ['building_evidence']);
+    }
+    contra.push(size === null ? 'no_building_size' : `size_${Math.round(size)}sqft_implausible`);
+    return result(RC.GARAGE_OR_ACCESSORY_STORAGE, 45, ['sub_facility_size'], contra, ['net_rentable_square_feet']);
+  }
+
+  // ---- Plausible-size storage: separate accessory/garage from real facilities ----
+  if (size < GENUINE_FACILITY_MIN_GBA_SQFT) {
+    // 3k–10k sqft: garage/accessory unless corroborated by units/buildings/keyword.
+    if (!corroboration) {
+      contra.push(`size_${Math.round(size)}sqft_below_facility_floor_no_corroboration`);
+      return result(RC.GARAGE_OR_ACCESSORY_STORAGE, 40, ['sub_floor_size'], contra, ['multiple_buildings_or_units']);
+    }
+    support.push('corroborated_small_facility');
+  }
+
+  if (size !== null) support.push(`size_${Math.round(size)}sqft`);
+  if (buildings !== null && buildings >= 2) support.push(`buildings=${buildings}`);
+  if (units !== null && units > 0) support.push(`units=${units}`);
+  if (explicitSelfStorage) support.push('explicit_self_storage_keyword');
+  if (hasOperatingData) support.push('operating_data_present');
+  if (btlr !== null && btlr > 0.55) contra.push(`building_to_land_ratio=${btlr.toFixed(2)}_high_for_storage`);
+
+  // A binary flag alone (no corroboration) is AMBIGUOUS, not an operating facility.
+  if (!corroboration) {
+    if (storageBool) contra.push('binary_storage_flag_only');
+    if (!explicitSelfStorage) missing.push('self_storage_confirmation');
+    missing.push('buildings_or_units_or_operating_data');
+    return result(RC.AMBIGUOUS_STORAGE, 40, support, contra, missing);
+  }
+
+  // ---- Specialized facility types ----
+  let cls = RC.OPERATING_SELF_STORAGE_FACILITY;
+  let confidence = 60;
+  if (/rv|boat|vehicle/.test(b)) { cls = RC.RV_BOAT_VEHICLE_STORAGE; confidence = 62; }
+  else if (/climate.?control/.test(b) || (num(row.climate_control_percentage) ?? 0) >= 0.5) { cls = RC.CLIMATE_CONTROLLED_STORAGE; confidence = 66; }
+  else if (/mini.?storage|mini.?warehouse/.test(b)) { cls = RC.MINI_STORAGE_FACILITY; confidence = 64; }
+
+  // Confidence lift from corroborating evidence.
+  if (buildings !== null && buildings >= 2) confidence += 8;
+  if (units !== null && units >= 50) confidence += 10;
+  if (explicitSelfStorage) confidence += 8;
+  if (hasOperatingData) confidence += 10;
+  if (contra.length) confidence = Math.min(confidence, 55);
+  confidence = Math.max(0, Math.min(95, confidence));
+
+  if (units === null) missing.push('total_units');
+  if (nrsf === null) missing.push('net_rentable_square_feet');
+
+  return result(cls, confidence, support, contra, missing);
+}
+
+function result(classification, confidence, supporting_signals, contradictory_signals, missing_evidence) {
+  const pricingEligible = PRICING_ELIGIBLE_RECORD_CLASSES.includes(classification) && confidence >= OPERATING_FACILITY_MIN_CONFIDENCE;
+  return {
+    classification,
+    confidence: Math.round(confidence),
+    supporting_signals,
+    contradictory_signals,
+    missing_evidence,
+    pricing_eligible: pricingEligible,
+    // Underwriting needs pricing eligibility AND at least size evidence.
+    underwriting_eligible: pricingEligible,
+  };
 }

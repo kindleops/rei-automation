@@ -12,9 +12,9 @@
  */
 
 import { ASSET_LANES, EXECUTION_STATES as ES, STRATEGY_QUALIFICATION as SQ, num, round } from './modelConstants.js';
-import { buildExecutionStateBasis } from './executionStateBasis.js';
+import { STORAGE_RECORD_CLASS as RC, STORAGE_READINESS as RD } from './selfStorageConstants.js';
 import { buildSelfStorageContract, storageMissingInputs } from './selfStorageContract.js';
-import { classifyStorageOperationalStatus } from './selfStorageClassification.js';
+import { classifyStorageOperationalStatus, classifyStorageRecord } from './selfStorageClassification.js';
 import {
   buildStorageRevenue, buildStorageExpenses, buildStorageNOI, buildStorageCapRate,
 } from './selfStorageUnderwriting.js';
@@ -23,7 +23,7 @@ import { buildStorageValuation, buildStorageCapital } from './selfStorageValuati
 import { buildStorageBuyerExit } from './selfStorageBuyerExit.js';
 import {
   buildStorageCashOffer, buildStorageSellerFinance, buildStorageCommercialDebt,
-  buildStorageDisposition, qualifyStorageStrategies,
+  buildStorageDisposition, qualifyStorageStrategies, buildStorageExecutionBasis,
 } from './selfStorageStrategies.js';
 
 export function isSelfStorageLane(lane) {
@@ -43,6 +43,26 @@ export function buildSelfStorageAnalysis({
 } = {}) {
   const contract = buildSelfStorageContract(subjectRow, storage);
   if (!contract.is_self_storage) return null;
+
+  // ---- Record-class gate (Item 5D.5 §4, §7): is this a genuine, pricing-
+  // eligible facility, or garage/condo/accessory/ambiguous noise? A binary
+  // is_storage flag alone is never sufficient. ----
+  const ops = storage.operations ?? {};
+  const inc = storage.income ?? {};
+  const expIn = storage.expenses ?? {};
+  const hasOperatingData = Boolean(
+    ops.physical_occupancy != null || ops.economic_occupancy != null ||
+    inc.base_rental_income != null || inc.average_in_place_rent != null ||
+    expIn.total_operating_expenses != null || Object.keys(expIn).length > 0,
+  );
+  const recordClass = classifyStorageRecord(
+    { ...subjectRow, ...(storage.net_rentable_square_feet != null ? { net_rentable_square_feet: storage.net_rentable_square_feet } : {}), ...(storage.unit_inventory?.total_units != null ? { total_units: storage.unit_inventory.total_units } : {}), climate_control_percentage: ops.climate_control_percentage },
+    { hasOperatingData },
+  );
+
+  // NOT_SELF_STORAGE routes away from the storage engine entirely.
+  if (recordClass.classification === RC.NOT_SELF_STORAGE) return null;
+  const recordGated = !recordClass.underwriting_eligible;
 
   // ---- Operational status ----
   const opStatus = classifyStorageOperationalStatus({ facility: storage.operations ?? {}, contract });
@@ -109,18 +129,26 @@ export function buildSelfStorageAnalysis({
   // ---- Qualification (class-first) ----
   const qualification = qualifyStorageStrategies({
     classification: contract.classification, contract, valuation, noi, revenue, capRate,
-    buyerExit, capital, strategies,
+    buyerExit, capital, strategies, recordGated, liveFlagsEnabled: false,
   });
 
-  // ---- Storage-specific execution state + explicit basis (§17) ----
+  // ---- Storage execution state + explicit basis (§17, Item 5D.5 §2) ----
+  // A gated (non-pricing-eligible) record is always DATA_REQUIRED — it never
+  // invokes a confirmed-facility shadow state.
   const anyProvisional = qualification.ranked.some((r) => r.qualification_status === SQ.PROVISIONAL_SCENARIO);
-  const executionState = qualification.shadow_mode_ready
-    ? ES.SHADOW_MODE_READY
-    : anyProvisional ? ES.REVIEW_REQUIRED : ES.DATA_REQUIRED;
+  const executionState = recordGated
+    ? ES.DATA_REQUIRED
+    : qualification.shadow_mode_ready
+      ? ES.SHADOW_MODE_READY
+      : anyProvisional ? ES.REVIEW_REQUIRED : ES.DATA_REQUIRED;
 
-  const primaryStrategy = qualification.ranked.find((r) => r.qualification_status === SQ.UNDERWRITTEN_SHADOW)?.strategy ?? null;
-  const executionStateBasis = buildExecutionStateBasis({
-    ranked: qualification.ranked, executionState, primaryStrategy,
+  const executionStateBasis = buildStorageExecutionBasis({
+    ranked: qualification.ranked, executionState, liveFlagsEnabled: false,
+  });
+
+  // ---- Production-readiness classification (Item 5D.5 §6) ----
+  const productionReadiness = assessStorageProductionReadiness({
+    recordClass, contract, revenue, noi, capRate, comparables, buyerExit, marketContext,
   });
 
   return {
@@ -128,6 +156,15 @@ export function buildSelfStorageAnalysis({
     is_self_storage: true,
     genuine_facility: contract.genuine_facility,
     classification: contract.classification,
+    record_class: recordClass,
+    pricing_eligible: recordClass.pricing_eligible,
+    underwriting_eligible: recordClass.underwriting_eligible,
+    decision_gate: {
+      record_gated: recordGated,
+      reason: recordGated ? `record_class=${recordClass.classification}` : null,
+      routed_to_storage_engine: true,
+    },
+    production_readiness: productionReadiness,
     operational_status: opStatus,
     facility_type: facilityType,
     facility_class: facilityClass,
@@ -160,4 +197,68 @@ function median(arr) {
   if (!a.length) return null;
   const s = [...a].sort((x, y) => x - y);
   return s[Math.floor((s.length - 1) / 2)];
+}
+
+/**
+ * Production-readiness classification (Item 5D.5 §6). Reports the data-sufficiency
+ * ceiling for THIS subject plus the exact blockers. Never labels the model
+ * production-pricing calibrated without real qualified data; AUTONOMOUS_READY is
+ * never returned while execution flags are disabled.
+ */
+export function assessStorageProductionReadiness({ recordClass, contract, revenue, noi, capRate, comparables, buyerExit, marketContext }) {
+  const classificationReliable = Boolean(recordClass?.underwriting_eligible);
+  const hasNrsf = num(contract?.physical?.net_rentable_square_feet?.value) !== null;
+  const nrsfModeledOnly = hasNrsf && contract.physical.net_rentable_square_feet.basis === 'MARKET_MODELED';
+  const hasUnits = num(contract?.unit_inventory?.total_units?.value) !== null;
+  const hasOccupancy = revenue?.physical_occupancy !== null && revenue?.physical_occupancy !== undefined;
+  const hasRevenue = num(revenue?.current_actual_base_annual) !== null && revenue?.current_base_basis === 'ACTUAL';
+  const hasExpenses = (noi?.income_supported ?? false);
+  const hasNoi = Boolean(noi?.income_supported);
+  const hasCapEvidence = capRate?.selected?.kind === 'OBSERVED' && capRate.selected.qualified;
+  const hasQualifiedSales = (comparables?.qualified_count ?? 0) >= 3;
+  const hasBuyerIdentity = (buyerExit?.matched_buyer_count ?? 0) > 0;
+  const hasMarketSupply = (marketContext?.supply_risk_status ?? 'UNAVAILABLE') !== 'UNAVAILABLE';
+
+  const blockers = {
+    classification_reliability: classificationReliable ? null : `record_class=${recordClass?.classification} (confidence ${recordClass?.confidence})`,
+    nrsf: hasNrsf ? (nrsfModeledOnly ? 'MODELED_FROM_GBA_ONLY' : null) : 'MISSING',
+    units: hasUnits ? null : 'MISSING',
+    occupancy: hasOccupancy ? null : 'MISSING',
+    revenue: hasRevenue ? null : 'MISSING',
+    expenses: hasExpenses ? null : 'MISSING_OR_MODELED',
+    noi: hasNoi ? null : 'NOT_INCOME_SUPPORTED',
+    cap_rate_evidence: hasCapEvidence ? null : 'NO_OBSERVED_CAP',
+    qualified_sales: hasQualifiedSales ? null : 'NONE',
+    buyer_identity: hasBuyerIdentity ? null : 'NONE',
+    market_supply_data: hasMarketSupply ? null : 'UNAVAILABLE',
+  };
+
+  // Architecture / data-model / deterministic-fixture validation are established
+  // facts of the build (see test suite); they are reported as always-true flags.
+  const applicable = [RD.ARCHITECTURE_VALIDATED, RD.DATA_MODEL_READY, RD.DETERMINISTIC_FIXTURE_VALIDATED];
+  if (!classificationReliable) applicable.push(RD.LIVE_CLASSIFICATION_PARTIAL);
+  if (!hasQualifiedSales) applicable.push(RD.LIVE_TRANSACTION_DATA_UNAVAILABLE);
+  if (!hasNoi) applicable.push(RD.LIVE_OPERATING_DATA_UNAVAILABLE);
+
+  let status;
+  if (!classificationReliable) {
+    status = RD.LIVE_CLASSIFICATION_PARTIAL;
+  } else if (hasNoi && hasCapEvidence && hasQualifiedSales && hasBuyerIdentity) {
+    status = RD.PRODUCTION_SHADOW_READY; // shadow only — never autonomous
+    applicable.push(RD.PRODUCTION_SHADOW_READY);
+  } else if (hasQualifiedSales || hasNoi) {
+    status = RD.SHADOW_SCENARIO_ONLY;
+    applicable.push(RD.SHADOW_SCENARIO_ONLY);
+  } else {
+    status = RD.PRODUCTION_PRICING_NOT_CALIBRATED;
+    applicable.push(RD.PRODUCTION_PRICING_NOT_CALIBRATED);
+  }
+
+  return {
+    status,
+    applicable_states: [...new Set(applicable)],
+    autonomous_ready: false,
+    blockers,
+    active_blockers: Object.entries(blockers).filter(([, v]) => v !== null).map(([k, v]) => `${k}:${v}`),
+  };
 }

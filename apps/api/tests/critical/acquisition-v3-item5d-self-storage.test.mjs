@@ -18,7 +18,9 @@ import assert from 'node:assert/strict';
 
 import { ASSET_LANES, STRATEGY_QUALIFICATION as SQ } from '@/lib/acquisition/modelConstants.js';
 import { EVIDENCE_BASIS, isKnown } from '@/lib/acquisition/incomeSnapshotContract.js';
-import { classifySelfStorageFacility, classifyStorageOperationalStatus } from '@/lib/acquisition/selfStorageClassification.js';
+import { classifySelfStorageFacility, classifyStorageOperationalStatus, classifyStorageRecord } from '@/lib/acquisition/selfStorageClassification.js';
+import { STORAGE_RECORD_CLASS, OPERATING_FACILITY_MIN_CONFIDENCE } from '@/lib/acquisition/selfStorageConstants.js';
+import { tierMonetary, qualifyStorageStrategies, buildStorageExecutionBasis } from '@/lib/acquisition/selfStorageStrategies.js';
 import { buildSelfStorageContract, normalizeUnitMix } from '@/lib/acquisition/selfStorageContract.js';
 import {
   buildStorageRevenue, buildStorageExpenses, buildStorageNOI, buildStorageCapRate,
@@ -405,15 +407,25 @@ test('strategy qualification remains class-first', () => {
   assert.equal(noSize.strategy_qualification.shadow_mode_ready, false);
 });
 
-test('execution-state basis is explicit and strategy-specific', () => {
+test('execution-state basis is explicit and strategy-specific (hardened semantics)', () => {
   const a = fullAnalysis();
   assert.equal(a.execution_state, 'SHADOW_MODE_READY');
   const basis = a.execution_state_basis;
+  // SHADOW_MODE_READY must name an underwritten shadow-approved basis strategy.
   assert.ok(basis.execution_state_basis_strategy !== null);
-  // No strategy is authorized (AUTO disabled) even when shadow-ready.
+  assert.ok(basis.shadow_approved_strategies.includes(basis.execution_state_basis_strategy));
+  // Underwritten cash supports shadow WITHOUT becoming live-authorized.
+  assert.equal(basis.cash_underwritten, true);
+  assert.equal(basis.cash_shadow_approved, true);
+  assert.equal(basis.cash_scenario_only, false); // corrected: UNDERWRITTEN_SHADOW is NOT scenario-only
+  assert.equal(basis.cash_live_authorized, false);
+  // No live authorization while unsafe execution flags are disabled.
+  assert.equal(basis.live_authorized_strategy, null);
+  assert.equal(basis.live_authorized_offer_type, null);
   assert.equal(basis.authorized_strategy, null);
-  assert.equal(basis.cash_authorized, false);
-  assert.equal(basis.cash_scenario_only, true);
+  assert.equal(basis.outbound_execution_enabled, false);
+  // Null live authorization must NOT erase the underwritten shadow identity.
+  assert.ok(basis.underwritten_strategies.includes('CASH'));
 });
 
 test('with no evidence, every storage strategy is DATA_REQUIRED / provisional (production reality)', () => {
@@ -453,4 +465,175 @@ test('storage decision through the pipeline does not enable outbound or auto exe
   }
   // Engine-level auto flags remain off.
   assert.equal(result.v3.active_feature_flags.ACQUISITION_ENGINE_V3_ALLOW_AUTO_OFFER, false);
+});
+
+/* ========================================================================== */
+/* Item 5D.5 — hardened authorization semantics & classification               */
+/* ========================================================================== */
+
+/** Build a ranked-strategy qualification with explicit, controllable stubs. */
+function qualifyWith({ cashStatus, debtStatus, classFirst = true, buyerExit = true, recordGated = false, incomeLed = true } = {}) {
+  return qualifyStorageStrategies({
+    classification: { is_self_storage: true, genuine_facility: classFirst },
+    contract: { physical: { net_rentable_square_feet: { value: classFirst ? 50000 : null } } },
+    valuation: { reconciliation: { qualified_method_count: classFirst ? 1 : 0 }, income_supported: incomeLed },
+    noi: { income_supported: incomeLed },
+    revenue: { current_actual_base_annual: incomeLed ? 600000 : null, current_base_basis: incomeLed ? 'ACTUAL' : 'UNKNOWN', physical_occupancy: incomeLed ? 0.9 : null },
+    capRate: { selected: { kind: incomeLed ? 'OBSERVED' : 'MODELED_MARKET', qualified: incomeLed } },
+    buyerExit: { exit_classification: buyerExit ? 'QUALIFIED' : 'PROVISIONAL_SCENARIO' },
+    capital: { one_time_capital: 0, known_items: [] },
+    strategies: {
+      cash: cashStatus ? { strategy: 'CASH', qualification: cashStatus, available: true, recommended_cash_offer: 4000000, opening_cash_offer: 3700000, maximum_cash_offer: 4300000 } : undefined,
+      commercial_debt: debtStatus ? { strategy: 'SUBJECT_TO', debt_model: 'COMMERCIAL_DEBT_TAKEOVER', qualification: debtStatus, available: true } : undefined,
+    },
+    recordGated,
+    liveFlagsEnabled: false,
+  });
+}
+
+test('UNDERWRITTEN_SHADOW is not scenario_only', () => {
+  const q = qualifyWith({ cashStatus: SQ.UNDERWRITTEN_SHADOW });
+  const cash = q.ranked.find((r) => r.strategy === 'CASH');
+  assert.equal(cash.underwritten, true);
+  assert.equal(cash.scenario_only, false);
+});
+
+test('a scenario-only strategy cannot support SHADOW_MODE_READY', () => {
+  const q = qualifyWith({ cashStatus: SQ.PROVISIONAL_SCENARIO });
+  const cash = q.ranked.find((r) => r.strategy === 'CASH');
+  assert.equal(cash.scenario_only, true);
+  assert.equal(cash.shadow_approved, false);
+  assert.equal(q.shadow_mode_ready, false);
+  assert.deepEqual(q.shadow_approved_strategies, []);
+});
+
+test('SHADOW_MODE_READY names an underwritten shadow-approved basis strategy', () => {
+  const q = qualifyWith({ cashStatus: SQ.UNDERWRITTEN_SHADOW });
+  assert.equal(q.shadow_mode_ready, true);
+  const basis = buildStorageExecutionBasis({ ranked: q.ranked, executionState: 'SHADOW_MODE_READY', liveFlagsEnabled: false });
+  assert.ok(q.shadow_approved_strategies.includes(basis.execution_state_basis_strategy));
+  assert.ok(basis.underwritten_strategies.length >= 1);
+});
+
+test('live-authorized strategy remains null while execution flags are disabled', () => {
+  const q = qualifyWith({ cashStatus: SQ.UNDERWRITTEN_SHADOW });
+  const basis = buildStorageExecutionBasis({ ranked: q.ranked, executionState: 'SHADOW_MODE_READY', liveFlagsEnabled: false });
+  assert.equal(basis.live_authorized_strategy, null);
+  assert.equal(basis.outbound_execution_enabled, false);
+  const cash = q.ranked.find((r) => r.strategy === 'CASH');
+  assert.equal(cash.live_authorized, false);
+  assert.ok(cash.authorization_blockers.includes('unsafe_execution_flags_disabled'));
+});
+
+test('shadow monetary outputs are separate from live-authorized outputs', () => {
+  const shadow = tierMonetary({ status: SQ.UNDERWRITTEN_SHADOW, liveAuthorized: false, opening: 3700000, recommended: 4000000, maximum: 4300000, walkaway: 4300000 });
+  assert.equal(shadow.shadow_recommended, 4000000);
+  assert.equal(shadow.scenario_recommended, null);
+  assert.equal(shadow.authorized_recommended, null); // live disabled
+
+  const scenario = tierMonetary({ status: SQ.PROVISIONAL_SCENARIO, liveAuthorized: false, recommended: 4000000 });
+  assert.equal(scenario.scenario_recommended, 4000000);
+  assert.equal(scenario.shadow_recommended, null);
+  assert.equal(scenario.authorized_recommended, null);
+});
+
+test('provisional cash remains scenario-only (its own monetary tier)', () => {
+  const q = qualifyWith({ cashStatus: SQ.PROVISIONAL_SCENARIO });
+  const cash = q.ranked.find((r) => r.strategy === 'CASH');
+  assert.equal(cash.scenario_only, true);
+  assert.equal(cash.monetary.scenario_recommended, 4000000);
+  assert.equal(cash.monetary.shadow_recommended, null);
+});
+
+test('commercial debt may support shadow while cash remains provisional', () => {
+  const q = qualifyWith({ cashStatus: SQ.PROVISIONAL_SCENARIO, debtStatus: SQ.UNDERWRITTEN_SHADOW });
+  const cash = q.ranked.find((r) => r.strategy === 'CASH');
+  const debt = q.ranked.find((r) => r.strategy === 'SUBJECT_TO');
+  assert.equal(cash.shadow_approved, false); // provisional cash cannot be shadow-approved
+  assert.equal(debt.underwritten, true);
+  assert.equal(debt.shadow_approved, true);
+  assert.equal(q.shadow_mode_ready, true);
+  const basis = buildStorageExecutionBasis({ ranked: q.ranked, executionState: 'SHADOW_MODE_READY', liveFlagsEnabled: false });
+  assert.equal(basis.execution_state_basis_strategy, 'SUBJECT_TO'); // debt, not provisional cash
+  assert.equal(basis.cash_scenario_only, true);
+  assert.equal(basis.cash_shadow_approved, false);
+});
+
+test('a binary is_storage flag alone is insufficient for high-confidence facility classification', () => {
+  const rc = classifyStorageRecord({ is_storage: true, building_square_feet: 24000 });
+  assert.equal(rc.classification, STORAGE_RECORD_CLASS.AMBIGUOUS_STORAGE);
+  assert.ok(rc.confidence < OPERATING_FACILITY_MIN_CONFIDENCE);
+  assert.equal(rc.pricing_eligible, false);
+});
+
+test('a small garage / accessory record does not become an operating facility', () => {
+  const rc = classifyStorageRecord({ is_storage: true, property_type: 'storage', building_square_feet: 1800 });
+  assert.equal(rc.classification, STORAGE_RECORD_CLASS.GARAGE_OR_ACCESSORY_STORAGE);
+  assert.equal(rc.pricing_eligible, false);
+});
+
+test('storage condominium remains a separate class', () => {
+  const rc = classifyStorageRecord({ is_storage: true, property_type: 'Storage Condominium', building_square_feet: 40000 });
+  assert.equal(rc.classification, STORAGE_RECORD_CLASS.STORAGE_CONDOMINIUM);
+  assert.equal(rc.pricing_eligible, false);
+});
+
+test('a warehouse-with-storage label is not self-storage automatically', () => {
+  const rc = classifyStorageRecord({ is_storage: true, property_type: 'Warehouse Distribution with storage', building_square_feet: 80000 });
+  assert.equal(rc.classification, STORAGE_RECORD_CLASS.WAREHOUSE_WITH_STORAGE_LABEL);
+  assert.equal(rc.pricing_eligible, false);
+});
+
+test('a credible operating facility is recognized', () => {
+  const rc = classifyStorageRecord({ property_type: 'Self Storage Facility', is_storage: true, building_square_feet: 55000, number_of_buildings: 6, total_units: 480 }, { hasOperatingData: true });
+  assert.equal(rc.classification, STORAGE_RECORD_CLASS.OPERATING_SELF_STORAGE_FACILITY);
+  assert.ok(rc.confidence >= OPERATING_FACILITY_MIN_CONFIDENCE);
+  assert.equal(rc.pricing_eligible, true);
+});
+
+test('ambiguous storage returns DATA_REQUIRED and does not run a confirmed-facility shadow', () => {
+  const a = fullAnalysis({
+    subjectRow: { property_id: 'amb', property_type: 'storage', is_storage: true, building_square_feet: 24000, property_address_state: 'TX' },
+    storage: {}, storageComps: qualifiedComps(), storageBuyers: [], capRateEvidence: [],
+  });
+  assert.equal(a.record_class.classification, STORAGE_RECORD_CLASS.AMBIGUOUS_STORAGE);
+  assert.equal(a.pricing_eligible, false);
+  assert.equal(a.decision_gate.record_gated, true);
+  assert.equal(a.execution_state, 'DATA_REQUIRED');
+  assert.equal(a.strategy_qualification.shadow_mode_ready, false);
+});
+
+test('modeled NRSF from GBA remains clearly assumed and cannot make income valuation qualified alone', () => {
+  const contract = buildSelfStorageContract({ property_type: 'Self Storage Facility', is_storage: true, building_square_feet: 60000, number_of_buildings: 5 }, { unit_inventory: { total_units: 500 } });
+  const nrsf = contract.physical.net_rentable_square_feet;
+  assert.equal(nrsf.basis, EVIDENCE_BASIS.MARKET_MODELED);
+  assert.ok(isKnown(nrsf)); // has a value, but explicitly modeled
+  // With modeled NRSF but no income/comps, no qualified income value emerges.
+  const a = fullAnalysis({
+    subjectRow: { property_type: 'Self Storage Facility', is_storage: true, building_square_feet: 60000, number_of_buildings: 5, property_address_state: 'TX' },
+    storage: { unit_inventory: { total_units: 500 } }, storageComps: [], storageBuyers: [], capRateEvidence: [],
+  });
+  assert.notEqual(a.valuation.reconciliation.value_classification, 'QUALIFIED');
+});
+
+test('no operating-data zeros are fabricated when inputs are absent', () => {
+  const contract = buildSelfStorageContract({ property_type: 'Self Storage Facility', is_storage: true, building_square_feet: 50000, number_of_buildings: 4 }, {});
+  for (const f of [contract.operations.physical_occupancy, contract.income.base_rental_income, contract.expenses.payroll, contract.operations.average_in_place_rent]) {
+    assert.equal(isKnown(f), false);
+    assert.equal(f.value, null); // UNKNOWN, never 0
+  }
+});
+
+test('production-readiness reports SHADOW (not pricing-calibrated) with full fixtures, and not-calibrated with none', () => {
+  const withFixtures = fullAnalysis();
+  // Fixtures provide qualified data → shadow-class readiness, never autonomous.
+  assert.ok(['PRODUCTION_SHADOW_READY', 'SHADOW_SCENARIO_ONLY'].includes(withFixtures.production_readiness.status));
+  assert.equal(withFixtures.production_readiness.autonomous_ready, false);
+
+  const credibleNoData = fullAnalysis({
+    subjectRow: { property_type: 'Self Storage Facility', is_storage: true, building_square_feet: 30000, number_of_buildings: 4, property_address_state: 'TX' },
+    storage: {}, storageComps: [], storageBuyers: [], capRateEvidence: [],
+  });
+  assert.equal(credibleNoData.production_readiness.status, 'PRODUCTION_PRICING_NOT_CALIBRATED');
+  assert.ok(credibleNoData.production_readiness.active_blockers.some((b) => b.startsWith('qualified_sales')));
 });

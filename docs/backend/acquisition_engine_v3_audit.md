@@ -434,3 +434,67 @@ supplements tests with **clearly-labeled deterministic fixtures** (not a
 production sample); and leaves all outbound execution and persistence disabled.
 No storage-specific migration is required — the canonical income snapshot
 (JSONB + structured provenance) absorbs all storage fields (mission §20).
+
+---
+
+## Item 5D.5 — Integrity pass (classification hardening, 2026-06-22)
+
+Read-only review of the 376 storage-flagged records, classified by the new
+record-level classifier (`classifyStorageRecord`). A single binary `is_storage`
+flag is never sufficient for an operating facility; a genuine facility needs
+plausible size **and** corroboration (multiple buildings, units, an explicit
+self-storage keyword, or operating data).
+
+### Record-class distribution (SQL mirror of the authoritative JS classifier)
+
+| Record class | Count | ≥10k sqft | Avg sqft |
+| --- | ---: | ---: | ---: |
+| GARAGE_OR_ACCESSORY_STORAGE | 190 | 0 | ~3,049 |
+| OPERATING_SELF_STORAGE_FACILITY | 103 | 80 | ~30,594 |
+| AMBIGUOUS_STORAGE | 61 | 61 | ~37,602 |
+| LAND_ONLY_STORAGE_USE | 22 | 0 | ~282 |
+
+**~73% (273/376) are gated out of confirmed-facility pricing** as
+garage/accessory, ambiguous (size-plausible but binary-flag-only, no
+units/keyword), or land. The SQL is an approximation of the authoritative JS
+classifier (sensitive to the population filter); the JS classifier governs the
+engine.
+
+### Review buckets (read-only; no classifications written to production)
+
+| Bucket | Dominant classes |
+| --- | --- |
+| CA <10k sqft (185) | GARAGE_OR_ACCESSORY (107, avg ~2.2k), small keyword-labeled OPERATING/MINI (57, avg ~4.5k, no units), LAND_ONLY (21) |
+| CA ≥10k sqft (20) | OPERATING (14, avg ~40.7k), AMBIGUOUS (6, avg ~28.9k, no units) |
+| TX (97) | OPERATING (61, avg ~22.9k, avg ~103 units), AMBIGUOUS (24, avg ~38.4k, no units), GARAGE (12) |
+| MN (1) | LAND_ONLY (226 sqft) |
+
+### Key consequence
+
+Even records that classify as OPERATING/MINI/CLIMATE remain
+**PRODUCTION_PRICING_NOT_CALIBRATED**: there is still zero operating data
+(NOI/cap/rent/occupancy) and zero qualified storage transactions, so no qualified
+value, observed cap, or authorized offer can be produced for any live record.
+AMBIGUOUS / GARAGE / CONDO / LAND records route to **DATA_REQUIRED** and never
+invoke a confirmed-facility shadow valuation.
+
+### Authorization-semantics correction (§2)
+
+The execution-state contract was hardened to remove the prior ambiguity where an
+UNDERWRITTEN_SHADOW cash strategy was reported `cash_scenario_only = true`. The
+corrected representative stabilized fixture now reports: cash
+`qualification_status = UNDERWRITTEN_SHADOW`, `underwritten = true`,
+`scenario_only = false`, `shadow_approved = true`, `live_authorized = false`;
+`execution_state = SHADOW_MODE_READY` with `execution_state_basis_strategy = CASH`;
+`live_authorized_strategy = null`, `outbound_execution_enabled = false`. Monetary
+figures are tiered into scenario_* / shadow_* / authorized_* — shadow figures are
+populated, authorized figures remain null while unsafe execution flags are off.
+
+### Production-readiness ceiling
+
+- Architecture: **ARCHITECTURE_VALIDATED**, **DATA_MODEL_READY**,
+  **DETERMINISTIC_FIXTURE_VALIDATED** (48 storage tests green).
+- Live data: **LIVE_CLASSIFICATION_PARTIAL**,
+  **LIVE_TRANSACTION_DATA_UNAVAILABLE**, **LIVE_OPERATING_DATA_UNAVAILABLE** →
+  ceiling **PRODUCTION_PRICING_NOT_CALIBRATED**. `AUTONOMOUS_READY` is never
+  reachable while execution flags are disabled.

@@ -230,26 +230,125 @@ export function buildStorageDisposition({ valuation, buyerExit, cashRecommended 
 }
 
 /* -------------------------------------------------------------------------- */
-/* Qualification (§16)                                                         */
+/* Monetary tiers + strategy semantics (Item 5D.5 §2, §3)                       */
+/* -------------------------------------------------------------------------- */
+
+const UNDERWRITTEN_SET = new Set([SQ.UNDERWRITTEN_SHADOW, SQ.EXECUTABLE]);
+
+/** Extract a strategy's primary offer figures for monetary tiering, or null. */
+function extractOfferFigures(entry) {
+  if (entry.strategy === S.CASH) {
+    if (num(entry.recommended_cash_offer) === null) return null;
+    return {
+      opening: entry.opening_cash_offer ?? null,
+      recommended: entry.recommended_cash_offer ?? null,
+      maximum: entry.maximum_cash_offer ?? null,
+      walkaway: entry.maximum_cash_offer ?? null, // max price before walking
+    };
+  }
+  if (entry.strategy === STORAGE_DISPOSITION_STRATEGY) {
+    if (num(entry.projected_seller_net) === null) return null;
+    return {
+      opening: null,
+      recommended: entry.projected_seller_net ?? null,
+      maximum: entry.expected_disposition_value ?? null,
+      walkaway: null,
+    };
+  }
+  // Seller-finance / commercial-debt carry structures/terms, not a single offer.
+  return null;
+}
+
+/**
+ * Split a strategy's primary offer figures into three mutually-exclusive tiers.
+ * scenario_* exist only for PROVISIONAL_SCENARIO; shadow_* only for underwritten
+ * economics; authorized_* only when LIVE authorization is granted (flags off ⇒
+ * always null). No consumer should infer authorization from a generic figure.
+ */
+export function tierMonetary({ status, liveAuthorized, opening = null, recommended = null, maximum = null, walkaway = null }) {
+  const scenario = status === SQ.PROVISIONAL_SCENARIO;
+  const underwritten = UNDERWRITTEN_SET.has(status);
+  const present = (v) => (v === null || v === undefined ? null : v);
+  return {
+    scenario_opening: scenario ? present(opening) : null,
+    scenario_recommended: scenario ? present(recommended) : null,
+    scenario_maximum: scenario ? present(maximum) : null,
+    scenario_walkaway: scenario ? present(walkaway) : null,
+    shadow_opening: underwritten ? present(opening) : null,
+    shadow_recommended: underwritten ? present(recommended) : null,
+    shadow_maximum: underwritten ? present(maximum) : null,
+    shadow_walkaway: underwritten ? present(walkaway) : null,
+    authorized_opening: liveAuthorized ? present(opening) : null,
+    authorized_recommended: liveAuthorized ? present(recommended) : null,
+    authorized_maximum: liveAuthorized ? present(maximum) : null,
+    authorized_walkaway: liveAuthorized ? present(walkaway) : null,
+  };
+}
+
+/**
+ * Derive the full, unambiguous semantic-flag set for a single strategy.
+ * Distinguishes: economically modeled / provisional scenario / fully
+ * underwritten / shadow-eligible / shadow-approved / live-execution-eligible /
+ * live-authorized. live_authorized is false while unsafe execution flags are off.
+ */
+function strategySemantics({ status, available, classFirstOk, buyerExitQualified, incomeLedRequired, incomeLedOk, recordGated, liveFlagsEnabled }) {
+  const modeled = available && (UNDERWRITTEN_SET.has(status) || status === SQ.PROVISIONAL_SCENARIO);
+  const scenarioOnly = status === SQ.PROVISIONAL_SCENARIO;
+  const underwritten = UNDERWRITTEN_SET.has(status);
+  const shadowEligible = underwritten && classFirstOk && !recordGated && (!incomeLedRequired || incomeLedOk);
+  const shadowApproved = shadowEligible && buyerExitQualified;
+  const liveExecutionEligible = shadowApproved && status === SQ.EXECUTABLE;
+  const liveAuthorized = liveExecutionEligible && liveFlagsEnabled === true;
+
+  const blockers = [];
+  if (recordGated) blockers.push('record_class_not_pricing_eligible');
+  if (!underwritten) blockers.push(scenarioOnly ? 'scenario_only_economics' : 'not_underwritten');
+  if (!classFirstOk) blockers.push('class_first_gate');
+  if (incomeLedRequired && !incomeLedOk) blockers.push('insufficient_income_evidence');
+  if (!buyerExitQualified) blockers.push('no_qualified_buyer_exit');
+  if (status !== SQ.EXECUTABLE) blockers.push('not_executable_economics');
+  if (!liveFlagsEnabled) blockers.push('unsafe_execution_flags_disabled');
+
+  return {
+    modeled,
+    scenario_only: scenarioOnly,
+    underwritten,
+    shadow_eligible: shadowEligible,
+    shadow_approved: shadowApproved,
+    live_execution_eligible: liveExecutionEligible,
+    live_authorized: liveAuthorized,
+    execution_basis_eligible: shadowApproved,
+    authorization_blockers: [...new Set(blockers)],
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Qualification (§16) + execution-state basis (Item 5D.5 §2)                   */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Class-first storage strategy qualification. SHADOW_MODE_READY requires
- * supportable asset classification, transaction OR income evidence, reliable
- * NRSF/physical size, buyer exit, capital requirements, strategy-specific
- * evidence depth, and all invariants. Income-led qualification additionally
- * requires rent/revenue, occupancy, expenses, NOI and cap-rate evidence.
+ * Class-first storage strategy qualification with hardened, unambiguous
+ * authorization semantics. SHADOW_MODE_READY requires supportable asset
+ * classification, transaction OR income evidence, reliable NRSF/physical size, a
+ * qualified buyer exit and at least one shadow-approved underwritten strategy.
+ * Income-led strategies additionally require rent/revenue, occupancy, expenses,
+ * NOI and cap-rate evidence. AUTO / live authorization stay disabled.
+ *
+ * @param {object} args
+ * @param {boolean} [args.recordGated]       record class is not pricing-eligible
+ * @param {boolean} [args.liveFlagsEnabled]  unsafe execution flags (always false here)
  */
 export function qualifyStorageStrategies({
   classification, contract, valuation, noi, revenue, capRate, buyerExit, capital,
-  strategies,
+  strategies, recordGated = false, liveFlagsEnabled = false,
 }) {
+  const buyerExitQualified = buyerExit?.exit_classification === 'QUALIFIED';
   const requirements = {
-    asset_classification: Boolean(classification?.is_self_storage && classification?.genuine_facility),
+    asset_classification: Boolean(classification?.is_self_storage && classification?.genuine_facility) && !recordGated,
     reliable_size: Boolean(num(contract?.physical?.net_rentable_square_feet?.value)),
     transaction_or_income_evidence:
       (valuation?.reconciliation?.qualified_method_count ?? 0) > 0 || Boolean(noi?.income_supported),
-    buyer_exit: buyerExit?.exit_classification === 'QUALIFIED',
+    buyer_exit: buyerExitQualified,
     capital_requirements: capital?.one_time_capital !== null || (capital?.known_items?.length ?? 0) >= 0,
     invariants_ok: true,
   };
@@ -261,29 +360,42 @@ export function qualifyStorageStrategies({
     cap_evidence: capRate?.selected?.kind === 'OBSERVED' && capRate.selected.qualified,
   };
 
-  const classFirstOk = requirements.asset_classification && requirements.reliable_size && requirements.transaction_or_income_evidence;
+  const classFirstOk = !recordGated && requirements.asset_classification && requirements.reliable_size && requirements.transaction_or_income_evidence;
   const incomeLedOk = Object.values(incomeEvidence).every(Boolean);
 
   const ranked = [];
   const evaluate = (entry) => {
     if (!entry || entry.qualification === undefined) return;
-    // Demote any strategy above PROVISIONAL when class-first gates fail.
     let status = entry.qualification;
-    if (!classFirstOk && (status === SQ.UNDERWRITTEN_SHADOW || status === SQ.EXECUTABLE)) {
-      status = entry.qualification === SQ.DATA_REQUIRED ? SQ.DATA_REQUIRED : SQ.PROVISIONAL_SCENARIO;
+    // Record gate: an ambiguous / false-positive record cannot be underwritten.
+    if (recordGated && UNDERWRITTEN_SET.has(status)) status = SQ.DATA_REQUIRED;
+    // Demote above-provisional economics when class-first gates fail.
+    if (!classFirstOk && UNDERWRITTEN_SET.has(status)) {
+      status = status === SQ.DATA_REQUIRED ? SQ.DATA_REQUIRED : SQ.PROVISIONAL_SCENARIO;
     }
-    // Income-led strategies (seller finance, commercial debt) require full income
-    // evidence to be more than provisional.
     const isIncomeLed = entry.strategy === S.SELLER_FINANCE || entry.debt_model === STORAGE_DEBT_MODEL;
-    if (isIncomeLed && !incomeLedOk && (status === SQ.UNDERWRITTEN_SHADOW || status === SQ.EXECUTABLE)) {
-      status = SQ.PROVISIONAL_SCENARIO;
-    }
+    if (isIncomeLed && !incomeLedOk && UNDERWRITTEN_SET.has(status)) status = SQ.PROVISIONAL_SCENARIO;
+
+    const semantics = strategySemantics({
+      status, available: Boolean(entry.available), classFirstOk, buyerExitQualified,
+      incomeLedRequired: isIncomeLed, incomeLedOk, recordGated, liveFlagsEnabled,
+    });
+
+    // Tier the strategy's primary offer figures by the FINAL (post-demotion) status.
+    const fig = extractOfferFigures(entry);
+    const monetary = fig
+      ? tierMonetary({ status, liveAuthorized: semantics.live_authorized, ...fig })
+      : null;
+
     ranked.push({
       strategy: entry.strategy,
       debt_model: entry.debt_model ?? null,
       qualification_status: status,
-      authorized_offer: false, // AUTO disabled
+      ...semantics,
+      // Backward-compatible alias (consumers migrating to live_authorized).
+      authorized_offer: semantics.live_authorized,
       available: Boolean(entry.available),
+      monetary,
     });
   };
   evaluate(strategies.cash);
@@ -291,18 +403,62 @@ export function qualifyStorageStrategies({
   evaluate(strategies.commercial_debt);
   evaluate(strategies.disposition);
 
-  // Storage shadow-ready iff at least one strategy is underwritten AND class-first
-  // gates pass AND a buyer exit exists.
-  const anyUnderwritten = ranked.some((r) => r.qualification_status === SQ.UNDERWRITTEN_SHADOW || r.qualification_status === SQ.EXECUTABLE);
-  const shadowModeReady = Boolean(classFirstOk && requirements.buyer_exit && anyUnderwritten);
+  const shadowApproved = ranked.filter((r) => r.shadow_approved);
+  const shadowModeReady = shadowApproved.length >= 1;
 
   return {
     requirements,
     income_evidence: incomeEvidence,
     class_first_ok: classFirstOk,
     income_led_ok: incomeLedOk,
+    record_gated: recordGated,
     ranked,
+    shadow_approved_strategies: shadowApproved.map((r) => r.strategy),
     shadow_mode_ready: shadowModeReady,
+    live_flags_enabled: liveFlagsEnabled,
     auto_states_enabled: false,
+  };
+}
+
+/**
+ * Build the decision-level execution-state basis with hardened semantics. The
+ * underwritten shadow strategy's identity is preserved even though live
+ * authorization is null while unsafe flags are disabled.
+ */
+export function buildStorageExecutionBasis({ ranked = [], executionState, liveFlagsEnabled = false }) {
+  const underwritten = ranked.filter((r) => r.underwritten).map((r) => r.strategy);
+  const shadowApproved = ranked.filter((r) => r.shadow_approved).map((r) => r.strategy);
+  const provisional = ranked.filter((r) => r.scenario_only).map((r) => r.strategy);
+
+  // SHADOW_MODE_READY must name a shadow-approved basis (prefer CASH).
+  let basisStrategy = null;
+  if (executionState === 'SHADOW_MODE_READY' && shadowApproved.length) {
+    basisStrategy = shadowApproved.includes(S.CASH) ? S.CASH : shadowApproved[0];
+  }
+
+  const liveAuthorized = ranked.find((r) => r.live_authorized) ?? null; // null while flags off
+  const cash = ranked.find((r) => r.strategy === S.CASH) ?? null;
+
+  return {
+    execution_state: executionState,
+    execution_state_basis_strategy: basisStrategy,
+    underwritten_strategies: underwritten,
+    shadow_approved_strategies: shadowApproved,
+    provisional_strategies: provisional,
+    live_authorized_strategy: liveAuthorized ? liveAuthorized.strategy : null,
+    live_authorized_offer_type: liveAuthorized ? `${liveAuthorized.strategy}_OFFER` : null,
+    outbound_execution_enabled: false,
+    // Per-cash explicit flags (mission §2 worked example).
+    cash_underwritten: Boolean(cash?.underwritten),
+    cash_shadow_approved: Boolean(cash?.shadow_approved),
+    cash_scenario_only: Boolean(cash?.scenario_only),
+    cash_live_authorized: Boolean(cash?.live_authorized),
+    // Backward-compatible keys (now semantically precise: authorized == live).
+    authorized_strategy: liveAuthorized ? liveAuthorized.strategy : null,
+    authorized_offer_type: liveAuthorized ? `${liveAuthorized.strategy}_OFFER` : null,
+    cash_authorized: Boolean(cash?.live_authorized),
+    note: executionState === 'SHADOW_MODE_READY' && basisStrategy && !liveAuthorized
+      ? `Global ${executionState} is justified by ${basisStrategy} (underwritten shadow); no strategy is live-authorized while execution flags are disabled.`
+      : null,
   };
 }
