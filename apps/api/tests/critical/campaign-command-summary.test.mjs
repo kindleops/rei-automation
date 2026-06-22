@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { deriveOperatorState, operatorStateLabel } from '../../src/lib/domain/campaigns/campaign-operator-state.js'
-import { wrapCampaignActionResponse } from '../../src/lib/domain/campaigns/campaign-lifecycle-response.js'
+import { deriveOperatorState, operatorStateLabel } from '@/lib/domain/campaigns/campaign-operator-state.js'
+import { wrapCampaignActionResponse } from '@/lib/domain/campaigns/campaign-lifecycle-response.js'
 
 test('proof-only execution never displays Live operator state', () => {
   const state = deriveOperatorState(
