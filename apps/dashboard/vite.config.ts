@@ -627,6 +627,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/intel': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
         '/api/ops': {
           target: backendProxyTarget,
           changeOrigin: true,
