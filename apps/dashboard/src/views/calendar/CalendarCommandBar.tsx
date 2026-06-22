@@ -4,6 +4,7 @@ import type { CalendarLayerId } from '../../lib/calendar/calendar-layers'
 import { Icon } from '../../shared/icons'
 import { CalendarDatePicker } from './components/CalendarDatePicker'
 import { CalendarLayersPopover } from './components/CalendarLayersPopover'
+import { CalendarCommandOverflow } from './components/CalendarCommandOverflow'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -72,53 +73,45 @@ export function CalendarCommandBar({
   lastSyncedLabel,
   errorMessage,
 }: CalendarCommandBarProps) {
-  const liveLabel = (() => {
+  const statusLabel = (() => {
     if (refreshState === 'updating') return 'Updating'
-    if (refreshState === 'error') return 'Error'
-    if (refreshState === 'updated') return `Updated ${lastSyncedLabel}`
+    if (refreshState === 'error') return 'Error — retry'
+    if (refreshState === 'updated') return 'Updated just now'
     return 'Live'
   })()
 
   return (
     <header className={cls('nx-cal__command-bar', collapsed && 'is-collapsed')}>
-      <div className="nx-cal__command-left">
-        <div className="nx-cal__command-brand" aria-hidden="true">
-          <Icon name="calendar" />
-        </div>
-        <div className="nx-cal__command-copy">
-          <strong>Execution Calendar</strong>
-          <span>Automation, follow-ups, milestones, and transaction timing · {rangeLabel}</span>
-        </div>
-      </div>
+      <div className="nx-cal__command-priority">
+        <nav className="nx-cal__command-views" aria-label="Calendar view mode">
+          {VIEW_MODES.map((mode) => (
+            <button
+              key={mode.key}
+              type="button"
+              className={cls('nx-cal__view-tab', viewMode === mode.key && 'is-active')}
+              onClick={() => onViewChange(mode.key)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </nav>
 
-      <nav className="nx-cal__command-views" aria-label="Calendar view mode">
-        {VIEW_MODES.map((mode) => (
-          <button
-            key={mode.key}
-            type="button"
-            className={cls('nx-cal__view-tab', viewMode === mode.key && 'is-active')}
-            onClick={() => onViewChange(mode.key)}
-          >
-            {mode.label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="nx-cal__command-right">
         <div className="nx-cal__command-nav">
           <button type="button" className="nx-cal__icon-btn" onClick={onPrev} aria-label="Previous range">
             <span aria-hidden="true">‹</span>
           </button>
-          <button type="button" className="nx-cal__cmd-btn" onClick={onToday}>Today</button>
+          <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--today" onClick={onToday}>Today</button>
           <button type="button" className="nx-cal__icon-btn" onClick={onNext} aria-label="Next range">
             <Icon name="chevron-right" />
           </button>
         </div>
 
         <CalendarDatePicker value={anchorDate} onChange={onDateChange} />
+      </div>
 
+      <div className="nx-cal__command-secondary">
         <select
-          className="nx-cal__timezone-select"
+          className="nx-cal__timezone-select nx-cal__cmd-desktop-only"
           value={timezoneMode}
           onChange={(e) => onTimezoneModeChange(e.target.value as CalendarTimezoneMode)}
           aria-label="Timezone display mode"
@@ -128,7 +121,7 @@ export function CalendarCommandBar({
           <option value="recipient">Recipient</option>
         </select>
 
-        <div className="nx-cal__scope-toggle">
+        <div className="nx-cal__scope-toggle nx-cal__cmd-desktop-only">
           <button
             type="button"
             className={cls('nx-cal__cmd-btn nx-cal__cmd-btn--sm', scopeMode === 'global' && 'is-active')}
@@ -138,44 +131,73 @@ export function CalendarCommandBar({
           </button>
           <button
             type="button"
-            className={cls('nx-cal__cmd-btn nx-cal__cmd-btn--sm', scopeMode === 'selected' && 'is-active')}
+            className={cls('nx-cal__cmd-btn nx-cal__cmd-btn--sm nx-cal__scope-entity', scopeMode === 'selected' && 'is-active')}
             onClick={() => onScopeChange('selected')}
             disabled={!selectedEnabled}
-            title={!selectedEnabled ? 'Select a seller in global entity context' : undefined}
+            title={!selectedEnabled ? 'Select an entity in universal context' : 'Selected Entity scope'}
           >
-            Selected Entity
+            <Icon name="user" />
+            <span className="nx-cal__scope-entity-label">Selected Entity</span>
           </button>
         </div>
 
-        <CalendarLayersPopover layers={layers} visibleCount={visibleEventCount} onChange={onLayersChange} />
+        <div className="nx-cal__cmd-desktop-only">
+          <CalendarLayersPopover layers={layers} visibleCount={visibleEventCount} onChange={onLayersChange} />
+        </div>
 
-        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent" onClick={onNewEvent} aria-label="Add task">
-          <Icon name="spark" />
-          <span>Add Task</span>
+        <button type="button" className="nx-cal__cmd-btn nx-cal__cmd-btn--accent nx-cal__cmd-add" onClick={onNewEvent} aria-label="Add task">
+          <span className="nx-cal__cmd-add-icon" aria-hidden="true">+</span>
+          <span className="nx-cal__cmd-add-label">Add Task</span>
         </button>
 
         <button
           type="button"
           data-testid="calendar-refresh"
-          className={cls('nx-cal__icon-btn', refreshState === 'updating' && 'is-spinning')}
+          className="nx-cal__icon-btn nx-cal__cmd-refresh"
           onClick={onRefresh}
           aria-label={refreshState === 'error' ? 'Retry refresh' : 'Refresh calendar'}
+          title={statusLabel}
         >
           <Icon name="refresh-cw" />
         </button>
 
-        <span className={cls('nx-cal__live-pill', refreshState === 'error' && 'is-error', refreshState === 'updating' && 'is-updating', refreshState === 'updated' && 'is-updated')}>
+        <span
+          className={cls(
+            'nx-cal__live-pill',
+            refreshState === 'error' && 'is-error',
+            refreshState === 'updating' && 'is-updating',
+            refreshState === 'updated' && 'is-updated',
+          )}
+          title={errorMessage || statusLabel}
+        >
           <span className="nx-cal__live-dot" aria-hidden="true" />
-          {liveLabel}
+          <span className="nx-cal__live-label">{statusLabel}</span>
         </span>
 
         {showRailToggle ? (
-          <button type="button" className={cls('nx-cal__icon-btn', railOpen && 'is-active')} onClick={onToggleRail} aria-label="Toggle contextual rail">
+          <button type="button" className={cls('nx-cal__icon-btn nx-cal__cmd-desktop-only', railOpen && 'is-active')} onClick={onToggleRail} aria-label="Toggle contextual rail">
             <Icon name="layout-split" />
           </button>
         ) : null}
 
-        {errorMessage ? <span className="nx-cal__live-error" title={errorMessage}>!</span> : null}
+        <CalendarCommandOverflow
+          scopeMode={scopeMode}
+          selectedEnabled={selectedEnabled}
+          timezoneMode={timezoneMode}
+          layers={layers}
+          visibleEventCount={visibleEventCount}
+          railOpen={railOpen}
+          showRailToggle={showRailToggle}
+          onScopeChange={onScopeChange}
+          onTimezoneModeChange={onTimezoneModeChange}
+          onLayersChange={onLayersChange}
+          onToggleRail={onToggleRail}
+        />
+      </div>
+
+      <div className="nx-cal__command-meta nx-cal__cmd-desktop-only" aria-hidden="true">
+        <strong>Execution Calendar</strong>
+        <span>{rangeLabel}</span>
       </div>
     </header>
   )

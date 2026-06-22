@@ -73,11 +73,12 @@ export function DailyExecutionSchedule({
                       draggable={Boolean(event.reschedulable)}
                       onDragStart={() => { (window as unknown as { __nxCalDragId?: string }).__nxCalDragId = event.id }}
                       className={cls('nx-cal__day-bar', `is-${event.tone}`, selectedEventId === event.id && 'is-selected', event.overdue && 'is-overdue', !event.reschedulable && 'is-locked')}
+                      title={!event.reschedulable ? `Read-only: ${event.readOnlyReason?.replace(/_/g, ' ') || 'automation owned'}` : event.title}
                       onClick={(e) => { e.stopPropagation(); onSelect(event) }}
                     >
                       <strong>{event.title}</strong>
                       <span>{event.sellerName}</span>
-                      {event.readOnlyReason ? <small>🔒 {event.readOnlyReason}</small> : null}
+                      {!event.reschedulable ? <small className="nx-cal__locked-hint">Read-only automation</small> : null}
                     </button>
                   ))}
                 </div>

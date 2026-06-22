@@ -60,6 +60,26 @@ export async function createManualCalendarEvent(payload: Record<string, unknown>
   )
 }
 
+export async function updateManualCalendarEvent(payload: Record<string, unknown>) {
+  return unwrap<{ ok: boolean; event: Record<string, unknown>; no_send_proof?: boolean }>(
+    await callBackend('/api/cockpit/calendar/manual-events', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  )
+}
+
+export async function deleteManualCalendarEvent(payload: Record<string, unknown>) {
+  return unwrap<{ ok: boolean; deleted_id?: string; no_send_proof?: boolean }>(
+    await callBackend('/api/cockpit/calendar/manual-events', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  )
+}
+
 export async function rescheduleCalendarEvent(payload: Record<string, unknown>) {
   return unwrap<{ ok: boolean; no_send_proof?: boolean; error?: string }>(
     await callBackend('/api/cockpit/calendar/reschedule', {

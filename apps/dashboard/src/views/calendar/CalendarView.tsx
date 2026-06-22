@@ -24,7 +24,8 @@ import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { formatRelativeTime } from '../../shared/formatters'
 import { CalendarCommandBar, type CalendarRefreshState } from './CalendarCommandBar'
 import { CalendarExecutionDrawer } from './CalendarExecutionDrawer'
-import { CalendarKpiRibbon } from './CalendarKpiRibbon'
+import { CalendarKpiRibbon, KPI_LAYER_MAP } from './CalendarKpiRibbon'
+import { buildCalendarProofFixtures, isCalendarProofMode } from '../../lib/calendar/calendar-proof-fixtures'
 import { CalendarMobileView } from './CalendarMobileView'
 import { CalendarIntelligenceRail } from './CalendarIntelligenceRail'
 import { filterViewEvents } from '../../lib/calendar/calendar-event-classification'
@@ -99,6 +100,8 @@ export function CalendarView({
   const [agendaSearch, setAgendaSearch] = useState('')
   const [activeKpi, setActiveKpi] = useState<string | null>(null)
   const [newEventOpen, setNewEventOpen] = useState(false)
+  const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null)
+  const proofMode = isCalendarProofMode()
   const [developerMode] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('developer_mode') === 'true')
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
@@ -190,18 +193,36 @@ export function CalendarView({
 
       if (requestId !== requestIdRef.current || controller.signal.aborted) return
 
-      const nextOverdue = primaryEvents.filter((e) => e.overdue).slice(0, 80)
-      const nextAutomation = primaryEvents.filter((e) =>
+      const merged = proofMode && primaryEvents.length === 0
+        ? buildCalendarProofFixtures(anchorDate)
+        : proofMode
+          ? [...primaryEvents, ...buildCalendarProofFixtures(anchorDate).filter((f) => !primaryEvents.some((e) => e.id === f.id))]
+          : primaryEvents
+
+      const nextOverdue = merged.filter((e) => e.overdue).slice(0, 80)
+      const nextAutomation = merged.filter((e) =>
         ['scheduled_sms', 'seller_follow_up', 'automation_blocked', 'queue_retry', 'workflow_wake', 'workflow_task'].includes(e.type))
-      const nextClosings = primaryEvents.filter((e) =>
+      const nextClosings = merged.filter((e) =>
         ['title_opened', 'title_milestone', 'clear_to_close', 'closing_scheduled'].includes(e.type))
-      const nextContracts = primaryEvents.filter((e) =>
+      const nextContracts = merged.filter((e) =>
         ['contract_sent', 'contract_signature_deadline', 'fully_executed_contract'].includes(e.type))
-      const nextOffers = primaryEvents.filter((e) =>
+      const nextOffers = merged.filter((e) =>
         ['offer_created', 'offer_sent', 'offer_expiration', 'offer_follow_up'].includes(e.type))
 
-      setAllEvents(primaryEvents)
-      setSummaryCards(nextSummary)
+      setAllEvents(merged)
+      const proofSummary = proofMode ? [
+        { id: 'due-today', label: 'Due Today', value: merged.filter((e) => toIsoDate(new Date(e.timestamp)) === toIsoDate(new Date())).length, tone: 'blue' as const },
+        { id: 'overdue', label: 'Overdue', value: merged.filter((e) => e.overdue).length, tone: 'red' as const },
+        { id: 'seller-replies', label: 'Seller Replies', value: merged.filter((e) => ['inbound_reply', 'seller_reply_needs_action'].includes(e.type)).length, tone: 'cyan' as const },
+        { id: 'scheduled-sms', label: 'Scheduled SMS', value: merged.filter((e) => e.type === 'scheduled_sms').length, tone: 'blue' as const },
+        { id: 'workflow-wakes', label: 'Workflow Wakes', value: merged.filter((e) => ['workflow_wake', 'workflow_task'].includes(e.type)).length, tone: 'violet' as const },
+        { id: 'offers-due', label: 'Offers Due', value: merged.filter((e) => ['offer_expiration', 'offer_follow_up'].includes(e.type)).length, tone: 'gold' as const },
+        { id: 'contracts-awaiting', label: 'Contracts Awaiting', value: merged.filter((e) => e.type === 'contract_signature_deadline').length, tone: 'purple' as const },
+        { id: 'title-milestones', label: 'Title Milestones', value: merged.filter((e) => ['title_milestone', 'title_opened'].includes(e.type)).length, tone: 'gold' as const },
+        { id: 'buyer-follow-ups', label: 'Buyer Follow-Ups', value: merged.filter((e) => e.type === 'buyer_follow_up').length, tone: 'amber' as const },
+        { id: 'closings', label: 'Closings', value: merged.filter((e) => e.type === 'closing_scheduled').length, tone: 'emerald' as const },
+      ] : nextSummary
+      setSummaryCards(proofSummary)
       setOverdueItems(nextOverdue)
       setAutomationSchedule(nextAutomation)
       setClosingItems(nextClosings)
@@ -221,7 +242,7 @@ export function CalendarView({
         }, 2200)
       }
     }
-  }, [anchorDate, filters, scopeMode, selectedThread?.ownerId, selectedThread?.propertyId, threads, viewMode])
+  }, [anchorDate, filters, proofMode, scopeMode, selectedThread?.ownerId, selectedThread?.propertyId, threads, viewMode])
 
   useEffect(() => {
     void loadAll()
@@ -386,7 +407,11 @@ export function CalendarView({
   const handleKpiClick = (id: string) => {
     setActiveKpi(id)
     if (id === 'overdue') setViewMode('agenda')
-    if (id === 'scheduled-sms') setLayers(['sms'])
+    const layerIds = KPI_LAYER_MAP[id]
+    if (layerIds?.length) {
+      setLayers(layerIds as CalendarLayerId[])
+      saveCalendarLayers(layerIds as CalendarLayerId[])
+    }
   }
 
   const mainSurface = (() => {
@@ -517,11 +542,9 @@ export function CalendarView({
           <SellerContextRibbon
             thread={selectedThread}
             nextEvent={nextSellerEvent}
-            compact={layoutMode === 'compact' || layoutMode === 'medium'}
             onOpenDeal={() => onOpenDealIntelligence?.(selectedThread.id)}
             onOpenConversation={() => onSelectThread(selectedThread.id)}
             onOpenIntelligence={() => onOpenDealIntelligence?.(selectedThread.id)}
-            onClearScope={() => setScopeMode('global')}
           />
         ) : null}
 
@@ -549,8 +572,9 @@ export function CalendarView({
             collapsed={false}
             onToggleCollapse={() => setRailOpen(false)}
             onSelect={handleSelectEvent}
-            onAddTask={() => setNewEventOpen(true)}
+            onAddTask={() => { setEditEvent(null); setNewEventOpen(true) }}
             onClearEvent={() => setSelectedEvent(null)}
+            onEditEvent={(event) => { setEditEvent(event); setNewEventOpen(true) }}
           />
         ) : null}
         </div>
@@ -568,11 +592,13 @@ export function CalendarView({
 
       <CalendarNewEventModal
         open={newEventOpen}
-        defaultDate={toIsoDate(anchorDate)}
+        defaultDate={selectedDayIso || toIsoDate(anchorDate)}
         sellerId={selectedThread?.ownerId}
         propertyId={selectedThread?.propertyId}
         threadId={selectedThread?.id}
-        onClose={() => setNewEventOpen(false)}
+        editEvent={editEvent}
+        entityLabel={selectedThread ? `${selectedThread.ownerDisplayName || selectedThread.ownerName || 'Entity'} · ${selectedThread.propertyAddress || ''}` : undefined}
+        onClose={() => { setNewEventOpen(false); setEditEvent(null) }}
         onCreated={() => setLiveTick((v) => v + 1)}
       />
 

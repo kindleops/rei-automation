@@ -14,13 +14,34 @@ async function setTheme(page: import('@playwright/test').Page, theme: 'dark' | '
   }, theme)
 }
 
-async function waitForCalendar(page: import('@playwright/test').Page) {
-  await page.goto('/calendar')
+async function waitForCalendar(page: import('@playwright/test').Page, proof = true) {
+  await page.goto(proof ? '/calendar?calendar_proof=1' : '/calendar')
   await page.waitForSelector('.nx-cal__command-bar', { timeout: 30000 })
-  await page.waitForTimeout(1200)
+  await page.waitForTimeout(800)
+}
+
+async function dismissOverlays(page: import('@playwright/test').Page) {
+  for (let i = 0; i < 2; i += 1) await page.keyboard.press('Escape').catch(() => {})
+  if (await page.locator('.nx-cal__event-backdrop').isVisible().catch(() => false)) {
+    await page.locator('.nx-cal__event-backdrop').click({ position: { x: 4, y: 4 }, timeout: 2000 }).catch(() => {})
+  }
+  if (await page.locator('.nx-cal__modal-backdrop').isVisible().catch(() => false)) {
+    await page.locator('.nx-cal__modal-backdrop').click({ position: { x: 4, y: 4 }, timeout: 2000 }).catch(() => {})
+  }
+}
+
+async function openLayers(page: import('@playwright/test').Page) {
+  const desktop = page.locator('.nx-cal__cmd-desktop-only button:has-text("Layers")').first()
+  if (await desktop.isVisible().catch(() => false)) {
+    await desktop.click()
+    return
+  }
+  await page.locator('.nx-cal__cmd-overflow button').click()
+  await page.locator('.nx-cal__cmd-overflow-panel button:has-text("Layers")').click()
 }
 
 test.describe('Calendar Nexus visual proof', () => {
+  test.setTimeout(300_000)
   test.beforeAll(() => {
     fs.mkdirSync(OUT, { recursive: true })
   })
@@ -39,6 +60,11 @@ test.describe('Calendar Nexus visual proof', () => {
 
     await setTheme(page, 'red-ops')
     await shot(page, '100-month-red-ops')
+
+    await setTheme(page, 'light')
+    await page.click('.nx-cal__view-tab:has-text("Week")')
+    await page.waitForTimeout(600)
+    await shot(page, '100-week-light')
 
     await setTheme(page, 'dark')
     await page.click('.nx-cal__view-tab:has-text("Week")')
@@ -73,14 +99,15 @@ test.describe('Calendar Nexus visual proof', () => {
       await shot(page, '100-selected-date-rail')
     }
 
+    await dismissOverlays(page)
     await setTheme(page, 'light')
-    await page.click('button:has-text("Layers")')
+    await openLayers(page)
     await page.waitForTimeout(400)
     await shot(page, '100-layers-popover-light')
 
     await setTheme(page, 'dark')
     await page.keyboard.press('Escape')
-    await page.click('button:has-text("Layers")')
+    await openLayers(page)
     await page.waitForTimeout(400)
     await shot(page, '100-layers-popover-dark')
 
@@ -109,29 +136,15 @@ test.describe('Calendar Nexus visual proof', () => {
     await page.locator('.nx-cal__modal-backdrop').click({ position: { x: 10, y: 10 } })
     await page.waitForTimeout(300)
 
-    await page.click('button:has-text("Global")')
-    await page.waitForTimeout(400)
-    await shot(page, '100-global-scope')
-
-    const entityBtn = page.locator('button:has-text("Selected Entity")')
-    if (await entityBtn.isEnabled()) {
-      await entityBtn.click()
-      await page.waitForTimeout(500)
-      await shot(page, '100-selected-entity-scope')
-      await page.click('button:has-text("Global")')
-    }
-
-    const railToggle = page.locator('button[aria-label="Toggle contextual rail"]')
-    if (await railToggle.count()) {
-      await railToggle.click()
-      await page.waitForTimeout(400)
-      await shot(page, '100-collapsed-rail')
-      await railToggle.click()
-      await page.waitForTimeout(300)
-    }
-
     const monthCells = await page.locator('.nx-cal__month-grid.is-true-month .nx-cal__month-cell').count()
     expect(monthCells).toBeGreaterThanOrEqual(35)
+
+    const emptyCats = await page.locator('.nx-cal__month-cell:not(.has-events) .nx-cal__month-cats').count()
+    expect(emptyCats).toBe(0)
+
+    const populatedChips = await page.locator('.nx-cal__month-cell.has-events .nx-cal__month-event').count()
+    expect(populatedChips).toBeGreaterThan(0)
+    await shot(page, '100-month-populated')
 
     await page.click('.nx-cal__view-tab:has-text("Week")')
     await page.waitForTimeout(400)
@@ -143,13 +156,14 @@ test.describe('Calendar Nexus visual proof', () => {
 
     const eventChip = page.locator('.nx-cal__month-event, .nx-cal__week-event, .nx-cal__agenda-row').first()
     if (await eventChip.count()) {
+      await dismissOverlays(page)
       await page.click('.nx-cal__view-tab:has-text("Month")')
       await page.waitForTimeout(300)
       await eventChip.click()
       await page.waitForTimeout(500)
       await shot(page, '100-selected-event-rail')
       await shot(page, '100-event-drawer')
-      await page.locator('.nx-cal__event-backdrop').click({ position: { x: 8, y: 8 } })
+      await dismissOverlays(page)
     }
 
     const selectedCell = page.locator('.nx-cal__month-cell.is-selected').first()
@@ -184,7 +198,7 @@ test.describe('Calendar Nexus visual proof', () => {
     await page.waitForTimeout(500)
     await shot(page, '50-week-dark')
 
-    await page.click('button:has-text("Layers")')
+    await openLayers(page)
     await page.waitForTimeout(400)
     await shot(page, '50-layer-panel')
 

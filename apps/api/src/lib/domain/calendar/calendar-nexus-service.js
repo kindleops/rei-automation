@@ -805,6 +805,50 @@ export async function createManualCalendarEvent(input = {}, deps = {}) {
   return { ok: true, event: data, no_send_proof: true };
 }
 
+export async function updateManualCalendarEvent(input = {}, deps = {}) {
+  const client = db(deps);
+  const id = clean(input.id || input.event_id || input.source_record_id);
+  if (!id) return { ok: false, error: 'manual_event_id_required' };
+
+  const { data: existing, error: readError } = await client
+    .from('calendar_manual_events')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (readError || !existing) return { ok: false, error: 'manual_event_not_found' };
+
+  const patch = {
+    title: input.title !== undefined ? clean(input.title) || existing.title : existing.title,
+    description: input.description !== undefined ? clean(input.description) : existing.description,
+    event_type: input.event_type !== undefined ? clean(input.event_type) : existing.event_type,
+    start_at: input.start_at !== undefined ? asIso(input.start_at) : existing.start_at,
+    end_at: input.end_at !== undefined ? asIso(input.end_at) : existing.end_at,
+    all_day: input.all_day !== undefined ? Boolean(input.all_day) : existing.all_day,
+    priority: input.priority !== undefined ? clean(input.priority) : existing.priority,
+    status: input.status !== undefined ? clean(input.status) : existing.status,
+    reminder_minutes: input.reminder_minutes !== undefined
+      ? Number(input.reminder_minutes) || null
+      : existing.reminder_minutes,
+    updated_at: new Date().toISOString(),
+    updated_by: clean(input.updated_by) || 'operator',
+    version: Number(existing.version || 1) + 1,
+  };
+
+  const { data, error } = await client.from('calendar_manual_events').update(patch).eq('id', id).select('*').single();
+  if (error) return { ok: false, error: error.message || 'manual_event_update_failed' };
+  return { ok: true, event: data, no_send_proof: true };
+}
+
+export async function deleteManualCalendarEvent(input = {}, deps = {}) {
+  const client = db(deps);
+  const id = clean(input.id || input.event_id || input.source_record_id);
+  if (!id) return { ok: false, error: 'manual_event_id_required' };
+
+  const { error } = await client.from('calendar_manual_events').delete().eq('id', id);
+  if (error) return { ok: false, error: error.message || 'manual_event_delete_failed' };
+  return { ok: true, deleted_id: id, no_send_proof: true };
+}
+
 export async function rescheduleCalendarEvent(input = {}, deps = {}) {
   const sourceDomain = clean(input.source_domain || input.sourceDomain);
   const sourceRecordId = clean(input.source_record_id || input.sourceRecordId);

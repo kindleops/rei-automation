@@ -126,10 +126,12 @@ export function WeeklyExecutionGrid({
                       onDragStart={() => { (window as unknown as { __nxCalDragId?: string }).__nxCalDragId = event.id }}
                       className={cls('nx-cal__week-event', `is-${event.tone}`, selectedEventId === event.id && 'is-selected', !event.reschedulable && 'is-locked')}
                       style={{ top: `${top}%`, height: `${height}%` }}
+                      title={!event.reschedulable ? `Read-only: ${event.readOnlyReason?.replace(/_/g, ' ') || 'automation owned'}` : event.title}
                       onClick={() => onSelect(event)}
                     >
                       <strong>{event.title}</strong>
                       <span>{event.sellerName}</span>
+                      {!event.reschedulable ? <small className="nx-cal__locked-hint">Read-only</small> : null}
                     </button>
                   ))}
                 </div>

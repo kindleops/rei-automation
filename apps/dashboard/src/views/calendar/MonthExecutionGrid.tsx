@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { CalendarEvent } from '../../lib/data/calendarData'
+import { CATEGORY_META, categoryIcon, summarizeDayCategories } from '../../lib/calendar/calendar-event-categories'
 import { formatEntitySubtitle } from '../../lib/calendar/calendar-entity-display'
 import { buildMonthGrid, eventDayKey, toIsoDate, weekdayHeaders, type WeekStart } from '../../lib/calendar/calendar-date-engine'
 import { Icon } from '../../shared/icons'
@@ -66,6 +67,7 @@ export function MonthExecutionGrid({
           const overflow = Math.max(0, dayEvents.length - 3)
           const isSelected = selectedDayIso === cell.iso
           const isWeekend = cell.date.getDay() === 0 || cell.date.getDay() === 6
+          const categories = summarizeDayCategories(dayEvents)
 
           return (
             <div
@@ -93,20 +95,34 @@ export function MonthExecutionGrid({
             >
               <div className="nx-cal__month-head">
                 <strong>{cell.date.getDate()}</strong>
-                {dayEvents.length > 0 ? <span className="nx-cal__month-count">{dayEvents.length}</span> : null}
+                {dayEvents.length > 0 ? (
+                  <>
+                    <span className="nx-cal__month-count" title={`${dayEvents.length} events`}>{dayEvents.length}</span>
+                    <div className="nx-cal__month-cats" aria-hidden="true">
+                      {categories.map((cat) => (
+                        <span
+                          key={cat}
+                          className="nx-cal__month-cat"
+                          style={{ ['--cat-color' as string]: CATEGORY_META[cat].dot }}
+                          title={CATEGORY_META[cat].label}
+                        >
+                          <Icon name={categoryIcon(cat)} />
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   className="nx-cal__month-add"
                   aria-label={`Add task on ${cell.iso}`}
                   onClick={(e) => { e.stopPropagation(); onCreateTask?.(cell.iso) }}
                 >
-                  <Icon name="spark" />
+                  <span aria-hidden="true">+</span>
                 </button>
               </div>
               <div className="nx-cal__month-body">
-                {dayEvents.length === 0 ? (
-                  <span className="nx-cal__month-empty-hint" aria-hidden="true" />
-                ) : (
+                {dayEvents.length === 0 ? null : (
                   <>
                     {dayEvents.slice(0, 3).map((event) => (
                       <button
@@ -121,8 +137,12 @@ export function MonthExecutionGrid({
                           event.overdue && 'is-overdue',
                           !event.reschedulable && 'is-locked',
                         )}
+                        title={!event.reschedulable ? `Read-only: ${event.readOnlyReason?.replace(/_/g, ' ') || 'automation owned'}` : event.title}
                         onClick={(e) => { e.stopPropagation(); onSelect(event) }}
                       >
+                        <span className="nx-cal__month-event-cat" aria-hidden="true">
+                          <Icon name={categoryIcon(summarizeDayCategories([event])[0])} />
+                        </span>
                         <span className="nx-cal__month-event-time">
                           {event.allDay ? 'All day' : new Date(event.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                         </span>
