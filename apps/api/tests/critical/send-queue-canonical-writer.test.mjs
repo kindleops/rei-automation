@@ -6,21 +6,19 @@ import { claimSendQueueRow } from "@/lib/supabase/sms-engine.js";
 
 // ─── mock supabase builders ────────────────────────────────────────────────────
 
-function makeInsertSupabase({ conflict = false, suppressed_21610 = false } = {}) {
+function makeInsertSupabase({ conflict = false, suppressed_21610 = false, existing = null } = {}) {
   const inserted = [];
 
   // Builds a fully-chainable select stub that handles both:
   //   a) suppression count: .select("id", {count,head}).eq().eq().ilike() -> { count }
   //   b) post-23505 lookup: .select("*").eq("queue_key",...).maybeSingle() -> { data, error }
   function makeSelectChain() {
-    const terminal = {
-      maybeSingle: () => Promise.resolve({ data: null, error: null }),
-      then: (resolve) => resolve({ count: suppressed_21610 ? 1 : 0 }),
-    };
     const chain = {
       eq: () => chain,
+      order: () => chain,
+      limit: () => chain,
       ilike: () => Promise.resolve({ count: suppressed_21610 ? 1 : 0 }),
-      maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      maybeSingle: () => Promise.resolve({ data: conflict ? existing : null, error: null }),
       then: (resolve) => resolve({ count: suppressed_21610 ? 1 : 0 }),
     };
     return chain;
@@ -127,21 +125,25 @@ test("enqueueSendQueueItem: succeeds and returns queue_row_id", async () => {
   assert.ok(result.queue_row_id, "must return queue_row_id");
 });
 
-test("enqueueSendQueueItem: same payload twice → second call returns duplicate_blocked", async () => {
-  // First call: succeeds
+test("enqueueSendQueueItem: same payload twice → second call returns idempotent replay", async () => {
+  const payload = basePayload();
+  const existing = {
+    id: 42,
+    queue_key: payload.queue_key,
+    dedupe_key: payload.queue_key,
+    queue_status: "queued",
+    scheduled_for: payload.scheduled_for,
+  };
+
   const { client: client1 } = makeInsertSupabase();
-  const first = await enqueueSendQueueItem(basePayload(), { supabase: client1 });
+  const first = await enqueueSendQueueItem(payload, { supabase: client1 });
   assert.equal(first.ok, true, "first insert must succeed");
 
-  // Second call: same queue_key → 23505 conflict
-  const { client: client2 } = makeInsertSupabase({ conflict: true });
-  const second = await enqueueSendQueueItem(
-    { ...basePayload(), queue_key: first.queue_key || basePayload().queue_key },
-    { supabase: client2 }
-  );
-  // duplicate_blocked = ok:false with reason duplicate_blocked
-  assert.equal(second.ok, false, "second insert with same key must be blocked");
-  assert.equal(second.reason, "duplicate_blocked");
+  const { client: client2 } = makeInsertSupabase({ conflict: true, existing });
+  const second = await enqueueSendQueueItem(payload, { supabase: client2 });
+  assert.equal(second.ok, true, "second insert with same dedupe grain must replay existing row");
+  assert.equal(second.idempotent_replay, true);
+  assert.equal(second.queue_row_id, 42);
 });
 
 test("enqueueSendQueueItem: blocked/audit rows bypass live guards", async () => {
@@ -282,11 +284,18 @@ test("enqueueSendQueueItem: auto-reply same thread+template+window produces at m
   const first = await enqueueSendQueueItem(payload, { supabase: c1 });
   assert.equal(first.ok, true, "first auto-reply insert must succeed");
 
-  // Second insert with same key hits 23505 → duplicate_blocked
-  const { client: c2 } = makeInsertSupabase({ conflict: true });
+  const replay_row = {
+    id: 77,
+    queue_key: shared_key,
+    dedupe_key: shared_key,
+    queue_status: "queued",
+    scheduled_for: payload.scheduled_for,
+  };
+  const { client: c2 } = makeInsertSupabase({ conflict: true, existing: replay_row });
   const second = await enqueueSendQueueItem(payload, { supabase: c2 });
-  assert.equal(second.ok, false, "duplicate auto-reply must be blocked");
-  assert.equal(second.reason, "duplicate_blocked");
+  assert.equal(second.ok, true, "duplicate auto-reply must replay existing row");
+  assert.equal(second.idempotent_replay, true);
+  assert.equal(second.queue_row_id, 77);
 });
 
 // ─── grep proof: no live direct insert outside canonical path ─────────────────

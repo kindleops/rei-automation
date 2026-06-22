@@ -21,6 +21,9 @@ import {
   normalizeTextGridFailure,
   textGridFailureMetadata,
 } from "@/lib/domain/messaging/textgrid-failure-normalization.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
+import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
+import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -84,25 +87,70 @@ function addMinutesIso(value, minutes = 5) {
 }
 
 // Returns true for provider errors that must never be retried on the same from/to pair.
-// Covers TextGrid 21610 (From/To pair violates a blacklist rule) and any error that
-// explicitly carries retryable=false.
 function isNonRetryableProviderError(error) {
   if (!error) return false;
-  const normalized = normalizeTextGridFailure(error);
-  if (
-    ["content_filter_blocked", "recipient_opted_out", "invalid_to_number"].includes(
-      normalized.failure_class
-    )
-  ) {
-    return true;
-  }
-  const msg = String(error.message ?? "").toLowerCase();
-  if (msg.includes("21610")) return true;
-  if (msg.includes("blacklist rule")) return true;
+  const classified = classifyTextGridProviderError(error);
+  if (classified.compliance_related || classified.is_terminal) return true;
   if (error.retryable === false) return true;
-  const code = error.code ?? error.error_code;
-  if (code === "21610" || code === 21610) return true;
   return false;
+}
+
+function hashPhoneForMetrics(value) {
+  const normalized = normalizePhone(value);
+  if (!normalized) return null;
+  return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+}
+
+async function persistProviderBlacklistSuppression(row = {}, error = {}, options = {}) {
+  const classified = classifyTextGridProviderError(error, {
+    campaign_id: row?.metadata?.campaign_id || null,
+    market: row?.market || row?.metadata?.market || null,
+    sender_hash: hashPhoneForMetrics(row?.from_phone_number),
+    destination_hash: hashPhoneForMetrics(row?.to_phone_number),
+  });
+  if (!classified.compliance_related || classified.provider_code !== "21610") {
+    return { ok: false, skipped: true };
+  }
+
+  const supabase_client = options.supabase || options.supabaseClient || defaultSupabase;
+  const to_phone = normalizePhone(row?.to_phone_number);
+  const from_phone = normalizePhone(row?.from_phone_number);
+  const now = options.now || nowIso();
+
+  if (!to_phone) return { ok: false, reason: "missing_to_phone_number" };
+
+  try {
+    await supabase_client.from("sms_suppression_list").upsert(
+      {
+        phone_e164: to_phone,
+        sender_phone_e164: from_phone || null,
+        phone_number: to_phone,
+        suppression_type: "provider_blacklist_pair",
+        suppression_reason: classified.provider_message || "provider_blacklist_21610",
+        is_active: true,
+        suppressed_at: now,
+        source: "textgrid_21610",
+      },
+      { onConflict: "phone_e164,sender_phone_e164", ignoreDuplicates: false }
+    );
+  } catch (suppression_error) {
+    warn("provider_blacklist_suppression_persist_failed", {
+      queue_row_id: row?.id || null,
+      message: suppression_error?.message || "unknown_error",
+    });
+    return { ok: false, reason: "suppression_persist_failed" };
+  }
+
+  captureSystemEvent("queue.send.suppressed", {
+    reason: "provider_blacklist",
+    provider_code: classified.provider_code,
+    campaign_id: row?.metadata?.campaign_id || null,
+    market: row?.market || null,
+    sender_hash: hashPhoneForMetrics(from_phone),
+    destination_hash: hashPhoneForMetrics(to_phone),
+  });
+
+  return { ok: true, scope: "pair_and_recipient_sms" };
 }
 
 function asNumber(value, fallback = 0) {
@@ -205,9 +253,7 @@ function getQueueRowDestinationCandidates(row = null) {
 }
 
 function toTimestamp(value) {
-  if (!value) return null;
-  const parsed = new Date(value).getTime();
-  return Number.isNaN(parsed) ? null : parsed;
+  return normalizeTimestamp(value);
 }
 
 function toIsoOrNull(value) {
@@ -1504,23 +1550,30 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
 export async function writeOutboundFailureMessageEvent(row, error, options = {}) {
   const payload = buildFailureMessageEvent(row, error, options);
 
-  // Capture the original SMS send error to Sentry. Fires regardless of whether
-  // the DB write is real or injected via options — telemetry is a side-effect
-  // that applies in all cases.
   const normalized_for_sentry = normalizeSendQueueRow(row);
-  captureRouteException(error, {
-    route: "sms-engine/writeOutboundFailureMessageEvent",
-    subsystem: "sms_engine",
-    context: {
-      queue_row_id: normalized_for_sentry.id,
-      queue_key: normalized_for_sentry.queue_key,
-      master_owner_id: normalized_for_sentry.master_owner_id,
-    },
+  const classified = classifyTextGridProviderError(error, {
+    campaign_id: normalized_for_sentry.metadata?.campaign_id || null,
+    market: normalized_for_sentry.market || null,
   });
-  addSentryBreadcrumb("sms_send", "sms_send_failed", {
+  const is_handled_terminal_compliance =
+    classified.compliance_related && classified.sentry_level === "warning";
+
+  if (!is_handled_terminal_compliance) {
+    captureRouteException(error, {
+      route: "sms-engine/writeOutboundFailureMessageEvent",
+      subsystem: "sms_engine",
+      context: {
+        queue_row_id: normalized_for_sentry.id,
+        queue_key: normalized_for_sentry.queue_key,
+        master_owner_id: normalized_for_sentry.master_owner_id,
+      },
+    });
+  }
+  addSentryBreadcrumb("sms_send", is_handled_terminal_compliance ? "sms_send_suppressed_terminal" : "sms_send_failed", {
     queue_row_id: normalized_for_sentry.id,
     queue_key: normalized_for_sentry.queue_key,
     master_owner_id: normalized_for_sentry.master_owner_id,
+    provider_code: classified.provider_code || null,
     error_message: error?.message || String(error),
   });
 
@@ -1534,19 +1587,21 @@ export async function writeOutboundFailureMessageEvent(row, error, options = {})
     error_message: error?.message || String(error),
   });
 
-  sendCriticalAlert({
-    title: "SMS Send Failed",
-    description: `Failed to send SMS for queue row ${normalized_for_sentry.id ?? "unknown"}`,
-    color: 0xe74c3c,
-    fields: [
-      { name: "Queue Row ID", value: String(normalized_for_sentry.id ?? "?"), inline: true },
-      { name: "Master Owner ID", value: String(normalized_for_sentry.master_owner_id ?? "?"), inline: true },
-      { name: "Touch", value: String(normalized_for_sentry.touch_number ?? "?"), inline: true },
-      { name: "Error", value: (error?.message || String(error)).slice(0, 256), inline: false },
-    ],
-    timestamp: new Date().toISOString(),
-    footer: { text: "sms_engine/writeOutboundFailureMessageEvent" },
-  });
+  if (!is_handled_terminal_compliance) {
+    sendCriticalAlert({
+      title: "SMS Send Failed",
+      description: `Failed to send SMS for queue row ${normalized_for_sentry.id ?? "unknown"}`,
+      color: 0xe74c3c,
+      fields: [
+        { name: "Queue Row ID", value: String(normalized_for_sentry.id ?? "?"), inline: true },
+        { name: "Master Owner ID", value: String(normalized_for_sentry.master_owner_id ?? "?"), inline: true },
+        { name: "Touch", value: String(normalized_for_sentry.touch_number ?? "?"), inline: true },
+        { name: "Error", value: (error?.message || String(error)).slice(0, 256), inline: false },
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: "sms_engine/writeOutboundFailureMessageEvent" },
+    });
+  }
 
   if (typeof options.writeOutboundFailureMessageEvent === "function") {
     return options.writeOutboundFailureMessageEvent(payload);
@@ -1633,6 +1688,12 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
   const next_retry_count = normalized.retry_count + 1;
+  const classified = classifyTextGridProviderError(error, {
+    campaign_id: normalized.metadata?.campaign_id || null,
+    market: normalized.market || normalized.metadata?.market || null,
+    sender_hash: hashPhoneForMetrics(normalized.from_phone_number),
+    destination_hash: hashPhoneForMetrics(normalized.to_phone_number),
+  });
   const normalized_failure = normalizeTextGridFailure({
     ...ensureObject(options.send_result),
     status: ensureObject(options.send_result).status,
@@ -1642,26 +1703,32 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   });
   const non_retryable = isNonRetryableProviderError(error);
   const is_final_failure =
-    normalized_failure.is_terminal || non_retryable || next_retry_count >= normalized.max_retries;
+    classified.is_terminal || normalized_failure.is_terminal || non_retryable || next_retry_count >= normalized.max_retries;
   const error_message =
+    clean(classified.provider_message) ||
     clean(normalized_failure.provider_failure_reason) ||
     clean(error?.message) ||
     "send_failed";
-  const normalized_failure_is_known =
-    Boolean(normalized_failure.failure_class) &&
-    normalized_failure.failure_class !== "unknown_failure";
-  const failure_bucket = normalized_failure_is_known
-    ? legacyFailureBucketForTextGrid(normalized_failure, {
-        ok: false,
-        error_message,
-        error_status: error?.status || null,
-      })
-    : non_retryable
-      ? "provider_blacklist_pair"
-      : null;
+  const failure_bucket = classified.failure_bucket ||
+    (normalized_failure.failure_class && normalized_failure.failure_class !== "unknown_failure"
+      ? legacyFailureBucketForTextGrid(normalized_failure, {
+          ok: false,
+          error_message,
+          error_status: error?.status || null,
+        })
+      : non_retryable
+        ? "provider_blacklist_pair"
+        : null);
+
+  const terminal_queue_status =
+    is_final_failure && !classified.retryable
+      ? (classified.queue_disposition || "failed")
+      : is_final_failure
+        ? "failed"
+        : "queued";
 
   const payload = {
-    queue_status: is_final_failure ? "failed" : "queued",
+    queue_status: terminal_queue_status,
     failed_reason: error_message,
     retry_count: next_retry_count,
     next_retry_at: is_final_failure ? null : addMinutesIso(now, 5),
@@ -1674,17 +1741,21 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       provider_error: {
         message: error_message,
         status: error?.status || null,
-        retryable: normalized_failure.retry_allowed && !is_final_failure,
-        failure_class: normalized_failure.failure_class || null,
-        normalized_reason: normalized_failure.normalized_reason || null,
+        code: classified.provider_code || null,
+        retryable: classified.retryable && !is_final_failure,
+        failure_class: classified.failure_class || normalized_failure.failure_class || null,
+        normalized_reason: classified.normalized_reason || normalized_failure.normalized_reason || null,
         provider_failure_reason: error_message,
-        ...(non_retryable ? { non_retryable_reason: normalized_failure.normalized_reason || "textgrid_non_retryable_failure" } : {}),
-        final_queue_status: is_final_failure ? "failed" : "queued",
+        provider_payload: classified.provider_payload || null,
+        ...(non_retryable
+          ? { non_retryable_reason: classified.non_retryable_reason || "textgrid_non_retryable_failure" }
+          : {}),
+        final_queue_status: terminal_queue_status,
         recorded_at: now,
       },
       ...textGridFailureMetadata(normalized_failure),
       ...(failure_bucket ? { failure_bucket, final_failure: true } : {}),
-      final_queue_status: is_final_failure ? "failed" : "queued",
+      final_queue_status: terminal_queue_status,
       finalized_at: now,
     },
   };
@@ -1706,10 +1777,14 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   if (non_retryable) {
     addSentryBreadcrumb("queue_failure", "provider_blacklist_21610_terminal", {
       queue_id: normalized.id,
-      failure_bucket: "provider_blacklist_pair",
+      failure_bucket: failure_bucket || "provider_blacklist_pair",
+      provider_code: classified.provider_code || null,
       from_phone_number: normalized.from_phone_number || null,
       to_phone_number: normalized.to_phone_number || null,
     });
+    if (classified.provider_code === "21610") {
+      await persistProviderBlacklistSuppression(normalized, error, options);
+    }
   }
 
   const updated_row = await updateSendQueueRowWithLock(
@@ -3206,6 +3281,82 @@ function metadataCreatedFromValue(row = {}) {
   return clean(meta.created_from);
 }
 
+const TERMINAL_ENQUEUE_STATUSES = new Set([
+  "sent",
+  "failed",
+  "blocked",
+  "cancelled",
+  "duplicate_blocked",
+  "invalid_number",
+  "opted_out",
+  "carrier_blocked",
+  "suppressed",
+]);
+
+async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number }, deps = {}) {
+  const to_phone = normalizePhone(to_phone_number);
+  if (!to_phone) return { suppressed: false };
+
+  const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
+  try {
+    let pair_count = 0;
+    if (from_phone_number) {
+      const pair_result = await supabase_client
+        .from(SEND_QUEUE_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq("to_phone_number", to_phone)
+        .eq("from_phone_number", normalizePhone(from_phone_number))
+        .eq("queue_status", "failed")
+        .ilike("failed_reason", "%21610%");
+      pair_count = pair_result.count ?? 0;
+    }
+
+    const recipient_result = await supabase_client
+      .from("sms_suppression_list")
+      .select("id", { count: "exact", head: true })
+      .eq("phone_e164", to_phone)
+      .ilike("suppression_reason", "%21610%");
+    const recipient_count = recipient_result.count ?? 0;
+
+    if ((pair_count ?? 0) > 0 || (recipient_count ?? 0) > 0) {
+      return { suppressed: true, reason: "phone_suppressed_21610" };
+    }
+  } catch (check_error) {
+    warn("enqueue_21610_suppression_check_failed", {
+      message: check_error?.message || "unknown_error",
+    });
+  }
+  return { suppressed: false };
+}
+
+/**
+ * Canonical guarded writer for send_queue rows (feeder, auto-reply, manual paths).
+ */
+export async function enqueueSendQueueItem(payload = {}, deps = {}) {
+  const queue_status = lower(payload.queue_status || "queued");
+  if (TERMINAL_ENQUEUE_STATUSES.has(queue_status)) {
+    return insertSupabaseSendQueueRow(payload, deps);
+  }
+
+  const validation = validateOutboundSmsPayload(payload);
+  if (!validation.ok) {
+    return { ok: false, reason: validation.reason };
+  }
+
+  const suppression = await isPhoneSuppressedFor21610(
+    {
+      to_phone_number: payload.to_phone_number,
+      from_phone_number: payload.from_phone_number,
+    },
+    deps
+  );
+  if (suppression.suppressed) {
+    return { ok: false, reason: suppression.reason };
+  }
+
+  return insertSupabaseSendQueueRow(payload, deps);
+}
+
 export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   const now = deps.now || nowIso();
   const sanitized = sanitizeSendQueuePayload({
@@ -3387,23 +3538,62 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   }
 
   if (error.code === "23505") {
-    const { data: existing, error: existing_error } = await supabase
-      .from(SEND_QUEUE_TABLE)
-      .select("*")
-      .eq("queue_key", insert_payload.queue_key)
-      .maybeSingle();
+    let existing = null;
+    let existing_error = null;
+
+    if (insert_payload.dedupe_key) {
+      let dedupe_query = supabase
+        .from(SEND_QUEUE_TABLE)
+        .select("*")
+        .eq("dedupe_key", insert_payload.dedupe_key);
+      if (typeof dedupe_query.order === "function") {
+        dedupe_query = dedupe_query.order("created_at", { ascending: false });
+      }
+      if (typeof dedupe_query.limit === "function") {
+        dedupe_query = dedupe_query.limit(1);
+      }
+      const by_dedupe = await dedupe_query.maybeSingle();
+      existing = by_dedupe.data || null;
+      existing_error = by_dedupe.error || null;
+    }
+
+    if (!existing) {
+      const by_queue_key = await supabase
+        .from(SEND_QUEUE_TABLE)
+        .select("*")
+        .eq("queue_key", insert_payload.queue_key)
+        .maybeSingle();
+      existing = by_queue_key.data || null;
+      existing_error = by_queue_key.error || existing_error;
+    }
 
     if (existing_error) throw existing_error;
+
+    if (existing) {
+      return {
+        ok: true,
+        idempotent_replay: true,
+        reason: "idempotent_replay",
+        item_id: existing.id || null,
+        queue_row_id: existing.id || null,
+        queue_item_id: existing.id || null,
+        queue_id: existing.queue_id || insert_payload.queue_id,
+        queue_key: existing.queue_key || insert_payload.queue_key,
+        queue_status: existing.queue_status || null,
+        scheduled_for: existing.scheduled_for || null,
+        raw: existing,
+      };
+    }
 
     return {
       ok: false,
       reason: "duplicate_blocked",
-      item_id: existing?.id || null,
-      queue_row_id: existing?.id || null,
-      queue_item_id: existing?.id || null,
-      queue_id: existing?.queue_id || insert_payload.queue_id,
-      queue_key: existing?.queue_key || insert_payload.queue_key,
-      raw: existing || insert_payload,
+      item_id: null,
+      queue_row_id: null,
+      queue_item_id: null,
+      queue_id: insert_payload.queue_id,
+      queue_key: insert_payload.queue_key,
+      raw: insert_payload,
     };
   }
 

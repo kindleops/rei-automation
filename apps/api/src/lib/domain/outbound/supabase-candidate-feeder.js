@@ -4,6 +4,13 @@ import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
+import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
+import {
+  SEND_QUEUE_HISTORY_SELECT,
+  MESSAGE_EVENTS_HISTORY_SELECT,
+  collectRecentTemplateIdsFromRows,
+  isPostgrestQueryError,
+} from "@/lib/domain/outbound/outreach-history-projection.js";
 import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
 import {
   blockedRuntimeBrakeResult,
@@ -81,6 +88,7 @@ const REASON_CODES = Object.freeze({
   MARKET_IDENTITY_QUARANTINE: "MARKET_IDENTITY_QUARANTINE",
   ACTIVE_QUEUE_ITEM: "ACTIVE_QUEUE_ITEM",
   PRIOR_TOUCH_COOLDOWN: "PRIOR_TOUCH_COOLDOWN",
+  OUTREACH_HISTORY_UNAVAILABLE: "OUTREACH_HISTORY_UNAVAILABLE",
 });
 
 const logger = child({ module: "domain.outbound.supabase_candidate_feeder" });
@@ -141,13 +149,27 @@ function asNumber(value, fallback = null) {
 }
 
 export function toTimestamp(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const ms = value.getTime();
-    return Number.isFinite(ms) ? ms : null;
-  }
-  const ms = Date.parse(String(value));
-  return Number.isFinite(ms) ? ms : null;
+  return normalizeTimestamp(value);
+}
+
+function classifyInsertedQueueScheduling(queueResult = {}, scheduledFor = null) {
+  const persistedScheduledFor =
+    queueResult?.inserted?.raw?.scheduled_for ??
+    queueResult?.inserted?.scheduled_for ??
+    scheduledFor;
+  const scheduledAtMs = normalizeTimestamp(persistedScheduledFor);
+  const persistedStatus = clean(
+    queueResult?.inserted?.raw?.queue_status ?? queueResult?.inserted?.queue_status
+  );
+  const isScheduled =
+    lower(persistedStatus) === "scheduled" ||
+    (scheduledAtMs !== null && scheduledAtMs > Date.now());
+  return {
+    persistedScheduledFor,
+    scheduledAtMs,
+    persistedStatus,
+    isScheduled,
+  };
 }
 
 function asPositiveInteger(value, fallback = null) {
@@ -1549,81 +1571,76 @@ function isS1OwnershipCheckRotation(selector = {}) {
 async function getRecentTemplateIds(candidate = {}, selector = {}, options = {}, deps = {}) {
   if (typeof deps.getRecentTemplateIds === "function") {
     const custom = await deps.getRecentTemplateIds(candidate, selector, options);
-    return Array.isArray(custom) ? custom.map((value) => clean(value)).filter(Boolean) : [];
+    if (custom && typeof custom === "object" && !Array.isArray(custom)) return custom;
+    return {
+      ok: true,
+      template_ids: Array.isArray(custom) ? custom.map((value) => clean(value)).filter(Boolean) : [],
+      errors: [],
+    };
   }
 
   let supabase;
   try {
     supabase = getSupabase(deps);
-  } catch {
-    return [];
+  } catch (error) {
+    return {
+      ok: false,
+      template_ids: [],
+      errors: [{ source: "supabase_client", message: error?.message || "supabase_unavailable" }],
+    };
   }
 
-  const phone = normalizePhone(candidate.canonical_e164);
-  const use_case = clean(selector.use_case);
-  const stage_code = clean(selector.stage_code);
   const lookback_ms = 30 * 24 * 60 * 60 * 1000;
   const cutoff_ms = Date.now() - lookback_ms;
-  const recent_template_ids = new Set();
+  const errors = [];
+  const rows = [];
 
-  const collectFromRows = (rows = []) => {
-    for (const row of rows) {
-      const created_at_raw = pick(row?.created_at, row?.sent_at, row?.scheduled_for, row?.inserted_at);
-      const created_at_ms = created_at_raw ? new Date(created_at_raw).getTime() : 0;
-      if (!created_at_ms || created_at_ms < cutoff_ms) continue;
-
-      const row_phone = normalizePhone(pick(row?.to_phone_number, row?.phone_number, row?.recipient_phone));
-      if (phone && row_phone && phone !== row_phone) continue;
-
-      const row_use_case = clean(
-        pick(row?.use_case_template, row?.metadata?.template_use_case, row?.template_use_case, row?.use_case)
-      );
-      if (use_case && row_use_case && lower(row_use_case) !== lower(use_case)) continue;
-
-      const row_stage_code = clean(
-        pick(row?.metadata?.template_stage_code, row?.stage_code, row?.metadata?.selected_template_stage_code)
-      );
-      if (stage_code && row_stage_code && lower(row_stage_code) !== lower(stage_code)) continue;
-
-      const template_id = clean(
-        pick(
-          row?.template_id,
-          row?.metadata?.template_id,
-          row?.metadata?.selected_template_id,
-          row?.metadata?.template?.id
-        )
-      );
-      if (template_id) recent_template_ids.add(template_id);
-    }
-  };
-
-  try {
-    const queue_query = await supabase
-      .from(SEND_QUEUE_TABLE)
-      .select("template_id,metadata,to_phone_number,created_at,scheduled_for,use_case_template,stage_code")
-      .eq("master_owner_id", candidate.master_owner_id)
-      .limit(200);
-    if (Array.isArray(queue_query?.data)) {
-      collectFromRows(queue_query.data);
-    }
-  } catch {
-    // Best-effort only.
+  const queue_query = await supabase
+    .from(SEND_QUEUE_TABLE)
+    .select(SEND_QUEUE_HISTORY_SELECT)
+    .eq("master_owner_id", candidate.master_owner_id)
+    .limit(200);
+  if (isPostgrestQueryError(queue_query)) {
+    errors.push({
+      source: "send_queue",
+      message: queue_query.error?.message || "send_queue_history_query_failed",
+      code: queue_query.error?.code || null,
+    });
+  } else if (Array.isArray(queue_query?.data)) {
+    rows.push(...queue_query.data);
   }
 
-  try {
-    const events_query = await supabase
-      .from("message_events")
-      .select("template_id,metadata,to_phone_number,created_at,sent_at,use_case,stage_code")
-      .eq("master_owner_id", candidate.master_owner_id)
-      .limit(200);
-    if (Array.isArray(events_query?.data)) {
-      collectFromRows(events_query.data);
-    }
-  } catch {
-    // message_events may not exist in every environment.
+  const events_query = await supabase
+    .from("message_events")
+    .select(MESSAGE_EVENTS_HISTORY_SELECT)
+    .eq("master_owner_id", candidate.master_owner_id)
+    .limit(200);
+  if (isPostgrestQueryError(events_query)) {
+    errors.push({
+      source: "message_events",
+      message: events_query.error?.message || "message_events_history_query_failed",
+      code: events_query.error?.code || null,
+    });
+  } else if (Array.isArray(events_query?.data)) {
+    rows.push(...events_query.data);
   }
 
-  return [...recent_template_ids];
+  if (errors.length) {
+    logger.warn("feeder.outreach_history_query_failed", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      errors,
+    });
+    return { ok: false, template_ids: [], errors };
+  }
+
+  const template_ids = collectRecentTemplateIdsFromRows(rows, {
+    cutoff_ms,
+    selector: { ...selector, canonical_e164: candidate.canonical_e164 },
+    normalizePhoneFn: normalizePhone,
+  });
+
+  return { ok: true, template_ids, errors: [] };
 }
 
 function buildRotationPool(sorted_templates = [], selector = {}) {
@@ -3168,9 +3185,27 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const sorted_templates = [...templates].sort((left, right) => sortTemplateCandidates(left, right, selector));
   let selected_template = sorted_templates[0] || null;
   const rotation_enabled = shouldEnableTemplateRotation(selector);
-  const recent_template_ids = rotation_enabled
+  const recent_history = rotation_enabled
     ? await getRecentTemplateIds(candidate, selector, options, deps)
-    : [];
+    : { ok: true, template_ids: [], errors: [] };
+
+  if (rotation_enabled && recent_history.ok === false) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.OUTREACH_HISTORY_UNAVAILABLE,
+      reason: "outreach_history_unavailable",
+      history_errors: recent_history.errors || [],
+      template_fallback_level,
+      template_rotation: {
+        enabled: false,
+        history_query_failed: true,
+        history_errors: recent_history.errors || [],
+      },
+      ...template_routing_details,
+    };
+  }
+
+  const recent_template_ids = recent_history.template_ids || [];
 
   let eligible_rotation_candidates = sorted_templates;
   if (rotation_enabled && recent_template_ids.length) {
@@ -4036,11 +4071,16 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     ok: true,
     dry_run: false,
     queued: true,
+    idempotent_replay: Boolean(inserted?.idempotent_replay),
     queue_key,
     queue_id: inserted?.queue_id || queue_key,
     queue_row_id: inserted?.queue_row_id || null,
     idempotency_key,
-    inserted,
+    inserted: {
+      ...inserted,
+      queue_status: inserted?.raw?.queue_status || inserted?.queue_status || payload.queue_status,
+      scheduled_for: inserted?.raw?.scheduled_for || inserted?.scheduled_for || payload.scheduled_for,
+    },
   };
 }
 
@@ -4059,6 +4099,7 @@ export function buildFeederDiagnostics(summary = {}) {
     eligible_count: Number(summary.eligible_count || 0),
     queued_count: Number(summary.queued_count || 0),
     scheduled_count: Number(summary.scheduled_count || 0),
+    idempotent_replay_count: Number(summary.idempotent_replay_count || 0),
     total_created_count: totalCreatedCount(summary),
     skipped_count: Number(summary.skipped_count || 0),
     routing_block_count: Number(summary.routing_block_count || 0),
@@ -4320,6 +4361,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       eligible_count: 0,
       queued_count: 0,
       scheduled_count: 0,
+      idempotent_replay_count: 0,
       skipped_count: 0,
       routing_block_count: 0,
       suppression_block_count: 0,
@@ -4377,6 +4419,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     eligible_count: 0,
     queued_count: 0,
     scheduled_count: 0,
+    idempotent_replay_count: 0,
     skipped_count: 0,
     routing_block_count: 0,
     suppression_block_count: 0,
@@ -4896,22 +4939,32 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       continue;
     }
 
-    const scheduledAtMs = toTimestamp(scheduled_for);
-    if (scheduled_for && scheduledAtMs === null) {
+    if (queue_result.idempotent_replay) {
+      summary.idempotent_replay_count = Number(summary.idempotent_replay_count || 0) + 1;
+      continue;
+    }
+
+    const scheduling = classifyInsertedQueueScheduling(queue_result, scheduled_for);
+    if (scheduling.persistedScheduledFor && scheduling.scheduledAtMs === null) {
       summary.invalid_scheduled_for_count += 1;
+      logger.warn("feeder.invalid_scheduled_for_after_insert", {
+        queue_row_id: queue_result.queue_row_id || queue_result.inserted?.queue_row_id || null,
+        campaign_target_id: candidate.campaign_target_id || candidate.raw?.campaign_target_id || null,
+        scheduled_for: String(scheduling.persistedScheduledFor),
+        queue_status: scheduling.persistedStatus || null,
+        route: "runSupabaseCandidateFeeder",
+      });
       if (summary.invalid_scheduled_for_examples.length < 3) {
         summary.invalid_scheduled_for_examples.push({
-          scheduled_for: String(scheduled_for),
+          scheduled_for: String(scheduling.persistedScheduledFor),
           queue_key: queue_result.queue_key || null,
+          queue_row_id: queue_result.queue_row_id || null,
           master_owner_id: candidate.master_owner_id || null,
           property_id: candidate.property_id || null,
         });
       }
     }
-    const isScheduled =
-      queue_result.inserted?.queue_status === "scheduled" ||
-      (scheduledAtMs && scheduledAtMs > Date.now());
-    if (isScheduled) {
+    if (scheduling.isScheduled) {
       summary.scheduled_count = (summary.scheduled_count || 0) + 1;
     } else {
       summary.queued_count += 1;

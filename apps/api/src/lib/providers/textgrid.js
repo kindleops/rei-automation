@@ -8,6 +8,7 @@ import { warn, info } from "@/lib/logging/logger.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 
 // Pre-send content guard patterns.
 const BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
@@ -350,10 +351,17 @@ function isRetryable(status) {
 export function mapTextgridFailureBucket(result) {
   if (!result || result.ok || result.success) return null;
 
+  const classified = classifyTextGridProviderError({
+    message: result.error_message,
+    status: result.error_status,
+    code: result.error_code,
+    data: result.raw || result.data,
+  });
+  if (classified.failure_bucket) return classified.failure_bucket;
+
   const status = result.error_status ?? 0;
   const msg = String(result.error_message ?? "").toLowerCase();
 
-  // 1. Blacklist Pair Logic (21610)
   if (msg.includes("21610") || msg.includes("blacklist")) {
     return "provider_blacklist_pair";
   }
@@ -664,22 +672,26 @@ export async function sendTextgridSMS({
       client_reference_id,
     });
 
+    const classified = classifyTextGridProviderError(tge);
     try {
-      await recordSystemAlert({
-        subsystem: "textgrid",
-        code: "send_failed",
-        severity: tge.status && tge.status >= 500 ? "high" : "warning",
-        retryable: Boolean(tge.status ? isRetryable(tge.status) : true),
-        summary: `TextGrid send failed: ${tge.message}`,
-        dedupe_key: `textgrid_send_${clean(tge.status) || "unknown"}`,
-        affected_ids: [tge.to || normalized_to, tge.from || normalized_from],
-        metadata: {
-          status: tge.status,
-          data: tge.data,
-          raw_text: tge.raw_text,
-          endpoint: tge.endpoint || getTextgridSendEndpoint(credentials.account_sid || null),
-        },
-      });
+      if (!classified.compliance_related) {
+        await recordSystemAlert({
+          subsystem: "textgrid",
+          code: "send_failed",
+          severity: tge.status && tge.status >= 500 ? "high" : "warning",
+          retryable: classified.retryable,
+          summary: `TextGrid send failed: ${tge.message}`,
+          dedupe_key: `textgrid_send_${clean(tge.status) || "unknown"}`,
+          affected_ids: [tge.to || normalized_to, tge.from || normalized_from],
+          metadata: {
+            status: tge.status,
+            data: tge.data,
+            raw_text: tge.raw_text,
+            provider_code: classified.provider_code || null,
+            endpoint: tge.endpoint || getTextgridSendEndpoint(credentials.account_sid || null),
+          },
+        });
+      }
     } catch (alert_error) {
       warn("textgrid.send_failed_alert_record_failed", {
         message: clean(alert_error?.message) || "unknown",
