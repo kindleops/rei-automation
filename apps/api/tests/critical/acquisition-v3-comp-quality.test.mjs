@@ -150,9 +150,12 @@ test('CALDWELL corrected: package excluded; foreclosure/government/$1.03M exclud
   // must be UNCONTAMINATED — never derived from the $1.03M outlier, the package,
   // distressed, government, builder, or flip records.
   const auth = v3.offer_authorization.authorized_recommended_offer;
-  assert.ok(auth === null || auth < 350000, `offer must be uncontaminated, got ${auth}`);
   assert.ok((inv.mid ?? 0) < 600000, `investor value must be de-inflated, got ${inv.mid}`);
   assert.ok(v3.reconciliation.reconciled_market_value_mid < 700000, 'market value must not be contaminated');
+  // §0: only 3 ordinary investor comps support wholesale → thin depth → REVIEW, no authorized offer.
+  assert.equal(v3.evidence_depth.wholesale_pricing_ess, 3);
+  assert.equal(v3.execution_state, 'REVIEW_REQUIRED');
+  assert.equal(auth, null);
 });
 
 /* --------------------- guardrails --------------------- */

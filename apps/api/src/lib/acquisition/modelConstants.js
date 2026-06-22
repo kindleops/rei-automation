@@ -496,3 +496,49 @@ export const EXECUTABLE_EXECUTION_STATES = Object.freeze([
   'AUTO_OFFER_READY',
   'AUTO_CREATIVE_READY',
 ]);
+
+/* -------------------------------------------------------------------------- */
+/* Item 5B §0 — strategy-/lane-specific execution depth gates                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wholesale-cash depth gate by asset family. Evidence-based: thin residential
+ * resale markets still need >=4 independent investor-compatible transactions
+ * (investor + institutional single-asset + qualified public-record) to
+ * authorize a shadow cash offer; a 3-transaction set may pass ONLY via the
+ * strict exception below. Smaller-market families allow a lower preferred count;
+ * income lanes additionally require income corroboration (income model).
+ */
+export const WHOLESALE_DEPTH_GATES = Object.freeze({
+  RESIDENTIAL_SINGLE: { preferred: 4, exception_min: 3 },
+  SMALL_MULTI: { preferred: 3, exception_min: 3 },
+  MULTIFAMILY: { preferred: 3, exception_min: 3 },
+  COMMERCIAL: { preferred: 3, exception_min: 2 },
+  LAND: { preferred: 3, exception_min: 2 },
+  SPECIAL: { preferred: 4, exception_min: 3 },
+  UNKNOWN: { preferred: 4, exception_min: 3 },
+});
+
+/** Strict corroboration required for a 3-transaction wholesale exception. */
+export const WHOLESALE_EXCEPTION = Object.freeze({
+  max_disagreement: 30, // strictly below the ordinary cap (35)
+  min_median_similarity: 70,
+  max_dispersion: 0.15,
+  min_public_corroboration: 1, // >=1 qualified public-record corroborating txn
+});
+
+/** Retail-resale ESS required for a novation-led shadow result. */
+export const NOVATION_DEPTH_MIN = 4;
+
+/** Final-confidence ceiling by the DOMINANT model's independent depth, so a high
+ * total candidate count can never lend confidence a thin dominant model lacks. */
+export function dominantDepthConfidenceCap(ess) {
+  const n = num(ess, 0);
+  if (n >= 6) return 100;
+  if (n >= 5) return 92;
+  if (n >= 4) return 85;
+  if (n >= 3) return 72;
+  if (n >= 2) return 58;
+  if (n >= 1) return 42;
+  return 25;
+}

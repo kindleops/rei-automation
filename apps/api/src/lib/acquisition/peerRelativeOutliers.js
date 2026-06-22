@@ -26,6 +26,7 @@ const MAD_K = 3.5; // robust MAD multiplier
 const IQR_K = 1.5;
 const RATIO_HIGH = 2.5; // candidate/peerMedian
 const RATIO_LOW = 0.4;
+const MIN_REL_DEV = 0.2; // MAD/IQR fences ignored within ±20% of the peer median
 
 function quantile(sorted, q) {
   if (!sorted.length) return null;
@@ -51,13 +52,18 @@ function judgeMetric(value, peers) {
 
   // Robust high/low: agree if ANY robust rule that is DEFINED fires; MAD/IQR are
   // skipped when zero, falling back to the ratio rule (which always works).
+  // The MAD/IQR fences are gated behind a minimum RELATIVE deviation so that a
+  // value within MIN_REL_DEV of the peer median is never flagged on a tight
+  // cluster (where MAD/IQR fences are razor-thin). This is a tight-cluster
+  // false-positive guard, not a market-specific threshold.
+  const relDev = med > 0 ? Math.abs(value - med) / med : 0;
   const highVotes = [];
   const lowVotes = [];
-  if (mad > 0) {
+  if (mad > 0 && relDev >= MIN_REL_DEV) {
     if (value > med + MAD_K * mad) highVotes.push('mad');
     if (value < med - MAD_K * mad) lowVotes.push('mad');
   }
-  if (iqr > 0) {
+  if (iqr > 0 && relDev >= MIN_REL_DEV) {
     if (value > p75 + IQR_K * iqr) highVotes.push('iqr');
     if (value < p25 - IQR_K * iqr) lowVotes.push('iqr');
   }

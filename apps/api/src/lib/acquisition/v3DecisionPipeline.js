@@ -78,6 +78,7 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
 
   const confidence = buildConfidenceAndExecution({
     subjectRow, classification, qualification, reconciliation, universes, repair, buyerExit, invariants,
+    novationRecommended: novation.novation_recommended,
   });
   const strategy = buildStrategyRanking({
     cashOffer,
@@ -186,6 +187,14 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     clean_independent_transaction_count: confidence.clean_independent_transaction_count,
     clean_effective_sample_size: confidence.clean_effective_sample_size,
     clean_universe_confidence: confidence.clean_universe_confidence,
+    raw_effective_sample_size: confidence.raw_effective_sample_size,
+    // Item 5B §0: universe-specific + strategy-specific evidence depth.
+    evidence_depth: confidence.evidence_depth,
+    dominant_model_universe: confidence.dominant_model_universe,
+    dominant_model_ess: confidence.dominant_model_ess,
+    dominant_model_depth_score: confidence.dominant_model_depth_score,
+    dominant_model_confidence_cap: confidence.dominant_model_confidence_cap,
+    strategy_depth_gate: confidence.strategy_depth_gate,
     loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),
