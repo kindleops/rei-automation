@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../../_shared.js'
 import { applyCampaignLifecycleAction } from '@/lib/domain/campaigns/campaign-automation-service.js'
+import { wrapCampaignActionResponse } from '@/lib/domain/campaigns/campaign-lifecycle-response.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,10 +46,11 @@ export async function POST(request, { params }) {
   try {
     const body = await parseJsonSafe(request)
     const result = await applyCampaignLifecycleAction(campaignId, body)
+    const payload = wrapCampaignActionResponse(result)
     if (!result.ok) {
-      return withCors(request, result, lifecycleHttpStatus(result))
+      return withCors(request, payload, lifecycleHttpStatus(result))
     }
-    return withCors(request, result, 200)
+    return withCors(request, payload, 200)
   } catch (error) {
     console.error('campaigns.lifecycle_failed', error)
     return withCors(request, {

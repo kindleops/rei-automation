@@ -128,19 +128,19 @@ export async function executeCampaignAction(
       })
       const inserted = res.queued ?? 0
       const result = res.result as Record<string, unknown> | undefined
-      const proofHydration = Boolean(result?.proof_hydration ?? result?.no_send)
+      const testModeHydration = Boolean(result?.proof_hydration ?? result?.no_send)
       if (res.blockers?.length && inserted === 0) {
-        emitNotification({ title: 'Queue blocked', detail: res.blockers.join(' · '), severity: 'warning' })
+        emitNotification({ title: 'Batch blocked', detail: res.blockers.join(' · '), severity: 'warning' })
       } else {
         const skipped = Number(result?.skipped_count ?? 0)
         const blocked = Number(result?.blocked_count ?? 0)
         emitNotification({
           title: inserted > 0
-            ? (proofHydration ? `Queued ${inserted} proof rows` : `Queued ${inserted} sends`)
-            : 'No new rows queued',
+            ? (testModeHydration ? `Prepared ${inserted} test rows` : `Prepared ${inserted} live sends`)
+            : 'No new rows prepared',
           detail: [
-            inserted > 0 ? `${inserted} inserted` : null,
-            proofHydration ? 'no-send proof hydration' : null,
+            inserted > 0 ? `${inserted} queue rows created` : null,
+            testModeHydration ? 'test mode — no transmission' : null,
             skipped > 0 ? `${skipped} skipped` : null,
             blocked > 0 ? `${blocked} blocked` : null,
           ].filter(Boolean).join(' · ') || `"${campaign.campaign_name}" batch complete`,

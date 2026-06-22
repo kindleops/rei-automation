@@ -23,6 +23,7 @@ import {
   matchesListFilter,
   type CampaignListFilter,
 } from './campaign-health'
+import { operatorStateLabel } from './campaign-operator'
 import { CampaignActivationModal } from './components/CampaignActivationModal'
 import { computeCampaignCostMetrics, formatCostUsd } from './campaign-cost'
 import { CreateCampaignModal } from './CreateCampaignModal'
@@ -120,10 +121,11 @@ const StatusBadge = ({
     draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
     completed: 'Completed', archived: 'Archived',
   }
-  const proofActive = status === 'active' && executionProof?.proof_mode
-  const label = proofActive ? 'Active — Proof No-Send' : (labels[status] ?? status)
+  const label = executionProof?.proof_mode
+    ? operatorStateLabel({ status, execution_proof: executionProof } as CampaignSummary)
+    : (labels[status] ?? status)
   return (
-    <span className={cls('ccc-status', `is-${status}`, proofActive && 'is-proof')}>
+    <span className={cls('ccc-status', `is-${status}`, executionProof?.proof_mode && 'is-proof')}>
       <span className="ccc-status__dot" />
       {label}
     </span>
@@ -149,7 +151,7 @@ export const KpiStrip = ({ kpis }: { kpis: CampaignModel['kpis'] }) => {
     { label: 'Active Campaigns', value: kpis.activeCampaigns, variant: 'is-success' },
     { label: 'Total Targets',    value: fmt(kpis.totalTargets),    variant: '' },
     { label: 'Ready Targets',    value: fmt(kpis.readyTargets),    variant: 'is-accent' },
-    { label: 'Scheduled Sends',  value: fmt(kpis.scheduledSends),  variant: 'is-blue' },
+    { label: 'Scheduled',        value: fmt(kpis.scheduledSends),  variant: 'is-blue' },
     { label: 'Sent Today',       value: fmt(kpis.sentToday),       variant: '' },
     { label: 'Delivered Today',  value: fmt(kpis.deliveredToday),  variant: 'is-success' },
     { label: 'Reply Rate',       value: fmtPct(kpis.replyRate),    variant: 'is-accent' },
@@ -774,11 +776,16 @@ const FailuresTab = ({ campaign }: { campaign: CampaignSummary }) => {
   if (loading) return <div className="ccc__shimmer" style={{ height: 100 }} />
 
   if (groups.length === 0) {
+    const hasSent = campaign.sent_count > 0
     return (
       <div className="ccc__empty">
         <div className="ccc__empty-icon"><Icon name="check" size={32} /></div>
-        <div className="ccc__empty-title">No Failures</div>
-        <div className="ccc__empty-sub">All sends delivered successfully</div>
+        <div className="ccc__empty-title">No failed execution rows</div>
+        <div className="ccc__empty-sub">
+          {hasSent
+            ? 'No failures recorded for the current run.'
+            : 'Campaign has not sent yet — failures will appear here after provider attempts.'}
+        </div>
       </div>
     )
   }
@@ -889,7 +896,9 @@ const TemplatesTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
   return (
     <div>
-      <div className="ccc__section-title">Template Performance</div>
+      <div className="ccc__section-title">
+        {campaign.sent_count > 0 ? 'Template Performance' : 'Template Assignment'}
+      </div>
       <table className="ccc__tmpl-table">
         <thead>
           <tr>
@@ -1489,7 +1498,10 @@ export const CampaignsPage = () => {
           ))}
         </div>
       ) : model ? (
-        <KpiStrip kpis={model.kpis} />
+        <>
+          <div className="ccc__portfolio-label">Campaign Portfolio</div>
+          <KpiStrip kpis={model.kpis} />
+        </>
       ) : null}
 
       {/* Body: 3 columns */}

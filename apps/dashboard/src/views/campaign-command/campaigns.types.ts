@@ -47,6 +47,10 @@ export interface CampaignSummary {
   id: string
   campaign_name: string
   status: CampaignStatus
+  operator_state?: string
+  operator_state_label?: string
+  mode?: 'live' | 'test'
+  mode_label?: string
   total_targets: number
   ready_targets: number
   scheduled_targets: number
