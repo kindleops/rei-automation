@@ -48,6 +48,7 @@ interface WorkflowNavigatorV2Props {
   workflows: Workflow[]
   selectedId: string | null
   loading?: boolean
+  refreshing?: boolean
   busy?: boolean
   onSelect: (workflowId: string) => void
   onCreate: () => void
@@ -141,6 +142,7 @@ export const WorkflowNavigatorV2 = ({
   workflows,
   selectedId,
   loading,
+  refreshing = false,
   busy,
   onSelect,
   onCreate,
@@ -214,9 +216,15 @@ export const WorkflowNavigatorV2 = ({
         <Icon name="grid" /> New Workflow
       </button>
 
+      {refreshing ? <div className="wfs2-nav__refresh" aria-live="polite">Refreshing catalog…</div> : null}
+
       <div className="wfs2-nav__list" ref={listRef}>
         {loading && filtered.length === 0 ? (
-          <div className="wfs2__empty">Loading workflows…</div>
+          <div className="wfs2-nav__skeletons" aria-hidden>
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="wfs2-nav__card is-skeleton" />
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="wfs2__empty">No workflows in this view.</div>
         ) : (

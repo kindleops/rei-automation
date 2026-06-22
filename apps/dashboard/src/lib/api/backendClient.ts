@@ -1262,8 +1262,16 @@ export function patchCampaignBackend(campaignId: string, payload: Record<string,
 
 type WorkflowBackendResponse = Record<string, unknown>
 
-export function listWorkflowsBackend(): Promise<BackendResult<WorkflowBackendResponse>> {
-  return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows')
+export function listWorkflowsBackend(
+  params: { summary?: boolean; include_stats?: boolean; include_archived?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<BackendResult<WorkflowBackendResponse>> {
+  const qs = new URLSearchParams()
+  if (params.summary === false) qs.set('summary', 'false')
+  if (params.include_stats) qs.set('include_stats', 'true')
+  if (params.include_archived) qs.set('include_archived', 'true')
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows${suffix}`, { signal })
 }
 
 export function createWorkflowBackend(payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
@@ -1273,8 +1281,18 @@ export function createWorkflowBackend(payload: Record<string, unknown>): Promise
   })
 }
 
-export function getWorkflowBackend(workflowId: string): Promise<BackendResult<WorkflowBackendResponse>> {
-  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}`)
+export function getWorkflowBackend(
+  workflowId: string,
+  params: { include_analytics?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<BackendResult<WorkflowBackendResponse>> {
+  const qs = new URLSearchParams()
+  if (params.include_analytics) qs.set('include_analytics', 'true')
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return callBackend<WorkflowBackendResponse>(
+    `/api/cockpit/workflows/${encodeURIComponent(workflowId)}${suffix}`,
+    { signal },
+  )
 }
 
 export function patchWorkflowBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {

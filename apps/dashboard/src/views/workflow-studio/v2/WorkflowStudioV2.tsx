@@ -23,6 +23,7 @@ import {
   restoreWorkflow,
   resumeWorkflowDraft,
   runWorkflowDryRun,
+  WorkflowApiRequestError,
   type GraphMutationOperation,
 } from '../workflowStudio.adapter'
 import { WorkflowCanvasV2, buildCanvasNodes, type WorkflowCanvasV2Handle } from './WorkflowCanvasV2'
@@ -41,12 +42,31 @@ import {
   resolveWorkflowStudioMode,
   studioModeLabel,
 } from './workflow-studio-mode'
+import {
+  applyUniversalContextToWorkflowStudio,
+  isWorkflowStudioV2Canonical,
+  migrateLegacyWorkflowStudioDestination,
+  publishWorkflowNodeEntityContext,
+  readWorkflowIdFromLocation,
+  resolveInitialWorkflowId,
+  syncWorkflowStudioUrl,
+} from './workflow-studio-routing'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
 const parseWorkflowError = (err: unknown) => {
+  if (err instanceof WorkflowApiRequestError) {
+    return {
+      message: err.message,
+      status: err.status ? String(err.status) : null,
+      traceId: null,
+      apiFailure: err.code.startsWith('WORKFLOW') || err.code.includes('REGISTRY'),
+      code: err.code,
+      retryable: err.retryable,
+    }
+  }
   const raw = err instanceof Error ? err.message : String(err || 'Workflow request failed')
   const status = raw.match(/\[(\d{3})\]/)?.[1] ?? null
   const traceMatch = raw.match(/trace[_-]?id[:\s]+([a-f0-9-]{8,})/i)
@@ -55,6 +75,8 @@ const parseWorkflowError = (err: unknown) => {
     status,
     traceId: traceMatch?.[1] ?? null,
     apiFailure: raw.includes('/api/cockpit/workflows'),
+    code: 'WORKFLOW_REQUEST_FAILED',
+    retryable: true,
   }
 }
 
@@ -91,7 +113,9 @@ export const WorkflowStudioV2 = ({
   paneWidth = '100',
   layoutMode = 'full',
 }: WorkflowStudioV2Props) => {
+  migrateLegacyWorkflowStudioDestination()
   const canvasRef = useRef<WorkflowCanvasV2Handle | null>(null)
+  const detailAbortRef = useRef<AbortController | null>(null)
   const { prefs, toggleLeftRail, toggleRightRail, toggleFocusMode } = useWorkflowStudioPrefs()
 
   const [workflows, setWorkflows] = useState<Workflow[]>(data?.workflows ?? [])
@@ -99,7 +123,9 @@ export const WorkflowStudioV2 = ({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [dryRunResult, setDryRunResult] = useState<WorkflowDryRunResult | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [listLoading, setListLoading] = useState(!data?.workflows?.length)
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [listRefreshing, setListRefreshing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -117,58 +143,78 @@ export const WorkflowStudioV2 = ({
 
   const selectedId = selected?.workflow.id ?? null
 
-  const refreshList = useCallback(async () => {
-    const model = await loadWorkflowStudio()
-    setWorkflows(model.workflows)
-    setApiAvailable(true)
-    setApiError(null)
-    return model.workflows
+  const refreshList = useCallback(async (options: { background?: boolean; signal?: AbortSignal } = {}) => {
+    if (options.background) setListRefreshing(true)
+    else setListLoading(true)
+    try {
+      const model = await loadWorkflowStudio({ signal: options.signal })
+      setWorkflows(model.workflows)
+      setApiAvailable(true)
+      setApiError(null)
+      return model.workflows
+    } finally {
+      if (options.background) setListRefreshing(false)
+      else setListLoading(false)
+    }
   }, [])
 
-  const loadSelected = useCallback(async (workflowId: string) => {
-    setLoading(true)
+  const loadSelected = useCallback(async (workflowId: string, options: { force?: boolean } = {}) => {
+    detailAbortRef.current?.abort()
+    const controller = new AbortController()
+    detailAbortRef.current = controller
+    setGraphLoading(true)
     setError('')
+    syncWorkflowStudioUrl(workflowId, applyUniversalContextToWorkflowStudio())
     try {
-      const detail = await loadWorkflowDetail(workflowId)
+      const detail = await loadWorkflowDetail(workflowId, { force: options.force, signal: controller.signal })
+      if (controller.signal.aborted) return
       setSelected(detail)
       setDryRunResult(null)
       setSelectedNodeId(null)
       setSelectedNodeIds([])
+      setApiAvailable(true)
+      setApiError(null)
     } catch (err) {
+      if (controller.signal.aborted) return
       const parsed = parseWorkflowError(err)
-      if (parsed.apiFailure) {
+      if (parsed.code === 'WORKFLOW_NOT_FOUND') {
+        setError('Workflow could not be loaded.')
+      } else {
+        setError(parsed.message)
+      }
+      if (parsed.code === 'WORKFLOW_API_HTML_ERROR' || parsed.code === 'WORKFLOWS_LIST_FAILED') {
         setApiAvailable(false)
         setApiError({ message: parsed.message, traceId: parsed.traceId })
       }
-      setError(parsed.message)
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setGraphLoading(false)
     }
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    refreshList()
+    const controller = new AbortController()
+    const preferredWorkflowId = readWorkflowIdFromLocation()
+    applyUniversalContextToWorkflowStudio()
+
+    void refreshList({ signal: controller.signal })
       .then((rows) => {
         if (cancelled) return
-        const first = rows[0]
-        if (first && !selected) void loadSelected(first.id)
+        const targetId = resolveInitialWorkflowId(rows, preferredWorkflowId)
+        if (targetId) void loadSelected(targetId)
       })
       .catch((err) => {
-        if (cancelled) return
+        if (cancelled || controller.signal.aborted) return
         const parsed = parseWorkflowError(err)
-        if (parsed.apiFailure) {
-          setApiAvailable(false)
-          setApiError({ message: parsed.message, traceId: parsed.traceId })
-        }
+        setApiAvailable(false)
+        setApiError({ message: parsed.message, traceId: parsed.traceId })
         setError(parsed.message)
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+
     return () => {
       cancelled = true
+      controller.abort()
+      detailAbortRef.current?.abort()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -495,7 +541,7 @@ export const WorkflowStudioV2 = ({
         onGoLive={() => withBusy(async () => {
           const detail = await enableWorkflowLive(requireWorkflow())
           setSelected(detail)
-          setLiveMode(true)
+          setLiveMode('live')
         }, 'Workflow live mode armed')}
       />
 
@@ -504,13 +550,11 @@ export const WorkflowStudioV2 = ({
           message={apiError.message}
           traceId={apiError.traceId}
           onRetry={() => {
-            setLoading(true)
             void refreshList()
               .then((rows) => {
-                const first = rows[0]
-                if (first) return loadSelected(first.id)
+                const target = resolveInitialWorkflowId(rows, selectedId ?? readWorkflowIdFromLocation())
+                if (target) return loadSelected(target, { force: true })
               })
-              .finally(() => setLoading(false))
           }}
           onOfflineDemo={() => {
             setOfflineDemo(true)
@@ -567,8 +611,9 @@ export const WorkflowStudioV2 = ({
                 <WorkflowNavigatorV2
                   workflows={workflows}
                   selectedId={selectedId}
-                  loading={loading}
-                  busy={busy}
+                  loading={listLoading}
+                  busy={busy || graphLoading}
+                  refreshing={listRefreshing}
                   onSelect={(workflowId) => void loadSelected(workflowId)}
                   onCreate={() => setCreateOpen(true)}
                   onAction={handleNavigatorAction}
@@ -602,7 +647,14 @@ export const WorkflowStudioV2 = ({
             dryRunResult={dryRunResult}
             selectedNodeId={selectedNodeId}
             selectedNodeIds={selectedNodeIds}
-            onSelectNode={setSelectedNodeId}
+            onSelectNode={(nodeId) => {
+              setSelectedNodeId(nodeId)
+              const node = canvasNodes.find((entry) => entry.id === nodeId)
+              const nodeConfig = node?.step?.config
+              if (nodeConfig && typeof nodeConfig === 'object') {
+                publishWorkflowNodeEntityContext(nodeConfig as Record<string, unknown>)
+              }
+            }}
             onSelectNodes={setSelectedNodeIds}
             busy={busy}
             layoutRevision={layoutRevision}
@@ -757,12 +809,5 @@ export const WorkflowStudioV2 = ({
 export default WorkflowStudioV2
 
 export function isWorkflowStudioV2Enabled(): boolean {
-  if (typeof window === 'undefined') return false
-  const params = new URLSearchParams(window.location.search)
-  if (params.get('workflow_v2') === '1') return true
-  try {
-    return localStorage.getItem('WORKFLOW_STUDIO_V2') === 'true'
-  } catch {
-    return false
-  }
+  return isWorkflowStudioV2Canonical()
 }

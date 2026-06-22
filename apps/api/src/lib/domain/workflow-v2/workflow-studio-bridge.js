@@ -35,6 +35,7 @@ import {
   applyGraphMutation,
   insertNodeOnEdgeResolved,
 } from '@/lib/domain/workflow-v2/graph-mutations.js';
+import { SYSTEM_GRAPH_VERSION } from '@/lib/domain/workflow-v2/system-workflow-graphs.js';
 
 const OPERATIONAL_MODES = Object.freeze([
   'draft',
@@ -50,6 +51,10 @@ const SMOKE_KEY_PATTERNS = [
   /^workflow_studio_smoke_/i,
   /^owner_acquisition_follow_up_mq/i,
 ];
+
+const REGISTRY_CACHE_TTL_MS = 5 * 60 * 1000;
+let registryCache = null;
+let registryCacheAt = 0;
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -143,6 +148,15 @@ function presentationMeta(node = {}) {
 
 export async function listWorkflowNodeRegistry(opts = {}, deps = {}) {
   const includeInternal = opts.include_internal === true || opts.developer_mode === true;
+  const cacheKey = includeInternal ? 'internal' : 'operator';
+  if (
+    opts.bypass_cache !== true
+    && registryCache?.[cacheKey]
+    && Date.now() - registryCacheAt < REGISTRY_CACHE_TTL_MS
+  ) {
+    return registryCache[cacheKey];
+  }
+
   const client = db(deps);
   const { data: dbRows, error } = await client
     .from('workflow_node_registry')
@@ -172,7 +186,7 @@ export async function listWorkflowNodeRegistry(opts = {}, deps = {}) {
     categories[cat].push(node);
   }
 
-  return {
+  const result = {
     ok: true,
     nodes: visible,
     categories,
@@ -182,7 +196,13 @@ export async function listWorkflowNodeRegistry(opts = {}, deps = {}) {
       internal: internalNodes.length,
     },
     source: error ? 'code_registry_fallback' : 'workflow_node_registry',
+    registry_version: SYSTEM_GRAPH_VERSION,
   };
+
+  registryCache = registryCache ?? {};
+  registryCache[cacheKey] = result;
+  registryCacheAt = Date.now();
+  return result;
 }
 
 export async function cloneLegacyWorkflowToV2(legacyId, deps = {}) {
@@ -236,7 +256,7 @@ export async function cloneLegacyWorkflowToV2(legacyId, deps = {}) {
     }
   }
 
-  return getWorkflowStudioDetail(definitionId, deps);
+  return getWorkflowStudioDetail(definitionId, {}, deps);
 }
 
 export function getRegistryRowsForSync() {
@@ -270,6 +290,109 @@ async function countRunsForWorkflow(workflowId, isLegacy, deps) {
   return count ?? 0;
 }
 
+function summarizeWorkflow(workflow, counts = {}) {
+  const meta = workflow.metadata && typeof workflow.metadata === 'object' ? workflow.metadata : {};
+  return {
+    ...workflow,
+    version: workflow.version ?? 1,
+    operational_mode: operationalMode(workflow),
+    is_system_template: workflow.is_system_template === true,
+    is_locked: workflow.is_locked === true,
+    node_count: counts.node_count ?? workflow.step_count ?? workflow.node_count ?? 0,
+    edge_count: counts.edge_count ?? workflow.edge_count ?? 0,
+    validation_state: counts.validation_state ?? workflow.validation_state ?? 'unknown',
+    stage_code: meta.stage_code ?? meta.stage ?? null,
+    touch_number: meta.touch_number ?? meta.touch ?? null,
+    last_updated: workflow.updated_at ?? workflow.created_at ?? null,
+  };
+}
+
+async function listDefinitionsLightweight(deps = {}) {
+  const client = db(deps);
+  const [v2Res, v1Res] = await Promise.all([
+    client
+      .from('workflow_definitions')
+      .select('id, name, description, definition_key, status, trigger_type, version, updated_at, created_at, published_at, metadata, is_system_template, is_locked')
+      .order('updated_at', { ascending: false })
+      .limit(200),
+    client
+      .from('workflows')
+      .select('id, name, description, workflow_key, status, trigger_type, version, updated_at, created_at')
+      .order('updated_at', { ascending: false })
+      .limit(100),
+  ]);
+
+  if (v2Res.error) throw v2Res.error;
+
+  const v2Workflows = (v2Res.data ?? []).map((definition) => ({
+    ...mapDefinitionToWorkflowSummary(definition),
+    live_send_enabled: false,
+  }));
+
+  const v1Workflows = (v1Res.data ?? []).map((workflow) => ({
+    ...workflow,
+    workflow_key: workflow.workflow_key,
+    is_v2: false,
+    is_legacy: true,
+    live_send_enabled: false,
+  }));
+
+  return [...v2Workflows, ...v1Workflows];
+}
+
+function mapDefinitionToWorkflowSummary(definition) {
+  const meta = definition.metadata && typeof definition.metadata === 'object' ? definition.metadata : {};
+  return {
+    id: definition.id,
+    name: definition.name,
+    description: definition.description,
+    workflow_key: definition.definition_key,
+    definition_key: definition.definition_key,
+    status: definition.status,
+    trigger_type: definition.trigger_type,
+    version: definition.version ?? 1,
+    updated_at: definition.updated_at,
+    created_at: definition.created_at,
+    published_at: definition.published_at ?? null,
+    channel: meta.channel ?? 'multichannel',
+    workflow_type: meta.workflow_type ?? 'automation',
+    metadata: meta,
+    is_v2: true,
+    is_legacy: false,
+    is_system_template: definition.is_system_template === true,
+    is_locked: definition.is_locked === true,
+    step_count: 0,
+    send_node_count: 0,
+  };
+}
+
+async function attachGraphCounts(workflows, deps) {
+  const v2Ids = workflows.filter((w) => !w.is_legacy).map((w) => w.id);
+  if (!v2Ids.length) {
+    return workflows.map((w) => summarizeWorkflow(w));
+  }
+
+  const client = db(deps);
+  const [nodesRes, edgesRes] = await Promise.all([
+    client.from('workflow_nodes').select('workflow_definition_id').in('workflow_definition_id', v2Ids),
+    client.from('workflow_edges').select('workflow_definition_id').in('workflow_definition_id', v2Ids),
+  ]);
+
+  const nodeCounts = {};
+  const edgeCounts = {};
+  for (const row of nodesRes.data ?? []) {
+    nodeCounts[row.workflow_definition_id] = (nodeCounts[row.workflow_definition_id] ?? 0) + 1;
+  }
+  for (const row of edgesRes.data ?? []) {
+    edgeCounts[row.workflow_definition_id] = (edgeCounts[row.workflow_definition_id] ?? 0) + 1;
+  }
+
+  return workflows.map((w) => summarizeWorkflow(w, {
+    node_count: w.is_legacy ? (w.step_count ?? 0) : (nodeCounts[w.id] ?? 0),
+    edge_count: w.is_legacy ? 0 : (edgeCounts[w.id] ?? 0),
+  }));
+}
+
 async function attachStats(workflow, deps) {
   const client = db(deps);
   const id = workflow.id;
@@ -295,7 +418,7 @@ async function attachStats(workflow, deps) {
         .select('status, completed_at, started_at')
         .eq('workflow_definition_id', defCol)
         .order('started_at', { ascending: false })
-        .limit(200),
+        .limit(50),
     ]);
     for (const row of enrollRes.data ?? []) {
       if (row.status === 'active') stats.active_runs += 1;
@@ -313,19 +436,23 @@ async function attachStats(workflow, deps) {
   }
 
   return {
-    ...workflow,
-    version: workflow.version ?? 1,
-    operational_mode: operationalMode(workflow),
-    is_system_template: workflow.is_system_template === true,
-    is_locked: workflow.is_locked === true,
+    ...summarizeWorkflow(workflow),
     stats,
   };
 }
 
+async function attachStatsBatch(workflows, deps) {
+  return Promise.all(workflows.map((w) => attachStats(w, deps)));
+}
+
 export async function listWorkflowStudioCatalog(opts = {}, deps = {}) {
   const includeArchived = opts.include_archived === true;
-  const listed = await listDefinitions(deps);
-  let workflows = listed.workflows ?? [];
+  const includeStats = opts.include_stats === true;
+  const summaryMode = opts.summary !== false;
+
+  let workflows = summaryMode
+    ? await listDefinitionsLightweight(deps)
+    : (await listDefinitions(deps)).workflows ?? [];
 
   if (!includeArchived) {
     workflows = workflows.filter((w) => {
@@ -335,20 +462,21 @@ export async function listWorkflowStudioCatalog(opts = {}, deps = {}) {
     });
   }
 
-  const enriched = [];
-  for (const w of workflows) {
-    enriched.push(await attachStats(w, deps));
-  }
+  const enriched = includeStats
+    ? await attachStatsBatch(workflows, deps)
+    : await attachGraphCounts(workflows, deps);
 
   return {
     ok: true,
     workflows: enriched,
     canonical_model: 'workflow_definitions',
     legacy_read_only: true,
+    summary: summaryMode,
   };
 }
 
-export async function getWorkflowStudioDetail(id, deps = {}) {
+export async function getWorkflowStudioDetail(id, opts = {}, deps = {}) {
+  const includeAnalytics = opts.include_analytics === true;
   const detail = await getDefinition(id, deps);
   if (!detail.ok) return detail;
 
@@ -356,14 +484,16 @@ export async function getWorkflowStudioDetail(id, deps = {}) {
     ? { ok: true, errors: [], warnings: ['legacy_workflow_read_only'] }
     : await validateDefinitionGraph(id, deps);
 
-  const analytics = detail.is_legacy
-    ? { ok: true, summary: {} }
-    : await getWorkflowAnalytics(id, deps);
+  let analyticsSummary = {};
+  if (includeAnalytics && !detail.is_legacy) {
+    const analytics = await getWorkflowAnalytics(id, deps);
+    analyticsSummary = analytics.summary ?? {};
+  }
 
   return {
     ...detail,
     validation,
-    analytics_summary: analytics.summary ?? {},
+    analytics_summary: analyticsSummary,
     operational_mode: operationalMode(detail.definition ?? detail.workflow),
     canonical_model: detail.is_legacy ? 'workflows_legacy' : 'workflow_definitions',
   };
@@ -398,7 +528,7 @@ export async function createWorkflowStudioDraft(payload = {}, deps = {}) {
     );
     if (template?.graph) {
       await seedTemplateGraph(definitionId, template.graph, deps);
-      return getWorkflowStudioDetail(definitionId, deps);
+      return getWorkflowStudioDetail(definitionId, {}, deps);
     }
   }
 
@@ -410,7 +540,7 @@ export async function createWorkflowStudioDraft(payload = {}, deps = {}) {
     config: { step_order: 10 },
   }, deps);
 
-  return getWorkflowStudioDetail(definitionId, deps);
+  return getWorkflowStudioDetail(definitionId, {}, deps);
 }
 
 async function seedTemplateGraph(definitionId, graph, deps) {
@@ -463,13 +593,13 @@ export async function updateWorkflowStudioDraft(id, payload = {}, deps = {}) {
   }
   const result = await updateDefinition(id, payload, deps);
   if (!result.ok) return result;
-  return getWorkflowStudioDetail(id, deps);
+  return getWorkflowStudioDetail(id, {}, deps);
 }
 
 export async function createWorkflowStudioNode(definitionId, payload = {}, deps = {}) {
   const result = await createNode(definitionId, payload, deps);
   if (!result.ok) return result;
-  return getWorkflowStudioDetail(definitionId, deps);
+  return getWorkflowStudioDetail(definitionId, {}, deps);
 }
 
 export async function updateWorkflowStudioNode(nodeId, payload = {}, deps = {}) {
@@ -477,19 +607,19 @@ export async function updateWorkflowStudioNode(nodeId, payload = {}, deps = {}) 
   if (!current.data) return { ok: false, status: 404, error: 'workflow_node_not_found' };
   const result = await updateNode(nodeId, payload, deps);
   if (!result.ok) return result;
-  return getWorkflowStudioDetail(current.data.workflow_definition_id, deps);
+  return getWorkflowStudioDetail(current.data.workflow_definition_id, {}, deps);
 }
 
 export async function insertNodeOnEdge(definitionId, payload = {}, deps = {}) {
   const raw = await insertNodeOnEdgeResolved(definitionId, payload, deps);
   if (!raw.ok) return raw;
-  return getWorkflowStudioDetail(definitionId, deps);
+  return getWorkflowStudioDetail(definitionId, {}, deps);
 }
 
 export async function mutateWorkflowGraph(definitionId, payload = {}, deps = {}) {
   const raw = await applyGraphMutation(definitionId, payload, deps);
   if (!raw.ok) return raw;
-  return getWorkflowStudioDetail(definitionId, deps);
+  return getWorkflowStudioDetail(definitionId, {}, deps);
 }
 
 export async function publishWorkflowVersion(id, deps = {}) {
@@ -537,7 +667,7 @@ export async function publishWorkflowVersion(id, deps = {}) {
     published_version: version,
     next_version: version + 1,
     validation,
-    detail: await getWorkflowStudioDetail(id, deps),
+    detail: await getWorkflowStudioDetail(id, {}, deps),
   };
 }
 

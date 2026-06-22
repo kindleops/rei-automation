@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server.js';
 
-import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../_shared.js';
+import {
+  corsHeaders,
+  ensureMutationAuth,
+  parseJsonSafe,
+  workflowError,
+  workflowErrorFromLegacy,
+  workflowSuccess,
+} from '../../_shared.js';
 import {
   getWorkflowStudioDetail,
   updateWorkflowStudioDraft,
@@ -25,18 +32,29 @@ export async function OPTIONS(request) {
 }
 
 export async function GET(request, { params }) {
+  const startedAt = Date.now();
   const auth = ensureMutationAuth(request);
   if (!auth.ok) return auth.response;
 
   try {
-    const result = await getWorkflowStudioDetail(await workflowIdFromParams(params));
-    return withCors(request, result, result.ok === false ? Number(result.status || 404) : 200);
+    const { searchParams } = new URL(request.url);
+    const includeAnalytics = searchParams.get('include_analytics') === 'true';
+    const result = await getWorkflowStudioDetail(await workflowIdFromParams(params), { include_analytics: includeAnalytics });
+    if (result.ok === false) {
+      const status = Number(result.status || 404);
+      const code = result.error === 'workflow_not_found' ? 'WORKFLOW_NOT_FOUND' : String(result.error ?? 'WORKFLOW_GET_FAILED').toUpperCase();
+      const message = result.message ?? (code === 'WORKFLOW_NOT_FOUND'
+        ? 'Workflow could not be loaded.'
+        : 'Workflow detail request failed.');
+      return withCors(request, workflowError(code, message, status >= 500, startedAt), status);
+    }
+    return withCors(request, workflowSuccess(result, startedAt), 200);
   } catch (error) {
-    return withCors(request, {
-      ok: false,
-      error: 'workflow_get_failed',
-      message: error?.message || String(error),
-    }, 500);
+    return withCors(
+      request,
+      workflowError('WORKFLOW_GET_FAILED', error?.message || String(error), true, startedAt),
+      500,
+    );
   }
 }
 

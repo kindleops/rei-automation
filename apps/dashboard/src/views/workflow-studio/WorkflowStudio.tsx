@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { ViewLayoutMode, ViewWidthPercent } from '../../domain/inbox/view-layout'
-import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from './v2/WorkflowStudioV2'
+import WorkflowStudioV2 from './v2/WorkflowStudioV2'
 import {
   cloneWorkflowDraft,
   createWorkflowDraft,
@@ -282,18 +282,9 @@ const WorkflowStudioLegacy = ({
   )
 }
 
+/** @deprecated Legacy Workflow Studio V1 — retained for diagnostics only. */
 export const WorkflowStudio = (props: WorkflowStudioProps) => {
-  const [useV2, setUseV2] = useState(isWorkflowStudioV2Enabled)
-
-  useEffect(() => {
-    setUseV2(isWorkflowStudioV2Enabled())
-  }, [])
-
-  if (useV2) {
-    return <WorkflowStudioV2 {...props} />
-  }
-
-  return <WorkflowStudioLegacy {...props} />
+  return <WorkflowStudioV2 {...props} />
 }
 
 export default WorkflowStudio

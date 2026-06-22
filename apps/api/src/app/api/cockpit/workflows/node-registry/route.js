@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server.js';
 
-import { corsHeaders, ensureMutationAuth, errorPayload } from '../../_shared.js';
+import {
+  corsHeaders,
+  ensureMutationAuth,
+  workflowError,
+  workflowSuccess,
+} from '../../_shared.js';
 import { listWorkflowNodeRegistry } from '@/lib/domain/workflow-v2/workflow-studio-bridge.js';
 
 export const runtime = 'nodejs';
@@ -16,6 +21,7 @@ export async function OPTIONS(request) {
 }
 
 export async function GET(request) {
+  const startedAt = Date.now();
   const auth = ensureMutationAuth(request);
   if (!auth.ok) return auth.response;
 
@@ -23,23 +29,25 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const grouped = searchParams.get('grouped') !== 'false';
     const includeInternal = searchParams.get('include_internal') === 'true';
+    const bypassCache = searchParams.get('bypass_cache') === 'true';
     const result = await listWorkflowNodeRegistry({
       include_internal: includeInternal,
       developer_mode: includeInternal,
+      bypass_cache: bypassCache,
     });
-    if (!grouped) {
-      return withCors(request, {
-        ok: true,
+    const payload = grouped
+      ? result
+      : {
         nodes: result.nodes,
         counts: result.counts,
         source: result.source,
-      });
-    }
-    return withCors(request, result);
+        registry_version: result.registry_version,
+      };
+    return withCors(request, workflowSuccess(payload, startedAt), 200);
   } catch (error) {
     return withCors(
       request,
-      errorPayload(request, 'workflow_node_registry_failed', error?.message || String(error)),
+      workflowError('NODE_REGISTRY_UNAVAILABLE', error?.message || String(error), true, startedAt),
       500,
     );
   }
