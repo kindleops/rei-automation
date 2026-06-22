@@ -1643,15 +1643,15 @@
   color: rgba(186, 205, 235, 0.82);
 }
 
-[data-nexus-theme='red-ops'] .plv-card__seller,
-[data-nexus-theme='red-ops'] .plv-lane__name {
+[data-nexus-theme='red_ops'] .plv-card__seller,
+[data-nexus-theme='red_ops'] .plv-lane__name {
   color: rgba(254, 242, 242, 0.95);
 }
-[data-nexus-theme='red-ops'] .plv-card__address,
-[data-nexus-theme='red-ops'] .plv-card__snippet {
+[data-nexus-theme='red_ops'] .plv-card__address,
+[data-nexus-theme='red_ops'] .plv-card__snippet {
   color: rgba(252, 211, 211, 0.78);
 }
-[data-nexus-theme='red-ops'] .plv-kpi__item {
+[data-nexus-theme='red_ops'] .plv-kpi__item {
   background: rgba(127, 29, 29, 0.22);
   border-color: rgba(248, 113, 113, 0.18);
 }
@@ -1665,13 +1665,13 @@
 
 /* ── Red Ops accents (not full-screen tint) ───────────────────────────────── */
 
-[data-nexus-theme='red-ops'] .plv-kpi__item:first-child {
+[data-nexus-theme='red_ops'] .plv-kpi__item:first-child {
   background: linear-gradient(180deg, rgba(127, 29, 29, 0.12), transparent);
 }
-[data-nexus-theme='red-ops'] .plv-lane.is-drag-over {
+[data-nexus-theme='red_ops'] .plv-lane.is-drag-over {
   box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.35);
 }
-[data-nexus-theme='red-ops'] .plv-card.is-selected {
+[data-nexus-theme='red_ops'] .plv-card.is-selected {
   border-color: rgba(248, 113, 113, 0.55);
   box-shadow:
     0 0 0 1px rgba(248, 113, 113, 0.3),
@@ -1823,11 +1823,11 @@
 }
 
 /* Red Ops header gradient */
-[data-nexus-theme='red-ops'] .plv-scope-bar {
+[data-nexus-theme='red_ops'] .plv-scope-bar {
   background: linear-gradient(90deg, rgba(127, 29, 29, 0.45), rgba(69, 10, 10, 0.2), transparent);
   border-bottom-color: rgba(248, 113, 113, 0.22);
 }
-[data-nexus-theme='red-ops'] .plv-command-panel__header {
+[data-nexus-theme='red_ops'] .plv-command-panel__header {
   background: linear-gradient(180deg, rgba(127, 29, 29, 0.35), transparent);
 }
 
@@ -2220,8 +2220,8 @@
   background: #ffffff;
 }
 
-[data-nexus-theme='red-ops'] .plv-card-designer__field-btn.is-selected,
-[data-nexus-theme='red-ops'] .plv-glass-toggle.is-active {
+[data-nexus-theme='red_ops'] .plv-card-designer__field-btn.is-selected,
+[data-nexus-theme='red_ops'] .plv-glass-toggle.is-active {
   border-color: rgba(248, 113, 113, 0.55);
   background: rgba(127, 29, 29, 0.35);
 }
