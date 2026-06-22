@@ -145,6 +145,25 @@ Published via `buildCanonicalBuyerDemand`:
 | Cause | Stale `.next` server chunks from interrupted/mixed build; API served HTML error page with webpack paths |
 | Fix | Sanitize client errors; rebuild API from buyer-match worktree; never expose module paths in JSON |
 
+## Production data counts (Supabase MCP / linked CLI — 2026-06-22)
+
+| Table | Row count |
+| --- | ---: |
+| `properties` | 124,046 |
+| `buyer_entities_v2` | 26,390 |
+| `buyer_purchase_events_v2` | 55,479 |
+| `buyer_geo_rollups_v2` | 3,211 |
+| `buyer_comp_raw_v2` | 47,985 |
+| `recently_sold_properties` | 55,893 |
+| `buyer_match_runs` | 12 |
+| `buyer_match_candidates` | 225 |
+
+**Schema note (verified live):** `buyer_purchase_events_v2` uses `property_zip`, `property_state`, `purchase_date` — not `property_address_zip` / `sale_date`. UI queries were corrected to match.
+
+**Geographic coverage:** Purchase events are concentrated in TX/MO metros (top ZIP: 63136, 76179, 77091). **Zero events in Tulsa ZIP 74127** and **zero `buyer_entities_v2` with `markets_active @> ['Tulsa, OK']`**. Tulsa subject `2109544499` (120 N 44th Ave W) has valid coordinates but RPC returns `[]` — correct empty result, not source failure.
+
+**Houston validation (77091):** RPC returns ranked buyers (e.g. Texas Funding Corporation A/88.2, Dr Horton A/87.6) with explainable `reason_for_match`.
+
 ## Status
 
 | Item | Status |
@@ -155,4 +174,4 @@ Published via `buildCanonicalBuyerDemand`:
 | Auto matching | Implemented |
 | Manual command buttons | Removed from primary UX |
 | Theme tokens | Dark / Light / Red Ops overrides added |
-| Production buyer data | **READY FOR BUYER DATA BACKFILL** if `buyer_purchase_events_v2` empty in env |
+| Production buyer data | **TX/MO covered; OK/Tulsa needs geographic backfill** |
