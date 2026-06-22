@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-06-22T19:46:02.741Z",
+  "failure_row_count": 211,
+  "distinct_historical_pairs": 90,
+  "distinct_covered_pairs": 88,
+  "distinct_uncovered_pairs": 2,
+  "duplicate_suppression_entries": 0,
+  "malformed_failure_pairs": 0,
+  "malformed_suppression_pairs": 76,
+  "executable_21610_rows": 0,
+  "uncovered_pairs": [
+    {
+      "pair_key": "+16129644413|+16128060495",
+      "recipient": "+16129644413",
+      "sender": "+16128060495",
+      "queue_row_ids": [
+        "f33386ca-7205-48ed-9a04-1419cfb060c6",
+        "2cf6f3aa-5fa1-4488-97ee-a8ec5921c56e"
+      ],
+      "statuses": [
+        "failed"
+      ]
+    },
+    {
+      "pair_key": "+19155036860|+14693131600",
+      "recipient": "+19155036860",
+      "sender": "+14693131600",
+      "queue_row_ids": [
+        "7efef9f0-684f-432b-9414-5226c53a4a57",
+        "8cf5787b-82d8-4534-99f6-bb8eadf11ca0"
+      ],
+      "statuses": [
+        "failed"
+      ]
+    }
+  ],
+  "proposed_backfill_rows": [
+    {
+      "phone_e164": "+16129644413",
+      "sender_phone_e164": "+16128060495",
+      "phone_number": "+16129644413",
+      "suppression_type": "provider_blacklist_pair",
+      "suppression_reason": "provider_blacklist_21610",
+      "is_active": true,
+      "source": "reconciliation_21610_pair_backfill"
+    },
+    {
+      "phone_e164": "+19155036860",
+      "sender_phone_e164": "+14693131600",
+      "phone_number": "+19155036860",
+      "suppression_type": "provider_blacklist_pair",
+      "suppression_reason": "provider_blacklist_21610",
+      "is_active": true,
+      "source": "reconciliation_21610_pair_backfill"
+    }
+  ],
+  "forward_sql": "-- FORWARD: backfill uncovered 21610 sender-recipient pairs only (2 rows)\nINSERT INTO public.sms_suppression_list (\n  phone_e164,\n  sender_phone_e164,\n  phone_number,\n  suppression_type,\n  suppression_reason,\n  is_active,\n  suppressed_at,\n  source\n)\nSELECT DISTINCT\n  sq.to_phone_number,\n  sq.from_phone_number,\n  sq.to_phone_number,\n  'provider_blacklist_pair',\n  COALESCE(NULLIF(sq.failed_reason, ''), 'provider_blacklist_21610'),\n  true,\n  NOW(),\n  'reconciliation_21610_pair_backfill'\nFROM public.send_queue sq\nWHERE sq.failed_reason ILIKE '%21610%'\n  AND sq.to_phone_number IS NOT NULL\n  AND sq.from_phone_number IS NOT NULL\n  AND NOT EXISTS (\n    SELECT 1\n    FROM public.sms_suppression_list ssl\n    WHERE ssl.phone_e164 = sq.to_phone_number\n      AND ssl.sender_phone_e164 = sq.from_phone_number\n  )\nON CONFLICT (phone_e164, sender_phone_e164) DO NOTHING;",
+  "rollback_sql": "-- ROLLBACK: remove only reconciliation backfill rows\nDELETE FROM public.sms_suppression_list\nWHERE source = 'reconciliation_21610_pair_backfill'\n  AND suppression_type = 'provider_blacklist_pair';",
+  "terminal_sql": "-- FORWARD: terminalize any still-retryable 21610 queue rows (predicate scoped to 21610 only)\nUPDATE public.send_queue\nSET\n  queue_status = 'failed',\n  next_retry_at = NULL,\n  is_locked = false,\n  locked_at = NULL,\n  lock_token = NULL,\n  updated_at = NOW(),\n  metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(\n    'reconciled_at', NOW(),\n    'reconciliation_reason', 'provider_blacklist_21610',\n    'final_queue_status', 'failed'\n  )\nWHERE failed_reason ILIKE '%21610%'\n  AND queue_status IN ('queued','scheduled','pending','processing','ready','runnable','paused','paused_after_hours');"
+}
