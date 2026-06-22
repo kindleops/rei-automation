@@ -2361,8 +2361,8 @@ export function BuyerMatchWorkspace({
           { label: 'zip_asset', build: async () => {
             if (!resolvedZip || !resolvedAsset) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,normalized_asset_class,is_corporate_buyer,buyer_type')
-              .eq('property_address_zip', resolvedZip)
+              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,normalized_asset_class,is_corporate_buyer,buyer_type')
+              .eq('property_zip', resolvedZip)
               .not('purchase_price', 'is', null)
               .limit(500)
             return data ?? []
@@ -2370,8 +2370,8 @@ export function BuyerMatchWorkspace({
           { label: 'zip', build: async () => {
             if (!resolvedZip) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,is_corporate_buyer,buyer_type')
-              .eq('property_address_zip', resolvedZip)
+              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,is_corporate_buyer,buyer_type')
+              .eq('property_zip', resolvedZip)
               .not('purchase_price', 'is', null)
               .limit(500)
             return data ?? []
@@ -2379,7 +2379,7 @@ export function BuyerMatchWorkspace({
           { label: 'market_asset', build: async () => {
             if (!resolvedMarket || resolvedMarket === 'Market Unknown') return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,is_corporate_buyer,buyer_type')
+              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,is_corporate_buyer,buyer_type')
               .eq('market', resolvedMarket)
               .not('purchase_price', 'is', null)
               .limit(500)
@@ -2388,7 +2388,7 @@ export function BuyerMatchWorkspace({
           { label: 'market', build: async () => {
             if (!resolvedMarket || resolvedMarket === 'Market Unknown') return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,is_corporate_buyer,buyer_type')
+              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,is_corporate_buyer,buyer_type')
               .eq('market', resolvedMarket)
               .not('purchase_price', 'is', null)
               .limit(500)
@@ -2397,8 +2397,8 @@ export function BuyerMatchWorkspace({
           { label: 'state_asset', build: async () => {
             if (!resolvedState) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,is_corporate_buyer,buyer_type')
-              .eq('property_address_state', resolvedState)
+              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,is_corporate_buyer,buyer_type')
+              .eq('property_state', resolvedState)
               .not('purchase_price', 'is', null)
               .limit(300)
             return data ?? []
@@ -2472,19 +2472,19 @@ export function BuyerMatchWorkspace({
         // Also pull from buyer purchase events as additional comps
         if (comps.length < 5 && resolvedZip) {
           const { data: evComps } = await supabase.from('buyer_purchase_events_v2')
-            .select('property_address_full,property_city,property_address_state,property_address_zip,purchase_price,sale_date,sqft,property_type,latitude,longitude')
-            .eq('property_address_zip', resolvedZip)
+            .select('property_address_full,property_city,property_state,property_zip,purchase_price,purchase_date,sqft,property_type,latitude,longitude')
+            .eq('property_zip', resolvedZip)
             .not('purchase_price', 'is', null)
-            .order('sale_date', { ascending: false })
+            .order('purchase_date', { ascending: false })
             .limit(20)
           if (evComps && evComps.length > 0) {
             const evMapped: RealComp[] = evComps.map((c: any) => ({
               id: String(Math.random()),
               address: c.property_address_full || 'Unknown',
-              city: c.property_city, state: c.property_address_state,
-              zip: c.property_address_zip,
+              city: c.property_city, state: c.property_state,
+              zip: c.property_zip,
               sold_price: c.purchase_price,
-              sold_date: c.sale_date,
+              sold_date: c.purchase_date,
               beds: c.beds, baths: c.baths,
               sqft: c.sqft,
               ppsf: (c.purchase_price && c.sqft) ? Math.round(c.purchase_price / c.sqft) : undefined,
@@ -2671,7 +2671,7 @@ export function BuyerMatchWorkspace({
         const { data } = await supabase.from('buyer_purchase_events_v2')
           .select('*')
           .eq('buyer_entity_id', sel.buyer_entity_id)
-          .order('sale_date', { ascending: false })
+          .order('purchase_date', { ascending: false })
           .limit(20)
         if (!active || !data) return
         setPurchases(data)
