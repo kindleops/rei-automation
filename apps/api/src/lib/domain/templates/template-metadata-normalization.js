@@ -1,5 +1,10 @@
 // Central normalization for template use_case, stage_code, touch, and language.
 
+import {
+  resolveCanonicalLanguage,
+  normalizeCanonicalLanguage as adapterNormalizeLanguage,
+} from '@/lib/domain/templates/canonical-language-adapter.js';
+
 export const CANONICAL_USE_CASES = Object.freeze({
   OWNERSHIP_CHECK: 'ownership_check',
   OWNERSHIP_CHECK_FOLLOW_UP: 'ownership_check_follow_up',
@@ -91,24 +96,12 @@ export function normalizeTouchNumber({ touch_number, is_follow_up, is_first_touc
   return 1;
 }
 
-const LANGUAGE_ALIASES = Object.freeze({
-  en: 'English',
-  english: 'English',
-  es: 'Spanish',
-  spanish: 'Spanish',
-  espanol: 'Spanish',
-  ru: 'Russian',
-  russian: 'Russian',
-});
-
 export function normalizeCanonicalLanguage(value = null) {
-  const raw = clean(value);
-  if (!raw) return null;
-  const alias = LANGUAGE_ALIASES[lower(raw)];
-  if (alias) return alias;
-  // Title-case known canonical languages
-  if (['English', 'Spanish', 'Russian'].includes(raw)) return raw;
-  return raw;
+  return adapterNormalizeLanguage(value);
+}
+
+export function normalizeCanonicalLanguageWithMeta(value = null) {
+  return resolveCanonicalLanguage(value);
 }
 
 export function resolveOperatorStageLabel(stageCode) {

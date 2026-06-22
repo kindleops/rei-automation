@@ -163,24 +163,32 @@ test('use-case alias asking_price maps to seller_asking_price', () => {
   assert.equal(normalizeCanonicalUseCase('seller_asking_price'), 'seller_asking_price');
 });
 
-test('template lifecycle: active does not mean auto-reply approved', () => {
+test('template lifecycle: active means enabled and automation-eligible', () => {
   const status = resolveTemplateLifecycleStatus({ is_active: true, safe_for_auto_reply: false });
-  assert.equal(status, TEMPLATE_LIFECYCLE.REVIEW_REQUIRED);
+  assert.equal(status, TEMPLATE_LIFECYCLE.ENABLED);
   const eligible = isTemplateEligibleForSend({ is_active: true }, { autonomous: true });
-  assert.equal(eligible.ok, false);
+  assert.equal(eligible.ok, true);
 });
 
-test('auto-reply blocks unsupported language and low confidence', () => {
+test('auto-reply routes low confidence to clarification; French is supported', () => {
   const review = requiresHumanReview({ primary_intent: 'unclear', confidence: 0.5 }, { language: 'English' });
-  assert.equal(review.required, true);
-  const blocked = evaluateAutoReplyEligibility({
-    classification: { primary_intent: 'ownership_confirmed', confidence: 0.95, language: 'French' },
-    template: { template_body: 'Hi', use_case: 'consider_selling', safe_for_auto_reply: true, is_active: true },
-    use_case: 'consider_selling',
-    context: { language: 'French' },
+  assert.equal(review.required, false);
+  const clarification = evaluateAutoReplyEligibility({
+    classification: { primary_intent: 'unclear', confidence: 0.5, language: 'English' },
+    template: { template_body: 'Hi', use_case: 'who_is_this', is_active: true },
+    use_case: 'who_is_this',
+    context: { language: 'English', current_stage: 'S1', clarification_attempt_count: 0 },
   });
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.action, 'human_review');
+  assert.equal(clarification.ok, true);
+  assert.equal(clarification.action, 'queue_clarification');
+  const french = evaluateAutoReplyEligibility({
+    classification: { primary_intent: 'ownership_confirmed', confidence: 0.95, language: 'French' },
+    template: { template_body: 'Bonjour {{seller_first_name}}', use_case: 'consider_selling', is_active: true, variables: ['seller_first_name'] },
+    use_case: 'consider_selling',
+    context: { language: 'French', merge_variables: { seller_first_name: 'Marie' } },
+  });
+  assert.equal(french.ok, true);
+  assert.equal(french.action, 'queue_auto_reply');
 });
 
 test('S1 cadence: max two active attempts and urgency delays', () => {

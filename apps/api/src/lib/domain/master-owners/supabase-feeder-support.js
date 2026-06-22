@@ -352,10 +352,8 @@ function scoreSupabaseSmsTemplate(row = {}, selector = {}) {
   if (is_follow_up) score += 40;
   if (template_language === requested_language) {
     score += 80;
-  } else if (template_language === normalizeSelectorText("English")) {
-    score += 30;
   } else {
-    score -= 100;
+    return Number.NEGATIVE_INFINITY;
   }
 
   if (normalizeTemplateScope(row?.property_type_scope)) score += 20;

@@ -45,8 +45,12 @@ export const CANONICAL_SELLER_INTENTS = Object.freeze({
  * @property {string|null} seller_intent
  * @property {string|null} next_action
  * @property {string|null} template_use_case
- * @property {boolean} requires_human_review
+ * @property {boolean} requires_human_review — deprecated; use requires_operator_exception
  * @property {string|null} review_reason
+ * @property {boolean} requires_operator_exception
+ * @property {string|null} exception_reason
+ * @property {string|null} automation_action — queue_auto_reply | queue_clarification | automated_fallback | operator_exception | terminal_suppression
+ * @property {number|null} clarification_attempt_count
  */
 
 function clean(value) {
@@ -101,8 +105,16 @@ export function buildCanonicalWorkflowEvent(input = {}) {
     seller_intent: clean(input.seller_intent ?? classification.seller_intent) || null,
     next_action: clean(input.next_action) || null,
     template_use_case: clean(input.template_use_case) || null,
-    requires_human_review: Boolean(input.requires_human_review),
-    review_reason: clean(input.review_reason) || null,
+    requires_human_review: Boolean(
+      input.requires_operator_exception ?? input.requires_human_review,
+    ),
+    review_reason: clean(input.exception_reason ?? input.review_reason) || null,
+    requires_operator_exception: Boolean(
+      input.requires_operator_exception ?? input.requires_human_review,
+    ),
+    exception_reason: clean(input.exception_reason ?? input.review_reason) || null,
+    automation_action: clean(input.automation_action) || null,
+    clarification_attempt_count: asNumber(input.clarification_attempt_count, null),
   };
 }
 

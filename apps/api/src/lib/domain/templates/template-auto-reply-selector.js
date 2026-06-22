@@ -1,4 +1,4 @@
-// Supabase-only template selection for autonomous replies — no English fallback.
+// Supabase template selection — catalog-driven, no English fallback.
 
 import { hasSupabaseConfig, supabase as defaultSupabase } from '@/lib/supabase/client.js';
 import {
@@ -7,7 +7,7 @@ import {
   normalizeCanonicalStageCode,
   normalizeTouchNumber,
 } from '@/lib/domain/templates/template-metadata-normalization.js';
-import { isTemplateEligibleForSend } from '@/lib/domain/templates/template-lifecycle.js';
+import { resolveTemplateFromPool } from '@/lib/domain/templates/template-runtime-resolver.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -31,44 +31,52 @@ export async function selectApprovedTemplateForAutoReply(input = {}, deps = {}) 
     return { ok: false, reason: 'supabase_not_configured' };
   }
 
-  const { data, error } = await client
-    .from('sms_templates')
-    .select('*')
-    .eq('is_active', true)
-    .eq('use_case', use_case)
-    .eq('language', language)
-    .limit(50);
+  let query = client.from('sms_templates').select('*').eq('is_active', true);
+  if (use_case) query = query.eq('use_case', use_case);
+  if (language) query = query.eq('language', language);
 
+  const { data, error } = await query.limit(200);
   if (error) return { ok: false, reason: 'template_query_failed', error: error.message };
 
-  const candidates = (data ?? []).filter((row) => {
-    const lifecycle = isTemplateEligibleForSend(row, { autonomous: true });
-    if (!lifecycle.ok) return false;
-    const rowStage = normalizeCanonicalStageCode({ use_case: row.use_case, stage_code: row.stage_code });
-    if (stage_code && rowStage && rowStage !== stage_code) return false;
-    return true;
-  });
-
-  if (!candidates.length) {
-    return {
-      ok: false,
-      reason: 'no_approved_template_for_language',
+  const resolved = resolveTemplateFromPool(
+    {
+      ...input,
       use_case,
       language,
       stage_code,
       touch_number,
+    },
+    data ?? [],
+  );
+
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      reason: resolved.reason,
+      use_case,
+      language,
+      stage_code,
+      touch_number,
+      candidate_pool_size: resolved.candidate_pool_size ?? 0,
+      excluded_candidates: resolved.excluded_candidates,
+      resolver_version: resolved.resolver_version,
     };
   }
 
-  const template = candidates[0];
   return {
     ok: true,
-    template,
+    template: resolved.template,
+    template_id: resolved.template_id,
     use_case,
     language,
     stage_code,
     touch_number,
-    candidate_count: candidates.length,
+    candidate_count: resolved.candidate_pool_size,
+    candidate_pool_size: resolved.candidate_pool_size,
+    match_dimensions: resolved.match_dimensions,
+    ranking_reason: resolved.ranking_reason,
+    excluded_candidates: resolved.excluded_candidates,
+    resolver_version: resolved.resolver_version,
   };
 }
 
