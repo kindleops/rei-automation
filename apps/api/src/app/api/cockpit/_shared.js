@@ -18,6 +18,41 @@ export function errorPayload(request, error, message, status = 500, extra = {}) 
   }
 }
 
+/** Standard Workflow Studio success envelope. */
+export function workflowSuccess(data, startedAt = Date.now()) {
+  return {
+    ok: true,
+    data,
+    meta: {
+      request_id: newTraceId(),
+      duration_ms: Math.max(0, Date.now() - startedAt),
+    },
+  }
+}
+
+/** Standard Workflow Studio failure envelope. */
+export function workflowError(code, message, retryable = false, startedAt = Date.now()) {
+  return {
+    ok: false,
+    error: {
+      code,
+      message,
+      retryable,
+    },
+    meta: {
+      request_id: newTraceId(),
+      duration_ms: Math.max(0, Date.now() - startedAt),
+    },
+  }
+}
+
+export function workflowErrorFromLegacy(result, startedAt = Date.now()) {
+  const code = String(result?.error ?? 'WORKFLOW_REQUEST_FAILED').toUpperCase()
+  const message = result?.message ?? result?.error ?? 'Workflow request failed.'
+  const retryable = result?.retryable === true || Number(result?.status) >= 500
+  return workflowError(code, message, retryable, startedAt)
+}
+
 const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',
   'https://nexus-dashboard.vercel.app',
