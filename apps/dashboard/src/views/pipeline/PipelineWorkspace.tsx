@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveInboxContext } from '../../modules/inbox/active-context'
 import { buildContextFromOpportunity } from '../../modules/inbox/active-context'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
@@ -6,9 +6,15 @@ import { fetchPipelineOpportunity } from '../../domain/pipeline/pipeline-opportu
 import type { PipelineSavedView, PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
 import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
 import { universalContextFromOpportunity } from '../../domain/pipeline/pipeline-universal-context'
-import { setUniversalEntityContextSnapshot, UNIVERSAL_ENTITY_CONTEXT_EVENT } from '../../domain/entity-graph/universal-entity-context-store'
+import { setUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
+import {
+  findOpportunityForActiveContext,
+  opportunityMatchesActiveContext,
+  syncPayloadFromOpportunity,
+} from '../../domain/entity-graph/universal-sync'
 import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
+import { sanitizePipelineError } from '../../domain/pipeline/pipeline-operator-error'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
 
 const OPP_PARAM = 'opp'
@@ -18,7 +24,11 @@ interface PipelineWorkspaceProps {
   selectedId: string | null
   layoutMode: ViewLayoutMode
   onSelect: (id: string) => void
+  onAnchorThread?: (id: string) => void
   onEstablishContext?: (context: ActiveInboxContext) => void
+  onSyncOpportunity?: (opportunity: PipelineOpportunity, mode: 'select' | 'preview') => void
+  onClearOpportunityPreview?: () => void
+  externalContext?: ActiveInboxContext
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
@@ -46,7 +56,11 @@ export function PipelineWorkspace({
   selectedId,
   layoutMode,
   onSelect,
+  onAnchorThread,
   onEstablishContext,
+  onSyncOpportunity,
+  onClearOpportunityPreview,
+  externalContext,
   onOpenCommandView,
   onOpenDealIntelligence,
   onAction,
@@ -55,6 +69,7 @@ export function PipelineWorkspace({
     opportunities,
     metrics,
     globalTotal,
+    total: scopedTotal,
     savedViews,
     viewState,
     groupBy,
@@ -88,47 +103,110 @@ export function PipelineWorkspace({
   const [detailOpportunity, setDetailOpportunity] = useState<PipelineOpportunity | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'loaded' | 'partial' | 'error'>('idle')
+  const detailRequestRef = useRef(0)
 
   const listOpportunity = useMemo(
     () => opportunities.find((o) => o.id === selectedOpportunityId) ?? null,
     [opportunities, selectedOpportunityId],
   )
 
-  const syncEntityContext = useCallback((opp: PipelineOpportunity | null) => {
+  const shouldPublishContext = useCallback((opp: PipelineOpportunity) => {
+    if (!externalContext) return true
+    if (externalContext.sourceView === 'pipeline') return true
+    return !opportunityMatchesActiveContext(opp, externalContext)
+  }, [externalContext])
+
+  const syncEntityContext = useCallback((
+    opp: PipelineOpportunity | null,
+    mode: 'select' | 'preview' = 'select',
+    options?: { force?: boolean },
+  ) => {
     if (!opp) return
-    const active = buildContextFromOpportunity(opp, 'pipeline')
+    if (mode === 'select' && !options?.force && !shouldPublishContext(opp)) return
+    if (onSyncOpportunity) {
+      onSyncOpportunity(opp, mode)
+      return
+    }
+    const { active, universal } = syncPayloadFromOpportunity(opp)
     onEstablishContext?.(active)
-    const universal = universalContextFromOpportunity(opp)
     setUniversalEntityContextSnapshot(universal)
-    window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: universal }))
-  }, [onEstablishContext])
+  }, [onEstablishContext, onSyncOpportunity, shouldPublishContext])
 
   useEffect(() => {
     if (!selectedOpportunityId) {
       setDetailOpportunity(null)
       setDetailError(null)
+      setDetailLoading(false)
+      setDetailState('idle')
       return
     }
-    let cancelled = false
+
+    const requestId = ++detailRequestRef.current
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000)
+
     setDetailLoading(true)
     setDetailError(null)
-    void fetchPipelineOpportunity(selectedOpportunityId)
+    setDetailState(listOpportunity ? 'partial' : 'loading')
+    if (listOpportunity) setDetailOpportunity(listOpportunity)
+
+    void fetchPipelineOpportunity(selectedOpportunityId, { signal: controller.signal })
       .then((row) => {
-        if (cancelled) return
+        if (requestId !== detailRequestRef.current) return
         setDetailOpportunity(row)
-        syncEntityContext(row)
+        setDetailState('loaded')
+        setDetailError(null)
       })
       .catch((err) => {
-        if (cancelled) return
-        setDetailError(err instanceof Error ? err.message : 'detail_fetch_failed')
+        if (requestId !== detailRequestRef.current) return
+        const message = err instanceof Error ? err.message : 'detail_fetch_failed'
+        const isAbort = err instanceof Error && err.name === 'AbortError'
+        if (isAbort) {
+          setDetailError('Detail request timed out')
+        } else {
+          setDetailError(message)
+        }
         if (listOpportunity) {
           setDetailOpportunity(listOpportunity)
-          syncEntityContext(listOpportunity)
+          setDetailState('partial')
+        } else {
+          setDetailState('error')
         }
       })
-      .finally(() => { if (!cancelled) setDetailLoading(false) })
-    return () => { cancelled = true }
-  }, [selectedOpportunityId, listOpportunity, syncEntityContext])
+      .finally(() => {
+        if (requestId !== detailRequestRef.current) return
+        setDetailLoading(false)
+      })
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timeoutId)
+    }
+  }, [selectedOpportunityId, listOpportunity?.id])
+
+  useEffect(() => {
+    if (!externalContext) return
+    const matched = findOpportunityForActiveContext(opportunities, externalContext)
+    if (matched) {
+      if (matched.id !== selectedOpportunityId) {
+        setSelectedOpportunityId(matched.id)
+        writeOppToUrl(matched.id)
+      }
+      return
+    }
+    if (
+      selectedOpportunityId
+      && externalContext.sourceView
+      && externalContext.sourceView !== 'pipeline'
+    ) {
+      const current = opportunities.find((o) => o.id === selectedOpportunityId)
+      if (current && !opportunityMatchesActiveContext(current, externalContext)) {
+        setSelectedOpportunityId(null)
+        writeOppToUrl(null)
+      }
+    }
+  }, [externalContext, opportunities, selectedOpportunityId])
 
   useEffect(() => {
     if (selectedOpportunityId) return
@@ -192,29 +270,41 @@ export function PipelineWorkspace({
 
   const handleApplySavedView = useCallback((view: PipelineSavedView) => {
     applySavedView(view)
-    void refresh()
-  }, [applySavedView, refresh])
+  }, [applySavedView])
 
   const handleSelectOpportunity = useCallback((opportunityId: string) => {
     setSelectedOpportunityId(opportunityId)
     writeOppToUrl(opportunityId)
     try { localStorage.setItem(STORAGE_KEY, opportunityId) } catch { /* ignore */ }
     const opp = opportunities.find((o) => o.id === opportunityId)
-    if (opp) syncEntityContext(opp)
-    onSelect(opp?.primary_thread_key || opportunityId)
-  }, [onSelect, opportunities, syncEntityContext])
+    if (!opp) return
+    syncEntityContext(opp, 'select', { force: true })
+    const anchor = onAnchorThread ?? onSelect
+    if (opp.primary_thread_key) anchor(opp.primary_thread_key)
+    else if (opp.id) anchor(opp.id)
+  }, [onAnchorThread, onSelect, opportunities, syncEntityContext])
+
+  const handlePreviewOpportunity = useCallback((opportunityId: string) => {
+    const opp = opportunities.find((o) => o.id === opportunityId)
+    if (opp) syncEntityContext(opp, 'preview', { force: true })
+  }, [opportunities, syncEntityContext])
 
   const handleClearSelection = useCallback(() => {
     setSelectedOpportunityId(null)
     writeOppToUrl(null)
     try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
-  }, [])
+    onClearOpportunityPreview?.()
+  }, [onClearOpportunityPreview])
 
   if (error) {
+    const operatorError = sanitizePipelineError(error)
     return (
-      <div className="plv plv--error">
-        <p>Pipeline unavailable: {error}</p>
-        <button type="button" className="plv-action-btn" onClick={() => void refresh()}>Retry</button>
+      <div className="plv plv--error" role="alert">
+        <p>{operatorError.message}</p>
+        {operatorError.traceId && <small>Trace: {operatorError.traceId}</small>}
+        {operatorError.retryable && (
+          <button type="button" className="plv-action-btn" onClick={() => void refresh()}>Retry</button>
+        )}
       </div>
     )
   }
@@ -224,6 +314,7 @@ export function PipelineWorkspace({
       opportunities={opportunities}
       metrics={metrics}
       globalTotal={globalTotal}
+      scopedTotal={scopedTotal}
       scope={scope}
       onScopeChange={setScope}
       savedViews={savedViews}
@@ -239,7 +330,7 @@ export function PipelineWorkspace({
       onResetView={() => { resetView(); void refresh() }}
       selectedId={selectedOpportunityId}
       selectedOpportunity={detailOpportunity ?? listOpportunity}
-      detailLoading={detailLoading}
+      detailLoading={detailLoading && detailState !== 'partial'}
       detailError={detailError}
       layoutMode={layoutMode}
       groupBy={groupBy}
@@ -247,6 +338,8 @@ export function PipelineWorkspace({
       refreshing={refreshing}
       onGroupByChange={setGroupBy}
       onSelect={handleSelectOpportunity}
+      onPreview={handlePreviewOpportunity}
+      onClearPreview={onClearOpportunityPreview}
       onClearSelection={handleClearSelection}
       onOpenCommandView={onOpenCommandView}
       onOpenDealIntelligence={onOpenDealIntelligence}

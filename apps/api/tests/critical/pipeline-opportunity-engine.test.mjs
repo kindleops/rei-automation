@@ -87,10 +87,11 @@ test('mapThreadToUniversalStatus resolves inbox buckets and waiting bands', () =
     mapThreadToUniversalStatus({ inbox_bucket: 'priority' }),
     UNIVERSAL_STATUS_CODES.PRIORITY,
   );
+  const recentOutbound = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   assert.equal(
     mapThreadToUniversalStatus({
       inbox_bucket: null,
-      last_outbound_at: '2026-06-21T10:00:00.000Z',
+      last_outbound_at: recentOutbound,
       last_inbound_at: null,
       latest_delivery_status: 'delivered',
     }),
