@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, parseJsonSafe } from '../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { buildBuyerMatchIntel } from '@/lib/intel/buyer-match-engine.js'
+import { buyerMatchDegradedResponse } from '@/lib/intel/buyer-match-api-errors.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

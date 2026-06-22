@@ -16,6 +16,18 @@ import {
   normalizeAssetClass,
   normalizeMarket,
 } from './normalize.js';
+import {
+  loadCanonicalSubjectProperty,
+  flattenSubjectForConsumers,
+} from '@/lib/domain/comp-intelligence/canonical-subject-property.js';
+import { buildCanonicalBuyerDemand } from './buyer-match-demand.js';
+import {
+  BUYER_MATCH_MODEL_VERSION,
+  BUYER_MATCH_DATA_VERSION,
+  buildIdempotencyKey,
+  findFreshBuyerMatchResult,
+  jobSnapshotFromSubject,
+} from './buyer-match-job-service.js';
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
@@ -204,9 +216,106 @@ function scoreSubject(candidates, rollup, fallbackLevel) {
  * @param {boolean} [args.persist]  Persist buyer_match_runs + candidates (default true)
  * @param {number}  [args.limit]    Max buyers to return (default 25)
  */
-export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, persist = true, limit = 25 }) {
+/**
+ * Resolve subject via canonical Comp Intelligence contract when property_id is present.
+ */
+export async function resolveBuyerMatchSubject(rawSubject = {}, context = {}, deps = {}) {
+  const propertyId = rawSubject.property_id ?? context.property_id ?? null;
+  if (propertyId) {
+    const loaded = await loadCanonicalSubjectProperty(propertyId, context, deps);
+    if (loaded.ok && loaded.subject) {
+      const flat = flattenSubjectForConsumers(loaded.subject);
+      return {
+        ...normalizeSubject({ ...flat, ...rawSubject }),
+        coordinate_source: loaded.subject.coordinate_source,
+        coordinate_confidence: loaded.subject.coordinate_confidence,
+        is_subject_resolved: loaded.subject.is_subject_resolved,
+        is_market_fallback: loaded.subject.is_market_fallback,
+        canonical_address: flat.canonical_address,
+        master_owner_id: flat.master_owner_id,
+        opportunity_id: flat.opportunity_id,
+        thread_key: flat.thread_key,
+        valuation_snapshot_id: context.valuation_snapshot_id ?? null,
+        contract_version: loaded.subject.contract_version,
+      };
+    }
+  }
+  return normalizeSubject(rawSubject);
+}
+
+export async function buildBuyerMatchIntel({
+  supabase,
+  subject: rawSubject,
+  context = {},
+  persist = true,
+  limit = 25,
+  skip_cache = false,
+  source_event = 'property_selected',
+  deps = {},
+}) {
   const startedAt = Date.now();
-  const subject = normalizeSubject(rawSubject);
+  const subject = await resolveBuyerMatchSubject(rawSubject, context, { ...deps, db: deps.db ?? supabase });
+
+  const idempotency_key = buildIdempotencyKey({
+    property_id: subject.property_id,
+    valuation_snapshot_id: subject.valuation_snapshot_id,
+  });
+
+  if (!skip_cache && persist && subject.property_id) {
+    const cached = await findFreshBuyerMatchResult(supabase, {
+      property_id: subject.property_id,
+      idempotency_key,
+    });
+    if (cached) {
+      const { data: cachedCandidates } = await supabase
+        .from('buyer_match_candidates')
+        .select('*')
+        .eq('buyer_match_run_id', cached.buyer_match_run_id)
+        .order('match_score', { ascending: false })
+        .limit(limit);
+      const snapshot = cached.selected_property_snapshot ?? {};
+      const demand = buildCanonicalBuyerDemand({
+        candidates: cachedCandidates ?? [],
+        demand_score: cached.demand_score,
+        liquidity_score: snapshot.liquidity_score ?? null,
+        confidence: snapshot.confidence ?? 0,
+        fallback_level: snapshot.fallback_level ?? 'none',
+        coordinates_unavailable: !subject.is_subject_resolved,
+        generated_at: cached.created_at,
+      });
+      return {
+        subject,
+        run_id: cached.buyer_match_run_id,
+        top_buyers: cachedCandidates ?? [],
+        buyer_matches: cachedCandidates ?? [],
+        buyer_rollup: null,
+        rollup_level: snapshot.rollup_level ?? null,
+        comps: [],
+        liquidity: snapshot.liquidity_score,
+        liquidity_score: snapshot.liquidity_score,
+        demand_score: cached.demand_score,
+        confidence: snapshot.confidence ?? 0,
+        fallback_level: snapshot.fallback_level ?? 'none',
+        buyer_count: cached.buyer_count ?? 0,
+        high_fit_count: cached.high_fit_count ?? 0,
+        best_buyer_grade: cached.best_buyer_grade ?? null,
+        buyer_demand: demand,
+        cached: true,
+        idempotency_key,
+        model_version: BUYER_MATCH_MODEL_VERSION,
+        source_counts: {
+          buyers: cached.buyer_count ?? 0,
+          matches: cached.buyer_count ?? 0,
+          high_fit: cached.high_fit_count ?? 0,
+          comps: 0,
+          fallback_level: snapshot.fallback_level ?? 'none',
+          rollup_level: snapshot.rollup_level ?? null,
+        },
+        generated_at: cached.created_at,
+        query_ms: Date.now() - startedAt,
+      };
+    }
+  }
 
   // 1. Core geospatial match
   const { data: candidates, error: rpcError } = await supabase.rpc('get_buyer_match_candidates', {
@@ -248,6 +357,18 @@ export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, pers
     rollup_buyer_count: num(rollup?.buyer_count) ?? 0,
   };
 
+  const buyer_demand = buildCanonicalBuyerDemand({
+    candidates: topBuyers,
+    rollup,
+    demand_score,
+    liquidity_score,
+    confidence,
+    fallback_level: fallbackLevel,
+    coordinates_unavailable: subject.is_subject_resolved === false,
+    subject_incomplete: !subject.property_id || !subject.zip,
+    generated_at: new Date().toISOString(),
+  });
+
   // 4. Persist run + candidates
   let run_id = null;
   let persistedCandidates = topBuyers;
@@ -263,6 +384,8 @@ export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, pers
       fallbackLevel,
       highFitCount,
       rollup_level,
+      idempotency_key,
+      source_event,
     });
     run_id = persistResult.run_id;
     persistedCandidates = persistResult.candidates;
@@ -284,6 +407,10 @@ export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, pers
     buyer_count: topBuyers.length,
     high_fit_count: highFitCount,
     best_buyer_grade: topBuyers[0]?.match_grade ?? null,
+    buyer_demand,
+    idempotency_key,
+    model_version: BUYER_MATCH_MODEL_VERSION,
+    data_version: BUYER_MATCH_DATA_VERSION,
     source_counts,
     generated_at: new Date().toISOString(),
     query_ms: Date.now() - startedAt,
@@ -294,22 +421,20 @@ export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, pers
 async function persistRun({
   supabase, subject, topBuyers, rollup, demand_score, liquidity_score,
   confidence, fallbackLevel, highFitCount, rollup_level,
+  idempotency_key, source_event = 'property_selected',
 }) {
-  const snapshot = {
-    property_id: subject.property_id,
-    address: subject.address,
-    normalized_filters: {
-      zip: subject.zip, market: subject.market, state: subject.state,
-      county: subject.county, asset_class: subject.asset_class,
-      lat: subject.lat, lng: subject.lng, radius_miles: subject.radius_miles,
-      estimated_value: subject.estimated_value, arv: subject.arv,
-    },
+  const snapshot = jobSnapshotFromSubject(subject, {
+    idempotency_key,
+    model_version: BUYER_MATCH_MODEL_VERSION,
+    data_version: BUYER_MATCH_DATA_VERSION,
+    valuation_snapshot_id: subject.valuation_snapshot_id ?? null,
     fallback_level: fallbackLevel,
     rollup_level,
     liquidity_score,
     confidence,
     top_buyer_count: topBuyers.length,
-  };
+    source_event,
+  });
 
   const { data: run, error: runError } = await supabase
     .from('buyer_match_runs')
@@ -410,4 +535,4 @@ async function persistRun({
   return { run_id, candidates };
 }
 
-export default { buildBuyerMatchIntel, normalizeSubject };
+export default { buildBuyerMatchIntel, normalizeSubject, resolveBuyerMatchSubject };
