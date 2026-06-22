@@ -1,4 +1,5 @@
 import type { CampaignStatus, CampaignSummary } from './campaigns.types'
+import { resolveOperatorState } from './campaign-operator'
 
 export type HealthLevel = 'healthy' | 'caution' | 'dangerous' | 'not_started' | 'awaiting'
 
@@ -122,6 +123,21 @@ export function computeCampaignHealth(campaign: CampaignSummary): CampaignHealth
 export function computeCampaignReadiness(campaign: CampaignSummary): CampaignReadiness {
   const blockers: string[] = []
   const warnings: string[] = []
+  const proof = campaign.execution_proof
+  const operatorState = resolveOperatorState(campaign)
+
+  if (operatorState === 'test_mode') {
+    return {
+      level: 'blocked',
+      label: campaign.readiness_label ?? 'Ready for Test Hydration',
+      blockers: ['TEST MODE — NO MESSAGES WILL TRANSMIT'],
+      warnings: [],
+    }
+  }
+
+  if (operatorState === 'completed') {
+    return { level: 'ready', label: 'Completed', blockers: [], warnings: [] }
+  }
 
   if (campaign.launch_readiness === 'blocked') {
     return {
@@ -134,15 +150,22 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
     }
   }
 
+  if (proof && (proof.routing_allowed ?? 0) === 0 && ['active', 'activating', 'scheduled'].includes(campaign.status)) {
+    blockers.push('No routable recipients — sender routing unavailable')
+  }
+
+  if (proof && !proof.transmission_enabled && ['active', 'activating'].includes(campaign.status)) {
+    blockers.push('Sending is disabled for this campaign')
+  }
+
   if (campaign.launch_readiness === 'warnings') {
     warnings.push('Partial template or routing resolution — review before live send')
   }
 
-  if (campaign.total_targets === 0) blockers.push('No target snapshot — run Build Targets')
+  if (campaign.total_targets === 0) blockers.push('No frozen targets — run Build Targets')
   if (campaign.ready_targets === 0 && campaign.total_targets > 0) {
     warnings.push('Zero ready targets after build — review exclusions')
   }
-  if (campaign.auto_send_enabled) blockers.push('Auto-send is disabled in Phase 1')
   if (campaign.launch_blocker_codes?.includes('template_required')) {
     blockers.push('Approved template required for campaign stage/language')
   }
@@ -150,9 +173,12 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   const level: ReadinessLevel =
     blockers.length > 0 ? 'blocked' : warnings.length > 0 ? 'warnings' : 'ready'
 
+  const derivedLabel = campaign.readiness_label
+    ?? (level === 'ready' ? 'Ready for Controlled Live' : level === 'warnings' ? 'Ready with Warnings' : 'Blocked for Live Transmission')
+
   return {
     level,
-    label: level === 'ready' ? 'Ready' : level === 'warnings' ? 'Ready with Warnings' : 'Blocked',
+    label: derivedLabel,
     blockers,
     warnings,
   }
@@ -185,6 +211,17 @@ export function canQueueBatch(campaign: CampaignSummary): boolean {
 }
 
 export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
+  const operatorState = resolveOperatorState(campaign)
+  if (operatorState === 'test_mode') {
+    return { id: 'queue_batch_test', label: 'Prepare Test Batch', variant: 'is-warn' }
+  }
+  if (operatorState === 'live' && campaign.readiness_label === 'Ready for Controlled Live') {
+    return { id: 'queue_batch_live', label: 'Prepare Controlled Live Batch', variant: 'is-primary' }
+  }
+  if (operatorState === 'blocked') {
+    return { id: 'review_blockers', label: 'Review Blockers', variant: 'is-warn' }
+  }
+
   switch (campaign.status) {
     case 'draft':
       if (campaign.total_targets === 0) {
@@ -199,11 +236,7 @@ export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
       return { id: 'activate', label: 'Activate Now', variant: 'is-primary' }
     case 'active':
     case 'live_limited':
-      return {
-        id: 'queue_batch',
-        label: campaign.execution_proof?.proof_mode ? 'Queue Proof Batch' : 'Queue Batch',
-        variant: 'is-blue',
-      }
+      return { id: 'queue_batch_live', label: 'Prepare Controlled Live Batch', variant: 'is-primary' }
     case 'paused':
       return { id: 'resume', label: 'Resume', variant: 'is-primary' }
     case 'completed':
@@ -244,8 +277,8 @@ export function getDetailActions(campaign: CampaignSummary): CampaignActionDef[]
       break
     case 'active':
     case 'live_limited':
-      if (canQueueBatch(campaign)) {
-        actions.push({ id: 'queue_batch', label: 'Queue Batch', variant: 'is-blue' })
+      if (canQueueBatch(campaign) && resolveOperatorState(campaign) !== 'test_mode') {
+        actions.push({ id: 'queue_batch', label: 'Prepare Next Batch', variant: 'is-blue' })
       }
       actions.push({ id: 'pause', label: 'Pause', variant: 'is-danger' })
       if (canArchiveCampaign(campaign)) {

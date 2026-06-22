@@ -60,7 +60,7 @@ export function CalendarEventDetailDrawer({
     { id: 'workflow', label: 'Open Workflow Run', disabled: !ctx.workflow_enrollment_id },
     { id: 'contract', label: 'Open Closing Desk', disabled: !['contract_sent', 'contract_signature_deadline', 'fully_executed_contract', 'title_opened', 'title_milestone', 'clear_to_close', 'closing_scheduled'].includes(event.type) },
     { id: 'entity_graph', label: 'Open Entity Graph', disabled: !event.sellerId && !ctx.master_owner_id },
-  ].filter((action) => !action.disabled)
+  ].filter((action): action is { id: CalendarDrawerAction; label: string; disabled?: boolean } => !action.disabled)
 
   const operatorActions: Array<{ id: CalendarDrawerAction; label: string; danger?: boolean; disabled?: boolean }> = [
     { id: 'reschedule', label: 'Reschedule', disabled: !event.reschedulable },

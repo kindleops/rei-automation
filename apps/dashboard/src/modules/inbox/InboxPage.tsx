@@ -143,7 +143,6 @@ import {
   findThreadByRef,
   findThreadForActiveContext,
   hasEntityAnchor,
-  mergeSelectedThreadAndDealContext,
   resolveCanonicalWorkspaceContext,
   resolveInboxHighlightId,
   syncPayloadFromOpportunity,
@@ -691,7 +690,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     return [...hydrated, ...synthetic]
   }, [data.mapPins, threads])
 
-  const advancedFilterOptions = useMemo(() => getAdvancedFilterOptions(threads), [threads])
+  void useMemo(() => getAdvancedFilterOptions(threads), [threads])
   const decisions = useMemo(
     () => new Map(threads.map((thread) => [thread.id, buildConversationDecision(thread)])),
     [threads],

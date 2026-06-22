@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate, formatInteger, formatPercent, formatPhone } from '../../shared/formatters'
+import { formatCurrency, formatDate, formatInteger, formatPhone } from '../../shared/formatters'
 import { humanizeEnum } from './deal-intelligence-humanize'
 
 export const fmtDiMoney = (v: number | null | undefined) => {

@@ -5283,6 +5283,11 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
     hydratedRows = proofNoSendRows
   }
 
+  const transmissionEnabled =
+    liveSendRows > 0 &&
+    routingAllowed > 0 &&
+    asBoolean(campaign?.auto_send_enabled, false)
+
   return {
     campaign_state: normalizeCampaignStatus(campaignStatus),
     hydrated_rows: hydratedRows,
@@ -5290,7 +5295,7 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
     proof_no_send_rows: proofNoSendRows,
     sms_eligible: smsEligible,
     routing_allowed: routingAllowed,
-    transmission_enabled: false,
+    transmission_enabled: transmissionEnabled,
     next_scheduled_proof_row: nextScheduledProofRow,
     no_messages_will_transmit: proofMode,
     proof_mode: proofMode,
@@ -5346,7 +5351,9 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     per_sender_cap: campaign.per_sender_cap,
     total_targets: totalFromBucket ?? targets.length,
     ready_targets: ready,
-    scheduled_targets: planned,
+    planned_targets: planned,
+    scheduled_targets: 0,
+    scheduled_queue_rows: 0,
     queued_targets: queued,
     canonical_queued_count: Number(campaign.queued_count || 0),
     sent_count: Number(counts.sent || 0) + Number(counts.delivered || 0),
@@ -5432,7 +5439,8 @@ export async function listCampaigns(deps = {}) {
       activeCampaigns: summaries.filter((campaign) => isLiveCampaignStatus(campaign.status)).length,
       totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),
       readyTargets: summaries.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
-      scheduledSends: summaries.reduce((sum, campaign) => sum + campaign.scheduled_targets, 0),
+      scheduledQueueRows: summaries.reduce((sum, campaign) => sum + Number(campaign.scheduled_queue_rows || 0), 0),
+      plannedTargets: summaries.reduce((sum, campaign) => sum + Number(campaign.planned_targets || 0), 0),
       sentToday: 0,
       deliveredToday: 0,
       replyRate: 0,
@@ -5486,11 +5494,50 @@ export async function getCampaign(campaignId, deps = {}) {
   summary.launch_readiness = launchReadiness.ok ? launchReadiness.launch_readiness : 'unknown'
   summary.launch_blockers = launchReadiness.blockers || []
   summary.launch_blocker_codes = launchReadiness.blocker_codes || []
+
+  let commandSummary = null
+  try {
+    const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
+    commandSummary = await buildCampaignCommandSummary(campaignId, deps)
+    if (commandSummary.ok) {
+      summary.operator_state = commandSummary.state
+      summary.operator_state_label = commandSummary.state_label
+      summary.mode = commandSummary.mode
+      summary.mode_label = commandSummary.mode_label
+      const c = commandSummary.counts
+      summary.total_targets = c.total_targets ?? summary.total_targets
+      summary.ready_targets = c.ready_targets ?? summary.ready_targets
+      summary.planned_targets = c.planned_targets ?? summary.planned_targets
+      summary.scheduled_queue_rows = c.scheduled_queue_rows ?? summary.scheduled_queue_rows
+      summary.scheduled_targets = c.scheduled_queue_rows ?? summary.scheduled_targets
+      summary.queued_targets = c.queued_rows ?? summary.queued_targets
+      summary.failed_count = (c.failed_target_rows ?? 0) + (c.failed_execution_rows ?? 0)
+      summary.failed_target_rows = c.failed_target_rows ?? 0
+      summary.failed_execution_rows = c.failed_execution_rows ?? 0
+      summary.readiness_label = commandSummary.readiness_label
+      summary.execution_proof = {
+        ...executionProof,
+        hydrated_rows: commandSummary.execution.hydrated_queue_rows,
+        live_send_rows: commandSummary.execution.live_send_rows,
+        proof_no_send_rows: commandSummary.execution.proof_no_send_rows,
+        sms_eligible: commandSummary.execution.sms_eligible,
+        routing_allowed: commandSummary.execution.routing_allowed,
+        transmission_enabled: commandSummary.execution.transmission_enabled,
+        proof_mode: commandSummary.execution.proof_mode,
+        no_messages_will_transmit: commandSummary.execution.no_messages_will_transmit,
+        scheduled_queue_rows: commandSummary.execution.scheduled_queue_rows,
+      }
+    }
+  } catch (summaryError) {
+    console.warn('campaign.command_summary_degraded', { campaignId, message: summaryError?.message })
+  }
+
   return {
     ok: true,
     campaign,
     filters: filters || [],
     summary,
+    command_summary: commandSummary?.ok ? commandSummary : null,
     recipient_metrics: recipientMetrics.ok ? recipientMetrics : null,
     launch_readiness: launchReadiness,
     targets: [],
@@ -7394,7 +7441,34 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       action,
       from: 'active',
       to: 'active',
+      previous_state: 'active',
+      state: 'active',
       campaign: loaded.campaign,
+      message: 'Campaign is already active.',
+    }
+  }
+
+  if (action === 'resume' && fromStatus === 'paused') {
+    const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
+    const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
+    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps)
+    if (readiness.launch_readiness === 'blocked') {
+      const summary = await buildCampaignCommandSummary(campaignId, deps)
+      return {
+        ok: false,
+        error: 'CAMPAIGN_BLOCKED',
+        code: 'CAMPAIGN_BLOCKED',
+        campaign_id: campaignId,
+        action,
+        from: fromStatus,
+        to: 'paused',
+        previous_state: summary.state || 'paused',
+        state: summary.state || 'blocked',
+        blockers: readiness.blockers || [],
+        warnings: readiness.warnings || [],
+        counts: summary.counts || {},
+        message: 'Resume blocked — resolve readiness gates before going live.',
+      }
     }
   }
 

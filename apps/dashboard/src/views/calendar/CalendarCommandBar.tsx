@@ -70,7 +70,7 @@ export function CalendarCommandBar({
   onTimezoneModeChange,
   onNewEvent,
   onLayersChange,
-  lastSyncedLabel,
+  lastSyncedLabel: _lastSyncedLabel,
   errorMessage,
 }: CalendarCommandBarProps) {
   const statusLabel = (() => {

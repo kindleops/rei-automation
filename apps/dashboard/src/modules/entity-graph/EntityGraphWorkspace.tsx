@@ -335,7 +335,7 @@ export function EntityGraphWorkspace({
     publishSelection(entity, result)
   }, [publishSelection])
 
-  const handleGraphNodeSelect = useCallback((nodeId: string, nodeType: string, entityId: string) => {
+  const handleGraphNodeSelect = useCallback((_nodeId: string, nodeType: string, entityId: string) => {
     const entity = selectedEntityFromGraphNode(nodeType, entityId)
     setSelectedEntity(entity)
     setSelectedResult(null)

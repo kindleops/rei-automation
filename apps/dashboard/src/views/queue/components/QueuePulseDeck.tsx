@@ -85,7 +85,7 @@ function OperationsPulse({ data, compact }: { data: OperationsPulseData; compact
 }
 
 function QueueFlow({ kpi, loading, onFilter }: { kpi: QueueKpiCounts; loading: boolean; onFilter: (k: string) => void }) {
-  const getCount = (key: string) => (kpi as Record<string, number>)[key] ?? 0
+  const getCount = (key: string) => (kpi as unknown as Record<string, number>)[key] ?? 0
   return (
     <div className="occ-queue-flow">
       <div className="occ-queue-flow__label">
@@ -155,7 +155,7 @@ export function QueuePulseDeck({
       <div className="occ-pulse-deck__atmo" aria-hidden="true" />
       <div className="occ-pulse-deck__kpis">
         {kpis.map(k => {
-          const val = (kpi as Record<string, number>)[k.key] ?? 0
+          const val = (kpi as unknown as Record<string, number>)[k.key] ?? 0
           const filterKey = k.key === 'optOuts' ? 'failed' : k.key
           return (
             <PulseKpi

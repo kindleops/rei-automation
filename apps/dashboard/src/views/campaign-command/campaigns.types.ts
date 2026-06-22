@@ -47,10 +47,19 @@ export interface CampaignSummary {
   id: string
   campaign_name: string
   status: CampaignStatus
+  operator_state?: string
+  operator_state_label?: string
+  mode?: 'live' | 'test'
+  mode_label?: string
   total_targets: number
   ready_targets: number
+  planned_targets?: number
   scheduled_targets: number
+  scheduled_queue_rows?: number
   queued_targets: number
+  failed_target_rows?: number
+  failed_execution_rows?: number
+  readiness_label?: string
   canonical_queued_count?: number
   launch_readiness?: LaunchReadinessLevel
   launch_blockers?: string[]
@@ -292,7 +301,8 @@ export interface CampaignKpis {
   activeCampaigns: number
   totalTargets: number
   readyTargets: number
-  scheduledSends: number
+  scheduledQueueRows: number
+  plannedTargets: number
   sentToday: number
   deliveredToday: number
   replyRate: number

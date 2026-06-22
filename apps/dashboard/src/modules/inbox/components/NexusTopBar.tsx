@@ -448,7 +448,6 @@ export const NexusTopBar = ({
               width="min(380px, calc(100vw - 24px))"
             >
               <QueueCommandCenter
-                variant="executive"
                 health={queueProcessorHealth}
                 control={queueControlDiagnostics}
                 loading={queueProcessorHealthLoading}
@@ -467,7 +466,6 @@ export const NexusTopBar = ({
                 onReconcileDelivery={onReconcileDelivery}
                 onCancelStaleFollowUps={onCancelStaleFollowUps}
                 onClose={() => closeAndRestoreFocus('queue')}
-                onOpenQueueCommand={onOpenQueueCommand}
               />
             </CommandPopover>
           </div>

@@ -495,7 +495,7 @@ export const WorkflowStudioV2 = ({
         onGoLive={() => withBusy(async () => {
           const detail = await enableWorkflowLive(requireWorkflow())
           setSelected(detail)
-          setLiveMode(true)
+          setLiveMode('live')
         }, 'Workflow live mode armed')}
       />
 

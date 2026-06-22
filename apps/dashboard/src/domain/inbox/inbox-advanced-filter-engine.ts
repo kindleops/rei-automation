@@ -232,12 +232,12 @@ export const buildAdvancedFilterChips = (
   context?: { stage?: InboxStageSelectValue; view?: InboxViewSelectValue },
 ): AdvancedFilterChip[] => {
   const chips: AdvancedFilterChip[] = []
-  const push = (key: string, label: string, clear: InboxAdvancedFilters) => {
+  const push = (key: string, label: string, clear: (current: InboxAdvancedFilters) => InboxAdvancedFilters) => {
     chips.push({ key, label, clear })
   }
 
   if (context?.stage && context.stage !== 'all_stages') {
-    push('stage', `Stage: ${context.stage}`, { ...filters, sellerStage: undefined })
+    push('stage', `Stage: ${context.stage}`, (current) => ({ ...current, sellerStage: undefined }))
   }
 
   const rangeChip = (key: string, label: string, minKey?: keyof InboxAdvancedFilters, maxKey?: keyof InboxAdvancedFilters) => {
@@ -247,11 +247,11 @@ export const buildAdvancedFilterChips = (
     const parts = []
     if (isActiveValue(min)) parts.push(`≥ ${min}`)
     if (isActiveValue(max)) parts.push(`≤ ${max}`)
-    push(key, `${label} ${parts.join(' ')}`, {
-      ...filters,
+    push(key, `${label} ${parts.join(' ')}`, (current) => ({
+      ...current,
       ...(minKey ? { [minKey]: undefined } : {}),
       ...(maxKey ? { [maxKey]: undefined } : {}),
-    } as InboxAdvancedFilters)
+    }))
   }
 
   for (const field of ADVANCED_FILTER_FIELDS) {
@@ -263,12 +263,12 @@ export const buildAdvancedFilterChips = (
     const value = filters[field.id as keyof InboxAdvancedFilters]
     if (!isActiveValue(value)) continue
     if (field.kind === 'tri' && value === 'all') continue
-    push(field.id, `${field.label}: ${String(value)}`, { ...filters, [field.id]: field.id === 'outOfStateOwner' ? 'all' : undefined } as InboxAdvancedFilters)
+    push(field.id, `${field.label}: ${String(value)}`, (current) => ({ ...current, [field.id]: field.id === 'outOfStateOwner' ? 'all' : undefined }))
   }
 
-  if (filters.highEquity) push('highEquity', 'High Equity', { ...filters, highEquity: undefined })
-  if (filters.taxDelinquent) push('taxDelinquent', 'Tax Delinquent', { ...filters, taxDelinquent: undefined })
-  if (filters.activeLien) push('activeLien', 'Active Lien', { ...filters, activeLien: undefined })
+  if (filters.highEquity) push('highEquity', 'High Equity', (current) => ({ ...current, highEquity: undefined }))
+  if (filters.taxDelinquent) push('taxDelinquent', 'Tax Delinquent', (current) => ({ ...current, taxDelinquent: undefined }))
+  if (filters.activeLien) push('activeLien', 'Active Lien', (current) => ({ ...current, activeLien: undefined }))
 
   return chips
 }

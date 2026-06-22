@@ -110,7 +110,7 @@ export async function executeCampaignAction(
       return true
     }
 
-    if (action === 'queue-batch' || action === 'queue_batch') {
+    if (action === 'queue-batch' || action === 'queue_batch' || action === 'queue_batch_test' || action === 'queue_batch_live') {
       if (!canQueueBatch(campaign)) {
         const health = computeCampaignHealth(campaign)
         emitNotification({
@@ -120,27 +120,36 @@ export async function executeCampaignAction(
         })
         return false
       }
+      if (action === 'queue_batch_live') {
+        const confirmed = window.confirm(
+          'Prepare a controlled LIVE batch? This will create executable send_queue rows subject to all readiness gates.',
+        )
+        if (!confirmed) return false
+      }
       pendingActions.add(key)
+      const isLiveBatch = action === 'queue_batch_live'
       const res = await queueBatch(campaign.id, {
-        limit: campaign.ready_targets,
+        limit: Math.min(campaign.ready_targets, isLiveBatch ? 5 : campaign.ready_targets),
         respect_send_window: true,
         interval_seconds: campaign.send_interval_seconds || 15,
+        no_send: !isLiveBatch,
+        confirm_live: isLiveBatch,
       })
       const inserted = res.queued ?? 0
       const result = res.result as Record<string, unknown> | undefined
-      const proofHydration = Boolean(result?.proof_hydration ?? result?.no_send)
+      const testModeHydration = Boolean(result?.proof_hydration ?? result?.no_send)
       if (res.blockers?.length && inserted === 0) {
-        emitNotification({ title: 'Queue blocked', detail: res.blockers.join(' · '), severity: 'warning' })
+        emitNotification({ title: 'Batch blocked', detail: res.blockers.join(' · '), severity: 'warning' })
       } else {
         const skipped = Number(result?.skipped_count ?? 0)
         const blocked = Number(result?.blocked_count ?? 0)
         emitNotification({
           title: inserted > 0
-            ? (proofHydration ? `Queued ${inserted} proof rows` : `Queued ${inserted} sends`)
-            : 'No new rows queued',
+            ? (testModeHydration ? `Prepared ${inserted} test rows` : `Prepared ${inserted} live sends`)
+            : 'No new rows prepared',
           detail: [
-            inserted > 0 ? `${inserted} inserted` : null,
-            proofHydration ? 'no-send proof hydration' : null,
+            inserted > 0 ? `${inserted} queue rows created` : null,
+            testModeHydration ? 'test mode — no transmission' : null,
             skipped > 0 ? `${skipped} skipped` : null,
             blocked > 0 ? `${blocked} blocked` : null,
           ].filter(Boolean).join(' · ') || `"${campaign.campaign_name}" batch complete`,

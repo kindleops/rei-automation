@@ -23,6 +23,7 @@ import {
   matchesListFilter,
   type CampaignListFilter,
 } from './campaign-health'
+import { isTestModeCampaign, operatorStateLabel } from './campaign-operator'
 import { CampaignActivationModal } from './components/CampaignActivationModal'
 import { computeCampaignCostMetrics, formatCostUsd } from './campaign-cost'
 import { CreateCampaignModal } from './CreateCampaignModal'
@@ -120,10 +121,11 @@ const StatusBadge = ({
     draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
     completed: 'Completed', archived: 'Archived',
   }
-  const proofActive = status === 'active' && executionProof?.proof_mode
-  const label = proofActive ? 'Active — Proof No-Send' : (labels[status] ?? status)
+  const label = executionProof?.proof_mode
+    ? operatorStateLabel({ status, execution_proof: executionProof } as CampaignSummary)
+    : (labels[status] ?? status)
   return (
-    <span className={cls('ccc-status', `is-${status}`, proofActive && 'is-proof')}>
+    <span className={cls('ccc-status', `is-${status}`, executionProof?.proof_mode && 'is-proof')}>
       <span className="ccc-status__dot" />
       {label}
     </span>
@@ -149,7 +151,8 @@ export const KpiStrip = ({ kpis }: { kpis: CampaignModel['kpis'] }) => {
     { label: 'Active Campaigns', value: kpis.activeCampaigns, variant: 'is-success' },
     { label: 'Total Targets',    value: fmt(kpis.totalTargets),    variant: '' },
     { label: 'Ready Targets',    value: fmt(kpis.readyTargets),    variant: 'is-accent' },
-    { label: 'Scheduled Sends',  value: fmt(kpis.scheduledSends),  variant: 'is-blue' },
+    { label: 'Scheduled Queue Rows', value: fmt(kpis.scheduledQueueRows), variant: 'is-blue' },
+    { label: 'Planned Targets',  value: fmt(kpis.plannedTargets),  variant: '' },
     { label: 'Sent Today',       value: fmt(kpis.sentToday),       variant: '' },
     { label: 'Delivered Today',  value: fmt(kpis.deliveredToday),  variant: 'is-success' },
     { label: 'Reply Rate',       value: fmtPct(kpis.replyRate),    variant: 'is-accent' },
@@ -254,7 +257,8 @@ export const CampaignIntelligenceRail = ({ campaign }: { campaign: CampaignSumma
               <div className="ccc__intel-card-label">Target Snapshot</div>
               <div className="ccc__intel-metric-row"><span>Total</span><strong>{fmt(campaign.total_targets)}</strong></div>
               <div className="ccc__intel-metric-row"><span>Ready</span><strong>{fmt(campaign.ready_targets)}</strong></div>
-              <div className="ccc__intel-metric-row"><span>Scheduled</span><strong>{fmt(campaign.scheduled_targets)}</strong></div>
+              <div className="ccc__intel-metric-row"><span>Planned targets</span><strong>{fmt(campaign.planned_targets ?? 0)}</strong></div>
+              <div className="ccc__intel-metric-row"><span>Scheduled queue rows</span><strong>{fmt(campaign.scheduled_queue_rows ?? campaign.scheduled_targets)}</strong></div>
             </div>
             <div className="ccc__intel-card">
               <div className="ccc__intel-card-label">Schedule</div>
@@ -391,7 +395,8 @@ const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
       {[
         { label: 'Total', value: campaign.total_targets, pct: 100, color: '' },
         { label: 'Ready', value: campaign.ready_targets, pct: campaign.total_targets > 0 ? (campaign.ready_targets / campaign.total_targets) * 100 : 0, color: 'is-blue' },
-        { label: 'Scheduled', value: campaign.scheduled_targets, pct: campaign.total_targets > 0 ? (campaign.scheduled_targets / campaign.total_targets) * 100 : 0, color: '' },
+        { label: 'Planned targets', value: campaign.planned_targets ?? 0, pct: campaign.total_targets > 0 ? ((campaign.planned_targets ?? 0) / campaign.total_targets) * 100 : 0, color: '' },
+        { label: 'Scheduled queue rows', value: campaign.scheduled_queue_rows ?? campaign.scheduled_targets, pct: campaign.total_targets > 0 ? ((campaign.scheduled_queue_rows ?? campaign.scheduled_targets) / campaign.total_targets) * 100 : 0, color: '' },
         { label: 'Sent', value: campaign.sent_count, pct: campaign.total_targets > 0 ? (campaign.sent_count / campaign.total_targets) * 100 : 0, color: '' },
         { label: 'Delivered', value: campaign.delivered_count, pct: campaign.total_targets > 0 ? (campaign.delivered_count / campaign.total_targets) * 100 : 0, color: '' },
         { label: 'Failed', value: campaign.failed_count, pct: campaign.total_targets > 0 ? (campaign.failed_count / campaign.total_targets) * 100 : 0, color: 'is-danger' },
@@ -756,15 +761,55 @@ const RepliesTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
 // ── Failures Tab ──────────────────────────────────────────────────────────────
 
+const FailureSection = ({
+  title,
+  groups,
+  total,
+  emptyTitle,
+  emptySub,
+}: {
+  title: string
+  groups: CampaignFailureGroup[]
+  total: number
+  emptyTitle: string
+  emptySub: string
+}) => (
+  <div style={{ marginBottom: 20 }}>
+    <div className="ccc__section-title">{title} — {total}</div>
+    {groups.length === 0 ? (
+      <div className="ccc__empty" style={{ padding: '16px 0' }}>
+        <div className="ccc__empty-title">{emptyTitle}</div>
+        <div className="ccc__empty-sub">{emptySub}</div>
+      </div>
+    ) : (
+      groups.map((g) => (
+        <div key={`${title}-${g.failure_category}`} className={cls('ccc__failure-card', `is-${g.severity}`)}>
+          <div className="ccc__failure-header">
+            <div className="ccc__failure-reason">{g.failure_category}</div>
+            <div className={cls('ccc__failure-count', `is-${g.severity}`)}>{g.count}</div>
+            <span className={cls('ccc__severity-badge', `is-${g.severity}`)}>{g.severity}</span>
+          </div>
+          {g.sample_reasons[0] && <div className="ccc__failure-example">"{g.sample_reasons[0]}"</div>}
+          <div className="ccc__failure-numbers">
+            {g.sample_numbers.slice(0, 6).map((n) => (
+              <span key={n} className="ccc__failure-number">{n}</span>
+            ))}
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+)
+
 const FailuresTab = ({ campaign }: { campaign: CampaignSummary }) => {
-  const [groups, setGroups] = useState<CampaignFailureGroup[]>([])
+  const [result, setResult] = useState<Awaited<ReturnType<typeof fetchCampaignFailures>> | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
     setLoading(true)
     fetchCampaignFailures(campaign.id).then((data) => {
-      if (active) setGroups(data)
+      if (active) setResult(data)
     }).finally(() => {
       if (active) setLoading(false)
     })
@@ -773,45 +818,25 @@ const FailuresTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
   if (loading) return <div className="ccc__shimmer" style={{ height: 100 }} />
 
-  if (groups.length === 0) {
-    return (
-      <div className="ccc__empty">
-        <div className="ccc__empty-icon"><Icon name="check" size={32} /></div>
-        <div className="ccc__empty-title">No Failures</div>
-        <div className="ccc__empty-sub">All sends delivered successfully</div>
-      </div>
-    )
-  }
+  const targetTotal = result?.targetTotal ?? campaign.failed_target_rows ?? 0
+  const executionTotal = result?.executionTotal ?? campaign.failed_execution_rows ?? 0
 
   return (
     <div>
-      <div className="ccc__section-title">Failure Groups — {campaign.failed_count} Total Failed</div>
-      {groups.map((g) => (
-        <div key={g.failure_category} className={cls('ccc__failure-card', `is-${g.severity}`)}>
-          <div className="ccc__failure-header">
-            <div className="ccc__failure-reason">{g.failure_category}</div>
-            <div className={cls('ccc__failure-count', `is-${g.severity}`)}>{g.count}</div>
-            <span className={cls('ccc__severity-badge', `is-${g.severity}`)}>{g.severity}</span>
-          </div>
-          {g.sample_reasons[0] && (
-            <div className="ccc__failure-example">"{g.sample_reasons[0]}"</div>
-          )}
-          <div className="ccc__failure-numbers">
-            {g.sample_numbers.slice(0, 6).map((n) => (
-              <span key={n} className="ccc__failure-number">{n}</span>
-            ))}
-            {g.sample_numbers.length > 6 && (
-              <span className="ccc__failure-number">+{g.sample_numbers.length - 6} more</span>
-            )}
-          </div>
-          <div className="ccc__bar-track" style={{ marginTop: 8 }}>
-            <div
-              className={cls('ccc__bar-fill', g.severity === 'critical' ? 'is-danger' : g.severity === 'warning' ? 'is-warn' : 'is-blue')}
-              style={{ width: `${Math.min((g.count / campaign.failed_count) * 100, 100)}%` }}
-            />
-          </div>
-        </div>
-      ))}
+      <FailureSection
+        title="Target Preparation Failures"
+        groups={result?.targetPreparation ?? []}
+        total={targetTotal}
+        emptyTitle="No target preparation failures"
+        emptySub="Eligible targets blocked during build or routing show here."
+      />
+      <FailureSection
+        title="Execution Failures"
+        groups={result?.execution ?? []}
+        total={executionTotal}
+        emptyTitle="No failed execution rows for the selected run"
+        emptySub="Provider and queue terminal failures for the current run appear here."
+      />
     </div>
   )
 }
@@ -889,7 +914,9 @@ const TemplatesTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
   return (
     <div>
-      <div className="ccc__section-title">Template Performance</div>
+      <div className="ccc__section-title">
+        {campaign.sent_count > 0 ? 'Template Performance' : 'Template Assignment'}
+      </div>
       <table className="ccc__tmpl-table">
         <thead>
           <tr>
@@ -1038,6 +1065,9 @@ export const DetailPanel = ({
             <Icon name="close" size={13} />
           </button>
         </div>
+        {isTestModeCampaign(campaign) && (
+          <div className="ccc__test-mode-banner">TEST MODE — NO MESSAGES WILL TRANSMIT</div>
+        )}
         <div className="ccc__detail-meta-row">
           <StatusBadge status={campaign.status} executionProof={campaign.execution_proof} />
           <span>·</span>
@@ -1489,7 +1519,10 @@ export const CampaignsPage = () => {
           ))}
         </div>
       ) : model ? (
-        <KpiStrip kpis={model.kpis} />
+        <>
+          <div className="ccc__portfolio-label">Campaign Portfolio</div>
+          <KpiStrip kpis={model.kpis} />
+        </>
       ) : null}
 
       {/* Body: 3 columns */}

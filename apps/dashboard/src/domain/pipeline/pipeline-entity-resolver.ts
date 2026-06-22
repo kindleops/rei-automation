@@ -27,6 +27,8 @@ const text = (v: unknown): string | null => {
   return s || null
 }
 
+const textField = (v: unknown): string | undefined => text(v) ?? undefined
+
 export function resolvePipelineEntityIdentity(
   opp: PipelineOpportunity | null | undefined,
 ): PipelineEntityIdentity | null {
@@ -76,11 +78,11 @@ export function resolvePipelineEntityIdentityFromContext(
   ctx: UniversalEntityContext,
 ): Partial<PipelineEntityIdentity> {
   return {
-    opportunityId: text(ctx.opportunityId),
-    threadKey: text(ctx.threadKey),
-    propertyId: text(ctx.propertyId),
-    masterOwnerId: text(ctx.masterOwnerId),
-    prospectId: text(ctx.prospectId),
-    phoneId: text(ctx.contactMethodId),
+    opportunityId: textField(ctx.opportunityId),
+    threadKey: textField(ctx.threadKey),
+    propertyId: textField(ctx.propertyId),
+    masterOwnerId: textField(ctx.masterOwnerId),
+    prospectId: textField(ctx.prospectId),
+    phoneId: textField(ctx.contactMethodId),
   }
 }

@@ -30,6 +30,8 @@ import {
   deleteCampaignBackend,
   patchCampaignBackend,
   fetchCampaignTargetsPage,
+  getCampaignCommandSummary,
+  getCampaignFailuresBackend,
   type CampaignApiSummary,
 } from '../../lib/api/backendClient'
 
@@ -107,8 +109,13 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       status: row.status as CampaignSummary['status'],
       total_targets: Number(row.total_targets ?? 0),
       ready_targets: Number(row.ready_targets ?? 0),
-      scheduled_targets: Number(row.scheduled_targets ?? 0),
+      planned_targets: Number(row.planned_targets ?? 0),
+      scheduled_targets: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),
+      scheduled_queue_rows: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),
       queued_targets: Number(row.queued_targets ?? 0),
+      failed_target_rows: Number(row.failed_target_rows ?? 0),
+      failed_execution_rows: Number(row.failed_execution_rows ?? 0),
+      readiness_label: (row.readiness_label as string | undefined) ?? undefined,
       canonical_queued_count: Number(row.canonical_queued_count ?? row.queued_targets ?? 0),
       launch_readiness: (row.launch_readiness as CampaignSummary['launch_readiness']) ?? undefined,
       launch_blockers: Array.isArray(row.launch_blockers) ? row.launch_blockers : undefined,
@@ -137,7 +144,53 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       health_score: Number(row.health_score ?? 0),
       health_status: row.health_status ?? 'caution',
       execution_proof: (row.execution_proof as CampaignSummary['execution_proof']) ?? null,
+      operator_state: (row.operator_state as string | undefined) ?? undefined,
+      operator_state_label: (row.operator_state_label as string | undefined) ?? undefined,
+      mode: (row.mode as CampaignSummary['mode']) ?? undefined,
+      mode_label: (row.mode_label as string | undefined) ?? undefined,
     }
+}
+
+export async function fetchCampaignCommandSummary(campaignId: string) {
+  const res = await getCampaignCommandSummary(campaignId)
+  if (!res.ok) throw new Error(res.message || res.error || 'campaign_summary_failed')
+  return res.data
+}
+
+function applyCommandSummaryToCampaign(campaign: CampaignSummary, summary: Awaited<ReturnType<typeof fetchCampaignCommandSummary>>): CampaignSummary {
+  if (!summary?.ok) return campaign
+  const counts = summary.counts || {}
+  return {
+    ...campaign,
+    operator_state: summary.state,
+    operator_state_label: summary.state_label,
+    mode: summary.mode as CampaignSummary['mode'],
+    mode_label: summary.mode_label,
+    total_targets: Number(counts.total_targets ?? campaign.total_targets),
+    ready_targets: Number(counts.ready_targets ?? campaign.ready_targets),
+    planned_targets: Number(counts.planned_targets ?? campaign.planned_targets),
+    scheduled_targets: Number(counts.scheduled_queue_rows ?? campaign.scheduled_targets),
+    scheduled_queue_rows: Number(counts.scheduled_queue_rows ?? campaign.scheduled_queue_rows),
+    queued_targets: Number(counts.queued_rows ?? campaign.queued_targets),
+    failed_count: Number((counts.failed_target_rows ?? 0) + (counts.failed_execution_rows ?? 0)),
+    failed_target_rows: Number(counts.failed_target_rows ?? campaign.failed_target_rows),
+    failed_execution_rows: Number(counts.failed_execution_rows ?? campaign.failed_execution_rows),
+    readiness_label: summary.readiness_label ?? summary.readiness?.label ?? campaign.readiness_label,
+    launch_readiness: (summary.readiness?.level as CampaignSummary['launch_readiness']) ?? campaign.launch_readiness,
+    launch_blockers: summary.blockers?.length ? summary.blockers : campaign.launch_blockers,
+    execution_proof: campaign.execution_proof
+      ? {
+          ...campaign.execution_proof,
+          hydrated_rows: Number(summary.execution?.hydrated_queue_rows ?? campaign.execution_proof.hydrated_rows),
+          live_send_rows: Number(summary.execution?.live_send_rows ?? campaign.execution_proof.live_send_rows),
+          proof_no_send_rows: Number(summary.execution?.proof_no_send_rows ?? campaign.execution_proof.proof_no_send_rows),
+          routing_allowed: Number(summary.execution?.routing_allowed ?? campaign.execution_proof.routing_allowed),
+          transmission_enabled: Boolean(summary.execution?.transmission_enabled ?? campaign.execution_proof.transmission_enabled),
+          proof_mode: Boolean(summary.execution?.proof_mode ?? campaign.execution_proof.proof_mode),
+          no_messages_will_transmit: Boolean(summary.execution?.no_messages_will_transmit ?? campaign.execution_proof.no_messages_will_transmit),
+        }
+      : campaign.execution_proof,
+  }
 }
 
 export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
@@ -268,7 +321,19 @@ export const fetchCampaignTargets = async (campaignId: string): Promise<Campaign
 export const fetchCampaignDetail = async (campaignId: string): Promise<CampaignSummary | null> => {
   const backend = await getCampaignBackend(campaignId)
   if (backend.ok && backend.data?.summary) {
-    return mapCampaignSummaryRow(backend.data.summary as CampaignApiSummary & Record<string, unknown>)
+    let campaign = mapCampaignSummaryRow(backend.data.summary as CampaignApiSummary & Record<string, unknown>)
+    const embedded = (backend.data as { command_summary?: Awaited<ReturnType<typeof fetchCampaignCommandSummary>> }).command_summary
+    if (embedded?.ok) {
+      campaign = applyCommandSummaryToCampaign(campaign, embedded)
+    } else {
+      try {
+        const summary = await fetchCampaignCommandSummary(campaignId)
+        campaign = applyCommandSummaryToCampaign(campaign, summary)
+      } catch {
+        // keep list-level summary if command summary unavailable
+      }
+    }
+    return campaign
   }
   return null
 }
@@ -418,7 +483,32 @@ export const fetchCampaignReplies = async (campaignId: string): Promise<Campaign
   }))
 }
 
-export const fetchCampaignFailures = async (campaignId: string): Promise<CampaignFailureGroup[]> => {
+export type CampaignFailuresResult = {
+  targetPreparation: CampaignFailureGroup[]
+  execution: CampaignFailureGroup[]
+  targetTotal: number
+  executionTotal: number
+}
+
+export const fetchCampaignFailures = async (campaignId: string): Promise<CampaignFailuresResult> => {
+  try {
+    const backend = await getCampaignFailuresBackend(campaignId)
+    if (backend.ok && backend.data) {
+      const data = backend.data as {
+        target_preparation?: { groups?: CampaignFailureGroup[]; total?: number }
+        execution?: { groups?: CampaignFailureGroup[]; total?: number }
+      }
+      return {
+        targetPreparation: data.target_preparation?.groups ?? [],
+        execution: data.execution?.groups ?? [],
+        targetTotal: data.target_preparation?.total ?? 0,
+        executionTotal: data.execution?.total ?? 0,
+      }
+    }
+  } catch (error) {
+    if (isDev) console.warn('[campaigns.adapter] failures API fallback', error)
+  }
+
   try {
     const { rows } = await getDealContextList({
       campaign_id: campaignId,
@@ -448,47 +538,19 @@ export const fetchCampaignFailures = async (campaignId: string): Promise<Campaig
     }
 
     if (Object.keys(groups).length > 0) {
-      return Object.values(groups).map((group) => ({
+      const executionGroups = Object.values(groups).map((group) => ({
         ...group,
         sample_numbers: group.sample_numbers.slice(0, 5),
         sample_reasons: group.sample_reasons.slice(0, 5),
       }))
+      const total = executionGroups.reduce((sum, g) => sum + g.count, 0)
+      return { targetPreparation: [], execution: executionGroups, targetTotal: 0, executionTotal: total }
     }
   } catch (error) {
     if (isDev) console.warn('[campaigns.adapter] deal-context failures fallback', error)
   }
 
-  // Aggregate from targets
-  const client = getSupabaseClient()
-  const { data, error } = await client
-    .from('sms_campaign_targets')
-    .select('failed_reason, phone_number')
-    .eq('campaign_id', campaignId)
-    .eq('status', 'failed')
-    .limit(100)
-    
-  if (error || !data) return []
-  
-  const groups: Record<string, CampaignFailureGroup> = {}
-  data.forEach((row: any) => {
-    const reason = row.failed_reason || 'Unknown Error'
-    if (!groups[reason]) {
-      groups[reason] = {
-        campaign_id: campaignId,
-        failure_category: reason,
-        count: 0,
-        severity: 'warning',
-        sample_numbers: [],
-        sample_reasons: [],
-      }
-    }
-    groups[reason].count++
-    if (groups[reason].sample_numbers.length < 5 && row.phone_number) {
-      groups[reason].sample_numbers.push(row.phone_number)
-    }
-  })
-  
-  return Object.values(groups).sort((a, b) => b.count - a.count)
+  return { targetPreparation: [], execution: [], targetTotal: 0, executionTotal: 0 }
 }
 
 function geoPerformance(replyRate: number, optoutRate: number): CampaignGeographyEntry['performance'] {
@@ -599,6 +661,28 @@ export const fetchCampaignGeography = async (campaignId: string): Promise<Campai
 }
 
 export const fetchCampaignTemplates = async (campaignId: string): Promise<CampaignTemplateStats[]> => {
+  try {
+    const summary = await fetchCampaignCommandSummary(campaignId)
+    if (summary.ok && summary.language_coverage?.length) {
+      return summary.language_coverage.map((row) => ({
+        template_id: row.language,
+        template_name: `${row.label} coverage`,
+        language: row.language,
+        use_count: row.targets,
+        delivered_count: row.assigned,
+        failed_count: row.blocked,
+        reply_count: 0,
+        opt_out_count: 0,
+        delivery_rate: row.coverage_pct,
+        reply_rate: 0,
+        opt_out_rate: 0,
+        last_used_at: null,
+      }))
+    }
+  } catch {
+    // fall through to target aggregation
+  }
+
   const backend = await getCampaignBackend(campaignId)
   const targets = backend.ok && Array.isArray(backend.data.targets) ? backend.data.targets : []
   const groups = new Map<string, CampaignTemplateStats>()
@@ -707,12 +791,20 @@ export const fetchCampaignLogs = async (campaignId: string): Promise<CampaignLog
 // walks BUILT -> QUEUED -> SCHEDULED. Nothing sends until the campaign is ACTIVE.
 export const queueBatch = async (
   campaignId: string,
-  options: { limit: number; respect_send_window?: boolean; interval_seconds?: number },
+  options: {
+    limit: number
+    respect_send_window?: boolean
+    interval_seconds?: number
+    no_send?: boolean
+    confirm_live?: boolean
+  },
 ) => {
   const res = await queueCampaignBatch(campaignId, {
     limit: options.limit,
     interval_seconds: options.interval_seconds,
     respect_send_window: options.respect_send_window,
+    no_send: options.no_send,
+    confirm_live: options.confirm_live,
   })
   if (!res.ok) {
     const upstream = (res.upstream && typeof res.upstream === 'object') ? (res.upstream as Record<string, unknown>) : {}
@@ -820,7 +912,8 @@ const buildKpis = (campaigns: CampaignSummary[]): CampaignKpis => {
   const active = campaigns.filter((c) => ['active', 'ready', 'live_limited'].includes(c.status))
   const totalTargets = campaigns.reduce((s, c) => s + c.total_targets, 0)
   const readyTargets = campaigns.reduce((s, c) => s + c.ready_targets, 0)
-  const scheduledSends = campaigns.reduce((s, c) => s + c.scheduled_targets, 0)
+  const scheduledQueueRows = campaigns.reduce((s, c) => s + Number(c.scheduled_queue_rows ?? c.scheduled_targets ?? 0), 0)
+  const plannedTargets = campaigns.reduce((s, c) => s + Number(c.planned_targets ?? 0), 0)
   const sentToday = active.reduce((s, c) => s + c.sent_count, 0)
   const deliveredToday = active.reduce((s, c) => s + c.delivered_count, 0)
   const totalSent = campaigns.reduce((s, c) => s + c.sent_count, 0)
@@ -835,7 +928,8 @@ const buildKpis = (campaigns: CampaignSummary[]): CampaignKpis => {
     activeCampaigns: active.length,
     totalTargets,
     readyTargets,
-    scheduledSends,
+    scheduledQueueRows,
+    plannedTargets,
     sentToday,
     deliveredToday,
     replyRate: Math.round(replyRate * 10) / 10,

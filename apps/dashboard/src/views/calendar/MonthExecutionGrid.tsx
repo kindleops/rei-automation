@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { CalendarEvent } from '../../lib/data/calendarData'
 import { CATEGORY_META, categoryIcon, summarizeDayCategories } from '../../lib/calendar/calendar-event-categories'
 import { formatEntitySubtitle } from '../../lib/calendar/calendar-entity-display'
-import { buildMonthGrid, eventDayKey, toIsoDate, weekdayHeaders, type WeekStart } from '../../lib/calendar/calendar-date-engine'
+import { buildMonthGrid, eventDayKey, weekdayHeaders, type WeekStart } from '../../lib/calendar/calendar-date-engine'
 import { Icon } from '../../shared/icons'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')

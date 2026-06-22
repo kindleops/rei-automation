@@ -52,7 +52,6 @@ export function priorityFlags(flags: string[]): string[] {
     'heavily dated',
     'senior owner',
   ]
-  const lower = flags.map((f) => f.toLowerCase())
   const ranked = [...flags].sort((a, b) => {
     const ai = priority.findIndex((p) => a.toLowerCase().includes(p))
     const bi = priority.findIndex((p) => b.toLowerCase().includes(p))

@@ -308,13 +308,16 @@ export async function callBackend<T = unknown>(
     if (parseError && (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html'))) {
       const nextMessage = bodyText.match(/"message":"((?:\\.|[^"\\])*)"/)?.[1]?.replace(/\\u003c/g, '<').replace(/\\n/g, '\n')
       const hint = nextMessage
-        ? `Backend crash: ${nextMessage.slice(0, 240)}`
+        ? `Backend error: ${nextMessage.slice(0, 240)}`
         : 'Backend returned an HTML error page instead of JSON.'
+      const devHint = import.meta.env.DEV
+        ? ' Check that the API server is running locally or set VITE_BACKEND_API_URL.'
+        : ' Verify VITE_BACKEND_API_URL points to the deployed API and retry.'
       return {
         ok: false,
-        status: response.status,
+        status: response.status >= 500 ? response.status : 502,
         error: 'BACKEND_HTML_ERROR',
-        message: `[${response.status}] ${hint} — ${url}. Ensure apps/api is running on port 3000 (rm -rf apps/api/.next && npm run dev if stale).`,
+        message: `[${response.status}] ${hint}${devHint}`,
         upstream: { html_preview: bodyText.slice(0, 400) },
       }
     }
@@ -757,7 +760,7 @@ export function fetchEntityGraphDossier(
     case 'zip':
       return callBackend(`/api/cockpit/entity-graph/zip/${encodeURIComponent(id)}`, { signal })
     default:
-      return Promise.resolve({ ok: false, status: 400, error: 'unsupported_entity_type' })
+      return Promise.resolve({ ok: false, status: 400, error: 'unsupported_entity_type', message: 'unsupported_entity_type' })
   }
 }
 
@@ -1196,6 +1199,61 @@ export function getCampaignBackend(campaignId: string): Promise<BackendResult<Ca
   return callBackend<CampaignDetailResponse>(`/api/cockpit/campaigns/${campaignId}`)
 }
 
+export interface CampaignCommandSummaryResponse {
+  ok: boolean
+  campaign_id: string
+  run_id: string | null
+  state: string
+  state_label: string
+  mode: string
+  mode_label: string
+  readiness_label?: string
+  counts: Record<string, number>
+  blockers: string[]
+  warnings: string[]
+  readiness: { level: string; label?: string; blockers: string[]; warnings: string[]; blocker_codes?: string[] }
+  execution: Record<string, unknown>
+  language_coverage: Array<{
+    language: string
+    label: string
+    targets: number
+    assigned: number
+    blocked: number
+    coverage_pct: number
+  }>
+  processor: Record<string, unknown>
+  primary_command: { action: string; label: string }
+  campaign: Record<string, unknown>
+}
+
+export function getCampaignCommandSummary(
+  campaignId: string,
+): Promise<BackendResult<CampaignCommandSummaryResponse>> {
+  return callBackend<CampaignCommandSummaryResponse>(`/api/cockpit/campaigns/${campaignId}/summary`)
+}
+
+export interface CampaignFailuresResponse {
+  ok: boolean
+  campaign_id: string
+  run_id: string | null
+  total: number
+  failures: Array<Record<string, unknown>>
+  groups: Array<{
+    campaign_id: string
+    failure_category: string
+    count: number
+    severity: 'critical' | 'warning' | 'info'
+    sample_numbers: string[]
+    sample_reasons: string[]
+  }>
+}
+
+export function getCampaignFailuresBackend(
+  campaignId: string,
+): Promise<BackendResult<CampaignFailuresResponse>> {
+  return callBackend<CampaignFailuresResponse>(`/api/cockpit/campaigns/${campaignId}/failures`)
+}
+
 export function patchCampaignBackend(campaignId: string, payload: Record<string, unknown>): Promise<BackendResult<CampaignCreateResponse>> {
   return callBackend<CampaignCreateResponse>(`/api/cockpit/campaigns/${campaignId}`, {
     method: 'PATCH',
@@ -1363,7 +1421,7 @@ export interface QueueBatchResponse {
 // server-side; the client only supplies operator intent + pacing.
 export function queueCampaignBatch(
   campaignId: string,
-  payload: { limit?: number; interval_seconds?: number; respect_send_window?: boolean } = {},
+  payload: { limit?: number; interval_seconds?: number; respect_send_window?: boolean; no_send?: boolean; confirm_live?: boolean } = {},
 ): Promise<BackendResult<QueueBatchResponse>> {
   return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-batch`, {
     method: 'POST',

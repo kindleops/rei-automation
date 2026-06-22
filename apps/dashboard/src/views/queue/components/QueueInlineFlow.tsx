@@ -9,7 +9,7 @@ interface QueueInlineFlowProps {
 }
 
 export function QueueInlineFlow({ kpi, loading, onFilter }: QueueInlineFlowProps) {
-  const getCount = (key: string) => (kpi as Record<string, number>)[key] ?? 0
+  const getCount = (key: string) => (kpi as unknown as Record<string, number>)[key] ?? 0
 
   return (
     <div className="occ-inline-flow" aria-label="Queue flow">

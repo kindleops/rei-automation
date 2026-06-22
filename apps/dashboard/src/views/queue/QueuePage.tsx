@@ -293,7 +293,8 @@ function buildSenderStats(items: QueueItem[]): SenderStat[] {
     const s = map.get(phone) ?? {
       phone, market: i.market || '—', sent: 0, delivered: 0, failed: 0, blocked: 0,
       optOuts: 0, violations21610: 0, deliveryPct: 0, failPct: 0,
-      health: 'healthy', lastUsed: null, state: 'active',
+      health: 'healthy' as const, performanceLabel: 'Performance: —', operationalLabel: 'Routing available',
+      lastUsed: null, state: 'active' as const,
     }
     if (isSent(i.status)) s.sent++
     if (isDelivered(i.status)) s.delivered++
@@ -479,7 +480,7 @@ const InspRow = ({ label, value, tone, mono }: { label: string; value: React.Rea
 
 // ── Hero Inspector (row dossier) ────────────────────────────────────────────
 
-const HeroInspector = ({
+const _HeroInspector = ({
   item,
   onAction,
 }: {
@@ -663,7 +664,7 @@ const HeroInspector = ({
 
 // ── Intelligence Panel (no row selected) ────────────────────────────────────
 
-const IntelPanel = ({
+const _IntelPanel = ({
   items,
   section,
   kpi,
@@ -843,7 +844,7 @@ const IntelPanel = ({
 
 // ── Templates Module ────────────────────────────────────────────────────────
 
-const TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose: () => void; onViewRows: (name: string) => void }) => (
+const _TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose: () => void; onViewRows: (name: string) => void }) => (
   <aside className="occ-tpl-dossier">
     <div className="occ-tpl-dossier__head">
       <div>
@@ -920,7 +921,7 @@ const TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose:
 
 const TemplatesModule = ({
   items,
-  onViewRows,
+  onViewRows: _onViewRows,
   selectedId,
   onSelectId,
 }: {
@@ -930,7 +931,7 @@ const TemplatesModule = ({
   onSelectId: (id: string | null) => void
 }) => {
   const stats = useMemo(() => buildTemplateStats(items), [items])
-  const selected = stats.find(s => s.id === selectedId) ?? null
+  void (stats.find(s => s.id === selectedId) ?? null)
 
   return (
     <div className="occ-tpl-layout">
@@ -1393,7 +1394,7 @@ const TIMELINE_FILTERS = [
 
 const EventTimelineModule = ({
   items,
-  onSelectItem,
+  onSelectItem: _onSelectItem,
   density,
   onDensityChange,
   selectedEventId,
@@ -2614,3 +2615,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
     </div>
   )
 }
+
+void _HeroInspector
+void _IntelPanel
+void _TemplateDossier

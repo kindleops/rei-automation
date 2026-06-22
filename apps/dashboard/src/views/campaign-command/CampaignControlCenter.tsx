@@ -6,6 +6,7 @@ import {
   setCampaignLifecycle,
   type CampaignRuntimeSummary,
 } from '../../lib/api/backendClient'
+import { operatorModeLabel, operatorStateLabel } from './campaign-operator'
 import type { CampaignSummary } from './campaigns.types'
 
 // ── Self-contained helpers (avoid a circular import with CampaignsPage) ──────
@@ -152,10 +153,11 @@ export function CampaignControlCenter({
     }
   }, [campaignId, load, onLifecycleChange, status])
 
-  const proofActive = status === 'active' && proof?.proof_mode
-  const meta = proofActive
-    ? { label: 'Active — Proof No-Send', tone: 'live' as Tone }
-    : (STATUS_META[status] ?? { label: status, tone: 'idle' as Tone })
+  const stateLabel = operatorStateLabel(campaign)
+  const modeLabel = operatorModeLabel(campaign)
+  const meta = proof?.proof_mode
+    ? { label: stateLabel, tone: 'paused' as Tone }
+    : { label: stateLabel, tone: (STATUS_META[status]?.tone ?? 'idle') as Tone }
 
   // Derived counters (no fake values — fall back to the list summary when the
   // progress engine has not been populated/migrated yet).
@@ -233,20 +235,20 @@ export function CampaignControlCenter({
 
       {proof && (
         <div className="ccc-exec__proof">
-          <div className="ccc-exec__section-label">Execution truth</div>
-          <div className="ccc-exec__proof-grid">
-            <div><span>Campaign state</span><strong>{proof.campaign_state}</strong></div>
-            <div><span>Hydrated rows</span><strong>{fmtNum(proof.hydrated_rows)}</strong></div>
-            <div><span>Live-send rows</span><strong>{fmtNum(proof.live_send_rows)}</strong></div>
-            <div><span>Proof / no-send rows</span><strong>{fmtNum(proof.proof_no_send_rows)}</strong></div>
-            <div><span>SMS eligible</span><strong>{fmtNum(proof.sms_eligible)}</strong></div>
-            <div><span>Routing allowed</span><strong>{fmtNum(proof.routing_allowed)}</strong></div>
-            <div><span>Next proof row</span><strong>{fmtClock(proof.next_scheduled_proof_row)}</strong></div>
-            <div><span>Transmission</span><strong>{proof.transmission_enabled ? 'enabled' : 'disabled'}</strong></div>
-          </div>
+          <div className="ccc-exec__section-label">Execution — {modeLabel}</div>
           {proof.no_messages_will_transmit && (
-            <div className="ccc-exec__proof-note">No messages will transmit — all hydrated rows are proof/no-send.</div>
+            <div className="ccc-exec__proof-banner">TEST MODE — No messages will be transmitted.</div>
           )}
+          <div className="ccc-exec__proof-grid">
+            <div><span>State</span><strong>{stateLabel}</strong></div>
+            <div><span>Queue rows created</span><strong>{fmtNum(proof.hydrated_rows)}</strong></div>
+            <div><span>Live send rows</span><strong>{fmtNum(proof.live_send_rows)}</strong></div>
+            <div><span>Test mode rows</span><strong>{fmtNum(proof.proof_no_send_rows)}</strong></div>
+            <div><span>SMS eligible</span><strong>{fmtNum(proof.sms_eligible)}</strong></div>
+            <div><span>Routable recipients</span><strong>{fmtNum(proof.routing_allowed)}</strong></div>
+            <div><span>Next scheduled</span><strong>{fmtClock(proof.next_scheduled_proof_row)}</strong></div>
+            <div><span>Sending</span><strong>{proof.transmission_enabled ? 'Enabled' : 'Disabled'}</strong></div>
+          </div>
         </div>
       )}
 
