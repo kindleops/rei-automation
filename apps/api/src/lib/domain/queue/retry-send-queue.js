@@ -18,6 +18,11 @@ import { resolveCanonicalDeliveryState } from "@/lib/domain/delivery/canonical-d
 const DEFAULT_RETRY_LIMIT = 50;
 const DEFAULT_MAX_RETRY_COUNT = 2;
 
+const RETRY_REASON_ALIASES = {
+  "connection timed out": "network error",
+  "network timeout": "network error",
+};
+
 const RETRY_POLICIES = {
   "network error": {
     retryable: true,
@@ -71,8 +76,9 @@ function incrementCounter(target, key) {
 
 export function getRetryPolicy(failed_reason = "") {
   const normalized_reason = lower(failed_reason);
+  const aliased_reason = RETRY_REASON_ALIASES[normalized_reason] || normalized_reason;
   return (
-    RETRY_POLICIES[normalized_reason] || {
+    RETRY_POLICIES[aliased_reason] || {
       retryable: false,
       terminal_reason: "unsupported_failure_reason",
     }

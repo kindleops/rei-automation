@@ -1,160 +1,146 @@
 /**
  * queue-batch-dedup.test.mjs
  *
- * Guards against duplicate sends when multiple Send Queue rows exist for the
- * same (master_owner_id, phone_item_id, touch_number) in a single batch run.
- *
- * The within-batch dedup key is owner:phone:touch — only the first
- * (earliest-scheduled) item is processed; subsequent duplicates are suppressed
- * with a warning.
- *
- * Covered:
- *  1. Two rows for same owner+phone+touch → only first is dispatched.
- *  2. Two rows for same owner+phone but DIFFERENT touch numbers → both sent.
- *  3. Two rows for different owners, same phone+touch → both sent (separate owners).
- *  4. Row without owner/phone ids is NOT filtered (passes through as-is).
- *  5. Warning log is emitted when duplicates are suppressed.
+ * Guards within-batch duplicate suppression in runSendQueue for Supabase rows.
+ * Dedup grain: master_owner_id + phone_id/to_phone + touch_number.
+ * Only the earliest-scheduled row per grain is dispatched; later duplicates are
+ * suppressed with queue.run_batch_duplicates_suppressed.
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
-import {
-  appRefField,
-  categoryField,
-  createPodioItem,
-  numberField,
-} from "../helpers/test-helpers.js";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+const NOW = "2026-01-01T12:00:00.000Z";
 
-function makeQueueItem(item_id, { owner_id, phone_id, touch_num, scheduled = "2026-01-01T00:00:00.000Z" } = {}) {
-  return createPodioItem(item_id, {
-    "queue-status": categoryField("Queued"),
-    "scheduled-for-utc": { start: scheduled },
-    ...(owner_id ? { "master-owner": appRefField(owner_id) } : {}),
-    ...(phone_id ? { "phone-number": appRefField(phone_id) } : {}),
-    ...(touch_num !== undefined ? { "touch-number": numberField(touch_num) } : {}),
-  });
-}
-
-function makeDeps(dispatched_log, warn_log_calls = []) {
+function makeRow(id, {
+  master_owner_id,
+  phone_id,
+  touch_number,
+  scheduled_for = "2026-01-01T00:00:00.000Z",
+} = {}) {
   return {
-    fetchAllItems: async () => [],
-    processSendQueueItem: async (id) => {
-      dispatched_log.push(id);
-      return { ok: true, sent: true };
-    },
-    recordSystemAlert: async () => {},
-    resolveSystemAlert: async () => {},
-    withRunLock: async ({ fn }) => fn(),
-    info: () => {},
-    warn: (...args) => warn_log_calls.push(args),
+    id,
+    queue_status: "queued",
+    message_body: "Test message body",
+    to_phone_number: "+15550001111",
+    is_locked: false,
+    scheduled_for,
+    ...(master_owner_id ? { master_owner_id } : {}),
+    ...(phone_id ? { phone_id } : {}),
+    ...(touch_number !== undefined ? { touch_number } : {}),
   };
 }
 
-// ── 1. Duplicate owner+phone+touch → only first dispatched ───────────────────
+function makeRunnerDeps(rows, dispatched_log, warn_log = []) {
+  const noopChain = () => ({
+    eq: () => noopChain(),
+    lt: () => noopChain(),
+    or: () => noopChain(),
+    in: () => noopChain(),
+    not: () => noopChain(),
+    order: () => noopChain(),
+    limit: async () => ({ data: [], error: null }),
+    select: async () => ({ data: [], error: null }),
+    update: () => noopChain(),
+  });
+
+  return {
+    loadRunnableSendQueueRows: async () => ({
+      rows,
+      raw_rows: rows,
+      skipped: [],
+      due_rows: rows.length,
+      eligible_claim_count: rows.length,
+    }),
+    reconcileCanonicalQueueLifecycle: async () => ({ ok: true }),
+    getSystemFlag: async () => true,
+    getSystemValue: async () => null,
+    supabaseClient: { from: () => noopChain() },
+    processSendQueueItem: async (row) => {
+      dispatched_log.push(row.id);
+      return { ok: true, sent: true };
+    },
+    info: () => {},
+    warn: (event, meta) => warn_log.push([event, meta]),
+  };
+}
 
 test("runSendQueue: duplicate owner+phone+touch in batch — only first item is sent", async () => {
   const dispatched = [];
   const warns = [];
 
-  const item_a = makeQueueItem(1001, { owner_id: 201, phone_id: 401, touch_num: 1, scheduled: "2026-01-01T06:00:00.000Z" });
-  const item_b = makeQueueItem(1002, { owner_id: 201, phone_id: 401, touch_num: 1, scheduled: "2026-01-01T07:00:00.000Z" });
+  const rows = [
+    makeRow("1001", { master_owner_id: "201", phone_id: "401", touch_number: 1, scheduled_for: "2026-01-01T06:00:00.000Z" }),
+    makeRow("1002", { master_owner_id: "201", phone_id: "401", touch_number: 1, scheduled_for: "2026-01-01T07:00:00.000Z" }),
+  ];
 
-  const deps = {
-    ...makeDeps(dispatched, warns),
-    fetchAllItems: async () => [item_a, item_b],
-  };
-
-  await runSendQueue({ limit: 50, now: "2026-01-01T12:00:00.000Z" }, deps);
+  const result = await runSendQueue({ limit: 50, now: NOW }, makeRunnerDeps(rows, dispatched, warns));
 
   assert.equal(dispatched.length, 1, "Only one item should be dispatched");
-  assert.equal(dispatched[0], 1001, "Earlier-scheduled item 1001 should be dispatched");
+  assert.equal(dispatched[0], "1001", "Earlier-scheduled item 1001 should be dispatched");
+  assert.equal(result.batch_duplicate_suppressed_count, 1);
 
   const dedup_warn = warns.find(([code]) => code === "queue.run_batch_duplicates_suppressed");
   assert.ok(dedup_warn, "A dedup warning must be emitted");
   assert.equal(dedup_warn[1].duplicate_count, 1);
 });
 
-// ── 2. Same owner+phone but different touch numbers → both sent ───────────────
-
 test("runSendQueue: same owner+phone but different touch numbers — both dispatched", async () => {
   const dispatched = [];
 
-  const item_a = makeQueueItem(2001, { owner_id: 201, phone_id: 401, touch_num: 1 });
-  const item_b = makeQueueItem(2002, { owner_id: 201, phone_id: 401, touch_num: 2 });
+  const rows = [
+    makeRow("2001", { master_owner_id: "201", phone_id: "401", touch_number: 1 }),
+    makeRow("2002", { master_owner_id: "201", phone_id: "401", touch_number: 2 }),
+  ];
 
-  const deps = {
-    ...makeDeps(dispatched),
-    fetchAllItems: async () => [item_a, item_b],
-  };
-
-  await runSendQueue({ limit: 50, now: "2026-01-01T12:00:00.000Z" }, deps);
+  await runSendQueue({ limit: 50, now: NOW }, makeRunnerDeps(rows, dispatched));
 
   assert.equal(dispatched.length, 2, "Different touch numbers must not suppress each other");
-  assert.ok(dispatched.includes(2001));
-  assert.ok(dispatched.includes(2002));
+  assert.ok(dispatched.includes("2001"));
+  assert.ok(dispatched.includes("2002"));
 });
-
-// ── 3. Different owners, same phone+touch → both sent ────────────────────────
 
 test("runSendQueue: different owners sharing a phone+touch — both dispatched", async () => {
   const dispatched = [];
 
-  const item_a = makeQueueItem(3001, { owner_id: 201, phone_id: 401, touch_num: 1 });
-  const item_b = makeQueueItem(3002, { owner_id: 202, phone_id: 401, touch_num: 1 });
+  const rows = [
+    makeRow("3001", { master_owner_id: "201", phone_id: "401", touch_number: 1 }),
+    makeRow("3002", { master_owner_id: "202", phone_id: "401", touch_number: 1 }),
+  ];
 
-  const deps = {
-    ...makeDeps(dispatched),
-    fetchAllItems: async () => [item_a, item_b],
-  };
-
-  await runSendQueue({ limit: 50, now: "2026-01-01T12:00:00.000Z" }, deps);
+  await runSendQueue({ limit: 50, now: NOW }, makeRunnerDeps(rows, dispatched));
 
   assert.equal(dispatched.length, 2, "Different owners must not suppress each other");
 });
 
-// ── 4. Item without owner/phone ids passes through ───────────────────────────
-
 test("runSendQueue: item missing owner/phone ids is not filtered by dedup", async () => {
   const dispatched = [];
 
-  const no_ids = makeQueueItem(4001, { scheduled: "2026-01-01T00:00:00.000Z" });
+  const rows = [makeRow("4001", { scheduled_for: "2026-01-01T00:00:00.000Z" })];
 
-  const deps = {
-    ...makeDeps(dispatched),
-    fetchAllItems: async () => [no_ids],
-  };
-
-  await runSendQueue({ limit: 50, now: "2026-01-01T12:00:00.000Z" }, deps);
+  await runSendQueue({ limit: 50, now: NOW }, makeRunnerDeps(rows, dispatched));
 
   assert.equal(dispatched.length, 1);
-  assert.equal(dispatched[0], 4001);
+  assert.equal(dispatched[0], "4001");
 });
-
-// ── 5. Three duplicates → two suppressed, one sent ───────────────────────────
 
 test("runSendQueue: three identical touch duplicates — first sent, two suppressed", async () => {
   const dispatched = [];
   const warns = [];
 
-  const items = [
-    makeQueueItem(5001, { owner_id: 201, phone_id: 401, touch_num: 1, scheduled: "2026-01-01T06:00:00.000Z" }),
-    makeQueueItem(5002, { owner_id: 201, phone_id: 401, touch_num: 1, scheduled: "2026-01-01T07:00:00.000Z" }),
-    makeQueueItem(5003, { owner_id: 201, phone_id: 401, touch_num: 1, scheduled: "2026-01-01T08:00:00.000Z" }),
+  const rows = [
+    makeRow("5001", { master_owner_id: "201", phone_id: "401", touch_number: 1, scheduled_for: "2026-01-01T06:00:00.000Z" }),
+    makeRow("5002", { master_owner_id: "201", phone_id: "401", touch_number: 1, scheduled_for: "2026-01-01T07:00:00.000Z" }),
+    makeRow("5003", { master_owner_id: "201", phone_id: "401", touch_number: 1, scheduled_for: "2026-01-01T08:00:00.000Z" }),
   ];
 
-  const deps = {
-    ...makeDeps(dispatched, warns),
-    fetchAllItems: async () => items,
-  };
-
-  await runSendQueue({ limit: 50, now: "2026-01-01T12:00:00.000Z" }, deps);
+  const result = await runSendQueue({ limit: 50, now: NOW }, makeRunnerDeps(rows, dispatched, warns));
 
   assert.equal(dispatched.length, 1);
-  assert.equal(dispatched[0], 5001);
+  assert.equal(dispatched[0], "5001");
+  assert.equal(result.batch_duplicate_suppressed_count, 2);
 
   const dedup_warn = warns.find(([code]) => code === "queue.run_batch_duplicates_suppressed");
   assert.ok(dedup_warn);

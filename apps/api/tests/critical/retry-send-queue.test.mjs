@@ -16,7 +16,7 @@ import {
 test("retry decision schedules transient network failures with backoff", () => {
   const item = createPodioItem(123, {
     "queue-status": categoryField("Failed"),
-    "failed-reason": categoryField("Network Error"),
+    "failed-reason": categoryField("connection timed out"),
     "retry-count": numberField(1),
     "max-retries": numberField(3),
   });
@@ -37,7 +37,7 @@ test("retry decision schedules transient network failures with backoff", () => {
 test("retry decision requeues once scheduled backoff is due", () => {
   const item = createPodioItem(124, {
     "queue-status": categoryField("Failed"),
-    "failed-reason": categoryField("Network Error"),
+    "failed-reason": categoryField("connection timed out"),
     "retry-count": numberField(1),
     "max-retries": numberField(3),
     "scheduled-for-utc": dateField("2026-04-01T11:00:00.000Z"),
@@ -77,6 +77,7 @@ test("retry runner skips safely when Podio cooldown is active", async () => {
       master_owner_id: 201,
     },
     {
+      getSystemFlag: async () => true,
       buildPodioCooldownSkipResult: async () => ({
         ok: true,
         skipped: true,
@@ -121,6 +122,7 @@ test("retry runner skips safely when Podio backpressure is active", async () => 
       master_owner_id: 201,
     },
     {
+      getSystemFlag: async () => true,
       buildPodioBackpressureSkipResult: async () => ({
         ok: true,
         skipped: true,

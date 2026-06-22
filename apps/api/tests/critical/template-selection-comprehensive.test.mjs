@@ -93,6 +93,19 @@ async function noRemoteFetch() {
   return [];
 }
 
+async function noSupabaseFetch() {
+  return [];
+}
+
+/** Podio/local-registry selection tests — isolate from Supabase runtime and render lint. */
+async function loadPodioTestCandidates(opts = {}) {
+  return loadTemplateCandidates({
+    skip_render_validation: true,
+    supabase_fetcher: noSupabaseFetch,
+    ...opts,
+  });
+}
+
 const MINIMAL_CONTEXT = {
   found: true,
   ids: { master_owner_id: 12345 },
@@ -966,7 +979,7 @@ test("podio: ownership_check first-touch selects correct local template", async 
     makeTemplate({ item_id: "t-1002", use_case: "ownership_check", is_first_touch: "No", language: "English" }),
     makeTemplate({ item_id: "t-1003", use_case: "consider_selling", is_first_touch: "No", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -982,7 +995,7 @@ test("podio: language match preferred over English fallback", async () => {
     makeTemplate({ item_id: "t-2001", use_case: "ownership_check", language: "Spanish", is_first_touch: "Yes" }),
     makeTemplate({ item_id: "t-2002", use_case: "ownership_check", language: "English", is_first_touch: "Yes" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check",
     language: "Spanish",
     context: MINIMAL_CONTEXT,
@@ -999,7 +1012,7 @@ test("podio: English fallback when target language unavailable", async () => {
   const templates = [
     makeTemplate({ item_id: "t-3001", use_case: "ownership_check", language: "English", is_first_touch: "Yes" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check",
     language: "Vietnamese",
     context: MINIMAL_CONTEXT,
@@ -1015,7 +1028,7 @@ test("podio: consider_selling selects correct template", async () => {
     makeTemplate({ item_id: "t-4001", use_case: "consider_selling", language: "English" }),
     makeTemplate({ item_id: "t-4002", use_case: "ownership_check", language: "English", is_first_touch: "Yes" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "consider_selling",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1031,7 +1044,7 @@ test("podio: ownership_check_follow_up selects follow-up template", async () => 
     makeTemplate({ item_id: "t-5001", use_case: "ownership_check_follow_up", is_follow_up: "Yes", language: "English" }),
     makeTemplate({ item_id: "t-5002", use_case: "ownership_check", is_first_touch: "Yes", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check_follow_up",
     touch_type: "Follow-Up",
     language: "English",
@@ -1048,7 +1061,7 @@ test("podio: offer_reveal_cash selects offer template", async () => {
     makeTemplate({ item_id: "t-6001", use_case: "offer_reveal_cash", language: "English" }),
     makeTemplate({ item_id: "t-6002", use_case: "consider_selling", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "offer_reveal_cash",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1070,7 +1083,7 @@ test("podio: mf_confirm_units selects MF template", async () => {
       deal_strategy: "Multifamily Underwrite",
     }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_confirm_units",
     language: "English",
     property_type_scope: "Landlord / Multifamily",
@@ -1088,7 +1101,7 @@ test("podio: mf_occupancy selects correct template", async () => {
     makeTemplate({ item_id: "t-7010", use_case: "mf_occupancy", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
     makeTemplate({ item_id: "t-7011", use_case: "mf_confirm_units", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_occupancy",
     language: "English",
     category: "Landlord / Multifamily",
@@ -1104,7 +1117,7 @@ test("podio: mf_rents selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-7020", use_case: "mf_rents", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_rents",
     language: "English",
     category: "Landlord / Multifamily",
@@ -1120,7 +1133,7 @@ test("podio: mf_expenses selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-7030", use_case: "mf_expenses", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_expenses",
     language: "English",
     category: "Landlord / Multifamily",
@@ -1136,7 +1149,7 @@ test("podio: mf_underwriting_ack selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-7040", use_case: "mf_underwriting_ack", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_underwriting_ack",
     language: "English",
     category: "Landlord / Multifamily",
@@ -1153,7 +1166,7 @@ test("podio: novation_probe selects novation template", async () => {
     makeTemplate({ item_id: "t-8001", use_case: "novation_probe", language: "English", deal_strategy: "Novation" }),
     makeTemplate({ item_id: "t-8002", use_case: "creative_probe", language: "English", deal_strategy: "Creative" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_probe",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1168,7 +1181,7 @@ test("podio: novation_condition_scope selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-8010", use_case: "novation_condition_scope", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_condition_scope",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1183,7 +1196,7 @@ test("podio: novation_listing_readiness selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-8020", use_case: "novation_listing_readiness", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_listing_readiness",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1198,7 +1211,7 @@ test("podio: novation_timeline selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-8030", use_case: "novation_timeline", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_timeline",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1213,7 +1226,7 @@ test("podio: novation_net_to_seller selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-8040", use_case: "novation_net_to_seller", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_net_to_seller",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1229,7 +1242,7 @@ test("podio: justify_price selects negotiation template", async () => {
     makeTemplate({ item_id: "t-9001", use_case: "justify_price", language: "English" }),
     makeTemplate({ item_id: "t-9002", use_case: "narrow_range", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "justify_price",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1244,7 +1257,7 @@ test("podio: ask_timeline selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-9010", use_case: "ask_timeline", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ask_timeline",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1259,7 +1272,7 @@ test("podio: ask_condition_clarifier selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-9020", use_case: "ask_condition_clarifier", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ask_condition_clarifier",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1274,7 +1287,7 @@ test("podio: narrow_range selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-9030", use_case: "narrow_range", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "narrow_range",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1289,7 +1302,7 @@ test("podio: close_handoff selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-9040", use_case: "close_handoff", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "close_handoff",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1305,7 +1318,7 @@ test("podio: who_is_this selects identity template", async () => {
     makeTemplate({ item_id: "t-10001", use_case: "who_is_this", language: "English" }),
     makeTemplate({ item_id: "t-10002", use_case: "ownership_check", language: "English", is_first_touch: "Yes" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "who_is_this",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1320,7 +1333,7 @@ test("podio: wrong_person selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-10010", use_case: "wrong_person", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "wrong_person",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1335,7 +1348,7 @@ test("podio: not_interested selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-10020", use_case: "not_interested", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "not_interested",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1350,7 +1363,7 @@ test("podio: disposition_access_coordination selects correct template", async ()
   const templates = [
     makeTemplate({ item_id: "t-11001", use_case: "disposition_access_coordination", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "disposition_access_coordination",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1365,7 +1378,7 @@ test("podio: disposition_marketing_update selects correct template", async () =>
   const templates = [
     makeTemplate({ item_id: "t-11010", use_case: "disposition_marketing_update", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "disposition_marketing_update",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1381,7 +1394,7 @@ test("podio: reengagement selects re-engagement template", async () => {
     makeTemplate({ item_id: "t-12001", use_case: "reengagement", is_follow_up: "Yes", language: "English" }),
     makeTemplate({ item_id: "t-12002", use_case: "ownership_check_follow_up", is_follow_up: "Yes", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "reengagement",
     touch_type: "Follow-Up",
     language: "English",
@@ -1402,7 +1415,7 @@ test("podio: offer_reveal_lease_option selects correct template", async () => {
     makeTemplate({ item_id: "t-13001", use_case: "offer_reveal_lease_option", language: "English", deal_strategy: "Lease Option" }),
     makeTemplate({ item_id: "t-13002", use_case: "offer_reveal_cash", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "offer_reveal_lease_option",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1417,7 +1430,7 @@ test("podio: offer_reveal_subject_to selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-13010", use_case: "offer_reveal_subject_to", language: "English", deal_strategy: "Subject To" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "offer_reveal_subject_to",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1432,7 +1445,7 @@ test("podio: offer_reveal_novation selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-13020", use_case: "offer_reveal_novation", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "offer_reveal_novation",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1454,7 +1467,7 @@ test("podio: mf_offer_reveal selects MF offer template", async () => {
       deal_strategy: "Multifamily Underwrite",
     }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_offer_reveal",
     language: "English",
     property_type_scope: "Landlord / Multifamily",
@@ -1496,7 +1509,7 @@ for (const uc of FOLLOW_UP_USE_CASES) {
       }),
       makeTemplate({ item_id: "t-fu-decoy", use_case: "ownership_check", is_first_touch: "Yes", language: "English" }),
     ];
-    const candidates = await loadTemplateCandidates({
+    const candidates = await loadPodioTestCandidates({
       use_case: uc,
       touch_type: "Follow-Up",
       language: "English",
@@ -1522,7 +1535,7 @@ for (const lang of LANGUAGES_TO_TEST) {
       makeTemplate({ item_id: `t-lang-${lang}`, use_case: "ownership_check", language: lang, is_first_touch: "Yes" }),
       makeTemplate({ item_id: "t-lang-en", use_case: "ownership_check", language: "English", is_first_touch: "Yes" }),
     ];
-    const candidates = await loadTemplateCandidates({
+    const candidates = await loadPodioTestCandidates({
       use_case: "ownership_check",
       language: lang,
       context: MINIMAL_CONTEXT,
@@ -1543,7 +1556,7 @@ test("podio: Probate scope template survives for Probate query", async () => {
     makeTemplate({ item_id: "t-16001", use_case: "ownership_check", property_type_scope: "Probate / Trust", is_first_touch: "Yes" }),
     makeTemplate({ item_id: "t-16002", use_case: "ownership_check", property_type_scope: "Residential", is_first_touch: "Yes" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check",
     language: "English",
     property_type_scope: "Probate / Trust",
@@ -1559,7 +1572,7 @@ test("podio: Multifamily scope template survives for MF query", async () => {
     makeTemplate({ item_id: "t-16010", use_case: "mf_confirm_units", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
     makeTemplate({ item_id: "t-16011", use_case: "mf_confirm_units", property_type_scope: "Landlord / Multifamily", category_primary: "Residential", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_confirm_units",
     language: "English",
     property_type_scope: "Landlord / Multifamily",
@@ -1579,7 +1592,7 @@ test("podio: Novation template survives for novation query", async () => {
   const templates = [
     makeTemplate({ item_id: "t-17001", use_case: "novation_probe", language: "English", deal_strategy: "Novation" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "novation_probe",
     language: "English",
     deal_strategy: "Novation",
@@ -1595,7 +1608,7 @@ test("podio: MF Underwrite template survives for MF query", async () => {
   const templates = [
     makeTemplate({ item_id: "t-17010", use_case: "mf_confirm_units", language: "English", property_type_scope: "Landlord / Multifamily", category_primary: "Landlord / Multifamily", deal_strategy: "Multifamily Underwrite" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "mf_confirm_units",
     language: "English",
     deal_strategy: "Multifamily Underwrite",
@@ -1613,7 +1626,7 @@ test("podio: MF Underwrite template survives for MF query", async () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 test("podio: falls back to local_registry templates when no remote available", async () => {
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "ownership_check",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1634,7 +1647,7 @@ test("podio: asking_price selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-19001", use_case: "asking_price", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "asking_price",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1649,7 +1662,7 @@ test("podio: price_works_confirm_basics selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-19010", use_case: "price_works_confirm_basics", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "price_works_confirm_basics",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1664,7 +1677,7 @@ test("podio: price_high_condition_probe selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-19020", use_case: "price_high_condition_probe", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "price_high_condition_probe",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1679,7 +1692,7 @@ test("podio: creative_probe selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-19030", use_case: "creative_probe", language: "English", deal_strategy: "Creative" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "creative_probe",
     language: "English",
     deal_strategy: "Creative",
@@ -1695,7 +1708,7 @@ test("podio: condition_question_set selects correct template", async () => {
   const templates = [
     makeTemplate({ item_id: "t-19040", use_case: "condition_question_set", language: "English" }),
   ];
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "condition_question_set",
     language: "English",
     context: MINIMAL_CONTEXT,
@@ -1711,7 +1724,7 @@ test("podio: condition_question_set selects correct template", async () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 test("podio: empty template list with unknown use_case returns empty", async () => {
-  const candidates = await loadTemplateCandidates({
+  const candidates = await loadPodioTestCandidates({
     use_case: "totally_nonexistent_use_case_xyz",
     language: "English",
     context: MINIMAL_CONTEXT,

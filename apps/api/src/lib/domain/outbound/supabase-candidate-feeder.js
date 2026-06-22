@@ -2255,6 +2255,10 @@ export async function loadOutboundTouchHistory(candidate = {}, options = {}, dep
 }
 
 export async function resolveNextOutboundTouch(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.resolveNextOutboundTouch === "function") {
+    return deps.resolveNextOutboundTouch(candidate, options, deps);
+  }
+
   const raw = candidate.raw || {};
   
   // 1. Extract candidate state from view fields
@@ -2622,7 +2626,7 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       };
     }
   } catch (suppressErr) {
-    warn("outreach.suppression_check_failed", {
+    logger.warn("outreach.suppression_check_failed", {
       error: suppressErr?.message,
       master_owner_id: candidate.master_owner_id,
     });
@@ -2645,7 +2649,7 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       };
     }
   } catch (phoneCooldownErr) {
-    warn("outreach.phone_cooldown_check_failed", {
+    logger.warn("outreach.phone_cooldown_check_failed", {
       error: phoneCooldownErr?.message,
       canonical_e164: candidate.canonical_e164?.slice(-4),
     });
@@ -4239,6 +4243,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const get_system_flag = deps.getSystemFlag || getSystemFlag;
 
   // ── System control gate ────────────────────────────────────────────────
   if (!input.dry_run) {
@@ -4262,11 +4267,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       };
     }
 
-    const feeder_enabled = await getSystemFlag("feeder_enabled");
+    const feeder_enabled = await get_system_flag("feeder_enabled");
     if (!feeder_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("feeder_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }
-    const outbound_sms_enabled = await getSystemFlag("outbound_sms_enabled");
+    const outbound_sms_enabled = await get_system_flag("outbound_sms_enabled");
     if (!outbound_sms_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("outbound_sms_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }
@@ -4278,11 +4283,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
 
   // ── Fetch Identity Policy Flags ───────────────────────────────────────
   const allow_weak_identity_outbound = asBoolean(
-    input.allow_weak_identity_outbound ?? (await getSystemFlag("allow_weak_identity_outbound")),
+    input.allow_weak_identity_outbound ?? (await get_system_flag("allow_weak_identity_outbound")),
     asBoolean(process.env.ALLOW_WEAK_IDENTITY_OUTBOUND, false)
   );
 
-  const identity_blocked_markets = input.identity_blocked_markets ?? (await getSystemFlag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
+  const identity_blocked_markets = input.identity_blocked_markets ?? (await get_system_flag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
   const identity_gate_mode = clean(input.identity_gate_mode || "strict").toLowerCase();
   const allow_identity_unknown = asBoolean(input.allow_identity_unknown, false);
   // ─────────────────────────────────────────────────────────────────────────
