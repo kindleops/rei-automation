@@ -105,7 +105,6 @@ export async function processAutonomousSellerReply({
 
   // Determine message type from use case / stage
   let message_type = "auto_reply";
-  const use_case = auto_reply_plan.selected_use_case;
   if (use_case === "selling_interest") message_type = "stage_1_auto_reply";
   else if (use_case === "price_or_offer") message_type = "stage_2_auto_reply";
   else if (use_case === "seller_price_received") message_type = "stage_3_auto_reply";
