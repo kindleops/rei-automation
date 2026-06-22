@@ -164,6 +164,16 @@ Published via `buildCanonicalBuyerDemand`:
 
 **Houston validation (77091):** RPC returns ranked buyers (e.g. Texas Funding Corporation A/88.2, Dr Horton A/87.6) with explainable `reason_for_match`.
 
+## Related audits (Supabase-linked, 2026-06-22)
+
+| Document | Contents |
+| --- | --- |
+| [`get_buyer_match_candidates_rpc.md`](./get_buyer_match_candidates_rpc.md) | Full RPC definition, scoring weights, grading rules |
+| [`buyer_match_market_coverage_audit.md`](./buyer_match_market_coverage_audit.md) | State/market coverage gaps (TX vs OK) |
+| [`buyer_ok_tulsa_backfill_plan.md`](./buyer_ok_tulsa_backfill_plan.md) | Read-only OK/Tulsa backfill plan from `buyer_comp_raw_v2` |
+
+**ETL root cause for Tulsa:** `populate_buyer_entities_from_sold_data()` reads only `recently_sold_properties` (0 OK rows). OK deed data exists in `buyer_comp_raw_v2` (104 events / 66 buyers) but never bridged to v2 tables.
+
 ## Status
 
 | Item | Status |
