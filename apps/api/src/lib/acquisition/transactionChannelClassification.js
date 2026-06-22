@@ -1,53 +1,93 @@
 /**
- * Acquisition Engine V3 — transaction channel classification (mission Item 5A §8).
- *
- * Deterministically classifies an enriched comp transaction into a channel, and
- * declares pricing vs demand eligibility + the universe it should feed. Pure.
+ * Acquisition Engine V3 — transaction channel classification (Item 5A §8 +
+ * comp-quality hardening). Deterministically classifies an enriched comp into a
+ * channel + EVIDENCE ROLE, and declares pricing/demand eligibility + the
+ * universe it feeds. New-construction and renovated-flip transactions are routed
+ * to retail/ARV evidence (not ordinary investor wholesale value). Pure.
  */
 
-import { TX_CHANNELS, VALUATION_UNIVERSES as U, lower, num } from './modelConstants.js';
+import { TX_CHANNELS, VALUATION_UNIVERSES as U, lower, num, clean } from './modelConstants.js';
 import { BUYER_ARCHETYPES, INVESTOR_ARCHETYPES, INSTITUTIONAL_ARCHETYPES } from './buyerIdentityResolution.js';
 
+export const EVIDENCE_ROLES = Object.freeze({
+  ORDINARY_INVESTOR_PRICING: 'ORDINARY_INVESTOR_PRICING',
+  INSTITUTIONAL_SINGLE_ASSET_PRICING: 'INSTITUTIONAL_SINGLE_ASSET_PRICING',
+  RETAIL_RESALE_PRICING: 'RETAIL_RESALE_PRICING',
+  RETAIL_NEW_CONSTRUCTION_PRICING: 'RETAIL_NEW_CONSTRUCTION_PRICING',
+  RENOVATED_ARV_PRICING: 'RENOVATED_ARV_PRICING',
+  DISTRESSED_LIQUIDATION_PRICING: 'DISTRESSED_LIQUIDATION_PRICING',
+  PACKAGE_DEMAND_ONLY: 'PACKAGE_DEMAND_ONLY',
+  GOVERNMENT_PROGRAM_CONTEXT_ONLY: 'GOVERNMENT_PROGRAM_CONTEXT_ONLY',
+  EXCLUDED: 'EXCLUDED',
+  REVIEW_ONLY: 'REVIEW_ONLY',
+});
+
+const RENO_NAME_RE = /renovat|reno\b|rehab|\bflip|restoration|remodel|home ?solutions|fix\s|revamp/;
+
+function saleYearOf(saleDate) {
+  const s = clean(saleDate);
+  const m = s.match(/^(\d{4})/);
+  return m ? Number(m[1]) : null;
+}
+
 /**
- * @returns {{ channel:string, pricing_eligible:boolean, demand_eligible:boolean,
- *   universe:string|null, reasons:string[] }}
+ * @returns {{ channel, evidence_role, pricing_eligible, demand_eligible, universe, reasons }}
  */
 export function classifyTransactionChannel({
   salePrice,
   mlsSoldPrice,
   documentType,
   archetype = BUYER_ARCHETYPES.UNKNOWN,
+  yearBuilt = null,
+  saleDate = null,
+  buyerName = '',
 } = {}) {
-  const reasons = [];
   const price = num(salePrice, 0);
   const mls = num(mlsSoldPrice, 0);
   const doc = lower(documentType);
+  const R = EVIDENCE_ROLES;
 
-  // Non-sale / nominal: no consideration and no MLS sold price.
+  // 1) Non-sale / nominal.
   if (price <= 0 && mls <= 0) {
-    return { channel: TX_CHANNELS.REFINANCE_OR_NON_SALE, pricing_eligible: false, demand_eligible: archetype !== BUYER_ARCHETYPES.UNKNOWN, universe: null, reasons: ['no_consideration_non_sale'] };
+    return { channel: TX_CHANNELS.REFINANCE_OR_NON_SALE, evidence_role: R.EXCLUDED, pricing_eligible: false, demand_eligible: archetype !== BUYER_ARCHETYPES.UNKNOWN, universe: null, reasons: ['no_consideration_non_sale'] };
   }
-  // Distressed / non-arm's-length document types or government grantee.
-  if (/foreclos|trustee|sheriff|reo/.test(doc) || archetype === BUYER_ARCHETYPES.GOVERNMENT_OR_NONPROFIT) {
-    return { channel: TX_CHANNELS.FORECLOSURE, pricing_eligible: false, demand_eligible: false, universe: U.LIQUIDATION_VALUE, reasons: ['distressed_or_government_non_arms_length'] };
+  // 2) Distressed / forced-sale instruments (Trustee's/Sheriff's/Foreclosure/REO/Substitute Trustee).
+  if (/foreclos|trustee|sheriff|\breo\b|substitute trustee/.test(doc)) {
+    return { channel: TX_CHANNELS.FORECLOSURE, evidence_role: R.DISTRESSED_LIQUIDATION_PRICING, pricing_eligible: false, demand_eligible: false, universe: U.LIQUIDATION_VALUE, reasons: [`distressed_instrument:${doc || 'unknown'}`] };
   }
   if (/tax (deed|sale|lien)/.test(doc)) {
-    return { channel: TX_CHANNELS.TAX_SALE, pricing_eligible: false, demand_eligible: false, universe: U.LIQUIDATION_VALUE, reasons: ['tax_sale'] };
+    return { channel: TX_CHANNELS.TAX_SALE, evidence_role: R.DISTRESSED_LIQUIDATION_PRICING, pricing_eligible: false, demand_eligible: false, universe: U.LIQUIDATION_VALUE, reasons: ['tax_sale'] };
   }
-  // MLS arm's-length retail.
+  // 3) Government / nonprofit grantee — pricing-ineligible by default (may be subsidized/programmatic).
+  if (archetype === BUYER_ARCHETYPES.GOVERNMENT_OR_NONPROFIT) {
+    return { channel: TX_CHANNELS.RELATED_PARTY, evidence_role: R.GOVERNMENT_PROGRAM_CONTEXT_ONLY, pricing_eligible: false, demand_eligible: false, universe: null, reasons: ['government_or_nonprofit_not_proven_arms_length'] };
+  }
+  // 4) New construction — route to retail new-construction, NOT ordinary investor.
+  const saleYear = saleYearOf(saleDate);
+  const yb = num(yearBuilt);
+  if (yb && saleYear && yb >= saleYear - 1) {
+    return { channel: TX_CHANNELS.BUILDER_DEVELOPMENT, evidence_role: R.RETAIL_NEW_CONSTRUCTION_PRICING, pricing_eligible: true, demand_eligible: true, universe: U.RETAIL_MLS_VALUE, reasons: [`new_construction(year_built=${yb}, sale=${saleYear})`] };
+  }
+  // 5) MLS arm's-length retail resale.
   if (mls > 0) {
-    return { channel: TX_CHANNELS.MLS_ARM_LENGTH, pricing_eligible: true, demand_eligible: true, universe: U.RETAIL_MLS_VALUE, reasons: ['mls_sold_price_present'] };
+    return { channel: TX_CHANNELS.MLS_ARM_LENGTH, evidence_role: R.RETAIL_RESALE_PRICING, pricing_eligible: true, demand_eligible: true, universe: U.RETAIL_MLS_VALUE, reasons: ['mls_sold_price_present'] };
   }
-  // Off-market investor / institutional, priced.
+  // 6) Renovated-flip buyer — ARV / retail ceiling evidence, not as-is investor value.
+  if (RENO_NAME_RE.test(lower(buyerName))) {
+    return { channel: TX_CHANNELS.INVESTOR_OFF_MARKET, evidence_role: R.RENOVATED_ARV_PRICING, pricing_eligible: true, demand_eligible: true, universe: U.RETAIL_MLS_VALUE, reasons: ['renovated_flip_buyer_name'] };
+  }
+  // 7) Institutional single-asset, priced.
   if (INSTITUTIONAL_ARCHETYPES.has(archetype)) {
-    return { channel: TX_CHANNELS.INSTITUTIONAL_SINGLE_ASSET, pricing_eligible: true, demand_eligible: true, universe: U.INSTITUTIONAL_VALUE, reasons: ['institutional_buyer_priced'] };
+    return { channel: TX_CHANNELS.INSTITUTIONAL_SINGLE_ASSET, evidence_role: R.INSTITUTIONAL_SINGLE_ASSET_PRICING, pricing_eligible: true, demand_eligible: true, universe: U.INSTITUTIONAL_VALUE, reasons: ['institutional_buyer_priced'] };
   }
+  // 8) Ordinary investor / builder-as-buyer of existing stock, priced.
   if (INVESTOR_ARCHETYPES.has(archetype) || archetype === BUYER_ARCHETYPES.BUILDER_DEVELOPER) {
-    return { channel: TX_CHANNELS.INVESTOR_OFF_MARKET, pricing_eligible: true, demand_eligible: true, universe: U.LOCAL_INVESTOR_VALUE, reasons: ['investor_buyer_priced'] };
+    return { channel: TX_CHANNELS.INVESTOR_OFF_MARKET, evidence_role: R.ORDINARY_INVESTOR_PRICING, pricing_eligible: true, demand_eligible: true, universe: U.LOCAL_INVESTOR_VALUE, reasons: ['investor_buyer_priced'] };
   }
-  // Owner-occupant off-market or unknown buyer but priced → public-record arm's-length.
+  // 9) Owner-occupant / unresolved but priced → public-record arm's-length.
   return {
     channel: TX_CHANNELS.PUBLIC_RECORD_UNVERIFIED,
+    evidence_role: R.RETAIL_RESALE_PRICING,
     pricing_eligible: true,
     demand_eligible: archetype !== BUYER_ARCHETYPES.UNKNOWN,
     universe: U.PUBLIC_RECORD_ARM_LENGTH_VALUE,

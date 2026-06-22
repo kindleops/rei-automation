@@ -30,6 +30,7 @@ import {
 } from './modelConstants.js';
 import { classifyAssetLane } from './assetClassification.js';
 import { compReliability, universeConfidence } from './sourceReliability.js';
+import { classifyPeerOutliers, peerStatusExcludesPricing, peerStatusReviewOnly } from './peerRelativeOutliers.js';
 import {
   weightedQuantile,
   weightedMean,
@@ -170,6 +171,30 @@ function buildUniverse(universeName, comps, { targetSample = 6 } = {}) {
       comps: [],
     };
   }
+  // ---- Peer-relative outlier filtering within this universe (comp-quality) ----
+  const peerMap = classifyPeerOutliers(comps.map((c, i) => ({ key: String(i), value: c.adjusted_value, ppsf: c.ppsf })));
+  const peerExcluded = [];
+  const peerReviewOnly = [];
+  const kept = [];
+  comps.forEach((c, i) => {
+    const k = peerMap.get(String(i));
+    c.peer_status = k?.status ?? null;
+    c.peer_metrics = k?.metrics ?? null;
+    const rec = { address: c.address, consideration: c.consideration, adjusted_value: roundMoney(c.adjusted_value), status: k?.status ?? null, reasons: k?.reasons ?? [] };
+    if (k && peerStatusExcludesPricing(k.status)) { peerExcluded.push(rec); return; }
+    if (k && peerStatusReviewOnly(k.status)) { peerReviewOnly.push(rec); return; }
+    kept.push(c);
+  });
+  if (!kept.length) {
+    return {
+      universe: universeName, available: false, unavailable_reason: 'all_comps_rejected_as_peer_outliers',
+      value_classification: null, low: null, mid: null, high: null,
+      effective_sample_size: 0, accepted_independent_transaction_count: 0, confidence: 0, comps: [],
+      peer_excluded: peerExcluded, peer_review_only: peerReviewOnly,
+    };
+  }
+  comps = kept;
+
   const rows = comps.map((c) => ({ value: c.adjusted_value, weight: c.weight }));
   const mid = weightedQuantile(rows, 0.5);
   const p25 = weightedQuantile(rows, 0.25);
@@ -219,15 +244,19 @@ function buildUniverse(universeName, comps, { targetSample = 6 } = {}) {
     confidence: conf.confidence,
     confidence_components: conf.components,
     source_lineage: [...new Set(comps.map((c) => c.channel))],
+    peer_excluded: peerExcluded,
+    peer_review_only: peerReviewOnly,
     comps: comps.slice(0, 25).map((c) => ({
       address: c.address,
       consideration: c.consideration,
       adjusted_value: roundMoney(c.adjusted_value),
       channel: c.channel,
+      evidence_role: c.evidence_role ?? null,
       qualification_score: c.qualification_score,
       physical_match: round(c.physical_match, 1),
       geographic_match: round(c.geographic_match, 1),
       recency: round(c.recency, 1),
+      peer_status: c.peer_status ?? null,
       weight: c.weight,
     })),
   };
@@ -328,12 +357,15 @@ export function buildValuationUniverses(subjectRow = {}, qualification, buyerPur
         recency,
         completeness: physical, // physical completeness proxy
       });
+      const csqft = num(raw.building_square_feet) ?? num(raw.sqft);
       return {
         address: a.address,
         consideration,
         channel,
+        evidence_role: raw.evidence_role ?? null,
         universe,
         adjusted_value: adjustedValue(subjectRow, raw, consideration, family),
+        ppsf: csqft && csqft > 0 && consideration ? consideration / csqft : null,
         physical_match: physical,
         geographic_match: geo.score,
         distance_miles: geo.distance_miles,

@@ -40,6 +40,9 @@ export function normalizeCandidate(candidate = {}, rawRow = null, entity = null)
     mlsSoldPrice: mlsSold,
     documentType,
     archetype: buyer.archetype,
+    yearBuilt: c.year_built,
+    saleDate: c.sale_date,
+    buyerName: ownerName,
   });
 
   // IDENTITY_UNRESOLVED demotes pricing eligibility unless the txn is MLS arm's-length.
@@ -98,6 +101,7 @@ export function normalizeCandidate(candidate = {}, rawRow = null, entity = null)
     matched_buyer_entity: buyer.matched_entity,
     observed_buy_box: buyer.observed_buy_box ?? null,
     transaction_channel: channel.channel,
+    evidence_role: channel.evidence_role,
     v3_channel: channel.channel,
     v3_universe_hint: channel.universe,
     v3_pricing_eligible: pricingEligible,
