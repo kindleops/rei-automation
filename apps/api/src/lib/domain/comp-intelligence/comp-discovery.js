@@ -170,7 +170,29 @@ export async function discoverCompsForSubject(subjectContract, options = {}, dep
     candidates.push(normalizeCompRow(row, index, subjectFlat));
   }
 
-  const scored = detectOutliers(candidates, subjectFlat);
+  let scored = detectOutliers(candidates, subjectFlat);
+
+  const ranked = [...scored]
+    .filter((c) => (c.sold_price ?? c.sale_list_price) && (c.latitude ?? c.lat))
+    .sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0));
+  const autoIncludeCount = Math.min(6, Math.max(2, Math.ceil(ranked.length * 0.4)));
+  const forceIncludeIds = new Set(ranked.slice(0, autoIncludeCount).map((c) => c.comp_property_id || c.property_id));
+
+  scored = scored.map((comp) => {
+    const id = comp.comp_property_id || comp.property_id;
+    if (!forceIncludeIds.has(id)) return comp;
+    return {
+      ...comp,
+      selected: true,
+      excluded: false,
+      inclusion_eligible: true,
+      exclusion_reasons: (comp.exclusion_reasons ?? []).filter((r) => r !== 'Similarity below inclusion threshold'),
+      scoring: comp.scoring
+        ? { ...comp.scoring, auto_included: true, auto_excluded: false }
+        : comp.scoring,
+    };
+  });
+
   const included = scored.filter((c) => c.selected && !c.excluded);
   const excluded = scored.filter((c) => c.excluded);
 

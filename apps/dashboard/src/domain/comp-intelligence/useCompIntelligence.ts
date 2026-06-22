@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import { resolveCanonicalProperty } from '../canonical-property/resolver'
 import { fetchCompIntelligence } from './comp-intelligence-api'
-import { resolveCoordinatesFromContext, subjectHasCoordinates } from './coordinate-resolver'
+import { runDirectCompIntelligence } from './direct-pipeline'
+import { subjectHasCoordinates } from './coordinate-resolver'
 import type { CompIntelligencePayload, ValuationPipelineState } from './types'
 
 function mapPipelineState(payload: CompIntelligencePayload | null, loading: boolean, error: string | null): ValuationPipelineState {
   if (loading) return 'loading_evidence'
-  if (error) return 'error'
+  if (error && !payload) return 'error'
   if (!payload) return 'blocked_missing_subject'
   const backendState = payload.valuation_state?.state
   switch (backendState) {
@@ -44,33 +46,31 @@ export function useCompIntelligence({
   paused?: boolean
 }) {
   const t = thread as Record<string, unknown> | null
-  const propertyId = String(dealContext?.propertyId || t?.propertyId || t?.property_id || '')
-  const threadKey = String(dealContext?.threadKey || t?.thread_key || '')
   const opportunityId = String((dealContext as Record<string, unknown> | null)?.opportunityId || (t as Record<string, unknown>)?.opportunity_id || '')
-  const masterOwnerId = String(dealContext?.masterOwnerId || t?.master_owner_id || '')
 
-  const localCoords = useMemo(
-    () =>
-      resolveCoordinatesFromContext({
-        dealContext: dealContext as Record<string, unknown> | null,
-        thread: t,
-        property: dealContext?.property as Record<string, unknown> | undefined,
-        rawPayload: (dealContext?.property as Record<string, unknown> | undefined)?.raw_payload_json as Record<string, unknown> | undefined,
-      }),
-    [dealContext, t],
+  const canonical = useMemo(
+    () => resolveCanonicalProperty({ dealContext, thread, opportunityId }),
+    [dealContext, thread, opportunityId],
   )
+
+  const propertyId = canonical?.property_id || ''
+  const threadKey = String(dealContext?.threadKey || dealContext?.thread_key || t?.thread_key || '')
+  const masterOwnerId = String(dealContext?.masterOwnerId || dealContext?.master_owner_id || t?.master_owner_id || '')
 
   const [payload, setPayload] = useState<CompIntelligencePayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dataSource, setDataSource] = useState<'api' | 'direct_rpc' | null>(null)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!propertyId) {
       setPayload(null)
+      setDataSource(null)
       return
     }
     setLoading(true)
     setError(null)
+
     try {
       const data = await fetchCompIntelligence(
         propertyId,
@@ -84,17 +84,61 @@ export function useCompIntelligence({
         },
         signal,
       )
+
       if (signal?.aborted) return
+
+      if (data?.subject?.is_subject_resolved && (data.discovery?.counts?.total ?? 0) > 0) {
+        setPayload(data)
+        setDataSource('api')
+        return
+      }
+
+      const direct = await runDirectCompIntelligence({
+        dealContext,
+        thread,
+        radius,
+        monthsBack,
+        opportunityId,
+      })
+      if (signal?.aborted) return
+
+      if (direct) {
+        setPayload(direct)
+        setDataSource('direct_rpc')
+        if (!data) setError('API pipeline unavailable — loaded via direct property RPC')
+        return
+      }
+
       setPayload(data)
+      setDataSource(data ? 'api' : null)
       if (!data) setError('Comp intelligence pipeline returned no data')
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return
+      try {
+        const direct = await runDirectCompIntelligence({
+          dealContext,
+          thread,
+          radius,
+          monthsBack,
+          opportunityId,
+        })
+        if (signal?.aborted) return
+        if (direct) {
+          setPayload(direct)
+          setDataSource('direct_rpc')
+          setError((err as Error)?.message || 'API failed — recovered via direct RPC')
+          return
+        }
+      } catch {
+        // fall through
+      }
       setError((err as Error)?.message || 'Comp intelligence failed')
       setPayload(null)
+      setDataSource(null)
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [propertyId, radius, monthsBack, assetClass, threadKey, opportunityId, masterOwnerId])
+  }, [propertyId, radius, monthsBack, assetClass, threadKey, opportunityId, masterOwnerId, dealContext, thread])
 
   useEffect(() => {
     if (paused || !propertyId) return
@@ -104,6 +148,7 @@ export function useCompIntelligence({
   }, [paused, propertyId, radius, monthsBack, assetClass, refresh])
 
   const subject = payload?.subject ?? null
+
   const coords = useMemo(() => {
     if (subject?.is_subject_resolved && subject.latitude?.value != null && subject.longitude?.value != null) {
       return {
@@ -113,18 +158,44 @@ export function useCompIntelligence({
         lng: subject.longitude.value,
         coordinate_source: subject.coordinate_source,
         coordinate_confidence: subject.coordinate_confidence,
-        is_market_fallback: subject.is_market_fallback,
+        is_market_fallback: false,
         is_subject_resolved: true,
-        failure_reason: subject.coordinate_failure_reason ?? null,
+        failure_reason: null,
       }
     }
-    return localCoords
-  }, [subject, localCoords])
+
+    if (canonical?.is_subject_resolved && canonical.latitude !== null && canonical.longitude !== null) {
+      return {
+        latitude: canonical.latitude,
+        longitude: canonical.longitude,
+        lat: canonical.latitude,
+        lng: canonical.longitude,
+        coordinate_source: canonical.coordinate_source,
+        coordinate_confidence: canonical.coordinate_confidence,
+        is_market_fallback: false,
+        is_subject_resolved: true,
+        failure_reason: null,
+      }
+    }
+
+    return {
+      latitude: null,
+      longitude: null,
+      lat: null,
+      lng: null,
+      coordinate_source: canonical?.coordinate_source || 'unresolved',
+      coordinate_confidence: canonical?.coordinate_confidence || 0,
+      is_market_fallback: false,
+      is_subject_resolved: false,
+      failure_reason: canonical?.coordinate_failure_reason || 'Subject coordinates unresolved',
+    }
+  }, [subject, canonical])
 
   const pipelineState = mapPipelineState(payload, loading, error)
 
   return {
     propertyId,
+    canonical,
     payload,
     subject,
     coords,
@@ -135,6 +206,7 @@ export function useCompIntelligence({
     pipelineState,
     loading,
     error,
+    dataSource,
     refresh,
   }
 }

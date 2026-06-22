@@ -107,9 +107,10 @@ export async function loadCanonicalSubjectProperty(propertyId, context = {}, dep
     geocode: context.geocode ?? null,
   });
 
-  const assetClass = normalizeAssetClass(
-    row.normalized_asset_class ?? row.asset_class ?? row.asset_type ?? row.property_type,
-  );
+  const assetClass =
+    normalizeAssetClass(
+      row.normalized_asset_class ?? row.asset_class ?? row.asset_type ?? row.property_type,
+    ) || 'single_family';
   const zip = normalizeZip(row.property_address_zip ?? row.property_zip ?? location.zip);
   const state = normalizeState(row.property_address_state ?? location.state);
   const market = normalizeMarket(row.market ?? row.market_region ?? location.market, location.city, state);

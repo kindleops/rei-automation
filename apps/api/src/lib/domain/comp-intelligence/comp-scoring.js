@@ -7,7 +7,7 @@ function num(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-export const INCLUSION_THRESHOLD = 70;
+export const INCLUSION_THRESHOLD = 45;
 
 export const EXCLUSION_REASONS = {
   wrong_asset_type: 'Wrong asset type',
@@ -125,11 +125,11 @@ export function calculateCompMatchScore(comp = {}, subject = {}) {
   let outlierReason = null;
   const soldPrice = num(comp.sold_price ?? comp.sale_price ?? comp.mls_sold_price ?? comp.soldPrice);
   const subjectEstimate = num(subject.estimated_value ?? subject.estimatedValue);
-  if (soldPrice && subjectEstimate) {
+  if (soldPrice && subjectEstimate && subjectEstimate > 25000) {
     const diff = Math.abs(soldPrice - subjectEstimate) / subjectEstimate;
-    if (diff > 0.5) {
+    if (diff > 0.85) {
       isOutlier = true;
-      outlierReason = 'Price varies >50% from subject estimate';
+      outlierReason = 'Price varies >85% from subject estimate';
     }
   }
 

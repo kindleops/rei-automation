@@ -584,7 +584,7 @@ export function CompIntelligenceWorkspace({
   const [mapMode, setMapMode] = useState<MapMode>('value')
   const [radius, setRadius] = useState<RadiusMiles>(1)
   const [monthsBack, setMonthsBack] = useState<number>(6)
-  const [assetClass, setAssetClass] = useState<string | undefined>(subject.assetClass)
+  const [assetClass, setAssetClass] = useState<string | undefined>(undefined)
   const [sortBy, setSortBy] = useState<SortMode>('match')
   const [comps, setComps] = useState<CompCandidate[]>([])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -594,6 +594,7 @@ export function CompIntelligenceWorkspace({
   const [activeSourceFilters, setActiveSourceFilters] = useState<string[]>([])
   const {
     propertyId,
+    canonical,
     subject: canonicalSubject,
     coords,
     hasCoords,
@@ -603,6 +604,8 @@ export function CompIntelligenceWorkspace({
     pipelineState,
     loading,
     error: pipelineError,
+    dataSource,
+    refresh,
   } = useCompIntelligence({
     thread,
     dealContext,
@@ -633,8 +636,8 @@ export function CompIntelligenceWorkspace({
       city: String(canonicalSubject?.city?.value || dp?.property_address_city || t?.property_city || t?.city || ''),
       state: String(canonicalSubject?.state?.value || dp?.property_address_state || t?.property_state || t?.state || ''),
       zip: String(canonicalSubject?.zip?.value || dp?.property_address_zip || t?.property_zip || t?.zip || ''),
-      lat: coords.lat ?? 0,
-      lng: coords.lng ?? 0,
+      lat: coords.lat ?? canonical?.latitude ?? 0,
+      lng: coords.lng ?? canonical?.longitude ?? 0,
       assetClass:
         normalized === 'unknown'
           ? (dealContext?.property_type || t?.property_type) === 'Multi-Family'
@@ -644,7 +647,14 @@ export function CompIntelligenceWorkspace({
       propertyType: String(canonicalSubject?.property_type?.value || dealContext?.property_type || t?.property_type || ''),
       beds: asNumber(canonicalSubject?.bedrooms?.value ?? dp?.total_bedrooms ?? t?.total_bedrooms ?? t?.beds),
       baths: asNumber(canonicalSubject?.bathrooms?.value ?? dp?.total_baths ?? t?.total_baths ?? t?.baths),
-      sqft: asNumber(canonicalSubject?.square_feet?.value ?? dp?.building_square_feet ?? t?.building_square_feet ?? t?.sqft),
+      sqft: asNumber(
+        canonicalSubject?.square_feet?.value ??
+          canonical?.square_feet ??
+          dp?.building_square_feet ??
+          dp?.square_feet ??
+          t?.building_square_feet ??
+          t?.sqft,
+      ) || null,
       units: asNumber(canonicalSubject?.units?.value ?? dp?.units_count ?? t?.units_count),
       yearBuilt: asNumber(canonicalSubject?.year_built?.value ?? dp?.year_built ?? t?.year_built),
       condition: String(canonicalSubject?.condition?.value ?? dp?.building_condition ?? t?.building_condition ?? 'Unknown'),
@@ -653,7 +663,7 @@ export function CompIntelligenceWorkspace({
       coordinateConfidence: coords.coordinate_confidence,
       isMarketFallback: coords.is_market_fallback,
     }
-  }, [canonicalSubject, coords, propertyId, dp, t, dealContext])
+  }, [canonicalSubject, canonical, coords, propertyId, dp, t, dealContext])
 
   const [valuationMode, setValuationMode] = useState<ValuationMode>(inferValuationMode(subject.assetClass as AssetClass))
 
@@ -1436,11 +1446,7 @@ function SubjectDataGapAlert({ message }: { message: string }) {
         <span className="ci-data-gap__title">Subject Data Gap</span>
       </div>
       <p className="ci-data-gap__message">{message}</p>
-      <div className="ci-data-gap__actions">
-        <button type="button" className="ci-data-gap__btn">Use county record</button>
-        <button type="button" className="ci-data-gap__btn">Estimate from comps</button>
-        <button type="button" className="ci-data-gap__btn">Manual entry</button>
-      </div>
+      <p className="ci-data-gap__footnote">Canonical property data reloads automatically when the subject resolves.</p>
     </div>
   )
 }
@@ -1471,7 +1477,7 @@ function ValuationPipelineStatus({
         ) : null}
       </div>
       {detail && <p className="ci-pipeline-status__detail">{detail}</p>}
-      {discovery?.is_market_fallback && (
+      {discovery?.is_market_fallback && !coords.is_subject_resolved && (
         <p className="ci-pipeline-status__warn">Market-level comp search active — distance ranking unavailable.</p>
       )}
       {lastRelaxation && (
