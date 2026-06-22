@@ -11,6 +11,7 @@ import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import type { DealContext } from '../../../lib/data/dealContext'
+import { resolveCoordinatesFromContext } from '../../../domain/comp-intelligence/coordinate-resolver'
 import '../buyer-match-workspace.css'
 
 const IS_DEV = import.meta.env.DEV
@@ -2190,8 +2191,12 @@ export function BuyerMatchWorkspace({
 
   const { property_id, address, market, zip, state, county, property_type, asset_class, estimated_value } = propertySnapshot
 
-  const lat = dealContext?.latitude || null
-  const lng = dealContext?.longitude || null
+  const resolvedCoords = resolveCoordinatesFromContext({
+    dealContext: dealContext as Record<string, unknown> | null,
+    property: dealContext?.property as Record<string, unknown> | undefined,
+  })
+  const lat = resolvedCoords.latitude
+  const lng = resolvedCoords.longitude
 
   const addDealEvent = useCallback((icon: string, action: string, result: string, source: string) => {
     setDealEvents(prev => [makeDealEvent(icon, action, result, source), ...prev])

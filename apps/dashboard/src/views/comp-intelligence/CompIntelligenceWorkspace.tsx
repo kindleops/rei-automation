@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { buildZillowUrl, buildGoogleMapsUrl, loadSubjectComps, loadMarketComps } from '../../lib/data/commandMapData'
+import { buildZillowUrl, buildGoogleMapsUrl } from '../../lib/data/commandMapData'
+import { useCompIntelligence } from '../../domain/comp-intelligence/useCompIntelligence'
+import type { CompCandidateEvidence } from '../../domain/comp-intelligence/types'
 import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
@@ -457,6 +459,90 @@ function summarizeEvidence(comps: CompCandidate[], arvStats: ArvStats | null): E
   }
 }
 
+function mapEvidenceToCompCandidate(
+  d: CompCandidateEvidence,
+  subject: Partial<CompCandidate>,
+  index: number,
+): CompCandidate {
+  const soldPrice = d.sale_list_price ?? d.sold_price ?? null
+  const soldDate = d.sale_list_date ?? d.sold_date ?? null
+  let soldSource: CompCandidate['soldSource'] = 'UNKNOWN'
+  if (d.sold_source === 'MLS SOLD' || d.source === 'MLS SOLD') soldSource = 'MLS SOLD'
+  else if (d.sold_source === 'PUBLIC RECORD SOLD' || d.source === 'PUBLIC RECORD SOLD') soldSource = 'PUBLIC RECORD SOLD'
+  else if (soldPrice) soldSource = 'PUBLIC RECORD SOLD'
+
+  const scoring = d.scoring
+  const reasoning = scoring?.reasoning as CompCandidate['reasoning'] | undefined
+
+  return {
+    id: d.comp_property_id || `comp-${index}`,
+    propertyId: d.property_id || d.comp_property_id,
+    address: d.address || 'Unknown address',
+    city: d.city,
+    state: d.state,
+    zip: d.zip,
+    soldPrice,
+    soldDate,
+    soldSource,
+    sqft: d.square_feet ?? null,
+    beds: d.bedrooms ?? null,
+    baths: d.bathrooms ?? null,
+    units: d.units ?? null,
+    yearBuilt: null,
+    condition: d.condition || 'Unknown',
+    assetClass: normalizeAssetClass(d.asset_type),
+    propertyType: d.asset_type,
+    constructionType: null,
+    lotSizeAcres: null,
+    lat: d.latitude ?? 0,
+    lng: d.longitude ?? 0,
+    distanceMiles: d.distance_miles ?? null,
+    estimatedValue: null,
+    priceOffValue: null,
+    percentOff: null,
+    ppsf: d.ppsf ?? null,
+    ppu: d.ppu ?? null,
+    ppbd: null,
+    sqftPerUnit: null,
+    bedsPerUnit: null,
+    imageUrl: buildStreetViewUrl(d.address || '') || null,
+    zillowUrl: buildZillowUrl(d.address || ''),
+    buyerType: null,
+    isCorporateBuyer: false,
+    isInstitutionalBuyer: false,
+    institutionalMatchName: null,
+    confidenceScore: d.similarity_score ?? null,
+    dealGrade: null,
+    compScore: d.similarity_score ?? scoring?.score ?? 0,
+    compMatchLabel: d.comp_match_label ?? scoring?.label ?? 'Review',
+    selected: Boolean(d.selected && !d.excluded),
+    excluded: Boolean(d.excluded),
+    excludeReason: d.exclusion_reasons?.[0] ?? null,
+    arvWeight: 0,
+    reasoning: reasoning ?? calculateCompMatchScore(
+      { distanceMiles: d.distance_miles, assetClass: normalizeAssetClass(d.asset_type), soldPrice, soldDate },
+      subject,
+    ).reasoning,
+  }
+}
+
+function pipelineStateLabel(state: string | undefined): string {
+  switch (state) {
+    case 'loading_evidence': return 'Loading evidence'
+    case 'resolving_subject': return 'Resolving subject'
+    case 'searching_comps': return 'Searching comps'
+    case 'expanding_search': return 'Expanding search'
+    case 'scoring_comps': return 'Scoring comps'
+    case 'valuing': return 'Valuing'
+    case 'ready': return 'Ready'
+    case 'ready_with_limitations': return 'Ready with limitations'
+    case 'blocked_missing_subject': return 'Blocked: missing subject'
+    case 'blocked_insufficient_evidence': return 'Blocked: insufficient evidence'
+    case 'error': return 'Error'
+    default: return 'Resolving'
+  }
+}
+
 function inferValuationMode(assetClass?: AssetClass): ValuationMode {
   if (assetClass === 'multifamily') return 'multifamily_comp'
   if (assetClass === 'land') return 'land'
@@ -489,34 +575,6 @@ export function CompIntelligenceWorkspace({
   const t = thread as unknown as Record<string, unknown>
   const dp = dealContext?.property as Record<string, unknown> | undefined
 
-  const subject: Partial<CompCandidate> = useMemo(() => {
-    const rawAsset = dp?.normalized_asset_class || t?.normalized_asset_class || dealContext?.property_type || t?.property_type
-    const normalized = normalizeAssetClass(rawAsset)
-    return {
-      propertyId: String(dealContext?.propertyId || t?.propertyId || t?.property_id || ''),
-      address: String(dealContext?.propertyAddress || t?.propertyAddress || t?.property_address || t?.subject || 'Subject Property'),
-      city: String(dp?.property_address_city || t?.property_city || t?.city || ''),
-      state: String(dp?.property_address_state || t?.property_state || t?.state || ''),
-      zip: String(dp?.property_address_zip || t?.property_zip || t?.zip || ''),
-      lat: asNumber(dealContext?.latitude || dealContext?.lat || t?.latitude || t?.lat),
-      lng: asNumber(dealContext?.longitude || dealContext?.lng || t?.longitude || t?.lng),
-      assetClass: normalized === 'unknown'
-        ? ((dealContext?.property_type || t?.property_type) === 'Multi-Family' ? 'multifamily' : 'single_family')
-        : normalized,
-      propertyType: String(dealContext?.property_type || t?.property_type || ''),
-      beds: asNumber(dp?.total_bedrooms || t?.total_bedrooms || t?.beds),
-      baths: asNumber(dp?.total_baths || t?.total_baths || t?.baths),
-      sqft: asNumber(dp?.building_square_feet || t?.building_square_feet || t?.sqft),
-      units: asNumber(dp?.units_count || t?.units_count),
-      yearBuilt: asNumber(dp?.year_built || t?.year_built),
-      condition: String(dp?.building_condition || t?.building_condition || 'Unknown'),
-      estimatedValue: asNumber(dp?.estimated_value || t?.estimated_value || t?.est_value)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, dp, dealContext?.propertyId, dealContext?.propertyAddress, dealContext?.latitude, dealContext?.longitude, dealContext?.property_type])
-
-  const hasCoords = Math.abs(subject.lat || 0) > 0.001 && Math.abs(subject.lng || 0) > 0.001
-
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
@@ -529,12 +587,74 @@ export function CompIntelligenceWorkspace({
   const [assetClass, setAssetClass] = useState<string | undefined>(subject.assetClass)
   const [sortBy, setSortBy] = useState<SortMode>('match')
   const [comps, setComps] = useState<CompCandidate[]>([])
-  const [loading, setLoading] = useState(false)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [openCompId, setOpenCompId] = useState<string | null>(null)
   const [expandedCompId, setExpandedCompId] = useState<string | null>(null)
   const [lastCalcTime, setLastCalcTime] = useState<Date | null>(null)
   const [activeSourceFilters, setActiveSourceFilters] = useState<string[]>([])
+  const {
+    propertyId,
+    subject: canonicalSubject,
+    coords,
+    hasCoords,
+    discovery,
+    valuation: pipelineValuation,
+    valuationState,
+    pipelineState,
+    loading,
+    error: pipelineError,
+  } = useCompIntelligence({
+    thread,
+    dealContext,
+    radius,
+    monthsBack,
+    assetClass,
+    paused,
+  })
+
+  const subject: Partial<CompCandidate> = useMemo(() => {
+    const rawAsset =
+      canonicalSubject?.asset_type?.value ||
+      dp?.normalized_asset_class ||
+      t?.normalized_asset_class ||
+      dealContext?.property_type ||
+      t?.property_type
+    const normalized = normalizeAssetClass(rawAsset)
+    return {
+      propertyId,
+      address: String(
+        canonicalSubject?.canonical_address?.value ||
+          dealContext?.propertyAddress ||
+          t?.propertyAddress ||
+          t?.property_address ||
+          t?.subject ||
+          'Subject Property',
+      ),
+      city: String(canonicalSubject?.city?.value || dp?.property_address_city || t?.property_city || t?.city || ''),
+      state: String(canonicalSubject?.state?.value || dp?.property_address_state || t?.property_state || t?.state || ''),
+      zip: String(canonicalSubject?.zip?.value || dp?.property_address_zip || t?.property_zip || t?.zip || ''),
+      lat: coords.lat ?? 0,
+      lng: coords.lng ?? 0,
+      assetClass:
+        normalized === 'unknown'
+          ? (dealContext?.property_type || t?.property_type) === 'Multi-Family'
+            ? 'multifamily'
+            : 'single_family'
+          : normalized,
+      propertyType: String(canonicalSubject?.property_type?.value || dealContext?.property_type || t?.property_type || ''),
+      beds: asNumber(canonicalSubject?.bedrooms?.value ?? dp?.total_bedrooms ?? t?.total_bedrooms ?? t?.beds),
+      baths: asNumber(canonicalSubject?.bathrooms?.value ?? dp?.total_baths ?? t?.total_baths ?? t?.baths),
+      sqft: asNumber(canonicalSubject?.square_feet?.value ?? dp?.building_square_feet ?? t?.building_square_feet ?? t?.sqft),
+      units: asNumber(canonicalSubject?.units?.value ?? dp?.units_count ?? t?.units_count),
+      yearBuilt: asNumber(canonicalSubject?.year_built?.value ?? dp?.year_built ?? t?.year_built),
+      condition: String(canonicalSubject?.condition?.value ?? dp?.building_condition ?? t?.building_condition ?? 'Unknown'),
+      estimatedValue: asNumber(canonicalSubject?.estimated_value?.value ?? dp?.estimated_value ?? t?.estimated_value ?? t?.est_value),
+      coordinateSource: coords.coordinate_source,
+      coordinateConfidence: coords.coordinate_confidence,
+      isMarketFallback: coords.is_market_fallback,
+    }
+  }, [canonicalSubject, coords, propertyId, dp, t, dealContext])
+
   const [valuationMode, setValuationMode] = useState<ValuationMode>(inferValuationMode(subject.assetClass as AssetClass))
 
   useEffect(() => {
@@ -543,101 +663,30 @@ export function CompIntelligenceWorkspace({
   }, [subject.propertyId, subject.assetClass])
 
   useEffect(() => {
-    let cancelled = false
-    const propertyId = subject.propertyId
-    const market = String(t?.market || subject.city || '')
-    const zip = String(t?.zip || t?.property_zip || subject.zip || '')
-
-    if (paused) return
-    if (!propertyId) {
+    if (!discovery?.candidates?.length) {
       setComps([])
       return
     }
+    dispatchSound('valuation_scan_completed', { count: discovery.candidates.length })
+    setComps(discovery.candidates.map((d, i) => mapEvidenceToCompCandidate(d, subject, i)))
+  }, [discovery, subject])
 
-    setLoading(true)
-    dispatchSound('valuation_scan_started')
-
-    const fetchPromise = hasCoords
-      ? loadSubjectComps(propertyId, radius, monthsBack, 100, { assetClass })
-      : loadMarketComps(market, zip, 100, { assetClass, monthsBack })
-
-    fetchPromise.then((data) => {
-      if (cancelled) return
-      setLoading(false)
-      dispatchSound('valuation_scan_completed', { count: data.length })
-
-      const mappedComps: CompCandidate[] = data.map((d, i) => {
-        const soldPrice = d.mls_sold_price || d.sale_price || 0
-        const soldDate = d.mls_sold_date || d.sale_date || null
-        let soldSource: CompCandidate['soldSource'] = 'UNKNOWN'
-        if (d.mls_sold_price || d.mls_sold_date) soldSource = 'MLS SOLD'
-        else if (d.sale_price || d.sale_date) soldSource = 'PUBLIC RECORD SOLD'
-
-        const c: Partial<CompCandidate> = {
-          id: d.property_id || `comp-${i}`,
-          propertyId: d.property_id,
-          address: d.property_address_full,
-          city: d.property_address_city,
-          state: d.property_address_state,
-          zip: d.property_address_zip,
-          soldPrice: soldPrice > 0 ? soldPrice : null,
-          soldDate,
-          soldSource,
-          sqft: d.building_square_feet || null,
-          beds: d.total_bedrooms || null,
-          baths: d.total_baths || null,
-          units: d.units_count || null,
-          yearBuilt: d.year_built || null,
-          condition: d.building_condition || d.renovation_level_classification || 'Unknown',
-          assetClass: normalizeAssetClass(d.normalized_asset_class || d.property_type),
-          propertyType: d.property_type,
-          constructionType: d.construction_type || null,
-          lotSizeAcres: null,
-          lat: d.latitude,
-          lng: d.longitude,
-          distanceMiles: d.distance_miles,
-          estimatedValue: d.estimated_value || null,
-          priceOffValue: d.price_off_value || null,
-          percentOff: d.percent_off || null,
-          ppsf: d.computed_ppsf || (soldPrice > 0 && d.building_square_feet ? Math.round(soldPrice / d.building_square_feet) : null),
-          ppu: d.ppu || (soldPrice > 0 && d.units_count && d.units_count > 1 ? Math.round(soldPrice / d.units_count) : null),
-          ppbd: d.ppbd || (soldPrice > 0 && d.total_bedrooms ? Math.round(soldPrice / d.total_bedrooms) : null),
-          sqftPerUnit: (d as any).sqft_per_unit || (d.building_square_feet && d.units_count ? Math.round(d.building_square_feet / d.units_count) : null),
-          bedsPerUnit: (d as any).beds_per_unit || (d.total_bedrooms && d.units_count ? Math.round((d.total_bedrooms / d.units_count) * 10) / 10 : null),
-          imageUrl: d.streetview_image || d.satellite_image || buildStreetViewUrl(d.property_address_full) || null,
-          zillowUrl: buildZillowUrl(d.property_address_full),
-          buyerType: d.buyer_type_label || null,
-          isCorporateBuyer: d.is_corporate_owner || false,
-          isInstitutionalBuyer: d.is_institutional_buyer || false,
-          institutionalMatchName: d.institutional_match_name || null,
-          confidenceScore: d.comp_confidence_score || null,
-          dealGrade: d.deal_grade || null,
-          excluded: false,
-          excludeReason: null,
-          arvWeight: 0,
-        }
-
-        const scoring = calculateCompMatchScore(c, subject)
-        return {
-          ...c,
-          compScore: scoring.score,
-          compMatchLabel: scoring.label,
-          reasoning: scoring.reasoning,
-          selected: scoring.score >= 70 && !!c.soldPrice && !scoring.reasoning.isOutlier
-        } as CompCandidate
-      })
-
-      setComps(mappedComps)
-    }).catch(err => {
-      console.error(err)
-      if (!cancelled) setLoading(false)
-    })
-
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject.propertyId, subject.lat, subject.lng, radius, monthsBack, assetClass, hasCoords, paused])
-
-  const arvStats = useMemo(() => computeArvStats(comps, subject), [comps, subject])
+  const arvStats = useMemo(() => {
+    const local = computeArvStats(comps, subject)
+    if (!pipelineValuation?.arv) return local
+    if (local) {
+      return {
+        ...local,
+        arv: pipelineValuation.arv,
+        confidence: pipelineValuation.confidence ?? local.confidence,
+        repairEstimate: pipelineValuation.repair_estimate ?? local.repairEstimate,
+        targetOffer: Number(pipelineValuation.outputs?.target_offer?.value ?? local.targetOffer),
+        maxAllowableOffer: Number(pipelineValuation.outputs?.max_allowable_offer?.value ?? local.maxAllowableOffer),
+        buyerExitPrice: Number(pipelineValuation.outputs?.investor_reality?.value ?? local.buyerExitPrice),
+      }
+    }
+    return local
+  }, [comps, subject, pipelineValuation])
 
   const finalComps = useMemo(() => {
     const active = comps.filter(c => c.selected && !c.excluded)
@@ -715,70 +764,6 @@ export function CompIntelligenceWorkspace({
     setComps(prev => prev.map(c => c.id === id ? { ...c, excluded: !c.excluded, selected: c.excluded ? true : false } : c))
     dispatchSound('comp_excluded')
   }, [])
-
-  const handleAction = async (action: string) => {
-    if (!subject.propertyId) return
-
-    try {
-      if (action === 'save_snapshot') {
-        if (!arvStats) return
-        const active = finalComps.filter(c => c.selected && !c.excluded)
-        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/valuation-snapshot`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            master_owner_id: String(t?.master_owner_id || ''),
-            valuation_type: valuationMode,
-            estimated_arv: arvStats.arv,
-            estimated_value: arvStats.arv,
-            arv_confidence_score: arvStats.confidence,
-            comp_confidence_score: arvStats.confidence,
-            median_sale_price: computeMedian(active.map(c => c.soldPrice || 0)),
-            median_ppsf: computeMedian(active.map(c => c.ppsf || 0)),
-            median_ppu: computeMedian(active.map(c => c.ppu || 0)),
-            low_value: arvStats.low,
-            high_value: arvStats.high,
-            repair_estimate: arvStats.repairEstimate,
-            conservative_offer: arvStats.conservativeOffer,
-            target_offer: arvStats.targetOffer,
-            max_allowable_offer: arvStats.maxAllowableOffer,
-            expected_assignment_low: arvStats.expectedAssignmentLow,
-            expected_assignment_high: arvStats.expectedAssignmentHigh,
-            buyer_exit_price: arvStats.buyerExitPrice,
-            buyer_demand_score: arvStats.buyerDemandScore,
-            included_comp_count: active.length,
-            excluded_comp_count: finalComps.filter(c => c.excluded).length,
-            radius_miles: radius,
-            lookback_months: monthsBack,
-            asset_class: assetClass,
-            included_comps: active.map(c => ({ id: c.id, score: c.compScore, weight: c.arvWeight })),
-            excluded_comps: finalComps.filter(c => c.excluded).map(c => ({ id: c.id, reason: c.excludeReason }))
-          })
-        })
-        const result = await response.json()
-        if (result.ok) dispatchSound('valuation_snapshot_saved')
-      }
-
-      if (action === 'push_underwriting') {
-        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/push-to-underwriting`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ thread_key: String(t?.thread_key || '') })
-        })
-        const result = await response.json()
-        if (result.ok) dispatchSound('underwriting_pushed')
-      }
-
-      if (action === 'buyer_match') {
-        const response = await fetch(`/api/cockpit/properties/${subject.propertyId}/run-buyer-match`, { method: 'POST' })
-        const result = await response.json()
-        if (result.ok) dispatchSound('buyer_match_started')
-      }
-    } catch (err) {
-      console.error('Action failed:', err)
-      dispatchSound('action_failed', { action })
-    }
-  }
 
   useEffect(() => {
     if (!mapRef.current || !hasCoords) return
@@ -883,7 +868,16 @@ export function CompIntelligenceWorkspace({
       <div className="ci-workspace__map-col">
         {hasCoords
           ? <div ref={mapRef} className="ci-map-canvas" />
-          : <div className="ci-map-canvas ci-map-no-coords-wrap"><span>No coordinates on file</span><p>Using market fallback for comp lookup.</p></div>
+          : <div className="ci-map-canvas ci-map-no-coords-wrap ci-map-resolution-state">
+              <span className="ci-map-resolution-state__title">Subject location unresolved</span>
+              <p>{coords.failure_reason || valuationState?.detail || 'Exact parcel coordinates are not available.'}</p>
+              {coords.is_market_fallback && (
+                <p className="ci-map-resolution-state__badge">Market-level search — no subject marker placed</p>
+              )}
+              {coords.coordinate_source && (
+                <p className="ci-map-resolution-state__meta">Source attempted: {coords.coordinate_source}</p>
+              )}
+            </div>
         }
 
         <MapCommandCenter
@@ -961,6 +955,7 @@ export function CompIntelligenceWorkspace({
               lastCalcTime={lastCalcTime}
               isMF={isMF}
               evidenceSummary={evidenceSummary}
+              pipelineState={pipelineState}
             />
 
             <EvidenceQualityStrip summary={evidenceSummary} arvStats={arvStats} />
@@ -983,10 +978,12 @@ export function CompIntelligenceWorkspace({
               />
             )}
 
-            <StickyValuationActions
-              arvStats={arvStats}
-              onAction={handleAction}
-              canPush={!!arvStats && !hasSubjectDataGap}
+            <ValuationPipelineStatus
+              pipelineState={pipelineState}
+              valuationState={valuationState}
+              pipelineError={pipelineError}
+              discovery={discovery}
+              coords={coords}
             />
 
             {sortedComps.length > 0 && (
@@ -1146,6 +1143,14 @@ function DossierHeader({ subject, radius, monthsBack, evidenceSummary, arvStats 
         <span className="ci-status-chip is-info">{monthsBack}mo lookback</span>
         <span className="ci-status-chip is-info">{evidenceSummary.totalCount} comps</span>
         <span className="ci-status-chip is-info">{evidenceSummary.includedCount} included</span>
+        {(subject as Partial<CompCandidate> & { coordinateSource?: string }).coordinateSource && (
+          <span className="ci-status-chip is-info">
+            {(subject as Partial<CompCandidate> & { coordinateSource?: string }).coordinateSource}
+          </span>
+        )}
+        {(subject as Partial<CompCandidate> & { isMarketFallback?: boolean }).isMarketFallback && (
+          <span className="ci-status-chip is-warn">Market search</span>
+        )}
         {(hasIncompleteData || hasNoUnits) && <span className="ci-status-chip is-warn">Incomplete Data</span>}
         {!subject.sqft && !hasNoUnits && <span className="ci-status-chip is-warn">Sqft Missing</span>}
         {hasNoUnits && <span className="ci-status-chip is-warn">Units Missing</span>}
@@ -1226,7 +1231,7 @@ function ValuationCommandBar({
   )
 }
 
-function ValuationHeroCard({ arvStats, displayArv, comps, subject, lastCalcTime, isMF, evidenceSummary }: {
+function ValuationHeroCard({ arvStats, displayArv, comps, subject, lastCalcTime, isMF, evidenceSummary, pipelineState }: {
   arvStats: ArvStats | null
   displayArv: number
   comps: CompCandidate[]
@@ -1234,6 +1239,7 @@ function ValuationHeroCard({ arvStats, displayArv, comps, subject, lastCalcTime,
   lastCalcTime: Date | null
   isMF: boolean
   evidenceSummary: EvidenceSummary
+  pipelineState: string
 }) {
   const active = comps.filter(c => c.selected && !c.excluded)
   const total = comps.length
@@ -1257,10 +1263,10 @@ function ValuationHeroCard({ arvStats, displayArv, comps, subject, lastCalcTime,
             </>
           ) : (
             <>
-              <div className="ci-arv-value is-pending">Pending</div>
+              <div className="ci-arv-value is-pending">{pipelineStateLabel(pipelineState)}</div>
               <span className="ci-arv-status-label">
                 {hasPending ? 'Needs subject sqft · ' : ''}
-                {active.length === 0 ? '0 included comps' : 'Computing...'}
+                {active.length === 0 ? '0 included comps' : pipelineStateLabel(pipelineState)}
               </span>
             </>
           )}
@@ -1439,27 +1445,44 @@ function SubjectDataGapAlert({ message }: { message: string }) {
   )
 }
 
-function StickyValuationActions({ arvStats, onAction, canPush }: {
-  arvStats: ArvStats | null
-  onAction: (action: string) => void
-  canPush: boolean
+function ValuationPipelineStatus({
+  pipelineState,
+  valuationState,
+  pipelineError,
+  discovery,
+  coords,
+}: {
+  pipelineState: string
+  valuationState: { state?: string; label?: string; detail?: string } | null
+  pipelineError: string | null
+  discovery: { relaxations?: Array<Record<string, unknown>>; is_market_fallback?: boolean } | null
+  coords: { coordinate_source?: string; coordinate_confidence?: number; is_market_fallback?: boolean }
 }) {
+  const label = valuationState?.label || pipelineStateLabel(pipelineState)
+  const detail = pipelineError || valuationState?.detail || null
+  const lastRelaxation = discovery?.relaxations?.[discovery.relaxations.length - 1]
+
   return (
-    <div className="ci-deal-actions ci-deal-actions--sticky">
-      <button
-        type="button"
-        className="ci-deal-btn is-primary"
-        disabled={!arvStats}
-        onClick={() => onAction('save_snapshot')}
-      >
-        Save Valuation Snapshot
-      </button>
-      <div className="ci-deal-btn-grid">
-        <button type="button" className="ci-deal-btn" disabled={!canPush} onClick={() => onAction('push_underwriting')}>Push to Underwriting</button>
-        <button type="button" className="ci-deal-btn" onClick={() => onAction('buyer_match')}>Run Buyer Match</button>
-        <button type="button" className="ci-deal-btn" onClick={() => onAction('seller_reply')}>Gen Seller Reply</button>
-        <button type="button" className="ci-deal-btn" onClick={() => onAction('mark_hot')}>Mark Hot Deal</button>
+    <div className={`ci-pipeline-status is-${pipelineState}`}>
+      <div className="ci-pipeline-status__head">
+        <span className="ci-pipeline-status__label">{label}</span>
+        {coords.coordinate_confidence ? (
+          <span className="ci-pipeline-status__meta">Location confidence {coords.coordinate_confidence}%</span>
+        ) : null}
       </div>
+      {detail && <p className="ci-pipeline-status__detail">{detail}</p>}
+      {discovery?.is_market_fallback && (
+        <p className="ci-pipeline-status__warn">Market-level comp search active — distance ranking unavailable.</p>
+      )}
+      {lastRelaxation && (
+        <p className="ci-pipeline-status__meta">
+          Search step: {String(lastRelaxation.step || 'unknown')}
+          {lastRelaxation.confidence_penalty ? ` · confidence penalty ${String(lastRelaxation.confidence_penalty)}` : ''}
+        </p>
+      )}
+      <p className="ci-pipeline-status__footnote">
+        Valuation snapshots persist automatically for the Acquisition Decision Engine.
+      </p>
     </div>
   )
 }

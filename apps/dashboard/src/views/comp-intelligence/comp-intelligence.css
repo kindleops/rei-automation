@@ -2229,10 +2229,79 @@
   gap: 8px;
 }
 
-/* Space for sticky action bar at the bottom of the list */
 .ci-list-section {
-  padding-bottom: 128px;
+  padding-bottom: 24px;
 }
+
+.ci-map-resolution-state {
+  padding: 32px 24px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(93, 220, 255, 0.08), transparent 55%),
+    #080e1c;
+}
+
+.ci-map-resolution-state__title {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.9);
+  margin-bottom: 8px;
+}
+
+.ci-map-resolution-state__badge,
+.ci-map-resolution-state__meta {
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+.ci-map-resolution-state__badge {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.ci-pipeline-status {
+  margin: 12px 14px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(8, 14, 28, 0.72);
+}
+
+.ci-pipeline-status__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.ci-pipeline-status__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.ci-pipeline-status__meta,
+.ci-pipeline-status__detail,
+.ci-pipeline-status__warn,
+.ci-pipeline-status__footnote {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.ci-pipeline-status__warn {
+  color: #fbbf24;
+}
+
+.ci-pipeline-status.is-ready .ci-pipeline-status__label { color: #34d399; }
+.ci-pipeline-status.is-ready_with_limitations .ci-pipeline-status__label { color: #fbbf24; }
+.ci-pipeline-status.is-blocked_insufficient_evidence .ci-pipeline-status__label,
+.ci-pipeline-status.is-error .ci-pipeline-status__label { color: #fb7185; }
 
 /* Only the --sticky modifier gets position:sticky — not every deal-actions */
 .ci-deal-actions--sticky {
@@ -2248,4 +2317,87 @@
 .ci-panel::before,
 .ci-panel::after {
   pointer-events: none;
+}
+
+/* Light theme — legible contrast, not washed out */
+[data-nexus-theme="light"] .ci-workspace {
+  --ci-text: #0f172a;
+  --ci-muted: rgba(51, 65, 85, 0.82);
+  --ci-faint: rgba(71, 85, 105, 0.72);
+  background:
+    radial-gradient(circle at 28% 18%, rgba(37, 99, 235, 0.06), transparent 28%),
+    linear-gradient(135deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
+  color: var(--ci-text);
+}
+
+[data-nexus-theme="light"] .ci-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,1)) !important;
+  color: #0f172a !important;
+  border-left: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-nexus-theme="light"] .ci-workspace select,
+[data-nexus-theme="light"] .ci-workspace input,
+[data-nexus-theme="light"] .ci-workspace button {
+  color: #0f172a;
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+[data-nexus-theme="light"] .ci-evidence-card,
+[data-nexus-theme="light"] .ci-valuation-hero,
+[data-nexus-theme="light"] .ci-subject-header,
+[data-nexus-theme="light"] .ci-pipeline-status,
+[data-nexus-theme="light"] .ci-agent-item,
+[data-nexus-theme="light"] .ci-waterfall,
+[data-nexus-theme="light"] .ci-command-bar {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: #0f172a;
+}
+
+[data-nexus-theme="light"] .ci-hero-metric__label,
+[data-nexus-theme="light"] .ci-ev-metric span,
+[data-nexus-theme="light"] .ci-arv-basis,
+[data-nexus-theme="light"] .ci-arv-status-label,
+[data-nexus-theme="light"] .ci-pipeline-status__meta,
+[data-nexus-theme="light"] .ci-pipeline-status__detail,
+[data-nexus-theme="light"] .ci-pipeline-status__footnote {
+  color: rgba(51, 65, 85, 0.82);
+}
+
+[data-nexus-theme="light"] .ci-arv-value,
+[data-nexus-theme="light"] .ci-ev-price,
+[data-nexus-theme="light"] .ci-subject-header__addr,
+[data-nexus-theme="light"] .ci-agent-name {
+  color: #0f172a;
+}
+
+[data-nexus-theme="light"] .ci-map-no-coords-wrap,
+[data-nexus-theme="light"] .ci-map-resolution-state {
+  background: #eef2ff;
+  color: #334155;
+}
+
+/* Red Ops theme */
+[data-nexus-theme="red_ops"] .ci-workspace {
+  background:
+    radial-gradient(circle at 24% 16%, rgba(255, 18, 18, 0.12), transparent 30%),
+    linear-gradient(135deg, #120404 0%, #1a0505 45%, #090202 100%);
+  color: rgba(255, 235, 235, 0.94);
+}
+
+[data-nexus-theme="red_ops"] .ci-panel {
+  background: linear-gradient(180deg, rgba(24, 4, 4, 0.98), rgba(10, 2, 2, 1)) !important;
+  color: rgba(255, 235, 235, 0.94) !important;
+}
+
+[data-nexus-theme="red_ops"] .ci-valuation-hero,
+[data-nexus-theme="red_ops"] .ci-evidence-card,
+[data-nexus-theme="red_ops"] .ci-pipeline-status {
+  border-color: rgba(255, 60, 60, 0.22);
+}
+
+[data-nexus-theme="red_ops"] .ci-pipeline-status.is-ready .ci-pipeline-status__label {
+  color: #ff8f8f;
 }
