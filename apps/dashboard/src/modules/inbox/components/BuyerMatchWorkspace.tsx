@@ -11,14 +11,6 @@ import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import type { DealContext } from '../../../lib/data/dealContext'
-import { resolveCoordinatesFromContext } from '../../../domain/comp-intelligence/coordinate-resolver'
-import {
-  sanitizeBuyerMatchError,
-  classifyBuyerMatchErrorCode,
-  makeStructuredEvent,
-  dedupeStructuredEvents,
-  type StructuredBuyerMatchEvent,
-} from '../../../domain/buyer/buyer-match-errors'
 import '../buyer-match-workspace.css'
 
 const IS_DEV = import.meta.env.DEV
@@ -204,9 +196,6 @@ interface DealMemoryEvent {
   action: string
   result: string
   source: string
-  error_code?: string | null
-  retryable?: boolean
-  structured?: boolean
 }
 
 export interface BuyerMatchWorkspaceProps {
@@ -281,45 +270,11 @@ function emitHook(event: string, detail?: Record<string, unknown>) {
   }
 }
 
-function makeDealEvent(
-  icon: string,
-  action: string,
-  result: string,
-  source: string,
-  extra: Partial<DealMemoryEvent> = {},
-): DealMemoryEvent {
+function makeDealEvent(icon: string, action: string, result: string, source: string): DealMemoryEvent {
   return {
     id: Math.random().toString(36).slice(2),
     timestamp: new Date().toISOString(),
-    icon,
-    action,
-    result: sanitizeBuyerMatchError(result),
-    source,
-    structured: true,
-    ...extra,
-  }
-}
-
-function structuredToDealEvent(ev: StructuredBuyerMatchEvent): DealMemoryEvent {
-  const iconMap: Record<string, string> = {
-    buyer_match_requested: '🎯',
-    subject_resolved: '📍',
-    match_completed: '✅',
-    match_completed_with_limitations: '⚠️',
-    match_blocked: '⛔',
-    match_failed: '❌',
-    purchase_graph_loaded: '📊',
-  }
-  return {
-    id: ev.id,
-    timestamp: ev.timestamp,
-    icon: iconMap[ev.event_type] ?? '•',
-    action: ev.event_type.replace(/_/g, ' '),
-    result: ev.message,
-    source: 'Buyer Match Engine',
-    error_code: ev.error_code ?? null,
-    retryable: ev.retryable,
-    structured: true,
+    icon, action, result, source,
   }
 }
 
@@ -401,7 +356,7 @@ function BuyerDemandPulseCard({ score, entityCount, matchCount, running, hasData
             Dormant Scanner
           </div>
           <div className="aic-demand-idle__title">Intelligence Locked</div>
-          <div className="aic-demand-idle__sub">Buyer match runs automatically when a property is selected:</div>
+          <div className="aic-demand-idle__sub">Run Buyer Match to unlock:</div>
           <ul className="aic-demand-idle__list aic-demand-idle__list--icons">
             <li><span className="aic-demand-idle__list-icon">🎯</span>Top buyers by match grade</li>
             <li><span className="aic-demand-idle__list-icon">📊</span>Demand score &amp; liquidity rating</li>
@@ -1417,9 +1372,9 @@ function BuyersTab({
                     </div>
                   ))}
                 </div>
-                <div className="aic-auto-status__sub" style={{ marginTop: 8 }}>
-                  {running ? 'Building purchase graph…' : 'Buyer graph builds automatically on property selection.'}
-                </div>
+                <button className="aic-cmd-btn" onClick={runMatch} disabled={running} style={{ maxWidth: 220, marginTop: 4 }}>
+                  {running ? '⟳ Building…' : '⚡ Build Buyer Graph'}
+                </button>
               </div>
             </div>
           )}
@@ -1448,10 +1403,8 @@ function BuyersTab({
           {!loading && hasEntityGraph && filteredCandidates.length === 0 && !running && (
             <div className="aic-empty">
               <div className="aic-empty__icon">🎯</div>
-              <div className="aic-empty__title">No Matching Buyers</div>
-              <div className="aic-empty__desc">
-                {fmtNum(demandStats?.entity_count)} entities evaluated — none matched current filters.
-              </div>
+              <div className="aic-empty__title">Run Buyer Match</div>
+              <div className="aic-empty__desc">Score {fmtNum(demandStats?.entity_count)} buyer entities against this property.</div>
             </div>
           )}
 
@@ -1656,12 +1609,8 @@ function HistoryTab({ runs, dealEvents }: { runs: MatchRun[]; dealEvents: DealMe
                   <div className="aic-deal-event__icon">{ev.icon}</div>
                   <div className="aic-deal-event__body">
                     <div className="aic-deal-event__action">{ev.action}</div>
-                  <div className="aic-deal-event__result">{ev.result}</div>
-                  <div className="aic-deal-event__meta">
-                    {ev.source} · {fmtDate(ev.timestamp)}
-                    {ev.error_code ? ` · ${ev.error_code}` : ''}
-                    {ev.retryable === false ? ' · non-retryable' : ev.retryable ? ' · retryable' : ''}
-                  </div>
+                    <div className="aic-deal-event__result">{ev.result}</div>
+                    <div className="aic-deal-event__meta">{ev.source} · {fmtDate(ev.timestamp)}</div>
                   </div>
                   <div className="aic-deal-event__time">{fmtDaysAgo(ev.timestamp)}</div>
                 </motion.div>
@@ -1717,22 +1666,21 @@ function NextBestActionCard({ hasData, demandScore, matchCount, runMatch, runnin
         transition={{ duration: 0.2 }}
       >
         <div className="aic-nba-card__top">
-          <span className="aic-nba-card__tag">Auto Pipeline</span>
-          <span className="aic-nba-card__title">{running ? 'Buyer Match Running' : 'Buyer Match Queued'}</span>
+          <span className="aic-nba-card__tag">Priority Action</span>
+          <span className="aic-nba-card__title">Run Buyer Match</span>
         </div>
-        <div className="aic-nba-card__reason">
-          {running
-            ? 'Evaluating purchase graph, buy boxes, and match scores.'
-            : 'Buyer demand and liquidity publish automatically when matching completes.'}
-        </div>
+        <div className="aic-nba-card__reason">Offer confidence is limited — buyer demand and liquidity are locked.</div>
         <div className="aic-nba-unlocks">
-          <span className="aic-nba-unlocks__label">Publishing</span>
+          <span className="aic-nba-unlocks__label">Unlocks</span>
           <div className="aic-nba-unlocks__chips">
             {['Exit range', 'Liquidity score', 'Buyer list', 'Institutional signals', 'Dispo timeline'].map(u => (
               <span key={u} className="aic-nba-unlock-chip">{u}</span>
             ))}
           </div>
         </div>
+        <button className="aic-cmd-btn" onClick={runMatch} disabled={running}>
+          {running ? '⟳ Scanning…' : '⚡ Run Buyer Match'}
+        </button>
       </motion.div>
     )
   }
@@ -1763,16 +1711,16 @@ function NextBestActionCard({ hasData, demandScore, matchCount, runMatch, runnin
       transition={{ duration: 0.2 }}
     >
       <div className="aic-nba-card__top">
-        <span className="aic-nba-card__tag is-go">Disposition Signal</span>
-        <span className="aic-nba-card__title">Buyer Demand Published</span>
+        <span className="aic-nba-card__tag is-go">Next Step</span>
+        <span className="aic-nba-card__title">{isHighLiquidity ? 'Push to Underwriting' : 'Generate Offer'}</span>
       </div>
       <div className="aic-nba-card__reason">
         {isHighLiquidity
-          ? `Strong liquidity — ${matchCount} buyers matched. Acquisition engine can consume demand score ${demandScore ?? '—'}.`
-          : `${matchCount} buyers matched. Review offer evidence before committing.`}
+          ? `ARV and buyer demand support an actionable offer range. ${matchCount} buyers matched.`
+          : `Buyer demand confirmed with ${matchCount} buyers. Ready for offer generation.`}
       </div>
-      <button className="aic-cmd-btn is-ghost" onClick={() => setActiveTab('offer')}>
-        View Offer Evidence →
+      <button className="aic-cmd-btn is-offer" onClick={() => setActiveTab(isHighLiquidity ? 'offer' : 'offer')}>
+        {isHighLiquidity ? 'Push to Underwriting' : 'Generate Offer →'}
       </button>
     </motion.div>
   )
@@ -2174,26 +2122,24 @@ function PropertyIntelSidebar({ propertySnapshot: ps, running, hasData, demandSc
           noDataReason={noDataReason}
         />
 
-        <div className="aic-blade-label">Automation</div>
+        <div className="aic-blade-label">Command</div>
 
-        <div className="aic-auto-status">
-          <div className={`aic-auto-status__dot ${running ? 'is-scanning' : hasData ? 'is-ready' : 'is-pending'}`} />
-          <div className="aic-auto-status__body">
-            <div className="aic-auto-status__title">
-              {running ? 'Matching in progress…' : hasData ? 'Buyer match active' : 'Scheduling buyer match…'}
-            </div>
-            <div className="aic-auto-status__sub">
-              Runs automatically on property selection. Offer engine consumes demand output.
-            </div>
-          </div>
+        <div className="aic-cmd-btns">
           <button
-            type="button"
-            className="aic-diag-refresh"
+            className={`aic-cmd-btn${running ? ' is-running' : ''}`}
             disabled={running || !ps.property_id}
             onClick={runMatch}
-            title="Recalculate buyer match"
           >
-            {running ? '⟳' : '↻'}
+            {running ? <><span style={{ animation: 'aic-pulse 1s linear infinite', display: 'inline-block' }}>⟳</span> Scanning…</>
+              : hasData ? <><Icon name="refresh-cw" size={13} /> Rerun Match</>
+              : <><Icon name="zap" size={13} /> Run Buyer Match</>}
+          </button>
+
+          <button
+            className="aic-cmd-btn is-offer"
+            onClick={() => setActiveTab('offer')}
+          >
+            <Icon name="dollar-sign" size={13} /> Generate Offer
           </button>
         </div>
 
@@ -2244,44 +2190,11 @@ export function BuyerMatchWorkspace({
 
   const { property_id, address, market, zip, state, county, property_type, asset_class, estimated_value } = propertySnapshot
 
-  const resolvedCoords = resolveCoordinatesFromContext({
-    dealContext: dealContext as Record<string, unknown> | null,
-    property: dealContext?.property as Record<string, unknown> | undefined,
-  })
-  const lat = resolvedCoords.latitude
-  const lng = resolvedCoords.longitude
-  const coordsResolved = resolvedCoords.is_subject_resolved
-  const autoRunRef = useRef<string | null>(null)
+  const lat = dealContext?.latitude || null
+  const lng = dealContext?.longitude || null
 
-  useEffect(() => {
-    autoRunRef.current = null
-  }, [property_id])
-
-  const addDealEvent = useCallback((
-    icon: string,
-    action: string,
-    result: string,
-    source: string,
-    extra: Partial<DealMemoryEvent> = {},
-  ) => {
-    setDealEvents(prev => {
-      const next = [makeDealEvent(icon, action, result, source, extra), ...prev]
-      return next.slice(0, 40)
-    })
-  }, [])
-
-  const addStructuredEvents = useCallback((events: StructuredBuyerMatchEvent[]) => {
-    const mapped = dedupeStructuredEvents(events).map(structuredToDealEvent)
-    setDealEvents(prev => {
-      const merged = [...mapped, ...prev.filter(e => !e.structured)]
-      const seen = new Set<string>()
-      return merged.filter(e => {
-        const key = `${e.action}:${e.error_code ?? ''}:${e.result}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      }).slice(0, 40)
-    })
+  const addDealEvent = useCallback((icon: string, action: string, result: string, source: string) => {
+    setDealEvents(prev => [makeDealEvent(icon, action, result, source), ...prev])
   }, [])
 
   // Load initial data: run history, entity count, demand rollup, comps
@@ -2361,8 +2274,8 @@ export function BuyerMatchWorkspace({
           { label: 'zip_asset', build: async () => {
             if (!resolvedZip || !resolvedAsset) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,normalized_asset_class,is_corporate_buyer,buyer_type')
-              .eq('property_zip', resolvedZip)
+              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,normalized_asset_class,is_corporate_buyer,buyer_type')
+              .eq('property_address_zip', resolvedZip)
               .not('purchase_price', 'is', null)
               .limit(500)
             return data ?? []
@@ -2370,8 +2283,8 @@ export function BuyerMatchWorkspace({
           { label: 'zip', build: async () => {
             if (!resolvedZip) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,is_corporate_buyer,buyer_type')
-              .eq('property_zip', resolvedZip)
+              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,is_corporate_buyer,buyer_type')
+              .eq('property_address_zip', resolvedZip)
               .not('purchase_price', 'is', null)
               .limit(500)
             return data ?? []
@@ -2379,7 +2292,7 @@ export function BuyerMatchWorkspace({
           { label: 'market_asset', build: async () => {
             if (!resolvedMarket || resolvedMarket === 'Market Unknown') return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,property_type,is_corporate_buyer,buyer_type')
+              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,property_type,is_corporate_buyer,buyer_type')
               .eq('market', resolvedMarket)
               .not('purchase_price', 'is', null)
               .limit(500)
@@ -2388,7 +2301,7 @@ export function BuyerMatchWorkspace({
           { label: 'market', build: async () => {
             if (!resolvedMarket || resolvedMarket === 'Market Unknown') return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,is_corporate_buyer,buyer_type')
+              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,is_corporate_buyer,buyer_type')
               .eq('market', resolvedMarket)
               .not('purchase_price', 'is', null)
               .limit(500)
@@ -2397,8 +2310,8 @@ export function BuyerMatchWorkspace({
           { label: 'state_asset', build: async () => {
             if (!resolvedState) return []
             const { data } = await supabase.from('buyer_purchase_events_v2')
-              .select('buyer_key,buyer_entity_id,purchase_price,purchase_date,is_corporate_buyer,buyer_type')
-              .eq('property_state', resolvedState)
+              .select('buyer_key,buyer_entity_id,purchase_price,sale_date,is_corporate_buyer,buyer_type')
+              .eq('property_address_state', resolvedState)
               .not('purchase_price', 'is', null)
               .limit(300)
             return data ?? []
@@ -2472,19 +2385,19 @@ export function BuyerMatchWorkspace({
         // Also pull from buyer purchase events as additional comps
         if (comps.length < 5 && resolvedZip) {
           const { data: evComps } = await supabase.from('buyer_purchase_events_v2')
-            .select('property_address_full,property_city,property_state,property_zip,purchase_price,purchase_date,sqft,property_type,latitude,longitude')
-            .eq('property_zip', resolvedZip)
+            .select('property_address_full,property_city,property_address_state,property_address_zip,purchase_price,sale_date,sqft,property_type,latitude,longitude')
+            .eq('property_address_zip', resolvedZip)
             .not('purchase_price', 'is', null)
-            .order('purchase_date', { ascending: false })
+            .order('sale_date', { ascending: false })
             .limit(20)
           if (evComps && evComps.length > 0) {
             const evMapped: RealComp[] = evComps.map((c: any) => ({
               id: String(Math.random()),
               address: c.property_address_full || 'Unknown',
-              city: c.property_city, state: c.property_state,
-              zip: c.property_zip,
+              city: c.property_city, state: c.property_address_state,
+              zip: c.property_address_zip,
               sold_price: c.purchase_price,
-              sold_date: c.purchase_date,
+              sold_date: c.sale_date,
               beds: c.beds, baths: c.baths,
               sqft: c.sqft,
               ppsf: (c.purchase_price && c.sqft) ? Math.round(c.purchase_price / c.sqft) : undefined,
@@ -2510,8 +2423,8 @@ export function BuyerMatchWorkspace({
               persist: false,
               subject: {
                 property_id, address,
-                lat: lat ?? null,
-                lng: lng ?? null,
+                lat: dealContext?.latitude ?? null,
+                lng: dealContext?.longitude ?? null,
                 zip: resolvedZip || null,
                 market: resolvedMarket || null,
                 state: resolvedState || null,
@@ -2584,7 +2497,7 @@ export function BuyerMatchWorkspace({
         const dbg: DebugData = {
           property_id, address, zip: resolvedZip, market: resolvedMarket,
           county: county || '', asset_class: resolvedAsset,
-          lat: lat ?? null, lng: lng ?? null,
+          lat: dealContext?.latitude || null, lng: dealContext?.longitude || null,
           demand_rollup_rows: rollupRows, demand_source: rollup ? `${rollup.source}/${fallbackLevel}` : 'none',
           comp_rows: compRows, buyer_match_candidate_rows: 0,
           valuation_snapshot: false, match_run_rows: runsList.length, entity_count,
@@ -2600,7 +2513,7 @@ export function BuyerMatchWorkspace({
           console.log('address:', address)
           console.log('zip:', resolvedZip, '| market:', resolvedMarket, '| state:', resolvedState)
           console.log('asset_class:', resolvedAsset)
-          console.log('lat/lng:', lat, lng, 'resolved:', coordsResolved)
+          console.log('lat/lng:', dealContext?.latitude, dealContext?.longitude)
           console.log('match_run_rows:', runsList.length)
           console.log('entity_count:', entity_count)
           console.log('demand_rollup:', rollup ? `${rollup.purchase_count} events via ${fallbackLevel}` : 'none')
@@ -2614,7 +2527,7 @@ export function BuyerMatchWorkspace({
 
     void load()
     return () => { active = false }
-  }, [property_id, paused, dealContext?.market, lat, lng, market, zip, state, county, asset_class, property_type, address, coordsResolved])
+  }, [property_id, paused, dealContext?.market, dealContext?.latitude, dealContext?.longitude, market, zip, state, county, asset_class, property_type, address])
 
   // Load candidates from last run (uses API route — service role, correct schema)
   useEffect(() => {
@@ -2643,8 +2556,8 @@ export function BuyerMatchWorkspace({
         const supabase = getSupabaseClient()
         const { data } = await supabase.from('buyer_match_candidates')
           .select('*, buyer_entities_v2(*)')
-          .eq('buyer_match_run_id', latestRun.run_id)
-          .order('match_score', { ascending: false })
+          .eq('run_id', latestRun.run_id)
+          .order('total_match_score', { ascending: false })
           .limit(150)
         if (!active || !data) return
         const merged = data.map((c: any) => ({ ...c.buyer_entities_v2, ...c, buyer_match_candidate_id: c.id || c.buyer_match_candidate_id }))
@@ -2702,20 +2615,7 @@ export function BuyerMatchWorkspace({
     setNoDataReason(null)
     setIntelState(s => ({ ...s, buyer_match_status: 'scanning', active_run_step: BUYER_MATCH_STEPS[0] }))
     emitHook('buyer_match_started', { property_id })
-    addStructuredEvents([
-      makeStructuredEvent('buyer_match_requested', `Evaluating buyers for property ${property_id}`, {
-        state: 'scanning',
-        counts: { entity_count: demandStats?.entity_count ?? 0 },
-        model_version: 'buyer_match_v2.1',
-      }),
-      ...(coordsResolved
-        ? [makeStructuredEvent('subject_resolved', 'Subject coordinates resolved', { state: 'resolving_subject' })]
-        : [makeStructuredEvent('match_blocked', 'Coordinates unavailable — geospatial matching limited', {
-            state: 'blocked',
-            error_code: 'coordinates_unavailable',
-            retryable: false,
-          })]),
-    ])
+    addDealEvent('🎯', 'Buyer Match Started', `Scanning ${demandStats?.entity_count ?? 0} buyer entities`, 'Buyer Match Agent')
 
     let stepIdx = 0
     const stepTimer = setInterval(() => {
@@ -2733,8 +2633,8 @@ export function BuyerMatchWorkspace({
           method: 'POST',
           body: JSON.stringify({
             address,
-            lat: lat ?? null,
-            lng: lng ?? null,
+            lat: dealContext?.latitude ?? null,
+            lng: dealContext?.longitude ?? null,
             market: market || null,
             zip: zip || null,
             state: state || null,
@@ -2748,10 +2648,7 @@ export function BuyerMatchWorkspace({
       )
       clearInterval(stepTimer)
 
-      if (!apiResult.ok) {
-        const code = (apiResult as { error_code?: string }).error_code ?? classifyBuyerMatchErrorCode(apiResult.message)
-        throw Object.assign(new Error(sanitizeBuyerMatchError(apiResult.message || 'run_failed')), { code })
-      }
+      if (!apiResult.ok) throw new Error(apiResult.message || 'run_failed')
 
       const { run_id, buyer_count, candidates: candidatesList } = apiResult.data
       const resolvedCandidates = candidatesList || []
@@ -2822,20 +2719,9 @@ export function BuyerMatchWorkspace({
           `asset_class: ${asset_class || property_type || '(empty)'}`,
           'Suggested: expand asset class filter or run market-level search',
         ])
-        addStructuredEvents([
-          makeStructuredEvent('match_completed_with_limitations', 'No buyers matched current filters', {
-            state: 'completed_with_limitations',
-            counts: { candidates: 0, entity_count: demandStats?.entity_count ?? 0 },
-          }),
-        ])
+        addDealEvent('⚠️', 'Buyer Match Low Data', 'RPC returned 0 candidates — check filters', 'Buyer Match Agent')
       } else {
-        addStructuredEvents([
-          makeStructuredEvent('match_completed', `${resolvedCandidates.length} buyers matched`, {
-            state: 'completed',
-            counts: { candidates: resolvedCandidates.length, demand_score: computedDemandScore },
-            model_version: (apiData as { model_version?: string }).model_version ?? 'buyer_match_v2.1',
-          }),
-        ])
+        addDealEvent('✅', 'Buyer Match Completed', `${resolvedCandidates.length} buyers matched · demand score ${computedDemandScore ?? '—'}`, 'Buyer Match Agent')
       }
 
       emitHook('buyer_match_completed', { property_id, count: resolvedCandidates.length, demand_score: computedDemandScore })
@@ -2853,45 +2739,14 @@ export function BuyerMatchWorkspace({
       clearInterval(stepTimer)
       console.warn('[BuyerMatchWorkspace] runMatch error:', err)
       setIntelState(s => ({ ...s, buyer_match_status: 'failed', active_run_step: null }))
-      const errCode = (err as { code?: string })?.code ?? classifyBuyerMatchErrorCode(err)
-      setNoDataReason([
-        sanitizeBuyerMatchError(err),
-        `zip: ${zip || '(empty)'}`,
-        `market: ${market || '(empty)'}`,
-        `coordinates: ${coordsResolved ? 'resolved' : 'unavailable'}`,
-      ])
-      addStructuredEvents([
-        makeStructuredEvent('match_failed', sanitizeBuyerMatchError(err), {
-          state: 'failed',
-          error_code: errCode,
-          retryable: errCode !== 'coordinates_unavailable' && errCode !== 'property_not_found',
-        }),
-      ])
-      emitHook('buyer_match_failed', { property_id, error_code: errCode })
+      setNoDataReason([`Error: ${String(err)}`, `zip: ${zip || '(empty)'}`, `market: ${market || '(empty)'}`])
+      addDealEvent('❌', 'Buyer Match Failed', String(err), 'Buyer Match Agent')
+      emitHook('buyer_match_failed', { property_id, error: String(err) })
     } finally {
       setRunning(false)
       setLoading(false)
     }
-  }, [property_id, market, zip, state, county, asset_class, property_type, estimated_value, running, demandStats?.entity_count, addStructuredEvents, coordsResolved, lat, lng, address])
-
-  // Auto-run: load cached results on select; schedule match when missing or stale
-  useEffect(() => {
-    if (!property_id || paused || running) return
-    if (autoRunRef.current === property_id) return
-
-    const staleMs = 6 * 60 * 60 * 1000
-    const isStale = latestRun
-      ? Date.now() - new Date(latestRun.created_at).getTime() > staleMs
-      : true
-    const needsRun = candidates.length === 0 && (isStale || !latestRun)
-
-    if (needsRun) {
-      autoRunRef.current = property_id
-      const timer = window.setTimeout(() => { void runMatch() }, 400)
-      return () => window.clearTimeout(timer)
-    }
-    autoRunRef.current = property_id
-  }, [property_id, paused, running, latestRun, candidates.length, runMatch])
+  }, [property_id, market, zip, state, county, asset_class, property_type, estimated_value, running, demandStats?.entity_count, addDealEvent])
 
   const updateCandidateStatus = useCallback(async (id: string | undefined, updates: Record<string, unknown>) => {
     if (!id) return

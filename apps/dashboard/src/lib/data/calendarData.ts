@@ -3,7 +3,7 @@ import { fetchCalendarNexus } from '../calendar/calendar-api'
 import { dayRangeIso, monthRangeIso, weekRangeIso } from '../calendar/calendar-date-engine'
 import type { CalendarLayerId } from '../calendar/calendar-layers'
 import { getSupabaseClient } from '../supabaseClient'
-import { asBoolean, asIso, asString, getFirst, mapErrorMessage, normalizeStatus, safeArray, type AnyRecord } from './shared'
+import { asIso, asString, getFirst, mapErrorMessage, normalizeStatus, safeArray, type AnyRecord } from './shared'
 
 export type CalendarViewMode = 'day' | 'week' | 'month' | 'agenda' | 'timeline'
 export type CalendarScopeMode = 'global' | 'selected'

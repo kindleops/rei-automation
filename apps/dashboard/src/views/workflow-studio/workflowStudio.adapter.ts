@@ -28,105 +28,22 @@ import type {
   WorkflowNodeTypesResponse,
 } from './workflow.types'
 
-const WORKFLOW_ERROR_CODES: Record<string, string> = {
-  WORKFLOW_NOT_FOUND: 'Workflow could not be loaded.',
-  WORKFLOWS_LIST_FAILED: 'Workflow catalog could not be loaded.',
-  NODE_REGISTRY_UNAVAILABLE: 'Node registry is unavailable.',
-  WORKFLOW_GET_FAILED: 'Workflow detail could not be loaded.',
-}
-
-export class WorkflowApiRequestError extends Error {
-  readonly code: string
-  readonly status: number | null
-  readonly retryable: boolean
-
-  constructor(code: string, message: string, status: number | null = null, retryable = false) {
-    super(message)
-    this.name = 'WorkflowApiRequestError'
-    this.code = code
-    this.status = status
-    this.retryable = retryable
-  }
-}
-
 const unwrap = <T,>(result: BackendResult<T>): T => {
-  if (!result.ok) {
-    const code = String(result.error ?? 'WORKFLOW_REQUEST_FAILED')
-    const message = result.message || WORKFLOW_ERROR_CODES[code] || 'Workflow request failed'
-    throw new WorkflowApiRequestError(code, message, result.status ?? null, result.status >= 500)
-  }
+  if (!result.ok) throw new Error(result.message || result.error || 'Workflow request failed')
   return result.data as T
 }
 
-function normalizeWorkflowEnvelope<T extends Record<string, unknown>>(body: T): T {
-  if (body && typeof body === 'object' && body.data && typeof body.data === 'object') {
-    return body.data as T
-  }
-  return body
-}
-
-function toWorkflowApiError(err: unknown): WorkflowApiRequestError {
-  if (err instanceof WorkflowApiRequestError) return err
-  const raw = err instanceof Error ? err.message : String(err || 'Workflow request failed')
-  if (raw.includes('<!DOCTYPE') || raw.includes('<html')) {
-    return new WorkflowApiRequestError(
-      'WORKFLOW_API_HTML_ERROR',
-      'Workflow API returned an HTML error page.',
-      Number(raw.match(/\[(\d{3})\]/)?.[1] ?? null) || 500,
-      true,
-    )
-  }
-  const status = Number(raw.match(/\[(\d{3})\]/)?.[1] ?? null) || null
-  return new WorkflowApiRequestError('WORKFLOW_REQUEST_FAILED', raw, status, status === null || status >= 500)
-}
-
 const unwrapWorkflowResponse = <T,>(result: BackendResult<Record<string, unknown>>): T => {
-  const body = normalizeWorkflowEnvelope(unwrap(result as unknown as BackendResult<Record<string, unknown>>))
-  return body as T
+  return unwrap(result as unknown as BackendResult<T>)
 }
 
-const catalogCache = {
-  data: null as { workflows: Workflow[] } | null,
-  at: 0,
-}
-const detailCache = new Map<string, { data: WorkflowDetail; at: number }>()
-const nodeRegistryCache = new Map<string, { data: WorkflowNodeTypesResponse; at: number }>()
-const CACHE_TTL_MS = 5 * 60 * 1000
-
-export const loadWorkflowStudio = async (options: { force?: boolean; signal?: AbortSignal } = {}): Promise<{ workflows: Workflow[] }> => {
-  if (!options.force && catalogCache.data && Date.now() - catalogCache.at < CACHE_TTL_MS) {
-    return catalogCache.data
-  }
-  try {
-    const response = unwrapWorkflowResponse<{ workflows: Workflow[] }>(
-      await listWorkflowsBackend({ summary: true, include_stats: false }, options.signal),
-    )
-    const model = { workflows: response.workflows ?? [] }
-    catalogCache.data = model
-    catalogCache.at = Date.now()
-    return model
-  } catch (err) {
-    throw toWorkflowApiError(err)
-  }
+export const loadWorkflowStudio = async (): Promise<{ workflows: Workflow[] }> => {
+  const response = unwrapWorkflowResponse<{ ok: boolean; workflows: Workflow[] }>(await listWorkflowsBackend())
+  return { workflows: response.workflows ?? [] }
 }
 
-export const loadWorkflowDetail = async (
-  workflowId: string,
-  options: { force?: boolean; signal?: AbortSignal } = {},
-): Promise<WorkflowDetail> => {
-  const cached = detailCache.get(workflowId)
-  if (!options.force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return cached.data
-  }
-  try {
-    const detail = unwrapWorkflowResponse<WorkflowDetail>(
-      await getWorkflowBackend(workflowId, { include_analytics: false }, options.signal),
-    )
-    detailCache.set(workflowId, { data: detail, at: Date.now() })
-    return detail
-  } catch (err) {
-    throw toWorkflowApiError(err)
-  }
+export const loadWorkflowDetail = async (workflowId: string): Promise<WorkflowDetail> => {
+  return unwrapWorkflowResponse<WorkflowDetail>(await getWorkflowBackend(workflowId))
 }
 
 export const createWorkflowDraft = async (payload: Record<string, unknown>): Promise<WorkflowDetail> => {
@@ -293,29 +210,16 @@ export const mutateWorkflowGraph = async (
 export const listNodeTypes = async (
   grouped = true,
   includeInternal = false,
-  options: { force?: boolean } = {},
 ): Promise<WorkflowNodeTypesResponse> => {
-  const cacheKey = `${grouped}:${includeInternal}`
-  const cached = nodeRegistryCache.get(cacheKey)
-  if (!options.force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return cached.data
-  }
-
   const params = new URLSearchParams()
   if (!grouped) params.set('grouped', 'false')
   if (includeInternal) params.set('include_internal', 'true')
   const qs = params.toString() ? `?${params.toString()}` : ''
-  try {
-    const result = await callBackend<WorkflowNodeTypesResponse>(
-      `/api/cockpit/workflows/node-registry${qs}`,
-    )
-    const body = normalizeWorkflowEnvelope(unwrap(result as unknown as BackendResult<Record<string, unknown>>))
-    const payload = body as unknown as WorkflowNodeTypesResponse
-    nodeRegistryCache.set(cacheKey, { data: payload, at: Date.now() })
-    return payload
-  } catch (err) {
-    throw toWorkflowApiError(err)
-  }
+  const result = await callBackend<WorkflowNodeTypesResponse>(
+    `/api/cockpit/workflows/node-registry${qs}`,
+  )
+  if (!result.ok) throw new Error(result.message || result.error || 'Node registry load failed')
+  return result.data
 }
 
 export const cloneLegacyWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {

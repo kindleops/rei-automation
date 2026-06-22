@@ -98,6 +98,8 @@ export interface InboxAdvancedFilters {
   underwater?: boolean
   bigSpreadPotential?: boolean
   heavyRepairs?: boolean
+  taxDelinquent?: boolean
+  activeLien?: boolean
 
   // F) MOTIVATION / DISTRESS
   motivationMin?: number

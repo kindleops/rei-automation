@@ -72,9 +72,15 @@ export type EntitySearchResult = {
     portfolioEquity?: number
     occupation?: string
     language?: string
+    ownerName?: string
     age?: number
     reachable?: boolean
     contactStatus?: string
+    contactType?: string
+    phoneType?: string
+    eligibility?: string
+    reachability?: string
+    wrongNumber?: boolean
     entityType?: string
     lastActivity?: string
   }

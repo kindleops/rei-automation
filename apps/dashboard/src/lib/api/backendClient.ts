@@ -760,7 +760,7 @@ export function fetchEntityGraphDossier(
     case 'zip':
       return callBackend(`/api/cockpit/entity-graph/zip/${encodeURIComponent(id)}`, { signal })
     default:
-      return Promise.resolve({ ok: false, status: 400, error: 'unsupported_entity_type' })
+      return Promise.resolve({ ok: false, status: 400, error: 'unsupported_entity_type', message: 'unsupported_entity_type' })
   }
 }
 
@@ -1207,10 +1207,11 @@ export interface CampaignCommandSummaryResponse {
   state_label: string
   mode: string
   mode_label: string
+  readiness_label?: string
   counts: Record<string, number>
   blockers: string[]
   warnings: string[]
-  readiness: { level: string; blockers: string[]; warnings: string[]; blocker_codes?: string[] }
+  readiness: { level: string; label?: string; blockers: string[]; warnings: string[]; blocker_codes?: string[] }
   execution: Record<string, unknown>
   language_coverage: Array<{
     language: string
@@ -1262,16 +1263,8 @@ export function patchCampaignBackend(campaignId: string, payload: Record<string,
 
 type WorkflowBackendResponse = Record<string, unknown>
 
-export function listWorkflowsBackend(
-  params: { summary?: boolean; include_stats?: boolean; include_archived?: boolean } = {},
-  signal?: AbortSignal,
-): Promise<BackendResult<WorkflowBackendResponse>> {
-  const qs = new URLSearchParams()
-  if (params.summary === false) qs.set('summary', 'false')
-  if (params.include_stats) qs.set('include_stats', 'true')
-  if (params.include_archived) qs.set('include_archived', 'true')
-  const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows${suffix}`, { signal })
+export function listWorkflowsBackend(): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows')
 }
 
 export function createWorkflowBackend(payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
@@ -1281,18 +1274,8 @@ export function createWorkflowBackend(payload: Record<string, unknown>): Promise
   })
 }
 
-export function getWorkflowBackend(
-  workflowId: string,
-  params: { include_analytics?: boolean } = {},
-  signal?: AbortSignal,
-): Promise<BackendResult<WorkflowBackendResponse>> {
-  const qs = new URLSearchParams()
-  if (params.include_analytics) qs.set('include_analytics', 'true')
-  const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  return callBackend<WorkflowBackendResponse>(
-    `/api/cockpit/workflows/${encodeURIComponent(workflowId)}${suffix}`,
-    { signal },
-  )
+export function getWorkflowBackend(workflowId: string): Promise<BackendResult<WorkflowBackendResponse>> {
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/${encodeURIComponent(workflowId)}`)
 }
 
 export function patchWorkflowBackend(workflowId: string, payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
@@ -1438,7 +1421,7 @@ export interface QueueBatchResponse {
 // server-side; the client only supplies operator intent + pacing.
 export function queueCampaignBatch(
   campaignId: string,
-  payload: { limit?: number; interval_seconds?: number; respect_send_window?: boolean } = {},
+  payload: { limit?: number; interval_seconds?: number; respect_send_window?: boolean; no_send?: boolean; confirm_live?: boolean } = {},
 ): Promise<BackendResult<QueueBatchResponse>> {
   return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-batch`, {
     method: 'POST',

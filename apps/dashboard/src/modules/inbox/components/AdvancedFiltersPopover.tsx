@@ -10,7 +10,6 @@ import {
   buildAdvancedFilterChips,
   clearAllAdvancedFilters,
   countActiveAdvancedFilters,
-  DEFAULT_ADVANCED_FILTERS,
   type AdvancedFilterFieldSpec,
   type AdvancedFilterGroupId,
 } from '../../../domain/inbox/inbox-advanced-filter-engine'

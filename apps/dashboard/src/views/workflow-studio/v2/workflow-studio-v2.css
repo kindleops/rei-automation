@@ -2052,35 +2052,6 @@
   gap: 0.55rem;
 }
 
-.wfs2-nav__refresh {
-  font-size: 0.72rem;
-  color: var(--wfs2-muted);
-  padding: 0.15rem 0.35rem 0.35rem;
-}
-
-.wfs2-nav__skeletons {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.wfs2-nav__card.is-skeleton {
-  min-height: 4.6rem;
-  pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--wfs2-card) 88%, transparent) 0%,
-    color-mix(in srgb, var(--wfs2-card-strong) 92%, transparent) 45%,
-    color-mix(in srgb, var(--wfs2-card) 88%, transparent) 100%
-  );
-  background-size: 200% 100%;
-  animation: wfs2-skeleton-shimmer 1.2s ease-in-out infinite;
-}
-
-@keyframes wfs2-skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
 .wfs2-nav__card {
   position: relative;
   border: 1px solid var(--wfs2-border);

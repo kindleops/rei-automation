@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import { buildPropertyExternalLinks } from '../../domain/inbox/inbox-normalization'
 import { useDealIntelligenceDossier } from '../../domain/deal-intelligence/useDealIntelligenceDossier'
-import type { CompRecord, DealIntelligenceDossier } from '../../domain/deal-intelligence/deal-intelligence.types'
+import type { CompRecord } from '../../domain/deal-intelligence/deal-intelligence.types'
 import { ENGINE_STAGE_DISPLAY_ORDER, ENGINE_STAGE_LABELS } from '../../domain/deal-intelligence/deal-intelligence.types'
 import { humanizeEnum, parseFlagBadges, priorityFlags } from '../../domain/deal-intelligence/deal-intelligence-humanize'
 import {
@@ -133,7 +133,7 @@ const STRATEGY_WINNER_KEYS: Record<string, string> = {
   NOVATION: 'novation_score',
 }
 
-const StrategyBars = ({ engine }: Record<string, unknown>) => {
+const StrategyBars = ({ engine }: { engine: Record<string, unknown> }) => {
   const strategies = [
     { key: 'subject_to_score', label: 'Subject-To' },
     { key: 'seller_finance_score', label: 'Seller Finance' },

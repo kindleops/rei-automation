@@ -255,7 +255,7 @@ export const AdvancedFiltersModal = ({
         <div className="nx-ifm-body">
           <nav className="nx-ifm-rail">
             {groups.map((g) => {
-              const count = fields.filter((f) => f.group === g.id && countActiveAdvancedFilters(local) > 0).length
+              void fields.filter((f) => f.group === g.id && countActiveAdvancedFilters(local) > 0).length
               return (
                 <button key={g.id} type="button" className={`nx-ifm-rail-item${activeGroup === g.id ? ' is-active' : ''}`} onClick={() => setActiveGroup(g.id)}>
                   <span className="nx-ifm-rail-icon">{GROUP_ICONS[g.id] ?? '•'}</span>
@@ -354,7 +354,7 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
   )
 }
 
-function FlagPicker({ fieldKey, mode, selected, onChange, loadOptions }: {
+function FlagPicker({ fieldKey: _fieldKey, mode: _mode, selected, onChange, loadOptions }: {
   fieldKey: string; mode: FlagMode; selected: string[]
   onChange: (flags: string[]) => void; loadOptions: () => Promise<FilterOption[]>
 }) {

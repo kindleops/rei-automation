@@ -36,7 +36,7 @@ export function WeeklyExecutionGrid({
   onSelect,
   onReschedule,
   weekStart = 0,
-  slotMinutes = 30,
+  slotMinutes: _slotMinutes = 30,
   workStart = 6,
   workEnd = 20,
 }: WeeklyExecutionGridProps) {

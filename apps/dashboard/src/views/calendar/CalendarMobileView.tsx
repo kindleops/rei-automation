@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { CalendarEvent } from '../../lib/data/calendarData'
-import { buildMonthGrid, toIsoDate, weekdayHeaders } from '../../lib/calendar/calendar-date-engine'
+import { toIsoDate, weekdayHeaders } from '../../lib/calendar/calendar-date-engine'
 import { Icon } from '../../shared/icons'
 import { CalendarAgendaView } from './components/CalendarAgendaView'
 import { MonthExecutionGrid } from './MonthExecutionGrid'

@@ -1,8 +1,6 @@
 import { Icon } from '../../../shared/icons'
 import type { BulkActionPreview } from '../queue-ui-helpers'
 
-const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
-
 interface QueueBulkActionDockProps {
   selectedCount: number
   onRetry: () => void

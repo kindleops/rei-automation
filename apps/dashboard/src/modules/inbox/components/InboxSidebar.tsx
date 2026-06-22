@@ -419,7 +419,7 @@ const priorityScoreClass = (score: number | null): string => {
   return 'is-priority-low'
 }
 
-const resolveMaterialIntent = (thread: InboxWorkflowThread, decision: ConversationDecision): string | null => {
+const _resolveMaterialIntent = (thread: InboxWorkflowThread, decision: ConversationDecision): string | null => {
   const intent = String((decision as any).ui_intent || (thread as any).uiIntent || (thread as any).detected_intent || '').toLowerCase()
   const status = readString(thread, 'universalStatus', 'universal_status', 'inboxStatus', 'statusText', 'status').toLowerCase()
   const haystack = `${intent} ${status}`
@@ -1084,7 +1084,7 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
 })
 CommandCenterRow.displayName = 'CommandCenterRow'
 
-const DealSnapshotPlaceholder = ({ thread, decision }: any) => {
+const _DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   if (!thread) return <div className="nx-deal-snapshot-empty">Select a thread to view details</div>
   const { name, address, market, latestMessageBody } = getThreadVars(thread, decision)
   return (
@@ -1190,7 +1190,7 @@ export const InboxSidebar = ({
     })
   }, [searchableThreads, decisionMap, visibleThreadCount, activeBucketConfig.bucket, coldStaleDays, threads.length])
 
-  const handleToggleBulk = (id: string) => {
+  const _handleToggleBulk = (id: string) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -1198,6 +1198,7 @@ export const InboxSidebar = ({
       return next
     })
   }
+  void _handleToggleBulk
 
   const handleBulkAction = (action: string) => {
     if (bulkSelectedIds.size === 0) return
@@ -1532,3 +1533,6 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
   if (view === 'suppressed' || view === 'dnc_opt_out') return 'suppressed'
   return 'all_messages'
 }
+
+void _resolveMaterialIntent
+void _DealSnapshotPlaceholder

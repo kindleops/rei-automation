@@ -80,6 +80,10 @@ export interface CompCandidateEvidence {
   ppsf?: number | null
   ppu?: number | null
   address?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+  condition?: string | null
   similarity_score?: number
   comp_match_label?: string
   selected?: boolean

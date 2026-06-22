@@ -478,9 +478,9 @@ function mapEvidenceToCompCandidate(
     id: d.comp_property_id || `comp-${index}`,
     propertyId: d.property_id || d.comp_property_id,
     address: d.address || 'Unknown address',
-    city: d.city,
-    state: d.state,
-    zip: d.zip,
+    city: d.city ?? undefined,
+    state: d.state ?? undefined,
+    zip: d.zip ?? undefined,
     soldPrice,
     soldDate,
     soldSource,
@@ -491,7 +491,7 @@ function mapEvidenceToCompCandidate(
     yearBuilt: null,
     condition: d.condition || 'Unknown',
     assetClass: normalizeAssetClass(d.asset_type),
-    propertyType: d.asset_type,
+    propertyType: d.asset_type ?? null,
     constructionType: null,
     lotSizeAcres: null,
     lat: d.latitude ?? 0,
@@ -604,8 +604,8 @@ export function CompIntelligenceWorkspace({
     pipelineState,
     loading,
     error: pipelineError,
-    dataSource,
-    refresh,
+    dataSource: _dataSource,
+    refresh: _refresh,
   } = useCompIntelligence({
     thread,
     dealContext,
@@ -1462,7 +1462,7 @@ function ValuationPipelineStatus({
   valuationState: { state?: string; label?: string; detail?: string } | null
   pipelineError: string | null
   discovery: { relaxations?: Array<Record<string, unknown>>; is_market_fallback?: boolean } | null
-  coords: { coordinate_source?: string; coordinate_confidence?: number; is_market_fallback?: boolean }
+  coords: { coordinate_source?: string; coordinate_confidence?: number; is_market_fallback?: boolean; is_subject_resolved?: boolean }
 }) {
   const label = valuationState?.label || pipelineStateLabel(pipelineState)
   const detail = pipelineError || valuationState?.detail || null

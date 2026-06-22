@@ -82,11 +82,11 @@ export function CalendarView({
   const [selectedDayIso, setSelectedDayIso] = useState<string>(() => toIsoDate(new Date()))
   const [allEvents, setAllEvents] = useState<CalendarEvent[]>([])
   const [summaryCards, setSummaryCards] = useState<ExecutionSummaryCard[]>([])
-  const [overdueItems, setOverdueItems] = useState<CalendarEvent[]>([])
-  const [automationSchedule, setAutomationSchedule] = useState<CalendarEvent[]>([])
-  const [closingItems, setClosingItems] = useState<CalendarEvent[]>([])
-  const [contractItems, setContractItems] = useState<CalendarEvent[]>([])
-  const [offerItems, setOfferItems] = useState<CalendarEvent[]>([])
+  const [_overdueItems, setOverdueItems] = useState<CalendarEvent[]>([])
+  const [_automationSchedule, setAutomationSchedule] = useState<CalendarEvent[]>([])
+  const [_closingItems, setClosingItems] = useState<CalendarEvent[]>([])
+  const [_contractItems, setContractItems] = useState<CalendarEvent[]>([])
+  const [_offerItems, setOfferItems] = useState<CalendarEvent[]>([])
   const [selectedSellerHistory, setSelectedSellerHistory] = useState<CalendarEvent[]>([])
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString())
@@ -266,7 +266,7 @@ export function CalendarView({
     }
   }, [selectedThread?.ownerId, selectedThread?.propertyId, threads, liveTick])
 
-  const selectedTimeline = useMemo(() => {
+  void useMemo(() => {
     if (!selectedThread) return []
     return selectedSellerHistory.slice(0, 40)
   }, [selectedSellerHistory, selectedThread])

@@ -3,7 +3,6 @@ import { Icon } from '../../../shared/icons'
 import { resolveAssetTypeIcon } from '../../../shared/asset-type-icons'
 import {
   buildOperationsPulse,
-  isManualMessage,
   isNonRetryableRow,
   resolveMessageLanguage,
   resolveMessageSource,

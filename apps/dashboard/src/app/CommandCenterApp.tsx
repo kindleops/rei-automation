@@ -126,8 +126,6 @@ const canonicalizeRoutePath = (target?: string) => {
     case '/email':
       return '/email-command'
     case '/workflows-v2':
-    case '/workflows':
-    case '/workflow-studio-v1':
       return '/workflow-studio'
     case '/list':
       return '/entity-graph'

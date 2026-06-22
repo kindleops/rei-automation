@@ -1,5 +1,5 @@
 import type { ContactLadderEntry, EntityGraphAction, EntityGraphDossier, UniversalEntityContext } from '../../domain/entity-graph/entity-graph.types'
-import type { EntityGraphActionItem } from '../../domain/entity-graph/entity-graph-actions'
+
 import type { SelectedEntity } from '../../domain/entity-graph/selected-entity'
 import { dossierApiType } from '../../domain/entity-graph/selected-entity'
 import {

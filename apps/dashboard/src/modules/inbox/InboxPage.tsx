@@ -84,7 +84,8 @@ import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { InboxCampaignView } from '../../views/campaign-command/InboxCampaignView'
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
-import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
+import { WorkflowStudio } from '../../views/workflow-studio/WorkflowStudio'
+import WorkflowStudioV2, { isWorkflowStudioV2Enabled } from '../../views/workflow-studio/v2/WorkflowStudioV2'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -142,7 +143,6 @@ import {
   findThreadByRef,
   findThreadForActiveContext,
   hasEntityAnchor,
-  mergeSelectedThreadAndDealContext,
   resolveCanonicalWorkspaceContext,
   resolveInboxHighlightId,
   syncPayloadFromOpportunity,
@@ -690,7 +690,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     return [...hydrated, ...synthetic]
   }, [data.mapPins, threads])
 
-  const advancedFilterOptions = useMemo(() => getAdvancedFilterOptions(threads), [threads])
+  void useMemo(() => getAdvancedFilterOptions(threads), [threads])
   const decisions = useMemo(
     () => new Map(threads.map((thread) => [thread.id, buildConversationDecision(thread)])),
     [threads],
@@ -4222,9 +4222,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     if (view === 'workflow_studio') {
+      const Studio = isWorkflowStudioV2Enabled() ? WorkflowStudioV2 : WorkflowStudio
       return (
         <section className="nx-workspace-surface nx-workspace-surface--workflow-studio wfs2-isolation-root" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <WorkflowStudioV2
+          <Studio
             paneWidth={paneWidth}
             layoutMode={layoutMode}
           />
