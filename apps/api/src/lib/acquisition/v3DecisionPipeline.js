@@ -34,6 +34,7 @@ import { buildSellerFinance } from './sellerFinanceModel.js';
 import { buildConfidenceAndExecution } from './acquisitionConfidence.js';
 import { buildStrategyRanking } from './acquisitionStrategyRanking.js';
 import { buildResidentialIncomeAnalysis, isIncomeFamily } from './residentialIncomeDecision.js';
+import { buildExecutionStateBasis } from './executionStateBasis.js';
 
 const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
@@ -106,6 +107,13 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
         finalConfidence: confidence.final_confidence,
       })
     : null;
+
+  // ---- Item 5C §10: explicit, strategy-specific execution-state basis ----
+  const executionStateBasis = buildExecutionStateBasis({
+    ranked: strategy.ranked,
+    executionState: confidence.execution_state,
+    primaryStrategy: strategy.primary_strategy,
+  });
 
   const isExecutable = EXECUTABLE_STATES.has(confidence.execution_state);
 
@@ -186,6 +194,7 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     subject_to: subjectTo,
     seller_finance: sellerFinance,
     strategy_ranking: strategy,
+    execution_state_basis: executionStateBasis,
     offer_authorization: offerAuthorization,
     value_contract: valueContract,
     confidence_components: confidence.components,

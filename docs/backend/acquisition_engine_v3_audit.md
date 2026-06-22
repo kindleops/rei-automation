@@ -215,3 +215,107 @@ Proven against prod (read-only) before rewiring the loader.
 
 ### Decision
 Production-compatible enrichment = `candidate.comp_id → buyer_comp_raw_v2` (batch `.in('id', ids)`), buyer archetype from `owner_name` + `is_corporate_owner`, optional `buyer_entities_v2` by normalized name. **No migration required.** The previously generated `v_recent_sold_comp_identity` (which selected from `recently_sold_properties`) is the **wrong source** for the primary path and is amended in this pass (see §14). The blind `buyer_comp_properties_v2` ZIP pull in the V2 loader is the contamination/cross-lane vector and is removed from the V3 path.
+
+---
+
+## Item 5C — Income Intelligence Foundation: data-source audit
+
+*Read-only audit (repo grep + live Supabase introspection, project `lcppdrmrdfblstpcbgpf`). No writes, no DDL.*
+
+### Headline finding
+
+Across **24,972** properties with `units_count >= 2`:
+
+| Field | Coverage | Notes / basis |
+|---|---|---|
+| `monthly_rent` | **0%** | column exists, entirely null |
+| `rent_estimate` | **0%** | entirely null |
+| `gross_monthly_income` / `gross_annual_income` | **0%** | entirely null |
+| `noi_estimate` | **0%** | entirely null |
+| `cap_rate` | **0%** | entirely null |
+| `building_square_feet` | **100%** | present everywhere |
+| `units_count` | **100%** | present (selection key) |
+| `tax_amt` | **~99.1%** (24,756) | public tax record → `PROVIDER_REPORTED`/`ACTUAL` candidate |
+| `total_loan_balance` | numeric on 100% | **but 59% are `0`** (14,704) — ambiguous *free-and-clear* vs *missing-coded-as-zero* |
+| `total_loan_payment` | numeric on 100% | annual payment/balance ratio ≈ **0.36** (implausible for P&I) → treat as `PROVIDER_REPORTED`, **low reliability** for DSCR |
+| `total_loan_amt` | numeric on 100% | original loan amount |
+| `past_due_amount` | **0%** | null on income assets |
+| `mls_current_listing_price` | ~0% (10 rows) | negligible |
+
+`properties.raw_payload_json` was probed across 4,000 income rows: the **only** income-adjacent keys present are `tax_amt`, `total_loan_*`, `units_count` (and `_1` duplicates). **No** rent / lease / occupancy / income / NOI / cap / expense keys exist in the raw provider payload. There is **no** rent-roll, lease, rental-comparable, operating-statement, or underwriting/override table in the schema (`rent_comp|rental_comp|lease|rent_roll|underwrit|operating_statement` → 0 tables).
+
+**Conclusion:** live income valuation is data-blocked. Rent, occupancy, NOI, cap rate, and operating expenses must be treated as `UNKNOWN` (never zero); NOI/cap/GRM stay provisional. The only qualified income-adjacent evidence today is **property taxes** (~99%) and **debt** (present but low-reliability and zero-ambiguous). Comparable PPU/PPSF (from `buyer_comp_raw_v2`) remains the only qualified valuation path for most income properties. Do not fabricate rents/NOI/cap/expenses.
+
+### Source inventory (income-relevant)
+
+| Source | Grain | Income-relevant fields | Basis / reliability | Join key | Suitable for auto-UW? |
+|---|---|---|---|---|---|
+| `properties` | 1/property | `monthly_rent`,`rent_estimate`,`gross_monthly_income`,`gross_annual_income`,`noi_estimate`,`cap_rate` (all 0%); `tax_amt`(99%),`total_loan_balance/payment/amt`(100% numeric),`past_due_amount`(0%) | tax=PROVIDER; rent/NOI/cap=absent; loan=PROVIDER_REPORTED low-rel | `property_id` | tax: yes; rent/NOI/cap: no; debt: shadow only |
+| `properties.raw_payload_json` | 1/property | tax, loan, units only (no rent/income) | PROVIDER raw | `property_id` | no new income signal |
+| `buyer_comp_raw_v2` | 1/comp | `tax_amt`,`total_loan_*`,`past_due_amount`,`mls_current_listing_price`,`tax_delinquent*` | PROVIDER (DataTree-class) | `id`=comp_id | PPU/PPSF + tax evidence: yes |
+| `property_cash_offer_snapshots` | 1/offer-snapshot | `estimated_mortgage_balance`,`estimated_mortgage_payment` | SYSTEM_INFERRED (modeled) | `property_id` | debt: modeled fallback only |
+| `census_geo_metrics` | 1/geo | `median_household_income`,`renter_rate`,`renter_occupied_units`,`owner_occupancy_rate`,`vacancy_rate`,`vacant_housing_units` | PROVIDER (Census ACS) | geo (zip/tract) | market-level rent-demand/occupancy proxy only — NOT property rent |
+| `thread_ai_state` | 1/thread (6,049) | `occupancy_status` (**0% populated**) | OWNER_REPORTED (when present) | thread→property | conversation occupancy: structurally ready, empty today |
+| `prospects`,`master_owners`,`inbox_*_hydrated` | 1/owner or thread | `portfolio_total_loan_balance/payment/tax_amount`,`past_due_amount`,`est_household_income`,`likely_renting` | PROVIDER rollups | owner/property | owner-level debt rollups; not per-asset income |
+| `recently_sold_properties` | 1/sold | `mls_current_listing_price`,`raw_payload` | PROVIDER | property | sale evidence; no rent |
+
+### Reliability flags
+
+- **Debt zero-ambiguity:** `total_loan_balance = 0` (59% of income assets) cannot be distinguished between *free-and-clear* (actual 0) and *missing*. The canonical loader treats provider `0` balance as `OWNER_REPORTED`-equivalent **`PROVIDER_REPORTED` with a free-and-clear flag + reduced confidence**, never as a verified ACTUAL zero that authorizes subject-to.
+- **Payment reliability:** annualized `total_loan_payment / total_loan_balance` ≈ 0.36 is implausible for amortizing P&I → flagged `PROVIDER_REPORTED`, low confidence; insufficient alone to make subject-to/seller-finance *underwritten*.
+- **Census is geo-level**, never a property rent. May only feed `MARKET_MODELED` market-rent priors and occupancy context, clearly labeled.
+- **Conversation occupancy** (`thread_ai_state.occupancy_status`) is the designed home for `OWNER_REPORTED` facts but is currently 0% populated — an enrichment target, not a present source.
+
+---
+
+## Item 5C — Read-only coverage report (live, no persistence)
+
+*Source: `properties` where `units_count >= 2` (total 24,972). Read-only census; nothing persisted.*
+
+### By canonical lane
+
+| Lane | Count | Actual rent | Est rent | NOI | Cap | Tax | Debt (numeric) | Debt > 0 | Payment > 0 | Sqft | Units |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| DUPLEX | 13,855 | 0% | 0% | 0% | 0% | 99.2% | 100% | 38.2% | 38.4% | 100% | 100% |
+| TRIPLEX | 3,639 | 0% | 0% | 0% | 0% | 99.6% | 100% | 46.6% | 46.7% | 100% | 100% |
+| FOURPLEX | 2,386 | 0% | 0% | 0% | 0% | 99.0% | 100% | 46.3% | 46.5% | 100% | 100% |
+| MULTIFAMILY_5_20 | 4,199 | 0% | 0% | 0% | 0% | 99.0% | 100% | 39.8% | 41.0% | 100% | 100% |
+| MULTIFAMILY_21_99 | 720 | 0% | 0% | 0% | 0% | 98.6% | 100% | 54.2% | 54.7% | 100% | 100% |
+| MULTIFAMILY_100_PLUS | 173 | 0% | 0% | 0% | 0% | 94.2% | 100% | 55.5% | 55.5% | 100% | 100% |
+
+### By state (top 8, income assets)
+
+| State | Count | Tax | Debt > 0 | Any rent |
+|---|---|---|---|---|
+| FL | 6,366 | 98.3% | 32.3% | 0% |
+| IL | 5,442 | 99.3% | 36.4% | 0% |
+| CA | 4,896 | ~100% | 65.1% | 0% |
+| TX | 1,350 | 98.8% | 35.0% | 0% |
+| RI | 893 | 100% | 49.7% | 0% |
+| MN | 838 | 99.9% | 33.1% | 0% |
+| PA | 822 | 98.2% | 40.0% | 0% |
+| CT | 733 | 100% | 46.9% | 0% |
+
+**Coverage conclusions:**
+- **Rent / NOI / cap / occupancy: 0% in every lane and state.** No conflicts and no stale records exist because there are no income records at all.
+- **Square feet + unit count: 100%** — comp PPU/PPSF valuation is fully supported.
+- **Taxes: ~99%** — usable property-specific expense evidence (`PROVIDER_REPORTED`).
+- **Debt: numeric on 100%, but only 38–55% have a positive balance** (rest are `0` = ambiguous free-and-clear vs missing). Payment present on a similar share; reliability low (see audit §reliability). Debt may seed *shadow* subject-to/seller-finance only — never authorize.
+- Alternate-source coverage gain is **negligible**: `raw_payload_json`, comps, and census contain no per-property rent/NOI/occupancy.
+
+---
+
+## Item 5C — Enrichment plan (ranked)
+
+| # | Gap | Lanes affected | Source class | Importance | Coverage gain | Confidence impact | Effort | Dependency | Required before |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | **Owner-reported rent / occupancy** via existing seller conversations (`thread_ai_state.occupancy_status` + new extraction) | all income | already present pipeline, 0% populated → conversation extraction | High | Medium (only engaged leads) | OWNER_REPORTED (med) | Med — extraction contract exists (this pass); wire population later | shadow underwriting per-deal |
+| 2 | **Tax → expense seeding** (taxes already ~99%) connect into expense model | all income | data present, not connected | High | High | raises expense completeness | Low | none | shadow |
+| 3 | **Debt-aware shadow subject-to** using present loan balance/payment (flag zero-ambiguous, low confidence) | 2–4 + MF | data present, low reliability | Med | High (numeric) | low (provider) | Low | none | shadow only — NOT authorization |
+| 4 | **Rent-roll / lease document upload** (verified actual rent + occupancy) | all income | document upload (new) | High | High where obtained | ACTUAL/VERIFIED (high) | Med — UI + parser | document pipeline | underwritten income value |
+| 5 | **Qualified rental comparables** (actual signed rents) | all income | new approved provider OR MLS-derived | High | High | COMPARABLE_DERIVED (med) | High | provider/legal — UNVERIFIED today | qualified market rent |
+| 6 | **Observed cap-rate evidence** (qualified single-asset sale + time-aligned NOI) | MF 5+ | derivable once NOI exists; needs both sale + NOI | Med | Low (rare) | OBSERVED (high) | Med | depends on #4/#5 | qualified cap model |
+| 7 | **Provider rent estimate** (e.g. AVM rent) | all income | current provider IF it offers rent | Med | High if available | PROVIDER_REPORTED (low/med) | Low | provider capability **UNVERIFIED** | market-rent prior |
+| 8 | **Actual operating statements / T-12** | MF 5+ | document upload | Med | Low (large deals only) | ACTUAL (high) | Med | document pipeline | underwritten NOI for 5+ |
+
+**Notes:** No provider rent capability is claimed as available — items #5 and #7 are explicitly gated on *unverified* provider capability. Items #1–#3 are achievable with data/pipelines already in the repo and are the highest-leverage near-term moves; none enable autonomous execution.
