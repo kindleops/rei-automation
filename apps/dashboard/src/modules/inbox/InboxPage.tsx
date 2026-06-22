@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread } from './inbox.adapter'
 import './inbox-universal.css'
@@ -519,6 +520,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     sourceMode,
     setSourceMode
   } = useInboxData({ paused: messagesLoading })
+  const { user, loading: authLoading, signOut } = useAuth()
   const DEV = Boolean(import.meta.env.DEV)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
@@ -1082,6 +1084,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [selectedWorkspaceViews, workspaceWidthOverrides],
   )
   const activeWorkspaceLabel = selectedWorkspacePreset.label
+  const activeContextSubtitle = selectedWorkspacePreset.description
+
+  const handleNavigateInboxView = useCallback((view: string) => {
+    const viewMap: Record<string, InboxViewSelectValue> = {
+      needs_review: 'needs_review',
+      follow_up: 'follow_up_due',
+      failed: 'failed',
+    }
+    const nextView = viewMap[view] ?? (view as InboxViewSelectValue)
+    setViewFilter(nextView)
+    if (!selectedWorkspaceViews.includes('thread')) {
+      setSelectedWorkspaceViews((current) => (['thread', ...current] as InboxWorkspaceView[]).slice(0, MAX_TOGGLED_VIEWS))
+    }
+    pushRoutePath('/inbox')
+  }, [selectedWorkspaceViews])
+
   const viewLabelByKey = useMemo(
     () => new Map(WORKSPACE_VIEW_OPTIONS.map((view) => [view.key, view.label.replace(' View', '')])),
     [],
@@ -4309,6 +4327,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onCloseOverlay={() => setActiveOverlay(null)}
         activeWorkspaceKey={selectedWorkspaceKey}
         activeWorkspaceLabel={activeWorkspaceLabel}
+        contextSubtitle={activeContextSubtitle}
+        actionCenterCounts={{
+          loading: _dataLoading,
+          humanReview: viewCounts.needs_review ?? 0,
+          followUps: viewCounts.follow_up ?? 0,
+          failedSends: queueProcessorHealth?.failedTodayCount ?? viewCounts.failed ?? 0,
+          decisionsRequired: viewCounts.needs_review ?? 0,
+          closingTasks: null,
+          systemTasks: null,
+        }}
+        onNavigateInboxView={handleNavigateInboxView}
+        onOpenQueueCommand={() => pushRoutePath('/queue')}
+        authReady={Boolean(user)}
+        authLoading={authLoading}
+        onSignOut={() => { void signOut() }}
+        profileInitials={(user?.email?.slice(0, 2) ?? 'RK').toUpperCase()}
         workspaceOptions={NEXUS_WORKSPACE_PRESETS.map((workspace) => ({
           key: workspace.key,
           label: workspace.label,
@@ -4333,7 +4367,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onOpenKeys={() => setActiveOverlay('keys')}
         onOpenKpis={() => pushRoutePath('/analytics')}
         onOpenActivity={() => setActiveOverlay('activity')}
-        onOpenTasks={() => emitNotification({ title: 'Tasks', detail: 'Tasks menu is coming soon.', severity: 'warning' })}
+        onOpenTasks={() => handleNavigateInboxView('needs_review')}
         onResetLayout={handleResetWorkspaceLayout}
         dryRun={autonomyControls.dryRun}
         onToggleDryRun={() => setAutonomyControls(prev => ({ ...prev, dryRun: !prev.dryRun }))}

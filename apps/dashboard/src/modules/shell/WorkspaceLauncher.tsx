@@ -1,0 +1,400 @@
+import { useMemo, useState } from 'react'
+import { Icon } from '../../shared/icons'
+import type { AccentPalette } from '../../shared/settings'
+import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
+import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
+import { CommandDrawer } from './primitives/CommandDrawer'
+import { FilterChip } from './primitives/FilterChip'
+import type { WorkspaceAvailability, WorkspaceLauncherItem } from './shell-types'
+
+const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+
+type LauncherCategory = 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration'
+
+const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
+  { id: 'pinned', label: 'Pinned' },
+  { id: 'workspaces', label: 'Workspaces' },
+  { id: 'views', label: 'Views' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'administration', label: 'Administration' },
+]
+
+const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
+  { id: 'dark', label: 'Dark' },
+  { id: 'red_ops', label: 'Red Ops' },
+  { id: 'light', label: 'Light' },
+]
+
+const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
+  { id: 'cyan', label: 'Cyan' },
+  { id: 'emerald', label: 'Emerald' },
+  { id: 'amber', label: 'Amber' },
+  { id: 'violet', label: 'Violet' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'ice', label: 'Ice' },
+]
+
+const WIDTH_OPTIONS: ViewWidthPercent[] = ['25', '50', '75', '100']
+
+const widthLabel = (width: ViewWidthPercent) => (width === '100' ? 'Full' : `${width}%`)
+
+const availabilityLabel = (availability?: WorkspaceAvailability) => {
+  if (!availability || availability === 'ready') return null
+  if (availability === 'backend_not_ready') return 'Unavailable'
+  return 'Coming soon'
+}
+
+const workspaceIcon = (key: string): Parameters<typeof Icon>[0]['name'] => {
+  if (key.includes('deal')) return 'briefing'
+  if (key.includes('queue')) return 'activity'
+  if (key.includes('map') || key.includes('market')) return 'map'
+  if (key.includes('pipeline')) return 'trending-up'
+  if (key.includes('buyer')) return 'users'
+  if (key.includes('comp')) return 'stats'
+  if (key.includes('closing')) return 'dollar-sign'
+  if (key === 'thread') return 'inbox'
+  if (key === 'sms_thread') return 'message'
+  if (key === 'analytics') return 'stats'
+  return 'layout-split'
+}
+
+export interface WorkspaceLauncherProps {
+  open: boolean
+  compact: boolean
+  onClose: () => void
+  activeWorkspaceKey?: string
+  workspaceOptions: WorkspaceLauncherItem[]
+  viewOptions: WorkspaceLauncherItem[]
+  activeViewKeys: string[]
+  activeViewWidths: Partial<Record<string, ViewWidthPercent>>
+  activeViewChips: Array<{ key: string; label: string }>
+  activeViewKey?: string
+  activeThemeId: NexusGlobalThemeId
+  activeAccentId: AccentPalette
+  onSelectWorkspace: (key: string) => void
+  onSelectView: (key: string) => void
+  onSelectViewWidth: (viewKey: string, width: ViewWidthPercent) => void
+  onToggleActiveViewChip?: (viewKey: string) => void
+  onSelectTheme: (themeId: NexusGlobalThemeId) => void
+  onSelectAccent: (accent: AccentPalette) => void
+  onSaveCurrentLayout?: () => void
+  onResetLayout: () => void
+  onWorkspaceSettings?: () => void
+}
+
+export const WorkspaceLauncher = ({
+  open,
+  compact,
+  onClose,
+  activeWorkspaceKey,
+  workspaceOptions,
+  viewOptions,
+  activeViewKeys,
+  activeViewWidths,
+  activeViewChips,
+  activeViewKey,
+  activeThemeId,
+  activeAccentId,
+  onSelectWorkspace,
+  onSelectView,
+  onSelectViewWidth,
+  onToggleActiveViewChip,
+  onSelectTheme,
+  onSelectAccent,
+  onSaveCurrentLayout,
+  onResetLayout,
+  onWorkspaceSettings,
+}: WorkspaceLauncherProps) => {
+  const [category, setCategory] = useState<LauncherCategory>('workspaces')
+  const [query, setQuery] = useState('')
+
+  const pinnedWorkspaces = useMemo(
+    () => workspaceOptions.filter((item) => item.pinned || item.key === activeWorkspaceKey).slice(0, 4),
+    [workspaceOptions, activeWorkspaceKey],
+  )
+
+  const filteredWorkspaces = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return workspaceOptions
+    return workspaceOptions.filter((item) =>
+      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
+    )
+  }, [workspaceOptions, query])
+
+  const filteredViews = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return viewOptions
+    return viewOptions.filter((item) =>
+      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
+    )
+  }, [viewOptions, query])
+
+  const readyWorkspaces = filteredWorkspaces.filter((item) => !item.availability || item.availability === 'ready')
+  const unavailableWorkspaces = filteredWorkspaces.filter((item) => item.availability && item.availability !== 'ready')
+
+  const readyViews = filteredViews.filter((item) => !item.availability || item.availability === 'ready')
+  const unavailableViews = filteredViews.filter((item) => item.availability && item.availability !== 'ready')
+
+  const selectAndClose = (action: () => void) => {
+    action()
+    onClose()
+  }
+
+  const renderWorkspaceRow = (workspace: WorkspaceLauncherItem, disabled = false) => {
+    const isActive = activeWorkspaceKey === workspace.key
+    const modes = workspace.layoutModes
+    return (
+      <div
+        key={workspace.key}
+        className={cls('nx-wsl-row', isActive && 'is-active', disabled && 'is-disabled')}
+        title={disabled ? availabilityLabel(workspace.availability) ?? 'Unavailable' : undefined}
+      >
+        <button
+          type="button"
+          className="nx-wsl-row__main"
+          disabled={disabled}
+          onClick={() => selectAndClose(() => onSelectWorkspace(workspace.key))}
+        >
+          <span className="nx-wsl-row__icon" aria-hidden>
+            <Icon name={workspaceIcon(workspace.key)} />
+          </span>
+          <span className="nx-wsl-row__copy">
+            <strong>{workspace.label}</strong>
+            {workspace.description ? <small>{workspace.description}</small> : null}
+          </span>
+          <span className="nx-wsl-row__state">
+            {disabled ? (
+              <em className="nx-wsl-row__availability">{availabilityLabel(workspace.availability)}</em>
+            ) : (
+              <em className="nx-wsl-row__availability is-ready">Ready</em>
+            )}
+            {isActive ? <Icon name="check" /> : null}
+          </span>
+        </button>
+        {modes && modes.length > 0 ? (
+          <div className="nx-wsl-row__modes" aria-label={`${workspace.label} layout modes`}>
+            {modes.map((mode) => (
+              <span key={mode} className="nx-wsl-mode-chip">{widthLabel(mode)}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  const renderViewRow = (view: WorkspaceLauncherItem, disabled = false) => {
+    const isActiveView = activeViewKeys.includes(view.key)
+    const widthKey = view.key === 'analytics' ? 'metrics' : view.key
+    return (
+      <div
+        key={view.key}
+        className={cls('nx-wsv-row', isActiveView && 'is-active', disabled && 'is-disabled')}
+        role="group"
+        title={disabled ? availabilityLabel(view.availability) ?? 'Unavailable' : undefined}
+      >
+        <button
+          type="button"
+          className="nx-wsv-row__toggle"
+          disabled={disabled}
+          onClick={() => onSelectView(view.key)}
+        >
+          <span className="nx-wsv-row__icon" aria-hidden>
+            <Icon name={workspaceIcon(view.key)} />
+          </span>
+          <span className="nx-wsv-row__label">
+            <strong>{view.label}</strong>
+            {view.description ? <small>{view.description}</small> : null}
+          </span>
+          <span className="nx-wsv-row__meta">
+            {disabled ? (
+              <em className="nx-wsv-row__availability">{availabilityLabel(view.availability)}</em>
+            ) : null}
+            {isActiveView ? <Icon name="check" /> : null}
+          </span>
+        </button>
+        {!disabled ? (
+          <div className="nx-wsv-row__pills" aria-label={`${view.label} width`}>
+            {WIDTH_OPTIONS.map((width) => (
+              <button
+                key={width}
+                type="button"
+                className={cls('nx-wsv-pill', activeViewWidths[widthKey] === width && 'is-active')}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onSelectViewWidth(view.key, width)
+                }}
+              >
+                {widthLabel(width)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  const renderCategoryPanel = () => {
+    if (category === 'pinned') {
+      return (
+        <div className="nx-wsl-panel__section">
+          <h4>Pinned &amp; Recent</h4>
+          {pinnedWorkspaces.length === 0 ? (
+            <p className="nx-wsl-panel__note">Pin a workspace from Workspaces to keep it here.</p>
+          ) : (
+            pinnedWorkspaces.map((workspace) =>
+              renderWorkspaceRow(workspace, workspace.availability !== 'ready' && Boolean(workspace.availability)),
+            )
+          )}
+        </div>
+      )
+    }
+
+    if (category === 'workspaces') {
+      return (
+        <>
+          <div className="nx-wsl-panel__section">
+            <h4>Workspaces</h4>
+            {readyWorkspaces.map((workspace) => renderWorkspaceRow(workspace))}
+          </div>
+          {unavailableWorkspaces.length > 0 ? (
+            <div className="nx-wsl-panel__section is-unavailable">
+              <h4>Unavailable</h4>
+              {unavailableWorkspaces.map((workspace) => renderWorkspaceRow(workspace, true))}
+            </div>
+          ) : null}
+        </>
+      )
+    }
+
+    if (category === 'views') {
+      return (
+        <>
+          {activeViewChips.length > 0 ? (
+            <div className="nx-workspace-active-view-strip" aria-label="Active views">
+              {activeViewChips.map((chip) => (
+                <FilterChip
+                  key={chip.key}
+                  label={chip.label}
+                  active={chip.key === activeViewKey}
+                  onClick={() => onToggleActiveViewChip?.(chip.key)}
+                />
+              ))}
+            </div>
+          ) : null}
+          <div className="nx-wsl-panel__section">
+            <h4>Views</h4>
+            {readyViews.map((view) => renderViewRow(view))}
+          </div>
+          {unavailableViews.length > 0 ? (
+            <div className="nx-wsl-panel__section is-unavailable">
+              <h4>Unavailable</h4>
+              {unavailableViews.map((view) => renderViewRow(view, true))}
+            </div>
+          ) : null}
+        </>
+      )
+    }
+
+    if (category === 'appearance') {
+      return (
+        <>
+          <div className="nx-wsl-panel__section">
+            <h4>Theme</h4>
+            {THEME_OPTIONS.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                className={cls('nx-wsl-menu-row', activeThemeId === theme.id && 'is-active')}
+                onClick={() => selectAndClose(() => onSelectTheme(theme.id))}
+              >
+                <span className="nx-theme-dot" data-theme={theme.id} />
+                <strong>{theme.label}</strong>
+                {activeThemeId === theme.id ? <Icon name="check" /> : null}
+              </button>
+            ))}
+          </div>
+          <div className="nx-wsl-panel__section">
+            <h4>Accent Palette</h4>
+            {ACCENT_OPTIONS.map((accent) => (
+              <button
+                key={accent.id}
+                type="button"
+                className={cls('nx-wsl-menu-row', activeAccentId === accent.id && 'is-active')}
+                onClick={() => selectAndClose(() => onSelectAccent(accent.id))}
+              >
+                <span className="nx-accent-dot" data-accent={accent.id} />
+                <strong>{accent.label}</strong>
+                {activeAccentId === accent.id ? <Icon name="check" /> : null}
+              </button>
+            ))}
+          </div>
+        </>
+      )
+    }
+
+    return (
+      <div className="nx-wsl-panel__section">
+        <h4>Administration</h4>
+        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}>
+          <Icon name="check" />
+          <strong>Save Current Layout</strong>
+        </button>
+        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onResetLayout())}>
+          <Icon name="refresh-cw" />
+          <strong>Reset Layout</strong>
+        </button>
+        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}>
+          <Icon name="settings" />
+          <strong>Workspace Settings</strong>
+        </button>
+      </div>
+    )
+  }
+
+  const launcherBody = (
+    <div className="nx-wsl-root">
+      <div className="nx-wsl-search">
+        <Icon name="search" />
+        <input
+          type="search"
+          value={query}
+          placeholder="Search workspaces and views…"
+          aria-label="Search workspaces and views"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      <div className={cls('nx-wsl-body', compact && 'is-compact')}>
+        <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
+          {CATEGORY_OPTIONS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={cls('nx-wsl-nav__item', category === item.id && 'is-active')}
+              onClick={() => setCategory(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="nx-wsl-panel">{renderCategoryPanel()}</div>
+      </div>
+    </div>
+  )
+
+  if (compact) {
+    return (
+      <CommandDrawer open={open} title="Workspace Launcher" onClose={onClose} fullWidth>
+        {launcherBody}
+      </CommandDrawer>
+    )
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="nx-wsl-popover nx-liquid-popover" role="dialog" aria-label="Workspace launcher" onClick={(e) => e.stopPropagation()}>
+      {launcherBody}
+    </div>
+  )
+}

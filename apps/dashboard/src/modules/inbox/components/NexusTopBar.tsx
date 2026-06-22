@@ -11,9 +11,25 @@ import { buildInboxNotifications, NexusNotificationCenter, type NexusNotificatio
 import type { AutonomousEngineModel } from '../autonomy-engine'
 import { InboxKpiOrb } from './InboxKpiOrb'
 import { QueueCommandCenter, type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
+import { ActionCenter } from '../../shell/ActionCenter'
+import { ProfileMenu } from '../../shell/ProfileMenu'
+import { WorkspaceLauncher } from '../../shell/WorkspaceLauncher'
+import { useShellSurface } from '../../shell/useShellSurface'
+import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } from '../../shell/shell-types'
+import { CommandPopover } from '../../shell/primitives/CommandPopover'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
+
+export interface ActionCenterCounts {
+  humanReview?: number | null
+  followUps?: number | null
+  failedSends?: number | null
+  decisionsRequired?: number | null
+  closingTasks?: number | null
+  systemTasks?: number | null
+  loading?: boolean
+}
 
 interface NexusTopBarProps {
   onSelectSearchResult: (id: string) => void
@@ -45,6 +61,7 @@ interface NexusTopBarProps {
   autonomyModel: AutonomousEngineModel
   activeWorkspaceKey?: string
   activeWorkspaceLabel?: string
+  contextSubtitle?: string
   activeViewKey?: string
   activeViewKeys?: string[]
   activeViewChips?: Array<{ key: string; label: string }>
@@ -75,24 +92,22 @@ interface NexusTopBarProps {
   onResetLayout: () => void
   dryRun: boolean
   onToggleDryRun: () => void
+  actionCenterCounts?: ActionCenterCounts
+  onNavigateInboxView?: (view: string) => void
+  onOpenQueueCommand?: () => void
+  authReady?: boolean
+  authLoading?: boolean
+  onSignOut?: () => void
+  profileInitials?: string
 }
 
-const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
-  { id: 'dark', label: 'Dark' },
-  { id: 'red_ops', label: 'RedOps' },
-  { id: 'light', label: 'Light' },
-]
-
-const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
-  { id: 'cyan', label: 'Cyan' },
-  { id: 'emerald', label: 'Emerald' },
-  { id: 'amber', label: 'Amber' },
-  { id: 'violet', label: 'Violet' },
-  { id: 'rose', label: 'Rose' },
-  { id: 'ice', label: 'Ice' },
-]
-
-type WorkspaceSubmenu = null | 'workspaces' | 'views' | 'theme' | 'accent' | 'manage'
+const toAvailability = (statusLabel?: string): WorkspaceAvailability | undefined => {
+  if (!statusLabel) return 'ready'
+  const normalized = statusLabel.toLowerCase()
+  if (normalized.includes('backend')) return 'backend_not_ready'
+  if (normalized.includes('coming')) return 'coming_soon'
+  return 'ready'
+}
 
 export const NexusTopBar = ({
   onSelectSearchResult,
@@ -118,6 +133,7 @@ export const NexusTopBar = ({
   autonomyModel,
   activeWorkspaceKey,
   activeWorkspaceLabel = 'Deal Desk',
+  contextSubtitle,
   activeViewKey,
   activeViewKeys = [],
   activeViewChips = [],
@@ -150,20 +166,28 @@ export const NexusTopBar = ({
   topSearchGroups,
   topSearchLoading,
   onExecuteTopSearchResult,
+  actionCenterCounts,
+  onNavigateInboxView,
+  onOpenQueueCommand,
+  authReady = false,
+  authLoading = false,
+  onSignOut,
+  profileInitials = 'RK',
 }: NexusTopBarProps) => {
   const DEV = Boolean(import.meta.env.DEV)
   const DEBUG_INBOX = DEV && String(import.meta.env.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
+
   const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const [openControlMenu, setOpenControlMenu] = useState<null | 'workspace'>(null)
-  const [activeSubmenu, setActiveSubmenu] = useState<WorkspaceSubmenu>(null)
-  const [openQuickMenu, setOpenQuickMenu] = useState<null | 'tasks' | 'activity' | 'profile'>(null)
-  const [isQueuePanelPinned, setIsQueuePanelPinned] = useState(false)
-  const [isQueuePanelHovered, setIsQueuePanelHovered] = useState(false)
+  const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const queueTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const profileTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const workspaceControlRef = useRef<HTMLDivElement | null>(null)
+
+  const { activeSurface, toggleSurface, closeAndRestoreFocus, setActiveSurface, registerTrigger } = useShellSurface()
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [isCompactMenu, setIsCompactMenu] = useState(false)
-  const [submenuFlipLeft, setSubmenuFlipLeft] = useState(false)
-  const workspaceControlRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1024px)')
@@ -172,6 +196,13 @@ export const NexusTopBar = ({
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [])
+
+  useEffect(() => {
+    registerTrigger('workspace', workspaceTriggerRef.current)
+    registerTrigger('queue', queueTriggerRef.current)
+    registerTrigger('action-center', actionTriggerRef.current)
+    registerTrigger('profile', profileTriggerRef.current)
+  })
 
   useEffect(() => {
     if (DEBUG_INBOX && activeOverlay) {
@@ -187,31 +218,17 @@ export const NexusTopBar = ({
     return () => window.removeEventListener('nexus:focus-search', focusSearch as EventListener)
   }, [])
 
-  useEffect(() => {
-    const closeAllMenus = () => {
-      setOpenControlMenu(null)
-      setActiveSubmenu(null)
-      setOpenQuickMenu(null)
-    }
-    const handleWindowClick = () => closeAllMenus()
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeAllMenus()
-    }
-    window.addEventListener('click', handleWindowClick)
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('click', handleWindowClick)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [])
+  const openExclusiveSurface = (surface: Exclude<typeof activeSurface, null>) => {
+    onCloseOverlay()
+    setSearchOpen(false)
+    toggleSurface(surface)
+  }
 
-  useEffect(() => {
-    if (openControlMenu !== 'workspace' || isCompactMenu) return
-    const rect = workspaceControlRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const expectedRight = rect.left + 300 + 300
-    setSubmenuFlipLeft(expectedRight > window.innerWidth - 16)
-  }, [openControlMenu, isCompactMenu])
+  const openOverlayExclusive = (overlay: ActiveOverlay) => {
+    setActiveSurface(null)
+    setSearchOpen(false)
+    onOpenOverlay(overlay)
+  }
 
   const processorStatus = queueProcessorHealth?.status ?? 'unknown'
   const processorHealthLabel =
@@ -249,233 +266,189 @@ export const NexusTopBar = ({
     setSearchOpen(false)
   }
 
-  const closeWorkspaceMenu = () => {
-    setOpenControlMenu(null)
-    setActiveSubmenu(null)
-  }
-
-
-  const selectAndClose = (action: () => void) => {
-    action()
-    closeWorkspaceMenu()
-  }
-
-  const renderWorkspaceRoot = () => (
-    <div className="nx-workspace-menu-root" role="menu">
-      <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'workspaces' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('workspaces')} onClick={() => setActiveSubmenu('workspaces')}>
-        <span>Pinned Workspaces</span><Icon name="chevron-right" />
-      </button>
-      <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'views' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('views')} onClick={() => setActiveSubmenu('views')}>
-        <span>Views</span><Icon name="chevron-right" />
-      </button>
-      <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'theme' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('theme')} onClick={() => setActiveSubmenu('theme')}>
-        <span>Theme</span><Icon name="chevron-right" />
-      </button>
-      <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'accent' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('accent')} onClick={() => setActiveSubmenu('accent')}>
-        <span>Accent Palette</span><Icon name="chevron-right" />
-      </button>
-      <button type="button" className={cls('nx-workspace-menu-item', activeSubmenu === 'manage' && 'is-active')} onMouseEnter={() => !isCompactMenu && setActiveSubmenu('manage')} onClick={() => setActiveSubmenu('manage')}>
-        <span>Manage</span><Icon name="chevron-right" />
-      </button>
-    </div>
+  const launcherWorkspaces: WorkspaceLauncherItem[] = useMemo(
+    () => workspaceOptions.map((workspace) => ({
+      key: workspace.key,
+      label: workspace.label,
+      description: workspace.description,
+      availability: toAvailability(workspace.statusLabel),
+      pinned: workspace.key === activeWorkspaceKey,
+      selected: workspace.key === activeWorkspaceKey,
+    })),
+    [workspaceOptions, activeWorkspaceKey],
   )
 
-  const renderSubmenu = () => {
-    if (!activeSubmenu) return null
+  const launcherViews: WorkspaceLauncherItem[] = useMemo(
+    () => viewOptions.map((view) => ({
+      key: view.key,
+      label: view.label,
+      description: view.description,
+      availability: toAvailability(view.statusLabel),
+      selected: activeViewKeys.includes(view.key),
+    })),
+    [viewOptions, activeViewKeys],
+  )
 
-    if (activeSubmenu === 'workspaces') {
-      return (
-        <div className="nx-workspace-submenu-scroll" role="menu">
-          {workspaceOptions.map((workspace) => (
-            <button key={workspace.key} type="button" className={cls('nx-workspace-submenu-item', activeWorkspaceKey === workspace.key && 'is-active')} onClick={() => selectAndClose(() => onSelectWorkspace?.(workspace.key))}>
-              <span className="nx-workspace-submenu-item__text"><strong>{workspace.label}</strong><small>{workspace.description || ''}</small></span>
-              <span className="nx-workspace-submenu-item__meta">
-                {workspace.statusLabel ? <em className="nx-workspace-submenu-item__badge">{workspace.statusLabel}</em> : null}
-                {activeWorkspaceKey === workspace.key ? <Icon name="check" /> : null}
-              </span>
-            </button>
-          ))}
-        </div>
-      )
+  const actionItems: ActionCenterItem[] = useMemo(() => {
+    const counts = actionCenterCounts
+    const navigate = (view: string) => {
+      if (onNavigateInboxView) onNavigateInboxView(view)
+      else onOpenTasks()
     }
 
-    if (activeSubmenu === 'views') {
-      return (
-        <div className="nx-workspace-submenu-scroll" role="menu">
-          {viewOptions.map((view) => {
-            const isActiveView = activeViewKeys.includes(view.key)
-            const widthKey = view.key === 'analytics' ? 'metrics' : view.key
-            return (
-              <div
-                key={view.key}
-                className={cls('nx-wsv-row', isActiveView && 'is-active')}
-                role="menuitemcheckbox"
-                aria-checked={isActiveView}
-              >
-                <button
-                  type="button"
-                  className="nx-wsv-row__toggle"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    onSelectView?.(view.key)
-                  }}
-                >
-                  <span className="nx-wsv-row__label">
-                    <strong>{view.label}</strong>
-                    {view.description ? <small>{view.description}</small> : null}
-                  </span>
-                  {isActiveView ? <Icon name="check" /> : null}
-                </button>
-                <div className="nx-wsv-row__pills" aria-label={`${view.label} width`}>
-                  {(['25', '50', '75', '100'] as ViewWidthPercent[]).map((width) => (
-                    <button
-                      key={width}
-                      type="button"
-                      className={cls('nx-wsv-pill', activeViewWidths[widthKey] === width && 'is-active')}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        onSelectViewWidth?.(view.key, width)
-                      }}
-                    >
-                      {width === '100' ? 'Full' : `${width}%`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )
-    }
+    return [
+      {
+        id: 'human-review',
+        label: 'Human Review',
+        count: counts?.humanReview ?? null,
+        loading: counts?.loading,
+        onSelect: () => navigate('needs_review'),
+      },
+      {
+        id: 'follow-ups',
+        label: 'Follow-Ups',
+        count: counts?.followUps ?? null,
+        loading: counts?.loading,
+        onSelect: () => navigate('follow_up'),
+      },
+      {
+        id: 'failed-sends',
+        label: 'Failed Sends',
+        count: counts?.failedSends ?? null,
+        loading: counts?.loading,
+        onSelect: () => onOpenQueueCommand?.() ?? onOpenTasks(),
+      },
+      {
+        id: 'decisions',
+        label: 'Decisions Required',
+        count: counts?.decisionsRequired ?? null,
+        loading: counts?.loading,
+        onSelect: () => navigate('needs_review'),
+      },
+      {
+        id: 'closing-tasks',
+        label: 'Closing Tasks',
+        count: counts?.closingTasks,
+        loading: counts?.loading,
+        hidden: counts?.closingTasks == null && !counts?.loading,
+        unavailableReason: counts?.closingTasks == null ? 'Closing desk not connected' : undefined,
+        onSelect: onOpenTasks,
+      },
+      {
+        id: 'system-tasks',
+        label: 'System Tasks',
+        count: counts?.systemTasks,
+        loading: counts?.loading,
+        hidden: counts?.systemTasks == null && !counts?.loading,
+        unavailableReason: counts?.systemTasks == null ? 'No system task feed' : undefined,
+        onSelect: onOpenTasks,
+      },
+    ]
+  }, [actionCenterCounts, onNavigateInboxView, onOpenQueueCommand, onOpenTasks])
 
-    if (activeSubmenu === 'theme') {
-      return (
-        <div className="nx-workspace-submenu-scroll" role="menu">
-          <div className="nx-workspace-submenu-title">NEXUS Theme</div>
-          <div className="nx-workspace-submenu-note">Command center color scheme</div>
-          {THEME_OPTIONS.map((themeOption) => (
-            <button key={themeOption.id} type="button" className={cls('nx-workspace-submenu-item', activeThemeId === themeOption.id && 'is-active')} onClick={() => selectAndClose(() => onSelectTheme(themeOption.id))}>
-              <span className="nx-theme-dot" data-theme={themeOption.id} />
-              <strong>{themeOption.label}</strong>
-              {activeThemeId === themeOption.id ? <Icon name="check" /> : null}
-            </button>
-          ))}
-        </div>
-      )
-    }
-
-    if (activeSubmenu === 'accent') {
-      return (
-        <div className="nx-workspace-submenu-scroll" role="menu">
-          <div className="nx-workspace-submenu-title">Accent Palette</div>
-          <div className="nx-workspace-submenu-note">Primary accent color</div>
-          {ACCENT_OPTIONS.map((accentOption) => (
-            <button key={accentOption.id} type="button" className={cls('nx-workspace-submenu-item', activeAccentId === accentOption.id && 'is-active')} onClick={() => selectAndClose(() => onSelectAccent(accentOption.id))}>
-              <span className="nx-accent-dot" data-accent={accentOption.id} />
-              <strong>{accentOption.label}</strong>
-              {activeAccentId === accentOption.id ? <Icon name="check" /> : null}
-            </button>
-          ))}
-        </div>
-      )
-    }
-
-    return (
-      <div className="nx-workspace-submenu-scroll" role="menu">
-        <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}><strong>Save Current Layout</strong></button>
-        <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onResetLayout())}><strong>Reset Layout</strong></button>
-        <button type="button" className="nx-workspace-submenu-item" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}><strong>Workspace Settings</strong></button>
-      </div>
-    )
-  }
+  const actionCountTotal = actionItems.reduce((sum, item) => {
+    if (item.hidden || typeof item.count !== 'number') return sum
+    return sum + item.count
+  }, 0)
 
   return (
     <header className="nx-topbar nx-topbar--nexus-shell">
+      {/* Zone 1: Workspace identity */}
       <div className="nx-topbar__left nx-topbar-shell-left">
         <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
           <div className="nx-topbar__logo">
             <Icon name="spark" />
           </div>
-          <div>
+          <div className="nx-topbar-identity">
             <span>NEXUS</span>
-            <strong>Dashboard</strong>
+            <strong>{activeWorkspaceLabel}</strong>
+            {contextSubtitle ? <small>{contextSubtitle}</small> : null}
           </div>
         </div>
-        <div className="nx-topbar-orb-slot">
-          <InboxKpiOrb />
-        </div>
-        <div className="nx-topbar-view-control" ref={workspaceControlRef}>
+
+        {/* Zone 2: Operational controls */}
+        <div className="nx-topbar-shell-zone nx-topbar-shell-zone--controls">
+          <div className="nx-topbar-orb-slot">
+            <InboxKpiOrb />
+          </div>
+
+          <div className="nx-topbar-view-control" ref={workspaceControlRef}>
             <button
+              ref={workspaceTriggerRef}
               type="button"
-              className={cls('nx-topbar-view-button nx-topbar-workspace-compact', openControlMenu === 'workspace' && 'is-active')}
+              className={cls('nx-topbar-view-button nx-topbar-workspace-compact', activeSurface === 'workspace' && 'is-active')}
               title={`Workspace: ${activeWorkspaceLabel}`}
+              aria-expanded={activeSurface === 'workspace'}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                setOpenControlMenu((current) => current === 'workspace' ? null : 'workspace')
-                setActiveSubmenu('workspaces')
+                openExclusiveSurface('workspace')
               }}
             >
               <strong><Icon name="layout-split" /></strong>
             </button>
-            {openControlMenu === 'workspace' && !isCompactMenu && (
-              <div
-                className={cls('nx-liquid-popover nx-topbar-workspace-menu', submenuFlipLeft && 'is-submenu-left')}
-                role="menu"
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                }}
-              >
-                {renderWorkspaceRoot()}
-                <div className="nx-workspace-submenu-panel">
-                  {activeSubmenu === 'views' && activeViewChips.length > 0 ? (
-                    <div className="nx-workspace-active-view-strip" aria-label="Active views">
-                      {activeViewChips.map((chip) => (
-                        <button
-                          key={chip.key}
-                          type="button"
-                          className={cls('nx-active-view-chip', chip.key === activeViewKey && 'is-active')}
-                          onClick={() => onToggleActiveViewChip?.(chip.key)}
-                          title={`Remove ${chip.label}`}
-                        >
-                          <span>{chip.label}</span>
-                          <Icon name="close" />
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {renderSubmenu()}
-                </div>
-              </div>
-            )}
-        </div>
-        <div
-          className="nx-notification-control"
-          onMouseEnter={() => setIsQueuePanelHovered(true)}
-          onMouseLeave={() => setIsQueuePanelHovered(false)}
-        >
-          <button
-            type="button"
-            className={cls('nx-processor-button nx-processor-button--compact', `is-${processorStatus}`, isQueuePanelPinned && 'is-active')}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setIsQueuePanelPinned((prev) => !prev)
-            }}
-            aria-expanded={isQueuePanelPinned || isQueuePanelHovered}
-            title={`Queue Processor · ${processorHealthLabel}`}
-          >
-            <span className={cls('nx-queue-indicator', `is-${processorStatus}`)}>
-              <Icon name={queueStatusIcon} />
-              {processorStatus === 'healthy' ? <i className="nx-queue-indicator-dot" /> : null}
-            </span>
-          </button>
-          {isQueuePanelPinned || isQueuePanelHovered ? (
-            <div className="nx-liquid-popover nx-liquid-popover--processor" role="status" onClick={(e) => e.stopPropagation()}>
+
+            <WorkspaceLauncher
+              open={activeSurface === 'workspace'}
+              compact={isCompactMenu}
+              onClose={() => closeAndRestoreFocus('workspace')}
+              activeWorkspaceKey={activeWorkspaceKey}
+              workspaceOptions={launcherWorkspaces}
+              viewOptions={launcherViews}
+              activeViewKeys={activeViewKeys}
+              activeViewWidths={activeViewWidths}
+              activeViewChips={activeViewChips}
+              activeViewKey={activeViewKey}
+              activeThemeId={activeThemeId}
+              activeAccentId={activeAccentId}
+              onSelectWorkspace={(key) => {
+                onSelectWorkspace?.(key)
+                closeAndRestoreFocus('workspace')
+              }}
+              onSelectView={(key) => onSelectView?.(key)}
+              onSelectViewWidth={(key, width) => onSelectViewWidth?.(key, width)}
+              onToggleActiveViewChip={onToggleActiveViewChip}
+              onSelectTheme={onSelectTheme}
+              onSelectAccent={onSelectAccent}
+              onSaveCurrentLayout={onSaveCurrentLayout}
+              onResetLayout={onResetLayout}
+              onWorkspaceSettings={onWorkspaceSettings}
+            />
+          </div>
+
+          <div className="nx-notification-control">
+            <button
+              ref={queueTriggerRef}
+              type="button"
+              className={cls(
+                'nx-processor-button nx-processor-button--compact',
+                `is-${processorStatus}`,
+                activeSurface === 'queue' && 'is-active',
+              )}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                openExclusiveSurface('queue')
+              }}
+              aria-expanded={activeSurface === 'queue'}
+              title={`Queue & System Status · ${processorHealthLabel}`}
+            >
+              <span className={cls('nx-queue-indicator', `is-${processorStatus}`)}>
+                <Icon name={queueStatusIcon} />
+                {processorStatus === 'healthy' ? <i className="nx-queue-indicator-dot" /> : null}
+              </span>
+            </button>
+
+            <CommandPopover
+              open={activeSurface === 'queue'}
+              anchorRef={queueTriggerRef}
+              onClose={() => closeAndRestoreFocus('queue')}
+              className="nx-liquid-popover nx-liquid-popover--processor"
+              placement="bottom-start"
+              width="min(380px, calc(100vw - 24px))"
+            >
               <QueueCommandCenter
+                variant="executive"
                 health={queueProcessorHealth}
                 control={queueControlDiagnostics}
                 loading={queueProcessorHealthLoading}
@@ -493,43 +466,29 @@ export const NexusTopBar = ({
                 onRetryFailed={onRetryFailed}
                 onReconcileDelivery={onReconcileDelivery}
                 onCancelStaleFollowUps={onCancelStaleFollowUps}
-                onClose={() => {
-                  setIsQueuePanelPinned(false)
-                  setIsQueuePanelHovered(false)
-                }}
+                onClose={() => closeAndRestoreFocus('queue')}
+                onOpenQueueCommand={onOpenQueueCommand}
               />
-            </div>
-          ) : null}
+            </CommandPopover>
+          </div>
         </div>
       </div>
 
+      {/* Zone 3: Global search */}
       <div className="nx-topbar__center nx-topbar-shell-center">
-        {openControlMenu === 'workspace' && isCompactMenu ? (
-            <>
-              <button className="nx-workspace-drawer-backdrop" type="button" aria-label="Close workspace menu" onClick={closeWorkspaceMenu} />
-              <div className="nx-workspace-drawer" role="menu" onClick={(event) => { event.stopPropagation() }}>
-                <div className="nx-workspace-drawer__header">
-                  <strong>Workspace Menu</strong>
-                  <button type="button" onClick={closeWorkspaceMenu}><Icon name="close" /></button>
-                </div>
-                <div className="nx-workspace-drawer__body">
-                  {renderWorkspaceRoot()}
-                  <div className="nx-workspace-submenu-panel is-drawer">{renderSubmenu()}</div>
-                </div>
-              </div>
-            </>
-          ) : null}
         <div className="nx-global-search">
           <Icon name="search" />
           <input
             ref={searchInputRef}
-            aria-label="Search Inbox sellers, buyers, properties, conversations, and markets"
+            aria-label="Search sellers, owners, properties, conversations, buyers, campaigns, and entities"
             value={topSearchQuery}
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {
               onTopSearchQueryChange(event.target.value)
               setSearchOpen(true)
+              setActiveSurface(null)
+              onCloseOverlay()
             }}
             onFocus={(event) => {
               event.currentTarget.select()
@@ -561,46 +520,43 @@ export const NexusTopBar = ({
           />
           <kbd>CMD+K</kbd>
           {showSearchPopover ? (
-            <div className="nx-search-results-popover" role="listbox" aria-label="Inbox search suggestions">
+            <div className="nx-search-results-popover" role="listbox" aria-label="Universal search suggestions">
               <div className="nx-search-results-popover__header">
-                <span>Inbox Search</span>
-                <b>{topSearchLoading ? 'Live' : `${topSearchItems.length} matches`}</b>
+                <span>Universal Search</span>
+                <b>{topSearchLoading ? 'Searching…' : `${topSearchItems.length} matches`}</b>
               </div>
               <div className="nx-search-results-list">
-                {topSearchGroups.map((group) => {
-                  let runningIndex = -1
-                  return (
-                    <section key={group.key} className="nx-search-result-group">
-                      <header className="nx-search-result-group__label">{group.label}</header>
-                      {group.items.map((result) => {
-                        runningIndex = topSearchItems.findIndex((item) => item.id === result.id)
-                        const isActive = runningIndex === searchActiveIndex
-                        return (
-                          <button
-                            key={result.id}
-                            type="button"
-                            className={cls('nx-search-result-item', isActive && 'is-active')}
-                            onMouseEnter={() => setSearchActiveIndex(runningIndex)}
-                            onMouseDown={(event) => {
-                              event.preventDefault()
-                              handleSearchSubmit(result)
-                            }}
-                          >
-                            <span className="nx-search-result-item__row">
-                              <strong>{result.title}</strong>
-                              {result.badge ? <em>{result.badge}</em> : null}
-                            </span>
-                            <small>{result.subtitle}</small>
-                            {result.description ? <p>{result.description}</p> : null}
-                          </button>
-                        )
-                      })}
-                    </section>
-                  )
-                })}
+                {topSearchGroups.map((group) => (
+                  <section key={group.key} className="nx-search-result-group">
+                    <header className="nx-search-result-group__label">{group.label}</header>
+                    {group.items.map((result) => {
+                      const runningIndex = topSearchItems.findIndex((item) => item.id === result.id)
+                      const isActive = runningIndex === searchActiveIndex
+                      return (
+                        <button
+                          key={result.id}
+                          type="button"
+                          className={cls('nx-search-result-item', isActive && 'is-active')}
+                          onMouseEnter={() => setSearchActiveIndex(runningIndex)}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            handleSearchSubmit(result)
+                          }}
+                        >
+                          <span className="nx-search-result-item__row">
+                            <strong>{result.title}</strong>
+                            {result.badge ? <em>{result.badge}</em> : null}
+                          </span>
+                          <small>{result.subtitle}</small>
+                          {result.description ? <p>{result.description}</p> : null}
+                        </button>
+                      )
+                    })}
+                  </section>
+                ))}
                 {!topSearchLoading && topSearchItems.length === 0 ? (
                   <div className="nx-search-results-empty">
-                    <strong>No inbox matches</strong>
+                    <strong>No matches</strong>
                     <span>Try a seller, buyer, address, market, phone, or queue status.</span>
                   </div>
                 ) : null}
@@ -610,42 +566,49 @@ export const NexusTopBar = ({
         </div>
       </div>
 
-      <div className="nx-topbar__actions">
+      {/* Zone 4: Operator controls */}
+      <div className="nx-topbar__actions nx-topbar-shell-zone nx-topbar-shell-zone--operators">
         <div className="nx-notification-control">
           <button
+            ref={actionTriggerRef}
             type="button"
-            className="nx-notification-button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setOpenQuickMenu((current) => current === 'tasks' ? null : 'tasks')
+            className={cls('nx-notification-button', activeSurface === 'action-center' && 'is-active')}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              openExclusiveSurface('action-center')
             }}
-            title="Tasks"
+            aria-expanded={activeSurface === 'action-center'}
+            title="Action Center"
           >
             <Icon name="check" />
+            {actionCountTotal > 0 ? <span>{actionCountTotal > 99 ? '99+' : actionCountTotal}</span> : null}
           </button>
-          {openQuickMenu === 'tasks' ? (
-            <div className="nx-liquid-popover nx-quick-menu-popover" role="menu">
-              {['Manual Review', 'Follow-ups', 'Failed Sends', 'Needs Decision', 'Closing Tasks', 'System Tasks'].map((item) => (
-                <button key={item} type="button" onClick={onOpenTasks}>
-                  <span>{item}</span><small>Count unavailable</small>
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <ActionCenter
+            open={activeSurface === 'action-center'}
+            anchorRef={actionTriggerRef}
+            onClose={() => closeAndRestoreFocus('action-center')}
+            items={actionItems}
+            loading={actionCenterCounts?.loading}
+          />
         </div>
 
         <div className="nx-notification-control">
           <button
             type="button"
-            className="nx-notification-button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onOpenActivity()
+            className={cls('nx-notification-button', activeOverlay === 'activity' && 'is-active')}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              if (activeOverlay === 'activity') onCloseOverlay()
+              else {
+                setActiveSurface(null)
+                setSearchOpen(false)
+                onOpenActivity()
+              }
             }}
             aria-expanded={activeOverlay === 'activity'}
-            title="Activity"
+            title="Live Activity"
           >
             <Icon name="activity" />
           </button>
@@ -654,11 +617,12 @@ export const NexusTopBar = ({
         <div className="nx-notification-control">
           <button
             type="button"
-            className={cls('nx-notification-button', unreadNotifications > 0 && 'has-alerts')}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onOpenOverlay(activeOverlay === 'notifications' ? null : 'notifications')
+            className={cls('nx-notification-button', unreadNotifications > 0 && 'has-alerts', activeOverlay === 'notifications' && 'is-active')}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              if (activeOverlay === 'notifications') onCloseOverlay()
+              else openOverlayExclusive('notifications')
             }}
             aria-expanded={activeOverlay === 'notifications'}
             title="Notifications"
@@ -668,31 +632,38 @@ export const NexusTopBar = ({
           </button>
         </div>
 
-        <button
-          type="button"
-          className="nx-avatar-menu nx-avatar-menu--compact"
-          title="User menu"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            setOpenQuickMenu((current) => current === 'profile' ? null : 'profile')
-          }}
-          aria-expanded={openQuickMenu === 'profile'}
-        >
-          <span>RK</span>
-        </button>
+        <div className="nx-notification-control">
+          <button
+            ref={profileTriggerRef}
+            type="button"
+            className={cls('nx-avatar-menu nx-avatar-menu--compact', activeSurface === 'profile' && 'is-active')}
+            title="Profile menu"
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              openExclusiveSurface('profile')
+            }}
+            aria-expanded={activeSurface === 'profile'}
+          >
+            <span>{profileInitials}</span>
+          </button>
 
-        {openQuickMenu === 'profile' && (
-          <div className="nx-avatar-popover nx-liquid-popover">
-            <button type="button" onClick={onOpenDossier}><Icon name="briefing" /> Profile</button>
-            {onOpenSettings && <button type="button" onClick={onOpenSettings}><Icon name="settings" /> Settings</button>}
-            <button type="button" onClick={() => onWorkspaceSettings?.()}><Icon name="layout-split" /> Workspace Settings</button>
-            <button type="button" onClick={onOpenKpis}><Icon name="stats" /> Theme Settings</button>
-            <button type="button" onClick={onOpenKeys}><Icon name="key" /> Keyboard Shortcuts</button>
-            <button type="button" onClick={onOpenAi}><Icon name="activity" /> Diagnostics</button>
-            <button type="button" disabled><Icon name="close" /> Sign Out (Not Ready)</button>
-          </div>
-        )}
+          <ProfileMenu
+            open={activeSurface === 'profile'}
+            anchorRef={profileTriggerRef}
+            onClose={() => closeAndRestoreFocus('profile')}
+            initials={profileInitials}
+            authReady={authReady}
+            authLoading={authLoading}
+            onProfile={onOpenDossier}
+            onSettings={onOpenSettings}
+            onWorkspaceSettings={onWorkspaceSettings}
+            onThemeSettings={onOpenKpis}
+            onKeyboardShortcuts={onOpenKeys}
+            onDiagnostics={onOpenAi}
+            onSignOut={onSignOut}
+          />
+        </div>
       </div>
 
       <NexusNotificationCenter
