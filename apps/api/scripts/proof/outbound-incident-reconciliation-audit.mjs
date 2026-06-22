@@ -7,7 +7,11 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
-import { normalizePhone } from "../../src/lib/providers/textgrid.js";
+import { normalizeUsPhoneToE164 } from "../../src/lib/sms/sanitize.js";
+
+function normalizePhone(value) {
+  return normalizeUsPhoneToE164(value);
+}
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

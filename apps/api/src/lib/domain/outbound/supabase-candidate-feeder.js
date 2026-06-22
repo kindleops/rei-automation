@@ -2622,7 +2622,7 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       };
     }
   } catch (suppressErr) {
-    warn("outreach.suppression_check_failed", {
+    logger.warn("outreach.suppression_check_failed", {
       error: suppressErr?.message,
       master_owner_id: candidate.master_owner_id,
     });
@@ -2645,7 +2645,7 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       };
     }
   } catch (phoneCooldownErr) {
-    warn("outreach.phone_cooldown_check_failed", {
+    logger.warn("outreach.phone_cooldown_check_failed", {
       error: phoneCooldownErr?.message,
       canonical_e164: candidate.canonical_e164?.slice(-4),
     });

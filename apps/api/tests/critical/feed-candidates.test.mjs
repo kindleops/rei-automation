@@ -14,7 +14,7 @@ import {
 import { normalizeFeedCandidatesInput, statusForResult } from "@/lib/domain/outbound/feed-candidates-request.js";
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
 
-function makeSupabaseWithCandidates(candidates = [], sourceName = "v_sms_campaign_queue_candidates") {
+function makeSupabaseWithCandidates(candidates = [], sourceName = "outbound_feeder_candidates") {
   return {
     from(table) {
       const rows = table === sourceName ? candidates : [];
@@ -58,6 +58,24 @@ function makeCandidate(id = 1, overrides = {}) {
     timezone: "America/Chicago",
     ...overrides,
   };
+}
+
+function makeFeederReadyCandidate(id = 1, overrides = {}) {
+  const suffix = String(id).padStart(4, "0");
+  return makeCandidate(id, {
+    display_name: `Taylor Owner ${suffix}`,
+    owner_display_name: `Taylor Owner ${suffix}`,
+    seller_full_name: `Taylor Owner ${suffix}`,
+    seller_first_name: "Taylor",
+    primary_prospect_id: `prospect_${suffix}`,
+    matching_flags: "Likely Owner",
+    property_address_full: `123 Main St, Houston, TX 7700${String(id % 10)}`,
+    ...overrides,
+  });
+}
+
+function mockDuplicateQueueItemFound() {
+  return { duplicate: true, reason_code: REASON_CODES.DUPLICATE_QUEUE_ITEM };
 }
 
 function makeTextgridNumber(id, market, overrides = {}) {
@@ -329,7 +347,15 @@ test("runSupabaseCandidateFeeder returns structured source unavailable error", a
 });
 
 test("evaluateCandidateEligibility blocks duplicate queue items", async () => {
-  const candidate = makeCandidate(9);
+  const candidate = {
+    ...makeFeederReadyCandidate(9),
+    identity_alignment: {
+      status: "verified",
+      hardBlock: false,
+      score: 100,
+      reasons: ["test_fixture"],
+    },
+  };
 
   const decision = await evaluateCandidateEligibility(
     {
@@ -341,7 +367,7 @@ test("evaluateCandidateEligibility blocks duplicate queue items", async () => {
       now: new Date().toISOString(),
     },
     {
-      hasDuplicateQueueItem: async () => true,
+      hasDuplicateQueueItem: async () => mockDuplicateQueueItemFound(),
     }
   );
 
@@ -2807,7 +2833,7 @@ test("schedule_spread blocks any slot beyond the 18 hour safety guard", async ()
 });
 
 test("duplicate suppression still blocks duplicates when scan_limit is large", async () => {
-  const candidates = Array.from({ length: 150 }, (_, i) => makeCandidate(i + 1));
+  const candidates = Array.from({ length: 150 }, (_, i) => makeFeederReadyCandidate(i + 1));
 
   const result = await runSupabaseCandidateFeeder(
     {
@@ -2819,7 +2845,7 @@ test("duplicate suppression still blocks duplicates when scan_limit is large", a
     },
     {
       supabase: makeSupabaseWithCandidates(candidates),
-      hasDuplicateQueueItem: async () => true,
+      hasDuplicateQueueItem: async () => mockDuplicateQueueItemFound(),
       chooseTextgridNumber: async () => ({
         ok: true,
         routing_allowed: true,
@@ -2848,22 +2874,23 @@ function makeOffsetCapturingSupabase(candidates = []) {
   const supabase = {
     _captured: captured,
     from() {
-      let _select_chain = null;
       const chain = {
         select() {
-          _select_chain = this;
+          return this;
+        },
+        order() {
           return this;
         },
         range(from, to) {
           captured.method = "range";
           captured.offset_from = from;
           captured.offset_to = to;
-          return Promise.resolve({ data: candidates, error: null });
+          return Promise.resolve({ data: candidates.slice(from, to + 1), error: null });
         },
         limit(n) {
           captured.method = "limit";
           captured.limit_n = n;
-          return Promise.resolve({ data: candidates, error: null });
+          return Promise.resolve({ data: candidates.slice(0, n), error: null });
         },
       };
       return chain;
@@ -2872,7 +2899,7 @@ function makeOffsetCapturingSupabase(candidates = []) {
   return { supabase, captured };
 }
 
-test("candidate_offset=0 uses limit() not range()", async () => {
+test("candidate_offset=0 uses range(0, 9) for scan_limit=10", async () => {
   const { supabase, captured } = makeOffsetCapturingSupabase([makeCandidate(1)]);
 
   await runSupabaseCandidateFeeder(
@@ -2890,8 +2917,9 @@ test("candidate_offset=0 uses limit() not range()", async () => {
     }
   );
 
-  assert.equal(captured.method, "limit", "offset=0 should use .limit() not .range()");
-  assert.equal(captured.offset_from, null);
+  assert.equal(captured.method, "range", "offset=0 should use .range() with scan_limit");
+  assert.equal(captured.offset_from, 0);
+  assert.equal(captured.offset_to, 9);
 });
 
 test("candidate_offset=100 uses range(100, 109) for scan_limit=10", async () => {
@@ -2962,8 +2990,8 @@ test("diagnostics include effective_candidate_offset", async () => {
 });
 
 test("candidate_offset does not weaken duplicate suppression", async () => {
-  const candidates = Array.from({ length: 20 }, (_, i) => makeCandidate(i + 100));
-  const { supabase } = makeOffsetCapturingSupabase(candidates);
+  const candidates = Array.from({ length: 120 }, (_, i) => makeFeederReadyCandidate(i + 1));
+  const { supabase } = makeSupabaseWithCandidates(candidates);
 
   const result = await runSupabaseCandidateFeeder(
     {
@@ -2976,7 +3004,7 @@ test("candidate_offset does not weaken duplicate suppression", async () => {
     },
     {
       supabase,
-      hasDuplicateQueueItem: async () => true,
+      hasDuplicateQueueItem: async () => mockDuplicateQueueItemFound(),
       chooseTextgridNumber: async () => ({
         ok: true,
         routing_allowed: true,
@@ -3015,8 +3043,9 @@ test("default candidate_offset is 0", async () => {
     }
   );
 
-  assert.equal(captured.method, "limit", "no offset → should use .limit()");
-  assert.equal(captured.offset_from, null);
+  assert.equal(captured.method, "range", "no offset → should start range at 0");
+  assert.equal(captured.offset_from, 0);
+  assert.equal(captured.offset_to, 9);
 });
 
 // ─── end candidate_offset tests ──────────────────────────────────────────────

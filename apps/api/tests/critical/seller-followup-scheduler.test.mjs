@@ -134,11 +134,23 @@ test("scheduleFollowUp: blocks 21610-suppressed recipient", async () => {
     from(table) {
       if (table === "send_queue") {
         return {
+          select: (_cols, opts = {}) => {
+            const chain = {
+              eq: function () {
+                return chain;
+              },
+              ilike: async () => ({ count: opts.head ? 1 : 0, error: null }),
+            };
+            return chain;
+          },
+        };
+      }
+      if (table === "sms_suppression_list") {
+        return {
           select: () => ({
-            eq: function () {
-              return this;
-            },
-            ilike: async () => ({ count: 1, error: null }),
+            eq: () => ({
+              ilike: async () => ({ count: 0, error: null }),
+            }),
           }),
         };
       }

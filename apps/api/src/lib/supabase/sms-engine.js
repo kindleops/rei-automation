@@ -414,6 +414,7 @@ export function normalizeSendQueueRow(row) {
     campaign_id: safe_row.campaign_id || null,
     campaign_target_id: safe_row.campaign_target_id || null,
     campaign_send_window_id: safe_row.campaign_send_window_id || null,
+    dedupe_key: clean(safe_row.dedupe_key || safe_row.metadata?.idempotency_key) || null,
   };
 }
 
@@ -3311,6 +3312,14 @@ async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number },
       pair_count = pair_result.count ?? 0;
     }
 
+    const recipient_failure_result = await supabase_client
+      .from(SEND_QUEUE_TABLE)
+      .select("id", { count: "exact", head: true })
+      .eq("to_phone_number", to_phone)
+      .eq("queue_status", "failed")
+      .ilike("failed_reason", "%21610%");
+    const recipient_failure_count = recipient_failure_result.count ?? 0;
+
     const recipient_result = await supabase_client
       .from("sms_suppression_list")
       .select("id", { count: "exact", head: true })
@@ -3318,7 +3327,7 @@ async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number },
       .ilike("suppression_reason", "%21610%");
     const recipient_count = recipient_result.count ?? 0;
 
-    if ((pair_count ?? 0) > 0 || (recipient_count ?? 0) > 0) {
+    if ((pair_count ?? 0) > 0 || (recipient_failure_count ?? 0) > 0 || (recipient_count ?? 0) > 0) {
       return { suppressed: true, reason: "phone_suppressed_21610" };
     }
   } catch (check_error) {
