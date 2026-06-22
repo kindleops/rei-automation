@@ -263,6 +263,13 @@ export function qualifyComps(subject = {}, rawComps = []) {
       comp_lane: r.q.comp_lane,
       status: r.q.status,
       reasons: r.q.reasons.map((x) => x.code),
+      // Additive (Item 5B): lets the income models draw confidence-reduced,
+      // adjustment-supported cross-unit / adjacent-band fallback evidence from
+      // REVIEW-classed permitted-fallback comps. Never used for autonomy.
+      score: r.q.score,
+      ppsf: r.q.ppsf,
+      ppu: r.q.ppu,
+      raw: r.tx.raw,
     })),
     clusters_summary: clusters,
     sample: {

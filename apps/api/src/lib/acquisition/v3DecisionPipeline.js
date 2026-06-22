@@ -33,12 +33,13 @@ import { buildSubjectTo } from './subjectToModel.js';
 import { buildSellerFinance } from './sellerFinanceModel.js';
 import { buildConfidenceAndExecution } from './acquisitionConfidence.js';
 import { buildStrategyRanking } from './acquisitionStrategyRanking.js';
+import { buildResidentialIncomeAnalysis, isIncomeFamily } from './residentialIncomeDecision.js';
 
 const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
 ]);
 
-export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null }) {
+export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {} }) {
   const classification = classifyAssetLane(subjectRow);
   const { universes, family } = buildValuationUniverses(subjectRow, qualification, buyerPurchases, now);
   const reconciliation = reconcileValuation(universes, family);
@@ -90,6 +91,21 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     autoOfferEligible: confidence.auto_offer_eligible,
     autoCreativeEligible: readFeatureFlag('ACQUISITION_ENGINE_V3_ALLOW_AUTO_CREATIVE'),
   });
+
+  // ---- Item 5B: additive residential-income analysis (income families only) ----
+  const residentialIncome = isIncomeFamily(family)
+    ? buildResidentialIncomeAnalysis({
+        subjectRow,
+        qualification,
+        universes,
+        repair,
+        family,
+        lane: classification.lane,
+        income,
+        buyerPurchases,
+        finalConfidence: confidence.final_confidence,
+      })
+    : null;
 
   const isExecutable = EXECUTABLE_STATES.has(confidence.execution_state);
 
@@ -187,7 +203,15 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     clean_independent_transaction_count: confidence.clean_independent_transaction_count,
     clean_effective_sample_size: confidence.clean_effective_sample_size,
     clean_universe_confidence: confidence.clean_universe_confidence,
+    raw_accepted_transaction_count: confidence.raw_accepted_transaction_count,
     raw_effective_sample_size: confidence.raw_effective_sample_size,
+    // Preflight §3: six explicitly-named, separate-semantics counts.
+    total_clean_accepted_transaction_count: confidence.total_clean_accepted_transaction_count,
+    total_clean_effective_sample_size: confidence.total_clean_effective_sample_size,
+    wholesale_pricing_independent_count: confidence.wholesale_pricing_independent_count,
+    wholesale_pricing_ess: confidence.wholesale_pricing_ess,
+    dominant_universe_independent_count: confidence.dominant_universe_independent_count,
+    dominant_universe_ess: confidence.dominant_universe_ess,
     // Item 5B §0: universe-specific + strategy-specific evidence depth.
     evidence_depth: confidence.evidence_depth,
     dominant_model_universe: confidence.dominant_model_universe,
@@ -195,6 +219,8 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     dominant_model_depth_score: confidence.dominant_model_depth_score,
     dominant_model_confidence_cap: confidence.dominant_model_confidence_cap,
     strategy_depth_gate: confidence.strategy_depth_gate,
+    // Item 5B: residential-income specialization (null for non-income families).
+    residential_income: residentialIncome,
     loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),

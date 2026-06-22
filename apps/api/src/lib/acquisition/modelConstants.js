@@ -519,13 +519,63 @@ export const WHOLESALE_DEPTH_GATES = Object.freeze({
   UNKNOWN: { preferred: 4, exception_min: 3 },
 });
 
-/** Strict corroboration required for a 3-transaction wholesale exception. */
+/**
+ * Strict corroboration required for a thin (exception_min) wholesale-cash
+ * exception. Preflight §2 fix: corroboration is LANE-APPROPRIATE and must use an
+ * INDEPENDENT, NON-OVERLAPPING source rather than always requiring a qualified
+ * PUBLIC_RECORD_ARM_LENGTH_VALUE transaction. Buyer-identity resolution routes
+ * public-record investor sales into LOCAL_INVESTOR_VALUE, which can legitimately
+ * leave PUBLIC_RECORD_ARM_LENGTH_VALUE empty; demanding public corroboration in
+ * that case would wrongly fail a well-corroborated thin set. The same
+ * transaction may NEVER serve as both primary evidence and corroboration.
+ *
+ * Any ONE of these independent corroborators satisfies the exception:
+ *   - the thin wholesale evidence itself spans >=2 non-overlapping universes
+ *     (cross-universe agreement among distinct transactions)
+ *   - >=1 qualified public-record arm-length transaction (when public is NOT the
+ *     sole primary contributor)
+ *   - >=1 qualified retail/MLS resale transaction
+ *   - >=1 qualified institutional single-asset transaction (distinct universe)
+ *   - an independently calculated, QUALIFIED income value (a model, not a txn)
+ *   - any other non-overlapping QUALIFIED valuation universe
+ */
 export const WHOLESALE_EXCEPTION = Object.freeze({
   max_disagreement: 30, // strictly below the ordinary cap (35)
   min_median_similarity: 70,
   max_dispersion: 0.15,
-  min_public_corroboration: 1, // >=1 qualified public-record corroborating txn
+  min_independent_corroboration: 1, // >=1 independent, non-overlapping corroborator
+  // Retained for reference/back-compat: the legacy single-source public-record
+  // threshold this exception replaced. Not used as the sole gate any longer.
+  min_public_corroboration: 1,
 });
+
+/* -------------------------------------------------------------------------- */
+/* Future calibration registry (preflight §4) — recorded, NOT auto-tuned      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Threshold-behavior items deliberately left UNCHANGED in this pass and flagged
+ * for future, evidence-driven calibration. Recording them here keeps the
+ * decision behind a documented, reviewable knob instead of a silent magic
+ * number, without altering behavior. Nothing here is read by the engine at
+ * runtime — it is an audit-facing registry only.
+ */
+export const FUTURE_CALIBRATION_ITEMS = Object.freeze([
+  Object.freeze({
+    id: 'PEER_OUTLIER_MIN_REL_DEV',
+    module: 'peerRelativeOutliers.js',
+    current_value: 0.2,
+    behavior:
+      'Global tight-cluster safeguard: MAD/IQR outlier fences are skipped when a ' +
+      'candidate is within ±20% of the peer median, so a value cannot be flagged ' +
+      'on a razor-thin cluster (the ratio rule still applies). This is a ' +
+      'false-positive guard, NOT a market-specific threshold.',
+    calibration_note:
+      'Future work may make MIN_REL_DEV lane-/market-specific. Do not remove the ' +
+      'tight-cluster safeguard during this pass unless tests prove a defect.',
+    status: 'DEFERRED',
+  }),
+]);
 
 /** Retail-resale ESS required for a novation-led shadow result. */
 export const NOVATION_DEPTH_MIN = 4;

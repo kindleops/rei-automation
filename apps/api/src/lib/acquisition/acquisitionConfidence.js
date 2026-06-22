@@ -31,6 +31,52 @@ function universeDepth(u) {
     : 0;
 }
 
+/**
+ * Preflight §2: lane-appropriate, NON-OVERLAPPING corroboration for a thin
+ * (exception_min) wholesale-cash set. The primary thin evidence is the
+ * wholesale pricing pool {investor, institutional, public}. Corroboration must
+ * come from an INDEPENDENT source whose transactions are disjoint from the
+ * single universe that supplies the thin evidence — or from a model
+ * (independently calculated income value), which never reuses a comp.
+ *
+ * @returns {{ corroborated: boolean, sources: string[], primary_contributors: string[] }}
+ */
+function wholesaleExceptionCorroboration({ investorEss, institutionalEss, publicEss, retailEss, universes }) {
+  const pool = [
+    { key: 'investor', ess: investorEss },
+    { key: 'institutional', ess: institutionalEss },
+    { key: 'public', ess: publicEss },
+  ];
+  const primary = pool.filter((p) => p.ess > 0).map((p) => p.key);
+  const sources = [];
+
+  // Cross-universe agreement: the thin wholesale evidence itself spans >=2
+  // distinct, non-overlapping universes (distinct transactions corroborate).
+  if (primary.length >= 2) {
+    sources.push('cross_universe_wholesale_agreement');
+  }
+
+  // When a SINGLE wholesale universe supplies the thin evidence, corroboration
+  // must come from outside that universe (so no transaction is counted twice).
+  const sole = primary.length === 1 ? primary[0] : null;
+  if (publicEss >= 1 && sole !== 'public') sources.push('qualified_public_record');
+  if (retailEss >= 1) sources.push('qualified_retail_resale');
+  if (institutionalEss >= 1 && sole !== 'institutional') sources.push('qualified_institutional');
+  if (investorEss >= 1 && sole !== 'investor') sources.push('qualified_local_investor');
+
+  // Independently calculated, QUALIFIED income value (a model — never a comp).
+  const income = universes[U.INCOME_VALUE];
+  if (income && income.available && income.value_classification === VC.QUALIFIED) {
+    sources.push('independent_income_value');
+  }
+
+  return {
+    corroborated: sources.length >= WHOLESALE_EXCEPTION.min_independent_corroboration,
+    sources,
+    primary_contributors: primary,
+  };
+}
+
 function subjectCompleteness(subjectRow) {
   const fields = ['estimated_value', 'building_square_feet', 'units_count', 'year_built', 'building_condition'];
   const present = fields.filter((f) => subjectRow[f] !== null && subjectRow[f] !== undefined && subjectRow[f] !== '');
@@ -119,12 +165,21 @@ export function buildConfidenceAndExecution({
   // ---- Strategy-specific wholesale-cash depth gate (Item 5B §0.4) ----
   const gate = WHOLESALE_DEPTH_GATES[family] ?? WHOLESALE_DEPTH_GATES.UNKNOWN;
   const invU = universes[U.LOCAL_INVESTOR_VALUE];
+  // Preflight §2: lane-appropriate, non-overlapping corroboration (no longer
+  // hard-requires a PUBLIC_RECORD_ARM_LENGTH_VALUE transaction).
+  const corroboration = wholesaleExceptionCorroboration({
+    investorEss,
+    institutionalEss,
+    publicEss,
+    retailEss,
+    universes,
+  });
   const exceptionMet =
     wholesaleEss >= gate.exception_min &&
     disagreement < WHOLESALE_EXCEPTION.max_disagreement &&
     (invU?.avg_similarity ?? dominantU?.avg_similarity ?? 0) >= WHOLESALE_EXCEPTION.min_median_similarity &&
     (invU?.dispersion ?? 1) <= WHOLESALE_EXCEPTION.max_dispersion &&
-    publicEss >= WHOLESALE_EXCEPTION.min_public_corroboration;
+    corroboration.corroborated;
   let cashGatePassed = false;
   let cashGateReason;
   if (wholesaleEss >= gate.preferred) {
@@ -228,11 +283,21 @@ export function buildConfidenceAndExecution({
     material_anomaly_reasons: materialReasons,
     nonmaterial_warning_reasons: nonmaterialWarnings,
     // clean depth = wholesale-relevant (investor-compatible) pricing depth only.
+    // NOTE (preflight §3): `clean_*` retains its established Item 5B meaning
+    // (= wholesale-pricing depth) for existing consumers and is NOT redefined.
     clean_independent_transaction_count: wholesaleEss,
     clean_effective_sample_size: wholesaleEss,
     clean_universe_confidence: cleanUniverseConfidence,
     raw_accepted_transaction_count: cleanAccepted,
     raw_effective_sample_size: cleanESS,
+    // ---- Preflight §3: six explicitly-named, separately-maintained counts ----
+    // so no broadly-named field silently conflates distinct semantics.
+    total_clean_accepted_transaction_count: cleanAccepted,
+    total_clean_effective_sample_size: cleanESS,
+    wholesale_pricing_independent_count: wholesaleEss,
+    wholesale_pricing_ess: wholesaleEss,
+    dominant_universe_independent_count: dominantEss,
+    dominant_universe_ess: dominantEss,
     // ---- Item 5B §0: universe-specific + strategy-specific depth ----
     evidence_depth: {
       investor_pricing_ess: investorEss,
@@ -247,7 +312,15 @@ export function buildConfidenceAndExecution({
     dominant_model_depth_score: round(clamp((dominantEss / 6) * 100, 0, 100), 1),
     dominant_model_confidence_cap: dominantDepthConfidenceCap(dominantEss),
     strategy_depth_gate: {
-      cash: { passed: cashGatePassed, reason: cashGateReason, wholesale_ess: wholesaleEss, preferred: gate.preferred, exception_met: exceptionMet },
+      cash: {
+        passed: cashGatePassed,
+        reason: cashGateReason,
+        wholesale_ess: wholesaleEss,
+        preferred: gate.preferred,
+        exception_met: exceptionMet,
+        exception_corroboration: corroboration.sources,
+        exception_primary_contributors: corroboration.primary_contributors,
+      },
       novation: { passed: novationGatePassed, retail_ess: retailEss, min: NOVATION_DEPTH_MIN },
     },
     reasons,
