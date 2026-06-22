@@ -270,8 +270,7 @@ export function PipelineWorkspace({
 
   const handleApplySavedView = useCallback((view: PipelineSavedView) => {
     applySavedView(view)
-    void refresh()
-  }, [applySavedView, refresh])
+  }, [applySavedView])
 
   const handleSelectOpportunity = useCallback((opportunityId: string) => {
     setSelectedOpportunityId(opportunityId)

@@ -22,6 +22,7 @@ interface PipelineConfigurableCardProps {
   onClick?: () => void
   onMouseEnter?: () => void
   onMouseLeave?: () => void
+  onPointerDown?: (e: React.PointerEvent<HTMLElement>) => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: () => void
   onReplyAction?: () => void
@@ -44,6 +45,7 @@ export function PipelineConfigurableCard({
   onClick,
   onMouseEnter,
   onMouseLeave,
+  onPointerDown,
   onDragStart,
   onDragEnd,
   onReplyAction,
@@ -98,6 +100,7 @@ export function PipelineConfigurableCard({
         dragging && 'is-dragging',
       )}
       onClick={onClick}
+      onPointerDown={onPointerDown}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.() } }}

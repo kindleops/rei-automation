@@ -24,9 +24,6 @@ interface PipelineCommandPanelProps {
   onToggleCollapse?: () => void
   onClose?: () => void
   hydrating?: boolean
-  onOpenCommandView: (threadId?: string | null) => void
-  onOpenConversation: (threadId?: string | null) => void
-  onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
   onRefreshEngine?: (id: string) => void | Promise<void>
 }
@@ -58,6 +55,61 @@ function Metric({ label, value, tone = 'neutral' }: { label: string; value: stri
   )
 }
 
+function SafetyMenu({
+  opportunityId,
+  onAction,
+}: {
+  opportunityId: string
+  onAction: PipelineCommandPanelProps['onAction']
+}) {
+  const [open, setOpen] = useState(false)
+  const [confirm, setConfirm] = useState<'pause' | 'suppress' | null>(null)
+
+  const run = (action: string) => {
+    void onAction(opportunityId, action)
+    setConfirm(null)
+    setOpen(false)
+  }
+
+  return (
+    <div className="plv-safety-menu">
+      <button
+        type="button"
+        className="plv-action-btn plv-safety-menu__trigger"
+        onClick={() => { setOpen((v) => !v); setConfirm(null) }}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        Safety
+      </button>
+      {open && (
+        <div className="plv-safety-menu__panel nx-glass-menu" role="menu">
+          {confirm === null ? (
+            <>
+              <button type="button" role="menuitem" onClick={() => setConfirm('pause')}>Pause Automation…</button>
+              <button type="button" role="menuitem" className="is-danger" onClick={() => setConfirm('suppress')}>Suppress Opportunity…</button>
+            </>
+          ) : (
+            <div className="plv-safety-menu__confirm">
+              <p>{confirm === 'pause' ? 'Pause automation for this opportunity?' : 'Suppress this opportunity? This is audited.'}</p>
+              <div className="plv-safety-menu__confirm-actions">
+                <button type="button" onClick={() => setConfirm(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className={confirm === 'suppress' ? 'is-danger' : 'is-warning'}
+                  onClick={() => run(confirm === 'pause' ? 'pause_automation' : 'suppress')}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function PipelineCommandPanel({
   opportunity: opp,
   loading,
@@ -67,21 +119,17 @@ export function PipelineCommandPanel({
   onToggleCollapse,
   onClose,
   hydrating,
-  onOpenCommandView,
-  onOpenConversation,
-  onOpenDealIntelligence,
   onAction,
   onRefreshEngine,
 }: PipelineCommandPanelProps) {
   const [tab, setTab] = useState<PanelTab>('overview')
-  const threadId = opp.primary_thread_key
   const engineRunId = opp.acquisition_engine_run_id
   const timeline = opp.activity_timeline ?? []
 
   if (collapsed) {
     return (
       <div className="plv-command-panel plv-command-panel--collapsed">
-        <button type="button" className="plv-command-panel__expand" onClick={onToggleCollapse} title="Expand panel (])">
+        <button type="button" className="plv-command-panel__expand" onClick={onToggleCollapse} title="Expand panel" aria-label="Expand detail panel">
           ◀
         </button>
       </div>
@@ -96,9 +144,9 @@ export function PipelineCommandPanel({
           <span>{opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} matched properties` : (opp.property_address_full || 'Property Unknown')}</span>
         </div>
         <div className="plv-command-panel__header-actions">
-          {hydrating && <span className="plv-command-panel__hydrate" aria-live="polite">Refreshing…</span>}
+          {hydrating && <span className="plv-command-panel__hydrate" aria-live="polite">Syncing…</span>}
           {onToggleCollapse && (
-            <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel">
+            <button type="button" className="plv-command-panel__collapse" onClick={onToggleCollapse} title="Collapse panel" aria-label="Collapse detail panel">
               ▶
             </button>
           )}
@@ -154,9 +202,8 @@ export function PipelineCommandPanel({
           <>
             <Row label="Intent" value={opp.latest_intent || 'Unknown'} />
             <Row label="Reply State" value={(opp.conversation_state || 'unknown').replace(/_/g, ' ')} />
+            <Row label="Thread" value={opp.primary_thread_key || 'No thread linked'} />
             <p className="plv-deal-detail__text">{opp.latest_message_preview || 'No recent message.'}</p>
-            <button type="button" className="plv-action-btn" onClick={() => onOpenConversation(threadId)}>Open Conversation</button>
-            <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_inbox_thread')}>Open Inbox Thread</button>
           </>
         )}
 
@@ -174,11 +221,6 @@ export function PipelineCommandPanel({
             <Row label="Est. Value" value={displayCurrency(opp.estimated_value, { engineRunId })} />
             <Row label="Equity" value={displayCurrency(opp.equity_amount, { engineRunId })} />
             <Row label="ARV" value={displayCurrency(opp.arv, { engineRunId })} />
-            <div className="plv-command-panel__actions-inline">
-              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_property')}>Open Property</button>
-              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_map')}>Open Map</button>
-              <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_comp_intelligence')}>Comp Intelligence</button>
-            </div>
           </>
         )}
 
@@ -192,10 +234,13 @@ export function PipelineCommandPanel({
             <Metric label="Confidence" value={opp.confidence != null ? `${Math.round(opp.confidence)}%` : 'Not calculated'} tone="neutral" />
             <Metric label="Offer Gap" value={formatUnknownMetric(opp.offer_to_ask_gap, 'currency', engineRunId)} tone="amber" />
             <Metric label="Recommended Offer" value={displayCurrency(opp.recommended_offer, { engineRunId })} tone="green" />
-            {onRefreshEngine && (
-              <button type="button" className="plv-action-btn is-primary" onClick={() => onRefreshEngine(opp.id)}>
-                {engineRunId ? 'Refresh Analysis' : 'Run Analysis'}
+            {onRefreshEngine && engineRunId && (
+              <button type="button" className="plv-action-btn" onClick={() => onRefreshEngine(opp.id)}>
+                Refresh Analysis
               </button>
+            )}
+            {onRefreshEngine && !engineRunId && (
+              <p className="plv-deal-detail__text">Run acquisition engine analysis from Workflow Studio when enrolled.</p>
             )}
           </div>
         )}
@@ -208,7 +253,6 @@ export function PipelineCommandPanel({
             <Row label="Follow-Up" value={opp.next_follow_up_at ? formatRelativeTime(opp.next_follow_up_at) : (opp.next_action_due ? formatRelativeTime(opp.next_action_due) : 'None scheduled')} />
             <Row label="Follow-Up Reason" value={opp.follow_up_reason || '—'} />
             {opp.blocker && <p className="plv-command-panel__blocker">{opp.blocker}</p>}
-            <button type="button" className="plv-action-btn" onClick={() => onAction(opp.id, 'open_workflow_run')}>Open Workflow Run</button>
           </>
         )}
 
@@ -238,10 +282,7 @@ export function PipelineCommandPanel({
       </div>
 
       <footer className="plv-command-panel__actions">
-        <button type="button" className="plv-action-btn is-primary" onClick={() => onOpenCommandView(threadId)}>Open Conversation</button>
-        <button type="button" className="plv-action-btn" onClick={() => onOpenDealIntelligence(threadId)}>Deal Intelligence</button>
-        <button type="button" className="plv-action-btn is-warning" onClick={() => onAction(opp.id, 'pause_automation')}>Pause Automation</button>
-        <button type="button" className="plv-action-btn is-danger" onClick={() => onAction(opp.id, 'suppress')}>Suppress</button>
+        <SafetyMenu opportunityId={opp.id} onAction={onAction} />
       </footer>
     </div>
   )

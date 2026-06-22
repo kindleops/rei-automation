@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import type { PipelineCardDesign, PipelineFilterGroup, PipelineSortSpec, PipelineViewState } from '../../domain/pipeline/pipeline-card-design.types'
 import type { PipelineGroupByMode, PipelineMetrics, PipelineOpportunity, PipelineSavedView } from '../../domain/pipeline/pipeline-opportunity.types'
@@ -28,6 +28,21 @@ import { PipelineViewManager } from './components/PipelineViewManager'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
+
+const COLLAPSED_LANES_KEY = 'pipeline_collapsed_lanes_v1'
+const DRAG_THRESHOLD_PX = 8
+
+function loadCollapsedLanes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_LANES_KEY)
+    if (raw) return new Set(JSON.parse(raw) as string[])
+  } catch { /* ignore */ }
+  return new Set()
+}
+
+function saveCollapsedLanes(ids: Set<string>) {
+  try { localStorage.setItem(COLLAPSED_LANES_KEY, JSON.stringify([...ids])) } catch { /* ignore */ }
+}
 
 interface OppCard {
   opp: PipelineOpportunity
@@ -146,10 +161,23 @@ export function PipelineOpportunityBoard({
   const [cardDesignerOpen, setCardDesignerOpen] = useState(false)
   const [viewManagerOpen, setViewManagerOpen] = useState(false)
   const [groupOverrides, setGroupOverrides] = useState<Record<string, string>>({})
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(loadCollapsedLanes)
+  const pointerDragRef = useRef<{ cardId: string; startX: number; startY: number; active: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
 
   useEffect(() => {
     setGroupOverrides({})
   }, [groupBy])
+
+  const toggleLaneCollapse = useCallback((laneId: string) => {
+    setCollapsedLanes((prev) => {
+      const next = new Set(prev)
+      if (next.has(laneId)) next.delete(laneId)
+      else next.add(laneId)
+      saveCollapsedLanes(next)
+      return next
+    })
+  }, [])
 
   const activeCardDesign = normalizeCardDesign(
     cardDesign ?? viewState?.cardDesign ?? DEFAULT_PIPELINE_CARD_DESIGN,
@@ -209,23 +237,7 @@ export function PipelineOpportunityBoard({
     setActiveStageId(displayStageModels[0]?.def.id ?? '')
   }, [activeStageId, displayStageModels])
 
-  const handleDragStart = useCallback((e: React.DragEvent, cardId: string) => {
-    if (!mutableView) return
-    setDragCardId(cardId)
-    e.dataTransfer.setData('text/plain', cardId)
-    e.dataTransfer.effectAllowed = 'move'
-  }, [mutableView])
-
-  const handleDragEnd = useCallback(() => {
-    setDragCardId(null)
-    setDragOverStage(null)
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent, stageId: string) => {
-    e.preventDefault()
-    const cardId = e.dataTransfer.getData('text/plain')
-    setDragCardId(null)
-    setDragOverStage(null)
+  const commitDrop = useCallback(async (cardId: string, stageId: string) => {
     if (!cardId || !mutableView) return
 
     const card = visibleCards.find((c) => c.opp.id === cardId)
@@ -244,7 +256,7 @@ export function PipelineOpportunityBoard({
       } else if (groupBy === 'status') {
         await onMoveStatus(cardId, stageId)
       } else if (groupBy === 'temperature') {
-        const temp = stageId === 'warm' ? 'warming' : stageId
+        const temp = stageId === 'warming' ? 'warm' : stageId
         await onMoveTemperature(cardId, temp)
       }
       setGroupOverrides((prev) => {
@@ -261,7 +273,73 @@ export function PipelineOpportunityBoard({
     }
   }, [groupBy, groupOverrides, mutableView, onMoveStage, onMoveStatus, onMoveTemperature, resolveGroupKey, visibleCards])
 
+  const handleDrop = useCallback(async (e: React.DragEvent, stageId: string) => {
+    e.preventDefault()
+    const cardId = e.dataTransfer.getData('text/plain')
+    setDragCardId(null)
+    setDragOverStage(null)
+    await commitDrop(cardId, stageId)
+  }, [commitDrop])
+
+  const handleDragStart = useCallback((e: React.DragEvent, cardId: string) => {
+    if (!mutableView) return
+    setDragCardId(cardId)
+    e.dataTransfer.setData('text/plain', cardId)
+    e.dataTransfer.effectAllowed = 'move'
+  }, [mutableView])
+
+  const handleDragEnd = useCallback(() => {
+    setDragCardId(null)
+    setDragOverStage(null)
+  }, [])
+
+  const handleCardPointerDown = useCallback((cardId: string, e: React.PointerEvent<HTMLElement>) => {
+    if (!mutableView || e.button !== 0) return
+    pointerDragRef.current = { cardId, startX: e.clientX, startY: e.clientY, active: false }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [mutableView])
+
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      const drag = pointerDragRef.current
+      if (!drag) return
+      const dist = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY)
+      if (!drag.active && dist >= DRAG_THRESHOLD_PX) {
+        drag.active = true
+        setDragCardId(drag.cardId)
+      }
+      if (drag.active) {
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const lane = el?.closest('[data-lane-id]') as HTMLElement | null
+        setDragOverStage(lane?.dataset.laneId ?? null)
+      }
+    }
+    const onPointerUp = (e: PointerEvent) => {
+      const drag = pointerDragRef.current
+      if (drag?.active) {
+        suppressClickRef.current = true
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const lane = el?.closest('[data-lane-id]') as HTMLElement | null
+        const stageId = lane?.dataset.laneId
+        if (stageId) void commitDrop(drag.cardId, stageId)
+      }
+      pointerDragRef.current = null
+      setDragCardId(null)
+      setDragOverStage(null)
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+    }
+  }, [commitDrop])
+
   const handleCardClick = useCallback((cardId: string) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
     onSelect(cardId)
     setShowDetail(true)
     setPanelCollapsed(false)
@@ -322,6 +400,7 @@ export function PipelineOpportunityBoard({
           if (card.opp.id !== selectedId) onClearPreview?.()
         }}
         onReplyAction={() => onOpenCommandView(card.opp.primary_thread_key)}
+        onPointerDown={(e) => handleCardPointerDown(card.opp.id, e)}
         onDragStart={(e) => handleDragStart(e, card.opp.id)}
         onDragEnd={handleDragEnd}
       />
@@ -360,11 +439,6 @@ export function PipelineOpportunityBoard({
             </div>
             <p>{dockOpp.latest_message_preview || 'No recent message.'}</p>
             <p className="plv-context-dock__action">{dockOpp.next_action || 'Review'}</p>
-            <div className="plv-context-dock__actions">
-              <button type="button" className="plv-action-btn" onClick={() => onOpenCommandView(dockOpp.primary_thread_key)}>Open Conversation</button>
-              <button type="button" className="plv-action-btn" onClick={() => onOpenDealIntelligence(dockOpp.primary_thread_key)}>Deal Intelligence</button>
-              <button type="button" className="plv-action-btn" onClick={() => onAction(dockOpp.id, 'open_map')}>Map</button>
-            </div>
           </div>
         )}
       </div>
@@ -396,9 +470,6 @@ export function PipelineOpportunityBoard({
               loading={detailLoading}
               hydrating={detailLoading}
               onClose={handleCloseInspector}
-              onOpenCommandView={onOpenCommandView}
-              onOpenConversation={onOpenCommandView}
-              onOpenDealIntelligence={onOpenDealIntelligence}
               onAction={onAction}
               onRetry={onRetryDetail}
               error={detailError}
@@ -415,9 +486,13 @@ export function PipelineOpportunityBoard({
       {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
       <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} scopedTotal={scopedTotal} globalTotal={globalTotal} />
       {loading && opportunities.length === 0 && <div className="plv-loading" aria-live="polite">Loading opportunities…</div>}
-      {refreshing && opportunities.length > 0 && <div className="plv-refreshing" aria-live="polite">Refreshing…</div>}
-
       <div className="plv-topbar">
+        {refreshing && opportunities.length > 0 && (
+          <span className="plv-sync-indicator" aria-live="polite" title="Syncing board data">
+            <span className="plv-sync-indicator__dot" />
+            Syncing
+          </span>
+        )}
         <div className="plv-filters">
           <div className="plv-filters__search">
             <span className="plv-filters__search-icon">⌕</span>
@@ -496,10 +571,19 @@ export function PipelineOpportunityBoard({
 
       <div className="plv-workspace">
         <div className="plv-board">
-          {displayStageModels.map((stage) => (
+          {displayStageModels.map((stage) => {
+            const isCollapsed = collapsedLanes.has(stage.def.id)
+            return (
             <div
               key={stage.def.id}
-              className={cls('plv-lane', `is-${stage.def.tone}`, readOnlyView && 'is-readonly', dragOverStage === stage.def.id && 'is-drag-over')}
+              data-lane-id={stage.def.id}
+              className={cls(
+                'plv-lane',
+                `is-${stage.def.tone}`,
+                readOnlyView && 'is-readonly',
+                isCollapsed && 'plv-lane--collapsed',
+                dragOverStage === stage.def.id && 'is-drag-over',
+              )}
               onDragOver={(e) => {
                 if (!mutableView) return
                 e.preventDefault()
@@ -511,22 +595,33 @@ export function PipelineOpportunityBoard({
                 <div className="plv-lane__title-row">
                   <span className="plv-lane__name">{stage.def.label}</span>
                   <span className={cls('plv-lane__count', stage.count > 0 && `is-${stage.def.tone}`)}>{stage.count}</span>
+                  <button
+                    type="button"
+                    className="plv-lane__collapse"
+                    onClick={() => toggleLaneCollapse(stage.def.id)}
+                    aria-expanded={!isCollapsed}
+                    title={isCollapsed ? 'Expand column' : 'Collapse column'}
+                  >
+                    {isCollapsed ? '▸' : '▾'}
+                  </button>
                 </div>
-                {readOnlyView && (
-                  <span className="plv-lane__readonly-badge" title={`${groupBy.replace(/_/g, ' ')} grouping is read-only — drag to change stage, status, or temperature`}>
+                {readOnlyView && !isCollapsed && (
+                  <span className="plv-lane__readonly-badge" title={`${groupBy.replace(/_/g, ' ')} grouping is read-only — switch to Stage, Status, or Temperature to drag cards`}>
                     Read-only
                   </span>
                 )}
               </header>
-              <div className="plv-lane__body">
-                {stage.cards.length > 0 ? (
-                  stage.cards.map((card) => renderCard(card))
-                ) : (
-                  <div className="plv-empty-lane"><span className="plv-empty-lane__icon">·</span><span>No deals in {stage.def.label}</span></div>
-                )}
-              </div>
+              {!isCollapsed && (
+                <div className="plv-lane__body">
+                  {stage.cards.length > 0 ? (
+                    stage.cards.map((card) => renderCard(card))
+                  ) : (
+                    <div className="plv-empty-lane"><span className="plv-empty-lane__icon">·</span><span>No deals in {stage.def.label}</span></div>
+                  )}
+                </div>
+              )}
             </div>
-          ))}
+          )})}
         </div>
 
         {(isFull || (isOps && showDetail)) && (
@@ -541,9 +636,6 @@ export function PipelineOpportunityBoard({
                 collapsed={panelCollapsed}
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
                 onClose={handleCloseInspector}
-                onOpenCommandView={onOpenCommandView}
-                onOpenConversation={onOpenCommandView}
-                onOpenDealIntelligence={onOpenDealIntelligence}
                 onAction={onAction}
               />
             ) : (
@@ -591,10 +683,18 @@ function ScopeBar({
   const filteredCards = metrics.active_opportunities ?? scopedTotal
   return (
     <div className={cls('plv-scope-bar', compact && 'plv-scope-bar--compact')}>
-      <div className="plv-scope-bar__counts" title={`${scopedTotal} opportunities match scope filter · ${filteredCards} cards loaded · ${globalTotal} total in database`}>
+      <div
+        className="plv-scope-bar__counts"
+        title={`${scopedTotal} active opportunities in current scope. ${globalTotal} total canonical opportunities in acquisition_opportunities. Active excludes closed, dead, suppressed, archived, and non-opportunity records. Message/thread counts (~7,846) are a separate grain and are not shown here.`}
+      >
         <strong>{scopedTotal} {scopeLabel} opportunities</strong>
         <span>·</span>
         <span>{globalTotal} total opportunities</span>
+        {scope === 'active' && (
+          <span className="plv-scope-bar__hint" title="Active excludes closed, dead, suppressed, archived, and non-opportunity records.">
+            (excludes closed/dead/suppressed)
+          </span>
+        )}
       </div>
       {onScopeChange && (
         <div className="plv-scope-bar__options">

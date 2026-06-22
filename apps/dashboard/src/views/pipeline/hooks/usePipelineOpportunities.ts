@@ -185,25 +185,61 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
   }, [])
 
   const moveStage = useCallback(async (id: string, toStage: string, reason?: string): Promise<void> => {
-    const result = await transitionPipelineStage(id, {
-      to_stage: toStage,
-      reason,
-      idempotency_key: `ui-drag:${id}:${toStage}:${Date.now()}`,
+    let snapshot: PipelineOpportunity | undefined
+    setOpportunities((rows) => {
+      snapshot = rows.find((r) => r.id === id)
+      return rows.map((r) => (r.id === id ? { ...r, pipeline_stage: toStage } : r))
     })
-    if (!result.ok) throw new Error(result.message || result.error || 'stage_transition_failed')
-    if (result.opportunity) patchOpportunity(id, result.opportunity)
+    try {
+      const result = await transitionPipelineStage(id, {
+        to_stage: toStage,
+        reason,
+        idempotency_key: `ui-drag:${id}:${toStage}:${Date.now()}`,
+      })
+      if (!result.ok) throw new Error(result.message || result.error || 'stage_transition_failed')
+      if (result.opportunity) patchOpportunity(id, result.opportunity)
+    } catch (err) {
+      if (snapshot) {
+        setOpportunities((rows) => rows.map((r) => (r.id === id ? snapshot! : r)))
+      }
+      throw err
+    }
   }, [patchOpportunity])
 
   const moveStatus = useCallback(async (id: string, toStatus: string, reason?: string): Promise<void> => {
-    const result = await transitionPipelineStatus(id, { to_status: toStatus, reason })
-    if (!result.ok) throw new Error(result.message || result.error || 'status_transition_failed')
-    if (result.opportunity) patchOpportunity(id, result.opportunity)
+    let snapshot: PipelineOpportunity | undefined
+    setOpportunities((rows) => {
+      snapshot = rows.find((r) => r.id === id)
+      return rows.map((r) => (r.id === id ? { ...r, universal_status: toStatus } : r))
+    })
+    try {
+      const result = await transitionPipelineStatus(id, { to_status: toStatus, reason })
+      if (!result.ok) throw new Error(result.message || result.error || 'status_transition_failed')
+      if (result.opportunity) patchOpportunity(id, result.opportunity)
+    } catch (err) {
+      if (snapshot) {
+        setOpportunities((rows) => rows.map((r) => (r.id === id ? snapshot! : r)))
+      }
+      throw err
+    }
   }, [patchOpportunity])
 
   const moveTemperature = useCallback(async (id: string, toTemperature: string, reason?: string): Promise<void> => {
-    const result = await transitionPipelineTemperature(id, { temperature: toTemperature, reason })
-    if (!result.ok) throw new Error(result.message || result.error || 'temperature_transition_failed')
-    if (result.opportunity) patchOpportunity(id, result.opportunity)
+    let snapshot: PipelineOpportunity | undefined
+    setOpportunities((rows) => {
+      snapshot = rows.find((r) => r.id === id)
+      return rows.map((r) => (r.id === id ? { ...r, temperature: toTemperature } : r))
+    })
+    try {
+      const result = await transitionPipelineTemperature(id, { temperature: toTemperature, reason })
+      if (!result.ok) throw new Error(result.message || result.error || 'temperature_transition_failed')
+      if (result.opportunity) patchOpportunity(id, result.opportunity)
+    } catch (err) {
+      if (snapshot) {
+        setOpportunities((rows) => rows.map((r) => (r.id === id ? snapshot! : r)))
+      }
+      throw err
+    }
   }, [patchOpportunity])
 
   return {
