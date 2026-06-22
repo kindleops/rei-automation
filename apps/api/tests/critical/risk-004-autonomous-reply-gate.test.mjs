@@ -90,7 +90,7 @@ test("RISK-004: healthy thread → gate passes, writer called exactly once", asy
     canSendImpl: async () => ({ ok: true, reason: null }),
     insertQueueImpl: async () => {
       write_count++;
-      return { ok: true, data: { id: "q-1", status: "queued" } };
+      return { queue_row_id: "q-1" };
     },
     getSystemValue: async () => null,
     supabase: makeSupabase(),

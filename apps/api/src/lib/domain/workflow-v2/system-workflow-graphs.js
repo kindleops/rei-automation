@@ -113,7 +113,7 @@ function buildOwnershipVerificationGraph() {
     n('advance_stage', 'action', 'action.update_stage', 'Advance Pipeline Stage', { stage: 'interest_qualification' }, 400),
     n('cancel_followups', 'action', 'action.cancel_pending_follow_ups', 'Cancel Ownership Follow-Ups', { task_types: ['ownership_follow_up'] }, 480),
     n('enroll_interest', 'action', 'action.enroll_subworkflow', 'Enroll Interest Qualification', { subworkflow_definition_key: 'system_interest_qualification' }, 560),
-    n('schedule_followup', 'action', 'action.schedule_follow_up', 'Stage 1 Follow-Up', { category: 'ownership', days_min: 14, days_max: 21 }, 640),
+    n('schedule_followup', 'action', 'action.schedule_follow_up', 'Stage 1 Follow-Up', { category: 'ownership', max_attempts: 2, urgency_cadence: true }, 640),
     n('wrong_contact', 'action', 'action.enroll_subworkflow', 'Alternate Contact Recovery', { subworkflow_definition_key: 'system_wrong_number_recovery' }, 720),
     n('exit', 'action', 'action.exit_workflow', 'Exit', {}, 800),
   ];
@@ -135,24 +135,31 @@ function buildInterestQualificationGraph() {
     n('motivation', 'action', 'action.update_structured_fact', 'Capture Motivation', { fact_key: 'seller_motivation' }, 240),
     n('timeline', 'action', 'action.update_structured_fact', 'Capture Timeline', { fact_key: 'timeline_to_sell' }, 320),
     n('authority', 'action', 'action.update_structured_fact', 'Capture Decision Authority', { fact_key: 'decision_maker_status' }, 400),
-    n('branch_intent', 'condition', 'condition.seller_intent', 'Branch Interest', {}, 480),
+    n('branch_intent', 'condition', 'condition.seller_intent', 'Branch Interest', { mode: 'branch' }, 480),
     n('advance_pricing', 'action', 'action.update_stage', 'Advance To Pricing', { stage: 'asking_price' }, 560),
     n('enroll_pricing', 'action', 'action.enroll_subworkflow', 'Enroll Asking Price', { subworkflow_definition_key: 'system_asking_price_extraction' }, 640),
     n('schedule_followup', 'action', 'action.schedule_follow_up', 'Interest Follow-Up', { category: 'interest', days_min: 5, days_max: 7 }, 720),
     n('nurture', 'action', 'action.enroll_subworkflow', 'Nurture Low Interest', { subworkflow_definition_key: 'system_nurture_reactivation' }, 800),
-    n('suppress', 'action', 'action.suppress_contact', 'Stop/Suppress', {}, 880),
-    n('exit', 'action', 'action.exit_workflow', 'Exit', {}, 960),
+    n('human_review', 'action', 'action.enroll_subworkflow', 'Human Review', { subworkflow_definition_key: 'system_human_review_escalation' }, 880),
+    n('suppress', 'action', 'action.suppress_contact', 'Stop/Suppress', {}, 960),
+    n('exit', 'action', 'action.exit_workflow', 'Exit', {}, 1040),
   ];
   const edges = [];
   chain(['trigger', 'guard_kill', 'run_extraction', 'motivation', 'timeline', 'authority', 'branch_intent'], edges);
-  edges.push(e('branch_intent', 'advance_pricing', 'interested', 'true'));
+  edges.push(e('branch_intent', 'advance_pricing', 'interested', 'branch'));
+  edges.push(e('branch_intent', 'schedule_followup', 'conditionally_interested', 'branch'));
   edges.push(e('advance_pricing', 'enroll_pricing'));
   edges.push(e('enroll_pricing', 'exit'));
-  edges.push(e('branch_intent', 'schedule_followup', 'unanswered', 'false'));
-  edges.push(e('schedule_followup', 'nurture'));
-  edges.push(e('branch_intent', 'nurture', 'low_interest', 'false'));
-  edges.push(e('branch_intent', 'suppress', 'not_interested', 'false'));
+  edges.push(e('schedule_followup', 'exit'));
+  edges.push(e('branch_intent', 'nurture', 'future_interest', 'branch'));
+  edges.push(e('branch_intent', 'nurture', 'listed', 'branch'));
+  edges.push(e('branch_intent', 'suppress', 'not_interested', 'branch'));
+  edges.push(e('branch_intent', 'suppress', 'opted_out', 'branch'));
+  edges.push(e('branch_intent', 'human_review', 'represented', 'branch'));
+  edges.push(e('branch_intent', 'human_review', 'unclear', 'branch'));
+  edges.push(e('branch_intent', 'human_review', 'needs_review', 'branch'));
   edges.push(e('nurture', 'exit'));
+  edges.push(e('human_review', 'exit'));
   edges.push(e('suppress', 'exit'));
   return { nodes, edges };
 }
@@ -490,9 +497,6 @@ export function buildMasterOrchestratorGraph() {
       }, y),
     );
     y += 80;
-    if (stage.blocked === true) {
-      nodes[nodes.length - 1].is_active = false;
-    }
     edges.push(e(priorKey, gateKey));
     edges.push(e(gateKey, enrollKey, 'true', 'true'));
     priorKey = enrollKey;

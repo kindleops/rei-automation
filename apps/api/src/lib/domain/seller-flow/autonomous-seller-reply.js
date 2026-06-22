@@ -1,7 +1,10 @@
 import { child } from "@/lib/logging/logger.js";
-import { resolveTemplate } from "@/lib/sms/template_resolver.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { executeAutonomousReply } from "./execute-autonomous-reply.js";
+import { prepareInboundForWorkflowV2 } from "@/lib/domain/acquisition/legacy-seller-flow-adapter.js";
+import { evaluateAutoReplyEligibility } from "@/lib/domain/acquisition/auto-reply-policy.js";
+import { normalizeCanonicalUseCase } from "@/lib/domain/templates/template-metadata-normalization.js";
+import { selectApprovedTemplateForAutoReply } from "@/lib/domain/templates/template-auto-reply-selector.js";
 
 const logger = child({ module: "domain.seller_flow.autonomous_seller_reply" });
 
@@ -19,25 +22,64 @@ export async function processAutonomousSellerReply({
     stage_code: auto_reply_plan.selected_stage_code,
   });
 
-  // 1. Resolve Template
-  const resolution = resolveTemplate({
-    use_case: auto_reply_plan.selected_use_case,
-    stage_code: auto_reply_plan.selected_stage_code,
-    language: auto_reply_plan.detected_language || "English",
-    agent_style_fit: context?.items?.agent_item?.fields?.agent_style_fit || "Neutral",
-    master_owner_id: context?.ids?.master_owner_id,
+  const v2Envelope = prepareInboundForWorkflowV2({
+    source_event_id: inbound_event_id,
+    thread_key: context?.ids?.thread_key || inbound_from,
     phone_e164: inbound_from,
-    is_first_touch: false,
-    is_follow_up: true,
+    classify_result: auto_reply_plan.classification,
+    use_case: auto_reply_plan.selected_use_case,
+    stage: auto_reply_plan.selected_stage_code,
+    master_owner_id: context?.ids?.master_owner_id,
+    property_id: context?.ids?.property_id,
   });
 
-  if (!resolution.resolved || !resolution.template_text) {
-    logger.warn("autonomous_reply.template_not_found", {
-      use_case: auto_reply_plan.selected_use_case,
-      language: auto_reply_plan.detected_language,
-      fallback_reason: resolution.fallback_reason,
+  if (!v2Envelope.ok) {
+    return { ok: false, reason: v2Envelope.reason };
+  }
+
+  const use_case = normalizeCanonicalUseCase(auto_reply_plan.selected_use_case);
+  const language = auto_reply_plan.detected_language || v2Envelope.canonical_event.language || null;
+
+  const templateResult = await selectApprovedTemplateForAutoReply({
+    use_case,
+    language,
+    stage_code: auto_reply_plan.selected_stage_code,
+    touch_number: 1,
+    supabase: context?.supabase,
+  });
+
+  const eligibility = evaluateAutoReplyEligibility({
+    classification: auto_reply_plan.classification || {},
+    template: templateResult.template,
+    use_case,
+    context: {
+      language,
+      missing_template: !templateResult.ok,
+      merge_variables: {
+        seller_first_name: context?.summary?.seller_first_name,
+        agent_first_name: context?.summary?.agent_name,
+        property_address: context?.summary?.property_address,
+      },
+    },
+  });
+
+  if (!eligibility.ok) {
+    logger.warn("autonomous_reply.human_review_required", {
+      reason: eligibility.reason,
+      use_case,
+      language,
     });
-    return { ok: false, reason: "template_not_found" };
+    return { ok: false, reason: eligibility.reason, action: "human_review" };
+  }
+
+  const resolution = {
+    resolved: true,
+    template_text: templateResult.template?.template_body,
+    template_id: templateResult.template?.template_id || templateResult.template?.id,
+  };
+
+  if (!resolution.template_text) {
+    return { ok: false, reason: "template_not_found", action: "human_review" };
   }
 
   // 2. Personalize Template

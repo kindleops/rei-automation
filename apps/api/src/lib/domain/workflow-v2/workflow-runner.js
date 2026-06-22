@@ -213,6 +213,7 @@ async function executeNode(node, enrollment, definition, client, deps) {
       status: 'completed',
       condition: { node_type: node.node_type, ...evaluation },
       _condition_result: evaluation.result,
+      _condition_branch: evaluation.branch ?? null,
     };
   }
 
@@ -323,7 +324,10 @@ export async function runEnrollment(enrollmentId, deps = {}) {
 
       let conditionResult = null;
       if (currentNode.node_kind === 'condition') {
-        conditionResult = stepResult._condition_result ?? false;
+        conditionResult =
+          stepResult._condition_branch ??
+          stepResult._condition_result ??
+          false;
       }
 
       const nextNode = resolveNextNodeByEdge(currentNode.id, conditionResult, edges, nodesById);

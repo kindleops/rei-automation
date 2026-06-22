@@ -5,6 +5,10 @@ import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { evaluateContactWindow } from '@/lib/supabase/sms-engine.js';
 import { getMissingFacts } from '@/lib/domain/workflow-v2/underwriting-playbooks.js';
 import { calculateOfferAskGap } from '@/lib/domain/workflow-v2/offer-gap-analysis.js';
+import {
+  CANONICAL_SELLER_INTENTS,
+  mapClassificationToSellerIntent,
+} from '@/lib/domain/acquisition/canonical-workflow-event.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -57,8 +61,13 @@ function inRange(value, config = {}) {
   return true;
 }
 
-function conditionResult(result, reason, data = {}) {
-  return { result: Boolean(result), reason, data };
+function conditionResult(result, reason, data = {}, branch = null) {
+  return {
+    result: Boolean(result),
+    branch: branch ?? null,
+    reason,
+    data,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -175,12 +184,38 @@ function evaluatePipelineStage(context, config) {
 }
 
 function evaluateSellerIntent(context, config) {
+  const classification = context.classification ?? {};
   const actual =
     contextValue(context, 'classification_intent') ??
-    context.classification?.primary_intent ??
+    classification.primary_intent ??
     contextValue(context, 'seller_interest_level') ??
     context.seller_intent;
   const expected = config.value ?? config.intent ?? config.seller_intent;
+
+  if (clean(config.mode) === 'branch' || !expected) {
+    const branch =
+      clean(context.seller_intent) ||
+      mapClassificationToSellerIntent({
+        ...classification,
+        primary_intent: actual ?? classification.primary_intent,
+        objection: classification.objection ?? context.objection,
+        confidence: classification.confidence ?? context.classification_confidence,
+      });
+
+    const normalizedBranch = lower(branch);
+    const allowed = new Set(Object.values(CANONICAL_SELLER_INTENTS));
+    const resolved = allowed.has(normalizedBranch)
+      ? normalizedBranch
+      : CANONICAL_SELLER_INTENTS.NEEDS_REVIEW;
+
+    const confidence = asNumber(classification.confidence ?? context.classification_confidence, 0);
+    if (confidence < 0.7 && resolved !== CANONICAL_SELLER_INTENTS.OPTED_OUT) {
+      return conditionResult(true, 'seller_intent_low_confidence', { actual, branch: resolved, confidence }, CANONICAL_SELLER_INTENTS.NEEDS_REVIEW);
+    }
+
+    return conditionResult(true, 'seller_intent_branch', { actual, branch: resolved, confidence }, resolved);
+  }
+
   const result = compareEquals(actual, expected);
   return conditionResult(result, result ? 'seller_intent_match' : 'seller_intent_mismatch', {
     actual,

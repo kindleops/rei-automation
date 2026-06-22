@@ -2,9 +2,14 @@
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { scheduleTask, cancelPendingTasks } from '@/lib/domain/workflow-v2/scheduled-tasks.js';
+import {
+  resolveS1FollowUpDelayDays,
+  shouldScheduleS1FollowUp,
+  S1_MAX_ACTIVE_ATTEMPTS,
+} from '@/lib/domain/acquisition/s1-cadence.js';
 
 const BASELINE_CADENCES_DAYS = Object.freeze({
-  ownership: [14, 21],
+  ownership: [7, 14, 21],
   interest: [5, 7],
   asking_price: [2, 3],
   underwriting: [1, 2, 4, 7],
@@ -73,8 +78,53 @@ export async function scheduleFollowUp(input = {}, deps = {}) {
   const category = clean(input.category ?? '') || resolveCadenceCategory(context, input.stage);
   const cadence = BASELINE_CADENCES_DAYS[category] ?? BASELINE_CADENCES_DAYS.interest;
   const touchIndex = Math.max(0, Number(input.touch_index ?? 0));
-  const baseDays = cadence[Math.min(touchIndex, cadence.length - 1)];
-  const adjustedDays = adjustFollowUpTiming(baseDays, context);
+
+  let baseDays = cadence[Math.min(touchIndex, cadence.length - 1)];
+  if (category === 'ownership' || input.urgency_cadence === true || input.config?.urgency_cadence) {
+    const s1Plan = shouldScheduleS1FollowUp({
+      ...context,
+      prior_touch_count: touchIndex,
+      ownership_touch_count: touchIndex,
+    });
+    baseDays = s1Plan.delay_days;
+    if (touchIndex >= S1_MAX_ACTIVE_ATTEMPTS) {
+      return scheduleTask(
+        {
+          workflow_definition_id: definitionId || null,
+          enrollment_id: enrollmentId || null,
+          node_id: clean(input.node_id ?? input.nodeId ?? '') || null,
+          task_type: 'long_tail_reactivation',
+          scheduled_for: input.scheduled_for ?? addDays(new Date(), baseDays),
+          reason: 's1_long_tail_reactivation',
+          dedupe_key:
+            clean(input.dedupe_key ?? '') ||
+            `wfv2-longtail:${enrollmentId}:ownership:${touchIndex}`,
+          payload: {
+            category: 'nurture',
+            touch_index: touchIndex,
+            base_days: baseDays,
+            stage: input.stage ?? context.stage ?? 'ownership_confirmation',
+            schedule: s1Plan.schedule,
+          },
+        },
+        deps,
+      ).then((task) => ({
+        ok: true,
+        category: 'nurture',
+        scheduled_for: input.scheduled_for ?? addDays(new Date(), baseDays),
+        adjusted_days: baseDays,
+        task,
+        live_send_blocked: true,
+        long_tail: true,
+      }));
+    }
+    baseDays = resolveS1FollowUpDelayDays(context, touchIndex + 1);
+  }
+
+  const adjustedDays =
+    category === 'ownership'
+      ? baseDays
+      : adjustFollowUpTiming(baseDays, context);
   const scheduledFor = input.scheduled_for ?? addDays(new Date(), adjustedDays);
 
   const task = await scheduleTask(

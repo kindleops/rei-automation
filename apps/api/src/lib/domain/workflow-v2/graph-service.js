@@ -266,6 +266,7 @@ export async function deleteEdge(edgeId, deps = {}) {
  *   null  → follow edge_type='next' (non-condition nodes)
  *   true  → follow edge_type='true'
  *   false → follow edge_type='false'
+ *   string → follow edge where condition_key or edge_type matches branch key
  *
  * Falls back: if no typed match, uses the first outgoing edge.
  * Returns null if no outgoing edges exist (graph end).
@@ -273,6 +274,16 @@ export async function deleteEdge(edgeId, deps = {}) {
 export function resolveNextNodeByEdge(currentNodeId, conditionResult, edges, nodesById) {
   const outgoing = edges.filter((e) => e.source_node_id === currentNodeId);
   if (!outgoing.length) return null;
+
+  if (typeof conditionResult === 'string' && conditionResult) {
+    const key = clean(conditionResult).toLowerCase();
+    const branch =
+      outgoing.find((e) => clean(e.condition_key).toLowerCase() === key) ??
+      outgoing.find((e) => clean(e.edge_type).toLowerCase() === key) ??
+      outgoing.find((e) => clean(e.edge_type).toLowerCase() === 'branch' && clean(e.condition_key).toLowerCase() === key);
+    const target = branch ?? outgoing.find((e) => clean(e.condition_key).toLowerCase() === 'needs_review') ?? outgoing[0];
+    return nodesById.get(target.target_node_id) ?? null;
+  }
 
   if (conditionResult === true) {
     const branch = outgoing.find((e) => e.edge_type === 'true' || e.condition_key === 'true');
