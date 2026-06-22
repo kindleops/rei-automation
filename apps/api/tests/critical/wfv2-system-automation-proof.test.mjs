@@ -264,8 +264,9 @@ test('proof 28: master orchestrator enrolls real subworkflows with gates', () =>
   assert.ok(graph.nodes.some((n) => n.node_type === 'guard.duplicate_action'));
   assert.ok(graph.nodes.some((n) => n.node_type === 'condition.pipeline_stage'));
   const stage6 = enrollNodes.find((n) => n.node_key === 'stage_6');
-  assert.equal(stage6?.is_active, false);
+  assert.notEqual(stage6?.is_active, false, 'stage_6 must remain structurally active for graph validation');
   assert.equal(stage6?.config?.blocked, true);
+  assert.equal(stage6?.config?.blocked_reason, 'pipeline_and_calendar_not_wired');
 });
 
 test('seed upgrades skeleton graphs to v2 operational graphs', async () => {
