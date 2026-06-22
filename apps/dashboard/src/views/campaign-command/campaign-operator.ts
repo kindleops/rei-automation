@@ -72,8 +72,18 @@ export function operatorModeLabel(campaign: CampaignSummary): 'Live' | 'Test Mod
   return 'Test Mode'
 }
 
+export function isTestModeCampaign(campaign: CampaignSummary): boolean {
+  const proof = campaign.execution_proof
+  return resolveOperatorState(campaign) === 'test_mode'
+    || Boolean(proof?.proof_mode && (proof.live_send_rows ?? 0) === 0 && (proof.proof_no_send_rows ?? 0) > 0 && !proof.transmission_enabled)
+}
+
 export const ACTION_LABELS: Record<string, string> = {
   queue_batch: 'Prepare Next Batch',
+  queue_batch_test: 'Prepare Test Batch',
+  queue_batch_test_loading: 'Preparing test batch…',
+  queue_batch_live: 'Prepare Controlled Live Batch',
+  queue_batch_live_loading: 'Preparing controlled live batch…',
   queue_batch_loading: 'Preparing batch…',
   pause: 'Pause',
   pause_loading: 'Pausing…',

@@ -5351,7 +5351,9 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     per_sender_cap: campaign.per_sender_cap,
     total_targets: totalFromBucket ?? targets.length,
     ready_targets: ready,
-    scheduled_targets: planned,
+    planned_targets: planned,
+    scheduled_targets: 0,
+    scheduled_queue_rows: 0,
     queued_targets: queued,
     canonical_queued_count: Number(campaign.queued_count || 0),
     sent_count: Number(counts.sent || 0) + Number(counts.delivered || 0),
@@ -5437,7 +5439,8 @@ export async function listCampaigns(deps = {}) {
       activeCampaigns: summaries.filter((campaign) => isLiveCampaignStatus(campaign.status)).length,
       totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),
       readyTargets: summaries.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
-      scheduledSends: summaries.reduce((sum, campaign) => sum + campaign.scheduled_targets, 0),
+      scheduledQueueRows: summaries.reduce((sum, campaign) => sum + Number(campaign.scheduled_queue_rows || 0), 0),
+      plannedTargets: summaries.reduce((sum, campaign) => sum + Number(campaign.planned_targets || 0), 0),
       sentToday: 0,
       deliveredToday: 0,
       replyRate: 0,
@@ -5501,21 +5504,28 @@ export async function getCampaign(campaignId, deps = {}) {
       summary.operator_state_label = commandSummary.state_label
       summary.mode = commandSummary.mode
       summary.mode_label = commandSummary.mode_label
-      summary.total_targets = commandSummary.counts.frozen_targets ?? summary.total_targets
-      summary.ready_targets = commandSummary.counts.ready ?? summary.ready_targets
-      summary.scheduled_targets = commandSummary.counts.scheduled ?? summary.scheduled_targets
-      summary.queued_targets = commandSummary.counts.queued ?? summary.queued_targets
-      summary.failed_count = commandSummary.counts.failed ?? summary.failed_count
+      const c = commandSummary.counts
+      summary.total_targets = c.total_targets ?? summary.total_targets
+      summary.ready_targets = c.ready_targets ?? summary.ready_targets
+      summary.planned_targets = c.planned_targets ?? summary.planned_targets
+      summary.scheduled_queue_rows = c.scheduled_queue_rows ?? summary.scheduled_queue_rows
+      summary.scheduled_targets = c.scheduled_queue_rows ?? summary.scheduled_targets
+      summary.queued_targets = c.queued_rows ?? summary.queued_targets
+      summary.failed_count = (c.failed_target_rows ?? 0) + (c.failed_execution_rows ?? 0)
+      summary.failed_target_rows = c.failed_target_rows ?? 0
+      summary.failed_execution_rows = c.failed_execution_rows ?? 0
+      summary.readiness_label = commandSummary.readiness_label
       summary.execution_proof = {
         ...executionProof,
-        hydrated_rows: commandSummary.execution.hydrated_rows,
+        hydrated_rows: commandSummary.execution.hydrated_queue_rows,
         live_send_rows: commandSummary.execution.live_send_rows,
-        proof_no_send_rows: commandSummary.execution.test_mode_rows,
+        proof_no_send_rows: commandSummary.execution.proof_no_send_rows,
         sms_eligible: commandSummary.execution.sms_eligible,
         routing_allowed: commandSummary.execution.routing_allowed,
         transmission_enabled: commandSummary.execution.transmission_enabled,
         proof_mode: commandSummary.execution.proof_mode,
         no_messages_will_transmit: commandSummary.execution.no_messages_will_transmit,
+        scheduled_queue_rows: commandSummary.execution.scheduled_queue_rows,
       }
     }
   } catch (summaryError) {

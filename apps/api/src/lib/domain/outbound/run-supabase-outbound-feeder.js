@@ -152,6 +152,25 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
         is_follow_up: !resolved.is_first_touch
       };
 
+      // Campaign/outbound gate: canSend blocks suppressed or paused recipients before hydration.
+      if (!dry_run) {
+        const can_send_fn = deps.canSend || deps.canSendImpl;
+        if (typeof can_send_fn === "function") {
+          const gate = await can_send_fn({
+            to_phone_number: activeCandidate.canonical_e164 || activeCandidate.to_phone_number,
+            master_owner_id: activeCandidate.master_owner_id,
+            property_id: activeCandidate.property_id,
+          });
+          if (!gate?.ok) {
+            recordSkip(`CAN_SEND_GATE:${gate?.reason || "blocked"}`, {
+              master_owner_id: activeCandidate.master_owner_id,
+              property_id: activeCandidate.property_id,
+            });
+            continue;
+          }
+        }
+      }
+
       // Safety Guard 1: Eligibility check (contact window, suppression, duplicates)
       const eligibility = await evaluateCandidateEligibility(activeCandidate, options, deps);
       if (!eligibility.ok) {

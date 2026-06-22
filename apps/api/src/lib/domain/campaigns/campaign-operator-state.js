@@ -38,9 +38,6 @@ const OPERATOR_LABELS = Object.freeze({
   archived: 'Archived',
 })
 
-/**
- * Derive operator lifecycle state from persisted status + execution truth.
- */
 export function deriveOperatorState(campaign = {}, execution = {}, readiness = {}) {
   const status = normalizeCampaignStatus(campaign.status || 'draft')
   const proofMode = Boolean(execution?.proof_mode || execution?.no_messages_will_transmit)
@@ -49,7 +46,7 @@ export function deriveOperatorState(campaign = {}, execution = {}, readiness = {
   const transmissionEnabled = Boolean(execution?.transmission_enabled)
   const readinessLevel = clean(readiness?.launch_readiness || readiness?.level)
   const hasBlockers = (readiness?.blockers || []).length > 0 || readinessLevel === 'blocked'
-  const frozenTargets = Number(campaign.total_targets ?? execution?.frozen_targets ?? 0)
+  const frozenTargets = Number(campaign.total_targets ?? execution?.total_targets ?? 0)
   const building = clean(campaign.metadata?.target_build_status).toLowerCase() === 'building'
 
   if (status === 'archived') return 'archived'
@@ -57,8 +54,8 @@ export function deriveOperatorState(campaign = {}, execution = {}, readiness = {
   if (status === 'failed') return 'failed'
   if (building) return 'building_targets'
 
-  if (proofMode && ['active', 'activating', 'paused', 'scheduled'].includes(status)) {
-    return 'test_mode'
+  if (proofMode || (liveSendRows === 0 && Number(execution?.proof_no_send_rows || 0) > 0 && !transmissionEnabled)) {
+    if (['active', 'activating', 'paused', 'scheduled'].includes(status)) return 'test_mode'
   }
 
   if (status === 'paused') return 'paused'
@@ -87,6 +84,40 @@ export function deriveOperatorState(campaign = {}, execution = {}, readiness = {
   return status
 }
 
+export function deriveReadinessLabel(campaign = {}, execution = {}, readiness = {}, operatorState = 'draft') {
+  const status = normalizeCampaignStatus(campaign.status || 'draft')
+  if (operatorState === 'completed') return 'Completed'
+  if (operatorState === 'failed') return 'Failed'
+  if (operatorState === 'paused') return 'Paused'
+  if (operatorState === 'live') return 'Live'
+
+  const proofMode = Boolean(execution?.proof_mode || execution?.no_messages_will_transmit)
+  const liveSendRows = Number(execution?.live_send_rows || 0)
+  const proofRows = Number(execution?.proof_no_send_rows || 0)
+  const transmissionEnabled = Boolean(execution?.transmission_enabled)
+  const readinessLevel = clean(readiness?.launch_readiness || readiness?.level)
+
+  if (proofMode || (liveSendRows === 0 && proofRows > 0 && !transmissionEnabled)) {
+    return 'Ready for Test Hydration'
+  }
+
+  if (readinessLevel === 'blocked' || (readiness?.blockers || []).length > 0) {
+    return 'Blocked for Live Transmission'
+  }
+
+  if (readinessLevel === 'ready' && transmissionEnabled && liveSendRows > 0) {
+    return 'Ready for Controlled Live'
+  }
+
+  if (['active', 'activating', 'scheduled'].includes(status) && readinessLevel === 'ready') {
+    return 'Ready for Controlled Live'
+  }
+
+  if (readinessLevel === 'warnings') return 'Ready with Warnings'
+  if (readinessLevel === 'ready') return 'Ready for Controlled Live'
+  return 'Blocked for Live Transmission'
+}
+
 export function operatorStateLabel(state) {
   return OPERATOR_LABELS[state] || OPERATOR_LABELS.draft
 }
@@ -97,7 +128,8 @@ export function operatorModeLabel(execution = {}) {
   return 'test'
 }
 
-export function primaryCommandForState(operatorState) {
+export function primaryCommandForState(operatorState, options = {}) {
+  const liveReady = options.liveReady === true
   switch (operatorState) {
     case 'draft':
     case 'building_targets':
@@ -108,9 +140,11 @@ export function primaryCommandForState(operatorState) {
     case 'scheduled':
       return { action: 'activate', label: 'Go Live' }
     case 'live':
-      return { action: 'pause', label: 'Pause' }
+      return liveReady
+        ? { action: 'queue_batch_live', label: 'Prepare Controlled Live Batch' }
+        : { action: 'pause', label: 'Pause' }
     case 'test_mode':
-      return { action: 'review_blockers', label: 'Review Blockers' }
+      return { action: 'queue_batch_test', label: 'Prepare Test Batch' }
     case 'paused':
       return { action: 'resume', label: 'Resume' }
     case 'blocked':

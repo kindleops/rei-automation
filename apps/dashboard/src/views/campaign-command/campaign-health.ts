@@ -129,8 +129,8 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   if (operatorState === 'test_mode') {
     return {
       level: 'blocked',
-      label: 'Test Mode',
-      blockers: ['TEST MODE — No messages will be transmitted.'],
+      label: campaign.readiness_label ?? 'Ready for Test Hydration',
+      blockers: ['TEST MODE — NO MESSAGES WILL TRANSMIT'],
       warnings: [],
     }
   }
@@ -173,9 +173,12 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   const level: ReadinessLevel =
     blockers.length > 0 ? 'blocked' : warnings.length > 0 ? 'warnings' : 'ready'
 
+  const derivedLabel = campaign.readiness_label
+    ?? (level === 'ready' ? 'Ready for Controlled Live' : level === 'warnings' ? 'Ready with Warnings' : 'Blocked for Live Transmission')
+
   return {
     level,
-    label: level === 'ready' ? 'Ready' : level === 'warnings' ? 'Ready with Warnings' : 'Blocked',
+    label: derivedLabel,
     blockers,
     warnings,
   }
@@ -208,6 +211,17 @@ export function canQueueBatch(campaign: CampaignSummary): boolean {
 }
 
 export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
+  const operatorState = resolveOperatorState(campaign)
+  if (operatorState === 'test_mode') {
+    return { id: 'queue_batch_test', label: 'Prepare Test Batch', variant: 'is-warn' }
+  }
+  if (operatorState === 'live' && campaign.readiness_label === 'Ready for Controlled Live') {
+    return { id: 'queue_batch_live', label: 'Prepare Controlled Live Batch', variant: 'is-primary' }
+  }
+  if (operatorState === 'blocked') {
+    return { id: 'review_blockers', label: 'Review Blockers', variant: 'is-warn' }
+  }
+
   switch (campaign.status) {
     case 'draft':
       if (campaign.total_targets === 0) {
@@ -222,10 +236,7 @@ export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
       return { id: 'activate', label: 'Activate Now', variant: 'is-primary' }
     case 'active':
     case 'live_limited':
-      if (resolveOperatorState(campaign) === 'test_mode') {
-        return { id: 'review_blockers', label: 'Review Blockers', variant: 'is-warn' }
-      }
-      return { id: 'queue_batch', label: 'Prepare Next Batch', variant: 'is-blue' }
+      return { id: 'queue_batch_live', label: 'Prepare Controlled Live Batch', variant: 'is-primary' }
     case 'paused':
       return { id: 'resume', label: 'Resume', variant: 'is-primary' }
     case 'completed':

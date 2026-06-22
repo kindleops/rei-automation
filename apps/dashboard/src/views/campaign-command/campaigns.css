@@ -5843,6 +5843,20 @@
   color: var(--text-0);
   font-variant-numeric: tabular-nums;
 }
+.ccc__test-mode-banner {
+  margin: 0 16px 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
 .ccc__portfolio-label {
   margin: 0 0 6px 2px;
   font-size: 10px;

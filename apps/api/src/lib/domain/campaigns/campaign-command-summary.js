@@ -12,6 +12,7 @@ import {
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import {
   deriveOperatorState,
+  deriveReadinessLabel,
   operatorModeLabel,
   operatorStateLabel,
   primaryCommandForState,
@@ -21,7 +22,7 @@ import { fetchCampaignTargetStatusCounts } from '@/lib/domain/campaigns/campaign
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 const TERMINAL_QUEUE_FAILURE = ['failed', 'expired', 'cancelled', 'suppressed', 'blocked']
-const TERMINAL_TARGET = ['sent', 'delivered', 'replied', 'replied_positive', 'replied_negative', 'opt_out', 'failed', 'skipped', 'suppressed']
+const SENDING_STATUSES = ['sending', 'processing']
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -52,13 +53,12 @@ async function loadCurrentRun(supabase, campaignId) {
   return data || null
 }
 
-async function aggregateQueueExecution(supabase, campaignId, runId = null) {
-  let query = supabase
+async function aggregateQueueExecution(supabase, campaignId, runId = null, campaign = {}) {
+  const { data: rows, error } = await supabase
     .from('send_queue')
-    .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata,failed_reason,failure_category,updated_at')
+    .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata,failed_reason,failure_category,updated_at,delivered_at,sent_at')
     .eq('campaign_id', campaignId)
-
-  const { data: rows, error } = await query.limit(5000)
+    .limit(5000)
   if (error) throw error
 
   const scoped = (rows || []).filter((row) => {
@@ -69,68 +69,70 @@ async function aggregateQueueExecution(supabase, campaignId, runId = null) {
   })
 
   const counts = {
-    hydrated_rows: 0,
+    hydrated_queue_rows: 0,
+    proof_no_send_rows: 0,
     live_send_rows: 0,
-    test_mode_rows: 0,
+    queued_rows: 0,
+    scheduled_queue_rows: 0,
+    due_queue_rows: 0,
+    claimed_or_sending_rows: 0,
+    sent_rows: 0,
+    delivered_rows: 0,
+    failed_execution_rows: 0,
+    blocked_rows: 0,
     sms_eligible: 0,
     routing_allowed: 0,
-    ready: 0,
-    scheduled: 0,
-    queued: 0,
-    sending: 0,
-    sent: 0,
-    delivered: 0,
-    failed: 0,
-    blocked: 0,
-    overdue: 0,
   }
 
   const now = Date.now()
   let nextScheduledAt = null
-  let transmissionEnabled = false
 
   for (const row of scoped) {
     const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
     const noSend = asBoolean(meta.no_send ?? meta.proof_no_send, false)
     const proofHydration = clean(meta.launch_mode) === 'proof_hydration_no_send' || noSend
     const status = clean(row.queue_status).toLowerCase()
+    const isLiveExecutable = !proofHydration && row.sms_eligible && row.routing_allowed
 
     if (ACTIVE_QUEUE_STATUSES.includes(status) || TERMINAL_QUEUE_FAILURE.includes(status)) {
-      counts.hydrated_rows += 1
+      counts.hydrated_queue_rows += 1
     }
 
     if (proofHydration) {
-      counts.test_mode_rows += 1
+      counts.proof_no_send_rows += 1
     } else {
       counts.live_send_rows += 1
       if (row.sms_eligible) counts.sms_eligible += 1
       if (row.routing_allowed) counts.routing_allowed += 1
     }
 
-    if (status === 'ready') counts.ready += 1
-    if (status === 'scheduled') {
-      if (!proofHydration && row.routing_allowed && row.sms_eligible) {
-        counts.scheduled += 1
-        if (row.scheduled_for) {
-          if (!nextScheduledAt || row.scheduled_for < nextScheduledAt) nextScheduledAt = row.scheduled_for
-          const dueMs = new Date(row.scheduled_for).getTime()
-          if (Number.isFinite(dueMs) && dueMs < now) counts.overdue += 1
-        }
-      } else if (proofHydration) {
-        // test rows never count as live scheduled sends
+    if (status === 'queued' && isLiveExecutable) counts.queued_rows += 1
+
+    if (status === 'scheduled' && isLiveExecutable) {
+      counts.scheduled_queue_rows += 1
+      if (row.scheduled_for) {
+        if (!nextScheduledAt || row.scheduled_for < nextScheduledAt) nextScheduledAt = row.scheduled_for
+        const dueMs = new Date(row.scheduled_for).getTime()
+        if (Number.isFinite(dueMs) && dueMs <= now) counts.due_queue_rows += 1
       }
     }
-    if (status === 'queued') counts.queued += 1
-    if (status === 'sending' || status === 'processing') counts.sending += 1
-    if (['sent', 'delivered'].includes(status)) counts.sent += 1
-    if (status === 'delivered') counts.delivered += 1
-    if (status === 'failed') counts.failed += 1
-    if (status === 'blocked') counts.blocked += 1
+
+    if (SENDING_STATUSES.includes(status) && isLiveExecutable) counts.claimed_or_sending_rows += 1
+    if (['sent', 'delivered'].includes(status) && !proofHydration) counts.sent_rows += 1
+    if (status === 'delivered' && !proofHydration) counts.delivered_rows += 1
+    if (status === 'failed' && !proofHydration) counts.failed_execution_rows += 1
+    if (status === 'blocked') counts.blocked_rows += 1
   }
 
-  transmissionEnabled = counts.live_send_rows > 0 && counts.routing_allowed > 0
+  const transmissionEnabled =
+    counts.live_send_rows > 0 &&
+    counts.routing_allowed > 0 &&
+    asBoolean(campaign.auto_send_enabled, false)
 
-  const proofMode = counts.test_mode_rows > 0 && counts.live_send_rows === 0
+  const proofMode =
+    counts.proof_no_send_rows > 0 &&
+    counts.live_send_rows === 0 &&
+    !transmissionEnabled
 
   return {
     ...counts,
@@ -147,45 +149,44 @@ async function aggregateTargetFunnel(supabase, campaignId) {
   const bucket = countMap.get(campaignId) || { statuses: {}, blocked: {}, total: 0 }
   const s = bucket.statuses || {}
 
-  const frozen = bucket.total || 0
-  const ready = Number(s.ready || 0)
-  const scheduled = Number(s.planned || 0)
-  const queued = Number(s.queued || 0)
-  const sending = Number(s.sending || 0)
-  const sent = Number(s.sent || 0) + Number(s.delivered || 0)
-  const delivered = Number(s.delivered || 0)
-  const replied = Number(s.replied || 0) + Number(s.replied_positive || 0) + Number(s.replied_negative || 0)
+  const total_targets = bucket.total || 0
+  const ready_targets = Number(s.ready || 0)
+  const planned_targets = Number(s.planned || 0)
+  const target_queued = Number(s.queued || 0)
+  const target_sending = Number(s.sending || 0)
+  const sent_rows = Number(s.sent || 0) + Number(s.delivered || 0)
+  const delivered_rows = Number(s.delivered || 0)
+  const replied_rows = Number(s.replied || 0) + Number(s.replied_positive || 0) + Number(s.replied_negative || 0)
   const positive = Number(s.replied_positive || 0)
   const negative = Number(s.replied_negative || 0)
-  const optedOut = Number(s.opt_out || 0)
-  const failed = Number(s.failed || 0)
-  const blocked = Number(s.blocked || 0)
+  const opted_out_rows = Number(s.opt_out || 0)
+  const failed_target_rows = Number(s.failed || 0)
+  const blocked_rows = Number(s.blocked || 0)
   const suppressed = Number(s.suppressed || 0)
   const skipped = Number(s.skipped || 0)
 
-  const terminal = sent + failed + optedOut + suppressed + skipped
-  const remaining = Math.max(0, frozen - terminal - queued - scheduled - sending)
+  const terminal = sent_rows + failed_target_rows + opted_out_rows + suppressed + skipped
+  const remaining = Math.max(0, total_targets - terminal - target_queued - planned_targets - target_sending)
 
   return {
-    frozen_targets: frozen,
-    eligible: ready + scheduled + queued,
-    ready,
-    scheduled,
-    queued,
-    sending,
-    sent,
-    delivered,
-    replied,
+    total_targets,
+    ready_targets,
+    planned_targets,
+    target_queued,
+    target_sending,
+    sent_rows,
+    delivered_rows,
+    replied_rows,
     positive,
     negative,
-    opted_out: optedOut,
-    blocked,
+    opted_out_rows,
+    failed_target_rows,
+    blocked_rows,
     suppressed,
-    failed,
     skipped,
     remaining,
     blocked_reason_counts: bucket.blocked || {},
-    invariant_ok: frozen >= ready + scheduled + queued + sending + terminal,
+    invariant_ok: total_targets >= ready_targets + planned_targets + target_queued + target_sending + terminal,
   }
 }
 
@@ -258,35 +259,46 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
   const currentRun = await loadCurrentRun(supabase, campaignId)
   const runId = currentRun?.id || null
 
-  const [funnel, queueExec, languageCoverage, readiness, processorState] = await Promise.all([
+  const [targets, queueExec, languageCoverage, readiness, processorState] = await Promise.all([
     aggregateTargetFunnel(supabase, campaignId),
-    aggregateQueueExecution(supabase, campaignId, runId),
+    aggregateQueueExecution(supabase, campaignId, runId, campaign),
     aggregateLanguageCoverage(supabase, campaignId),
     evaluateCampaignLaunchReadiness(campaignId, { supabase, ...deps }),
     loadQueueProcessorState(supabase),
   ])
 
   queueExec.campaign_state = normalizeCampaignStatus(campaign.status)
+  queueExec.transmission_enabled =
+    queueExec.live_send_rows > 0 &&
+    queueExec.routing_allowed > 0 &&
+    asBoolean(campaign.auto_send_enabled, false)
 
   const operatorState = deriveOperatorState(campaign, queueExec, readiness)
   const mode = operatorModeLabel(queueExec)
-  const primary = primaryCommandForState(operatorState)
+  const readinessLabel = deriveReadinessLabel(campaign, queueExec, readiness, operatorState)
+  const primary = primaryCommandForState(operatorState, { liveReady: readiness.launch_readiness === 'ready' && queueExec.transmission_enabled })
 
   const counts = {
-    ...funnel,
-    queue_rows_created: queueExec.hydrated_rows,
+    total_targets: targets.total_targets,
+    ready_targets: targets.ready_targets,
+    planned_targets: targets.planned_targets,
+    hydrated_queue_rows: queueExec.hydrated_queue_rows,
+    proof_no_send_rows: queueExec.proof_no_send_rows,
     live_send_rows: queueExec.live_send_rows,
-    test_mode_rows: queueExec.test_mode_rows,
+    queued_rows: queueExec.queued_rows,
+    scheduled_queue_rows: queueExec.scheduled_queue_rows,
+    due_queue_rows: queueExec.due_queue_rows,
+    claimed_or_sending_rows: queueExec.claimed_or_sending_rows,
+    sent_rows: Math.max(targets.sent_rows, queueExec.sent_rows),
+    delivered_rows: Math.max(targets.delivered_rows, queueExec.delivered_rows),
+    replied_rows: targets.replied_rows,
+    failed_target_rows: targets.failed_target_rows,
+    failed_execution_rows: queueExec.failed_execution_rows,
+    blocked_rows: targets.blocked_rows + queueExec.blocked_rows,
+    opted_out_rows: targets.opted_out_rows,
+    remaining_targets: targets.remaining,
     routable_recipients: queueExec.routing_allowed,
-    live_scheduled: queueExec.scheduled,
-    live_queued: queueExec.queued,
-    live_sending: queueExec.sending,
-    queue_failed: queueExec.failed,
-    overdue_scheduled: queueExec.overdue,
   }
-
-  // Reconcile failed count: prefer queue failures when sent > 0, else target failures
-  const failedCount = queueExec.failed > 0 ? queueExec.failed : funnel.failed
 
   return {
     ok: true,
@@ -308,15 +320,14 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
     persisted_status: normalizeCampaignStatus(campaign.status),
     mode,
     mode_label: mode === 'live' ? 'Live' : 'Test Mode',
+    readiness_label: readinessLabel,
     message: null,
-    counts: {
-      ...counts,
-      failed: failedCount,
-    },
+    counts,
     blockers: readiness.blockers || [],
     warnings: readiness.warnings || [],
     readiness: {
       level: readiness.launch_readiness || 'unknown',
+      label: readinessLabel,
       blockers: readiness.blockers || [],
       warnings: readiness.warnings || [],
       blocker_codes: readiness.blocker_codes || [],

@@ -110,7 +110,7 @@ export async function executeCampaignAction(
       return true
     }
 
-    if (action === 'queue-batch' || action === 'queue_batch') {
+    if (action === 'queue-batch' || action === 'queue_batch' || action === 'queue_batch_test' || action === 'queue_batch_live') {
       if (!canQueueBatch(campaign)) {
         const health = computeCampaignHealth(campaign)
         emitNotification({
@@ -120,11 +120,20 @@ export async function executeCampaignAction(
         })
         return false
       }
+      if (action === 'queue_batch_live') {
+        const confirmed = window.confirm(
+          'Prepare a controlled LIVE batch? This will create executable send_queue rows subject to all readiness gates.',
+        )
+        if (!confirmed) return false
+      }
       pendingActions.add(key)
+      const isLiveBatch = action === 'queue_batch_live'
       const res = await queueBatch(campaign.id, {
-        limit: campaign.ready_targets,
+        limit: Math.min(campaign.ready_targets, isLiveBatch ? 5 : campaign.ready_targets),
         respect_send_window: true,
         interval_seconds: campaign.send_interval_seconds || 15,
+        no_send: !isLiveBatch,
+        confirm_live: isLiveBatch,
       })
       const inserted = res.queued ?? 0
       const result = res.result as Record<string, unknown> | undefined
