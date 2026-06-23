@@ -669,7 +669,10 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "active":
       return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
     case "waiting":
-      return bucket === "waiting";
+      return (
+        bucket === "waiting" ||
+        (direction === "outbound" && !["dead", "suppressed"].includes(bucket))
+      );
     case "unlinked":
       return !thread.property_id;
     default:
@@ -1286,8 +1289,7 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      query = query.eq("inbox_bucket", "waiting");
-      break;
+      return null;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
@@ -1391,7 +1393,11 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
         : query;
     case "waiting":
-      return query.eq("inbox_bucket", "waiting");
+      query = query.eq(sourceConfig.directionColumn || "latest_message_direction", "outbound");
+      if (typeof query.not === "function") {
+        query = query.not("inbox_bucket", "in", "(dead,suppressed)");
+      }
+      return query;
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     default:
@@ -1460,6 +1466,11 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   cursorKeyset,
   offset,
 } = {}) {
+  // Authoritative inbox_thread_state rows are bucket/count primitives only.
+  // Thread listing always comes from canonical live thread sources so message
+  // bodies, delivery fields, and keyword flags stay hydrated.
+  return null;
+
   const normalizedFilter = normalizeLiveFilter(filter);
   if (normalizedFilter === "all") return null;
 
@@ -1490,8 +1501,7 @@ async function queryAuthoritativeInboxThreads(params = {}, {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      query = query.eq("inbox_bucket", "waiting");
-      break;
+      return null;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
@@ -1742,9 +1752,9 @@ async function fetchAuthoritativeInboxCounts(supabase) {
 
   if (unlinkedError) throw unlinkedError;
 
-  counts.all = Number(allCount || total);
+  counts.all = Number(allCount || 0);
   counts.all_messages = counts.all;
-  counts.unlinked = Number(unlinkedCount || unlinked);
+  counts.unlinked = Number(unlinkedCount || 0);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
