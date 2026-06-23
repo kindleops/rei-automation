@@ -1,4 +1,4 @@
-import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext } from '../command.types'
+import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext } from '../../../domain/command-center/command.types'
 import { canUseSupabaseSearch, getSupabaseSearchClient, limitResults, sanitizeIlike, withScoredResult } from './providerUtils'
 
 type MarketRow = Record<string, unknown>
@@ -46,7 +46,7 @@ export const marketSearchProvider: GlobalCommandProvider = {
     const supabase = getSupabaseSearchClient()
     const term = `%${sanitizeIlike(query)}%`
     const { data, error } = await supabase
-      .from('v_inbox_enriched')
+      .from('v_operator_inbox_threads')
       .select('market,property_address_city,property_address_state,property_address_zip')
       .or([
         `market.ilike.${term}`,

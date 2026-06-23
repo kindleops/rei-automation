@@ -71,6 +71,8 @@ const LEGACY_USE_CASE_ALIASES = Object.freeze({
   // cold outbound Stage 1 ownership-check templates in some schema revisions.
   // Map it directly so canonical resolution never depends on variant-group lookup.
   "First Message": SELLER_FLOW_STAGES.OWNERSHIP_CHECK,
+  asking_price: "seller_asking_price",
+  seller_asking_price: "seller_asking_price",
   // ── Offer-reveal / closing aliases ──────────────────────────────────────────
   offer_reveal: SELLER_FLOW_STAGES.OFFER_REVEAL_CASH,
   close_ask_soft: SELLER_FLOW_STAGES.CLOSE_HANDOFF,
@@ -268,6 +270,7 @@ export function followUpUseCaseForStage(use_case = null) {
     case SELLER_FLOW_STAGES.CONSIDER_SELLING:
       return SELLER_FLOW_STAGES.CONSIDER_SELLING_FOLLOW_UP;
     case SELLER_FLOW_STAGES.ASKING_PRICE:
+    case "seller_asking_price":
       return SELLER_FLOW_STAGES.ASKING_PRICE_FOLLOW_UP;
     case SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS:
       return SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS_FOLLOW_UP;

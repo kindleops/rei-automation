@@ -113,11 +113,9 @@ const REQUIRED_ENV = {
   PODIO_PASSWORD,
 };
 
-function assertPodioCredentialsConfigured() {
-  for (const [key, value] of Object.entries(REQUIRED_ENV)) {
-    if (!value) {
-      throw new Error(`[Podio] Missing required env var: ${key}`);
-    }
+for (const [key, value] of Object.entries(REQUIRED_ENV)) {
+  if (!value) {
+    console.warn(`[Podio] Missing required env var: ${key}. Podio integration will be disabled.`);
   }
 }
 
@@ -227,8 +225,6 @@ export function invalidateToken() {
 }
 
 async function _doRefresh() {
-  assertPodioCredentialsConfigured();
-
   const form = new URLSearchParams({
     grant_type: "password",
     client_id: PODIO_CLIENT_ID,

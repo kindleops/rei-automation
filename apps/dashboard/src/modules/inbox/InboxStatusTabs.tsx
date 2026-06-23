@@ -1,4 +1,4 @@
-import type { CanonicalBucket } from './classifyInboxBucket'
+import type { CanonicalBucket } from '../../domain/inbox/classifyInboxBucket'
 
 const TAB_META: Array<{ id: CanonicalBucket; label: string; icon: string }> = [
   { id: 'priority',    label: 'Priority',     icon: '🔥' },

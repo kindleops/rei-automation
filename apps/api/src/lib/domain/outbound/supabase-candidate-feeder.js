@@ -4,29 +4,60 @@ import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
-import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
-import { checkOutreachSuppression } from "@/lib/domain/outreach/outreach-service.js";
+import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
+import {
+  SEND_QUEUE_HISTORY_SELECT,
+  MESSAGE_EVENTS_HISTORY_SELECT,
+  collectRecentTemplateIdsFromRows,
+  isPostgrestQueryError,
+} from "@/lib/domain/outbound/outreach-history-projection.js";
+import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
+import {
+  blockedRuntimeBrakeResult,
+  evaluateQueueCreationRuntimeBrakes,
+} from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
 const IDENTITY_QUARANTINE_TABLE = "outbound_identity_quarantine";
-const DEFAULT_CANDIDATE_SOURCE = "v_outbound_discovery_fresh";
+// outbound_feeder_candidates is the default live feeder source: a materialized table
+// refreshed before campaigns from v_sms_campaign_queue_candidates + prospects join +
+// contact_outreach_state join. Fast, indexed, and safe at scale.
+const DEFAULT_CANDIDATE_SOURCE = "outbound_feeder_candidates";
 const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
+  "outbound_feeder_candidates",
+  "v_feeder_candidates_fast",
   "v_outbound_discovery_open_now",
   "v_outbound_discovery_fresh",
   "v_outbound_candidate_freshness",
   "outbound_candidate_snapshot",
   "v_sms_ready_contacts",
+  "v_sms_ready_contacts_clean",
+  "v_sms_ready_contacts_expanded",
   "v_sms_campaign_queue_candidates",
   "v_launch_sms_tier1",
 ]);
 const CANDIDATE_SOURCE_AVAILABLE_HINT = [
-  "v_outbound_discovery_fresh",
+  "outbound_feeder_candidates",
   "v_sms_campaign_queue_candidates",
+  "v_outbound_discovery_fresh",
   "v_sms_ready_contacts",
   "v_launch_sms_tier1",
 ];
+
+// Sources that carry outreach-state enrichment columns (never_contacted, touch_count, suppression_until).
+// For these we push ordering down to the DB and can apply pre-filters in the query.
+const ENRICHED_SOURCES = new Set([
+  "outbound_feeder_candidates",
+  "v_feeder_candidates_fast",
+  "v_outbound_discovery_fresh",
+  "v_outbound_candidate_freshness",
+  "v_outbound_discovery_open_now",
+]);
 
 const REASON_CODES = Object.freeze({
   NO_MASTER_OWNER: "NO_MASTER_OWNER",
@@ -40,6 +71,9 @@ const REASON_CODES = Object.freeze({
   PENDING_PRIOR_TOUCH: "PENDING_PRIOR_TOUCH",
   DUPLICATE_QUEUE_ITEM: "DUPLICATE_QUEUE_ITEM",
   RECENTLY_CONTACTED: "RECENTLY_CONTACTED",
+  INTERNAL_TEST_PHONE: "INTERNAL_TEST_PHONE",
+  COLD_OUTBOUND_TOUCH_CAP: "COLD_OUTBOUND_TOUCH_CAP",
+  PHONE_LEVEL_COOLDOWN: "PHONE_LEVEL_COOLDOWN",
   NO_TEMPLATE: "NO_TEMPLATE",
   TEMPLATE_RENDER_FAILED: "TEMPLATE_RENDER_FAILED",
   NO_VALID_TEXTGRID_NUMBER: "NO_VALID_TEXTGRID_NUMBER",
@@ -52,9 +86,42 @@ const REASON_CODES = Object.freeze({
   IDENTITY_MISMATCH: "IDENTITY_MISMATCH",
   IDENTITY_NOT_VERIFIED: "IDENTITY_NOT_VERIFIED",
   MARKET_IDENTITY_QUARANTINE: "MARKET_IDENTITY_QUARANTINE",
+  ACTIVE_QUEUE_ITEM: "ACTIVE_QUEUE_ITEM",
+  PRIOR_TOUCH_COOLDOWN: "PRIOR_TOUCH_COOLDOWN",
+  OUTREACH_HISTORY_UNAVAILABLE: "OUTREACH_HISTORY_UNAVAILABLE",
 });
 
 const logger = child({ module: "domain.outbound.supabase_candidate_feeder" });
+const RELATIONSHIP_PROBE_TEMPLATE_IDS = new Set(["840801", "840802"]);
+const RESIDENTIAL_PROPERTY_GROUPS = new Set([
+  "sfr",
+  "duplex",
+  "triplex",
+  "fourplex",
+  "small_multifamily",
+]);
+const RELATIONSHIP_PROBE_ALLOWED_PROSPECT_FLAGS = new Set([
+  "Family",
+  "Resident",
+  "Potential Owner",
+  "Likely Renting",
+  "Potentially Linked To Company",
+]);
+const STANDARD_OWNERSHIP_ONLY_PROSPECT_FLAGS = new Set([
+  "Likely Owner",
+  "Linked To Company",
+]);
+const EXACT_PROSPECT_MATCHING_FLAG_LOOKUP = new Map(
+  [
+    "Family",
+    "Resident",
+    "Potential Owner",
+    "Likely Renting",
+    "Potentially Linked To Company",
+    "Likely Owner",
+    "Linked To Company",
+  ].map((flag) => [normalizeProspectMatchingFlagToken(flag), flag])
+);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -62,6 +129,10 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function normalizeProspectMatchingFlagToken(value) {
+  return lower(value).replace(/\s+/g, " ");
 }
 
 function asBoolean(value, fallback = false) {
@@ -77,9 +148,37 @@ function asNumber(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export function toTimestamp(value) {
+  return normalizeTimestamp(value);
+}
+
+function classifyInsertedQueueScheduling(queueResult = {}, scheduledFor = null) {
+  const persistedScheduledFor =
+    queueResult?.inserted?.raw?.scheduled_for ??
+    queueResult?.inserted?.scheduled_for ??
+    scheduledFor;
+  const scheduledAtMs = normalizeTimestamp(persistedScheduledFor);
+  const persistedStatus = clean(
+    queueResult?.inserted?.raw?.queue_status ?? queueResult?.inserted?.queue_status
+  );
+  const isScheduled =
+    lower(persistedStatus) === "scheduled" ||
+    (scheduledAtMs !== null && scheduledAtMs > Date.now());
+  return {
+    persistedScheduledFor,
+    scheduledAtMs,
+    persistedStatus,
+    isScheduled,
+  };
+}
+
 function asPositiveInteger(value, fallback = null) {
   const parsed = asNumber(value, fallback);
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
+}
+
+function totalCreatedCount(summary = {}) {
+  return Number(summary.queued_count || 0) + Number(summary.scheduled_count || 0);
 }
 
 function asArray(value) {
@@ -101,6 +200,82 @@ function pick(...values) {
     if (value !== null && value !== undefined && clean(value) !== "") return value;
   }
   return null;
+}
+
+function hasOwn(value = {}, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function numberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractExactProspectMatchingFlags(value) {
+  if (!clean(value)) return [];
+  const seen = new Set();
+  const flags = [];
+  for (const token of clean(value).split(/[,\n;|]+/)) {
+    const canonical = EXACT_PROSPECT_MATCHING_FLAG_LOOKUP.get(normalizeProspectMatchingFlagToken(token));
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    flags.push(canonical);
+  }
+  return flags;
+}
+
+function getTemplateReferenceId(template = {}) {
+  return clean(pick(template?.template_id, template?.id, template?.item_id, template?.podio_template_id)) || null;
+}
+
+function isRelationshipProbeTemplate(template = {}) {
+  const template_id = getTemplateReferenceId(template);
+  return Boolean(template_id && RELATIONSHIP_PROBE_TEMPLATE_IDS.has(template_id));
+}
+
+function isGenericOwnershipTemplateBody(template = {}) {
+  const body = lower(pick(template?.template_body, template?.english_translation, ""));
+  if (!body) return false;
+  if (body.includes("duplex") || body.includes("triplex") || body.includes("fourplex")) return false;
+  if (body.includes("units") && !body.includes("units?")) return false;
+  return true;
+}
+
+function canRenderOwnershipTemplateWithoutPropertyType(template = {}, candidate = {}, selector = {}) {
+  if (lower(selector.use_case) !== "ownership_check") return false;
+
+  const property_type = clean(
+    pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
+  );
+  if (property_type) return false;
+
+  const property_address_full = clean(
+    pick(candidate.property_address_full, candidate.property_address, candidate.raw?.property_address_full)
+  );
+  if (!property_address_full) return false;
+
+  const allowed = Array.isArray(template.allowed_property_groups)
+    ? template.allowed_property_groups.map((group) => lower(group)).filter(Boolean)
+    : [];
+  if (!allowed.length) return false;
+  if (!allowed.every((group) => RESIDENTIAL_PROPERTY_GROUPS.has(group))) return false;
+
+  return isGenericOwnershipTemplateBody(template);
+}
+
+function logTemplateRenderFailure(candidate = {}, reason = "", details = {}) {
+  logger.warn("feeder.template_render_failed", {
+    module: "domain.outbound.supabase_candidate_feeder",
+    master_owner_id: candidate.master_owner_id,
+    property_id: candidate.property_id,
+    template_id: clean(details.template_id) || null,
+    selected_template_id: clean(details.selected_template_id || details.template_id) || null,
+    reason: clean(reason) || null,
+    missing_variables: Array.isArray(details.missing_variables) ? details.missing_variables : [],
+    template_routing_reason: clean(details.template_routing_reason) || null,
+    candidate_group: clean(details.candidate_group) || null,
+    property_type: clean(details.property_type) || null,
+  });
 }
 
 function isLikelyPhoneValue(value) {
@@ -157,8 +332,43 @@ function titleCaseNameToken(value) {
 /**
  * Determine the canonical property group for template matching.
  */
-export function getCanonicalPropertyGroup(property_type) {
-  const pt = lower(property_type);
+export function getCanonicalPropertyGroup(hints = {}) {
+  let pt = lower(typeof hints === "string" ? hints : hints.property_type);
+  if (!pt && typeof hints === "object" && hints !== null) {
+    const raw_pt = lower(hints.raw_payload_json?.property_type || hints.raw?.raw_payload_json?.property_type);
+    const p_class = lower(hints.property_class || hints.raw?.property_class);
+    const options = lower(hints.options || hints.raw?.options);
+    const podio_tags = lower(hints.podio_tags || hints.raw?.podio_tags);
+    const units = asNumber(hints.units_count || hints.raw?.units_count, null);
+
+    pt = pick(pt, raw_pt, p_class);
+
+    if (!pt) {
+       if (units === 1) pt = "sfr";
+       else if (units === 2) pt = "duplex";
+       else if (units === 3) pt = "triplex";
+       else if (units === 4) pt = "fourplex";
+       else if (units > 4 && units <= 10) pt = "small_multifamily";
+       else if (units > 10) pt = "multifamily_5_plus";
+    }
+
+    if (!pt && options) {
+      if (options.includes("sfr") || options.includes("single family")) pt = "sfr";
+      else if (options.includes("duplex")) pt = "duplex";
+      else if (options.includes("triplex")) pt = "triplex";
+      else if (options.includes("fourplex")) pt = "fourplex";
+      else if (options.includes("multifamily")) pt = "multifamily_5_plus";
+    }
+
+    if (!pt && podio_tags) {
+       if (podio_tags.includes("sfr")) pt = "sfr";
+       else if (podio_tags.includes("duplex")) pt = "duplex";
+       else if (podio_tags.includes("triplex")) pt = "triplex";
+       else if (podio_tags.includes("fourplex")) pt = "fourplex";
+       else if (podio_tags.includes("multifamily")) pt = "multifamily_5_plus";
+    }
+  }
+
   if (!pt) return "other_commercial";
 
   if (pt === "single family" || pt === "sfr" || pt === "residential" || pt === "single-family") return "sfr";
@@ -214,8 +424,8 @@ export function resolveSellerIdentity(candidate = {}) {
     { source: "master_owner_first_name", value: candidate.master_owner_first_name, allow_single_token: true },
     { source: "master_owner_display_name", value: candidate.master_owner_display_name, allow_single_token: false },
     { source: "seller_full_name", value: candidate.seller_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted },
-    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, skip_if_untrusted: is_untrusted || skip_prospect_names, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
-    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted || skip_prospect_names },
+    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, skip_if_untrusted: skip_prospect_names, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
+    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false, skip_if_untrusted: skip_prospect_names },
   ];
 
   for (const { source, value, allow_single_token, guard, skip_if_untrusted } of sources) {
@@ -364,18 +574,19 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
 
   // Accept any non-empty string for IDs (mo_..., prop_..., ph_..., numeric, etc.)
   const master_owner_id =
-    pick(row.master_owner_id, row.owner_id, row.owner_podio_item_id) || null;
+    pick(row.normalized_master_owner_id, row.master_owner_id, row.owner_id, row.owner_podio_item_id) || null;
   const property_id =
-    pick(row.property_id, row.property_export_id, row.property_item_id) || null;
+    pick(row.normalized_property_id, row.property_id, row.property_export_id, row.property_item_id) || null;
   const property_export_id = pick(row.property_export_id) || null;
   const best_phone_id = pick(row.best_phone_id) || null;
-  const phone_id = pick(row.best_phone_id, row.phone_id, row.phone_item_id) || null;
+  const phone_id = pick(row.normalized_phone_id, row.best_phone_id, row.phone_id, row.phone_item_id) || null;
   const primary_prospect_id = pick(row.primary_prospect_id) || null;
   const canonical_prospect_id = pick(row.canonical_prospect_id) || null;
 
   const canonical_e164 =
     normalizePhone(
       pick(
+        row.normalized_phone_e164,
         row.canonical_e164,
         row.best_phone_e164,
         row.phone,
@@ -387,10 +598,10 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     ) || "";
 
   const market = clean(
-    pick(row.market, row.market_name, row.seller_market, row.canonical_market_slug, row.market_label, defaults.market)
+    pick(row.market, row.normalized_market, row.market_name, row.seller_market, row.canonical_market_slug, row.market_label, defaults.market)
   );
   const state = clean(
-    pick(row.state_code, row.property_address_state, row.property_state, row.seller_state, row.state, defaults.state)
+    pick(row.state_code, row.property_address_state, row.normalized_state, row.property_state, row.seller_state, row.state, defaults.state)
   );
   const owner_display_name = clean(pick(row.owner_display_name, row.display_name, row.owner_name));
   const phone_full_name = clean(pick(row.phone_full_name, row.seller_full_name));
@@ -403,6 +614,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   );
   const seller_first_name = clean(pick(row.seller_first_name, row.phone_first_name, phone_first_name));
   const seller_full_name = clean(pick(row.seller_full_name, row.phone_full_name, phone_full_name));
+  const prospect_matching_flags = clean(pick(row.prospect_matching_flags, row.matching_flags, row.person_flags_text));
 
   const candidate = {
     raw: row,
@@ -500,12 +712,14 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     never_contacted: asBoolean(row.never_contacted, null),
     freshness_score: asNumber(row.freshness_score, null),
     last_sms_at: row.last_sms_at || null,
-    canonical_property_group: getCanonicalPropertyGroup(row.property_type),
+    canonical_property_group: getCanonicalPropertyGroup(row),
     // Identity alignment fields
     likely_owner: asBoolean(pick(row.likely_owner), null),
     likely_renting: asBoolean(pick(row.likely_renting), null),
-    matching_flags: clean(pick(row.matching_flags)),
+    matching_flags: prospect_matching_flags,
+    prospect_matching_flags,
     person_flags_text: clean(pick(row.person_flags_text)),
+    person_flags_json: row.person_flags_json ?? null,
     owner_type_guess: clean(pick(row.owner_type_guess)),
     phone_owner: clean(pick(row.phone_owner)),
     prospect_cnam: clean(pick(row.prospect_cnam, row.cnam)),
@@ -514,30 +728,53 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   };
 
   // ── Identity Alignment Check ───────────────────────────────────────────
-  const identity_alignment = calculateOwnerProspectAlignment({
-    masterOwnerName: candidate.owner_display_name,
-    ownerDisplayName: candidate.owner_display_name,
-    ownerName: candidate.owner_display_name,
-    prospectFullName: candidate.prospect_full_name,
-    phoneFullName: candidate.phone_full_name,
-    phoneOwner: candidate.phone_owner,
-    cnam: candidate.prospect_cnam,
-    likelyOwner: candidate.likely_owner,
-    likelyRenting: candidate.likely_renting,
-    matchingFlags: candidate.matching_flags,
-    personFlagsText: candidate.person_flags_text,
-    bestPhoneScore: candidate.best_phone_score,
-    contactScoreFinal: candidate.contact_score_final,
-    linkedPropertyIdsText: candidate.linked_property_ids_text,
-    joinedPropertySource: candidate.joined_property_source
-  });
+  const identity_alignment =
+    row.identity_alignment &&
+    typeof row.identity_alignment === "object" &&
+    clean(row.identity_alignment.status)
+      ? row.identity_alignment
+      : calculateOwnerProspectAlignment({
+          masterOwnerName: candidate.owner_display_name,
+          ownerDisplayName: candidate.owner_display_name,
+          ownerName: candidate.owner_display_name,
+          prospectFullName: candidate.prospect_full_name,
+          phoneFullName: candidate.phone_full_name,
+          phoneOwner: candidate.phone_owner,
+          cnam: candidate.prospect_cnam,
+          likelyOwner: candidate.likely_owner,
+          likelyRenting: candidate.likely_renting,
+          matchingFlags: candidate.matching_flags,
+          personFlagsText: candidate.person_flags_text,
+          bestPhoneScore: candidate.best_phone_score,
+          contactScoreFinal: candidate.contact_score_final,
+          linkedPropertyIdsText: candidate.linked_property_ids_text,
+          joinedPropertySource: candidate.joined_property_source,
+          smsEligible: candidate.sms_eligible,
+          canonicalProspectId: candidate.canonical_prospect_id,
+          primaryProspectId: candidate.primary_prospect_id,
+          normalizedPhoneId: pick(row.normalized_phone_id, row.phone_id),
+          bestPhoneId: candidate.best_phone_id,
+          phoneId: candidate.phone_id,
+          sellerFullName: candidate.seller_full_name,
+          sellerFirstName: candidate.seller_first_name,
+        });
   candidate.identity_alignment = identity_alignment;
   // ─────────────────────────────────────────────────────────────────────────
 
   const seller_identity = resolveSellerIdentity(candidate);
+  const hydrated_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   return {
     ...candidate,
     ...seller_identity,
+    seller_full_name: hydrated_seller_full_name || "",
     seller_name: seller_identity.seller_first_name || "",
   };
 }
@@ -551,6 +788,12 @@ function mapReasonToDiagnosticCounter(reason) {
   }
   if (reason === REASON_CODES.PENDING_PRIOR_TOUCH) {
     return "pending_prior_touch_block_count";
+  }
+  if (reason === REASON_CODES.ACTIVE_QUEUE_ITEM) {
+    return "active_queue_block_count";
+  }
+  if (reason === REASON_CODES.PRIOR_TOUCH_COOLDOWN) {
+    return "prior_touch_cooldown_block_count";
   }
   if (reason === REASON_CODES.DUPLICATE_QUEUE_ITEM) {
     return "duplicate_queue_block_count";
@@ -588,6 +831,8 @@ function buildCandidateNormalizedPreview(raw, candidate) {
     joined_property_source: candidate.joined_property_source || null,
     normalized_market: candidate.market || null,
     normalized_state: candidate.state || null,
+    identity_resolution: candidate.identity_alignment?.status || null,
+    identity_alignment_status: candidate.identity_alignment?.status || null,
   };
 }
 
@@ -824,8 +1069,9 @@ function hasBlankLocationPattern(text = "") {
 
 export function hasBlankSellerGreeting(text = "") {
   const normalized = clean(text).replace(/\s+/g, " ");
-  // Blank greeting patterns (e.g. "Hey ,")
-  if (/^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(normalized)) return true;
+  // Blank greeting patterns (e.g. "Hey ," or trailing "Hi,") — not "Hi, this is {name}".
+  if (/^(hi|hey|hello|hola|ola|marhaba)\s+,/i.test(normalized)) return true;
+  if (/^(hi|hey|hello|hola|ola|marhaba)\s*,\s*$/i.test(normalized)) return true;
   
   // Unresolved variable patterns
   if (normalized.includes(", ,")) return true;
@@ -924,6 +1170,15 @@ function buildNeutralGreetingMessage(variable_payload = {}) {
 
 function buildTemplateVariablePayload(candidate = {}) {
   const seller_identity = resolveSellerIdentity(candidate);
+  const resolved_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   const owner_display_name = clean(
     pick(candidate.raw?.display_name, candidate.owner_display_name, candidate.raw?.owner_display_name)
   );
@@ -1015,7 +1270,22 @@ function buildTemplateVariablePayload(candidate = {}) {
       agent_name_raw
     )
   ) || "Alex";
-
+  const property_zip = clean(
+    pick(
+      candidate.property_zip,
+      candidate.raw?.property_address_zip,
+      candidate.raw?.property_zip,
+      ""
+    )
+  );
+  const property_county_name = clean(
+    pick(
+      candidate.property_address_county_name,
+      candidate.raw?.property_address_county_name,
+      candidate.raw?.property_county_name,
+      ""
+    )
+  );
   const payload = {
     seller_first_name: seller_identity.seller_first_name || "",
     first_name: seller_identity.seller_first_name || "",
@@ -1024,7 +1294,7 @@ function buildTemplateVariablePayload(candidate = {}) {
     seller_display_name: seller_identity.seller_display_name || "",
     owner_display_name,
     owner_name: owner_display_name || candidate.seller_name || "",
-    seller_full_name: seller_identity.seller_full_name || "",
+    seller_full_name: resolved_seller_full_name || "",
     seller_name_source: seller_identity.seller_name_source,
     seller_name_missing: seller_identity.seller_name_missing,
     property_address_full,
@@ -1040,7 +1310,11 @@ function buildTemplateVariablePayload(candidate = {}) {
     state: property_state,
     property_address_state: property_state,
     seller_state: property_state,
-    property_zip: clean(candidate.property_zip),
+    property_zip,
+    property_address_zip: property_zip,
+    zip: property_zip,
+    property_address_county_name: property_county_name,
+    county: property_county_name,
     offer_price: formatCurrency(candidate.cash_offer),
     cash_offer: candidate.cash_offer,
     agent_name: agent_first_name,
@@ -1229,6 +1503,70 @@ function filterTemplatesByPreferredLanguage(templates = [], selector = {}) {
   };
 }
 
+function resolveProspectTemplateRouting(candidate = {}, selector = {}, templates = []) {
+  const prospect_matching_flags = extractExactProspectMatchingFlags(candidate.matching_flags);
+  const identity_unknown = lower(candidate?.identity_alignment?.status) === "unknown";
+  const normalized_use_case = lower(selector.use_case);
+  const rows = Array.isArray(templates) ? templates : [];
+
+  if (normalized_use_case !== "ownership_check") {
+    return {
+      blocked: false,
+      templates: rows,
+      prospect_matching_flags,
+      template_routing_reason: "template_routing_not_applicable",
+    };
+  }
+
+  const use_case_templates = rows.filter((template) => lower(template?.use_case) === normalized_use_case);
+  const standard_templates = use_case_templates.filter((template) => !isRelationshipProbeTemplate(template));
+  const relationship_probe_templates = use_case_templates.filter((template) => isRelationshipProbeTemplate(template));
+  const has_standard_only_flag = prospect_matching_flags.some((flag) =>
+    STANDARD_OWNERSHIP_ONLY_PROSPECT_FLAGS.has(flag)
+  );
+  const has_relationship_probe_flag = prospect_matching_flags.some((flag) =>
+    RELATIONSHIP_PROBE_ALLOWED_PROSPECT_FLAGS.has(flag)
+  );
+
+  if (has_standard_only_flag) {
+    return {
+      blocked: false,
+      templates: standard_templates,
+      prospect_matching_flags,
+      template_routing_reason: "exact_prospect_flag_standard_ownership_only",
+    };
+  }
+
+  if (has_relationship_probe_flag) {
+    return {
+      blocked: false,
+      templates: relationship_probe_templates.length ? relationship_probe_templates : standard_templates,
+      prospect_matching_flags,
+      template_routing_reason: relationship_probe_templates.length
+        ? "exact_prospect_flag_relationship_probe"
+        : "exact_prospect_flag_standard_ownership_fallback",
+    };
+  }
+
+  if (identity_unknown) {
+    return {
+      blocked: true,
+      templates: [],
+      prospect_matching_flags,
+      template_routing_reason: "identity_unknown_without_exact_prospect_flag",
+      reason_code: REASON_CODES.NO_TEMPLATE,
+      reason: "no_safe_template_for_identity_unknown",
+    };
+  }
+
+  return {
+    blocked: false,
+    templates: standard_templates,
+    prospect_matching_flags,
+    template_routing_reason: "no_exact_prospect_flag_standard_ownership_only",
+  };
+}
+
 function isS1OwnershipCheckRotation(selector = {}) {
   const use_case = lower(clean(pick(selector.use_case, selector.template_use_case, "")));
   const stage_code = clean(selector.stage_code).toUpperCase();
@@ -1239,81 +1577,79 @@ function isS1OwnershipCheckRotation(selector = {}) {
 async function getRecentTemplateIds(candidate = {}, selector = {}, options = {}, deps = {}) {
   if (typeof deps.getRecentTemplateIds === "function") {
     const custom = await deps.getRecentTemplateIds(candidate, selector, options);
-    return Array.isArray(custom) ? custom.map((value) => clean(value)).filter(Boolean) : [];
+    if (custom && typeof custom === "object" && !Array.isArray(custom)) return custom;
+    return {
+      ok: true,
+      template_ids: Array.isArray(custom) ? custom.map((value) => clean(value)).filter(Boolean) : [],
+      errors: [],
+    };
   }
 
   let supabase;
   try {
     supabase = getSupabase(deps);
-  } catch {
-    return [];
+  } catch (error) {
+    if (process.env.NODE_ENV === "test" && !deps.supabase) {
+      return { ok: true, template_ids: [], errors: [] };
+    }
+    return {
+      ok: false,
+      template_ids: [],
+      errors: [{ source: "supabase_client", message: error?.message || "supabase_unavailable" }],
+    };
   }
 
-  const phone = normalizePhone(candidate.canonical_e164);
-  const use_case = clean(selector.use_case);
-  const stage_code = clean(selector.stage_code);
   const lookback_ms = 30 * 24 * 60 * 60 * 1000;
   const cutoff_ms = Date.now() - lookback_ms;
-  const recent_template_ids = new Set();
+  const errors = [];
+  const rows = [];
 
-  const collectFromRows = (rows = []) => {
-    for (const row of rows) {
-      const created_at_raw = pick(row?.created_at, row?.sent_at, row?.scheduled_for, row?.inserted_at);
-      const created_at_ms = created_at_raw ? new Date(created_at_raw).getTime() : 0;
-      if (!created_at_ms || created_at_ms < cutoff_ms) continue;
-
-      const row_phone = normalizePhone(pick(row?.to_phone_number, row?.phone_number, row?.recipient_phone));
-      if (phone && row_phone && phone !== row_phone) continue;
-
-      const row_use_case = clean(
-        pick(row?.use_case_template, row?.metadata?.template_use_case, row?.template_use_case, row?.use_case)
-      );
-      if (use_case && row_use_case && lower(row_use_case) !== lower(use_case)) continue;
-
-      const row_stage_code = clean(
-        pick(row?.metadata?.template_stage_code, row?.stage_code, row?.metadata?.selected_template_stage_code)
-      );
-      if (stage_code && row_stage_code && lower(row_stage_code) !== lower(stage_code)) continue;
-
-      const template_id = clean(
-        pick(
-          row?.template_id,
-          row?.metadata?.template_id,
-          row?.metadata?.selected_template_id,
-          row?.metadata?.template?.id
-        )
-      );
-      if (template_id) recent_template_ids.add(template_id);
-    }
-  };
-
-  try {
-    const queue_query = await supabase
-      .from(SEND_QUEUE_TABLE)
-      .select("template_id,metadata,to_phone_number,created_at,scheduled_for,use_case_template,stage_code")
-      .eq("master_owner_id", candidate.master_owner_id)
-      .limit(200);
-    if (Array.isArray(queue_query?.data)) {
-      collectFromRows(queue_query.data);
-    }
-  } catch {
-    // Best-effort only.
+  const queue_query = await supabase
+    .from(SEND_QUEUE_TABLE)
+    .select(SEND_QUEUE_HISTORY_SELECT)
+    .eq("master_owner_id", candidate.master_owner_id)
+    .limit(200);
+  if (isPostgrestQueryError(queue_query)) {
+    errors.push({
+      source: "send_queue",
+      message: queue_query.error?.message || "send_queue_history_query_failed",
+      code: queue_query.error?.code || null,
+    });
+  } else if (Array.isArray(queue_query?.data)) {
+    rows.push(...queue_query.data);
   }
 
-  try {
-    const events_query = await supabase
-      .from("message_events")
-      .select("template_id,metadata,to_phone_number,created_at,sent_at,use_case,stage_code")
-      .eq("master_owner_id", candidate.master_owner_id)
-      .limit(200);
-    if (Array.isArray(events_query?.data)) {
-      collectFromRows(events_query.data);
-    }
-  } catch {
-    // message_events may not exist in every environment.
+  const events_query = await supabase
+    .from("message_events")
+    .select(MESSAGE_EVENTS_HISTORY_SELECT)
+    .eq("master_owner_id", candidate.master_owner_id)
+    .limit(200);
+  if (isPostgrestQueryError(events_query)) {
+    errors.push({
+      source: "message_events",
+      message: events_query.error?.message || "message_events_history_query_failed",
+      code: events_query.error?.code || null,
+    });
+  } else if (Array.isArray(events_query?.data)) {
+    rows.push(...events_query.data);
   }
 
-  return [...recent_template_ids];
+  if (errors.length) {
+    logger.warn("feeder.outreach_history_query_failed", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      errors,
+    });
+    return { ok: false, template_ids: [], errors };
+  }
+
+  const template_ids = collectRecentTemplateIdsFromRows(rows, {
+    cutoff_ms,
+    selector: { ...selector, canonical_e164: candidate.canonical_e164 },
+    normalizePhoneFn: normalizePhone,
+  });
+
+  return { ok: true, template_ids, errors: [] };
 }
 
 function buildRotationPool(sorted_templates = [], selector = {}) {
@@ -1768,32 +2104,49 @@ export async function getSupabaseFeederCandidates(
     : Math.min(Math.max(requestedLimit * 5, 10), 2500);
   const effective_offset = Math.max(0, Math.trunc(Number(candidate_offset) || 0));
 
-  let query = supabase.from(source_name).select("*");
-  
-  // Ensure we prioritize fresh/high-value candidates even if the view ordering is missing
-  if (source_name.includes("fresh") || source_name.includes("discovery")) {
-    query = query.order("never_contacted", { ascending: false });
-    query = query.order("final_acquisition_score", { ascending: false, nullsFirst: false });
-    query = query.order("best_phone_score", { ascending: false, nullsFirst: false });
+  const rows = [];
+  const page_size = 1000;
+  const last_index = effective_offset + effective_fetch_limit - 1;
+
+  for (let page_start = effective_offset; page_start <= last_index; page_start += page_size) {
+    const page_end = Math.min(page_start + page_size - 1, last_index);
+    let query = supabase.from(source_name).select("*");
+
+    if (ENRICHED_SOURCES.has(source_name)) {
+      // Enriched views carry outreach-state columns — order fresh/high-value candidates first.
+      // The REST layer does not guarantee VIEW ORDER BY, so we push ordering explicitly.
+      query = query
+        .order("never_contacted", { ascending: false, nullsFirst: false })
+        .order("touch_count",     { ascending: true,  nullsFirst: true  })
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("best_phone_score",        { ascending: false, nullsFirst: false });
+    } else if (source_name === "v_sms_campaign_queue_candidates") {
+      // Base candidate view has no outreach state — order by score only.
+      query = query
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("best_phone_score",        { ascending: false, nullsFirst: false });
+    }
+
+    const { data, error } = await query.range(page_start, page_end);
+
+    if (error) {
+      return {
+        ok: false,
+        error: "CANDIDATE_SOURCE_UNAVAILABLE",
+        source: source_name,
+        requested_source: requested_source || null,
+        scanned_count: 0,
+        rows: [],
+        candidate_source_error: error?.message || String(error),
+        available_hint: [...CANDIDATE_SOURCE_AVAILABLE_HINT],
+      };
+    }
+
+    const page_rows = Array.isArray(data) ? data : [];
+    rows.push(...page_rows);
+    if (page_rows.length < page_end - page_start + 1) break;
   }
 
-  query = query.range(effective_offset, effective_offset + effective_fetch_limit - 1);
-  const { data, error } = await query;
-
-  if (error) {
-    return {
-      ok: false,
-      error: "CANDIDATE_SOURCE_UNAVAILABLE",
-      source: source_name,
-      requested_source: requested_source || null,
-      scanned_count: 0,
-      rows: [],
-      candidate_source_error: error?.message || String(error),
-      available_hint: [...CANDIDATE_SOURCE_AVAILABLE_HINT],
-    };
-  }
-
-  const rows = Array.isArray(data) ? data : [];
   const normalized = rows
     .map((row) =>
       normalizeCandidateRow(row, {
@@ -1911,6 +2264,10 @@ export async function loadOutboundTouchHistory(candidate = {}, options = {}, dep
 }
 
 export async function resolveNextOutboundTouch(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.resolveNextOutboundTouch === "function") {
+    return deps.resolveNextOutboundTouch(candidate, options, deps);
+  }
+
   const raw = candidate.raw || {};
   
   // 1. Extract candidate state from view fields
@@ -2007,9 +2364,31 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     return deps.hasDuplicateQueueItem(candidate, options);
   }
 
+  // Hard guard: null owner means dedup queries would match nothing and let everything through.
+  if (!candidate.master_owner_id || !candidate.property_id) {
+    return {
+      duplicate: true,
+      null_owner_block: true,
+      reason_code: REASON_CODES.DUPLICATE_QUEUE_ITEM,
+      reason: "cold_outbound_requires_owner_and_property",
+    };
+  }
+
   const supabase = getSupabase(deps);
-  const statuses = ["queued", "scheduled", "pending", "approved", "ready", "sending", "sent", "delivered"];
+  const active_statuses = ["queued", "scheduled", "pending", "approved", "ready", "sending"];
+  // All terminal statuses that represent a recent send attempt — include failed/expired/cancelled
+  // so a send that didn't deliver still blocks re-queue within the cooldown window.
+  const terminal_cooldown_statuses = [
+    "sent", "delivered",
+    "expired", "failed", "failed_transport", "blocked", "carrier_blocked",
+    "cancelled", "duplicate_blocked", "invalid_number", "opted_out",
+    "paused_name_missing", "paused_global_lock", "paused_invalid_queue_row",
+    "paused_review", "paused_max_retries", "paused_duplicate",
+  ];
+  const all_statuses = [...active_statuses, ...terminal_cooldown_statuses];
   const phone = normalizePhone(candidate.canonical_e164);
+  const duplicate_body_cooldown_hours = asPositiveInteger(options.duplicate_body_cooldown_hours, 24);
+  const cold_outbound_cooldown_days = asPositiveInteger(options.cold_outbound_cooldown_days, 30);
 
   // 1. Check send_queue for active or recently completed rows
   const { data, error, count } = await supabase
@@ -2017,7 +2396,7 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
     .select("id,queue_status,queue_key,touch_number,to_phone_number,use_case_template,metadata,scheduled_for,sent_at,created_at,updated_at", { count: "exact" })
     .eq("master_owner_id", candidate.master_owner_id)
     .eq("property_id", candidate.property_id)
-    .in("queue_status", statuses)
+    .in("queue_status", all_statuses)
     .eq("touch_number", candidate.touch_number)
     .limit(20);
 
@@ -2025,15 +2404,47 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
 
   const rows = Array.isArray(data) ? data : [];
 
-  const matched = rows.find((row) => {
+  const matched_active = rows.find((row) => {
     const row_phone = normalizePhone(row?.to_phone_number);
     const template_use_case = getQueueRowUseCase(row);
-    return row_phone === phone && template_use_case === clean(candidate.template_use_case);
+    return row_phone === phone && template_use_case === clean(candidate.template_use_case) && active_statuses.includes(row.queue_status);
   });
 
-  if (matched) {
+  if (matched_active) {
     return {
       duplicate: true,
+      active_queue_block: true,
+      reason_code: REASON_CODES.ACTIVE_QUEUE_ITEM,
+      policy: {
+        match_basis: [
+          "master_owner_id",
+          "property_id",
+          "touch_number",
+          "to_phone_number",
+          "template_use_case"
+        ],
+        blocking_statuses: active_statuses
+      },
+      matched_row: matched_active,
+      scanned_duplicate_rows_count: count ?? rows.length
+    };
+  }
+
+  const cooldown_ms = duplicate_body_cooldown_hours * 60 * 60 * 1000;
+  const matched_completed_cooldown = rows.find((row) => {
+    const row_phone = normalizePhone(row?.to_phone_number);
+    const template_use_case = getQueueRowUseCase(row);
+    if (row_phone !== phone || template_use_case !== clean(candidate.template_use_case) || !terminal_cooldown_statuses.includes(row.queue_status)) {
+       return false;
+    }
+    const timestamp = new Date(row.sent_at || row.updated_at || row.created_at).getTime();
+    return Date.now() - timestamp < cooldown_ms;
+  });
+
+  if (matched_completed_cooldown) {
+    return {
+      duplicate: true,
+      duplicate_body_block: true,
       reason_code: REASON_CODES.DUPLICATE_QUEUE_ITEM,
       policy: {
         match_basis: [
@@ -2043,56 +2454,49 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
           "to_phone_number",
           "template_use_case"
         ],
-        blocking_statuses: statuses
+        blocking_statuses: terminal_cooldown_statuses,
+        cooldown_hours: duplicate_body_cooldown_hours
       },
-      matched_row: {
-        id: matched.id,
-        queue_status: matched.queue_status,
-        queue_key: matched.queue_key,
-        touch_number: matched.touch_number,
-        to_phone_number_masked: maskPhone(matched.to_phone_number),
-        template_use_case: clean(
-          matched?.metadata?.template_use_case || matched?.metadata?.selected_use_case || matched?.use_case_template
-        ),
-        scheduled_for: matched.scheduled_for,
-        sent_at: matched.sent_at,
-        created_at: matched.created_at,
-        updated_at: matched.updated_at
-      },
+      matched_row: matched_completed_cooldown,
       scanned_duplicate_rows_count: count ?? rows.length
     };
   }
 
-  // 2. Check message_events for recent outbound (72 hours)
-  // Condition: Same phone AND (Same Owner OR Same Property)
-  const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
-  
-  const { data: recentEvents, error: eventError } = await supabase
-    .from("message_events")
-    .select("id, created_at, to_phone_number, master_owner_id, property_id")
-    .eq("direction", "outbound")
-    .gte("created_at", seventyTwoHoursAgo)
-    .eq("to_phone_number", phone)
-    .or(`master_owner_id.eq.${candidate.master_owner_id},property_id.eq.${candidate.property_id}`)
-    .limit(1);
+  // 2. Hard phone+owner cold-outbound cooldown: check message_events for ANY prior
+  // outbound contact within cold_outbound_cooldown_days. This is the backstop for when
+  // contact_outreach_state is missing a row for this owner-phone pair.
+  if (phone) {
+    const cold_cutoff = new Date(Date.now() - cold_outbound_cooldown_days * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      const { data: coldEvents, error: coldError } = await supabase
+        .from("message_events")
+        .select("id, created_at, to_phone_number, master_owner_id, property_id")
+        .eq("direction", "outbound")
+        .gte("created_at", cold_cutoff)
+        .eq("to_phone_number", phone)
+        .eq("master_owner_id", candidate.master_owner_id)
+        .limit(1);
 
-  if (eventError) {
-    // Graceful failure for message_events check
-    console.error("[hasDuplicateQueueItem] message_events check failed:", eventError.message);
-  } else if (recentEvents && recentEvents.length > 0) {
-    const event = recentEvents[0];
-    return {
-      duplicate: true,
-      recently_contacted: true,
-      reason_code: REASON_CODES.RECENTLY_CONTACTED,
-      matched_event: {
-        id: event.id,
-        created_at: event.created_at,
-        phone_masked: maskPhone(event.to_phone_number),
-        master_owner_id: event.master_owner_id,
-        property_id: event.property_id
+      if (!coldError && coldEvents?.length > 0) {
+        const event = coldEvents[0];
+        return {
+          duplicate: true,
+          recently_contacted: true,
+          cold_outbound_cooldown_block: true,
+          reason_code: REASON_CODES.RECENTLY_CONTACTED,
+          cold_outbound_cooldown_days,
+          matched_event: {
+            id: event.id,
+            created_at: event.created_at,
+            phone_masked: maskPhone(event.to_phone_number),
+            master_owner_id: event.master_owner_id,
+            property_id: event.property_id
+          }
+        };
       }
-    };
+    } catch {
+      // Best-effort — fall through.
+    }
   }
 
   return {
@@ -2102,6 +2506,10 @@ async function hasDuplicateQueueItem(candidate = {}, options = {}, deps = {}) {
 }
 
 export async function evaluateCandidateEligibility(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.evaluateCandidateEligibility === "function") {
+    return deps.evaluateCandidateEligibility(candidate, options);
+  }
+
   if (!candidate.master_owner_id) {
     return { ok: false, reason_code: REASON_CODES.NO_MASTER_OWNER, reason: "missing_master_owner_id" };
   }
@@ -2117,6 +2525,19 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
   if (!candidate.canonical_e164) {
     return { ok: false, reason_code: REASON_CODES.NO_VALID_PHONE, reason: "missing_phone_e164" };
   }
+
+  // ── Internal/test phone hard block ─────────────────────────────────────
+  // Production feeder must never contact internal test numbers as seller candidates.
+  if (isInternalTestPhone(candidate.canonical_e164) && !options.allow_internal_test_phones) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.INTERNAL_TEST_PHONE,
+      reason: "internal_test_phone_blocked_in_production",
+      phone_masked: candidate.canonical_e164?.slice(-4),
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (candidate.true_post_contact_suppression) {
     return { ok: false, reason_code: REASON_CODES.SUPPRESSED, reason: "true_post_contact_suppression" };
   }
@@ -2184,23 +2605,65 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── Long-term outreach state suppression ────────────────────────────────
+  // ── Long-term outreach state suppression + touch cap ───────────────────
+  const outreach_deps = deps.supabase ? { supabase: deps.supabase } : {};
   try {
     const outreach_suppression = await checkOutreachSuppression(
-      candidate.master_owner_id, 
-      candidate.canonical_e164
+      candidate.master_owner_id,
+      candidate.canonical_e164,
+      outreach_deps
     );
     if (outreach_suppression.suppressed) {
-      return { 
-        ok: false, 
-        reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, 
+      return {
+        ok: false,
+        reason_code: REASON_CODES.PENDING_PRIOR_TOUCH,
         reason: outreach_suppression.reason || "outreach_state_suppressed",
-        suppression_until: outreach_suppression.until
+        suppression_until: outreach_suppression.until,
+        touch_count: outreach_suppression.touch_count,
+      };
+    }
+    // Touch cap: cold outbound (touch 1) is blocked after 5 confirmed sends.
+    const cold_outbound_touch_cap = asPositiveInteger(options.cold_outbound_touch_cap, 5);
+    const touch_count = outreach_suppression.touch_count ?? 0;
+    if (Number(candidate.touch_number ?? 1) === 1 && touch_count >= cold_outbound_touch_cap) {
+      return {
+        ok: false,
+        reason_code: REASON_CODES.COLD_OUTBOUND_TOUCH_CAP,
+        reason: "cold_outbound_touch_cap_reached",
+        touch_count,
+        cold_outbound_touch_cap,
       };
     }
   } catch (suppressErr) {
-    warn("outreach.suppression_check_failed", { error: suppressErr.message, master_owner_id: candidate.master_owner_id });
+    logger.warn("outreach.suppression_check_failed", {
+      error: suppressErr?.message,
+      master_owner_id: candidate.master_owner_id,
+    });
   }
+
+  // ── Phone-level cooldown (any owner, same phone, 14 days) ───────────────
+  // Prevents contacting the same phone through multiple owner/property records.
+  try {
+    const phone_cooldown = await checkPhoneLevelCooldown(candidate.canonical_e164, {
+      ...outreach_deps,
+      phone_cooldown_days: asPositiveInteger(options.phone_cooldown_days, 14),
+    });
+    if (phone_cooldown.blocked) {
+      return {
+        ok: false,
+        reason_code: REASON_CODES.PHONE_LEVEL_COOLDOWN,
+        reason: "phone_level_cooldown",
+        last_sms_at: phone_cooldown.last_sms_at,
+        matching_owner_id: phone_cooldown.matching_owner_id,
+      };
+    }
+  } catch (phoneCooldownErr) {
+    logger.warn("outreach.phone_cooldown_check_failed", {
+      error: phoneCooldownErr?.message,
+      canonical_e164: candidate.canonical_e164?.slice(-4),
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const duplicate_check = await hasDuplicateQueueItem(candidate, options, deps);
   if (duplicate_check.duplicate) {
@@ -2280,6 +2743,7 @@ function buildRoutingSelection({
   routing_rule_name = null,
   seller_market = null,
   seller_state = null,
+  rejected_candidate_count = 0,
 } = {}) {
   return {
     ok: true,
@@ -2292,6 +2756,7 @@ function buildRoutingSelection({
     selected_textgrid_number: selected?.phone_number || null,
     seller_market: seller_market || null,
     seller_state: seller_state || null,
+    rejected_candidate_count,
     routing_block_reason: null,
     selected: {
       id: selected?.id || null,
@@ -2347,6 +2812,18 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
 
   const seller_market = normalizeMarket(candidate.market);
   const seller_state = lower(candidate.state);
+  const has_explicit_touch = candidate.touch_number != null || candidate.is_first_touch != null;
+  const first_touch = asBoolean(
+    options.first_touch ?? candidate.is_first_touch,
+    has_explicit_touch ? Number(candidate.touch_number || 1) === 1 : false
+  );
+  const require_local_routing = asBoolean(options.require_local_routing, false);
+  const allow_regional_fallback_for_first_touch = asBoolean(
+    options.allow_regional_fallback_for_first_touch,
+    false
+  );
+  const exact_market_required =
+    require_local_routing || (first_touch && !allow_regional_fallback_for_first_touch);
 
   const exact = numbers.filter((row) => row.market_normalized === seller_market).sort(byUsageThenRecency);
   const alias = numbers
@@ -2381,7 +2858,35 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "exact_market_match",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
+  }
+
+  if (exact_market_required) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.ROUTING_BLOCKED,
+      routing_allowed: false,
+      routing_tier: "blocked",
+      selection_reason: null,
+      routing_rule_name: regional_rule?.name || null,
+      selected_textgrid_market: null,
+      selected_textgrid_number: null,
+      seller_market: candidate.market || null,
+      seller_state: candidate.state || null,
+      rejected_candidate_count: numbers.length,
+      routing_block_reason: "NO_VALID_LOCAL_TEXTGRID_NUMBER",
+      selected: null,
+      diagnostics: {
+        require_local_routing,
+        first_touch,
+        allow_regional_fallback_for_first_touch,
+        exact_market_required,
+        seller_market: candidate.market || null,
+        selected_textgrid_market: null,
+        rejected_candidate_count: numbers.length,
+      },
+    };
   }
 
   if (alias.length) {
@@ -2392,6 +2897,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "approved_alias_match",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2403,6 +2909,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: regional_rule?.name || null,
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2414,6 +2921,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       routing_rule_name: "approved_nationwide_fallback",
       seller_market: candidate.market,
       seller_state: candidate.state,
+      rejected_candidate_count: Math.max(0, numbers.length - 1),
     });
   }
 
@@ -2428,6 +2936,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       selected_textgrid_number: null,
       seller_market: candidate.market || null,
       seller_state: candidate.state || null,
+      rejected_candidate_count: numbers.length,
       routing_block_reason: "NO_APPROVED_ROUTING_PATH",
       selected: null,
     };
@@ -2448,6 +2957,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     preferred_agent_persona: clean(candidate.agent_persona) || "",
     property_type_scope: clean(candidate.raw?.property_type_scope) || null,
     deal_strategy: clean(candidate.raw?.deal_strategy) || null,
+  };
+  const template_routing_details = {
+    prospect_matching_flags: extractExactProspectMatchingFlags(candidate.matching_flags),
+    selected_template_id: null,
+    template_routing_reason: lower(selector.use_case) === "ownership_check"
+      ? "template_routing_pending"
+      : "template_routing_not_applicable",
   };
 
   const is_cold_s1_fetch = isS1OwnershipCheckRotation(selector);
@@ -2499,6 +3015,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         missing_variables: [],
         variable_payload_preview: {},
         selected_template_preview: null,
+        ...template_routing_details,
       };
     }
 
@@ -2529,57 +3046,134 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     }
   }
 
+  // Save all fetched templates before language filter for English universal fallback
+  const all_fetched_templates = templates.slice();
+
   const language_filtered = filterTemplatesByPreferredLanguage(templates, selector);
   fetch_diagnostics.template_count_after_language_filter = language_filtered.templates.length;
   templates = language_filtered.templates;
+  const prospect_template_routing = resolveProspectTemplateRouting(candidate, selector, templates);
+  template_routing_details.prospect_matching_flags = prospect_template_routing.prospect_matching_flags;
+  template_routing_details.template_routing_reason = prospect_template_routing.template_routing_reason;
 
-  // ── Phase B: Strict Property Template Matching ──────────────────────────
+  if (prospect_template_routing.blocked) {
+    logger.warn("feeder.template_routing_blocked", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      prospect_matching_flags: template_routing_details.prospect_matching_flags,
+      selected_template_id: null,
+      template_routing_reason: template_routing_details.template_routing_reason,
+    });
+    return {
+      ok: false,
+      reason_code: prospect_template_routing.reason_code || REASON_CODES.NO_TEMPLATE,
+      reason: prospect_template_routing.reason || "no_safe_template_for_identity_unknown",
+      template: null,
+      rendered_message_body: null,
+      missing_variables: [],
+      variable_payload_preview: buildTemplateVariablePayload(candidate),
+      selected_template_preview: null,
+      template_fallback_level: 0,
+      ...template_routing_details,
+    };
+  }
+
+  // ── Phase B: Property group filtering with 5-level fallback cascade ─────────
   const candidate_group = candidate.canonical_property_group || "other_commercial";
-  const property_matched_templates = templates.filter((t) => {
+  const property_type = clean(
+    pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
+  );
+
+  // Reusable property group filter (same logic for all levels)
+  const filterByPropertyGroup = (tmplList) => tmplList.filter((t) => {
     const allowed = Array.isArray(t.allowed_property_groups) ? t.allowed_property_groups : [];
     const prohibited = Array.isArray(t.prohibited_property_groups) ? t.prohibited_property_groups : [];
-    
-    // 1. Hard block if group is explicitly prohibited
     if (prohibited.includes(candidate_group)) return false;
-    
-    // 2. If allowed list exists, group MUST be in it
-    if (allowed.length > 0 && !allowed.includes(candidate_group)) return false;
-    
-    // 3. Fallback check: No duplex/triplex wording for SFR
-    if (candidate_group === 'sfr') {
-      const body = lower(t.template_body || '');
-      if (body.includes('duplex') || body.includes('triplex') || body.includes('fourplex')) return false;
-      if (body.includes('units') && !body.includes('units?')) return false; // "how many units?" is okay
+    if (allowed.length > 0 && !allowed.includes(candidate_group)) {
+      if (!canRenderOwnershipTemplateWithoutPropertyType(t, candidate, selector)) return false;
     }
-    
+    if (candidate_group === "sfr" && !isGenericOwnershipTemplateBody(t)) return false;
     return true;
   });
 
-  if (!property_matched_templates.length && templates.length > 0) {
-    return {
-      ok: false,
-      reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
-      reason: "property_template_mismatch",
-      template: null,
-      rendered_message_body: null,
-      missing_variables: [],
-      variable_payload_preview: buildTemplateVariablePayload(candidate),
-      selected_template_preview: null,
-    };
+  // Standard (non-relationship-probe) templates from the language-filtered set
+  const use_case_lower = lower(selector.use_case);
+  const all_standard_templates = language_filtered.templates.filter(
+    (t) => lower(t.use_case || "") === use_case_lower && !isRelationshipProbeTemplate(t)
+  );
+
+  // Prospect-routed templates (the specific subset returned by prospect flag routing)
+  const prospect_routed_templates = prospect_template_routing.templates;
+
+  // Build fallback levels — stop at the first non-empty set
+  let template_fallback_level = 0;
+  let fallback_routing_reason = template_routing_details.template_routing_reason;
+
+  // Level 1: exact prospect route + property group filter
+  const lvl1 = filterByPropertyGroup(prospect_routed_templates);
+  if (lvl1.length) {
+    templates = lvl1;
+    template_fallback_level = 1;
+  } else if (prospect_routed_templates.length) {
+    // Level 2: exact prospect route, relax property group filter
+    templates = prospect_routed_templates;
+    template_fallback_level = 2;
+    fallback_routing_reason = fallback_routing_reason + "_property_relaxed";
+  } else {
+    // Level 3: standard ownership + property group filter (drop prospect specificity)
+    const lvl3 = filterByPropertyGroup(all_standard_templates);
+    if (lvl3.length) {
+      templates = lvl3;
+      template_fallback_level = 3;
+      fallback_routing_reason = "standard_ownership_property_fallback";
+    } else if (all_standard_templates.length) {
+      // Level 4: standard ownership, relax property group filter
+      templates = all_standard_templates;
+      template_fallback_level = 4;
+      fallback_routing_reason = "standard_ownership_fallback";
+    } else {
+      // Level 5: universal English ownership fallback (language-agnostic)
+      const english_standard = all_fetched_templates.filter(
+        (t) => lower(t.use_case || "") === use_case_lower &&
+               !isRelationshipProbeTemplate(t) &&
+               lower(t.language || "") === "english"
+      );
+      const lvl5 = filterByPropertyGroup(english_standard);
+      templates = lvl5.length ? lvl5 : english_standard;
+      template_fallback_level = 5;
+      fallback_routing_reason = "universal_english_fallback";
+    }
   }
-  
-  templates = property_matched_templates;
+
+  template_routing_details.template_routing_reason = fallback_routing_reason;
+  template_routing_details.template_fallback_level = template_fallback_level;
 
   if (!templates.length) {
+    logTemplateRenderFailure(candidate, "no_template_after_fallback", {
+      selected_template_id: null,
+      missing_variables: [],
+      template_routing_reason: fallback_routing_reason,
+      candidate_group,
+      property_type,
+    });
+    logger.info("feeder.template_routing_no_template", {
+      master_owner_id: candidate.master_owner_id,
+      property_id: candidate.property_id,
+      prospect_matching_flags: template_routing_details.prospect_matching_flags,
+      selected_template_id: null,
+      template_routing_reason: fallback_routing_reason,
+      template_fallback_level,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.NO_TEMPLATE,
-      reason: "no_template_for_preferred_language",
+      reason: "no_template_after_fallback",
       template: null,
       rendered_message_body: null,
       missing_variables: [],
       variable_payload_preview: buildTemplateVariablePayload(candidate),
       selected_template_preview: null,
+      template_fallback_level,
       template_rotation: {
         enabled: false,
         preferred_language: language_filtered.preferred_language,
@@ -2587,7 +3181,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         selected_template_language: null,
         rotation_candidate_languages: [],
         rotation_language_mismatch_detected: false,
-        rotation_strategy: "no_template_for_preferred_language",
+        rotation_strategy: "no_template_after_fallback",
         rotation_best_score: null,
         rotation_min_score: null,
         eligible_template_count: 0,
@@ -2598,15 +3192,34 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         selected_index: -1,
         ...fetch_diagnostics,
       },
+      ...template_routing_details,
     };
   }
 
   const sorted_templates = [...templates].sort((left, right) => sortTemplateCandidates(left, right, selector));
   let selected_template = sorted_templates[0] || null;
   const rotation_enabled = shouldEnableTemplateRotation(selector);
-  const recent_template_ids = rotation_enabled
+  const recent_history = rotation_enabled
     ? await getRecentTemplateIds(candidate, selector, options, deps)
-    : [];
+    : { ok: true, template_ids: [], errors: [] };
+
+  if (rotation_enabled && recent_history.ok === false) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.OUTREACH_HISTORY_UNAVAILABLE,
+      reason: "outreach_history_unavailable",
+      history_errors: recent_history.errors || [],
+      template_fallback_level,
+      template_rotation: {
+        enabled: false,
+        history_query_failed: true,
+        history_errors: recent_history.errors || [],
+      },
+      ...template_routing_details,
+    };
+  }
+
+  const recent_template_ids = recent_history.template_ids || [];
 
   let eligible_rotation_candidates = sorted_templates;
   if (rotation_enabled && recent_template_ids.length) {
@@ -2643,6 +3256,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       };
 
   selected_template = rotation_choice.selected || selected_template;
+  template_routing_details.selected_template_id = getTemplateReferenceId(selected_template);
   const template_rotation = buildTemplateRotationDiagnostics({
     rotation_enabled,
     rotation_seed,
@@ -2654,6 +3268,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     preferred_language: language_filtered.preferred_language,
     fetch_diagnostics,
   });
+  logger.info("feeder.template_routing_selected", {
+    master_owner_id: candidate.master_owner_id,
+    property_id: candidate.property_id,
+    prospect_matching_flags: template_routing_details.prospect_matching_flags,
+    selected_template_id: template_routing_details.selected_template_id,
+    template_routing_reason: template_routing_details.template_routing_reason,
+  });
 
   const selected_template_with_source = selected_template
     ? { ...selected_template, source: "sms_templates" }
@@ -2662,6 +3283,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const rewritten_source_body = rewriteAddressPlaceholdersForColdS1(source_body, selector);
 
   if (!rewritten_source_body) {
+    logTemplateRenderFailure(candidate, "rendered_message_empty", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: [],
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2682,17 +3310,27 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
   const seller_identity = resolveSellerIdentity(candidate);
+  const resolved_seller_full_name = clean(
+    pick(
+      candidate.seller_full_name,
+      candidate.phone_full_name,
+      candidate.owner_display_name,
+      seller_identity.seller_full_name,
+      seller_identity.seller_display_name
+    )
+  );
   const variable_payload = buildTemplateVariablePayload(candidate);
   variable_payload.seller_first_name = seller_identity.seller_first_name || "";
   variable_payload.first_name = seller_identity.seller_first_name || "";
   variable_payload.owner_first_name = seller_identity.seller_first_name || "";
   variable_payload.seller_name = seller_identity.seller_display_name || "";
   variable_payload.seller_display_name = seller_identity.seller_display_name || "";
-  variable_payload.seller_full_name = seller_identity.seller_full_name || "";
+  variable_payload.seller_full_name = resolved_seller_full_name || "";
   variable_payload.seller_name_source = seller_identity.seller_name_source;
   variable_payload.seller_name_missing = seller_identity.seller_name_missing;
   const raw_agent_name = clean(
@@ -2740,6 +3378,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         template_id: selected_template?.template_id || selected_template?.id || null,
         rendered_preview: normalized_rendered.slice(0, 80),
       });
+    logTemplateRenderFailure(candidate, "blank_greeting_rendered", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
@@ -2762,6 +3407,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2777,6 +3423,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         template_id: selected_template?.template_id || selected_template?.id || null,
         missing_vars: missing_name_vars,
       });
+    logTemplateRenderFailure(candidate, "missing_required_name_variable", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
@@ -2787,9 +3440,17 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       missing_variables: rendered.missing_variables,
       variable_payload_preview: variable_payload,
       template_rotation,
+      ...template_routing_details,
     };
   }
   if (!normalized_rendered) {
+    logTemplateRenderFailure(candidate, "rendered_message_empty", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2810,10 +3471,18 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
   if (hasBlankLocationPattern(normalized_rendered)) {
+    logTemplateRenderFailure(candidate, "blank_location_placeholder", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2836,6 +3505,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2847,6 +3517,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       variable_payload.property_street_address
     )
   ) {
+    logTemplateRenderFailure(candidate, "full_address_rendered_in_cold_sms", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2870,6 +3547,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2881,6 +3559,13 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     has_full_agent_name &&
     rendered_lower.includes(lower(agent_name_raw))
   ) {
+    logTemplateRenderFailure(candidate, "agent_full_name_rendered", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+    });
     return {
       ok: false,
       reason_code: REASON_CODES.TEMPLATE_RENDER_FAILED,
@@ -2904,6 +3589,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
         stage_label: selected_template?.stage_label || null,
       },
       template_rotation,
+      ...template_routing_details,
     };
   }
 
@@ -2912,6 +3598,8 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     reason_code: "OK",
     template: selected_template_with_source,
     template_use_case: selector.use_case,
+    selected_template_use_case: selected_template?.use_case || selector.use_case,
+    selected_template_stage: selected_template?.stage_code || selector.stage_code,
     rendered_message_body: normalized_rendered,
     missing_variables: rendered.missing_variables,
     variable_payload_preview: variable_payload,
@@ -2925,14 +3613,176 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       stage_code: selected_template?.stage_code || null,
       stage_label: selected_template?.stage_label || null,
     },
+    template_fallback_level,
     template_rotation,
     stage_code: selected_template?.stage_code || selector.stage_code,
     stage_label: selected_template?.stage_label || selector.stage_label,
     language: selected_template?.language || selector.preferred_language,
+    ...template_routing_details,
   };
 }
 
+// ── Property Hydration: resolve property_id for v_sms_ready_contacts rows ────────
+// When a candidate row is missing property_id but has master_owner_id, attempt a
+// deterministic lookup against the properties table before marking as ineligible.
+
+function buildPropertyHydrationPayload(prop, source) {
+  const property_id = clean(
+    pick(prop.property_id, prop.property_export_id, String(prop.id ?? ""))
+  );
+  if (!property_id) return { ok: false, reason: "property_row_missing_id" };
+
+  return {
+    ok: true,
+    strategy: source,
+    hydration_source: source,
+    property_id,
+    property_address_full: clean(pick(prop.property_address_full, prop.address_full)),
+    property_address_city: clean(pick(prop.property_address_city, prop.address_city, prop.city)),
+    property_address_state: clean(pick(prop.property_address_state, prop.address_state, prop.state)),
+    property_address_zip: clean(pick(prop.property_address_zip, prop.address_zip, prop.zip)),
+    market: clean(pick(prop.market, prop.market_name, prop.seller_market)),
+    property_type: clean(prop.property_type),
+    property_class: clean(prop.property_class),
+    units_count: asNumber(prop.units_count, null),
+    options: clean(prop.options),
+    podio_tags: clean(prop.podio_tags),
+    estimated_value: asNumber(prop.estimated_value, null),
+    cash_offer: asNumber(prop.cash_offer, null),
+    final_acquisition_score: asNumber(prop.final_acquisition_score, null),
+  };
+}
+
+export async function hydratePropertyForCandidate(candidate = {}, deps = {}) {
+  const master_owner_id = clean(candidate.master_owner_id || candidate.normalized_master_owner_id);
+  const property_id = clean(candidate.property_id || candidate.normalized_property_id);
+  const property_export_id = clean(candidate.property_export_id);
+  const address = clean(candidate.property_address_full || candidate.property_address);
+
+  let supabase;
+  try { supabase = getSupabase(deps); } catch { return { ok: false, reason: "supabase_unavailable" }; }
+
+  // Strategy 0.1: exact property_id match
+  if (property_id) {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("id", property_id)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "property_id_match");
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 0.2: exact property_export_id match
+  if (property_export_id) {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("property_export_id", property_export_id)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "property_export_id_match");
+    } catch { /* fall through */ }
+  }
+
+  if (!master_owner_id && !address) {
+    return { ok: false, reason: "insufficient_identifiers" };
+  }
+
+  if (master_owner_id) {
+    // Strategy 1: properties WHERE master_owner_id = candidate.master_owner_id
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("master_owner_id", master_owner_id)
+        .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+        .order("structured_motivation_score", { ascending: false, nullsFirst: false })
+        .order("estimated_value", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "master_owner_id_match");
+    } catch { /* fall through */ }
+
+    // Strategy 2: joined_property_ids_json on master_owners row
+    try {
+      const { data: moData, error: moError } = await supabase
+        .from("master_owners")
+        .select("joined_property_ids_json")
+        .eq("id", master_owner_id)
+        .maybeSingle();
+
+      if (!moError && moData?.joined_property_ids_json) {
+        const ids = Array.isArray(moData.joined_property_ids_json)
+          ? moData.joined_property_ids_json.map(String).filter(Boolean)
+          : [];
+        if (ids.length > 0) {
+          const { data: propData, error: propError } = await supabase
+            .from("properties")
+            .select("*")
+            .in("id", ids.slice(0, 20))
+            .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+            .order("estimated_value", { ascending: false, nullsFirst: false })
+            .order("updated_at", { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+          if (!propError && propData) return buildPropertyHydrationPayload(propData, "joined_property_ids_json");
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 3: property_address match
+  if (address) {
+    try {
+      const normalizedAddress = address.replace(/\s+/g, " ").trim().toLowerCase();
+      // Match on title
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .ilike("title", `${normalizedAddress}%`)
+        .order("updated_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return buildPropertyHydrationPayload(data, "address_match");
+    } catch { /* fall through */ }
+  }
+
+  return { ok: false, reason: "no_property_found" };
+}
+// ─────────────────────────────────────────────────────────────────────────────────
+
 export async function createSendQueueItem(candidate = {}, options = {}, deps = {}) {
+  const campaign_session_id = clean(pick(options.campaign_session_id, candidate.campaign_session_id)) || null;
+  const campaign_mode = clean(options.campaign_mode) || null;
+  const approval_mode = clean(options.approval_mode) || null;
+  const no_send_specified =
+    hasOwn(options, "no_send") ||
+    hasOwn(options, "noSend") ||
+    hasOwn(options, "proof_no_send");
+  const no_send = no_send_specified
+    ? asBoolean(pick(options.no_send, options.noSend, options.proof_no_send), false)
+    : false;
+  const proof_mode = asBoolean(pick(options.proof_mode, options.proofMode, options.proof), false);
+  const exclude_from_kpis = asBoolean(options.exclude_from_kpis, no_send || proof_mode);
+  const cap_basis_snapshot = Array.isArray(options.cap_basis_snapshot)
+    ? options.cap_basis_snapshot
+    : Array.isArray(options.cap_basis)
+      ? options.cap_basis
+      : null;
+  const effective_total_cap = numberOrNull(options.effective_total_cap);
+  const remaining_cap_before_create = numberOrNull(options.remaining_cap_before_create);
+  const selected_sender_diagnostics = {
+    selected_textgrid_number_id: options.selected_textgrid_number_id || null,
+    selected_textgrid_number: options.selected_textgrid_number || null,
+    selected_textgrid_market: options.selected_textgrid_market || null,
+    routing_tier: asNumber(options.routing_tier, null),
+    selection_reason: options.selection_reason || null,
+    routing_allowed: options.routing_allowed !== false,
+    routing_block_reason: options.routing_block_reason || null,
+  };
   const effective_phone_id = candidate.best_phone_id || candidate.phone_id;
   const idempotency_key = buildIdempotencyKey({
     master_owner_id: candidate.master_owner_id,
@@ -2940,7 +3790,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     phone_id: effective_phone_id,
     template_use_case: options.template_use_case,
     touch_number: candidate.touch_number,
-    campaign_session_id: candidate.campaign_session_id,
+    campaign_session_id,
   });
 
   const dedupe_key = buildSendQueueDedupeKey({
@@ -2949,7 +3799,7 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     to_phone_number: candidate.canonical_e164,
     template_use_case: options.template_use_case,
     touch_number: candidate.touch_number,
-    campaign_session_id: candidate.campaign_session_id,
+    campaign_session_id,
   });
 
   const queue_key = buildQueueKeyFromIdempotencyKey(idempotency_key);
@@ -2984,6 +3834,48 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       agent_name_raw
     )
   );
+  const safety_diagnostics = {
+    status: "passed",
+    evaluated_at: options.now || new Date().toISOString(),
+    campaign_session_id,
+    campaign_mode,
+    approval_mode,
+    no_send,
+    cap_basis: cap_basis_snapshot,
+    effective_total_cap,
+    dedupe_key,
+    queue_key,
+    checks: {
+      internal_test_phone_blocked: true,
+      suppression_checked: true,
+      dnc_opt_out_checked: true,
+      duplicate_checked: true,
+      active_queue_checked: true,
+      same_phone_active_queue_checked: true,
+      identity_checked: true,
+      routing_checked: true,
+      template_checked: true,
+    },
+    routing: {
+      allowed: options.routing_allowed !== false,
+      tier: asNumber(options.routing_tier, null),
+      block_reason: options.routing_block_reason || null,
+      selected_textgrid_number_id: options.selected_textgrid_number_id || null,
+      selected_textgrid_number: options.selected_textgrid_number || null,
+      selected_textgrid_market: options.selected_textgrid_market || null,
+    },
+    template: {
+      id: options.template_id || null,
+      source: options.template_source || "supabase",
+      use_case: options.template_use_case || null,
+      language: options.selected_template_language || options.template_language || null,
+    },
+    identity: {
+      status: candidate.identity_alignment?.status || null,
+      hard_block: Boolean(candidate.identity_alignment?.hardBlock),
+      seller_name_missing: Boolean(candidate.seller_name_missing || seller_identity.seller_name_missing),
+    },
+  };
 
   const payload = {
     queue_key,
@@ -3021,13 +3913,31 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     template_key: clean(pick(options.template_id, options.selected_template_id)) || null,
     language: clean(pick(candidate.language, candidate.best_language)) || null,
     routing_tier: asNumber(options.routing_tier, null),
+    sms_eligible: no_send ? false : true,
+    routing_allowed: no_send ? false : options.routing_allowed !== false,
+    safety_status: no_send ? "blocked" : "passed",
     metadata: {
       idempotency_key,
-      campaign_session_id: candidate.campaign_session_id,
+      campaign_session_id,
+      campaign_mode,
+      approval_mode,
+      ...(no_send_specified ? { no_send } : {}),
+      ...(proof_mode ? { proof: true, proof_mode: true } : {}),
+      ...(exclude_from_kpis ? { exclude_from_kpis: true } : {}),
+      cap_basis: cap_basis_snapshot,
+      cap_basis_snapshot,
+      effective_total_cap,
+      remaining_cap_before_create,
+      queue_limited_request_context:
+        options.queue_limited_request_context && typeof options.queue_limited_request_context === "object" && !Array.isArray(options.queue_limited_request_context)
+          ? options.queue_limited_request_context
+          : null,
+      safety_diagnostics,
       template_use_case: options.template_use_case,
       selected_textgrid_number_id: options.selected_textgrid_number_id,
       selected_textgrid_number: options.selected_textgrid_number,
       selected_textgrid_market: options.selected_textgrid_market,
+      selected_sender_diagnostics,
       seller_market: candidate.market,
       seller_state: candidate.state,
       routing_tier: options.routing_tier,
@@ -3041,6 +3951,12 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       agent_full_name_raw: agent_name_raw || null,
       selected_agent_display_name: agent_name_raw || null,
       seller_identity,
+      phone_rotation_reason: candidate.phone_rank > 1 ? "wrong_number" : null,
+      phone_rank: Number(candidate.phone_rank) || 1,
+      candidate_confidence_score: candidate.candidate_confidence_score || null,
+      prior_phone_id: options.prior_phone_id || null,
+      rotated_from_thread_key: options.rotated_from_thread_key || null,
+      duplicate_body_cooldown_applied: options.rotation_duplicate_cooldown_applied === true,
       candidate_snapshot: {
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
@@ -3049,6 +3965,10 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
         canonical_phone_masked: maskPhone(candidate.canonical_e164),
         seller_market: candidate.market,
         seller_state: candidate.state,
+        campaign_session_id,
+        campaign_mode,
+        approval_mode,
+        ...(no_send_specified ? { no_send } : {}),
         touch_number: candidate.touch_number,
         template_use_case: options.template_use_case || null,
         template_key: clean(options.template_id) || null,
@@ -3165,11 +4085,16 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     ok: true,
     dry_run: false,
     queued: true,
+    idempotent_replay: Boolean(inserted?.idempotent_replay),
     queue_key,
     queue_id: inserted?.queue_id || queue_key,
     queue_row_id: inserted?.queue_row_id || null,
     idempotency_key,
-    inserted,
+    inserted: {
+      ...inserted,
+      queue_status: inserted?.raw?.queue_status || inserted?.queue_status || payload.queue_status,
+      scheduled_for: inserted?.raw?.scheduled_for || inserted?.scheduled_for || payload.scheduled_for,
+    },
   };
 }
 
@@ -3187,17 +4112,26 @@ export function buildFeederDiagnostics(summary = {}) {
     scanned_count: Number(summary.scanned_count || 0),
     eligible_count: Number(summary.eligible_count || 0),
     queued_count: Number(summary.queued_count || 0),
+    scheduled_count: Number(summary.scheduled_count || 0),
+    idempotent_replay_count: Number(summary.idempotent_replay_count || 0),
+    total_created_count: totalCreatedCount(summary),
     skipped_count: Number(summary.skipped_count || 0),
     routing_block_count: Number(summary.routing_block_count || 0),
     suppression_block_count: Number(summary.suppression_block_count || 0),
     contact_window_block_count: Number(summary.contact_window_block_count || 0),
     pending_prior_touch_block_count: Number(summary.pending_prior_touch_block_count || 0),
     duplicate_queue_block_count: Number(summary.duplicate_queue_block_count || 0),
+    active_queue_block_count: Number(summary.active_queue_block_count || 0),
+    prior_touch_cooldown_block_count: Number(summary.prior_touch_cooldown_block_count || 0),
     batch_duplicate_block_count: Number(summary.batch_duplicate_block_count || 0),
     template_block_count: Number(summary.template_block_count || 0),
     no_template_count: Number(summary.no_template_count || 0),
     template_render_failed_count: Number(summary.template_render_failed_count || 0),
     hydration_failure_count: Number(summary.hydration_failure_count || 0),
+    property_hydration_attempt_count: Number(summary.property_hydration_attempt_count || 0),
+    property_hydration_success_count: Number(summary.property_hydration_success_count || 0),
+    property_hydration_failed_count: Number(summary.property_hydration_failed_count || 0),
+    missing_property_id_after_hydration_count: Number(summary.missing_property_id_after_hydration_count || 0),
     identity_mismatch_count: Number(summary.identity_mismatch_count || 0),
     identity_verified_count: Number(summary.identity_verified_count || 0),
     identity_probable_count: Number(summary.identity_probable_count || 0),
@@ -3222,6 +4156,10 @@ export function buildFeederDiagnostics(summary = {}) {
     schedule_interval_seconds: Number(summary.schedule_interval_seconds || 0),
     schedule_window_full_count: Number(summary.schedule_window_full_count || 0),
     schedule_overflow_blocked_count: Number(summary.schedule_overflow_blocked_count || 0),
+    invalid_scheduled_for_count: Number(summary.invalid_scheduled_for_count || 0),
+    invalid_scheduled_for_examples: Array.isArray(summary.invalid_scheduled_for_examples)
+      ? summary.invalid_scheduled_for_examples.slice(0, 3)
+      : [],
     first_scheduled_for: summary.first_scheduled_for || null,
     last_scheduled_for: summary.last_scheduled_for || null,
     error: clean(summary.error) || null,
@@ -3235,25 +4173,124 @@ export function buildFeederDiagnostics(summary = {}) {
     sample_skips: Array.isArray(summary.sample_skips) ? summary.sample_skips.slice(0, 50) : [],
   };
 
+  diagnostics.eligible = diagnostics.eligible_count;
+  diagnostics.skipped = diagnostics.skipped_count;
+  diagnostics.routing_blocked_count = diagnostics.routing_block_count;
+  diagnostics.suppressed_count = diagnostics.suppression_block_count;
+  diagnostics.template_blocked_count = diagnostics.template_block_count;
+  diagnostics.duplicate_blocked_count =
+    diagnostics.duplicate_queue_block_count + diagnostics.batch_duplicate_block_count;
+  diagnostics.active_queue_blocked_count = diagnostics.active_queue_block_count;
+  diagnostics.identity_held_count =
+    diagnostics.identity_hold_count +
+    diagnostics.identity_weak_held_count +
+    diagnostics.identity_unknown_held_count +
+    diagnostics.identity_household_held_count;
+  diagnostics.sample_candidates = diagnostics.sample_created_queue_items.map((item) => {
+    const payload = item?.payload || {};
+    const metadata = payload.metadata || {};
+    return {
+      queue_key: item?.queue_key || payload.queue_key || null,
+      master_owner_id: item?.master_owner_id || payload.master_owner_id || metadata.candidate_snapshot?.master_owner_id || null,
+      property_id: item?.property_id || payload.property_id || metadata.candidate_snapshot?.property_id || null,
+      market: item?.market || item?.seller_market || payload.market || metadata.seller_market || null,
+      state: item?.seller_state || payload.property_address_state || metadata.seller_state || null,
+      template_id: item?.selected_template_id || item?.template_id || payload.template_id || metadata.selected_template_id || null,
+      selected_textgrid_market: item?.selected_textgrid_market || metadata.selected_textgrid_market || null,
+      scheduled_for: item?.scheduled_for || payload.scheduled_for || payload.scheduled_for_utc || null,
+      safety_status: payload.safety_status || (item?.dry_run ? "preview" : null),
+    };
+  });
+  const selectedTemplates = new Map();
+  for (const item of diagnostics.sample_created_queue_items) {
+    const payload = item?.payload || {};
+    const metadata = payload.metadata || {};
+    const template_id = clean(item?.selected_template_id || item?.template_id || payload.template_id || metadata.selected_template_id || metadata.template?.id);
+    if (!template_id || selectedTemplates.has(template_id)) continue;
+    selectedTemplates.set(template_id, {
+      template_id,
+      source: clean(metadata.selected_template_source || metadata.template?.source || "supabase") || "supabase",
+      use_case: clean(item?.template_use_case || metadata.selected_template_use_case || metadata.template?.use_case || payload.use_case_template) || null,
+      language: clean(item?.selected_template_language || item?.language || metadata.selected_template_language) || null,
+    });
+  }
+  diagnostics.selected_templates = Array.from(selectedTemplates.values());
+
   return diagnostics;
+}
+
+function getSkipDiagnostics(candidate, options) {
+  const alignment = candidate.identity_alignment || {};
+  return {
+    normalized_master_owner_id: candidate.master_owner_id,
+    normalized_property_id: candidate.property_id,
+    normalized_phone_id: candidate.phone_id || candidate.best_phone_id,
+    normalized_phone_e164: candidate.canonical_e164,
+    hydration_lookup_strategy: candidate.hydration_lookup_strategy || null,
+    hydration_error: candidate.hydration_error || null,
+    // Entity / linkage diagnostics
+    owner_is_entity: alignment.ownerIsEntity ?? null,
+    raw_matching_flags: candidate.matching_flags || null,
+    normalized_linkage: alignment.normalizedLinkage ?? null,
+    linkage_source: candidate.matching_flags ? "prospects.matching_flags" : null,
+    identity_resolution: alignment.status || null,
+    identity_reason: alignment.reasons || null,
+    identity_inputs_used: {
+      prospect_full_name: candidate.prospect_full_name || null,
+      phone_full_name: candidate.phone_full_name || null,
+      owner_display_name: candidate.owner_display_name || null,
+      matching_flags: candidate.matching_flags || null,
+      person_flags_text: candidate.person_flags_text || null,
+      likely_owner: candidate.likely_owner ?? null,
+    },
+    property_type_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
+    canonical_property_group_source: candidate.hydration_lookup_strategy ? "hydration" : "view",
+    ...(options.dry_run ? { candidate_preview: buildCandidateNormalizedPreview(candidate.raw, candidate) } : {})
+  };
 }
 
 export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+
+  const get_system_flag =
+    deps.getSystemFlag ||
+    (typeof getSystemFlag === "function" ? getSystemFlag : async () => true);
 
   // ── System control gate ────────────────────────────────────────────────
   if (!input.dry_run) {
-    const feeder_enabled = await getSystemFlag("feeder_enabled");
+    const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+      {
+        campaign_mode: await get_system_value("campaign_mode"),
+        queue_auto_enqueue_enabled: await get_system_value("queue_auto_enqueue_enabled"),
+        queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+      },
+      {
+        action: "runSupabaseCandidateFeeder",
+        requireAutoEnqueue: false,
+        failClosed: false,
+      }
+    );
+    if (!runtime_brake.ok) {
+      return {
+        status: 423,
+        ...blockedRuntimeBrakeResult(runtime_brake, "runSupabaseCandidateFeeder"),
+        queued_count: 0,
+      };
+    }
+
+    const feeder_enabled = await get_system_flag("feeder_enabled");
     if (!feeder_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("feeder_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }
-    const outbound_sms_enabled = await getSystemFlag("outbound_sms_enabled");
+    const outbound_sms_enabled = await get_system_flag("outbound_sms_enabled");
     if (!outbound_sms_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("outbound_sms_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }
   }
 
-  const limit = Math.max(1, Math.min(asPositiveInteger(input.limit, 25), 500));
+  const limit = Math.max(1, Math.min(asPositiveInteger(input.max_created_count ?? input.limit, 25), 500));
   const scan_limit = Math.max(limit, Math.min(asPositiveInteger(input.scan_limit ?? input.candidate_fetch_limit, 500), 5000));
   const candidate_offset = Math.max(0, Math.trunc(Number(input.candidate_offset ?? input.scan_offset ?? input.offset) || 0));
 
@@ -3264,6 +4301,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   );
 
   const identity_blocked_markets = input.identity_blocked_markets ?? (await getSystemFlag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
+  const identity_gate_mode = clean(input.identity_gate_mode || "strict").toLowerCase();
+  const allow_identity_unknown = asBoolean(input.allow_identity_unknown, false);
   // ─────────────────────────────────────────────────────────────────────────
 
   const options = {
@@ -3275,11 +4314,35 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     market: clean(input.market) || null,
     state: clean(input.state) || null,
     routing_safe_only: asBoolean(input.routing_safe_only, true),
+    require_local_routing: asBoolean(
+      input.require_local_routing ?? await get_system_value("require_local_routing"),
+      false
+    ),
+    allow_regional_fallback_for_first_touch: asBoolean(
+      input.allow_regional_fallback_for_first_touch ??
+        await get_system_value("allow_regional_fallback_for_first_touch"),
+      false
+    ),
     allow_phone_fallback: asBoolean(input.allow_phone_fallback, false),
     within_contact_window_now: asBoolean(input.within_contact_window_now, true),
     template_use_case: clean(input.template_use_case) || "ownership_check",
     touch_number: asPositiveInteger(input.touch_number, 1),
     campaign_session_id: clean(input.campaign_session_id) || `session-${now.slice(0, 10)}`,
+    campaign_mode: clean(input.campaign_mode) || null,
+    approval_mode: clean(input.approval_mode || input.approvalMode || input.approval) || null,
+    ...(hasOwn(input, "no_send") ? { no_send: asBoolean(input.no_send, false) } : {}),
+    ...(hasOwn(input, "noSend") ? { noSend: asBoolean(input.noSend, false) } : {}),
+    ...(hasOwn(input, "proof_no_send") ? { proof_no_send: asBoolean(input.proof_no_send, false) } : {}),
+    proof_mode: asBoolean(input.proof_mode ?? input.proofMode ?? input.proof, false),
+    exclude_from_kpis: asBoolean(input.exclude_from_kpis ?? input.excludeFromKpis, false),
+    cap_basis: Array.isArray(input.cap_basis) ? input.cap_basis : null,
+    cap_basis_snapshot: Array.isArray(input.cap_basis_snapshot) ? input.cap_basis_snapshot : null,
+    effective_total_cap: Number.isFinite(Number(input.effective_total_cap)) ? Number(input.effective_total_cap) : null,
+    remaining_cap_before_create: Number.isFinite(Number(input.remaining_cap_before_create)) ? Number(input.remaining_cap_before_create) : null,
+    queue_limited_request_context:
+      input.queue_limited_request_context && typeof input.queue_limited_request_context === "object" && !Array.isArray(input.queue_limited_request_context)
+        ? input.queue_limited_request_context
+        : null,
     batch_name: clean(input.batch_name) || null,
     debug_templates: asBoolean(input.debug_templates, false),
     schedule_spread: asBoolean(input.schedule_spread, false),
@@ -3288,8 +4351,15 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     schedule_interval_seconds_min: asPositiveInteger(input.schedule_interval_seconds_min, 45),
     schedule_interval_seconds_max: asPositiveInteger(input.schedule_interval_seconds_max, 180),
     timezone_filter: clean(input.timezone_filter) || null,
+    identity_gate_mode,
+    allow_identity_unknown,
     allow_weak_identity_outbound,
     identity_blocked_markets,
+    cold_outbound_cooldown_days: asPositiveInteger(input.cold_outbound_cooldown_days, 30),
+    duplicate_body_cooldown_hours: asPositiveInteger(input.duplicate_body_cooldown_hours, 24),
+    cold_outbound_touch_cap: asPositiveInteger(input.cold_outbound_touch_cap, 5),
+    phone_cooldown_days: asPositiveInteger(input.phone_cooldown_days, 14),
+    allow_internal_test_phones: asBoolean(input.allow_internal_test_phones, false),
     now,
   };
 
@@ -3308,12 +4378,16 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       scanned_count: 0,
       eligible_count: 0,
       queued_count: 0,
+      scheduled_count: 0,
+      idempotent_replay_count: 0,
       skipped_count: 0,
       routing_block_count: 0,
       suppression_block_count: 0,
       contact_window_block_count: 0,
       pending_prior_touch_block_count: 0,
       duplicate_queue_block_count: 0,
+      active_queue_block_count: 0,
+      prior_touch_cooldown_block_count: 0,
       batch_duplicate_block_count: 0,
       template_block_count: 0,
       no_template_count: 0,
@@ -3324,6 +4398,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       schedule_interval_seconds: options.schedule_interval_seconds_min || 0,
       schedule_window_full_count: 0,
       schedule_overflow_blocked_count: 0,
+      invalid_scheduled_for_count: 0,
+      invalid_scheduled_for_examples: [],
       first_scheduled_for: null,
       last_scheduled_for: null,
       selected_textgrid_market_counts: {},
@@ -3360,17 +4436,25 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     scanned_count: source.scanned_count,
     eligible_count: 0,
     queued_count: 0,
+    scheduled_count: 0,
+    idempotent_replay_count: 0,
     skipped_count: 0,
     routing_block_count: 0,
     suppression_block_count: 0,
     contact_window_block_count: 0,
     pending_prior_touch_block_count: 0,
     duplicate_queue_block_count: 0,
+    active_queue_block_count: 0,
+    prior_touch_cooldown_block_count: 0,
     batch_duplicate_block_count: 0,
     template_block_count: 0,
     no_template_count: 0,
     template_render_failed_count: 0,
     hydration_failure_count: 0,
+    property_hydration_attempt_count: 0,
+    property_hydration_success_count: 0,
+    property_hydration_failed_count: 0,
+    missing_property_id_after_hydration_count: 0,
     identity_mismatch_count: 0,
     identity_verified_count: 0,
     identity_probable_count: 0,
@@ -3395,6 +4479,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     schedule_interval_seconds: options.schedule_interval_seconds_min || 0,
     schedule_window_full_count: 0,
     schedule_overflow_blocked_count: 0,
+    invalid_scheduled_for_count: 0,
+    invalid_scheduled_for_examples: [],
     first_scheduled_for: null,
     last_scheduled_for: null,
     selected_textgrid_market_counts: {},
@@ -3408,6 +4494,8 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const seenOwnerPhoneTouch = new Set();
   const seenOwners = new Set();
   const allow_multiple_per_owner = asBoolean(input.allow_multiple_per_owner, false);
+  const only_first_touch = asBoolean(input.only_first_touch, false);
+
   for (const candidate of source.rows) {
     // Operational telemetry for freshness
     if (candidate.never_contacted === true) {
@@ -3416,21 +4504,43 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       summary.exhausted_candidate_count += 1;
     }
 
-    if (summary.queued_count >= options.limit) {
+    if (totalCreatedCount(summary) >= options.limit) {
       summary.skipped_count += 1;
       continue;
     }
+
+    // ── First Touch Enforcer ────────────────────────────────────────────────
+    if (only_first_touch && candidate.never_contacted !== true && candidate.last_touch_number > 0) {
+       const first_touch_cooldown_days = asPositiveInteger(options.first_touch_cooldown_days, 30);
+       const cooldown_ms = first_touch_cooldown_days * 24 * 60 * 60 * 1000;
+       const last_contact_timestamp = candidate.latest_message_at || candidate.latest_contact_at;
+       
+       if (last_contact_timestamp && (Date.now() - new Date(last_contact_timestamp).getTime() < cooldown_ms)) {
+         summary.skipped_count += 1;
+         summary.prior_touch_cooldown_block_count += 1;
+         summary.sample_skips.push({
+           reason_code: REASON_CODES.PRIOR_TOUCH_COOLDOWN,
+           reason: "first_touch_cooldown",
+           master_owner_id: candidate.master_owner_id,
+           property_id: candidate.property_id,
+           ...getSkipDiagnostics(candidate, options)
+         });
+         continue;
+       }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const phoneKey = clean(candidate.canonical_e164 || candidate.phone_number || candidate.best_phone_id || "");
     const ownerKey = clean(candidate.master_owner_id);
     const ownerPhoneTouchKey = `${ownerKey}:${phoneKey}:${options.touch_number}`;
 
-    if (summary.queued_count >= options.limit) {
+    if (totalCreatedCount(summary) >= options.limit) {
       summary.skipped_count += 1;
       summary.sample_skips.push({
         reason_code: REASON_CODES.CAMPAIGN_LIMIT_REACHED,
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        ...getSkipDiagnostics(candidate, options)
       });
       continue;
     }
@@ -3439,9 +4549,38 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     candidate.template_use_case = options.template_use_case;
     candidate.campaign_session_id = options.campaign_session_id;
 
-    const _preview = options.dry_run
-      ? { candidate_preview: buildCandidateNormalizedPreview(candidate.raw, candidate) }
-      : {};
+    // Property hydration: resolve property_id for candidates from views that omit it (e.g. v_sms_ready_contacts)
+    if (!candidate.property_id && candidate.master_owner_id) {
+      summary.property_hydration_attempt_count += 1;
+      const hydration = await hydratePropertyForCandidate(candidate, deps);
+      if (hydration.ok) {
+        summary.property_hydration_success_count += 1;
+        candidate._property_hydrated = true;
+        candidate.hydration_lookup_strategy = hydration.hydration_source;
+        candidate.property_id = hydration.property_id;
+        if (hydration.property_address_full) candidate.property_address_full = hydration.property_address_full;
+        if (hydration.property_address_full) candidate.property_address = hydration.property_address_full;
+        if (hydration.property_address_city) candidate.property_address_city = hydration.property_address_city;
+        if (hydration.property_address_state) candidate.property_address_state = hydration.property_address_state;
+        if (hydration.property_address_zip) candidate.property_address_zip = hydration.property_address_zip;
+        if (hydration.market) { candidate.market = hydration.market; candidate.routing_market = hydration.market; candidate.seller_market = hydration.market; }
+        if (hydration.property_type) candidate.property_type = hydration.property_type;
+        if (hydration.estimated_value != null) candidate.estimated_value = hydration.estimated_value;
+        if (hydration.cash_offer != null) candidate.cash_offer = hydration.cash_offer;
+        if (hydration.final_acquisition_score != null) candidate.final_acquisition_score = hydration.final_acquisition_score;
+        
+        const newGroup = getCanonicalPropertyGroup(hydration.property_type);
+        if (!candidate.canonical_property_group || candidate.canonical_property_group === "other_commercial") {
+           candidate.canonical_property_group = newGroup;
+        }
+      } else {
+        summary.property_hydration_failed_count += 1;
+        candidate._property_hydrated = false;
+        candidate.hydration_error = hydration.reason;
+      }
+    }
+
+    const _preview = getSkipDiagnostics(candidate, options);
 
     const eligibility = await evaluateCandidateEligibility(candidate, options, deps);
 
@@ -3478,6 +4617,9 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       summary.skipped_count += 1;
       const counter = mapReasonToDiagnosticCounter(eligibility.reason_code);
       if (counter) summary[counter] += 1;
+      if (eligibility.reason_code === REASON_CODES.NO_PROPERTY && candidate._property_hydrated === false) {
+        summary.missing_property_id_after_hydration_count += 1;
+      }
       summary.sample_skips.push({
         reason_code: eligibility.reason_code,
         reason: eligibility.reason,
@@ -3564,6 +4706,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         reason: rendered.reason,
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        prospect_matching_flags: rendered.prospect_matching_flags || [],
+        selected_template_id:
+          rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
+        template_routing_reason: rendered.template_routing_reason || null,
         ...(options.dry_run && options.debug_templates
           ? {
               template_lookup_use_case: candidate.template_lookup_use_case || candidate.template_use_case || null,
@@ -3611,6 +4757,54 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       continue;
     }
 
+    const selected_template_id =
+      rendered.selected_template_id ||
+      rendered.template_rotation?.selected_template_id ||
+      rendered.template?.template_id ||
+      rendered.template?.id ||
+      null;
+    const health_guard = evaluateSmsHealthGuard({
+      from_phone_number: routing.selected_textgrid_number || routing.selected?.phone_number,
+      template_id: selected_template_id,
+      routing_tier: routing.routing_tier,
+      first_touch: candidate.is_first_touch,
+      require_local_routing: options.require_local_routing,
+      allow_regional_fallback_for_first_touch: options.allow_regional_fallback_for_first_touch,
+      metadata: {
+        routing_tier: routing.routing_tier,
+        touch_number: candidate.touch_number,
+        selected_template_id,
+      },
+      system_control: {
+        require_local_routing: options.require_local_routing,
+        allow_regional_fallback_for_first_touch: options.allow_regional_fallback_for_first_touch,
+      },
+      now,
+    });
+
+    if (!health_guard.allowed) {
+      summary.skipped_count += 1;
+      summary.routing_block_count += 1;
+      summary.sample_skips.push({
+        reason_code: REASON_CODES.ROUTING_BLOCKED,
+        reason: health_guard.reason,
+        block_class: health_guard.block_class,
+        master_owner_id: candidate.master_owner_id,
+        property_id: candidate.property_id,
+        routing_allowed: false,
+        routing_tier: routing.routing_tier,
+        selected_textgrid_market: routing.selected_textgrid_market,
+        selected_textgrid_number: routing.selected_textgrid_number,
+        selected_template_id,
+        seller_market: routing.seller_market || candidate.market,
+        seller_state: routing.seller_state || candidate.state,
+        routing_block_reason: health_guard.reason,
+        diagnostics: health_guard.diagnostics,
+        ..._preview,
+      });
+      continue;
+    }
+
     let scheduled_for;
     if (spread_scheduler) {
       const spread_result = spread_scheduler.nextScheduledFor(candidate);
@@ -3623,6 +4817,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
           reason: spread_result.reason_code,
           master_owner_id: candidate.master_owner_id,
           property_id: candidate.property_id,
+          ..._preview
         });
         continue;
       }
@@ -3666,6 +4861,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         property_address: candidate.property_address,
         market: candidate.market,
         never_contacted: candidate.never_contacted,
+        ..._preview
       });
       continue;
     }
@@ -3675,6 +4871,23 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     if (ownerPhoneTouchKey) seenOwnerPhoneTouch.add(ownerPhoneTouchKey);
     if (ownerKey) seenOwners.add(ownerKey);
 
+    let prior_phone_id = null;
+    let rotated_from_thread_key = null;
+    if (candidate.phone_rank > 1) {
+      const priorPhonesQuery = await defaultSupabase
+        .from("phones")
+        .select("phone_id, wrong_number_source_thread_key")
+        .eq("master_owner_id", candidate.master_owner_id)
+        .eq("phone_contact_status", "wrong_number")
+        .order("wrong_number_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (priorPhonesQuery.data) {
+        prior_phone_id = priorPhonesQuery.data.phone_id;
+        rotated_from_thread_key = priorPhonesQuery.data.wrong_number_source_thread_key;
+      }
+    }
+
     const queue_result = await createSendQueueItem(
       candidate,
       {
@@ -3683,6 +4896,9 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         rendered_message_body: rendered.rendered_message_body,
         template_id: rendered.template?.template_id || rendered.template?.item_id || null,
         template_source: rendered.template?.source || "supabase",
+        prior_phone_id,
+        rotated_from_thread_key,
+        rotation_duplicate_cooldown_applied: eligibility.duplicate_body_cooldown_applied === true,
         template_use_case: rendered.template_use_case,
         template_name: rendered.template?.template_name || null,
         template_stage_code: rendered.stage_code || rendered.template?.stage_code || null,
@@ -3732,12 +4948,45 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
         reason: queue_result.reason || "queue_create_failed",
         master_owner_id: candidate.master_owner_id,
         property_id: candidate.property_id,
+        prospect_matching_flags: rendered.prospect_matching_flags || [],
+        selected_template_id:
+          rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
+        template_routing_reason: rendered.template_routing_reason || null,
         ..._preview,
       });
       continue;
     }
 
-    summary.queued_count += 1;
+    if (queue_result.idempotent_replay) {
+      summary.idempotent_replay_count = Number(summary.idempotent_replay_count || 0) + 1;
+      continue;
+    }
+
+    const scheduling = classifyInsertedQueueScheduling(queue_result, scheduled_for);
+    if (scheduling.persistedScheduledFor && scheduling.scheduledAtMs === null) {
+      summary.invalid_scheduled_for_count += 1;
+      logger.warn("feeder.invalid_scheduled_for_after_insert", {
+        queue_row_id: queue_result.queue_row_id || queue_result.inserted?.queue_row_id || null,
+        campaign_target_id: candidate.campaign_target_id || candidate.raw?.campaign_target_id || null,
+        scheduled_for: String(scheduling.persistedScheduledFor),
+        queue_status: scheduling.persistedStatus || null,
+        route: "runSupabaseCandidateFeeder",
+      });
+      if (summary.invalid_scheduled_for_examples.length < 3) {
+        summary.invalid_scheduled_for_examples.push({
+          scheduled_for: String(scheduling.persistedScheduledFor),
+          queue_key: queue_result.queue_key || null,
+          queue_row_id: queue_result.queue_row_id || null,
+          master_owner_id: candidate.master_owner_id || null,
+          property_id: candidate.property_id || null,
+        });
+      }
+    }
+    if (scheduling.isScheduled) {
+      summary.scheduled_count = (summary.scheduled_count || 0) + 1;
+    } else {
+      summary.queued_count += 1;
+    }
     if (!summary.first_scheduled_for) summary.first_scheduled_for = scheduled_for;
     summary.last_scheduled_for = scheduled_for;
     summary.selected_textgrid_market_counts[routing.selected.market || "unknown"] =
@@ -3767,6 +5016,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       selected_textgrid_market: routing.selected.market,
       seller_market: candidate.market,
       seller_state: candidate.state,
+      identity_resolution: candidate.identity_alignment?.status || null,
+      identity_alignment_status: candidate.identity_alignment?.status || null,
+      identity_status: candidate.identity_alignment?.status || null,
+      candidate_preview: options.dry_run ? buildCandidateNormalizedPreview(candidate.raw, candidate) : undefined,
       routing_tier: routing.routing_tier,
       selection_reason: routing.selection_reason,
       routing_rule_name: routing.routing_rule_name,
@@ -3774,7 +5027,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       routing_block_reason: null,
       template_use_case: rendered.template_use_case,
       template_id: rendered.template?.template_id || rendered.template?.id || null,
+      selected_template_id:
+        rendered.selected_template_id || rendered.template_rotation?.selected_template_id || rendered.template?.template_id || rendered.template?.id || null,
       template_name: rendered.template?.template_name || null,
+      prospect_matching_flags: rendered.prospect_matching_flags || [],
+      template_routing_reason: rendered.template_routing_reason || null,
       stage_code: rendered.stage_code || rendered.template?.stage_code || null,
       language: rendered.language || rendered.template?.language || null,
       template_rotation_enabled: Boolean(rendered.template_rotation?.enabled),

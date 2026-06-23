@@ -66,11 +66,11 @@ const defaultReplayDeps = {
 
 let replayDeps = { ...defaultReplayDeps };
 
-function __setReplayInboundTestDeps(overrides = {}) {
+export function __setReplayInboundTestDeps(overrides = {}) {
   replayDeps = { ...replayDeps, ...overrides };
 }
 
-function __resetReplayInboundTestDeps() {
+export function __resetReplayInboundTestDeps() {
   replayDeps = { ...defaultReplayDeps };
 }
 

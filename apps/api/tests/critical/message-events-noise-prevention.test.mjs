@@ -22,6 +22,7 @@ import {
   __resetTextgridInboundTestDeps,
 } from "@/lib/flows/handle-textgrid-inbound.js";
 import { createInMemoryIdempotencyLedger, createPodioItem } from "../helpers/test-helpers.js";
+import { makeInboundWebhookBaseDeps } from "../helpers/chainable-supabase.mjs";
 
 afterEach(() => {
   __resetRunLockTestDeps();
@@ -118,6 +119,30 @@ test("inbound webhook rehydrates the same seller event after late brain creation
   const logged_payloads = [];
 
   __setTextgridInboundTestDeps({
+    ...makeInboundWebhookBaseDeps({
+      resolveSellerAutoReplyPlan: async () => ({
+        handled: true,
+        should_queue_reply: true,
+        selected_use_case: "consider_selling",
+        detected_intent: "Ownership Confirmed",
+        brain_stage: "consider_selling",
+      }),
+      executeInboundAutomationDecision: async () => ({
+        ok: true,
+        queued: true,
+        queue_row_id: "queue-late-brain",
+        seller_stage_reply: {
+          ok: true,
+          handled: true,
+          queued: true,
+          brain_stage: "consider_selling",
+          plan: {
+            detected_intent: "Ownership Confirmed",
+            selected_use_case: "consider_selling",
+          },
+        },
+      }),
+    }),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -171,16 +196,7 @@ test("inbound webhook rehydrates the same seller event after late brain creation
     maybeProgressOfferStatus: async () => ({ ok: true, updated: false }),
     maybeCreateOfferFromContext: async () => ({ ok: true, created: false }),
     maybeUpsertUnderwritingFromInbound: async () => ({ ok: true, extracted: false }),
-    maybeQueueSellerStageReply: async () => ({
-      ok: true,
-      handled: false,
-      queued: true,
-      brain_stage: "Offer Interest Confirmation",
-      plan: {
-        detected_intent: "Ownership Confirmed",
-        selected_use_case: "consider_selling",
-      },
-    }),
+
     createBrain: async () => createPodioItem(777),
     maybeQueueUnderwritingFollowUp: async () => ({ ok: true, queued: false }),
     maybeCreateContractFromAcceptedOffer: async () => ({ ok: true, created: false }),
@@ -202,5 +218,5 @@ test("inbound webhook rehydrates the same seller event after late brain creation
   assert.equal(logged_payloads[1].record_item_id, 991);
   assert.equal(logged_payloads[1].conversation_item_id, 777);
   assert.equal(logged_payloads[1].prior_message_id, "outbound:queue-55");
-  assert.equal(logged_payloads[1].stage_after, "Offer Interest Confirmation");
+  assert.equal(logged_payloads[1].stage_after, "consider_selling");
 });

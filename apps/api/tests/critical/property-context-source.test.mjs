@@ -266,8 +266,8 @@ test("evaluateTemplatePlaceholders returns ok=false and missing_required_placeho
     "Expected property_address to be missing"
   );
   assert.ok(
-    result.missing_required_placeholders.includes("{{property_city}}"),
-    "Expected property_city to be missing"
+    result.missing_optional_placeholders.includes("{{property_city}}"),
+    "Expected property_city to be missing (optional placeholder)"
   );
 });
 

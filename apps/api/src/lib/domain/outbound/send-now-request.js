@@ -1,5 +1,8 @@
 import { processSendQueue } from "@/lib/domain/queue/process-send-queue.js";
+import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -20,6 +23,8 @@ function previewMessage(value, max = 160) {
 }
 
 function statusForResult(result) {
+  if (result?.queued?.status) return result.queued.status;
+  if (result?.processed?.status) return result.processed.status;
   return result?.queued?.ok === false || result?.processed?.ok === false ? 400 : 200;
 }
 
@@ -61,6 +66,52 @@ export async function buildAndSendNow(
     processSendQueueImpl = processSendQueue,
   } = deps;
   let queued;
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
+    {
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "send_now_queue_create", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    return {
+      queued: {
+        ok: false,
+        stage: "runtime_brake",
+        status: 423,
+        reason: runtime_brake.reason,
+        error: runtime_brake.error,
+        message: runtime_brake.message,
+        diagnostics: runtime_brake.diagnostics,
+      },
+      processed: null,
+    };
+  }
+
+  const can_send_fn = deps.canSend || deps.canSendImpl;
+  if (typeof can_send_fn === "function") {
+    const gate = await can_send_fn(
+      {
+        to_phone_number: phone,
+        thread_key: phone,
+        message_body: rendered_message_text,
+      },
+      deps
+    );
+    if (!gate.ok) {
+      return {
+        queued: {
+          ok: false,
+          stage: "can_send_gate",
+          status: 423,
+          reason: gate.reason,
+        },
+        processed: null,
+      };
+    }
+  }
 
   try {
     queued = await queueOutboundMessageImpl({

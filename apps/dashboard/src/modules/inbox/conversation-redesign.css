@@ -354,6 +354,24 @@
   border-radius: 3px;
 }
 
+.nx-load-older-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 12px;
+  flex: 0 0 auto;
+}
+
+.nx-load-older-row .nx-btn {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.nx-load-older-row svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* ── Message Bubbles ───────────────────────────────────────── */
 .nx-bubble-wrap {
   display: flex;
@@ -1043,6 +1061,47 @@
   text-align: center;
 }
 
+.nx-hydration-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px;
+  gap: 6px;
+}
+
+.nx-hydration-failed__dev-banner {
+  padding: 4px 10px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #92400e;
+  font-family: monospace;
+}
+
+.nx-hydration-failed__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--nx-text-muted);
+  font-size: 13px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.nx-hydration-failed__body p {
+  margin: 0;
+}
+
+.nx-hydration-failed__sub {
+  font-size: 11px;
+  opacity: 0.65;
+  max-width: 260px;
+  line-height: 1.4;
+}
+
 .nx-inbox__messages-loading-icon {
   width: 20px;
   height: 20px;
@@ -1217,7 +1276,7 @@
   left: 0;
   z-index: 9999;
   min-width: 172px;
-  background: rgba(14, 16, 24, 0.97);
+  background: var(--nexus-panel-strong);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 9px;
   padding: 5px;
@@ -1237,7 +1296,7 @@
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: rgba(255,255,255,0.7);
+  color: var(--nexus-muted);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -1250,7 +1309,7 @@
 
 .nx-state-pill__option:hover {
   background: rgba(255,255,255,0.07);
-  color: rgba(255,255,255,0.95);
+  color: var(--nexus-text);
 }
 
 .nx-state-pill__option.is-selected {

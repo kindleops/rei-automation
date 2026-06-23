@@ -341,11 +341,28 @@ export function evaluateTemplatePlaceholders({
     }
   }
 
-  // Personalization Safety Gates
+  // Personalization Safety Gates — evaluate against rendered preview, not raw
+  // template tokens (e.g. "Hi {{seller_first_name}}" is valid before substitution).
   const text = String(template_text || "");
-  const has_token_leak = text.includes("undefined") || text.includes("null");
+  let rendered_preview = text;
+  for (const key of placeholders) {
+    const canonical_key = LEGACY_PLACEHOLDER_ALIASES[key] || key;
+    const replacement = variables[canonical_key];
+    if (!replacement || String(replacement).trim() === "") continue;
+    const regexes = [
+      new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "g"),
+      new RegExp(`\\{(?!\\{)\\s*${escapeRegExp(key)}\\s*\\}(?!\\})`, "g"),
+    ];
+    for (const regex of regexes) {
+      rendered_preview = rendered_preview.replace(regex, String(replacement).trim());
+    }
+  }
+  rendered_preview = cleanupPunctuation(normalizeWhitespace(rendered_preview));
+
+  const has_token_leak =
+    rendered_preview.includes("undefined") || rendered_preview.includes("null");
   const bad_greetings = ["Hi ,", "Hey ,", "Hello ,", "Hi {{", "Hey {{"];
-  const has_bad_greeting = bad_greetings.some(g => text.startsWith(g));
+  const has_bad_greeting = bad_greetings.some((g) => rendered_preview.startsWith(g));
 
   const ok = 
     missing_required_placeholders.length === 0 && 

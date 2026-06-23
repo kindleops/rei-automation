@@ -1,0 +1,112 @@
+/* ============================================================================
+ * nexus-theme-contract.css
+ * Stable theme surface contract. Loaded LAST in main.tsx — after all global
+ * theme files, before any view-specific sheets.
+ *
+ * Rules here are intentionally NON-!important. They establish baseline
+ * defaults for menus, nav, and map chrome that view sheets can override.
+ * The --nx-contract-* variables give view sheets a stable reference without
+ * coupling them to theme internals.
+ *
+ * CASCADE POSITION: main.tsx, after nx-glass-system.css
+ * ========================================================================== */
+
+/* ── Dark themes (default + all dark variants) ───────────────────────────── */
+
+:root,
+[data-nexus-theme="dark"],
+[data-nexus-theme="satellite"],
+[data-nexus-theme="monochrome"],
+[data-nexus-theme="blueprint"],
+[data-nexus-theme="matrix"],
+[data-nexus-theme="obsidian"],
+[data-nexus-theme="crimson"] {
+  --nx-contract-bg:          var(--nx-bg, #060c14);
+  --nx-contract-surface:     var(--nx-panel-bg, #0d1520);
+  --nx-contract-text:        var(--nx-text, #e2e8f0);
+  --nx-contract-text-muted:  var(--nx-text-muted, #94a3b8);
+  --nx-contract-border:      var(--nx-border, rgba(148, 163, 184, 0.12));
+  --nx-contract-accent:      var(--nx-accent, #38d0f0);
+
+  --nx-contract-menu-bg:     var(--nx-glass-bg-strong, rgba(6, 12, 20, 0.94));
+  --nx-contract-menu-text:   var(--nx-glass-text, #e2e8f0);
+  --nx-contract-menu-border: var(--nx-glass-border, rgba(148, 163, 184, 0.16));
+  --nx-contract-menu-hover:  var(--nx-glass-bg-hover, rgba(255, 255, 255, 0.06));
+
+  /* Glass/Blur Tokens */
+  --nx-blur-sm: 4px;
+  --nx-blur-md: 12px;
+  --nx-blur-lg: 24px;
+  --nx-blur-xl: 48px;
+
+  /* Shell Z-Index tokens */
+  --nx-shell-z-popover: 13000;
+  --nx-shell-z-toast:   14000;
+  --nx-shell-z-command: 15000;
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+[data-nexus-theme="light"] {
+  --nx-contract-bg:          #fbfcff;
+  --nx-contract-surface:     #ffffff;
+  --nx-contract-text:        #020617;
+  --nx-contract-text-muted:  #475569;
+  --nx-contract-border:      rgba(15, 23, 42, 0.10);
+  --nx-contract-accent:      var(--nx-accent, #2563eb);
+
+  --nx-contract-menu-bg:     var(--nx-glass-bg-strong, rgba(255, 255, 255, 0.97));
+  --nx-contract-menu-text:   #020617;
+  --nx-contract-menu-border: rgba(15, 23, 42, 0.12);
+  --nx-contract-menu-hover:  rgba(15, 23, 42, 0.04);
+}
+
+/* ── Red ops theme ───────────────────────────────────────────────────────── */
+
+[data-nexus-theme="red_ops"] {
+  --nx-contract-bg:          #0c0204;
+  --nx-contract-surface:     #160305;
+  --nx-contract-text:        #fff0f1;
+  --nx-contract-text-muted:  rgba(255, 240, 241, 0.60);
+  --nx-contract-border:      rgba(255, 18, 18, 0.18);
+  --nx-contract-accent:      var(--nx-accent, #ff1212);
+
+  --nx-contract-menu-bg:     var(--nx-glass-bg-strong, rgba(22, 3, 5, 0.96));
+  --nx-contract-menu-text:   #fff0f1;
+  --nx-contract-menu-border: rgba(255, 18, 18, 0.20);
+  --nx-contract-menu-hover:  rgba(255, 18, 18, 0.08);
+}
+
+/* ── Navigation surfaces ─────────────────────────────────────────────────── */
+
+.nx-topbar,
+.nx-sidebar,
+.nx-nav {
+  background: var(--nx-contract-surface);
+  color: var(--nx-contract-text);
+  border-color: var(--nx-contract-border);
+}
+
+/* ── Menus and dropdowns ─────────────────────────────────────────────────── */
+
+.nx-dropdown-menu,
+.nx-popover,
+.nx-menu,
+.nx-select-menu,
+.nx-advanced-popover,
+.nx-search-results-popover {
+  background: var(--nx-contract-menu-bg);
+  color: var(--nx-contract-menu-text);
+  border-color: var(--nx-contract-menu-border);
+}
+
+/* ── Map chrome ──────────────────────────────────────────────────────────── */
+
+.nx-icm,
+.nx-icm__panel,
+.nx-map-right-body,
+.nx-map-shell {
+  background: var(--nx-contract-surface);
+  color: var(--nx-contract-text);
+  border-color: var(--nx-contract-border);
+}

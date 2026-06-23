@@ -124,6 +124,7 @@ test("queue reconcile skips safely when Podio cooldown is active", async () => {
       master_owner_id: 201,
     },
     {
+      getSystemFlag: async () => true,
       buildPodioCooldownSkipResult: async () => ({
         ok: true,
         skipped: true,
@@ -170,6 +171,7 @@ test("queue reconcile skips safely when Podio backpressure is active", async () 
       master_owner_id: 201,
     },
     {
+      getSystemFlag: async () => true,
       buildPodioBackpressureSkipResult: async () => ({
         ok: true,
         skipped: true,

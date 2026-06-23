@@ -7,13 +7,13 @@ import type { CommandSuggestion } from '../ai-command-center'
 import { emitNotification } from '../../../shared/NotificationToast'
 import { formatRelativeTime } from '../../../shared/formatters'
 import { Icon } from '../../../shared/icons'
-import { InboxCommandMap } from '../InboxCommandMap'
+import { InboxCommandMap } from '../../../views/map/InboxCommandMap'
 import { InboxSidebar } from './InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './InboxConversationTable'
-import type { InboxMapActivityMode, MapFilterState, MapOverlayToggles } from '../InboxCommandMap'
-import { COMMAND_MAP_THEME_OPTIONS, type MapStyleMode } from '../commandMapThemes'
+import type { InboxMapActivityMode, MapFilterState, MapOverlayToggles } from '../../../views/map/InboxCommandMap'
+import { COMMAND_MAP_THEME_OPTIONS, type MapStyleMode } from '../../../views/map/commandMapThemes'
 import { updateSetting, applyThemeToDOM } from '../../../shared/settings'
-import { MAP_THEME_TO_NEXUS_GLOBAL } from '../../theme/nexusThemes'
+import { MAP_THEME_TO_NEXUS_GLOBAL } from '../../../domain/theme/nexusThemes'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 

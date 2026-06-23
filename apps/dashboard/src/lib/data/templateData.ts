@@ -1,4 +1,4 @@
-import type { InboxThread } from '../../modules/inbox/inbox.adapter'
+import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import type { ThreadContext } from './inboxData'
 import { getSupabaseClient } from '../supabaseClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'
@@ -54,6 +54,7 @@ export interface TemplateRenderResult {
 }
 
 const DEV = Boolean(import.meta.env?.DEV)
+let _loggedSchemaKeys = false
 
 const USE_CASE_LABELS: Record<string, string> = {
   ownership_check: 'Ownership Check',
@@ -206,7 +207,8 @@ export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Pr
   }
 
   const rows = safeArray(data as AnyRecord[])
-  if (DEV && rows[0]) {
+  if (DEV && rows[0] && !_loggedSchemaKeys) {
+    _loggedSchemaKeys = true
     console.log('[templateData] sms_templates schema sample keys', Object.keys(rows[0]))
   }
 

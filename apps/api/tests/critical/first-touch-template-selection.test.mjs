@@ -149,6 +149,7 @@ test("null or mismatched variant_group metadata does not block a valid Touch 1 t
   const candidates = await loadTemplateCandidates({
     use_case: "ownership_check",
     language: "English",
+    skip_render_validation: true,
     remote_fetcher: noRemoteFetch,
     local_fetcher: makeLocalFetcher([null_variant, stage1, bad_variant]),
   });

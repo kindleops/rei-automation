@@ -1,0 +1,11 @@
+{
+  "generated": "2026-06-22T21:00:18.643Z",
+  "total_consider_selling_active": 1000,
+  "would_update": 0,
+  "excluded_ambiguous": 0,
+  "by_language": {},
+  "sample_before_after": [],
+  "ambiguous_sample": [],
+  "canary_sql": "-- CANARY (max 10 rows) — DO NOT RUN WITHOUT APPROVAL\nUPDATE sms_templates t\nSET stage_code = 'S2', stage_label = 'S2 Selling Interest', updated_at = now()\nFROM (\n  SELECT id FROM sms_templates\n  WHERE is_active = true AND use_case = 'consider_selling' AND stage_code IS DISTINCT FROM 'S2'\n  LIMIT 10\n) c\nWHERE t.id = c.id;",
+  "rollback_sql": "-- ROLLBACK canary\n-- Restore from backup table sms_templates_metadata_backup_20260622 before applying."
+}

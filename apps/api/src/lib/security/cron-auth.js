@@ -5,6 +5,14 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+async function getQueueEngineSharedSecret() {
+  const env_secret = clean(process.env.QUEUE_ENGINE_SHARED_SECRET);
+  if (env_secret) return env_secret;
+
+  const { getSystemValue } = await import("@/lib/system-control.js");
+  return clean(await getSystemValue("queue_engine_shared_secret"));
+}
+
 export function getCronAuthResult(request) {
   const cron_secret = clean(process.env.CRON_SECRET);
   const authorization = clean(request?.headers?.get("authorization"));
@@ -87,8 +95,13 @@ export async function requireCronOrEngineAuth(request, logger = null) {
   const cron_result = requireCronAuth(request, logger);
   if (cron_result.authorized) return cron_result;
 
-  const queue_secret = String(process.env.QUEUE_ENGINE_SHARED_SECRET ?? "").trim();
-  if (!queue_secret) return cron_result;
+  const queue_secret = await getQueueEngineSharedSecret();
+  if (!queue_secret) {
+    logger?.warn?.("queue_engine_secret.not_configured", {
+      hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
+    });
+    return cron_result;
+  }
 
   const engine_result = getSharedSecretAuthResult(request, {
     env_name: "QUEUE_ENGINE_SHARED_SECRET",

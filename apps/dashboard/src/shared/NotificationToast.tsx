@@ -45,11 +45,12 @@ export function emitNotification(
   partial: Omit<NexusNotification, 'id' | 'timestamp'>,
 ): void {
   _notifCounter++
+  const isCritical = partial.severity === 'critical'
   const notif: NexusNotification = {
     id: `notif-${_notifCounter}-${Date.now()}`,
     timestamp: new Date(),
-    autoDismiss: true,
-    dismissMs: 3000,
+    autoDismiss: !isCritical,
+    dismissMs: 6000,
     read: false,
     ...partial,
   }

@@ -1,25 +1,9 @@
-import { createClient, type SupabaseClient, type Session } from '@supabase/supabase-js'
+import { type SupabaseClient, type Session } from '@supabase/supabase-js'
+import { getSupabaseClient } from '../supabaseClient'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-
-let authClient: SupabaseClient | null = null
-
-export const getAuthClient = (): SupabaseClient => {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY')
-  }
-  if (!authClient) {
-    authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    })
-  }
-  return authClient
-}
+// Single client — avoids "Multiple GoTrueClient instances detected" warning.
+// Re-uses the same singleton created by supabaseClient.ts instead of a second instance.
+export const getAuthClient = (): SupabaseClient => getSupabaseClient()
 
 export async function signInWithEmail(
   email: string,

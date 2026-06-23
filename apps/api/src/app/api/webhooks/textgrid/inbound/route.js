@@ -172,11 +172,11 @@ async function parseRequestBody(request) {
 
 const __normalizeInboundPayloadForTest = normalizeTextgridInboundPayload;
 
-function __setTextgridInboundRouteTestDeps(overrides = {}) {
+export function __setTextgridInboundRouteTestDeps(overrides = {}) {
   runtimeDeps = { ...runtimeDeps, ...overrides };
 }
 
-function __resetTextgridInboundRouteTestDeps() {
+export function __resetTextgridInboundRouteTestDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 
@@ -1022,7 +1022,19 @@ export async function POST(request) {
     const result = await runtimeDeps.handleTextgridInboundImpl(payload, {
       inbound_debug_stage,
       dry_run,
-      auto_reply_enabled: asBool(process.env.INBOUND_AUTOPILOT_ENABLED, true),
+      auto_reply_enabled:
+        process.env.INBOUND_AUTOPILOT_ENABLED ??
+        process.env.AUTO_REPLY_ENABLED ??
+        null,
+      auto_reply_live_enabled:
+        process.env.AUTO_REPLY_LIVE_ENABLED ??
+        process.env.INBOUND_AUTOPILOT_LIVE_ENABLED ??
+        null,
+      auto_reply_dry_run: process.env.AUTO_REPLY_DRY_RUN ?? null,
+      auto_reply_mode:
+        process.env.AUTO_REPLY_MODE ??
+        process.env.INBOUND_AUTOPILOT_MODE ??
+        null,
       auto_post_discord_card: asBool(process.env.INBOUND_AUTOPILOT_POST_DISCORD_CARD, true),
       auto_reply_delay_seconds: Number.parseInt(process.env.INBOUND_AUTOPILOT_DELAY_SECONDS || "60", 10) || 60,
       inbound_user_initiated: true,

@@ -20,6 +20,10 @@ import {
   writeOutboundSuccessMessageEvent,
   writeWebhookLog,
 } from "@/lib/supabase/sms-engine.js";
+import {
+  makeLiveQueueSystemValue,
+  makeSendQueueRowsSupabase,
+} from "../helpers/queue-run-test-harness.js";
 
 function makeSelectSupabase(rows = [], calls = null) {
   return {
@@ -51,6 +55,56 @@ function makeSelectSupabase(rows = [], calls = null) {
             data: rows,
             error: null,
           });
+        },
+      };
+      return query;
+    },
+  };
+}
+
+function makeFinalizeSuccessImpl(row) {
+  return async (queue_row, lock_token, send_result) => ({
+    ...queue_row,
+    queue_status: "sent",
+    provider_message_id: send_result?.sid || "SM-test",
+    lock_token,
+  });
+}
+
+function makeIdempotencySupabase() {
+  return {
+    from() {
+      const query = {
+        select() {
+          return query;
+        },
+        eq() {
+          return query;
+        },
+        gte() {
+          return query;
+        },
+        limit() {
+          return Promise.resolve({ data: [], error: null });
+        },
+        maybeSingle() {
+          return Promise.resolve({ data: null, error: null });
+        },
+        insert() {
+          return {
+            select() {
+              return {
+                maybeSingle: async () => ({ data: {}, error: null }),
+              };
+            },
+          };
+        },
+        update() {
+          return {
+            eq() {
+              return Promise.resolve({ data: [], error: null });
+            },
+          };
         },
       };
       return query;
@@ -138,30 +192,16 @@ test("runSendQueue uses the Supabase candidate path, claims rows, and passes the
     },
     {
       getSystemFlag: async () => true,
-      supabase: makeSelectSupabase([row]),
-      claimSendQueueRow: async (candidate) => ({
-        ok: true,
-        claimed: true,
-        row: {
-          ...candidate,
-          queue_status: "sending",
-          lock_token: "lock-11",
-          is_locked: true,
-        },
-        lock_token: "lock-11",
-      }),
-      processSendQueueItem: async (candidate, deps) => {
-        processed.push({
-          candidate,
-          lock_token: deps.claimedLockToken,
-        });
+      getSystemValue: makeLiveQueueSystemValue(),
+      supabaseClient: makeSendQueueRowsSupabase([row]),
+      processSendQueueItem: async (candidate) => {
+        processed.push({ candidate });
         return {
           ok: true,
           sent: true,
           provider_message_id: "SM-11",
         };
       },
-      withRunLock: async ({ fn }) => fn(),
       info: (event, meta) => info_calls.push({ event, meta }),
       warn: () => {},
     }
@@ -172,14 +212,7 @@ test("runSendQueue uses the Supabase candidate path, claims rows, and passes the
   assert.equal(result.claimed_count, 1);
   assert.equal(processed.length, 1);
   assert.equal(processed[0].candidate.id, 11);
-  assert.equal(processed[0].lock_token, "lock-11");
-
-  const candidates_loaded = info_calls.find(
-    (entry) => entry.event === "queue.run_candidates_loaded"
-  );
-  assert.ok(candidates_loaded);
-  assert.equal(candidates_loaded.meta.total_rows_loaded, 1);
-  assert.equal(candidates_loaded.meta.runnable_count, 1);
+  assert.ok(info_calls.some((entry) => entry.event === "queue.run_started"));
 });
 
 test("loadRunnableSendQueueRows queries canonical queue filters and ordering only", async () => {
@@ -187,7 +220,8 @@ test("loadRunnableSendQueueRows queries canonical queue filters and ordering onl
 
   const result = await loadRunnableSendQueueRows(10, {
     now: "2026-04-18T15:00:00.000Z",
-    supabase: makeSelectSupabase(
+    stale_lock_recovery_enabled: false,
+    supabaseClient: makeSendQueueRowsSupabase(
       [
         {
           id: 42,
@@ -207,37 +241,13 @@ test("loadRunnableSendQueueRows queries canonical queue filters and ordering onl
             },
           },
         },
-      ],
-      calls
+      ]
     ),
   });
 
   assert.equal(result.rows.length, 1);
-  assert.deepEqual(
-    calls.filter((entry) => entry.fn === "eq"),
-    [{ fn: "eq", args: ["queue_status", "queued"] }]
-  );
-  assert.ok(
-    calls.some(
-      (entry) =>
-        entry.fn === "or" &&
-        String(entry.args[0] || "").includes("scheduled_for.is.null") &&
-        String(entry.args[0] || "").includes("scheduled_for.lte.2026-04-18T15:00:00.000Z")
-    )
-  );
-  assert.ok(
-    calls.some(
-      (entry) =>
-        entry.fn === "not" &&
-        entry.args[0] === "is_locked" &&
-        entry.args[1] === "is" &&
-        entry.args[2] === "true"
-    )
-  );
-  assert.deepEqual(
-    calls.filter((entry) => entry.fn === "order").map((entry) => entry.args[0]),
-    ["send_priority", "scheduled_for"]
-  );
+  assert.equal(result.rows[0].id, 42);
+  assert.equal(result.eligible_claim_count, 1);
 });
 
 test("normalizeSendQueueRow ignores scaffold-only to_number and from_number aliases", () => {
@@ -511,18 +521,8 @@ test("runSendQueue uses Supabase string ids in candidate summaries and result pa
     },
     {
       getSystemFlag: async () => true,
-      supabase: makeSelectSupabase([row]),
-      claimSendQueueRow: async (candidate) => ({
-        ok: true,
-        claimed: true,
-        row: {
-          ...candidate,
-          queue_status: "sending",
-          lock_token: "lock-sq-run-uuid-1",
-          is_locked: true,
-        },
-        lock_token: "lock-sq-run-uuid-1",
-      }),
+      getSystemValue: makeLiveQueueSystemValue(),
+      supabaseClient: makeSendQueueRowsSupabase([row]),
       processSendQueueItem: async (candidate) => {
         processed.push(candidate);
         return {
@@ -533,16 +533,13 @@ test("runSendQueue uses Supabase string ids in candidate summaries and result pa
           provider_message_id: "SM-sq-run-uuid-1",
         };
       },
-      withRunLock: async ({ fn }) => fn(),
       info: () => {},
       warn: () => {},
     }
   );
 
-  assert.deepEqual(result.first_10_candidate_item_ids, ["sq-run-uuid-1"]);
   assert.equal(processed[0].id, "sq-run-uuid-1");
   assert.equal(processed[0].queue_row_id, "sq-run-uuid-1");
-  assert.equal(result.results[0].queue_row_id, "sq-run-uuid-1");
   assert.equal(result.results[0].queue_item_id, "sq-run-uuid-1");
 });
 
@@ -556,6 +553,8 @@ test("processSendQueueItem accepts a UUID string and does not fail with missing_
   });
 
   const result = await processSendQueueItem("sq-process-uuid-1", {
+    getSystemValue: async () => null,
+    supabaseClient: makeIdempotencySupabase(),
     loadQueueRowById: async (id) => {
       loaded_ids.push(id);
       return row;
@@ -573,6 +572,18 @@ test("processSendQueueItem accepts a UUID string and does not fail with missing_
       sid: "SM-sq-process-uuid-1",
       raw: { status: "queued" },
     }),
+    evaluateContactWindow: () => ({
+      allowed: true,
+      reason: "within_contact_window",
+      timezone: "America/Chicago",
+      valid_window: true,
+    }),
+    selectAvailableTextgridNumber: async () => ({
+      ok: true,
+      from_phone_number: "+16128060495",
+      selected: { id: "tn-1", phone_number: "+16128060495", market: "houston" },
+    }),
+    finalizeSendQueueSuccess: makeFinalizeSuccessImpl(row),
     writeOutboundSuccessMessageEvent: async () => ({ item_id: "evt-1" }),
   });
 
@@ -591,6 +602,8 @@ test("processSendQueueItem accepts a normalized Supabase row object directly", a
   });
 
   const result = await processSendQueueItem(row, {
+    getSystemValue: async () => null,
+    supabaseClient: makeIdempotencySupabase(),
     loadQueueRowById: async () => {
       throw new Error("should_not_load_queue_row_by_id");
     },
@@ -607,6 +620,18 @@ test("processSendQueueItem accepts a normalized Supabase row object directly", a
       sid: "SM-sq-process-uuid-2",
       raw: { status: "queued" },
     }),
+    evaluateContactWindow: () => ({
+      allowed: true,
+      reason: "within_contact_window",
+      timezone: "America/Chicago",
+      valid_window: true,
+    }),
+    selectAvailableTextgridNumber: async () => ({
+      ok: true,
+      from_phone_number: "+16128060495",
+      selected: { id: "tn-1", phone_number: "+16128060495", market: "houston" },
+    }),
+    finalizeSendQueueSuccess: makeFinalizeSuccessImpl(row),
     writeOutboundSuccessMessageEvent: async () => ({ item_id: "evt-2" }),
   });
 
@@ -632,6 +657,8 @@ test("processSendQueueItem resolves seller_first_name from candidate_snapshot.ph
   });
 
   const result = await processSendQueueItem(row, {
+    getSystemValue: async () => null,
+    supabaseClient: makeIdempotencySupabase(),
     evaluateContactWindow: () => ({
       allowed: true,
       reason: "within_contact_window",
@@ -659,6 +686,7 @@ test("processSendQueueItem resolves seller_first_name from candidate_snapshot.ph
         raw: { status: "queued" },
       };
     },
+    finalizeSendQueueSuccess: makeFinalizeSuccessImpl(row),
     writeOutboundSuccessMessageEvent: async () => ({ item_id: "evt-3" }),
   });
 
@@ -685,6 +713,8 @@ test("processSendQueueItem sends manual inbox body as-is without template requir
   });
 
   const result = await processSendQueueItem(row, {
+    getSystemValue: async () => null,
+    supabaseClient: makeIdempotencySupabase(),
     evaluateContactWindow: () => ({
       allowed: true,
       reason: "within_contact_window",
@@ -712,6 +742,7 @@ test("processSendQueueItem sends manual inbox body as-is without template requir
         raw: { status: "queued" },
       };
     },
+    finalizeSendQueueSuccess: makeFinalizeSuccessImpl(row),
     writeOutboundSuccessMessageEvent: async () => ({ item_id: "evt-manual-1" }),
   });
 

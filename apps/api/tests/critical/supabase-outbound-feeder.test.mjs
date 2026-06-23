@@ -41,9 +41,11 @@ function createMockSupabase(overrides = {}) {
       }
       if (table === "sms_templates") {
         return query([
-          { id: "tmpl_1", template_id: "tmpl_1", language: "English", use_case: "ownership_check", stage_code: "S1", is_active: true, template_body: "Hi there!" },
-          { id: "tmpl_2", template_id: "tmpl_2", language: "English", use_case: "consider_selling", stage_code: "S2", is_active: true, template_body: "Still interested?" },
-          { id: "tmpl_3", template_id: "tmpl_3", language: "English", use_case: "seller_asking_price", stage_code: "S3", is_active: true, template_body: "What is your price?" }
+          { id: "tmpl_1", template_id: "tmpl_1", language: "English", use_case: "ownership_check", stage_code: "S1", is_active: true, is_first_touch: true, template_body: "Hi {{seller_first_name}} there!" },
+          { id: "tmpl_2", template_id: "tmpl_2", language: "English", use_case: "consider_selling", stage_code: "S2", is_active: true, is_follow_up: true, template_body: "Still interested {{seller_first_name}}?" },
+          { id: "tmpl_3", template_id: "tmpl_3", language: "English", use_case: "seller_asking_price", stage_code: "S3", is_active: true, is_follow_up: true, template_body: "What is your price {{seller_first_name}}?" },
+          { id: "tmpl_pt", template_id: "tmpl_pt", language: "Portuguese", use_case: "ownership_check", stage_code: "S1", is_active: true, is_first_touch: true, template_body: "Olá {{seller_first_name}}!" },
+          { id: "tmpl_he", template_id: "tmpl_he", language: "Hebrew", use_case: "ownership_check", stage_code: "S1", is_active: true, is_first_touch: true, template_body: "שלום {{seller_first_name}}" },
         ]);
       }
       return query([]);
@@ -58,9 +60,13 @@ const baseCandidate = {
   market: "test_market",
   state: "tx",
   seller_first_name: "Test",
+  seller_full_name: "Test Seller",
+  owner_display_name: "Test Seller",
+  prospect_full_name: "Test Seller",
+  likely_owner: true,
   property_address: "123 Main St",
   property_id: "prop_1",
-  master_owner_id: "mo_1"
+  master_owner_id: "mo_1",
 };
 
 test("Supabase outbound feeder progression and suppression logic", async () => {

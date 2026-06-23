@@ -4,7 +4,6 @@
  * Deterministically turns inbound classified threads into queued replies.
  */
 
-import { getSupabaseClient } from '../supabaseClient'
 import type { InboxWorkflowThread, SellerStage, InboxStatus } from './inboxWorkflowData'
 import { persistWorkflowPatch } from './inboxWorkflowData'
 import { 
@@ -12,7 +11,7 @@ import {
   renderTemplate, 
   buildTemplateContextFromThread, 
 } from './templateData'
-import { extractCopilotContext, generateBigPickleDraft } from '../../modules/inbox/copilot/copilot-context'
+import { extractCopilotContext, generateBigPickleDraft } from './copilotContextData'
 import { logInboxActivity } from './inboxActivityData'
 import { asString, normalizeStatus, mapErrorMessage, type AnyRecord } from './shared'
 import * as backendClient from '../api/backendClient'
@@ -26,16 +25,6 @@ export interface AutoReplyResult {
   queueId?: string | null
   threadKey: string
 }
-
-/**
- * Intents that should trigger immediate suppression without a reply.
- */
-const HARD_SUPPRESSION_INTENTS = new Set([
-  'opt_out',
-  'wrong_person',
-  'hostile_or_legal',
-  'not_interested'
-])
 
 /**
  * Intents that require human approval before sending.
@@ -110,8 +99,7 @@ const isWithinContactWindow = (): boolean => {
  */
 const performSafetyChecks = async (
   thread: InboxWorkflowThread,
-  latestInbound: AnyRecord | null,
-  intent: string
+  latestInbound: AnyRecord | null
 ): Promise<{ safe: boolean; action: AutoReplyResult['action']; reason: string | null }> => {
   // 1. Is automation active?
   if (thread.automationState === 'paused' || thread.automationState === 'manual_control') {
@@ -121,11 +109,6 @@ const performSafetyChecks = async (
   // 2. Is thread suppressed or archived?
   if (thread.isSuppressed || thread.isArchived) {
     return { safe: false, action: 'skipped', reason: 'Thread is suppressed or archived.' }
-  }
-
-  // 3. Hard Suppression check
-  if (HARD_SUPPRESSION_INTENTS.has(intent)) {
-    return { safe: false, action: 'suppressed', reason: `High-risk intent detected: ${intent}` }
   }
 
   // 4. Contact Window check
@@ -138,32 +121,9 @@ const performSafetyChecks = async (
     return { safe: false, action: 'skipped', reason: 'No inbound message found to reply to.' }
   }
 
-  // 6. Duplicate check: Have we already replied to this message?
-  const supabase = getSupabaseClient()
-  const latestMessageId = asString(latestInbound.id || latestInbound.message_event_id, '')
-  
-  const { data: existingQueue } = await supabase
-    .from('send_queue')
-    .select('id')
-    .eq('metadata->>replied_to_message_id', latestMessageId)
-    .limit(1)
-
-  if (existingQueue && existingQueue.length > 0) {
-    return { safe: false, action: 'skipped', reason: `Already queued a reply for message ID: ${latestMessageId}` }
-  }
-
-  // 7. Collision check: Is there any other pending/ready message in queue?
-  const { data: pendingQueue } = await supabase
-    .from('send_queue')
-    .select('id')
-    .eq('to_phone_number', thread.phoneNumber || thread.canonicalE164)
-    .in('queue_status', ['queued', 'scheduled', 'approval'])
-    .limit(1)
-
-  if (pendingQueue && pendingQueue.length > 0) {
-    return { safe: false, action: 'skipped', reason: 'A message is already pending delivery for this contact.' }
-  }
-
+  // Duplicate and collision checks are enforced by the backend (cockpit-service.js
+  // returns duplicate_active_or_sent_queue_row for any repeat). Do not read send_queue
+  // directly here — those reads are stale relative to in-flight backend writes.
   return { safe: true, action: 'queued', reason: null }
 }
 
@@ -180,23 +140,10 @@ export const executeAutoReply = async (
   
   try {
     // 1. Safety Checks
-    const safety = await performSafetyChecks(thread, latestInbound, currentIntent)
+    const safety = await performSafetyChecks(thread, latestInbound)
     
     // Audit Logging for safety check result
     if (!safety.safe) {
-      if (safety.action === 'suppressed') {
-        await persistWorkflowPatch(thread as any, { isSuppressed: true, inboxStatus: 'suppressed', conversationStage: 'dead_suppressed' } as any)
-        await logInboxActivity({
-          event_type: 'stage_change',
-          thread_key: threadKey,
-          actor: 'Auto-Reply Engine',
-          title: 'Thread Suppressed',
-          description: `Automatically suppressed thread due to intent: ${currentIntent}`,
-          metadata: { intent: currentIntent, action: 'suppression' },
-          undo_payload: null
-        })
-      }
-
       return { ok: false, action: safety.action, reason: safety.reason, threadKey }
     }
 

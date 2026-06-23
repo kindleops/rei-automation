@@ -9,7 +9,7 @@
   flex-direction: column;
   width: 100%;
   min-height: 100%;
-  background: #040912;
+  background: var(--nexus-panel);
   color: rgba(210, 228, 255, 0.88);
   font-size: 13px;
   gap: 0;
@@ -108,7 +108,7 @@
   min-width: 88px;
 }
 
-.sqd-stage:hover { background: rgba(255, 255, 255, 0.045); border-color: rgba(255, 255, 255, 0.12); }
+.sqd-stage:hover { background: rgba(255, 255, 255, 0.045); border-color: var(--nexus-muted); }
 
 .sqd-stage.is-active {
   background: rgba(72, 138, 236, 0.14);
@@ -175,7 +175,7 @@
   gap: 5px;
   padding: 13px 16px 12px;
   flex: 1 0 92px;
-  background: rgba(4, 9, 18, 0.7);
+  background: var(--nexus-surface-overlay);
   border-right: 1px solid rgba(255, 255, 255, 0.04);
   position: relative;
 }
@@ -235,7 +235,7 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: rgba(4, 9, 18, 0.7);
+  background: var(--nexus-surface-overlay);
   padding: 16px 18px 18px;
   border-right: 1px solid rgba(255, 255, 255, 0.04);
   min-height: 240px;
@@ -290,7 +290,7 @@
   width: 100%;
 }
 
-.sqd-failure-row:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.07); }
+.sqd-failure-row:hover { background: rgba(255, 255, 255, 0.04); border-color: var(--nexus-muted); }
 
 .sqd-failure-row.is-active {
   background: rgba(72, 138, 236, 0.1);
@@ -379,7 +379,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  background: rgba(4, 9, 18, 0.6);
+  background: var(--nexus-surface-overlay);
 }
 
 .sqd-rmetric__label {
@@ -585,7 +585,7 @@
   flex: 0 0 auto;
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
   padding: 16px 24px 20px;
-  background: rgba(4, 9, 18, 0.4);
+  background: var(--nexus-surface-overlay);
 }
 
 .sqd-section__head {
@@ -624,7 +624,7 @@
   transition: background 0.12s, border-color 0.12s;
 }
 
-.sqd-market-card:hover { background: rgba(255, 255, 255, 0.038); border-color: rgba(255, 255, 255, 0.12); }
+.sqd-market-card:hover { background: rgba(255, 255, 255, 0.038); border-color: var(--nexus-muted); }
 
 .sqd-market-card.is-active {
   background: rgba(72, 138, 236, 0.1);
@@ -706,7 +706,7 @@
 }
 
 .sqd-select:focus { border-color: rgba(72, 138, 236, 0.35); }
-.sqd-select option { background: #0c1322; color: rgba(200, 218, 255, 0.9); }
+.sqd-select option { background: var(--nexus-panel); color: rgba(200, 218, 255, 0.9); }
 
 .sqd-clear-btn {
   padding: 8px 14px;
@@ -846,7 +846,7 @@
 
 .sqd-status-pill--ready     { background: rgba(34, 211, 238, 0.1);  border-color: rgba(34, 211, 238, 0.22); color: rgba(34, 211, 238, 0.88); }
 .sqd-status-pill--scheduled { background: rgba(72, 138, 236, 0.1);  border-color: rgba(72, 138, 236, 0.22); color: rgba(99, 165, 255, 0.88); }
-.sqd-status-pill--queued    { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.09); color: rgba(155, 178, 222, 0.72); }
+.sqd-status-pill--queued    { background: rgba(255, 255, 255, 0.04); border-color: var(--nexus-muted); color: rgba(155, 178, 222, 0.72); }
 .sqd-status-pill--sending   { background: rgba(72, 138, 236, 0.12); border-color: rgba(72, 138, 236, 0.28); color: rgba(99, 165, 255, 0.92); }
 .sqd-status-pill--sent      { background: rgba(72, 138, 236, 0.08); border-color: rgba(72, 138, 236, 0.18); color: rgba(115, 160, 252, 0.8); }
 .sqd-status-pill--delivered { background: rgba(52, 211, 153, 0.1);  border-color: rgba(52, 211, 153, 0.22); color: rgba(52, 211, 153, 0.9); }
@@ -854,7 +854,7 @@
 .sqd-status-pill--retry     { background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.18); color: rgba(248, 130, 130, 0.75); }
 .sqd-status-pill--blocked   { background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.18); color: rgba(251, 191, 36, 0.8); }
 .sqd-status-pill--held      { background: rgba(251, 191, 36, 0.06); border-color: rgba(251, 191, 36, 0.14); color: rgba(251, 191, 36, 0.7); }
-.sqd-status-pill--cancelled { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.06); color: rgba(108, 133, 178, 0.45); }
+.sqd-status-pill--cancelled { background: rgba(255, 255, 255, 0.03); border-color: var(--nexus-muted); color: rgba(108, 133, 178, 0.45); }
 .sqd-status-pill--approval  { background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.18); color: rgba(251, 200, 60, 0.8); }
 
 .sqd-status-pill--replied_before_send {
@@ -920,7 +920,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   font-size: 11px;
   color: rgba(108, 133, 178, 0.42);
-  background: rgba(4, 9, 18, 0.5);
+  background: var(--nexus-surface-overlay);
 }
 
 .sqd-cc-note__icon {
@@ -1049,7 +1049,7 @@
   padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid rgba(72, 138, 236, 0.14);
-  background: rgba(4, 9, 18, 0.5);
+  background: var(--nexus-surface-overlay);
   font-size: 10.5px;
 }
 
@@ -1085,7 +1085,7 @@
 /* ── Approved Cluster Routing Panel ─────────────────────────────────────── */
 
 .sqd-cluster-section {
-  background: rgba(4, 9, 18, 0.55);
+  background: var(--nexus-surface-overlay);
 }
 
 .sqd-cluster-grid {
@@ -1248,7 +1248,7 @@
   border: 1px solid rgba(72, 138, 236, 0.14);
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(4, 9, 18, 0.5);
+  background: var(--nexus-surface-overlay);
 }
 
 .sqd-launch-checklist__head {
@@ -1353,7 +1353,7 @@
   flex-direction: column;
   width: 100%;
   min-height: 100%;
-  background: #040912;
+  background: var(--nexus-panel);
   color: rgba(210, 228, 255, 0.88);
   font-size: 12px;
   gap: 0;
@@ -1593,7 +1593,7 @@
   flex-direction: column;
   width: 100%;
   min-height: 100%;
-  background: #040912;
+  background: var(--nexus-panel);
   color: rgba(210, 228, 255, 0.88);
   font-size: 13px;
   gap: 0;
@@ -1766,7 +1766,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   position: sticky;
   top: 0;
-  background: #040912;
+  background: var(--nexus-panel);
   z-index: 1;
 }
 
@@ -1795,7 +1795,7 @@
   flex-direction: column;
   width: 100%;
   min-height: 100%;
-  background: #040912;
+  background: var(--nexus-panel);
   color: rgba(210, 228, 255, 0.88);
   font-size: 13px;
   gap: 0;

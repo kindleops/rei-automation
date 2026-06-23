@@ -1,0 +1,469 @@
+.nx-seller-card {
+  --seller-bg-top: #07111f;
+  --seller-bg-bottom: #050912;
+  --seller-surface: rgba(255, 255, 255, 0.035);
+  --seller-surface-strong: rgba(255, 255, 255, 0.055);
+  --seller-border: rgba(59, 167, 255, 0.18);
+  --seller-text: #f4f7ff;
+  --seller-muted: #8ea0b8;
+  --seller-blue: #3ba7ff;
+  --seller-cyan: #38d9ff;
+  --seller-green: #41d6a0;
+  --seller-amber: #f5b84b;
+  --seller-red: #ff4d57;
+  width: clamp(320px, 24vw, 390px);
+  max-width: 400px;
+  /* Viewport-safe: never taller than viewport minus top nav + bottom safe zone */
+  max-height: min(680px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid var(--seller-border);
+  background:
+    radial-gradient(circle at top right, rgba(56, 217, 255, 0.1), transparent 30%),
+    linear-gradient(180deg, var(--seller-bg-top), var(--seller-bg-bottom));
+  box-shadow:
+    0 20px 48px rgba(2, 8, 18, 0.56),
+    0 0 24px rgba(56, 217, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  color: var(--seller-text);
+  position: relative;
+  pointer-events: auto;
+  z-index: 60;
+  backdrop-filter: blur(18px) saturate(1.04);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142, 160, 184, 0.24) transparent;
+}
+
+.nx-seller-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nx-seller-card::-webkit-scrollbar-thumb {
+  background: rgba(142, 160, 184, 0.24);
+  border-radius: 999px;
+}
+
+.nx-seller-card.is-selected {
+  width: min(420px, calc(100vw - 24px));
+  max-width: 420px;
+  /* taller budget for selected mode, but still viewport-safe */
+  max-height: min(72vh, 680px);
+}
+
+/* Hover variant: pointer events are handled at the popup level.
+   The nx-icm-hover-popup--interactive CSS allows the popup content to
+   receive pointer events, and DOM mouseenter/mouseleave on the popup
+   element keep it alive while the cursor is on the card. */
+.nx-seller-card.is-hover {
+  pointer-events: auto;
+  /* Compact: slightly narrower and shorter than selected mode */
+  width: clamp(300px, 24vw, 380px);
+  max-height: min(54vh, 520px);
+  /* Softer glow for hover state — full glow is reserved for selected */
+  box-shadow:
+    0 16px 48px rgba(2, 8, 18, 0.62),
+    0 0 24px rgba(56, 217, 255, 0.1),
+    0 0 48px rgba(59, 167, 255, 0.06),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.026);
+  border-color: rgba(59, 167, 255, 0.22);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 215, 255, 0.18) transparent;
+}
+
+.nx-seller-card.is-hover::-webkit-scrollbar { width: 4px; }
+.nx-seller-card.is-hover::-webkit-scrollbar-thumb {
+  background: rgba(99, 215, 255, 0.18);
+  border-radius: 999px;
+}
+
+.nx-seller-card__image {
+  position: relative;
+  height: 132px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(9, 14, 23, 0.88), rgba(5, 10, 18, 0.96));
+}
+
+.nx-seller-card.is-selected .nx-seller-card__image,
+.nx-seller-card.seller-card--expanded .nx-seller-card__image,
+.nx-seller-card.seller-card--full .nx-seller-card__image {
+  height: 164px;
+}
+
+.nx-seller-card__image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  filter: brightness(0.88) contrast(1.03);
+}
+
+.nx-seller-card__image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--seller-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nx-seller-card__image-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(5, 9, 18, 0.04) 0%, rgba(5, 9, 18, 0.18) 50%, rgba(5, 9, 18, 0.92) 100%);
+  pointer-events: none;
+}
+
+.nx-seller-card__image-label {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 1;
+  color: rgba(244, 247, 255, 0.52);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nx-seller-card__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: var(--nexus-surface-overlay);
+  color: var(--nexus-text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.nx-seller-card__body {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px 12px;
+  /* Allow body to scroll when content overflows max-height */
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142, 160, 184, 0.22) transparent;
+}
+
+.nx-seller-card__body::-webkit-scrollbar { width: 4px; }
+.nx-seller-card__body::-webkit-scrollbar-thumb {
+  background: rgba(142, 160, 184, 0.22);
+  border-radius: 999px;
+}
+
+.nx-seller-card__identity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.nx-seller-card__identity-copy {
+  min-width: 0;
+}
+
+.nx-seller-card__identity-copy h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.nx-seller-card__identity-copy p {
+  margin: 4px 0 0;
+  color: var(--seller-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-seller-card__identity-badges {
+  display: grid;
+  gap: 5px;
+  justify-items: end;
+}
+
+.nx-seller-card__badge {
+  min-height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--seller-surface);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--seller-text);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nx-seller-card__badge.is-muted {
+  color: var(--seller-muted);
+}
+
+.nx-seller-card__summary {
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: var(--seller-surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.nx-seller-card__summary p,
+.nx-seller-card__micro-meta,
+.nx-seller-card__message-copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.nx-seller-card__summary p {
+  color: rgba(244, 247, 255, 0.94);
+}
+
+.nx-seller-card__financial-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nx-seller-card__financial-item {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 14px;
+  background: var(--seller-surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: grid;
+  gap: 4px;
+}
+
+.nx-seller-card__financial-item span,
+.nx-seller-card__intel-score-head small,
+.nx-seller-card__message-head small {
+  color: var(--seller-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nx-seller-card__financial-item strong {
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.nx-seller-card__financial-item.is-primary strong {
+  font-size: 19px;
+  color: var(--nexus-text);
+}
+
+.nx-seller-card__intel-strip,
+.nx-seller-card__message-strip,
+.nx-seller-card__panel {
+  display: grid;
+  gap: 7px;
+  padding: 10px 11px;
+  border-radius: 16px;
+  background: var(--seller-surface);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.nx-seller-card__intel-score-head,
+.nx-seller-card__message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nx-seller-card__intel-score-head strong,
+.nx-seller-card__message-head strong {
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.nx-seller-card__progress {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.nx-seller-card__progress.is-thin {
+  height: 6px;
+}
+
+.nx-seller-card__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--seller-blue), var(--seller-cyan));
+  box-shadow: 0 0 16px rgba(56, 217, 255, 0.25);
+}
+
+.nx-seller-card__micro-meta {
+  color: var(--seller-muted);
+}
+
+.nx-seller-card__tags,
+.nx-seller-card__status-strip,
+.nx-seller-card__actions,
+.nx-seller-card__actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  /* keep actions in view — prevent overflow clip */
+  overflow: visible;
+}
+
+.nx-seller-card__tag,
+.nx-seller-card__pill,
+.nx-seller-card__mini-action {
+  min-height: 24px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nx-seller-card__tag {
+  background: rgba(59, 167, 255, 0.08);
+  border: 1px solid rgba(59, 167, 255, 0.14);
+  color: #d7ebff;
+}
+
+.nx-seller-card__tag.is-more {
+  background: transparent;
+  color: var(--seller-cyan);
+}
+
+.nx-seller-card__pill {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(244, 247, 255, 0.82);
+  white-space: nowrap;
+}
+
+.nx-seller-card__pill.is-accent {
+  border-color: rgba(59, 167, 255, 0.34);
+  color: #9dd8ff;
+}
+
+.nx-seller-card__pill.is-success {
+  border-color: rgba(65, 214, 160, 0.34);
+  color: #93e9c4;
+}
+
+.nx-seller-card__pill.is-warning {
+  border-color: rgba(245, 184, 75, 0.34);
+  color: #ffd694;
+}
+
+.nx-seller-card__pill.is-danger {
+  border-color: rgba(255, 77, 87, 0.34);
+  color: #ffb1b7;
+}
+
+.nx-seller-card__message-copy {
+  color: rgba(244, 247, 255, 0.9);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nx-seller-card__mini-action,
+.nx-seller-card__actions button,
+.nx-seller-card__composer button {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--seller-text);
+  cursor: pointer;
+}
+
+.nx-seller-card__mini-action.is-primary,
+.nx-seller-card__actions button.is-primary,
+.nx-seller-card__composer button {
+  border-color: rgba(59, 167, 255, 0.22);
+  background: linear-gradient(135deg, rgba(59, 167, 255, 0.2), rgba(56, 217, 255, 0.1));
+}
+
+.nx-seller-card__mini-action[disabled] {
+  opacity: 0.56;
+  cursor: default;
+}
+
+.nx-seller-card__actions-panel {
+  gap: 10px;
+}
+
+.nx-seller-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nx-seller-card__actions button {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nx-seller-card__composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.nx-seller-card__composer input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--nexus-panel-strong);
+  color: var(--seller-text);
+}
+
+.nx-seller-card__loading {
+  color: var(--seller-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .nx-seller-card,
+  .nx-seller-card.is-selected {
+    width: min(100vw - 20px, 100%);
+    max-width: min(100vw - 20px, 440px);
+  }
+
+  .nx-seller-card__identity {
+    grid-template-columns: 1fr;
+  }
+
+  .nx-seller-card__identity-badges {
+    justify-items: start;
+  }
+
+  .nx-seller-card__financial-row {
+    grid-template-columns: 1fr;
+  }
+}

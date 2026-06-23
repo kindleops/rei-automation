@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { handleQueueRunRequest, statusForResult } from "@/lib/domain/queue/queue-run-request.js";
+import { makeLiveQueueSystemValue } from "../helpers/queue-run-test-harness.js";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ test("handleQueueRunRequest calls runSendQueue and emits route_enter, before_run
 
   await handleQueueRunRequest(makeRequest(), "GET", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async (opts) => {
       run_calls.push(opts);
       return stub_result;
@@ -170,6 +172,7 @@ test("handleQueueRunRequest emits queue_run.early_return warn when runSendQueue 
 
   await handleQueueRunRequest(makeRequest(), "GET", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async () => lock_skipped_result,
     logger,
     jsonResponse: fn,
@@ -201,6 +204,7 @@ test("handleQueueRunRequest returns 200 and logs first failure details when the 
 
   await handleQueueRunRequest(makeRequest(), "GET", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async () => ({
       ok: true,
       partial: true,
@@ -336,6 +340,7 @@ test("handleQueueRunRequest allows when QUEUE_ENGINE_SHARED_SECRET is set and x-
       auth: { authenticated: false, is_vercel_cron: false },
       response: null,
     }),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async (opts) => { run_calls.push(opts); return stub_result; },
     getSharedSecretAuthResult: () => ({
       ok: true, status: 200, reason: "authorized",
@@ -351,6 +356,50 @@ test("handleQueueRunRequest allows when QUEUE_ENGINE_SHARED_SECRET is set and x-
   assert.equal(responses.length, 1);
   assert.equal(responses[0].status, 200);
   assert.equal(responses[0].body.ok, true);
+  assert.equal(calls.find((c) => c.event === "queue_engine_secret.not_configured"), undefined, "no not_configured warning");
+  assert.equal(calls.find((c) => c.event === "queue_engine_secret.rejected"), undefined, "no rejected warning");
+});
+
+test("handleQueueRunRequest falls back to system_control queue_engine_shared_secret when env is unset", async () => {
+  const { calls, logger } = makeLogger();
+  const { responses, fn } = makeJsonResponse();
+  const run_calls = [];
+
+  const stub_result = {
+    ok: true, skipped: false, partial: false, dry_run: false,
+    attempted_count: 0, claimed_count: 0, started_count: 0,
+    processed_count: 0, sent_count: 0, failed_count: 0,
+    blocked_count: 0, skipped_count: 0, duplicate_locked_count: 0,
+    first_failing_queue_item_id: null, first_failing_reason: null,
+    first_failure_queue_item_id: null, first_failure_reason: null,
+    batch_duration_ms: 0, due_rows: 0, future_rows: 0,
+    total_rows_loaded: 0, run_started_at: "2026-05-18T00:00:00.000Z",
+    results: [],
+  };
+
+  await handleQueueRunRequest(makeRequest(), "GET", {
+    requireCronAuth: () => ({
+      authorized: false,
+      auth: { authenticated: false, is_vercel_cron: false },
+      response: null,
+    }),
+    runSendQueue: async (opts) => { run_calls.push(opts); return stub_result; },
+    getSharedSecretAuthResult: () => ({
+      ok: true,
+      status: 200,
+      reason: "authorized",
+      required: true,
+      authenticated: true,
+      via: "header:x-queue-engine-secret",
+    }),
+    getSystemValue: makeLiveQueueSystemValue({ queue_engine_shared_secret: "system-control-secret" }),
+    logger,
+    jsonResponse: fn,
+  });
+
+  assert.equal(run_calls.length, 1, "runSendQueue must be called");
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].status, 200);
   assert.equal(calls.find((c) => c.event === "queue_engine_secret.not_configured"), undefined, "no not_configured warning");
   assert.equal(calls.find((c) => c.event === "queue_engine_secret.rejected"), undefined, "no rejected warning");
 });
@@ -438,6 +487,7 @@ test("handleQueueRunRequest does not check QUEUE_ENGINE_SHARED_SECRET when cron 
 
   await handleQueueRunRequest(makeRequest(), "GET", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async () => stub_result,
     getSharedSecretAuthResult: () => { engine_auth_called = true; return { ok: true }; },
     queueEngineSecret: "test-shared-secret-abc",
@@ -507,6 +557,7 @@ test("handleQueueRunRequest POST body dry_run:false sends live and response dry_
 
   await handleQueueRunRequest(makePostRequest({ dry_run: false, limit: 1 }), "POST", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async (opts) => { run_calls.push(opts); return stub_result; },
     logger,
     jsonResponse: fn,
@@ -525,6 +576,7 @@ test("handleQueueRunRequest POST with no dry_run field defaults to false", async
 
   await handleQueueRunRequest(makePostRequest({ limit: 5 }), "POST", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async (opts) => { run_calls.push(opts); return { ok: true, sent_count: 0, failed_count: 0, blocked_count: 0, skipped_count: 0, attempted_count: 0, claimed_count: 0, started_count: 0, processed_count: 0, duplicate_locked_count: 0, first_failing_queue_item_id: null, first_failing_reason: null, first_failure_queue_item_id: null, first_failure_reason: null, batch_duration_ms: 0, due_rows: 0, future_rows: 0, total_rows_loaded: 0, results: [] }; },
     logger,
     jsonResponse: fn,
@@ -591,6 +643,7 @@ test("handleQueueRunRequest converts Podio cooldown errors into a safe skipped r
 
   await handleQueueRunRequest(makeRequest(), "GET", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async () => {
       throw {
         name: "PodioError",

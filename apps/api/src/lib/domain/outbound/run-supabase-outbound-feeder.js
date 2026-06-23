@@ -8,11 +8,71 @@ import {
 } from "./supabase-candidate-feeder.js";
 import { insertSupabaseSendQueueRow } from "../../supabase/sms-engine.js";
 
+function resolveFeederLockDeps(deps = {}) {
+  return {
+    acquire:
+      deps._acquireFeederLock ||
+      deps.acquireFeederLock ||
+      (() => true),
+    release:
+      deps._releaseFeederLock ||
+      deps.releaseFeederLock ||
+      (() => {}),
+  };
+}
+
+function normalizeFeederDeps(deps = {}) {
+  const normalized = { ...deps };
+
+  if (typeof deps._loadCandidates === "function" && typeof deps.loadSupabaseOutboundCandidates !== "function") {
+    normalized.loadSupabaseOutboundCandidates = async (options) => deps._loadCandidates(options);
+  }
+  if (typeof deps._resolveNextTouch === "function" && typeof deps.resolveNextOutboundTouch !== "function") {
+    normalized.resolveNextOutboundTouch = async (candidate, options) =>
+      deps._resolveNextTouch(candidate, options);
+  }
+  if (typeof deps._evaluateEligibility === "function" && typeof deps.evaluateCandidateEligibility !== "function") {
+    normalized.evaluateCandidateEligibility = async (candidate, options) =>
+      deps._evaluateEligibility(candidate, options);
+  }
+  if (typeof deps._chooseNumber === "function" && typeof deps.chooseTextgridNumber !== "function") {
+    normalized.chooseTextgridNumber = async (candidate, options) => deps._chooseNumber(candidate, options);
+  }
+  if (typeof deps._renderTemplate === "function" && typeof deps.renderOutboundTemplate !== "function") {
+    normalized.renderOutboundTemplate = async (candidate, options) => deps._renderTemplate(candidate, options);
+  }
+  if (typeof deps._insertRow === "function" && typeof deps.createSendQueueItem !== "function") {
+    normalized.createSendQueueItem = async (payload) => deps._insertRow(payload);
+  }
+
+  return normalized;
+}
+
+function feederAlreadyRunningResult(dry_run = false) {
+  return {
+    ok: false,
+    reason: "feeder_already_running",
+    dry_run,
+    scanned_count: 0,
+    eligible_count: 0,
+    queued_count: 0,
+    skipped_count: 0,
+    skip_reasons: {},
+    errors: [],
+  };
+}
+
 /**
  * runSupabaseOutboundFeeder
  * Feeds Supabase-native candidates into the send queue.
  */
 export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
+  const feederDeps = normalizeFeederDeps(deps);
+  const lock = resolveFeederLockDeps(feederDeps);
+  if (!lock.acquire()) {
+    return feederAlreadyRunningResult(Boolean(input.dry_run));
+  }
+
   const now = input.now || new Date().toISOString();
 
   const limit = Math.max(1, Math.min(Number(input.limit) || 25, 500));
@@ -85,7 +145,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
   };
 
   try {
-    const source = await loadSupabaseOutboundCandidates(options, deps);
+    const source = await loadSupabaseOutboundCandidates(options, feederDeps);
     summary.scanned_count = source.scanned_count;
     summary.source = source.source;
 
@@ -99,7 +159,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Step 0: Resolve Next Touch Progression
-      const resolved = await resolveNextOutboundTouch(candidate, options, deps);
+      const resolved = await resolveNextOutboundTouch(candidate, options, feederDeps);
       
       if (debug && summary.first_10_candidate_touch_context.length < 10) {
         const hc = resolved.history_context || {};
@@ -152,8 +212,27 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
         is_follow_up: !resolved.is_first_touch
       };
 
+      // Campaign/outbound gate: canSend blocks suppressed or paused recipients before hydration.
+      if (!dry_run) {
+        const can_send_fn = feederDeps.canSend || feederDeps.canSendImpl;
+        if (typeof can_send_fn === "function") {
+          const gate = await can_send_fn({
+            to_phone_number: activeCandidate.canonical_e164 || activeCandidate.to_phone_number,
+            master_owner_id: activeCandidate.master_owner_id,
+            property_id: activeCandidate.property_id,
+          });
+          if (!gate?.ok) {
+            recordSkip(`CAN_SEND_GATE:${gate?.reason || "blocked"}`, {
+              master_owner_id: activeCandidate.master_owner_id,
+              property_id: activeCandidate.property_id,
+            });
+            continue;
+          }
+        }
+      }
+
       // Safety Guard 1: Eligibility check (contact window, suppression, duplicates)
-      const eligibility = await evaluateCandidateEligibility(activeCandidate, options, deps);
+      const eligibility = await evaluateCandidateEligibility(activeCandidate, options, feederDeps);
       if (!eligibility.ok) {
         recordSkip(eligibility.reason_code || "INELIGIBLE", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -178,7 +257,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Safety Guard 2: Routing check
-      const routing = await chooseTextgridNumber(activeCandidate, options, deps);
+      const routing = await chooseTextgridNumber(activeCandidate, options, feederDeps);
       if (!routing.ok) {
         recordSkip(routing.reason_code || "ROUTING_BLOCKED", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -195,7 +274,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
       }
 
       // Safety Guard 3: Template rendering and guards
-      const rendered = await renderOutboundTemplate(activeCandidate, options, deps);
+      const rendered = await renderOutboundTemplate(activeCandidate, options, feederDeps);
       if (!rendered.ok) {
         recordSkip(rendered.reason_code || "TEMPLATE_ERROR", {
           master_owner_id: activeCandidate.master_owner_id,
@@ -248,7 +327,7 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
 
       // Write to Send Queue
       if (!dry_run) {
-        const queueResult = await insertSupabaseSendQueueRow(queue_payload, deps);
+        const queueResult = await insertSupabaseSendQueueRow(queue_payload, feederDeps);
 
         if (!queueResult.ok) {
           recordSkip("QUEUE_INSERT_FAILED", {
@@ -265,6 +344,8 @@ export async function runSupabaseOutboundFeeder(input = {}, deps = {}) {
   } catch (err) {
     summary.ok = false;
     summary.errors.push(err.message);
+  } finally {
+    lock.release();
   }
 
   return summary;

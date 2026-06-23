@@ -1,4 +1,9 @@
 import {
+  acquisitionQueueOperation,
+  acquisitionRuntimeDisabled,
+  getAcquisitionRuntimeControl,
+} from "@/lib/domain/acquisition/acquisition-runtime-control.js";
+import {
   buildQueueMessageEventMetadata,
   buildQueueSendFailedTriggerName,
 } from "@/lib/domain/events/message-event-metadata.js";
@@ -15,10 +20,18 @@ import {
   normalizePhone,
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
+import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import {
+  AUTOMATION_LOG_TAGS,
+  logAutomationConsole,
+} from "@/lib/domain/automation/automation-audit.js";
 import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
+import { getSystemValue } from "@/lib/system-control.js";
 import {
   claimSendQueueRow,
   evaluateContactWindow,
@@ -40,7 +53,6 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
 import { isManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
-import { classifyQueueBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -57,6 +69,14 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = lower(value);
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 }
 
 function nowIso() {
@@ -327,22 +347,165 @@ function toFailureResult(queue_row = null, error = null) {
   };
 }
 
-function toHandledQueueOutcome(queue_row = null, outcome = {}, extras = {}) {
-  const queue_row_id = getQueueRowId(queue_row);
-  const reason = clean(outcome?.reason || extras?.reason || "handled_business_outcome");
-  const final_status = clean(extras?.final_queue_status || extras?.queue_status || "failed") || "failed";
-  return {
-    ok: true,
-    handled: true,
-    sent: false,
-    skipped: final_status === "queued" || final_status.startsWith("paused_") || final_status === "cancelled",
-    failed: final_status === "failed",
-    reason,
-    queue_status: final_status,
-    final_queue_status: final_status,
+function resolveQueueTemplateId(queue_row = null) {
+  return clean(
+    getQueueRowValue(queue_row, [
+      "template_id",
+      "selected_template_id",
+      "template",
+      "template-2",
+    ]) ||
+      queue_row?.metadata?.selected_template_id ||
+      queue_row?.metadata?.template_id ||
+      queue_row?.metadata?.template?.id ||
+      queue_row?.metadata?.selected_template?.id
+  );
+}
+
+function resolveQueueAutomationEventType(result = {}) {
+  const final_status = lower(result.final_queue_status || result.queue_status || result.status);
+  if (result.sent === true || final_status === "sent" || final_status === "delivered") {
+    return "queue_item_sent";
+  }
+  if (
+    result.ok === false &&
+    !result.skipped &&
+    !["cancelled", "blocked_by_health_guard", "duplicate_blocked"].includes(final_status)
+  ) {
+    return "queue_item_failed";
+  }
+  if (["failed", "failed_transport", "invalid_number", "carrier_blocked"].includes(final_status)) {
+    return "queue_item_failed";
+  }
+  return null;
+}
+
+async function emitQueueAutomationEvent(queue_row = {}, result = {}, deps = {}) {
+  const emitter = deps.emitAutomationEvent || emitAutomationEvent;
+  const event_type = resolveQueueAutomationEventType(result);
+  if (!event_type || typeof emitter !== "function") return null;
+
+  const queue_row_id = getQueueRowId(queue_row) || result.queue_row_id || result.queue_item_id || null;
+  const payload = {
+    provider: "textgrid",
     queue_row_id,
     queue_item_id: queue_row_id,
-    ...extras,
+    queue_key: clean(queue_row?.queue_key || queue_row?.queue_id) || null,
+    queue_status: result.final_queue_status || result.queue_status || null,
+    from_phone_number:
+      clean(result.from_phone_number || queue_row?.from_phone_number || queue_row?.from) || null,
+    to_phone_number:
+      clean(result.to_phone_number || queue_row?.to_phone_number || queue_row?.to) || null,
+    provider_message_sid:
+      clean(result.provider_message_id || result.provider_message_sid || result.message_id) || null,
+    failed_reason: clean(result.failed_reason || result.reason || result.error) || null,
+    template_id: resolveQueueTemplateId(queue_row) || null,
+    routing_tier: resolveQueueRoutingTier(queue_row) || null,
+    raw_result: result,
+  };
+
+  try {
+    return await emitter({
+      event_type,
+      source: "send_queue_processor",
+      dedupe_key: `send-queue:${event_type}:${queue_row_id || "unknown"}:${payload.provider_message_sid || payload.queue_status || "unknown"}`,
+      conversation_thread_id: clean(queue_row?.thread_key || queue_row?.canonical_thread_key) || null,
+      property_id: clean(queue_row?.property_id) || null,
+      prospect_id: clean(queue_row?.prospect_id) || null,
+      master_owner_id: clean(queue_row?.master_owner_id || queue_row?.owner_id) || null,
+      phone_number_id: clean(queue_row?.phone_number_id || queue_row?.phone_id) || null,
+      queue_item_id: queue_row_id,
+      payload,
+    }, {
+      supabaseClient: deps.supabaseClient || deps.supabase,
+      logger: deps.logger,
+    });
+  } catch (error) {
+    logAutomationConsole(AUTOMATION_LOG_TAGS.emit_failed_non_blocking, {
+      source: "send_queue_processor",
+      queue_row_id,
+      event_type,
+      error: error?.message || "automation_emit_failed",
+    });
+    warn("queue.automation_emit_failed", {
+      queue_row_id,
+      event_type,
+      error: error?.message || "automation_emit_failed",
+    });
+    return null;
+  }
+}
+
+function resolveQueueRoutingTier(queue_row = null) {
+  return clean(
+    queue_row?.routing_tier ||
+      queue_row?.selected_textgrid_routing_tier ||
+      queue_row?.metadata?.routing_tier ||
+      queue_row?.metadata?.selected_sender_diagnostics?.routing_tier ||
+      queue_row?.metadata?.candidate_snapshot?.routing_tier
+  );
+}
+
+function isQueueFirstTouch(queue_row = null) {
+  if (typeof queue_row?.is_first_touch === "boolean") return queue_row.is_first_touch;
+  if (typeof queue_row?.metadata?.is_first_touch === "boolean") return queue_row.metadata.is_first_touch;
+  const touch_number = asNonNegativeInteger(
+    queue_row?.touch_number ??
+      queue_row?.metadata?.touch_number ??
+      queue_row?.metadata?.candidate_snapshot?.touch_number,
+    0
+  );
+  return touch_number === 1;
+}
+
+async function loadSmsHealthGuardSystemControl(deps = {}) {
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+
+  return {
+    sms_blocked_sender_numbers: await get_system_value("sms_blocked_sender_numbers"),
+    sms_blocked_template_ids: await get_system_value("sms_blocked_template_ids"),
+    require_local_routing: await get_system_value("require_local_routing"),
+    allow_regional_fallback_for_first_touch: await get_system_value("allow_regional_fallback_for_first_touch"),
+  };
+}
+
+async function blockQueueRowBySmsHealthGuard(queue_row = {}, guard = {}, deps = {}) {
+  const queue_row_id = getQueueRowId(queue_row);
+  const now = deps.now || nowIso();
+  const payload = {
+    queue_status: "blocked_by_health_guard",
+    guard_status: "blocked",
+    guard_reason: guard.reason || "sms_health_guard_blocked",
+    failed_reason: guard.reason || "sms_health_guard_blocked",
+    is_locked: false,
+    locked_at: null,
+    lock_token: null,
+    updated_at: now,
+    metadata: {
+      ...(queue_row.metadata ?? {}),
+      skip_reason: guard.reason || "sms_health_guard_blocked",
+      block_class: guard.block_class || null,
+      sms_health_guard: guard,
+      final_queue_status: "blocked_by_health_guard",
+      blocked_by: "sms_health_guard",
+      blocked_at: now,
+      finalized_at: now,
+    },
+  };
+
+  await updateQueueRow(queue_row_id, payload, deps);
+
+  return {
+    ok: true,
+    skipped: true,
+    sent: false,
+    reason: guard.reason || "sms_health_guard_blocked",
+    queue_status: "blocked_by_health_guard",
+    final_queue_status: "blocked_by_health_guard",
+    queue_row_id,
+    queue_item_id: queue_row_id,
+    diagnostics: guard.diagnostics || null,
   };
 }
 
@@ -1109,12 +1272,45 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
   const manual_inbox_send = isManualInboxSend(queue_row);
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
 
+  const acquisition_operation = acquisitionQueueOperation(queue_row);
+  if (acquisition_operation) {
+    const runtime = await getAcquisitionRuntimeControl(acquisition_operation, deps);
+    if (!runtime.enabled) {
+      const disabled = acquisitionRuntimeDisabled(runtime);
+      return {
+        ...disabled,
+        sent: false,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+  }
+
   if (!queue_row_id) {
     logMissingQueueRowId(queue_row, "processSupabaseQueueItem");
     return {
       ok: false,
       sent: false,
       reason: "missing_queue_row_id",
+    };
+  }
+
+  if (
+    asBoolean(queue_row.metadata?.no_send, false) ||
+    asBoolean(queue_row.metadata?.proof_no_send, false) ||
+    lower(queue_row.metadata?.proof_mode) === "no_send" ||
+    queue_row.sms_eligible === false ||
+    queue_row.routing_allowed === false
+  ) {
+    return {
+      ok: true,
+      skipped: true,
+      sent: false,
+      reason: asBoolean(queue_row.metadata?.no_send, false) ? "no_send_queue_row" : "queue_row_not_sendable",
+      queue_status: queue_row.queue_status,
+      final_queue_status: queue_row.queue_status,
+      queue_row_id,
+      queue_item_id: queue_row_id,
     };
   }
 
@@ -1185,8 +1381,6 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       ...deps,
       now,
     });
-
-    const manual_inbox_send = isManualInboxSend(queue_row);
 
     console.log("CONTACT WINDOW CHECK", {
       row_id: queue_row_id,
@@ -1294,10 +1488,15 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         reason: "missing_seller_first_name",
       });
 
-      return toHandledQueueOutcome(queue_row, { reason: "missing_seller_name" }, {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "missing_seller_first_name",
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
-      });
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
     }
 
     info("queue.textgrid_send_attempt", {
@@ -1309,6 +1508,93 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       from: message_fields.from,
       manual_inbox_send: Boolean(manual_inbox_send),
     });
+
+    // ── Hard Idempotency Lock ───────────────────────────────────────────
+    // Prevent duplicate sends if the same content was sent to the same number recently (24h).
+    // This protects against loops caused by database update failures or crashes.
+    const supabase_client = getSupabase(deps);
+    const normalized_body = clean(message_fields.body);
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // 1. Check if the row itself already has evidence of a previous send attempt
+    const evidence_sid = clean(queue_row.provider_message_id || queue_row.textgrid_message_id || queue_row.metadata?.provider_message_sid);
+    if (evidence_sid) {
+      warn("queue.idempotency_blocked_sid_exists", {
+        queue_row_id,
+        provider_message_id: evidence_sid,
+        to: message_fields.to,
+      });
+
+      // Mark as sent and return success to move the row out of the runnable pool.
+      // We don't re-send because we already have a SID.
+      return {
+        ok: true,
+        sent: true,
+        skipped: false,
+        reason: "idempotency_blocked_sid_exists",
+        queue_status: "sent",
+        final_queue_status: "sent",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+        provider_message_id: evidence_sid,
+      };
+    }
+
+    // 2. Check message_events for any identical outbound message to this number in the last 24h.
+    const { data: recent_sends, error: send_check_err } = await supabase_client
+      .from("message_events")
+      .select("id, created_at, provider_message_sid, message_body")
+      .eq("to_phone_number", message_fields.to)
+      .eq("direction", "outbound")
+      .gte("created_at", twentyFourHoursAgo)
+      .limit(10); // Check multiple in case of high volume
+
+    if (send_check_err) {
+      warn("queue.idempotency_check_failed", {
+        queue_row_id,
+        error: send_check_err.message,
+      });
+    } else {
+      const duplicate_event = recent_sends?.find(event => clean(event.message_body) === normalized_body);
+      
+      if (duplicate_event) {
+        warn("queue.idempotency_blocked_recent_duplicate", {
+          queue_row_id,
+          matched_event_id: duplicate_event.id,
+          to: message_fields.to,
+          body_preview: normalized_body.slice(0, 50),
+        });
+
+        // Terminal Block: Mark row as duplicate_blocked
+        await supabase_client
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "duplicate_blocked",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              skip_reason: "hard_idempotency_blocked_24h",
+              matched_event_id: duplicate_event.id,
+              matched_sid: duplicate_event.provider_message_sid,
+              finalized_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+
+        return {
+          ok: true,
+          skipped: true,
+          reason: "hard_idempotency_blocked_24h",
+          queue_status: "duplicate_blocked",
+          final_queue_status: "duplicate_blocked",
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
+    }
 
     console.log("ABOUT TO SEND MESSAGE");
     console.log("SENDING SMS", {
@@ -1358,10 +1644,40 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         body_preview: String(message_fields.body || "").slice(0, 60),
       });
 
-      return toHandledQueueOutcome(queue_row, { reason: "blank_body" }, {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "blank_greeting_before_send",
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    const sms_health_guard = evaluateSmsHealthGuard({
+      from_phone_number: message_fields.from,
+      template_id: resolveQueueTemplateId(queue_row),
+      routing_tier: resolveQueueRoutingTier(queue_row),
+      first_touch: isQueueFirstTouch(queue_row),
+      metadata: queue_row.metadata || {},
+      system_control: await loadSmsHealthGuardSystemControl(deps),
+      now,
+    });
+
+    if (!sms_health_guard.allowed) {
+      warn("queue.sms_health_guard_blocked", {
+        queue_row_id,
+        queue_key: queue_row.queue_key || null,
+        reason: sms_health_guard.reason,
+        block_class: sms_health_guard.block_class,
+        from: message_fields.from,
+        template_id: resolveQueueTemplateId(queue_row) || null,
+        routing_tier: resolveQueueRoutingTier(queue_row) || null,
+        first_touch: isQueueFirstTouch(queue_row),
       });
+
+      return blockQueueRowBySmsHealthGuard(queue_row, sms_health_guard, deps);
     }
 
     captureSystemEvent("sms_send_started", {
@@ -1374,63 +1690,12 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       campaign_id: queue_row.metadata?.campaign_id ?? null,
     });
 
-    let send_result;
-    try {
-      send_result = await send_textgrid_sms({
-        to: message_fields.to,
-        from: message_fields.from,
-        body: message_fields.body,
-        seller_first_name,
-      });
-    } catch (first_send_error) {
-      const first_class = classifyQueueBusinessOutcome({
-        message: first_send_error?.message,
-        reason: first_send_error?.reason || first_send_error?.data?.reason,
-        code: first_send_error?.code || first_send_error?.status,
-      });
-      const fallback_enabled =
-        (queue_row?.metadata?.content_filter_fallback_enabled ?? true) !== false;
-      const already_attempted = queue_row?.metadata?.content_filter_fallback_attempted === true;
-      if (first_class?.reason === "provider_content_filter" && fallback_enabled && !already_attempted) {
-        const fallback_body = clean(
-          queue_row?.metadata?.fallback_message_body ||
-          "Quick follow-up from our team. When is a good time to connect?"
-        );
-        queue_row = normalizeSendQueueRow({
-          ...queue_row,
-          message_body: fallback_body,
-          message_text: fallback_body,
-          metadata: {
-            ...(queue_row.metadata || {}),
-            content_filter_fallback_attempted: true,
-            content_filter_original_body: message_fields.body,
-            original_template_id: queue_row.template_id || null,
-            fallback_template_id: queue_row.metadata?.fallback_template_id || "content_filter_fallback_v1",
-          },
-        });
-        try {
-          const supabase_client = getSupabase(deps);
-          await supabase_client
-            .from(QUEUE_TABLE)
-            .update({
-              message_body: fallback_body,
-              message_text: fallback_body,
-              metadata: queue_row.metadata,
-              updated_at: now,
-            })
-            .eq("id", queue_row_id)
-            .eq("lock_token", lock_token);
-        } catch {}
-        send_result = await send_textgrid_sms({
-          to: message_fields.to,
-          from: message_fields.from,
-          body: fallback_body,
-          seller_first_name,
-        });
-      } else {
-        throw first_send_error;
-      }
-    }
+    const send_result = await send_textgrid_sms({
+      to: message_fields.to,
+      from: message_fields.from,
+      body: message_fields.body,
+      seller_first_name,
+    });
 
     console.log("TEXTGRID RAW RESPONSE", send_result?.raw ?? null);
     console.log("SEND RESULT", send_result);
@@ -1582,14 +1847,51 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       manual_inbox_send: Boolean(manual_inbox_send),
     });
 
+    // ── Duplicate Block Detection ────────────────────────────────────────
+    // If the provider specifically returns a duplicate error, treat as terminal.
+    const error_msg_lower = String(error?.message || "").toLowerCase();
+    const is_duplicate_error = error_msg_lower.includes("duplicate message") || 
+                              error_msg_lower.includes("already sent") ||
+                              (error?.data?.error && String(error.data.error).toLowerCase().includes("duplicate"));
+    
+    if (is_duplicate_error) {
+      warn("queue.provider_duplicate_detected", { queue_row_id, to: queue_row.to_phone_number });
+      try {
+        const supabase_client = getSupabase(deps);
+        await supabase_client
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "duplicate_blocked",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            failed_reason: "provider_duplicate_message",
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              final_queue_status: "duplicate_blocked",
+              provider_error: error?.message,
+              finalized_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+      } catch (_dup_err) {
+        warn("queue.duplicate_mark_failed", { queue_row_id });
+      }
+      return {
+        ok: true, // It's "ok" because we handled it as a terminal state
+        skipped: true,
+        reason: "provider_duplicate_message",
+        queue_status: "duplicate_blocked",
+        final_queue_status: "duplicate_blocked",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
     // Blank greeting errors from TextGrid guard should pause as name_missing not failed.
     const is_blank_greeting_error = /blank.*(greeting|name)|missing.*seller_first_name/i.test(error?.message || "");
     const is_blacklist_error = /21610|blacklist/i.test(error?.message || "");
-    const classified = classifyQueueBusinessOutcome({
-      message: error?.message,
-      reason: error?.reason || error?.data?.reason,
-      code: error?.code || error?.status || error?.data?.status,
-    });
     
     if (is_blank_greeting_error) {
       try {
@@ -1619,10 +1921,15 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       } catch (_pause_err) {
         warn("queue.blank_greeting_pause_failed", { queue_row_id });
       }
-      return toHandledQueueOutcome(queue_row, { reason: "blank_body" }, {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "blank_greeting_textgrid_guard",
         queue_status: "paused_name_missing",
         final_queue_status: "paused_name_missing",
-      });
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
     }
 
     if (is_blacklist_error) {
@@ -1661,19 +1968,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         });
       }
 
-      const final_queue_status = failed_row?.queue_status || "failed";
-      if (classified?.handled) {
-        return toHandledQueueOutcome(queue_row, classified, {
-          queue_status: final_queue_status,
-          final_queue_status,
-          failure_bucket: classified.failure_bucket || null,
-          retryable: classified.retryable !== false,
-        });
-      }
       return {
         ...toFailureResult(queue_row, error),
-        queue_status: final_queue_status,
-        final_queue_status,
+        queue_status: failed_row?.queue_status || "failed",
+        final_queue_status: failed_row?.queue_status || "failed",
       };
     } catch (update_error) {
       warn("queue.send.fail_update_failed", {
@@ -1725,11 +2023,36 @@ export async function processSendQueueItem(queue_row, deps = {}) {
     };
   }
 
-  if (isSupabaseQueueRow(resolved_queue_row)) {
-    return processSupabaseQueueItem(resolved_queue_row, deps);
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const runtime_brake = evaluateQueueSendRuntimeBrakes(
+    {
+      queue_processor_mode: await get_system_value("queue_processor_mode"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    },
+    { action: "processSendQueueItem", failClosed: false }
+  );
+  if (!runtime_brake.ok) {
+    return {
+      ok: false,
+      status: 423,
+      sent: false,
+      skipped: true,
+      reason: runtime_brake.reason,
+      error: runtime_brake.error,
+      message: runtime_brake.message,
+      diagnostics: runtime_brake.diagnostics,
+      queue_row_id: getQueueRowId(resolved_queue_row),
+      queue_item_id: getQueueRowId(resolved_queue_row),
+    };
   }
 
-  return processLegacyQueueItem(resolved_queue_row, deps);
+  const result = isSupabaseQueueRow(resolved_queue_row)
+    ? await processSupabaseQueueItem(resolved_queue_row, deps)
+    : await processLegacyQueueItem(resolved_queue_row, deps);
+
+  await emitQueueAutomationEvent(resolved_queue_row, result, deps);
+  return result;
 }
 
 export async function processSendQueue(input = {}, deps = {}) {

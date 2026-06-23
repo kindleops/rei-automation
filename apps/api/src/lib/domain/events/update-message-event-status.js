@@ -77,6 +77,11 @@ export async function updateMessageEventStatus({
   failed_at = null,
   failure_code = null,
   failure_reason = null,
+  failure_class = null,
+  provider_failure_reason = null,
+  normalized_reason = null,
+  retry_allowed = null,
+  is_terminal = null,
 } = {}) {
   const event_item = event_item_id
     ? await getMessageEvent(Number(event_item_id) || event_item_id)
@@ -152,6 +157,11 @@ export async function updateMessageEventStatus({
     failed_at: clean(failed_at) || clean(occurred_at) || null,
     failure_code: clean(failure_code) || null,
     failure_reason: clean(failure_reason) || null,
+    failure_class: clean(failure_class) || null,
+    provider_failure_reason: clean(provider_failure_reason) || null,
+    normalized_reason: clean(normalized_reason) || null,
+    retry_allowed: typeof retry_allowed === "boolean" ? retry_allowed : null,
+    is_terminal: typeof is_terminal === "boolean" ? is_terminal : null,
     latency_ms:
       latency_ms !== null && latency_ms !== undefined
         ? Number(latency_ms) || 0

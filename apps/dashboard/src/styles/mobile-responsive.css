@@ -7,7 +7,6 @@
 
 /* ── Viewport meta guard ───────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
-
 /* ══════════════════════════════════════════════════════════════════════════
    SHARED MOBILE UTILITIES
    ══════════════════════════════════════════════════════════════════════════ */
@@ -28,7 +27,6 @@
     gap: 8px;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    1. LIVE DASHBOARD & MAP (hq / cc-shell)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -59,34 +57,8 @@
   }
 
   /* hq map fills entire viewport */
-  .hq {
-    position: fixed;
-    inset: 0;
-  }
-  .hq__map {
-    position: absolute;
-    inset: 0;
-  }
 
   /* Map filter dock: collapse to a pill bar at top */
-  .hq__map-filter-dock {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    right: 8px;
-    bottom: auto;
-    z-index: 40;
-    background: rgba(8, 11, 18, 0.88);
-    backdrop-filter: blur(12px);
-    border-radius: 12px;
-    padding: 8px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  .hq__map-filter-panel {
-    max-height: 50vh;
-    overflow-y: auto;
-  }
-  .hq__map-filter-row { flex-wrap: wrap; gap: 8px; }
 
   /* Property/lead cards: slide up from bottom as bottom sheet */
   .cc-map__lead-card,
@@ -128,24 +100,12 @@
   }
 
   /* Map modes: compact pill row */
-  .hq__map-modes {
-    position: absolute;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    flex-direction: row;
-    gap: 4px;
-    background: rgba(8, 11, 18, 0.85);
-    border-radius: 20px;
-    padding: 4px 6px;
-  }
 
   /* cc-shell workspace: stack vertically */
   .cc-workspace {
     flex-direction: column;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    2. INBOX (nx-inbox-shell / nx-premium-inbox)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -296,7 +256,6 @@
     gap: 8px !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    3. QUEUE PAGE (nx-premium-queue)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -462,7 +421,6 @@
   }
   .nx-btn.nx-btn--xs { min-height: 36px !important; }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    4. PIPELINE VIEW (plv-*)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -544,7 +502,6 @@
   .plv-kpi__item { min-width: 70px !important; padding: 8px 12px !important; }
   .plv-kpi__value { font-size: 16px !important; }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    5. LIST VIEWS — generic table → card conversion
    ══════════════════════════════════════════════════════════════════════════ */
@@ -592,7 +549,6 @@
     -webkit-box-orient: vertical;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    6. DEAL / COMP INTELLIGENCE
    ══════════════════════════════════════════════════════════════════════════ */
@@ -647,39 +603,10 @@
   .nx-inspector-card { max-width: 100% !important; }
   .nx-inspector-json { font-size: 10px !important; max-height: 200px !important; overflow-y: auto; }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
-   7. ALERTS PAGE
-   ══════════════════════════════════════════════════════════════════════════ */
-
-@media (max-width: 768px) {
-  .nx-alerts { padding: 0 !important; }
-  .nx-surface-header {
-    padding: 12px 14px !important;
-    flex-wrap: wrap !important;
-    gap: 8px !important;
-  }
-  .nx-alerts__grid {
-    grid-template-columns: 1fr !important;
-    padding: 10px !important;
-    gap: 8px !important;
-  }
-  .nx-alert-card {
-    padding: 14px !important;
-  }
-  .nx-alert-card__header { flex-wrap: wrap; gap: 6px; }
-  .nx-alerts__filters {
-    padding: 8px 10px !important;
-    overflow-x: auto;
-    scrollbar-width: none;
-    flex-wrap: nowrap !important;
-  }
-  .nx-alerts__filters::-webkit-scrollbar { display: none; }
-  .nx-filter-pill { flex-shrink: 0; min-height: 44px !important; padding: 0 16px !important; }
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   8. GLOBAL CHROME — room label, nav, modals
+   8. GLOBAL CHROME — room label,
+nav,
+modals
    ══════════════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
@@ -716,10 +643,11 @@
   }
   .nx-toast { max-width: 100% !important; }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    9. MOBILE STICKY BOTTOM ACTION BAR
-   Applied to queue, pipeline, inbox — shows critical actions
+   Applied to queue,
+pipeline,
+inbox — shows critical actions
    ══════════════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
@@ -769,7 +697,6 @@
     flex-shrink: 0;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    10. TAP TARGET ENFORCEMENT (all interactive elements)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -816,7 +743,6 @@
     justify-content: center !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    11. DROPDOWN / MODAL VIEWPORT FIT
    ══════════════════════════════════════════════════════════════════════════ */
@@ -860,7 +786,6 @@
     z-index: 200 !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    12. PROPERTIES / DOSSIER LIST
    ══════════════════════════════════════════════════════════════════════════ */
@@ -886,7 +811,6 @@
   .nx-tab-row::-webkit-scrollbar { display: none; }
   .nx-tab { flex-shrink: 0 !important; min-height: 44px !important; }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    13. STATS / KPI / INTELLIGENCE DASHBOARDS
    ══════════════════════════════════════════════════════════════════════════ */
@@ -913,7 +837,6 @@
     grid-template-columns: 1fr 1fr !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    14. ACQUISITION / PROSPECT VIEWS
    ══════════════════════════════════════════════════════════════════════════ */
@@ -929,7 +852,6 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    15. PHONE-SPECIFIC (≤430px) — tighten spacing further
    ══════════════════════════════════════════════════════════════════════════ */
@@ -966,15 +888,12 @@
     flex: 0 0 210px !important;
   }
 
-  /* Alert cards: tighter */
-  .nx-alert-card { padding: 10px 12px !important; }
 
   /* Queue inspector: full height */
   .nx-queue-inspector {
     max-height: 90vh !important;
   }
 }
-
 /* ══════════════════════════════════════════════════════════════════════════
    16. PREVENT CONTENT CUT-OFF — overflow safety net
    ══════════════════════════════════════════════════════════════════════════ */
@@ -986,9 +905,7 @@
   /* Ensure no element exceeds viewport width */
   .nx-premium-queue,
   .nx-premium-inbox,
-  .nx-alerts,
   .cc-shell,
-  .hq,
   .plv {
     max-width: 100vw !important;
     overflow-x: hidden !important;
@@ -1007,6 +924,6 @@
     min-width: 480px !important;
   }
 }
-
-/* Hidden by default, shown on mobile */
+/* Hidden by default,
+shown on mobile */
 .nx-mobile-only { display: none; }

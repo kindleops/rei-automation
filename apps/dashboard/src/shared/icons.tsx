@@ -10,6 +10,7 @@ export type IconName =
   | 'chevron-down'
   | 'chevron-up'
   | 'chevron-right'
+  | 'chevron-left'
   | 'arrow-up-right'
   | 'clock'
   | 'shield'
@@ -71,11 +72,13 @@ export type IconName =
   | 'heart'
   | 'database'
   | 'x'
+  | 'check-double'
 
 
 
 interface IconProps extends SVGProps<SVGSVGElement> {
   name: IconName
+  size?: number | string
 }
 
 const commonProps = {
@@ -86,7 +89,8 @@ const commonProps = {
   strokeWidth: 1.7,
 }
 
-export const Icon = ({ name, ...props }: IconProps) => {
+export const Icon = ({ name, size, ...rest }: IconProps) => {
+  const props = size ? { width: size, height: size, ...rest } : rest;
   switch (name) {
     case 'search':
       return (
@@ -151,6 +155,12 @@ export const Icon = ({ name, ...props }: IconProps) => {
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
           <path d="m9 6 6 6-6 6" {...commonProps} />
+        </svg>
+      )
+    case 'chevron-left':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+          <path d="m15 18-6-6 6-6" {...commonProps} />
         </svg>
       )
     case 'arrow-up-right':
@@ -567,6 +577,13 @@ export const Icon = ({ name, ...props }: IconProps) => {
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
           <path d="M18 6 6 18M6 6l12 12" {...commonProps} />
+        </svg>
+      )
+    case 'check-double':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+          <path d="M2 13l3 3 7-7" {...commonProps} />
+          <path d="M12 13l3 3 7-7" {...commonProps} />
         </svg>
       )
 

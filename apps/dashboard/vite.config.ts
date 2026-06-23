@@ -1,12 +1,19 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'node:child_process'
+import crypto from 'node:crypto'
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import type { Plugin } from 'vite'
 import { createClient } from '@supabase/supabase-js'
 import { fetchCensusZcta, fetchCensusCounty } from './src/lib/census/censusClient'
 import { transformCensusRow } from './src/lib/census/censusTransform'
 
+const requireFromDashboard = createRequire(import.meta.url)
 const tslibShim = fileURLToPath(new URL('./src/lib/tslib-shim.ts', import.meta.url))
+const reactEntry = path.dirname(requireFromDashboard.resolve('react/package.json'))
+const reactDomEntry = path.dirname(requireFromDashboard.resolve('react-dom/package.json'))
 
 /* ── Underwriting Logic (Shared with API) ────────────────────────── */
 
@@ -592,14 +599,47 @@ const buyerActivityPlugin = (env: Record<string, string>): Plugin => ({
   },
 })
 
+function resolveDevGitIdentity() {
+  const repoRoot = path.resolve(process.cwd(), '../..')
+  const read = (command: string) => {
+    try {
+      return String(execSync(command, { cwd: repoRoot, encoding: 'utf8' })).trim()
+    } catch {
+      return 'unknown'
+    }
+  }
+  const commitSha = read('git rev-parse HEAD')
+  const branch = read('git rev-parse --abbrev-ref HEAD')
+  const worktreeId = crypto.createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
+  return { commitSha, branch, worktreeId }
+}
+
+function resolveBackendProxyTarget(env: Record<string, string>, mode: string): string {
+  const configured = (env.VITE_BACKEND_API_URL || '').trim()
+  if (mode !== 'development') {
+    return configured || 'http://localhost:3000'
+  }
+  // Local API dev server runs on 3000 by default. Port 3001 is often a stale
+  // secondary instance with a corrupted .next cache that returns HTML 500s.
+  if (!configured || /localhost:3001\b/.test(configured)) {
+    return 'http://localhost:3000'
+  }
+  return configured
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const backendProxyTarget = resolveBackendProxyTarget(env, mode)
+  const devIdentity = resolveDevGitIdentity()
   return {
     define: {
       'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA || 'local'),
       'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
-      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard')
+      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard'),
+      'import.meta.env.VITE_DASHBOARD_GIT_SHA': JSON.stringify(devIdentity.commitSha),
+      'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
+      'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
     plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {
@@ -609,26 +649,41 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       proxy: {
         '/api/cockpit': {
-          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/intel': {
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
         },
         '/api/ops': {
-          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
         },
         '/api/internal': {
-          target: env.VITE_BACKEND_API_URL || 'http://localhost:3000',
+          target: backendProxyTarget,
           changeOrigin: true,
           secure: false,
-        }
+        },
+        '/api/workflows': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
       }
     },
     resolve: {
       alias: {
         tslib: tslibShim,
+        react: reactEntry,
+        'react-dom': reactDomEntry,
+        'react/jsx-runtime': path.resolve(reactEntry, 'jsx-runtime.js'),
+        'react/jsx-dev-runtime': path.resolve(reactEntry, 'jsx-dev-runtime.js'),
       },
+      dedupe: ['react', 'react-dom', 'framer-motion'],
     },
   }
 })

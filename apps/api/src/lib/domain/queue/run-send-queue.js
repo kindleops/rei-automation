@@ -1,19 +1,44 @@
 import crypto from "node:crypto";
 import { info, warn } from "@/lib/logging/logger.js";
-import { getSystemFlag, buildDisabledResponse } from "@/lib/system-control.js";
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
+import {
+  blockedRuntimeBrakeResult,
+  evaluateQueueSendRuntimeBrakes,
+} from "@/lib/domain/queue/queue-control-safety.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { 
   processSendQueueItem as defaultProcessSendQueueItem,
   loadQueueRowById
 } from "@/lib/domain/queue/process-send-queue.js";
-import { 
-  loadRunnableSendQueueRows,
-  normalizeSendQueueRow
-} from "@/lib/supabase/sms-engine.js";
-import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
-
+import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
+import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
+import { isLiveCampaignStatus, LIVE_CAMPAIGN_STATES } from "@/lib/domain/campaigns/campaign-state-machine.js";
 function normalizeRows(data) {
   return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Campaign-gated dispatch: a send_queue row that belongs to a campaign is only
+ * eligible to send while that campaign is live (ACTIVE/activating). Rows with no
+ * campaign_id are unaffected and flow exactly as before. Returns a Set of live
+ * campaign ids, or null if the lookup failed (caller fails closed for campaign
+ * rows so a transient error can never dispatch a non-active campaign).
+ */
+async function fetchLiveCampaignIds(supabase) {
+  try {
+    const { data, error } = await supabase
+      .from("campaigns")
+      .select("id,status")
+      .in("status", [...LIVE_CAMPAIGN_STATES]);
+    if (error) {
+      warn("queue.live_campaign_fetch_failed", { error: error.message });
+      return null;
+    }
+    return new Set((data || []).filter((c) => isLiveCampaignStatus(c.status)).map((c) => c.id));
+  } catch (err) {
+    warn("queue.live_campaign_fetch_failed", { error: err?.message });
+    return null;
+  }
 }
 
 function nowIso() {
@@ -62,6 +87,13 @@ async function buildQueueCandidates(limit = 50, now = nowIso(), deps = {}) {
   return buildSupabaseCandidateSummary(limit, now, deps);
 }
 
+async function loadQueueSendBrakeSettings(get_system_value) {
+  return {
+    queue_processor_mode: await get_system_value("queue_processor_mode"),
+    queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+  };
+}
+
 export async function runSendQueue(
   {
     limit = 50,
@@ -75,6 +107,8 @@ export async function runSendQueue(
     (typeof getSystemFlag === "function"
       ? getSystemFlag
       : async () => true);
+  const get_system_value =
+    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
   const log_info = deps.info || info;
   const log_warn = deps.warn || warn;
   const supabase = deps.supabaseClient || defaultSupabase;
@@ -84,6 +118,45 @@ export async function runSendQueue(
   const processing_run_id = crypto.randomUUID();
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
+
+  if (!dry_run) {
+    const runtime_brake = evaluateQueueSendRuntimeBrakes(
+      await loadQueueSendBrakeSettings(get_system_value),
+      { action: "runSendQueue", failClosed: false }
+    );
+    if (!runtime_brake.ok) {
+      log_info("queue_runner.blocked_runtime_brake", {
+        reason: runtime_brake.reason,
+        diagnostics: runtime_brake.diagnostics,
+      });
+      return {
+        status: 423,
+        ...blockedRuntimeBrakeResult(runtime_brake, "runSendQueue"),
+        skipped: true,
+        sent_count: 0,
+        results: [],
+      };
+    }
+  }
+
+  // Canonical lifecycle reconciliation before claiming rows so stale runnable
+  // rows don't re-enter active processing unexpectedly.
+  try {
+    const reconcile = await (deps.reconcileCanonicalQueueLifecycle || reconcileCanonicalQueueLifecycle)({
+      now,
+      dry_run,
+      stale_minutes: deps.stale_queue_minutes ?? 180,
+      lease_minutes: deps.processing_lease_minutes ?? 10,
+      max_rows: 1000,
+      supabaseClient: supabase,
+      supabase,
+    });
+    log_info("queue.lifecycle_reconcile", reconcile);
+  } catch (reconcile_error) {
+    log_warn("queue.lifecycle_reconcile_failed", {
+      error: reconcile_error?.message || "unknown_error",
+    });
+  }
 
   // ── System control gate ────────────────────────────────────────────────
   if (!dry_run) {
@@ -123,7 +196,23 @@ export async function runSendQueue(
 
   // 2. Fetch candidates (no global lock skip)
   const candidates = await buildQueueCandidates(limit, now, { ...deps, dry_run, supabaseClient: supabase });
-  const rows = normalizeRows(candidates.rows);
+  const candidateRows = normalizeRows(candidates.rows);
+
+  // 2b. Campaign-gated dispatch. Rows belonging to a campaign only send while
+  // that campaign is live (ACTIVE/activating). Unlinked rows flow as today.
+  const liveCampaignIds = await fetchLiveCampaignIds(supabase);
+  const rows = candidateRows.filter((row) => {
+    const campaignId = row.campaign_id || row.metadata?.campaign_id || null;
+    if (!campaignId) return true;
+    return liveCampaignIds ? liveCampaignIds.has(campaignId) : false;
+  });
+  const campaign_gated_held_back = candidateRows.length - rows.length;
+  if (campaign_gated_held_back > 0) {
+    log_info("queue.campaign_gated_rows_held", {
+      held_back: campaign_gated_held_back,
+      live_campaigns: liveCampaignIds ? liveCampaignIds.size : 0,
+    });
+  }
 
   log_info("queue_rows_claimed", { count: rows.length });
 
@@ -133,7 +222,8 @@ export async function runSendQueue(
   let skipped_count = 0;
   let processed_count = 0;
 
-  // 3. Process rows with row-level atomic claims
+  // 3. Process rows with canonical row-level atomic claims in processSendQueueItem.
+  // Do not pre-claim here; the processor owns claim->send->finalize.
   for (const row of rows) {
     const queue_item_id = row.id;
     
@@ -143,49 +233,71 @@ export async function runSendQueue(
         continue;
     }
 
-    // Atomic Claim
-    const { data: claimed, error: claim_error } = await supabase
-        .from('send_queue')
-        .update({
-            queue_status: 'processing',
-            is_locked: true,
-            locked_at: new Date().toISOString(),
-            processing_run_id: processing_run_id,
-            metadata: {
-                ...row.metadata,
-            }
-        })
-        .eq('id', queue_item_id)
-        .eq('queue_status', 'queued')
-        .is('is_locked', false)
-        .select()
-        .single();
-
-    if (claim_error || !claimed) {
-        log_warn("queue_row_claim_failed", { queue_item_id });
-        continue;
-    }
+    log_info("queue_row_selected", {
+      queue_item_id,
+      queue_status: row.queue_status,
+      message_type: row.message_type || null,
+      use_case_template: row.use_case_template || null,
+      scheduled_for: row.scheduled_for || null,
+      to_phone_number: row.to_phone_number || null,
+      from_phone_number: row.from_phone_number || null,
+    });
 
     try {
-        const result = await process_item(claimed, { ...deps, now, supabaseClient: supabase });
+        const result = await process_item(row, {
+          ...deps,
+          now,
+          supabaseClient: supabase,
+          processing_run_id,
+          run_started_at,
+        });
         processed_count += 1;
         
         if (result?.sent) {
             sent_count += 1;
-            results.push({ ok: true, queue_item_id, outcome: "sent", reason: result?.reason || null });
-            log_info("queue_row_processed", { queue_item_id, status: 'sent' });
+            results.push({
+              ok: true,
+              queue_item_id,
+              status: 'sent',
+              provider_message_id: result.provider_message_id || null,
+            });
+            log_info("queue_row_provider_send_attempted", {
+              queue_item_id,
+              provider_message_id: result.provider_message_id || null,
+              final_queue_status: result.final_queue_status || result.queue_status || 'sent',
+            });
         } else if (result?.skipped) {
             skipped_count += 1;
-            results.push({ ok: true, queue_item_id, outcome: "skipped", reason: result?.reason || "skipped" });
-            log_info("queue_row_skipped", { queue_item_id, reason: result?.reason || "skipped" });
+            results.push({
+              ok: true,
+              skipped: true,
+              queue_item_id,
+              reason: result.reason || 'skipped',
+              final_queue_status: result.final_queue_status || result.queue_status || null,
+            });
+            log_info("queue_row_skipped", {
+              queue_item_id,
+              reason: result.reason || 'skipped',
+              final_queue_status: result.final_queue_status || result.queue_status || null,
+            });
         } else {
             failed_count += 1;
-            results.push({ ok: true, queue_item_id, outcome: "failed", reason: result?.reason || "send_failed" });
-            log_warn("queue_row_failed", { queue_item_id, reason: result?.reason || "send_failed" });
+            results.push({
+              ok: false,
+              queue_item_id,
+              reason: result?.reason || 'failed',
+              final_queue_status: result?.final_queue_status || result?.queue_status || null,
+            });
+            log_warn("queue_row_failed", {
+              queue_item_id,
+              reason: result?.reason || 'failed',
+              final_queue_status: result?.final_queue_status || result?.queue_status || null,
+            });
         }
     } catch (err) {
+        processed_count += 1;
         failed_count += 1;
-        results.push({ ok: true, queue_item_id, outcome: "failed", reason: err?.message || "unhandled_queue_row_error" });
+        results.push({ ok: false, queue_item_id, reason: err?.message || 'queue_processing_exception' });
         log_warn("queue_row_failed", { queue_item_id, error: err.message });
     }
   }
@@ -195,6 +307,7 @@ export async function runSendQueue(
       claimed_count: rows.length,
       sent_count,
       failed_count,
+      skipped_count,
       batch_duration_ms: Date.now() - new Date(run_started_at).getTime()
   });
 
@@ -205,11 +318,18 @@ export async function runSendQueue(
     skipped_count,
     claimed_count: rows.length,
     processed_count,
+    attempted_count: processed_count,
     results,
     eligible_claim_count: candidates.eligible_claim_count,
     due_rows: candidates.due_rows,
     future_rows: candidates.future_rows,
+    preclaim_scanned_count: candidates.preclaim_scanned_count,
     preclaim_outside_window_excluded_count: candidates.preclaim_outside_window_excluded_count,
+    preclaim_retry_pending_excluded_count: candidates.preclaim_retry_pending_excluded_count,
+    preclaim_paused_name_missing_count: candidates.preclaim_paused_name_missing_count,
+    preclaim_paused_invalid_count: candidates.preclaim_paused_invalid_count,
+    preclaim_paused_max_retries_count: candidates.preclaim_paused_max_retries_count,
+    invalid_queue_row_count: candidates.preclaim_paused_invalid_count,
     skipped_invalid_phone_count: candidates.skipped_invalid_phone_count,
     skipped_missing_body_count: candidates.skipped_missing_body_count,
   };

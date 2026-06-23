@@ -1650,11 +1650,7 @@ const applyAdvancedClauseToSupabase = (query: any, clause: PropertyFilterClause)
   }
 }
 
-export const buildSupabasePropertyQuery = (params?: PropertyQueryParams) => {
-  const normalized = normalizePropertyFilters(params?.filters)
-  const supabase = getSupabaseClient()
-  let query: any = supabase.from('properties').select('*', { count: 'exact' })
-
+const applyPropertyFilterClauses = (query: any, normalized: PropertyFilters) => {
   if (normalized.market) query = query.eq('market', normalized.market)
   if (normalized.propertyType) query = query.eq('property_type', normalized.propertyType)
   if (normalized.ownerType) query = query.eq('owner_type', normalized.ownerType)
@@ -1668,16 +1664,32 @@ export const buildSupabasePropertyQuery = (params?: PropertyQueryParams) => {
   if (normalized.equity === 'freeclear') {
     query = query.or('total_loan_balance.eq.0,offer_vs_loan.ilike.%free and clear%')
   }
-
   if (normalized.search) query = query.or(buildSearchOr(normalized.search))
-
   for (const quickFilter of normalized.quickFilters ?? []) {
     query = applyQuickFilter(query, quickFilter)
   }
-
   for (const clause of normalized.advanced ?? []) {
     query = applyAdvancedClauseToSupabase(query, clause)
   }
+  return query
+}
+
+export const buildSupabasePropertyFilterQuery = (params?: PropertyQueryParams, options?: { head?: boolean }) => {
+  const normalized = normalizePropertyFilters(params?.filters)
+  const supabase = getSupabaseClient()
+  let query: any = supabase.from('properties').select('*', {
+    count: 'exact',
+    head: options?.head ?? false,
+  })
+  query = applyPropertyFilterClauses(query, normalized)
+  return { query, normalized }
+}
+
+export const buildSupabasePropertyQuery = (params?: PropertyQueryParams) => {
+  const supabase = getSupabaseClient()
+  let query: any = supabase.from('properties').select('*', { count: 'exact' })
+
+  query = applyPropertyFilterClauses(query, normalizePropertyFilters(params?.filters))
 
   const sort = params?.sort ?? { column: 'final_acquisition_score', ascending: false }
   query = query.order(sort.column, { ascending: sort.ascending ?? false, nullsFirst: sort.nullsFirst ?? false })
@@ -1776,31 +1788,30 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
   const supabase = getSupabaseClient()
   const take = (rows: AnyRecord[] | null | undefined) => safeArray(rows as AnyRecord[])
 
+  const chunkArray = <T>(arr: T[], size: number): T[][] => {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size))
+  }
+
+  const fetchChunked = async (arr: string[], fetcher: (chunk: string[]) => Promise<{ data: any[] | null }>) => {
+    if (arr.length === 0) return { data: [] }
+    const chunks = chunkArray(arr, 50)
+    const results = await Promise.all(chunks.map(fetcher))
+    return { data: results.flatMap(r => r.data || []) }
+  }
+
+  const cleanIds = (ids: (string | null)[]) => Array.from(new Set(ids.filter(Boolean) as string[]))
+  const oIds = cleanIds(ownerIds)
+  const pIds = cleanIds(propertyIds)
+
   const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts] = await Promise.all([
-    ownerIds.length
-      ? supabase.from('master_owners').select('*').in('master_owner_id', ownerIds).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
-    ownerIds.length
-      ? supabase.from('prospects').select('*').in('master_owner_id', ownerIds).limit(1500)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('phones').select('*').in('property_id', propertyIds).limit(2000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('emails').select('*').in('property_id', propertyIds).limit(2000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('message_events').select('*').in('property_id', propertyIds).order('created_at', { ascending: false }).limit(3000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('send_queue').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(3000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('property_cash_offer_snapshots').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
-    propertyIds.length
-      ? supabase.from('contracts').select('*').in('property_id', propertyIds).order('updated_at', { ascending: false }).limit(1000)
-      : Promise.resolve({ data: [], error: null }),
+    fetchChunked(oIds, async chunk => await supabase.from('master_owners').select('*').in('master_owner_id', chunk).limit(1000)),
+    fetchChunked(oIds, async chunk => await supabase.from('prospects').select('*').in('master_owner_id', chunk).limit(1500)),
+    fetchChunked(pIds, async chunk => await supabase.from('phones').select('*').in('property_id', chunk).limit(2000)),
+    fetchChunked(pIds, async chunk => await supabase.from('emails').select('*').in('property_id', chunk).limit(2000)),
+    fetchChunked(pIds, async chunk => await supabase.from('message_events').select('*').in('property_id', chunk).order('created_at', { ascending: false }).limit(3000)),
+    fetchChunked(pIds, async chunk => await supabase.from('send_queue').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(3000)),
+    fetchChunked(pIds, async chunk => await supabase.from('property_cash_offer_snapshots').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
+    fetchChunked(pIds, async chunk => await supabase.from('contracts').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
   ])
 
   return {
@@ -1914,29 +1925,76 @@ export const fetchPropertyCount = async (params?: PropertyQueryParams): Promise<
   if (!shouldUseSupabase()) {
     return applyPropertyFilters(mockRows().map(normalizeProperty), params?.filters).length
   }
-  const supabase = getSupabaseClient()
-  const normalized = normalizePropertyFilters(params?.filters)
-  let query: any = supabase.from('properties').select('*', { count: 'exact', head: true })
-  if (normalized.market) query = query.eq('market', normalized.market)
-  if (normalized.propertyType) query = query.eq('property_type', normalized.propertyType)
-  if (normalized.ownerType) query = query.eq('owner_type', normalized.ownerType)
-  if (normalized.search) query = query.or(buildSearchOr(normalized.search))
-  const { count } = await query
+  const { query } = buildSupabasePropertyFilterQuery(params, { head: true })
+  const { count, error } = await query
+  if (error) {
+    if (isDev) console.warn('[NEXUS] fetchPropertyCount fallback', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+const countFilteredProperties = async (params: PropertyQueryParams | undefined, mutate?: (query: any) => any): Promise<number> => {
+  if (!shouldUseSupabase()) {
+    const filtered = applyPropertyFilters(mockRows().map(normalizeProperty), params?.filters)
+    if (!mutate) return filtered.length
+    return filtered.length
+  }
+  const { query } = buildSupabasePropertyFilterQuery(params, { head: true })
+  const finalQuery = mutate ? mutate(query) : query
+  const { count, error } = await finalQuery
+  if (error) {
+    if (isDev) console.warn('[NEXUS] countFilteredProperties fallback', error.message)
+    return 0
+  }
   return count ?? 0
 }
 
 export const fetchPropertyStats = async (params?: PropertyQueryParams): Promise<PropertyStats> => {
-  const page = await fetchPropertiesPage({ ...params, page: 1, pageSize: 200 })
-  const totalProperties = page.totalCount
-  const highEquityCount = page.records.filter((property) => (property.equityPercent ?? 0) >= 50).length
-  const distressCount = page.records.filter((property) => property.distressSignals.length > 0).length
-  const taxDelinquentCount = page.records.filter((property) => property.taxDelinquent).length
-  const activeLienCount = page.records.filter((property) => property.activeLien).length
-  const freeClearCount = page.records.filter((property) => (property.loanBalance ?? 0) <= 0).length
-  const avgPriorityScore =
-    page.records.length > 0
-      ? Math.round(page.records.reduce((sum, property) => sum + property.priorityScore, 0) / page.records.length)
-      : 0
+  if (!shouldUseSupabase()) {
+    const page = await fetchPropertiesPage({ ...params, page: 1, pageSize: 200 })
+    const totalProperties = page.totalCount
+    const highEquityCount = page.records.filter((property) => (property.equityPercent ?? 0) >= 50).length
+    const distressCount = page.records.filter((property) => property.distressSignals.length > 0).length
+    const taxDelinquentCount = page.records.filter((property) => property.taxDelinquent).length
+    const activeLienCount = page.records.filter((property) => property.activeLien).length
+    const freeClearCount = page.records.filter((property) => (property.loanBalance ?? 0) <= 0).length
+    const avgPriorityScore =
+      page.records.length > 0
+        ? Math.round(page.records.reduce((sum, property) => sum + property.priorityScore, 0) / page.records.length)
+        : 0
+    return {
+      totalProperties,
+      highEquityCount,
+      distressCount,
+      avgPriorityScore,
+      taxDelinquentCount,
+      activeLienCount,
+      freeClearCount,
+    }
+  }
+
+  const [
+    totalProperties,
+    highEquityCount,
+    taxDelinquentCount,
+    activeLienCount,
+    freeClearCount,
+    distressCount,
+    avgSample,
+  ] = await Promise.all([
+    countFilteredProperties(params),
+    countFilteredProperties(params, (query) => query.gte('equity_percent', 50)),
+    countFilteredProperties(params, (query) => query.eq('tax_delinquent', true)),
+    countFilteredProperties(params, (query) => query.eq('active_lien', true)),
+    countFilteredProperties(params, (query) => query.or('total_loan_balance.eq.0,offer_vs_loan.ilike.%free and clear%')),
+    countFilteredProperties(params, (query) => query.or('tax_delinquent.eq.true,active_lien.eq.true,property_flags_text.ilike.%distress%,seller_tags_text.ilike.%distress%')),
+    fetchPropertiesPage({ ...params, page: 1, pageSize: 100 }),
+  ])
+
+  const avgPriorityScore = avgSample.records.length > 0
+    ? Math.round(avgSample.records.reduce((sum, property) => sum + (property.finalAcquisitionScore ?? property.priorityScore), 0) / avgSample.records.length)
+    : 0
 
   return {
     totalProperties,

@@ -3,9 +3,12 @@ import crypto from "node:crypto";
 
 import ENV from "@/lib/config/env.js";
 import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
+import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { warn, info } from "@/lib/logging/logger.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
-import { getSystemFlag } from "@/lib/system-control.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 
 // Pre-send content guard patterns.
 const BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
@@ -56,6 +59,89 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = lower(value);
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function objectMetadata(value = null) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export function isManualInboxSendContext(context = {}) {
+  const metadata = objectMetadata(context.metadata);
+  return (
+    asBoolean(context.manual_operator_send, false) ||
+    asBoolean(metadata.manual_operator_send, false) ||
+    lower(context.source) === "manual_inbox" ||
+    lower(context.send_source) === "manual_inbox" ||
+    lower(metadata.source) === "manual_inbox" ||
+    lower(metadata.send_source) === "manual_inbox"
+  );
+}
+
+export function shouldBypassTextgridRuntimeBrakeForManualSend(runtime_brake = {}, context = {}) {
+  return (
+    runtime_brake?.ok === false &&
+    runtime_brake.reason === "queue_emergency_stop_active" &&
+    isManualInboxSendContext(context)
+  );
+}
+
+export function evaluateTextgridRuntimeBrakeForSend(runtime_brake = {}, context = {}) {
+  const metadata = { ...objectMetadata(context.metadata) };
+  const source = clean(context.source) || clean(metadata.source) || null;
+  const send_source = clean(context.send_source) || clean(metadata.send_source) || null;
+  const manual_operator_send =
+    asBoolean(context.manual_operator_send, false) ||
+    asBoolean(metadata.manual_operator_send, false);
+  const normalized_metadata = {
+    ...metadata,
+    ...(source ? { source } : {}),
+    ...(send_source ? { send_source } : {}),
+    ...(manual_operator_send ? { manual_operator_send: true } : {}),
+  };
+
+  if (runtime_brake?.ok !== false) {
+    return {
+      ok: true,
+      blocked: false,
+      bypassed_queue_emergency_stop_for_manual_send: false,
+      metadata: normalized_metadata,
+    };
+  }
+
+  if (shouldBypassTextgridRuntimeBrakeForManualSend(runtime_brake, {
+    source,
+    send_source,
+    manual_operator_send,
+    metadata,
+  })) {
+    return {
+      ok: true,
+      blocked: false,
+      reason: runtime_brake.reason,
+      bypassed_queue_emergency_stop_for_manual_send: true,
+      metadata: {
+        ...normalized_metadata,
+        bypassed_queue_emergency_stop_for_manual_send: true,
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    blocked: true,
+    error: runtime_brake.error || "runtime_brake_active",
+    reason: runtime_brake.reason || "runtime_brake_active",
+    message: runtime_brake.message || "Send blocked by runtime safety brake.",
+    metadata: normalized_metadata,
+  };
 }
 
 function safeEqual(left, right) {
@@ -160,12 +246,18 @@ export function buildTextgridSendPayload({
   body = "",
   from = "",
   to = "",
+  statusCallback = null,
 } = {}) {
-  return {
+  const payload = {
     body: String(body ?? ""),
     from: clean(from),
     to: clean(to),
   };
+  const resolved_callback = clean(statusCallback);
+  if (resolved_callback) {
+    payload.StatusCallback = resolved_callback;
+  }
+  return payload;
 }
 
 function buildTextgridWebhookDigests(raw_body, webhook_secret) {
@@ -259,10 +351,17 @@ function isRetryable(status) {
 export function mapTextgridFailureBucket(result) {
   if (!result || result.ok || result.success) return null;
 
+  const classified = classifyTextGridProviderError({
+    message: result.error_message,
+    status: result.error_status,
+    code: result.error_code,
+    data: result.raw || result.data,
+  });
+  if (classified.failure_bucket) return classified.failure_bucket;
+
   const status = result.error_status ?? 0;
   const msg = String(result.error_message ?? "").toLowerCase();
 
-  // 1. Blacklist Pair Logic (21610)
   if (msg.includes("21610") || msg.includes("blacklist")) {
     return "provider_blacklist_pair";
   }
@@ -294,10 +393,66 @@ export async function sendTextgridSMS({
   client_reference_id = null,
   message_type = "sms",
   seller_first_name = null,
+  bypass_system_control = false,
+  bypass_content_guards = false,
+  bypass_reason = null,
+  source = null,
+  send_source = null,
+  manual_operator_send = false,
+  metadata = null,
+  statusCallback = null,
 }) {
+  const send_metadata = { ...objectMetadata(metadata) };
+  const send_context = {
+    source: clean(source) || clean(send_metadata.source) || null,
+    send_source: clean(send_source) || clean(send_metadata.send_source) || null,
+    manual_operator_send:
+      asBoolean(manual_operator_send, false) ||
+      asBoolean(send_metadata.manual_operator_send, false),
+    metadata: send_metadata,
+  };
+
+  if (hasSupabaseConfig()) {
+    const runtime_brake = evaluateQueueSendRuntimeBrakes(
+      {
+        queue_processor_mode: await getSystemValue("queue_processor_mode"),
+        queue_emergency_stop_at: await getSystemValue("queue_emergency_stop_at"),
+      },
+      { action: "sendTextgridSMS", failClosed: false }
+    );
+    const runtime_brake_decision = evaluateTextgridRuntimeBrakeForSend(runtime_brake, send_context);
+    if (!runtime_brake_decision.ok) {
+      info("send.blocked_runtime_brake", {
+        reason: runtime_brake_decision.reason,
+        to_input: to,
+        client_reference_id,
+        bypass_system_control: Boolean(bypass_system_control),
+        source: send_context.source,
+        send_source: send_context.send_source,
+        manual_operator_send: send_context.manual_operator_send,
+      });
+      throw new TextGridError(
+        `sendTextgridSMS: ${runtime_brake_decision.reason} - send blocked by runtime safety brake`,
+        { to, from, body }
+      );
+    }
+    Object.assign(send_metadata, runtime_brake_decision.metadata);
+    if (runtime_brake_decision.bypassed_queue_emergency_stop_for_manual_send) {
+      info("send.bypassed_runtime_brake", {
+        reason: runtime_brake_decision.reason,
+        to_input: to,
+        client_reference_id,
+        source: send_context.source || "manual_inbox",
+        send_source: send_context.send_source || "manual_inbox",
+        manual_operator_send: true,
+        bypassed_queue_emergency_stop_for_manual_send: true,
+      });
+    }
+  }
+
   // ── System control gate ────────────────────────────────────────────────
   const sms_enabled = await getSystemFlag("outbound_sms_enabled", { failClosedOnError: false });
-  if (!sms_enabled) {
+  if (!sms_enabled && !bypass_system_control) {
     info("send.blocked_system_control", {
       flag: "outbound_sms_enabled",
       to_input: to,
@@ -307,6 +462,14 @@ export async function sendTextgridSMS({
       "sendTextgridSMS: outbound_sms_enabled flag is false — send blocked by system_control",
       { to, from, body }
     );
+  }
+  if (!sms_enabled && bypass_system_control) {
+    info("send.bypassed_system_control", {
+      flag: "outbound_sms_enabled",
+      to_input: to,
+      client_reference_id,
+      bypass_reason: clean(bypass_reason) || "manual_operator_send",
+    });
   }
 
   const normalized_to = normalizePhone(to);
@@ -328,7 +491,7 @@ export async function sendTextgridSMS({
 
   // ── Content guards ────────────────────────────────────────────────────
   // Block messages with blank seller greeting ("Hello ,").
-  if (BLANK_GREETING_RE.test(trimmed_body)) {
+  if (!bypass_content_guards && BLANK_GREETING_RE.test(trimmed_body)) {
     info("send.blocked_missing_name", {
       reason: "blank_seller_greeting",
       client_reference_id,
@@ -341,7 +504,7 @@ export async function sendTextgridSMS({
   }
 
   // Block messages with unresolved template placeholders.
-  if (UNRESOLVED_PLACEHOLDER_RE.test(trimmed_body)) {
+  if (!bypass_content_guards && UNRESOLVED_PLACEHOLDER_RE.test(trimmed_body)) {
     info("send.blocked_missing_name", {
       reason: "unresolved_placeholder",
       client_reference_id,
@@ -354,7 +517,7 @@ export async function sendTextgridSMS({
   }
 
   // Block if explicit seller_first_name is empty.
-  if (seller_first_name !== null && String(seller_first_name).trim() === "") {
+  if (!bypass_content_guards && seller_first_name !== null && String(seller_first_name).trim() === "") {
     info("send.blocked_missing_name", {
       reason: "seller_first_name_blank",
       client_reference_id,
@@ -380,10 +543,14 @@ export async function sendTextgridSMS({
     }
 
     const send_endpoint = getTextgridSendEndpoint(credentials.account_sid);
+    const status_callback_enabled =
+      (ENV.TEXTGRID_STATUS_CALLBACK_ENABLED === true) ||
+      ["1", "true", "yes", "on"].includes(lower(process.env.TEXTGRID_STATUS_CALLBACK_ENABLED || ""));
     const payload = buildTextgridSendPayload({
       body: trimmed_body,
       from: normalized_from,
       to: normalized_to,
+      statusCallback: status_callback_enabled ? clean(statusCallback) : null,
     });
 
     const response = await fetch(send_endpoint, {
@@ -473,6 +640,12 @@ export async function sendTextgridSMS({
       from: normalized_from,
       body: trimmed_body,
       endpoint: send_endpoint,
+      metadata: {
+        ...send_metadata,
+        ...(send_context.source ? { source: send_context.source } : {}),
+        ...(send_context.send_source ? { send_source: send_context.send_source } : {}),
+        ...(send_context.manual_operator_send ? { manual_operator_send: true } : {}),
+      },
     };
   } catch (error) {
     const tge =
@@ -499,22 +672,26 @@ export async function sendTextgridSMS({
       client_reference_id,
     });
 
+    const classified = classifyTextGridProviderError(tge);
     try {
-      await recordSystemAlert({
-        subsystem: "textgrid",
-        code: "send_failed",
-        severity: tge.status && tge.status >= 500 ? "high" : "warning",
-        retryable: Boolean(tge.status ? isRetryable(tge.status) : true),
-        summary: `TextGrid send failed: ${tge.message}`,
-        dedupe_key: `textgrid_send_${clean(tge.status) || "unknown"}`,
-        affected_ids: [tge.to || normalized_to, tge.from || normalized_from],
-        metadata: {
-          status: tge.status,
-          data: tge.data,
-          raw_text: tge.raw_text,
-          endpoint: tge.endpoint || getTextgridSendEndpoint(credentials.account_sid || null),
-        },
-      });
+      if (!classified.compliance_related) {
+        await recordSystemAlert({
+          subsystem: "textgrid",
+          code: "send_failed",
+          severity: tge.status && tge.status >= 500 ? "high" : "warning",
+          retryable: classified.retryable,
+          summary: `TextGrid send failed: ${tge.message}`,
+          dedupe_key: `textgrid_send_${clean(tge.status) || "unknown"}`,
+          affected_ids: [tge.to || normalized_to, tge.from || normalized_from],
+          metadata: {
+            status: tge.status,
+            data: tge.data,
+            raw_text: tge.raw_text,
+            provider_code: classified.provider_code || null,
+            endpoint: tge.endpoint || getTextgridSendEndpoint(credentials.account_sid || null),
+          },
+        });
+      }
     } catch (alert_error) {
       warn("textgrid.send_failed_alert_record_failed", {
         message: clean(alert_error?.message) || "unknown",

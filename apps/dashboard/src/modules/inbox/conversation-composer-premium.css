@@ -1,0 +1,680 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEXUS CONVERSATION COMPOSER — Premium Operating Layer v4
+   Scoped to .nx-workspace-pane-surface--sms-thread and descendants only.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.nx-workspace-pane-surface--sms-thread {
+  --nx-conv-outbound-bg: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--nx-accent, #3b82f6) 42%, rgba(8, 18, 38, 0.92)),
+    color-mix(in srgb, var(--nx-accent, #3b82f6) 18%, rgba(4, 10, 24, 0.96))
+  );
+  --nx-conv-outbound-border: color-mix(in srgb, var(--nx-accent, #3b82f6) 55%, transparent);
+  --nx-conv-outbound-glow: color-mix(in srgb, var(--nx-accent, #3b82f6) 22%, transparent);
+  --nx-conv-outbound-text: rgba(248, 252, 255, 0.98);
+  --nx-conv-glass: rgba(12, 18, 32, 0.62);
+  --nx-conv-glass-border: rgba(255, 255, 255, 0.09);
+  --nx-conv-glass-highlight: rgba(255, 255, 255, 0.06);
+}
+
+[data-nexus-theme="light"] .nx-workspace-pane-surface--sms-thread {
+  --nx-conv-glass: rgba(255, 255, 255, 0.82);
+  --nx-conv-glass-border: rgba(15, 23, 42, 0.1);
+  --nx-conv-glass-highlight: rgba(255, 255, 255, 0.9);
+  --nx-conv-outbound-text: #f8fbff;
+}
+
+/* ── Premium context header ─────────────────────────────────────────────── */
+.nx-workspace-pane-surface--sms-thread .nx-chat-header-v2 {
+  position: relative;
+  z-index: 2;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  overflow: hidden;
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-chat-header-v2::before {
+  content: '';
+  position: absolute;
+  inset: -40% -20%;
+  background:
+    radial-gradient(ellipse 55% 80% at 12% 20%, color-mix(in srgb, var(--nx-accent, #3b82f6) 28%, transparent), transparent 68%),
+    radial-gradient(ellipse 45% 70% at 88% 10%, color-mix(in srgb, var(--nx-accent, #3b82f6) 14%, transparent), transparent 72%),
+    radial-gradient(ellipse 60% 50% at 50% 120%, rgba(255, 255, 255, 0.04), transparent 70%);
+  animation: nx-conv-header-flow 22s ease-in-out infinite;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+@keyframes nx-conv-header-flow {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.72; }
+  50% { transform: translate3d(2%, -1%, 0) scale(1.03); opacity: 0.95; }
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-chat-header-v2__left,
+.nx-workspace-pane-surface--sms-thread .nx-chat-header-v2__actions {
+  position: relative;
+  z-index: 1;
+}
+
+.nx-conv-header-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.nx-conv-header-identity {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nx-conv-header-name {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--nx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(280px, 100%);
+}
+
+.nx-conv-header-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nx-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-conv-header-phone svg { width: 10px; height: 10px; opacity: 0.65; }
+
+.nx-conv-header-address {
+  font-size: 11.5px;
+  color: var(--nx-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-conv-header-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.nx-conv-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass-highlight);
+  color: var(--nx-text-secondary);
+  white-space: nowrap;
+}
+
+.nx-conv-metric.is-accent {
+  color: var(--nx-accent, #3b82f6);
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 30%, transparent);
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 10%, transparent);
+}
+
+.nx-conv-metric.is-flag {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-chat-action-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.18s, color 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-chat-action-icon:hover {
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 10%, var(--nx-bg-hover));
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 22%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--nx-accent, #3b82f6) 18%, transparent);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-chat-action-icon.is-active {
+  color: var(--nx-accent, #3b82f6);
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 14%, transparent);
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 32%, transparent);
+}
+
+/* ── Liquid-glass state controls ────────────────────────────────────────── */
+.nx-workspace-pane-surface--sms-thread .nx-thread-state-bar {
+  position: relative;
+  z-index: 2;
+  padding: 6px 12px;
+  gap: 6px;
+  background: color-mix(in srgb, var(--nx-conv-glass) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--nx-conv-glass-border);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-state-pill {
+  padding: 4px 9px 4px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--nx-conv-glass-border) !important;
+  background: var(--nx-conv-glass-highlight) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-state-pill__dropdown {
+  background: var(--nx-conv-glass);
+  border: 1px solid var(--nx-conv-glass-border);
+  border-radius: 10px;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ── Premium bubbles with tails ─────────────────────────────────────────── */
+.nx-workspace-pane-surface--sms-thread .nx-chat-bubble {
+  position: relative;
+  max-width: min(520px, 78%);
+  padding: 11px 14px 10px;
+  border-radius: 16px;
+  font-size: 13.5px;
+  line-height: 1.52;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-outbound .nx-chat-bubble {
+  background: var(--nx-conv-outbound-bg);
+  color: var(--nx-conv-outbound-text);
+  border: 1px solid var(--nx-conv-outbound-border);
+  border-radius: 16px 16px 4px 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 28px var(--nx-conv-outbound-glow);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-outbound .nx-chat-bubble::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  bottom: 8px;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  border-right: 1px solid var(--nx-conv-outbound-border);
+  border-bottom: 1px solid var(--nx-conv-outbound-border);
+  border-radius: 0 0 3px 0;
+  transform: rotate(-35deg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-inbound .nx-chat-bubble {
+  background: var(--nx-conv-glass);
+  border: 1px solid var(--nx-conv-glass-border);
+  border-radius: 16px 16px 16px 4px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-inbound .nx-chat-bubble::after {
+  content: '';
+  position: absolute;
+  left: -5px;
+  bottom: 8px;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  border-left: 1px solid var(--nx-conv-glass-border);
+  border-bottom: 1px solid var(--nx-conv-glass-border);
+  border-radius: 0 0 0 3px;
+  transform: rotate(35deg);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-bubble-wrap.is-scheduled .nx-chat-bubble {
+  border-style: dashed;
+  opacity: 0.92;
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 8%, var(--nx-conv-glass));
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-bubble-wrap.is-sending .nx-chat-bubble {
+  animation: nx-bubble-sending-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes nx-bubble-sending-pulse {
+  0%, 100% { opacity: 0.88; }
+  50% { opacity: 1; }
+}
+
+/* Date separators */
+.nx-conv-date-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--nx-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nx-conv-date-separator::before,
+.nx-conv-date-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--nx-conv-glass-border), transparent);
+}
+
+/* Glass receipt badges */
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-delivered {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-sent {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-sending,
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-queued {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-scheduled {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-cancelled {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-delivery-pill.is-failed {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.nx-scheduled-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.nx-scheduled-actions button {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: transparent;
+  color: var(--nx-text-muted);
+  cursor: pointer;
+}
+
+.nx-scheduled-actions button:hover {
+  color: var(--nx-text-primary);
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 30%, transparent);
+}
+
+/* ── Premium composer dock ──────────────────────────────────────────────── */
+.nx-workspace-pane-surface--sms-thread .nx-composer {
+  position: relative;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  padding: 0;
+}
+
+.nx-composer-dock {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+
+.nx-composer-dock__side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.nx-composer-dock__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nx-composer-dock__input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: color-mix(in srgb, var(--nx-conv-glass-highlight) 70%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+
+.nx-composer-dock__input-wrap:focus-within {
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 45%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 0 0 3px color-mix(in srgb, var(--nx-accent, #3b82f6) 14%, transparent);
+}
+
+.nx-composer-dock__input-wrap textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  max-height: 200px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--nx-text-primary);
+  font-size: 13.5px;
+  line-height: 1.45;
+  font-family: inherit;
+}
+
+.nx-composer-dock__tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.nx-composer-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--nx-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.nx-composer-tool-btn:hover:not(:disabled) {
+  color: var(--nx-text-primary);
+  background: var(--nx-conv-glass-highlight);
+  border-color: var(--nx-conv-glass-border);
+}
+
+.nx-composer-tool-btn.is-active {
+  color: var(--nx-accent, #3b82f6);
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 12%, transparent);
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 28%, transparent);
+}
+
+.nx-composer-tool-btn svg { width: 15px; height: 15px; }
+
+.nx-workspace-pane-surface--sms-thread .nx-send-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #3b82f6) 50%, transparent);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--nx-accent, #3b82f6) 88%, #fff 12%),
+    color-mix(in srgb, var(--nx-accent, #3b82f6) 62%, #000 38%)
+  );
+  color: #fff;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--nx-accent, #3b82f6) 28%, transparent);
+  transition: transform 0.12s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-send-button.is-ready:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--nx-accent, #3b82f6) 36%, transparent);
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-send-button:disabled {
+  opacity: 0.38;
+  box-shadow: none;
+}
+
+/* Operator polish preview */
+.nx-polish-preview {
+  margin: 0 10px 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #3b82f6) 24%, transparent);
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 6%, var(--nx-conv-glass));
+  animation: nx-qap-rise 0.22s ease-out;
+}
+
+.nx-polish-preview__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--nx-accent, #3b82f6);
+  margin-bottom: 4px;
+}
+
+.nx-polish-preview__text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--nx-text-primary);
+  margin-bottom: 8px;
+}
+
+.nx-polish-preview__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.nx-polish-preview__actions button {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass-highlight);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+}
+
+.nx-polish-preview__actions button.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 78%, #000 22%);
+  border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 45%, transparent);
+}
+
+/* Quick actions portal */
+.nx-qap-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: rgba(4, 8, 18, 0.42);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: nx-qap-fade 0.2s ease-out;
+}
+
+@keyframes nx-qap-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes nx-qap-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx-qap-anchor {
+  position: fixed;
+  z-index: 12001;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, 58vh);
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  animation: nx-qap-rise 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Voice recording premium */
+.nx-voice-recording-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 10px 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #3b82f6) 30%, transparent);
+  background: color-mix(in srgb, var(--nx-accent, #3b82f6) 8%, transparent);
+}
+
+.nx-voice-recording-ring {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--nx-accent, #3b82f6) 55%, transparent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--nx-accent, #3b82f6) 35%, transparent);
+  animation: nx-voice-ring-pulse 1.2s ease-out infinite;
+  display: grid;
+  place-items: center;
+}
+
+@keyframes nx-voice-ring-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--nx-accent, #3b82f6) 40%, transparent); }
+  70% { box-shadow: 0 0 0 12px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.nx-voice-recording-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.nx-voice-recording-meta strong {
+  display: block;
+  font-size: 11px;
+  color: var(--nx-text-primary);
+}
+
+.nx-voice-recording-meta span {
+  font-size: 10px;
+  color: var(--nx-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-voice-recording-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.nx-voice-recording-actions button {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-conv-glass-border);
+  background: var(--nx-conv-glass-highlight);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+}
+
+/* Width modes */
+.nx-workspace-pane-surface--sms-thread .is-layout-compact .nx-conv-header-metrics .nx-conv-metric:nth-child(n+4),
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-compact .nx-conv-header-metrics .nx-conv-metric:nth-child(n+4) {
+  display: none;
+}
+
+.nx-workspace-pane-surface--sms-thread .is-layout-compact .nx-conv-header-address,
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-compact .nx-conv-header-address {
+  display: none;
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-composer.is-layout-compact .nx-composer-dock__tools .nx-composer-tool-btn:not(.nx-composer-tool-btn--essential),
+.nx-workspace-pane-surface--sms-thread .is-layout-compact .nx-composer-dock__tools .nx-composer-tool-btn:not(.nx-composer-tool-btn--essential) {
+  display: none;
+}
+
+.nx-workspace-pane-surface--sms-thread .is-layout-medium .nx-conv-header-metrics .nx-conv-metric:nth-child(n+6),
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-medium .nx-conv-header-metrics .nx-conv-metric:nth-child(n+6) {
+  display: none;
+}
+
+.nx-workspace-pane-surface--sms-thread .is-layout-expanded .nx-chat-bubble,
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-expanded .nx-chat-bubble {
+  max-width: min(580px, 72%);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-layout-full .nx-chat-bubble,
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-full .nx-chat-bubble {
+  max-width: min(640px, 68%);
+}
+
+.nx-workspace-pane-surface--sms-thread .is-layout-full .nx-conv-header-name,
+.nx-workspace-pane-surface--sms-thread .nx-chat-container.is-layout-full .nx-conv-header-name {
+  max-width: 360px;
+}
+
+.nx-workspace-pane-surface--sms-thread .nx-composer.is-layout-full .nx-composer-dock,
+.nx-workspace-pane-surface--sms-thread .is-layout-full .nx-composer-dock {
+  padding: 10px 14px 12px;
+}
+
+/* Hide legacy inline clutter */
+.nx-composer-toolbar,
+.nx-composer-ai-suggestions,
+.nx-composer-input-area {
+  display: none !important;
+}

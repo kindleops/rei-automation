@@ -1,15 +1,16 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
-import type { ThreadDossier } from '../../../lib/data/threadDossier'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
-import type { PanelMode } from '../inbox-layout-state'
+import type { DealContext } from '../../../lib/data/dealContext'
+import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
+import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
 import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
   buildAerialViewUrl,
   buildStreetViewUrl,
-} from '../inbox-normalization'
-import type { NormalizedPropertySnapshot } from '../inbox-normalization'
+} from '../../../domain/inbox/inbox-normalization'
+import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
 import { Icon, type IconName } from '../../../shared/icons'
 import { 
   formatCurrency, 
@@ -33,16 +34,17 @@ import {
 
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { Phase3Intelligence } from '../../../lib/data/inboxIntelligencePhase3'
-import type { ViewLayoutMode } from '../view-layout'
+import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
-import { ErrorBoundary } from '../../../shared/ErrorBoundary'
 
 import { detectPropertyCategory } from '../helpers/propertyHelpers'
 import { WatchBell } from '../../../shared/WatchBell'
 import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../../lib/data/censusData'
 import type { CensusData } from '../../../lib/data/censusData'
+import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
+import '../../deal-intelligence/deal-intelligence-25.css'
 
 const formatMoney = formatCurrency
 const fmtPhone = formatPhone
@@ -127,6 +129,10 @@ type WorkflowThread = InboxWorkflowThread & Partial<{
   primary_owner_address: string
   mailing_address: string
   sellerFirstName: string
+  firstName: string
+  masterOwnerId: string
+  tax_amount: number
+  opt_out: boolean
   motivationScore: number
   equityPercent: number
   equityAmount: number
@@ -242,7 +248,169 @@ type WorkflowThread = InboxWorkflowThread & Partial<{
   satellite_image: string
   lastMessageBody: string
   aiSummary: string
+  aiDraft: string | null
+  nextSystemAction: string
+  best_contact_window: string
+  sms_eligible: boolean
+  email_eligible: boolean
+  matching_flags: string
+  person_flags_text: string
+  calculated_age: number
+  prospect_age: number
+  displayAddress: string
+  units_count: number
+  year_built: number
+  beds: number | string
+  baths: number | string
+  sqft: number | string
+  stories: number | string
+  propertyType: string
+  arv_confidence_score: number
+  underwriting_state: any
+  lastInboundAt: string | null
+  lastOutboundAt: string | null
 }>
+
+// ── HOOKS ─────────────────────────────────────────────────────────────────
+
+function useDossierModel(thread: WorkflowThread, dealContext: DealContext | null) {
+  const asStringArray = (val: any): string[] => {
+    if (Array.isArray(val)) return val
+    if (typeof val === 'string' && val.trim()) return val.split(',').map(s => s.trim())
+    return []
+  }
+
+  return useMemo(() => {
+    const pros = dealContext?.prospect || (thread as any).prospect_data || {}
+    const prop = dealContext?.property || (thread as any).property_data || {}
+    const own = dealContext?.master_owner || (thread as any).master_owner_data || {}
+    const val = dealContext?.valuation || (thread as any).valuation_data || {}
+    const buyer = dealContext?.buyer_match || (thread as any).buyer_match_data || {}
+    const census = dealContext?.census || (thread as any).census_data || {}
+    const conv = dealContext?.conversation || (thread as any).thread_state_data || {}
+    const status = dealContext?.deal_status || (thread as any).pipeline_summary || {}
+    const acq = dealContext?.acquisition_decision || (thread as any).acquisition_decision_data || {}
+    
+    return {
+      // Identity
+      threadKey: dealContext?.identity?.thread_key || thread.threadKey || thread.id,
+      propertyId: dealContext?.identity?.property_id || thread.propertyId,
+      prospectId: dealContext?.identity?.prospect_id || thread.prospectId,
+      masterOwnerId: dealContext?.identity?.master_owner_id || thread.masterOwnerId,
+      canonicalE164: dealContext?.identity?.canonical_e164 || thread.canonicalE164,
+
+      // Prospect
+      prospectName: pros.full_name || thread.prospect_full_name || thread.displayName,
+      prospectFirstName: pros.first_name || thread.firstName,
+      age: pros.age || (thread as any).calculated_age || (thread as any).prospect_age,
+      maritalStatus: pros.marital_status || (thread as any).marital_status,
+      gender: pros.gender || (thread as any).gender,
+      language: pros.language || pros.language_preference || thread.language_preference || thread.contactLanguage,
+      education: pros.education_model || (thread as any).education_model,
+      income: pros.est_household_income || (thread as any).est_household_income,
+      netWorth: pros.net_asset_value || (thread as any).net_asset_value,
+      buyingPower: pros.buying_power || (thread as any).buying_power,
+      occupation: pros.occupation || (thread as any).occupation,
+      occupationGroup: pros.occupation_group || (thread as any).occupation_group,
+      phoneCarrier: pros.phone_carrier || (thread as any).phone_carrier,
+      prospectBestPhone: pros.prospect_best_phone || thread.prospect_best_phone || thread.phoneNumber,
+      prospectBestEmail: pros.prospect_best_email || thread.prospect_best_email || (thread as any).best_email_1,
+      smsEligible: pros.sms_eligible ?? (thread as any).sms_eligible,
+      emailEligible: pros.email_eligible ?? (thread as any).email_eligible,
+      motivationScore: pros.motivation_score || thread.motivationScore || thread.priorityScore,
+      urgencyScore: pros.urgency_score || thread.urgency_score,
+      financialPressureScore: pros.financial_pressure_score || (thread as any).financial_pressure_score,
+      contactConfidence: pros.prospect_contact_score || thread.prospect_contact_score || thread.prospect_phone_score,
+      matchTags: asStringArray(pros.person_flags_text || (thread as any).matching_flags),
+
+      // Property
+      address: prop.full_address || thread.propertyAddress || thread.displayAddress,
+      city: prop.city || thread.property_address_city,
+      state: prop.state || thread.property_address_state,
+      zip: prop.zip || thread.property_address_zip,
+      market: prop.market || thread.market || thread.displayMarket,
+      propertyType: prop.property_type || thread.propertyType,
+      propertyClass: prop.property_class || thread.property_class,
+      beds: prop.beds || thread.total_bedrooms || thread.beds,
+      baths: prop.baths || thread.total_baths || thread.baths,
+      sqft: prop.sqft || thread.building_square_feet || thread.sqft,
+      lotAcreage: prop.lot_acreage || thread.lot_acreage,
+      lotSqft: prop.lot_square_feet || (thread as any).lot_square_feet,
+      units: prop.units_count || thread.units_count,
+      yearBuilt: prop.year_built || thread.year_built,
+      effectiveYearBuilt: prop.effective_year_built || thread.effective_year_built,
+      stories: prop.stories || thread.stories,
+      construction: prop.construction_type || thread.construction_type,
+      exteriorWalls: prop.exterior_walls || thread.exterior_walls,
+      floorCover: prop.floor_cover || thread.floor_cover,
+      roofCover: prop.roof_cover || thread.roof_cover,
+      hvac: prop.air_conditioning || prop.heating_type || thread.air_conditioning || thread.heating_type,
+      basement: prop.basement || thread.basement,
+      zoning: prop.zoning || thread.zoning,
+      floodZone: prop.flood_zone || (thread as any).flood_zone,
+      condition: prop.building_condition || thread.building_condition,
+      quality: prop.building_quality || (thread as any).building_quality,
+      rehabLevel: prop.rehab_level || (thread as any).rehab_level,
+
+      // Owner
+      ownerName: own.full_name || thread.ownerDisplayName || thread.ownerName,
+      ownerType: own.owner_type || thread.ownerType || thread.owner_type_guess,
+      mailingAddress: own.primary_owner_address || thread.primary_owner_address,
+      absentee: own.absentee_owner || thread.isAbsentee,
+      ownerOccupied: own.owner_occupied || thread.isOwnerOccupied,
+      ownershipYears: own.ownership_years || thread.ownership_years,
+      portfolioCount: own.portfolio_property_count || thread.property_count,
+      portfolioUnits: own.portfolio_total_units || thread.portfolio_total_units,
+      portfolioValue: own.portfolio_total_value || thread.portfolio_total_value,
+      portfolioEquity: own.portfolio_total_equity || thread.portfolio_total_equity,
+
+      // Financial
+      estimatedValue: val.estimated_value || thread.estimatedValue,
+      arv: val.estimated_arv || thread.estimated_arv,
+      equityAmount: val.equity_amount || thread.equityAmount,
+      equityPercent: val.equity_percent || thread.equityPercent,
+      totalLoanBalance: val.total_loan_balance || thread.total_loan_balance,
+      taxAmount: val.tax_amount || thread.tax_amount,
+      lastSalePrice: val.sale_price || thread.sale_price,
+      lastSaleDate: val.sale_date || thread.sale_date,
+      estimatedRepairCost: prop.estimated_repair_cost || (thread as any).estimatedRepairCost,
+      cashOffer: status.offer_price || (thread as any).cashOffer,
+      isOutOfState: own.absentee_owner || thread.isAbsentee,
+      freshness: dealContext?.freshness || (thread as any).freshness_data || {},
+
+      // Buyer
+      buyerCount: buyer.buyer_count || buyer.buyer_match_count || 0,
+      buyerDemand: buyer.demand_score || buyer.buyer_pressure || 0,
+      highFitCount: buyer.high_fit_count || 0,
+      cashBuyerPct: buyer.cash_buyer_percentage || 0,
+
+      // Acquisition
+      strategy: acq.strategy_label || acq.recommended_strategy || (thread as any).best_strategy,
+      acquisitionScore: acq.acquisition_score || (thread as any).aos_score,
+      suggestedOffer: acq.suggested_offer || (thread as any).recommended_cash_offer,
+      acquisitionConfidence: acq.confidence_score || (thread as any).confidence,
+      riskFlags: acq.risk_flags || [],
+
+      // Census
+      medianIncome: census.median_household_income || (thread as any).census_median_income,
+      vacancyRate: census.vacancy_rate || (thread as any).vacancy_rate,
+
+      // Conversation
+      intent: conv.seller_intent || thread.uiIntent || thread.detected_intent,
+      sentiment: conv.sentiment || thread.sentiment,
+      summary: conv.ai_summary || thread.aiSummary,
+      nextAction: conv.next_best_action || thread.nextSystemAction,
+      lastMessageBody: conv.latest_message_body || thread.latestMessageBody,
+      lastMessageAt: conv.latest_message_at || thread.lastMessageAt,
+      
+      // Compliance
+      isSuppressed: dealContext?.compliance?.is_suppressed || (thread as any).suppressed,
+      isDnc: dealContext?.compliance?.dnc || thread.opt_out,
+
+      raw: { thread, dealContext }
+    }
+  }, [thread, dealContext])
+}
 
 // ── Helper Utilities ──────────────────────────────────────────────────────
 
@@ -265,99 +433,6 @@ const isPresent = (value: unknown): boolean => {
 }
 
 const asStr = (value: unknown): string => normalizeText(value)
-
-const hasValue = (value: unknown): boolean => {
-  if (value === null || value === undefined) return false
-  if (typeof value === 'number') return Number.isFinite(value) && value !== 0
-  return String(value).trim().length > 0
-}
-
-const firstPresent = (...values: unknown[]) => {
-  for (const value of values) {
-    if (hasValue(value)) return value
-  }
-  return undefined
-}
-
-const buildHydratedThread = (
-  thread: WorkflowThread,
-  intelligence: ThreadIntelligenceRecord | null,
-  threadDossier: ThreadDossier | null,
-): WorkflowThread => {
-  const property = (threadDossier?.property ?? {}) as Record<string, unknown>
-  const prospect = (threadDossier?.prospect ?? {}) as Record<string, unknown>
-  const owner = (threadDossier?.master_owner ?? {}) as Record<string, unknown>
-  const state = (threadDossier?.inbox_thread_state ?? {}) as Record<string, unknown>
-  const intel = (intelligence ?? {}) as Record<string, unknown>
-  const base = (thread ?? {}) as unknown as Record<string, unknown>
-
-  const hydrated: Record<string, unknown> = {
-    ...owner,
-    ...prospect,
-    ...property,
-    ...state,
-    ...intel,
-    ...base,
-  }
-
-  hydrated.latitude = firstPresent(base.latitude, base.lat, intel.latitude, intel.lat, property.latitude, property.lat)
-  hydrated.longitude = firstPresent(base.longitude, base.lng, intel.longitude, intel.lng, property.longitude, property.lng)
-  hydrated.lat = hydrated.latitude
-  hydrated.lng = hydrated.longitude
-
-  hydrated.phoneNumber = firstPresent(
-    base.phoneNumber, base.phone, base.displayPhone, base.canonicalE164, base.sellerPhone,
-    prospect.best_phone, prospect.phone, prospect.phone_number,
-    owner.best_phone, owner.phone, owner.phone_number,
-    intel.best_phone, intel.phone, intel.phone_number,
-  )
-  hydrated.prospect_best_phone = firstPresent(
-    base.prospect_best_phone, base.best_phone,
-    prospect.best_phone, prospect.phone, prospect.phone_number,
-    owner.best_phone,
-    intel.best_phone,
-  )
-  hydrated.displayPhone = firstPresent(base.displayPhone, hydrated.phoneNumber)
-  hydrated.canonicalE164 = firstPresent(
-    base.canonicalE164,
-    prospect.canonical_e164,
-    owner.canonical_e164,
-    intel.canonical_e164,
-    hydrated.phoneNumber,
-  )
-
-  hydrated.propertyAddress = firstPresent(
-    base.propertyAddress, base.property_address,
-    property.property_address, property.address,
-    intel.property_address, intel.address,
-  )
-  hydrated.propertyAddressFull = firstPresent(
-    base.propertyAddressFull, base.property_address_full, hydrated.propertyAddress,
-    property.property_address_full, property.property_address, property.address,
-    intel.property_address_full, intel.property_address, intel.address,
-  )
-
-  hydrated.ownerName = firstPresent(
-    base.ownerName, base.owner_name, base.sellerName, base.seller_display_name,
-    owner.owner_full_name, owner.owner_name, owner.display_name, owner.full_name,
-    prospect.full_name, prospect.name,
-    intel.owner_full_name, intel.owner_name, intel.prospect_full_name,
-  )
-  hydrated.prospect_full_name = firstPresent(
-    base.prospect_full_name,
-    prospect.full_name, prospect.name,
-    intel.prospect_full_name,
-    hydrated.ownerName,
-  )
-  hydrated.prospect_best_email = firstPresent(
-    base.prospect_best_email, base.best_email_1,
-    prospect.best_email, prospect.email,
-    owner.best_email, owner.email,
-    intel.best_email,
-  )
-
-  return hydrated as unknown as WorkflowThread
-}
 
 
 const getAvailableFields = (group: Record<string, unknown>): string[] =>
@@ -568,6 +643,48 @@ const SectionEmptyState = ({ text }: { text: string }) => (
   </div>
 )
 
+const DealContextPayloadCard = ({
+  thread,
+  intelligence,
+}: {
+  thread: WorkflowThread
+  intelligence: ThreadIntelligenceRecord | null
+}) => {
+  const records = [
+    ['property_data', (intelligence as any)?.property_data ?? (thread as any).property_data],
+    ['master_owner_data', (intelligence as any)?.master_owner_data ?? (thread as any).master_owner_data],
+    ['prospect_data', (intelligence as any)?.prospect_data ?? (thread as any).prospect_data],
+    ['phone_data', (intelligence as any)?.phone_data ?? (thread as any).phone_data],
+    ['email_data', (intelligence as any)?.email_data ?? (thread as any).email_data],
+    ['thread_state_data', (intelligence as any)?.thread_state_data ?? (thread as any).thread_state_data],
+    ['queue_data', (intelligence as any)?.queue_data ?? (thread as any).queue_data],
+    ['latest_message_event_data', (intelligence as any)?.latest_message_event_data ?? (thread as any).latest_message_event_data],
+    ['valuation_data', (intelligence as any)?.valuation_data ?? (thread as any).valuation_data],
+    ['buyer_match_data', (intelligence as any)?.buyer_match_data ?? (thread as any).buyer_match_data],
+  ].filter(([, value]) => value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0)
+
+  if (records.length === 0) return null
+
+  return (
+    <DossierCard className="nx-deal-context-payload">
+      <div className="nx-dossier-section__title">
+        <Icon name="database" />
+        <span>DEALCONTEXT PAYLOAD</span>
+      </div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {records.map(([label, value]) => (
+          <details key={label} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{label}</summary>
+            <pre style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: 12, lineHeight: 1.45 }}>
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </DossierCard>
+  )
+}
+
 const ScoreRing = ({
   label,
   value,
@@ -592,6 +709,101 @@ const ScoreRing = ({
       <div className="nx-score-ring__copy">
         <label>{label}</label>
         <p>{sublabel || 'Signal calibrated from live thread context.'}</p>
+      </div>
+    </div>
+  )
+}
+
+function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: WorkflowThread; dealContext?: DealContext | null; onOpenComps: () => void }) {
+  const [snapshot, setSnapshot] = useState<any>(null)
+  const [snapshotUnavailable, setSnapshotUnavailable] = useState(false)
+
+  useEffect(() => {
+    if (!thread.propertyId) return
+    let cancelled = false
+    setSnapshotUnavailable(false)
+    const base = getBackendBaseUrl()
+    const secret = getBackendSecret()
+    fetch(`${base}/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ops-dashboard-secret': secret,
+      },
+    })
+      .then(res => res.json())
+      .then(res => {
+        if (cancelled) return
+        if (res.ok && res.data) {
+          setSnapshot(res.data)
+        } else {
+          console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: res.error || 'no_data' })
+          setSnapshotUnavailable(true)
+        }
+      })
+      .catch(err => {
+        if (cancelled) return
+        console.log('[VALUATION_SNAPSHOT_FALLBACK_TO_CONTEXT]', { propertyId: thread.propertyId, reason: err?.message || 'fetch_failed' })
+        setSnapshotUnavailable(true)
+      })
+    return () => { cancelled = true }
+  }, [thread.propertyId])
+
+  // Fallback chain: snapshot → dealContext → thread row
+  const arv = snapshot?.estimated_arv || dealContext?.estimated_arv || (thread as any).estimatedValue || (thread as any).arv
+  const offer = snapshot?.target_offer || dealContext?.cashOffer || (thread as any).cashOffer
+  const spread = snapshot ? (snapshot.expected_assignment_low + ' – ' + snapshot.expected_assignment_high) : 'Unknown'
+  const confidence = snapshot?.arv_confidence_score || 0
+
+  const handlePushUnderwriting = async () => {
+    if (!thread.propertyId) return
+    const res = await fetch(`/api/cockpit/properties/${thread.propertyId}/push-to-underwriting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_key: thread.threadKey })
+    })
+    const result = await res.json()
+    if (result.ok) alert('Deal pushed to underwriting workflow.')
+  }
+
+  return (
+    <div className="nx-deal-intel-card">
+      <div className="nx-deal-intel-card__head">
+        <Icon name="radar" />
+        <strong>Deal Intelligence</strong>
+        {snapshot && <span className="nx-deal-intel-card__date">Snapshot: {formatDate(snapshot.created_at)}</span>}
+        {snapshotUnavailable && !snapshot && (
+          <span className="nx-deal-intel-card__fallback-label" title="Valuation snapshot unavailable — showing thread row estimates">Valuation unavailable</span>
+        )}
+      </div>
+      
+      <div className="nx-deal-intel-card__grid">
+        <div className="nx-deal-intel-item">
+          <label>Estimated ARV</label>
+          <strong>{arv ? formatMoney(Number(arv)) : '—'}</strong>
+        </div>
+        <div className="nx-deal-intel-item">
+          <label>Confidence</label>
+          <strong>{confidence ? confidence + '%' : 'Low'}</strong>
+        </div>
+        <div className="nx-deal-intel-item is-highlight">
+          <label>Suggested Offer</label>
+          <strong>{offer ? formatMoney(Number(offer)) : '—'}</strong>
+        </div>
+        <div className="nx-deal-intel-item">
+          <label>Exp. Spread</label>
+          <strong>{spread !== 'Unknown' ? '$' + spread : '—'}</strong>
+        </div>
+      </div>
+
+      <div className="nx-deal-intel-card__footer">
+        <button type="button" className="nx-deal-intel-btn" onClick={onOpenComps}>
+          <Icon name="layers" />
+          <span>Open Comps</span>
+        </button>
+        <button type="button" className="nx-deal-intel-btn is-primary" onClick={handlePushUnderwriting}>
+          <Icon name="briefcase" />
+          <span>Push to Underwriting</span>
+        </button>
       </div>
     </div>
   )
@@ -1083,11 +1295,17 @@ const PanelSection = ({ title, icon = 'grid', children }: { title: string; icon?
 )
 
 // ── Census Property Panel ────────────────────────────────────────────────────
-const CensusPropertyPanel = ({ thread }: { thread: WorkflowThread }) => {
+const CensusPropertyPanel = ({ thread, dealContext }: { thread: WorkflowThread; dealContext?: DealContext | null }) => {
   const [data, setData] = useState<CensusData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (dealContext?.census && dealContext.census.status !== 'missing') {
+      setData(dealContext.census as unknown as CensusData)
+      setLoading(false)
+      return
+    }
+    
     let active = true
     setLoading(true)
     loadCensusForProperty(thread)
@@ -1101,7 +1319,7 @@ const CensusPropertyPanel = ({ thread }: { thread: WorkflowThread }) => {
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [thread?.id])
+  }, [thread?.id, dealContext?.census])
 
   if (loading) {
     return (
@@ -1187,9 +1405,10 @@ const PropertyIntelFields = ({
     ['BEDS', thread.total_bedrooms || thread.beds],
     ['BATHS', thread.total_baths || thread.baths],
     ['SQFT', thread.building_square_feet || thread.sqft],
-    ['UNITS', thread.units_count],
+    ['UNITS', thread.units_count || (thread as any).number_of_units],
     ['YEAR BUILT', thread.year_built],
     ['EFFECTIVE YEAR BUILT', thread.effective_year_built],
+    ['PPU', (thread.units_count || (thread as any).number_of_units) ? formatMoney(Math.round(Number(thread.estimatedValue || 0) / (thread.units_count || (thread as any).number_of_units))) : null],
     ['ESTIMATED VALUE', formatMoney(Number(thread.estimatedValue || 0))],
     ['LAST SALE PRICE', formatMoney(Number(thread.sale_price || 0))],
     ['LAST SALE DATE', formatDate(thread.sale_date)],
@@ -1280,36 +1499,41 @@ const PropertyIntelFields = ({
 
 export const PropertyIntelligenceTabs = ({
   thread,
+  dealContext,
 }: {
   thread: WorkflowThread
   intelligence: ThreadIntelligenceRecord | null
+  dealContext?: DealContext | null
 }) => {
   const [activeTab, setActiveTab] = useState('overview')
-  const address = thread.displayAddress || 'Property Unknown'
+  const prop = dealContext?.property || (thread as any).property_data || {}
+  const val = dealContext?.valuation || (thread as any).valuation_data || {}
+  
+  const address = prop.full_address || thread.propertyAddress || thread.displayAddress || 'Property Unknown'
   const extLinks = buildPropertyExternalLinks(address)
 
   const fields = useMemo(() => ({
-    unitCount: thread.units_count,
-    yearBuilt: thread.year_built,
-    effectiveYear: thread.effective_year_built,
-    constructionType: thread.construction_type,
-    exteriorWalls: thread.exterior_walls,
-    floorCover: thread.floor_cover,
-    basement: thread.basement,
-    hvacType: thread.air_conditioning || thread.heating_type,
-    roofCover: thread.roof_cover,
-    beds: thread.total_bedrooms || thread.beds,
-    baths: thread.total_baths || thread.baths,
-    sqft: thread.building_square_feet || thread.sqft,
-    stories: thread.stories,
-    garage: thread.garage,
-    propertyType: thread.propertyType,
-    occupancy: thread.building_condition,
-    county: thread.property_county_name,
-    apn: thread.propertyId,
-    zoning: thread.zoning,
-    lotSize: thread.lot_acreage,
-  }), [thread])
+    unitCount: prop.units_count || thread.units_count,
+    yearBuilt: prop.year_built || thread.year_built,
+    effectiveYear: prop.effective_year_built || thread.effective_year_built,
+    constructionType: prop.construction_type || thread.construction_type,
+    exteriorWalls: prop.exterior_walls || thread.exterior_walls,
+    floorCover: prop.floor_cover || thread.floor_cover,
+    basement: prop.basement || thread.basement,
+    hvacType: prop.air_conditioning || prop.heating_type || thread.air_conditioning || thread.heating_type,
+    roofCover: prop.roof_cover || thread.roof_cover,
+    beds: prop.beds || thread.total_bedrooms || thread.beds,
+    baths: prop.baths || thread.total_baths || thread.baths,
+    sqft: prop.sqft || thread.building_square_feet || thread.sqft,
+    stories: prop.stories || thread.stories,
+    garage: prop.garage || thread.garage,
+    propertyType: prop.property_type || thread.propertyType,
+    occupancy: prop.building_condition || thread.building_condition,
+    county: prop.county || thread.property_county_name,
+    apn: prop.parcel_id || thread.propertyId,
+    zoning: prop.zoning || thread.zoning,
+    lotSize: prop.lot_acreage || thread.lot_acreage,
+  }), [prop, thread])
 
   const availableCount = getAvailableFields(fields).length
   const tabs = PROPERTY_TABS.map((t) => t.id === 'overview' ? { ...t, count: availableCount } : t)
@@ -1357,30 +1581,30 @@ export const PropertyIntelligenceTabs = ({
             <div className="nx-field-group">
               <div className="nx-field-group__title"><Icon name="trending-up" /><span>Valuation</span></div>
               <div className="nx-data-grid">
-                <DossierMetric label="Est. Value" value={formatMoney(Number(thread.estimatedValue || 0))} icon="trending-up" accent="green" />
-                <DossierMetric label="Assessed Value" value={formatMoney(Number(thread.assd_total_value || 0))} icon="stats" />
-                <DossierMetric label="Last Sale Price" value={formatMoney(Number(thread.sale_price || 0))} icon="arrow-up-right" />
-                <DossierMetric label="Equity Amount" value={formatMoney(Number(thread.equityAmount || 0))} icon="zap" accent="green" />
-                <DossierMetric label="Equity %" value={formatPercent(Number(thread.equityPercent || 0))} icon="activity" accent="green" />
+                <DossierMetric label="Est. Value" value={formatMoney(Number(val.estimated_value || thread.estimatedValue || 0))} icon="trending-up" accent="green" />
+                <DossierMetric label="Assessed Value" value={formatMoney(Number(val.assd_total_value || thread.assd_total_value || 0))} icon="stats" />
+                <DossierMetric label="Last Sale Price" value={formatMoney(Number(val.sale_price || thread.sale_price || 0))} icon="arrow-up-right" />
+                <DossierMetric label="Equity Amount" value={formatMoney(Number(val.equity_amount || thread.equityAmount || 0))} icon="zap" accent="green" />
+                <DossierMetric label="Equity %" value={formatPercent(Number(val.equity_percent || thread.equityPercent || 0))} icon="activity" accent="green" />
               </div>
             </div>
             <MissingDataDisclosure fields={getMissingFields({
-              estimatedValue: thread.estimatedValue,
-              assessedValue: thread.assd_total_value,
-              lastSalePrice: thread.sale_price,
-              equityAmount: thread.equityAmount,
-              equityPercent: thread.equityPercent,
+              estimatedValue: val.estimated_value || thread.estimatedValue,
+              assessedValue: val.assd_total_value || thread.assd_total_value,
+              lastSalePrice: val.sale_price || thread.sale_price,
+              equityAmount: val.equity_amount || thread.equityAmount,
+              equityPercent: val.equity_percent || thread.equityPercent,
             })} />
           </>
         )}
         {activeTab === 'property' && (
-          <PropertyIntelFields thread={thread} subTab="property" />
+          <PropertyIntelFields thread={{ ...thread, ...prop }} subTab="property" />
         )}
         {activeTab === 'location' && (
-          <PropertyIntelFields thread={thread} subTab="location" />
+          <PropertyIntelFields thread={{ ...thread, ...prop }} subTab="location" />
         )}
         {activeTab === 'tax' && (
-          <PropertyIntelFields thread={thread} subTab="tax" />
+          <PropertyIntelFields thread={{ ...thread, ...prop, ...val }} subTab="tax" />
         )}
         {activeTab === 'links' && (
           <div className="nx-links-grid">
@@ -1397,19 +1621,23 @@ export const PropertyIntelligenceTabs = ({
 
 // ── 7. Seller / Owner Intelligence ────────────────────────────────────────
 
-export const SellerOwnerCard = ({ thread }: { thread: WorkflowThread }) => {
-  const ownerName = thread.displayName || 'Unknown Seller'
-  const phone = formatPhone(thread.phoneNumber || thread.canonicalE164 || thread.displayPhone)
-  const phoneConfidence = thread.prospect_phone_score
-  const language = thread.contactLanguage || thread.best_language
-  const ownerType = thread.ownerType || thread.owner_type_guess
-  const mailingLocation = thread.primary_owner_address
-  const ownershipYears = thread.ownership_years
-  const motivationScore = thread.motivationScore || thread.priorityScore
-  const lastIntent = thread.uiIntent || thread.detected_intent
-  const lastInbound = thread.lastInboundAt
+export const SellerOwnerCard = ({ thread, dealContext }: { thread: WorkflowThread; dealContext?: DealContext | null }) => {
+  const own = dealContext?.master_owner || (thread as any).master_owner_data || {}
+  const pros = dealContext?.prospect || (thread as any).prospect_data || {}
+  
+  const ownerName = own.full_name || thread.ownerDisplayName || thread.ownerName || 'Unknown Seller'
+  const phone = formatPhone(own.best_phone || pros.prospect_best_phone || thread.phoneNumber || thread.canonicalE164 || thread.displayPhone)
+  const phoneConfidence = own.phone_score || pros.prospect_phone_score || thread.prospect_phone_score
+  const language = own.language || pros.language || thread.contactLanguage || thread.best_language
+  const ownerType = own.owner_type || thread.ownerType || thread.owner_type_guess
+  const mailingLocation = own.primary_owner_address || thread.primary_owner_address
+  const ownershipYears = own.ownership_years || thread.ownership_years
+  const motivationScore = pros.motivation_score || thread.motivationScore || thread.priorityScore
+  const lastIntent = dealContext?.conversation?.seller_intent || thread.uiIntent || thread.detected_intent
+  const lastInbound = dealContext?.freshness?.latest_message_at || thread.lastInboundAt
   const lastOutbound = thread.lastOutboundAt
-  const email = thread.prospect_best_email || (thread as any).best_email_1
+  const email = own.best_email || pros.prospect_best_email || (thread as any).best_email_1
+  
   const initials = ownerName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
   const hasIdentityData = [phone, phoneConfidence, language, email, mailingLocation, ownershipYears, motivationScore, lastIntent, lastInbound, lastOutbound].some((v) => isPresent(v))
 
@@ -1425,8 +1653,8 @@ export const SellerOwnerCard = ({ thread }: { thread: WorkflowThread }) => {
           <strong>{ownerName}</strong>
           <div className="nx-seller-chips">
             {isPresent(ownerType) && <QuietBadge label={asStr(ownerType)} />}
-            {thread.isAbsentee && <QuietBadge label="Absentee" tone="warning" />}
-            {thread.isOwnerOccupied && <QuietBadge label="Owner occupied" tone="success" />}
+            {own.absentee_owner || thread.isAbsentee ? <QuietBadge label="Absentee" tone="warning" /> : null}
+            {own.owner_occupied || thread.isOwnerOccupied ? <QuietBadge label="Owner occupied" tone="success" /> : null}
           </div>
         </div>
       </div>
@@ -1436,10 +1664,15 @@ export const SellerOwnerCard = ({ thread }: { thread: WorkflowThread }) => {
         <MetricInline label="Language" value={isPresent(language) ? asStr(language) : null} />
         <MetricInline label="Motivation score" value={formatScore(motivationScore)} tone="warning" />
         <MetricInline label="Last intent" value={isPresent(lastIntent) ? asStr(lastIntent) : null} />
-        <MetricInline label="Last inbound" value={lastInbound ? formatRelativeTime(lastInbound) : null} />
-        <MetricInline label="Last outbound" value={lastOutbound ? formatRelativeTime(lastOutbound) : null} />
+        <MetricInline label="Last inbound" value={lastInbound ? formatRelativeTime(lastInbound as any) : null} />
+        <MetricInline label="Last outbound" value={lastOutbound ? formatRelativeTime(lastOutbound as any) : null} />
         <MetricInline label="Mailing address" value={isPresent(mailingLocation) ? asStr(mailingLocation) : null} />
         <MetricInline label="Ownership years" value={isPresent(ownershipYears) ? `${toChip(ownershipYears)} yrs` : null} />
+        <MetricInline label="Portfolio Count" value={toChip(own.portfolio_property_count)} />
+        <MetricInline label="Total Units" value={toChip(own.portfolio_total_units)} />
+        <MetricInline label="Portfolio Value" value={formatMoney(own.portfolio_total_value)} tone="success" />
+        <MetricInline label="Portfolio Equity" value={formatMoney(own.portfolio_total_equity)} tone="success" />
+        <MetricInline label="Tax Delinquent Props" value={toChip(own.tax_delinquent_count)} tone={own.tax_delinquent_count > 0 ? 'danger' : undefined} />
       </div>
       {!hasIdentityData && <SectionEmptyState text="Owner contact intelligence has not been enriched yet." />}
     </DossierCard>
@@ -1476,7 +1709,7 @@ export const LinkedRecordsCard = ({ thread }: { thread: WorkflowThread }) => {
         {offerId && <LinkedRecordButton label="Offer App" url={`${baseUrl}/offers/${offerId}`} icon="zap" variant="internal" />}
         {underwritingId && <LinkedRecordButton label="Underwriting App" url={`${baseUrl}/underwriting/${underwritingId}`} icon="stats" variant="internal" />}
         {contractId && <LinkedRecordButton label="Contract App" url={`${baseUrl}/contracts/${contractId}`} icon="briefing" variant="internal" />}
-        {titleId && <LinkedRecordButton label="Title App" url={`${baseUrl}/title/${titleId}`} icon="briefing" variant="internal" />}
+        {titleId && <LinkedRecordButton label="Closing Desk" url={`/closing-desk`} icon="briefing" variant="internal" />}
       </div>
     </DossierCard>
   )
@@ -1570,7 +1803,7 @@ const MiniTimeline = ({ thread, messages, limit = 8 }: { thread: WorkflowThread;
   const syntheticItems = [
     { label: 'First touch', time: thread.updatedAt, detail: 'Initial contact sequence opened.', done: true },
     { label: 'AI classified', time: thread.lastMessageAt, detail: thread.uiIntent || getSellerStageVisual(thread.conversationStage).label, done: true },
-    { label: 'Auto response queued', time: thread.aiDraft ? thread.updatedAt : null, detail: thread.aiDraft || 'No draft queued.', done: Boolean(thread.aiDraft) },
+    { label: 'Auto-reply prepared', time: thread.aiDraft ? thread.updatedAt : null, detail: thread.aiDraft || 'No draft prepared.', done: Boolean(thread.aiDraft) },
     { label: 'Delivered', time: thread.lastOutboundAt, detail: (thread as any).deliveryStatus || 'Outbound delivery recorded.', done: Boolean(thread.lastOutboundAt) },
     { label: 'Escalation triggered', time: thread.inboxStatus === 'needs_review' ? thread.updatedAt : null, detail: 'Operator review required.', done: thread.inboxStatus === 'needs_review', active: thread.inboxStatus === 'needs_review' },
     { label: 'Offer generated', time: thread.updatedAt, detail: formatMoney(Number(thread.cashOffer || 0)) || 'Awaiting offer model.', done: isPresent(thread.cashOffer) },
@@ -1626,21 +1859,27 @@ export const DossierTabNav = ({ active, onChange }: { active: IntelligenceTabId;
   </nav>
 )
 
-export const OverviewPanel = ({ thread, messages }: { thread: WorkflowThread; messages: ThreadMessage[] }) => {
+export const OverviewPanel = ({ thread, messages, onOpenComps, dealContext }: { thread: WorkflowThread; messages: ThreadMessage[]; onOpenComps: () => void; dealContext?: DealContext | null }) => {
+  const dossier = useDossierModel(thread, dealContext || null)
   const action = getNextBestAction(thread)
-  const latestInbound = messages.find((message) => message.direction === 'inbound')?.body || thread.latestMessageBody || thread.lastMessageBody
+  const latestInbound = dossier.lastMessageBody
   return (
     <div className="nx-intel-panel-grid">
       <PanelSection title="Acquisition Command" icon="spark">
         <FieldGrid columns={3}>
-          <FieldTile label="Acquisition Score" value={formatScore(thread.finalAcquisitionScore || (thread as any).ai_score)} tone="good" />
-          <FieldTile label="Deal Strength" value={thread.priority || thread.priorityBucket} tone="accent" />
-          <FieldTile label="Close Probability" value={formatPercent(Number(thread.motivationScore || 0))} />
-          <FieldTile label="Intent" value={thread.uiIntent || thread.detected_intent} />
+          <FieldTile label="Acquisition Score" value={formatScore(dossier.acquisitionScore)} tone="good" />
+          <FieldTile label="Strategy" value={dossier.strategy} tone="accent" />
+          <FieldTile label="Sug. Offer" value={formatMoney(dossier.suggestedOffer)} tone="good" />
+          <FieldTile label="Intent" value={dossier.intent} />
           <FieldTile label="Lead Status" value={getStatusVisual(thread.inboxStatus).label} />
-          <FieldTile label="Responsiveness" value={thread.lastInboundAt ? 'Responsive' : 'N/A'} />
+          <FieldTile label="Close Prob." value={formatPercent(asNum((dossier as any).closeProbability || dossier.acquisitionScore))} />
         </FieldGrid>
+
       </PanelSection>
+
+      {/* Deal Intelligence Card */}
+      <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps} />
+
       <PanelSection title="AI Recommendation" icon="spark">
         <div className="nx-intel-copy-card">
           <strong>{action.title}</strong>
@@ -1662,32 +1901,43 @@ export const OverviewPanel = ({ thread, messages }: { thread: WorkflowThread; me
   )
 }
 
-export const ProspectPanel = ({ thread }: { thread: WorkflowThread; intelligence: ThreadIntelligenceRecord | null }) => {
+export const ProspectPanel = ({ thread, dealContext }: { thread: WorkflowThread; intelligence: ThreadIntelligenceRecord | null; dealContext?: DealContext | null }) => {
+  const pros = dealContext?.prospect || (thread as any).prospect_data || {}
+  const badges = buildMatchBadges({ ...thread, ...pros })
 
-  const badges = buildMatchBadges(thread)
   return (
     <div className="nx-intel-panel-grid">
       <PanelSection title="Prospect Identity" icon="users">
         <div className="nx-match-badge-row">{badges.map((badge) => <MatchBadge key={badge.label} label={badge.label} tone={badge.tone} />)}</div>
         <FieldGrid>
-          <FieldTile label="Prospect Name" value={thread.prospect_full_name || thread.displayName} tone="accent" />
-          <FieldTile label="Matching Confidence" value={formatScore(thread.prospect_contact_score || thread.prospect_phone_score)} />
-          <FieldTile label="Contact Match Tags" value={(thread as any).matching_flags || (thread as any).person_flags_text} />
-          <FieldTile label="Age" value={(thread as any).prospect_age} />
-          <FieldTile label="Marital Status" value={(thread as any).marital_status} />
-          <FieldTile label="Gender" value={(thread as any).gender} />
-          <FieldTile label="Language" value={thread.language_preference || thread.contactLanguage} />
-          <FieldTile label="Education" value={(thread as any).education_model} />
-          <FieldTile label="Household Income" value={(thread as any).est_household_income} />
-          <FieldTile label="Net Asset Value" value={(thread as any).net_asset_value} />
-          <FieldTile label="Buying Power" value={(thread as any).buying_power} />
-          <FieldTile label="Phone Carrier" value={(thread as any).phone_carrier} />
-          <FieldTile label="Occupation" value={(thread as any).occupation} />
-          <FieldTile label="Occupation Group" value={(thread as any).occupation_group} />
-          <FieldTile label="Phone Number" value={formatPhone(thread.prospect_best_phone || thread.phoneNumber)} tone="good" />
-          <FieldTile label="Email" value={thread.prospect_best_email} />
-          <FieldTile label="SMS Eligible" value={formatBoolean((thread as any).sms_eligible)} />
-          <FieldTile label="Email Eligible" value={formatBoolean((thread as any).email_eligible)} />
+          <FieldTile label="Prospect Name" value={pros.full_name || thread.prospect_full_name || thread.displayName} tone="accent" />
+          <FieldTile label="Matching Confidence" value={formatScore(pros.prospect_contact_score || thread.prospect_contact_score || thread.prospect_phone_score)} />
+          <FieldTile label="Contact Match Tags" value={asStr(pros.person_flags_text || (thread as any).matching_flags || (thread as any).person_flags_text)} />
+          <FieldTile label="Age" value={asStr(pros.age || (thread as any).prospect_age)} />
+          <FieldTile label="Marital Status" value={asStr(pros.marital_status || (thread as any).marital_status)} />
+          <FieldTile label="Gender" value={asStr(pros.gender || (thread as any).gender)} />
+          <FieldTile label="Language" value={asStr(pros.language || thread.language_preference || thread.contactLanguage)} />
+          <FieldTile label="Education" value={asStr(pros.education_model || (thread as any).education_model)} />
+          <FieldTile label="Household Income" value={formatMoney(pros.est_household_income || (thread as any).est_household_income)} />
+          <FieldTile label="Net Asset Value" value={formatMoney(pros.net_asset_value || (thread as any).net_asset_value)} />
+          <FieldTile label="Buying Power" value={asStr(pros.buying_power || (thread as any).buying_power)} />
+          <FieldTile label="Phone Carrier" value={asStr(pros.phone_carrier || (thread as any).phone_carrier)} />
+          <FieldTile label="Occupation" value={asStr(pros.occupation || (thread as any).occupation)} />
+          <FieldTile label="Occupation Group" value={asStr(pros.occupation_group || (thread as any).occupation_group)} />
+          <FieldTile label="Phone Number" value={formatPhone(pros.prospect_best_phone || thread.prospect_best_phone || thread.phoneNumber)} tone="good" />
+          <FieldTile label="Email" value={pros.prospect_best_email || thread.prospect_best_email} />
+          <FieldTile label="SMS Eligible" value={formatBoolean(pros.sms_eligible ?? (thread as any).sms_eligible)} />
+          <FieldTile label="Email Eligible" value={formatBoolean(pros.email_eligible ?? (thread as any).email_eligible)} />
+        </FieldGrid>
+      </PanelSection>
+
+      <PanelSection title="Motivation & Timing" icon="activity">
+        <FieldGrid>
+          <FieldTile label="Motivation Score" value={formatScore(pros.motivation_score || (thread as any).motivationScore || (thread as any).priority_score)} tone="good" />
+          <FieldTile label="Urgency Score" value={formatScore(pros.urgency_score || (thread as any).urgency_score)} tone="warn" />
+          <FieldTile label="Fin. Pressure" value={formatScore(pros.financial_pressure_score || (thread as any).financial_pressure_score)} tone="bad" />
+          <FieldTile label="Lead Source" value={asStr(pros.lead_source || (thread as any).lead_source)} />
+          <FieldTile label="Seller Stage" value={asStr(pros.seller_stage || (thread as any).seller_stage)} />
         </FieldGrid>
       </PanelSection>
     </div>
@@ -1773,7 +2023,7 @@ export const ConversationPanel = ({ thread, messages }: { thread: WorkflowThread
           <FieldTile label="Timeline" value={thread.lastMessageAt ? formatRelativeTime(thread.lastMessageAt) : null} />
           <FieldTile label="Thread State" value={getStatusVisual(thread.inboxStatus).label} />
           <FieldTile label="Current Stage" value={getSellerStageVisual(thread.conversationStage).label} />
-          <FieldTile label="Queued Reply" value={thread.aiDraft} />
+          <FieldTile label="Draft Reply" value={thread.aiDraft} />
         </FieldGrid>
       </PanelSection>
     </div>
@@ -2581,19 +2831,22 @@ export const PropertyHeroCard = ({
 const ContactIntelligenceCard = ({
   thread,
   snapshot,
+  dealContext,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
   intelligence: ThreadIntelligenceRecord | null
+  dealContext?: DealContext | null
 }) => {
+  const dossier = useDossierModel(thread, dealContext || null)
   const [activeTab, setActiveTab] = useState<'prospect' | 'owner' | 'portfolio' | 'financial' | 'property' | 'phone' | 'email'>('prospect')
   const [propertyTab, setPropertyTab] = useState<'overview' | 'location' | 'property' | 'equity' | 'tax' | 'census'>('overview')
 
-  const sellerName = snapshot.ownerDisplayName || snapshot.ownerName || thread.displayName || thread.ownerDisplayName || thread.ownerName || 'Unknown seller'
-  const initials = sellerName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()
-  const headlineAddress = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject
-  const propertyType = snapshot.propertyType || thread.propertyType || 'Not enriched'
-  const prospectMatchBadges = useMemo(() => buildMatchBadges(thread), [thread])
+  const sellerName = dossier.prospectName || 'Unknown seller'
+  const initials = sellerName.split(' ').map((part: string) => part[0]).join('').slice(0, 2).toUpperCase()
+  const headlineAddress = dossier.address || thread.subject
+  const propertyType = dossier.propertyType || 'Not enriched'
+  const prospectMatchBadges = useMemo(() => buildMatchBadges({ ...thread, ...dossier.raw.dealContext?.prospect }), [thread, dossier.raw.dealContext?.prospect])
   const propertyTagBadges = useMemo(() => buildPropertyTagBadges(thread), [thread])
   const ownerIdentityBadge = [asStr(snapshot.ownerType || thread.ownerType || thread.owner_type_guess || 'Individual').toUpperCase(), thread.isAbsentee ? 'ABSENTEE' : null]
     .filter(Boolean)
@@ -2609,20 +2862,20 @@ const ContactIntelligenceCard = ({
     { id: 'property', label: 'PROPERTY', icon: 'home' },
   ] as const
 
-  const prospectTagBadges = useMemo(() => buildProspectTagBadges(thread), [thread])
+  const prospectTagBadges = useMemo(() => buildProspectTagBadges({ ...thread, ...dossier.raw.dealContext?.prospect }), [thread, dossier.raw.dealContext?.prospect])
 
   const prospectRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'PROSPECT NAME', value: snapshot.prospectFullName || thread.prospect_full_name || thread.displayName },
-    { label: 'AGE', value: (thread as any).prospect_age || thread.age },
-    { label: 'MARITAL STATUS', value: thread.marital_status },
-    { label: 'GENDER', value: snapshot.gender || thread.gender },
-    { label: 'LANGUAGE', value: snapshot.language || thread.language_preference || thread.contactLanguage, tone: 'accent' },
-    { label: 'EDUCATION', value: thread.education_model },
-    { label: 'HOUSEHOLD INCOME', value: snapshot.householdIncome || thread.est_household_income, tone: 'success' },
-    { label: 'NET ASSET VALUE', value: snapshot.netAssetValue || thread.net_asset_value, tone: 'success' },
-    { label: 'BUYING POWER', value: (thread as any).buying_power, tone: 'accent' },
-    { label: 'OCCUPATION', value: thread.occupation },
-    { label: 'OCCUPATION GROUP', value: snapshot.occupationGroup || thread.occupation_group },
+    { label: 'PROSPECT NAME', value: dossier.prospectName },
+    { label: 'AGE', value: dossier.age },
+    { label: 'MARITAL STATUS', value: dossier.maritalStatus },
+    { label: 'GENDER', value: dossier.gender },
+    { label: 'LANGUAGE', value: dossier.language, tone: 'accent' },
+    { label: 'EDUCATION', value: dossier.education },
+    { label: 'HOUSEHOLD INCOME', value: dossier.income, tone: 'success' },
+    { label: 'NET ASSET VALUE', value: dossier.netWorth, tone: 'success' },
+    { label: 'BUYING POWER', value: dossier.buyingPower, tone: 'success' },
+    { label: 'OCCUPATION', value: dossier.occupation },
+    { label: 'OCCUPATION GROUP', value: dossier.occupationGroup },
     { 
       label: 'PROSPECT TAGS', 
       value: prospectTagBadges.length ? 'has_tags' : null,
@@ -2632,57 +2885,44 @@ const ContactIntelligenceCard = ({
         </div>
       ) : null
     },
-    { label: 'PHONE NUMBER', value: fmtPhone(thread.prospect_best_phone || thread.phoneNumber || thread.canonicalE164), tone: 'accent' },
-    { label: 'PHONE CARRIER', value: snapshot.phoneCarrier || (thread as any).phone_carrier },
+    { label: 'PHONE NUMBER', value: fmtPhone(dossier.prospectBestPhone), tone: 'accent' },
+    { label: 'PHONE CARRIER', value: dossier.phoneCarrier },
   ]
 
   const ownerRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'OWNER ADDRESS', value: snapshot.ownerAddress || thread.primary_owner_address || thread.mailing_address },
-    { label: 'PRIORITY TIER', value: snapshot.priorityTier || thread.owner_priority_tier || thread.priority, tone: 'warning' },
-    { label: 'PRIORITY SCORE /100', value: snapshot.finalScore || formatScore(thread.owner_priority_score || thread.finalAcquisitionScore), tone: 'accent' },
-    { label: 'BEST CONTACT WINDOW', value: snapshot.bestContactWindow || (thread as any).best_contact_window },
-    { label: 'LANGUAGE', value: snapshot.language || thread.language_preference || thread.contactLanguage },
+    { label: 'OWNER ADDRESS', value: dossier.mailingAddress },
+    { label: 'OWNER TYPE', value: dossier.ownerType },
+    { label: 'PRIORITY SCORE /100', value: formatScore(dossier.motivationScore), tone: 'accent' },
+    { label: 'LANGUAGE', value: dossier.language },
   ]
 
   const portfolioRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'PORTFOLIO PROPERTY COUNT', value: snapshot.portfolioPropertyCount || thread.property_count, tone: 'accent' },
-    { label: 'PROPERTY TYPE MAJORITY', value: snapshot.propertyType || thread.property_type_majority || thread.propertyType },
-    { label: 'SFR COUNT', value: snapshot.sfrCount || (thread as any).sfr_count },
-    { label: 'MF COUNT', value: snapshot.mfCount || (thread as any).mf_count },
-    { label: 'TOTAL UNITS', value: snapshot.unitCount || thread.portfolio_total_units, tone: 'accent' },
-    { label: 'PORTFOLIO VALUE', value: formatMoney(Number(snapshot.portfolioValue || thread.portfolio_total_value || 0)), tone: 'success' },
-    { label: 'TOTAL EQUITY', value: formatMoney(Number(snapshot.equityAmount || thread.portfolio_total_equity || 0)), tone: 'success' },
-    { label: 'TOTAL DEBT', value: formatMoney(Number(snapshot.loanAmount || thread.portfolio_total_loan_balance || 0)), tone: 'warning' },
-    { label: 'TOTAL DEBT PAYMENT', value: formatMoney(Number(snapshot.loanPayment || thread.portfolio_total_loan_payment || 0)) },
+    { label: 'PORTFOLIO PROPERTY COUNT', value: dossier.portfolioCount, tone: 'accent' },
+    { label: 'PROPERTY TYPE MAJORITY', value: dossier.propertyType },
+    { label: 'TOTAL UNITS', value: dossier.portfolioUnits, tone: 'accent' },
+    { label: 'PORTFOLIO VALUE', value: formatMoney(Number(dossier.portfolioValue)), tone: 'success' },
+    { label: 'TOTAL EQUITY', value: formatMoney(Number(dossier.portfolioEquity)), tone: 'success' },
   ]
 
   const financialRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'FINANCIAL PRESSURE SCORE', value: snapshot.financialScore || formatScore(thread.financial_pressure_score), tone: 'warning' },
-    { label: 'URGENCY COUNT', value: snapshot.urgencyCount || thread.urgency_count || formatScore(thread.urgency_score), tone: 'danger' },
-    { label: 'PORTFOLIO TAX DELINQUENT COUNT', value: snapshot.taxDelinquentCount || thread.tax_delinquent_count, tone: (Number(snapshot.taxDelinquentCount || thread.tax_delinquent_count) > 0) ? 'danger' : 'neutral' },
-    { label: 'TAX DELINQUENT BADGE', value: snapshot.taxDelinquent || formatBoolean(thread.property_tax_delinquent) },
-    { label: 'PORTFOLIO LIEN COUNT', value: snapshot.lienCount || thread.active_lien_count, tone: (Number(snapshot.lienCount || thread.active_lien_count) > 0) ? 'warning' : 'neutral' },
-    { label: 'ACTIVE LIEN BADGE', value: formatBoolean(thread.property_active_lien) },
-    { label: 'OLDEST TAX DELINQUENT YEAR', value: snapshot.oldestTaxYear || thread.oldest_tax_delinquent_year },
-    { label: 'TOTAL TAX AMOUNT', value: formatMoney(Number(snapshot.taxAmount || thread.tax_amt || thread.past_due_amount || 0)), tone: 'danger' },
+    { label: 'FINANCIAL PRESSURE SCORE', value: formatScore(dossier.financialPressureScore), tone: 'warning' },
+    { label: 'EST. VALUE', value: formatMoney(Number(dossier.estimatedValue)), tone: 'success' },
+    { label: 'TOTAL DEBT', value: formatMoney(Number(dossier.totalLoanBalance)), tone: 'warning' },
+    { label: 'TAX AMOUNT', value: formatMoney(Number(dossier.taxAmount)), tone: 'danger' },
   ]
 
   const phoneRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'BEST PHONE', value: fmtPhone(thread.prospect_best_phone || thread.phoneNumber || thread.canonicalE164), tone: 'accent' },
-    { label: 'DISPLAY PHONE', value: fmtPhone(thread.displayPhone) },
-    { label: 'PHONE CARRIER', value: snapshot.phoneCarrier || (thread as any).phone_carrier },
-    { label: 'CONTACTABILITY SCORE', value: formatScore(thread.contactability_score), tone: 'success' },
-    { label: 'PHONE MATCH SCORE', value: formatScore(thread.prospect_phone_score || thread.prospect_contact_score) },
-    { label: 'SMS ELIGIBLE', value: formatBoolean((thread as any).sms_eligible) },
-    { label: 'LANGUAGE', value: snapshot.language || thread.language_preference || thread.contactLanguage },
+    { label: 'BEST PHONE', value: fmtPhone(dossier.prospectBestPhone), tone: 'accent' },
+    { label: 'PHONE CARRIER', value: dossier.phoneCarrier },
+    { label: 'CONTACTABILITY SCORE', value: formatScore(dossier.contactConfidence), tone: 'success' },
+    { label: 'SMS ELIGIBLE', value: formatBoolean(dossier.smsEligible) },
   ]
 
   const emailRows: Array<{ label: string; value?: unknown; render?: React.ReactNode; tone?: any }> = [
-    { label: 'BEST EMAIL', value: thread.prospect_best_email || (thread as any).best_email_1, tone: 'accent' },
-    { label: 'EMAIL ELIGIBLE', value: formatBoolean((thread as any).email_eligible) },
-    { label: 'CONTACT NAME', value: snapshot.prospectFullName || thread.prospect_full_name || thread.displayName },
-    { label: 'OWNER NAME', value: snapshot.ownerDisplayName || thread.ownerDisplayName || thread.ownerName },
-    { label: 'LAST MESSAGE CONTEXT', value: thread.latestMessageBody || thread.lastMessageBody },
+    { label: 'BEST EMAIL', value: dossier.prospectBestEmail, tone: 'accent' },
+    { label: 'EMAIL ELIGIBLE', value: formatBoolean(dossier.emailEligible) },
+    { label: 'CONTACT NAME', value: dossier.prospectName },
+    { label: 'OWNER NAME', value: dossier.ownerName },
   ]
 
   const activeRows = activeTab === 'prospect'
@@ -3122,20 +3362,24 @@ const DealCommandHeader = ({
   )
 }
 
-const DealDecisionStrip = ({ thread }: { thread: WorkflowThread }) => {
-  const arv = asNum(thread.estimatedValue || thread.arv)
+const DealDecisionStrip = ({ thread, dealContext }: { thread: WorkflowThread; dealContext?: DealContext | null }) => {
+  const acq = dealContext?.acquisition_decision || (thread as any).acquisition_decision_data || {}
+  
+  const arv = asNum(acq.max_allowable_offer || (thread.estimatedValue || thread.arv))
   const investorExit = arv ? Math.round(arv * 0.82) : 0
-  const repairs = asNum(thread.estimatedRepairCost)
-  const spread = Math.max(Math.round(arv * 0.18), 25000)
+  const repairs = asNum(dealContext?.valuation?.estimated_repair_cost || thread.estimatedRepairCost)
+  const spread = asNum(acq.expected_spread || Math.max(Math.round(arv * 0.18), 25000))
   const mao = Math.max(arv - repairs - spread, 0)
-  const offer = asNum(thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao || mao)
-  const walkaway = asNum(thread.walkaway_price || thread.walkaway_internal || mao * 1.05)
-  const confidence = clamp((arv ? 40 : 18) + (repairs ? 18 : 0) + (thread.contactability_score ? 8 : 0) + (thread.finalAcquisitionScore ? 16 : 0), 24, 96)
-  const offerFloor = offer ? Math.round(offer * 0.94) : Math.round(mao * 0.94)
-  const offerCeiling = offer ? Math.round(offer * 1.03) : Math.round(mao * 1.03)
+  const offer = asNum(acq.suggested_offer || thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao || mao)
+  const offerFloor = asNum(acq.offer_floor || (offer ? offer * 0.95 : 0))
+  const offerCeiling = asNum(acq.offer_ceiling || (offer ? offer * 1.05 : 0))
+  const walkaway = asNum((thread as any).walkaway_price || (thread as any).walkaway_internal || mao * 1.05)
+  const confidence = acq.confidence_score || clamp((arv ? 40 : 18) + (repairs ? 18 : 0) + (thread.contactability_score ? 8 : 0) + (thread.finalAcquisitionScore ? 16 : 0), 24, 96)
+  
   const decisionTone = confidence >= 72 ? 'pursue' : confidence >= 52 ? 'review' : 'pass'
-  const decisionLabel = decisionTone === 'pursue' ? 'Pursue' : decisionTone === 'review' ? 'Review' : 'Pass'
-  const decisionReasons = [
+  const decisionLabel = acq.strategy_label || (decisionTone === 'pursue' ? 'Pursue' : decisionTone === 'review' ? 'Review' : 'Pass')
+  
+  const decisionReasons = acq.reasoning_summary ? [acq.reasoning_summary] : [
     isPresent(thread.equityPercent) ? `${formatPercent(thread.equityPercent)} equity supports acquisition spread.` : 'Equity position still needs validation.',
     repairs ? `${formatMoney(repairs)} repair load priced into the decision range.` : 'Repair estimate still pending.',
     thread.inboxStatus === 'new_reply' ? 'Seller just replied, timing is favorable for action.' : 'Seller timing is still moderate.',
@@ -3211,7 +3455,7 @@ const DealDecisionStrip = ({ thread }: { thread: WorkflowThread }) => {
   )
 }
 
-const CompIntelligenceModule = ({ thread, snapshot }: { thread: WorkflowThread; snapshot: NormalizedPropertySnapshot }) => {
+const CompIntelligenceModule = ({ thread, snapshot, dealContext: _dealContext }: { thread: WorkflowThread; snapshot: NormalizedPropertySnapshot; dealContext?: DealContext | null }) => {
   const arv = asNum(thread.estimatedValue || snapshot.estimatedValue)
   const sqft = asNum(thread.building_square_feet || thread.sqft || snapshot.sqft)
   const address = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || 'Property Unknown'
@@ -3311,17 +3555,26 @@ const CompIntelligenceModule = ({ thread, snapshot }: { thread: WorkflowThread; 
   )
 }
 
-const BuyerMatchingModule = ({ thread, snapshot }: { thread: WorkflowThread; snapshot: NormalizedPropertySnapshot }) => {
-  const equity = percentFromScore(snapshot.equityPercent || thread.equityPercent, 38)
-  const demand = clamp(percentFromScore(thread.finalAcquisitionScore || thread.priorityScore || 58) * 0.78 + equity * 0.22, 22, 96)
-  const avgBuy = asNum(thread.estimatedValue || snapshot.estimatedValue) ? Math.round(asNum(thread.estimatedValue || snapshot.estimatedValue) * 0.72) : 0
-  const leaderboard = [
-    { name: 'Peachtree Value Fund', type: 'Fund', score: clamp(demand + 6, 0, 100), markets: 'Atlanta South + 30315', recent: 14, avg: avgBuy, max: Math.round(avgBuy * 1.24), last: '12d ago', reason: 'Heavy small multifamily velocity in this ZIP.' },
-    { name: 'Northline Cash Buyers', type: 'Local Investor', score: clamp(demand - 4, 0, 100), markets: 'Intown duplexes', recent: 9, avg: Math.round(avgBuy * 0.92), max: Math.round(avgBuy * 1.1), last: '21d ago', reason: 'Matches size and entry price band.' },
-    { name: 'Beltline Yield Group', type: 'Rental Operator', score: clamp(demand - 11, 0, 100), markets: 'Multifamily + rental holds', recent: 7, avg: Math.round(avgBuy * 1.08), max: Math.round(avgBuy * 1.36), last: '34d ago', reason: 'Strong hold profile for repaired yield assets.' },
-  ]
+const BuyerMatchingModule = ({ thread, snapshot, dealContext }: { thread: WorkflowThread; snapshot: NormalizedPropertySnapshot; dealContext?: DealContext | null }) => {
+  const buyer = dealContext?.buyer_match || (thread as any).buyer_match_data || {}
+  const demand = buyer.demand_score || buyer.buyer_pressure || 0
+  const avgBuy = asNum(buyer.avg_resale_price) || 0
+  const _highFitCount = buyer.high_fit_count || 0; void _highFitCount
 
-  if (!avgBuy) {
+  const topCandidates = Array.isArray(buyer.top_candidates) ? buyer.top_candidates : []
+  const leaderboard = topCandidates.map((c: any) => ({
+    name: c.buyer_name || c.name || 'Investor Candidate',
+    type: c.buyer_type || 'Investor',
+    score: c.match_score || 0,
+    markets: c.markets || 'Local Market',
+    recent: c.recent_buys || 0,
+    avg: c.avg_buy_price || avgBuy,
+    max: c.max_buy_price || null,
+    last: c.last_buy_at ? formatRelativeTime(c.last_buy_at) : 'N/A',
+    reason: c.match_reason || 'Matches property profile.'
+  }))
+
+  if (!leaderboard.length && !demand) {
     return (
       <DossierCard className="nx-command-module nx-buyer-match-module">
         <div className="nx-command-module__head">
@@ -3357,7 +3610,7 @@ const BuyerMatchingModule = ({ thread, snapshot }: { thread: WorkflowThread; sna
         </div>
       </div>
       <div className="nx-buyer-match-module__leaderboard">
-        {leaderboard.map((buyer, index) => (
+        {leaderboard.map((buyer: any, index: number) => (
           <div key={buyer.name} className="nx-buyer-match-module__card">
             <div>
               <span>TOP MATCH {index + 1} • {buyer.type}</span>
@@ -3386,8 +3639,9 @@ const ConversationBrainModule = ({
 }: {
   thread: WorkflowThread
   messages: ThreadMessage[]
-  phase3: Phase3Intelligence | null
+  phase3?: Phase3Intelligence | null
 }) => {
+
   const latestInbound = messages.find((message) => message.direction === 'inbound') || null
   const latestOutbound = messages.find((message) => message.direction === 'outbound') || null
   const summary = phase3?.latestSnapshot?.capture_reason || thread.aiSummary || thread.aiDraft || 'Conversation intelligence will summarize seller signals here.'
@@ -3452,11 +3706,13 @@ const ConversationBrainModule = ({
 
 const CommandActionDock = ({
   onOpenMap,
+  onOpenComps,
   onOpenDossier,
   onOpenAi,
   layoutMode = 'full',
 }: {
   onOpenMap: () => void
+  onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
   layoutMode?: ViewLayoutMode
@@ -3474,7 +3730,7 @@ const CommandActionDock = ({
       <span>Analysis</span>
       <div>
         <button type="button">Run Underwriting</button>
-        <button type="button">Open Comp Workspace</button>
+        <button type="button" onClick={onOpenComps}>Open Comp Workspace</button>
         <button type="button">Show Buyer Matches</button>
       </div>
     </div>
@@ -3541,13 +3797,6 @@ const humanizeEducation = (raw: string): string => {
   }
   const key = String(raw || '').toLowerCase().replace(/\s+/g, '_')
   return map[key] || String(raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-const humanizeGender = (raw: string): string => {
-  const r = String(raw || '').toLowerCase()
-  if (r === 'm' || r === 'male') return 'Male'
-  if (r === 'f' || r === 'female') return 'Female'
-  return String(raw || '').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 const humanizeMaritalStatus = (raw: string): string => {
@@ -3641,43 +3890,48 @@ const BuyerSignalBar = ({ label, value, tone = 'blue', showBar = true, trend }: 
   )
 }
 
-const CompactDealIntelligenceCapsule = ({
+const _CompactDealIntelligenceCapsule = ({
   thread,
   snapshot,
   messages,
+  dealContext,
+  onOpenComps: _onOpenComps,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
   messages: ThreadMessage[]
+  dealContext: DealContext | null
+  onOpenComps?: () => void
 }) => {
+  const dossier = useDossierModel(thread, dealContext)
   const [addrCopied, setAddrCopied] = useState(false)
   const handleCopyAddr = () => {
-    const addr = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || ''
+    const addr = dossier.address || ''
     if (!addr) return
     navigator.clipboard.writeText(addr).catch(() => undefined)
     setAddrCopied(true)
     setTimeout(() => setAddrCopied(false), 1400)
   }
 
-  const address = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || ''
+  const address = dossier.address || 'Property Unknown'
   const heroLinks = buildPropertyExternalLinks(address)
   const encodedAddr = address ? encodeURIComponent(address) : ''
   const redfinUrl = encodedAddr ? `https://www.redfin.com/query?query=${encodedAddr}` : null
 
-  const heatScore = percentFromScore(thread.finalAcquisitionScore || (thread as any).ai_score || thread.priorityScore || thread.motivationScore, 42)
+  const heatScore = percentFromScore(dossier.motivationScore, 42)
 
   // Property metrics
-  const beds = snapshot.beds || thread.total_bedrooms || thread.beds
-  const baths = snapshot.baths || thread.total_baths || thread.baths
-  const sqft = snapshot.sqft || thread.building_square_feet || thread.sqft
-  const yearBuilt = snapshot.yearBuilt || thread.year_built
-  const estValue = asNum(snapshot.estimatedValue || thread.estimatedValue)
-  const equityPctNum = asNum(snapshot.equityPercent || thread.equityPercent || 0)
-  const repairs = asNum(snapshot.repairCost || thread.estimatedRepairCost)
-  const offer = asNum(thread.ai_recommended_opening_offer || thread.ai_offer || thread.cashOffer || thread.mao)
+  const beds = dossier.beds
+  const baths = dossier.baths
+  const sqft = dossier.sqft
+  const yearBuilt = dossier.yearBuilt
+  const estValue = asNum(dossier.estimatedValue)
+  const equityPctNum = asNum(dossier.equityPercent)
+  const repairs = asNum(dossier.estimatedRepairCost)
+  const offer = asNum(dossier.cashOffer)
 
   // Condition
-  const rawCondition = asStr(thread.building_condition || '')
+  const rawCondition = asStr(dossier.condition || '')
   let conditionLabel: string | null = null
   let conditionTone: 'green' | 'amber' | 'red' = 'amber'
   if (rawCondition) {
@@ -3691,51 +3945,32 @@ const CompactDealIntelligenceCapsule = ({
   }
 
   // Buyer demand signals
-  const demand = clamp(percentFromScore(thread.finalAcquisitionScore || thread.priorityScore || 58) * 0.78 + (equityPctNum || 38) * 0.22, 22, 96)
-  const avgBuy = estValue ? Math.round(estValue * 0.72) : 0
-  const sqftNum = asNum(sqft || 0)
-  const avgPpsf = avgBuy > 0 && sqftNum > 0 ? Math.round(avgBuy / sqftNum) : 0
-  const bedsNum = asNum(beds || 0)
-  const bathsNum = asNum(baths || 0)
+  const demand = asNum(dossier.buyerDemand)
+  const buyerMatch = dealContext?.buyer_match || (thread as any).buyer_match_data
+  const avgBuy = asNum(buyerMatch?.avg_resale_price) || 0
+  const avgPpsf = asNum(buyerMatch?.avg_ppsf) || 0
 
   // Prospect identity
-  const prospectName = thread.prospect_full_name || snapshot.ownerDisplayName || snapshot.ownerName || thread.ownerDisplayName || thread.ownerName || thread.displayName || 'Unknown Prospect'
-  const language = thread.language_preference || thread.contactLanguage || 'English'
-  const occupation = thread.occupation
-  const maritalStatus = thread.marital_status
-  const prospectAge = (thread as any).prospect_age || (thread as any).age
-  const education = thread.education_model
-  const gender = thread.gender
+  const prospectName = dossier.prospectName || 'Unknown Prospect'
+  const language = dossier.language || 'English'
+  const occupation = dossier.occupation
+  const prospectAge = dossier.age
 
   // Motivation signals
-  const householdIncome = thread.est_household_income
-  const netAssetValue = thread.net_asset_value
-  const financialPressureScore = asNum(thread.financial_pressure_score || 0)
-  const contactQuality = asNum(thread.contactability_score || thread.prospect_contact_score || 0)
-  const sellerPersona = getSellerPersona(thread, equityPctNum)
-  const stage = getSellerStageVisual(thread.conversationStage).label
-  const lastIntent = thread.uiIntent || thread.detected_intent || 'Pending'
-  const motivationPct = percentFromScore(thread.motivationScore || thread.priorityScore, 0)
 
   // Risk signals
-  const isOutOfState = (() => {
-    const propState = asStr(snapshot.state || thread.property_address_state || '').toUpperCase()
-    const mailAddr = asStr(thread.primary_owner_address || thread.mailing_address || '')
-    const isAbsentee = thread.isAbsentee || (thread as any).isAbsentee === 'true'
-    return isAbsentee && propState.length === 2 && mailAddr.length > 5 && !mailAddr.toUpperCase().includes(` ${propState}`)
-  })()
-  const isVacant = thread.isVacant || (thread as any).isVacant === 'true'
-  const daysSinceResponse = thread.lastInboundAt
-    ? Math.floor((Date.now() - new Date(String(thread.lastInboundAt)).getTime()) / 86400000)
-    : null
-
   const latestEvents = messages.slice(-5).reverse()
 
   // Property type classification
-  const isMultifamily = asStr(thread.propertyType || '').toLowerCase().includes('multi') || asStr(snapshot.propertyType || '').toLowerCase().includes('multi')
-  const unitCount = Number(snapshot.unitCount || thread.units_count || 0)
-  const isCommercial = asStr(snapshot.propertyType || '').toLowerCase().includes('commercial')
-  const isLand = asStr(snapshot.propertyType || '').toLowerCase().includes('land') || asStr(snapshot.propertyType || '').toLowerCase().includes('lot')
+  const isMultifamily = asStr(dossier.propertyType || '').toLowerCase().includes('multi') || dossier.units > 1
+  const unitCount = Number(dossier.units || 0)
+  const isCommercial = asStr(dossier.propertyType || '').toLowerCase().includes('commercial')
+  const isLand = asStr(dossier.propertyType || '').toLowerCase().includes('land') || asStr(dossier.propertyType || '').toLowerCase().includes('lot')
+
+  // Numeric equivalents for division
+  const bedsNum = Number(beds || 0)
+  const bathsNum = Number(baths || 0)
+  const sqftNum = Number(sqft || 0)
 
   // Multifamily per-unit metrics (computed after unitCount + isMultifamily are available)
   const unitCountSafe = Math.max(unitCount, 1)
@@ -3760,10 +3995,10 @@ const CompactDealIntelligenceCapsule = ({
     displayPropType = 'Single Family'
   }
 
-  const rawMarket = snapshot.market || thread.displayMarket || thread.market || thread.marketId
+  const rawMarket = dossier.market
   const displayMarket = isPresent(rawMarket) && !/^\d+$/.test(String(rawMarket))
     ? rawMarket
-    : (snapshot.city && snapshot.state ? `${snapshot.city}, ${snapshot.state}` : (rawMarket || 'Unknown market'))
+    : (dossier.city && dossier.state ? `${dossier.city}, ${dossier.state}` : (rawMarket || 'Unknown market'))
 
   // Heat color scale: 0-40=blue, 40-60=amber, 60-80=orange, 80+=red
   let heatColor = 'blue'
@@ -3774,30 +4009,12 @@ const CompactDealIntelligenceCapsule = ({
   // Address identity decomposition
   const addrParts = address.split(',')
   const streetAddress = (addrParts[0] || '').trim().toUpperCase()
-  const cityStateZip = addrParts.slice(1).map((s) => s.trim()).filter(Boolean).join(', ')
+  const cityStateZip = addrParts.slice(1).map((s: string) => s.trim()).filter(Boolean).join(', ')
   const addressMetaLine = [
     cityStateZip || displayMarket,
     displayPropType,
     isMultifamily && unitCount > 0 ? `${unitCount} Units` : null,
   ].filter(Boolean).join(' • ')
-
-  // Jarvis-style acquisition recommendation
-  const aiRecText = (() => {
-    const base = getNextBestAction(thread)
-    const days = daysSinceResponse
-    const finP = financialPressureScore
-    const stg = thread.conversationStage || ''
-    if (thread.isSuppressed) return 'Remove from active rotation'
-    if (finP >= 75) return 'High financial pressure — escalate now'
-    if (equityPctNum >= 80 && motivationPct >= 70) return 'Prime target — move to offer discussion'
-    if (stg === 'negotiation' && equityPctNum >= 60) return 'High leverage negotiation opportunity'
-    if (stg === 'contract_path') return 'Escalate to acquisitions team'
-    if (days !== null && days > 21) return `${days}d dormant — re-engage or archive`
-    if (days !== null && days >= 3 && days <= 5) return 'Optimal window — delay follow-up 48h'
-    if (thread.inboxStatus === 'new_reply') return 'New reply — classify intent and respond'
-    if (base.title.toLowerCase().includes('waiting')) return 'Monitor — follow up in 3–5 days'
-    return base.title
-  })()
 
   // Hedge fund / institutional derived intel
   const instIntelLabel = (() => {
@@ -3808,7 +4025,7 @@ const CompactDealIntelligenceCapsule = ({
   })()
   const instChipTone = demand >= 70 ? 'is-warning' : demand >= 55 ? 'is-purple' : 'is-muted'
 
-  const propertyTags = buildPropertyTags(thread, snapshot, equityPctNum)
+  const propertyTags = buildPropertyTags({ ...thread, ...dossier.raw.dealContext?.property }, snapshot, equityPctNum)
 
   return (
     <div className="nx-deal-capsule-shell">
@@ -3966,7 +4183,7 @@ const CompactDealIntelligenceCapsule = ({
             />
             <BuyerSignalBar
               label="Buyer Match Count"
-              value={demand > 0 ? Math.round(demand / 5) : null}
+              value={buyerMatch?.buyer_match_count > 0 ? buyerMatch.buyer_match_count : null}
               showBar={false}
               trend={demand >= 60 ? 'up' : null}
             />
@@ -3979,12 +4196,12 @@ const CompactDealIntelligenceCapsule = ({
               <>
                 <BuyerSignalBar label="Avg Price / Unit" value={avgBuy > 0 && unitCount > 0 ? formatMoney(Math.round(avgBuy / unitCountSafe)) : null} showBar={false} />
                 <BuyerSignalBar label="MF Buyer Activity" value={demand > 0 ? (demand >= 70 ? 'Accelerating' : demand >= 50 ? 'Active' : 'Moderate') : null} showBar={false} trend={demand >= 65 ? 'up' : demand >= 45 ? 'flat' : 'down'} />
-                <BuyerSignalBar label="Investor Acquisitions" value={demand > 0 ? `${Math.round(demand / 12)} nearby (6mo)` : null} showBar={false} trend={demand >= 65 ? 'up' : null} />
+                <BuyerSignalBar label="Investor Acquisitions" value={buyerMatch?.recent_sold_count > 0 ? `${buyerMatch.recent_sold_count} nearby (6mo)` : null} showBar={false} trend={demand >= 65 ? 'up' : null} />
               </>
             ) : (
               <>
                 <BuyerSignalBar label="Avg PPSF" value={avgPpsf > 0 ? `$${avgPpsf.toLocaleString()}` : null} showBar={false} trend={demand >= 65 ? 'up' : null} />
-                <BuyerSignalBar label="Investor Acquisitions" value={demand > 0 ? `${Math.round(demand / 10)} nearby (6mo)` : null} showBar={false} trend={demand >= 60 ? 'up' : null} />
+                <BuyerSignalBar label="Investor Acquisitions" value={buyerMatch?.recent_sold_count > 0 ? `${buyerMatch.recent_sold_count} nearby (6mo)` : null} showBar={false} trend={demand >= 60 ? 'up' : null} />
               </>
             )}
             <div className="nx-bsig-divider" />
@@ -4004,181 +4221,33 @@ const CompactDealIntelligenceCapsule = ({
         </div>
 
         <div className="nx-capsule-section">
-          <span className="nx-capsule-section__title">PROSPECT INTEL</span>
+          <span className="nx-capsule-section__title">DOSSIER & COMPLIANCE</span>
           <div className="nx-prospect-intel-v2">
-            {/* Identity */}
             <div className="nx-prospect-group">
-              <div className="nx-prospect-group__hdr">IDENTITY</div>
+              <div className="nx-prospect-group__hdr">PROSPECT</div>
               <div className="nx-prospect-group__body">
-                {isPresent(prospectName) && prospectName !== 'Unknown Prospect' && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Name</span>
-                    <span className="nx-prow__val is-accent">{prospectName}</span>
-                  </div>
-                )}
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Language</span>
-                  <span className="nx-prow__val">{language}</span>
-                </div>
-                {isPresent(occupation) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Occupation</span>
-                    <span className="nx-prow__val">{humanizeOccupation(asStr(occupation))}</span>
-                  </div>
-                )}
-                {isPresent(maritalStatus) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Marital Status</span>
-                    <span className="nx-prow__val">{humanizeMaritalStatus(asStr(maritalStatus))}</span>
-                  </div>
-                )}
-                {isPresent(prospectAge) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Age</span>
-                    <span className="nx-prow__val">{asStr(prospectAge)}</span>
-                  </div>
-                )}
-                {isPresent(education) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Education</span>
-                    <span className="nx-prow__val">{humanizeEducation(asStr(education))}</span>
-                  </div>
-                )}
-                {isPresent(gender) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Gender</span>
-                    <span className="nx-prow__val">{humanizeGender(asStr(gender))}</span>
-                  </div>
-                )}
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Ownership</span>
-                  <span className={cls('nx-prow__val', !isPresent(snapshot.ownershipYears) && 'is-muted')}>
-                    {snapshot.ownershipYears ? `${snapshot.ownershipYears} Yrs` : 'Unknown'}
-                  </span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Owner Type</span>
-                  <span className={cls('nx-prow__val', !isPresent(snapshot.ownerType) && 'is-muted')}>
-                    {isPresent(snapshot.ownerType) ? snapshot.ownerType : 'Unknown'}
-                  </span>
-                </div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Name</span><span className="nx-prow__val is-accent">{prospectName}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Language</span><span className="nx-prow__val">{language}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Occupation</span><span className="nx-prow__val">{humanizeOccupation(asStr(occupation))}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Age</span><span className="nx-prow__val">{asStr(prospectAge)}</span></div>
               </div>
             </div>
-
-            {/* Motivation */}
             <div className="nx-prospect-group">
-              <div className="nx-prospect-group__hdr">MOTIVATION</div>
+              <div className="nx-prospect-group__hdr">OWNER & RISK</div>
               <div className="nx-prospect-group__body">
-                {isPresent(sellerPersona) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Persona</span>
-                    <span className="nx-prow__val is-accent">{sellerPersona}</span>
-                  </div>
-                )}
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Stage</span>
-                  <span className="nx-prow__val">{humanizeStage(stage)}</span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Intent</span>
-                  <span className="nx-prow__val">{humanizeIntent(lastIntent)}</span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Priority Tier</span>
-                  <span className={cls('nx-prow__val', (() => {
-                    const tier = String(snapshot.priorityTier || thread.owner_priority_tier || '').toLowerCase()
-                    return tier.includes('high') || tier.includes('urgent') ? 'is-warn' : ''
-                  })())}>
-                    {snapshot.priorityTier || thread.owner_priority_tier || 'Normal'}
-                  </span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Motivation</span>
-                  <div className="nx-prow__score-bar">
-                    <div className="nx-prow__score-track">
-                      <div className="nx-prow__score-fill" style={{ width: `${motivationPct}%`, background: (motivationPct >= 60 ? '#30d158' : '#ffd60a') }} />
-                    </div>
-                    <span className={cls('nx-prow__val', !isPresent(thread.motivationScore || thread.priorityScore) && 'is-muted')}>
-                      {isPresent(thread.motivationScore || thread.priorityScore) ? `${Math.round(motivationPct)}/100` : 'Unavailable'}
-                    </span>
-                  </div>
-                </div>
-                {isPresent(householdIncome) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">HH Income</span>
-                    <span className="nx-prow__val">{typeof householdIncome === 'number' ? formatMoney(householdIncome) : String(householdIncome)}</span>
-                  </div>
-                )}
-                {isPresent(netAssetValue) && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Net Assets</span>
-                    <span className="nx-prow__val">{typeof netAssetValue === 'number' ? formatMoney(netAssetValue) : String(netAssetValue)}</span>
-                  </div>
-                )}
-                {financialPressureScore > 0 && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Fin. Pressure</span>
-                    <span className={cls('nx-prow__val nx-score-emphasis',
-                      financialPressureScore >= 70 ? 'is-danger is-intense' : financialPressureScore >= 40 ? 'is-warn' : '')}>
-                      {Math.round(financialPressureScore)}/100
-                    </span>
-                  </div>
-                )}
-                {contactQuality > 0 && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Contact Quality</span>
-                    <span className={cls('nx-prow__val nx-score-emphasis',
-                      contactQuality >= 70 ? 'is-green is-intense' : contactQuality >= 40 ? '' : 'is-muted')}>
-                      {Math.round(contactQuality)}/100
-                    </span>
-                  </div>
-                )}
+                <div className="nx-prow"><span className="nx-prow__lbl">Owner</span><span className="nx-prow__val">{dossier.ownerName}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Type</span><span className="nx-prow__val">{asStr(dossier.ownerType)}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">DNC</span><span className={cls('nx-prow__val', dossier.isDnc && 'is-danger')}>{dossier.isDnc ? 'YES (DNC)' : 'Clear'}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Suppressed</span><span className={cls('nx-prow__val', dossier.isSuppressed && 'is-danger')}>{dossier.isSuppressed ? 'YES' : 'No'}</span></div>
               </div>
             </div>
-
-            {/* Risk / Opportunity */}
             <div className="nx-prospect-group">
-              <div className="nx-prospect-group__hdr">RISK / OPPORTUNITY</div>
+              <div className="nx-prospect-group__hdr">ACQUISITION & MARKET</div>
               <div className="nx-prospect-group__body">
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Absentee</span>
-                  <span className={cls('nx-prow__val', (thread.isAbsentee || (thread as any).isAbsentee === 'true') && 'is-warn')}>
-                    {(thread.isAbsentee || (thread as any).isAbsentee === 'true') ? 'Yes — Absentee Owner' : 'No'}
-                  </span>
-                </div>
-                {isOutOfState && (
-                  <div className="nx-prow">
-                    <span className="nx-prow__lbl">Out of State</span>
-                    <span className="nx-prow__val is-warn">Yes</span>
-                  </div>
-                )}
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Vacant</span>
-                  <span className={cls('nx-prow__val', isVacant && 'is-warn')}>
-                    {isVacant ? 'Yes — Vacant' : 'No'}
-                  </span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">DNC</span>
-                  <span className={cls('nx-prow__val', thread.isSuppressed && 'is-danger')}>
-                    {thread.isSuppressed ? 'Suppressed / DNC' : 'Clear'}
-                  </span>
-                </div>
-                <div className="nx-prow">
-                  <span className="nx-prow__lbl">Last Response</span>
-                  <span className={cls('nx-prow__val', daysSinceResponse !== null && daysSinceResponse > 14 ? 'is-muted' : '')}>
-                    {thread.lastInboundAt
-                      ? `${formatRelativeTime(thread.lastInboundAt)}${daysSinceResponse !== null ? ` (${daysSinceResponse}d)` : ''}`
-                      : <span className="nx-prow__val is-muted">No response yet</span>
-                    }
-                  </span>
-                </div>
-                <div className="nx-prow nx-prow--ai">
-                  <span className="nx-prow__lbl">AI REC</span>
-                  <span className="nx-prow__val nx-prow__val--ai-rec" style={{ fontSize: '10px', lineHeight: 1.35, whiteSpace: 'normal', textAlign: 'right' }}>
-                    {aiRecText}
-                  </span>
-                </div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Strategy</span><span className="nx-prow__val" style={{ color: '#14b8a6', fontWeight: 600 }}>{asStr(dossier.strategy)}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Rec Offer</span><span className="nx-prow__val">{formatMoney(dossier.suggestedOffer)}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Zip Income</span><span className="nx-prow__val">{formatMoney(dossier.medianIncome)}</span></div>
+                <div className="nx-prow"><span className="nx-prow__lbl">Vacancy</span><span className="nx-prow__val">{formatPercent(dossier.vacancyRate)}</span></div>
               </div>
             </div>
           </div>
@@ -4228,13 +4297,19 @@ const MediumDealWorkspace = ({
   thread,
   snapshot,
   messages,
-  phase3,
+  phase3: _phase3,
+  dealContext,
+  onOpenComps,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
   messages: ThreadMessage[]
-  phase3: Phase3Intelligence | null
+  phase3?: Phase3Intelligence | null
+  dealContext: DealContext | null
+  onOpenComps?: () => void
 }) => {
+  const dossier = useDossierModel(thread, dealContext)
+
   // ── ACCORDION STATE ───────────────────────────────────────
   const [openProspect, setOpenProspect] = useState<Set<string>>(() => new Set(['identity', 'motivation']))
   const toggleProspect = (key: string) => setOpenProspect(prev => {
@@ -4248,12 +4323,7 @@ const MediumDealWorkspace = ({
     if (next.has(key)) { next.delete(key) } else { next.add(key) }
     return next
   })
-  const [openCensus, setOpenCensus] = useState<Set<string>>(() => new Set(['demo']))
-  const toggleCensus = (key: string) => setOpenCensus(prev => {
-    const next = new Set(prev)
-    if (next.has(key)) { next.delete(key) } else { next.add(key) }
-    return next
-  })
+  const [_openCensus, _setOpenCensus] = useState<Set<string>>(() => new Set(['demo']))
   const [openPortfolio, setOpenPortfolio] = useState<Set<string>>(() => new Set(['overview']))
   const togglePortfolio = (key: string) => setOpenPortfolio(prev => {
     const next = new Set(prev)
@@ -4312,25 +4382,6 @@ const MediumDealWorkspace = ({
 
   // ── BUYER INTELLIGENCE ───────────────────────────────────
   const demand = asNum((thread as any).buyerDemand || (thread as any).demandScore || (thread as any).demand_score) || 0
-  const flipVelocity = asNum((thread as any).flipVelocity || (thread as any).flip_velocity) || 0
-  const avgPpsf = asNum((thread as any).avgPpsf || (thread as any).avg_ppsf || (thread as any).price_per_sqft) || 0
-  const cashBuyerPct = asNum((thread as any).cashBuyerPct || (thread as any).cash_buyer_pct) || 0
-  const nearbyAcquisitions = asNum((thread as any).nearbyAcquisitions || (thread as any).nearby_acquisitions) || 0
-  const hedgeFundActivity = asStr((thread as any).hedgeFundActivity || (thread as any).hedge_fund_activity)
-  const recentSoldCount = asNum((thread as any).recentSoldCount || (thread as any).recent_sold_count)
-  const buyerMatchCount = asNum((thread as any).buyerMatchCount || (thread as any).buyer_match_count)
-  const avgResalePrice = asNum((thread as any).avgResalePrice || (thread as any).avg_resale_price)
-  const dispoConfidence = asNum((thread as any).dispoConfidence || (thread as any).dispo_confidence)
-  const assignmentSpread = asNum((thread as any).assignmentSpread || (thread as any).assignment_spread)
-  const avgPricePerUnit = isMultifamily && unitCount > 0 && avgResalePrice > 0 ? Math.round(avgResalePrice / unitCount) : 0
-  const buyerChips = ([
-    demand >= 75 && { label: 'HIGH BUYER PRESSURE', tone: 'red' },
-    isMultifamily && demand >= 60 && { label: 'MF BUYER ACTIVE', tone: 'purple' },
-    cashBuyerPct >= 60 && { label: 'CASH HEAVY', tone: 'green' },
-    demand >= 70 && { label: 'INSTITUTIONAL DEMAND', tone: 'cyan' },
-    flipVelocity >= 70 && { label: 'HIGH VELOCITY', tone: 'amber' },
-    demand > 0 && demand < 40 && { label: 'LOW INVENTORY', tone: 'amber' },
-  ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
 
   // ── PROSPECT ─────────────────────────────────────────────
   const financialPressureScore = asNum(thread.financial_pressure_score) || 0
@@ -4363,20 +4414,14 @@ const MediumDealWorkspace = ({
   ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
 
   // ── BEHAVIORAL DERIVATIONS ───────────────────────────────
-  const negotiationStyle = financialPressureScore >= 70 ? 'Motivated Seller'
+  const negotiationStyle = (financialPressureScore >= 70 ? 'Motivated Seller'
     : /executive|ceo|president|vp|director|founder/i.test(occupation) ? 'Analytical Negotiator'
     : ownerYears >= 20 ? 'Emotional Hold Seller'
     : isAbsentee ? 'Investor Mindset'
-    : 'Discovery Phase'
-  const likelyObjections: string[] = [
-    financialPressureScore < 40 ? 'May push for higher price' : null,
-    equity < 30 ? 'Limited flexibility on price' : null,
-    ownerYears >= 15 ? 'Emotional attachment to property' : null,
-    isAbsentee ? 'Slower remote engagement' : null,
-    !thread.lastInboundAt ? 'No response yet — cold outreach' : null,
-  ].filter(Boolean) as string[]
+    : /aggressive|direct|firm/i.test(dossier.summary || '') ? 'Firm' : 'Cooperative')
+
   const responseCadence = (() => {
-    const ts = thread.lastInboundAt
+    const ts = dossier.freshness?.latest_message_at || thread.lastInboundAt
     if (!ts) return 'No response yet'
     const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)
     if (days === 0) return 'Responded today'
@@ -4385,6 +4430,16 @@ const MediumDealWorkspace = ({
     if (days <= 7) return `${days}d ago — cooling`
     return `${days}d ago — dormant`
   })()
+
+  const likelyObjections: string[] = [
+    financialPressureScore < 40 ? 'May push for higher price' : null,
+    equity < 30 ? 'Limited flexibility on price' : null,
+    ownerYears >= 15 ? 'Emotional attachment to property' : null,
+    isAbsentee ? 'Slower remote engagement' : null,
+    !thread.lastInboundAt ? 'No response yet — cold outreach' : null,
+    /price|more money|too low/i.test(dossier.summary || '') ? 'Price Expectations' : null,
+    /trust|who are you|scam/i.test(dossier.summary || '') ? 'Offer Confidence' : null,
+  ].filter(Boolean) as string[]
   const phoneConfidence = asNum(thread.prospect_phone_score || thread.contactability_score) || 0
   const smsDeliverability = phoneConfidence
   const languagePref = asStr(thread.best_language || snapshot.language || thread.language_preference)
@@ -4452,23 +4507,6 @@ const MediumDealWorkspace = ({
   ] as (false | { label: string; tone: string })[]).filter(Boolean) as { label: string; tone: string }[]
 
   // ── CENSUS INTELLIGENCE ──────────────────────────────────
-  const censusMedianIncome = asNum((thread as any).censusMedianIncome || (thread as any).census_median_income || (thread as any).medianIncome)
-  const censusMedianAge = asNum((thread as any).censusMedianAge || (thread as any).census_median_age)
-  const censusHouseholdSize = asNum((thread as any).censusHouseholdSize || (thread as any).census_household_size)
-  const censusPopulation = asNum((thread as any).censusPopulation || (thread as any).census_population || (thread as any).population)
-  const populationGrowth = asNum((thread as any).populationGrowth || (thread as any).population_growth)
-  const ownerOccupancyRate = asNum((thread as any).ownerOccupancyRate || (thread as any).owner_occupancy_rate)
-  const rentalRate = asNum((thread as any).rentalRate || (thread as any).rental_rate)
-  const vacancyRate = asNum((thread as any).vacancyRate || (thread as any).vacancy_rate)
-  const crimeIndex = asNum((thread as any).crimeIndex || (thread as any).crime_index)
-  const schoolRating = asNum((thread as any).schoolRating || (thread as any).school_rating)
-  const employmentStrength = asNum((thread as any).employmentStrength || (thread as any).employment_strength)
-  const migrationTrend = asStr((thread as any).migrationTrend || (thread as any).migration_trend)
-  const economicTrend = asStr((thread as any).economicTrend || (thread as any).economic_trend)
-  const investorActivity = asNum((thread as any).investorActivity || (thread as any).investor_activity)
-  const neighborhoodScore = asNum((thread as any).neighborhoodScore || (thread as any).neighborhood_score)
-  const growthMomentum = asNum((thread as any).growthMomentum || (thread as any).growth_momentum)
-
   // ── OWNER PORTFOLIO INTELLIGENCE ────────────────────────
   const portfolioCount = asNum(thread.property_count || snapshot.portfolioPropertyCount)
   const portfolioUnits = asNum(thread.portfolio_total_units)
@@ -4538,11 +4576,9 @@ const MediumDealWorkspace = ({
   const prospectTags = autoProspectTags
 
   // ── CONVERSATION BRAIN ───────────────────────────────────
-  const latestInbound = messages.find((m) => m.direction === 'inbound') || null
-  const latestOutbound = messages.find((m) => m.direction === 'outbound') || null
-  const summary = phase3?.latestSnapshot?.capture_reason || thread.aiSummary || thread.aiDraft || 'AI is analyzing seller conversation patterns and market signals.'
-  const intent = thread.uiIntent || thread.detected_intent || 'Pending'
-  const sentiment = String(thread.sentiment || 'Neutral')
+  const summary = dossier.summary || 'AI is analyzing seller conversation patterns and market signals.'
+  const intent = dossier.intent || 'Pending'
+  const sentiment = dossier.sentiment || 'Neutral'
 
   const emotionalState = (() => {
     if (/angry|frustrated|upset|hostile/i.test(summary + sentiment)) return { label: 'Frustrated', tone: 'red' }
@@ -4552,14 +4588,18 @@ const MediumDealWorkspace = ({
     if (/negative/i.test(sentiment)) return { label: 'Resistant', tone: 'red' }
     return { label: 'Neutral', tone: 'blue' }
   })()
-  const urgency = percentFromScore(thread.urgency_score || thread.priorityScore, thread.priority === 'urgent' ? 82 : 44)
-  const currentStageIndex = Math.max(0, sellerStageOptions.findIndex((o) => o.value === thread.conversationStage))
+  const urgency = dossier.urgencyScore
   const nextAction = getNextBestAction(thread)
+  const latestInbound = messages.find((m) => m.direction === 'inbound') || null
+  const latestOutbound = messages.find((m) => m.direction === 'outbound') || null
   const stageFlow = ['Ownership', 'Interest', 'Price', 'Condition', 'Offer', 'Negotiation', 'Contract']
+  const currentStageIndex = Math.max(0, sellerStageOptions.findIndex((o) => o.value === thread.conversationStage))
   const aiInsights: string[] = []
   if (urgency >= 75) aiInsights.push('Seller response timing indicates elevated engagement.')
   if (financialPressureScore >= 65) aiInsights.push('Motivation appears financial rather than emotional.')
   if (demand >= 70) aiInsights.push('Buyer pressure supports stronger acquisition confidence.')
+  if (dossier.isOutOfState) aiInsights.push('Absentee out-of-state owner — possible management fatigue.')
+
   if (equity >= 70) aiInsights.push('Strong equity position creates flexible offer room.')
   if (isTaxDelinquent) aiInsights.push('Tax delinquency suggests urgency — timing leverage elevated.')
   if (!aiInsights.length) aiInsights.push('Analyzing seller signals and market conditions.')
@@ -4625,11 +4665,7 @@ const MediumDealWorkspace = ({
   const closeRingFill = CLOSE_C * (closeProbability / 100)
   const closeTone = closeProbability >= 65 ? 'green' : closeProbability >= 40 ? 'amber' : 'red'
   // Buyer intel extras
-  const marketAbsorption = asNum((thread as any).marketAbsorption || (thread as any).absorption_rate) || 0
-  const investorCompetition = asNum((thread as any).investorCompetition || (thread as any).investor_competition) || 0
   void asNum((thread as any).buyerSaturation || (thread as any).buyer_saturation) // reserved field, not yet rendered
-  const dispositionConfidence = Math.round(clamp((demand > 0 ? demand * 0.5 : 20) + (flipVelocity * 0.3) + (cashBuyerPct * 0.2), 0, 100))
-  const exitLiquidity = demand >= 70 ? 'High' : demand >= 45 ? 'Moderate' : demand > 0 ? 'Low' : null
   const resistanceLevel = Math.round(clamp(100 - financialPressureScore - (urgency * 0.5), 0, 100))
   const momentumTone = momentumScore >= 70 ? 'green' : momentumScore >= 40 ? 'amber' : 'red'
 
@@ -4688,12 +4724,16 @@ const MediumDealWorkspace = ({
               />
             </svg>
             <div className="nx-mh-score-inner">
-              <strong>{Math.round(score)}</strong>
+              <strong>{acqScore}</strong>
               <span>SCORE</span>
+              <small>{acqGrade}</small>
             </div>
           </div>
         </div>
       </div>
+
+      {/* ── DEAL INTELLIGENCE (NEW) ────────────────────── */}
+      <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps || (() => undefined)} />
 
       {/* ── 2. STREET VIEW — CINEMATIC INTELLIGENCE VIEWPORT ── */}
       <div className="nx-medium-map-frame">
@@ -4886,144 +4926,7 @@ const MediumDealWorkspace = ({
           BUYER INTELLIGENCE
           <span className="nx-medium-live-badge">LIVE</span>
         </div>
-        {/* Demand heat bar */}
-        <div className="nx-mby-heat-track">
-          <div className="nx-mby-heat-track__fill" style={{ width: `${demand}%` }}>
-            <span className="nx-mby-heat-track__label">{demand > 0 ? `BUYER DEMAND ${Math.round(demand)}/100` : 'DEMAND DATA PENDING'}</span>
-          </div>
-        </div>
-        {/* Scanning state when buyer data is absent */}
-        {demand === 0 && cashBuyerPct === 0 && flipVelocity === 0 && avgResalePrice === 0 && (
-          <div className="nx-mby-scanning">
-            <div className="nx-mby-scanning__title">Buyer Network Scanning — Dispo Intelligence Syncing</div>
-            <div className="nx-mby-scanning__row">
-              <div className="nx-mby-scanning__skel w-60" />
-              <div className="nx-mby-scanning__skel w-30" />
-            </div>
-            <div className="nx-mby-scanning__row">
-              <div className="nx-mby-scanning__skel w-40" />
-              <div className="nx-mby-scanning__skel w-60" />
-            </div>
-          </div>
-        )}
-        {/* Market pulse pills — always visible */}
-        <div className="nx-mby-market-pulse" style={{ marginBottom: 10 }}>
-          {demand >= 70 ? <span className="nx-mby-market-pill is-red">HIGH DEMAND</span> : demand >= 45 ? <span className="nx-mby-market-pill is-amber">MODERATE DEMAND</span> : demand > 0 ? <span className="nx-mby-market-pill is-muted">LOW DEMAND</span> : <span className="nx-mby-market-pill is-muted">DEMAND PENDING</span>}
-          {cashBuyerPct >= 60 ? <span className="nx-mby-market-pill is-green">HIGH CASH ACTIVITY</span> : cashBuyerPct >= 30 ? <span className="nx-mby-market-pill is-blue">MIXED BUYERS</span> : cashBuyerPct > 0 ? <span className="nx-mby-market-pill is-muted">LOW CASH ACTIVITY</span> : null}
-          {(dispoConfidence || dispositionConfidence) < 40 && (dispoConfidence || dispositionConfidence) > 0 ? <span className="nx-mby-market-pill is-amber">SLOW DISPO</span> : (dispoConfidence || dispositionConfidence) >= 65 ? <span className="nx-mby-market-pill is-green">FAST DISPO</span> : null}
-          {nearbyAcquisitions >= 5 ? <span className="nx-mby-market-pill is-purple">ACTIVE INV. ZONE</span> : nearbyAcquisitions > 0 ? <span className="nx-mby-market-pill is-blue">SOME INV. ACTIVITY</span> : null}
-          {investorCompetition >= 70 ? <span className="nx-mby-market-pill is-red">HIGH COMPETITION</span> : null}
-          {exitLiquidity === 'Low' ? <span className="nx-mby-market-pill is-amber">LOW LIQUIDITY</span> : null}
-          {hedgeFundActivity ? <span className="nx-mby-market-pill is-purple">HEDGE FUND ACTIVE</span> : null}
-        </div>
-        {/* Dispo ring + key stats row */}
-        {(() => {
-          const dispo = dispoConfidence || dispositionConfidence
-          const DISPO_R = 20, DISPO_C = 2 * Math.PI * DISPO_R
-          const dispoFill = DISPO_C * (dispo / 100)
-          const dispoTone = dispo >= 65 ? 'is-green' : dispo >= 40 ? 'is-amber' : 'is-red'
-          return (
-            <div className="nx-mby-dispo-row">
-              <div className="nx-mby-dispo-ring-wrap">
-                <svg viewBox="0 0 48 48" className="nx-mby-dispo-ring-svg">
-                  <circle cx="24" cy="24" r={DISPO_R} className="nx-mby-dispo-ring-bg" />
-                  <circle cx="24" cy="24" r={DISPO_R} className={cls('nx-mby-dispo-ring-fill', dispo > 0 ? dispoTone : 'is-red')}
-                    strokeDasharray={`${dispo > 0 ? dispoFill : 0} ${DISPO_C}`}
-                    strokeDashoffset={DISPO_C * 0.25} />
-                </svg>
-                <div className="nx-mby-dispo-ring-inner">
-                  <strong>{dispo > 0 ? `${Math.round(dispo)}%` : '—'}</strong>
-                  <span>DISPO</span>
-                </div>
-              </div>
-              <div className="nx-mby-dispo-stats">
-                <div className="nx-mby-dispo-stat">
-                  <span className="nx-mby-dispo-stat__label">Exit Liquidity</span>
-                  <span className={cls('nx-mby-dispo-stat__val', exitLiquidity === 'High' ? 'is-green' : exitLiquidity === 'Moderate' ? 'is-amber' : 'nx-mm-unavail')}>{exitLiquidity || '—'}</span>
-                </div>
-                <div className="nx-mby-dispo-stat">
-                  <span className="nx-mby-dispo-stat__label">Assignment Spread</span>
-                  <span className={cls('nx-mby-dispo-stat__val', assignmentSpread > 0 ? 'is-green' : 'nx-mm-unavail')}>{assignmentSpread > 0 ? formatMoney(assignmentSpread) : '—'}</span>
-                </div>
-                <div className="nx-mby-dispo-stat">
-                  <span className="nx-mby-dispo-stat__label">Buyer Match Count</span>
-                  <span className={cls('nx-mby-dispo-stat__val', buyerMatchCount > 0 ? '' : 'nx-mm-unavail')}>{buyerMatchCount > 0 ? buyerMatchCount : '—'}</span>
-                </div>
-              </div>
-            </div>
-          )
-        })()}
-        <div className="nx-medium-buyer-grid">
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">DEMAND SCORE</span>
-            <strong className={cls('nx-mm-value', !demand && 'nx-mm-unavail')}>{demand > 0 ? `${Math.round(demand)}/100` : 'Unavailable'}</strong>
-            {demand > 0 && <div className="nx-mby-demand-bar"><div className={cls('nx-mby-demand-fill', demand >= 70 ? 'is-red' : demand >= 45 ? 'is-amber' : 'is-blue')} style={{ width: `${demand}%` }} /></div>}
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">AVG RESALE PRICE</span>
-            <strong className={cls('nx-mm-value', !avgResalePrice && 'nx-mm-unavail')}>{avgResalePrice > 0 ? formatMoney(avgResalePrice) : 'Unavailable'}</strong>
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">AVG PPSF</span>
-            <strong className={cls('nx-mm-value', !avgPpsf && 'nx-mm-unavail')}>{avgPpsf > 0 ? `$${Math.round(avgPpsf)}/sqft` : 'Unavailable'}</strong>
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">RECENT SOLD (6mo)</span>
-            <strong className={cls('nx-mm-value', !recentSoldCount && 'nx-mm-unavail')}>{recentSoldCount > 0 ? recentSoldCount : 'Unavailable'}</strong>
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">NEARBY INV. ACQS</span>
-            <strong className={cls('nx-mm-value', !nearbyAcquisitions && 'nx-mm-unavail')}>{nearbyAcquisitions > 0 ? nearbyAcquisitions : 'Unavailable'}</strong>
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">CASH BUYER %</span>
-            <strong className={cls('nx-mm-value', !cashBuyerPct && 'nx-mm-unavail')}>{cashBuyerPct > 0 ? `${Math.round(cashBuyerPct)}%` : 'Unavailable'}</strong>
-            {cashBuyerPct > 0 && <div className="nx-mby-demand-bar"><div className="nx-mby-demand-fill is-green" style={{ width: `${cashBuyerPct}%` }} /></div>}
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">FLIP VELOCITY</span>
-            <strong className={cls('nx-mm-value', !flipVelocity && 'nx-mm-unavail')}>{flipVelocity > 0 ? `${Math.round(flipVelocity)}/100` : 'Unavailable'}</strong>
-            {flipVelocity > 0 && <div className="nx-mby-demand-bar"><div className="nx-mby-demand-fill is-amber" style={{ width: `${flipVelocity}%` }} /></div>}
-          </div>
-          <div className="nx-medium-buyer-metric">
-            <span className="nx-mm-label">BUYER PRESSURE</span>
-            <strong className={cls('nx-mm-value', !investorCompetition && 'nx-mm-unavail', investorCompetition >= 70 ? 'nx-mm-value--red' : '')}>{investorCompetition > 0 ? `${investorCompetition}/100` : 'Unavailable'}</strong>
-          </div>
-          {hedgeFundActivity && (
-            <div className="nx-medium-buyer-metric" style={{ gridColumn: 'span 2' }}>
-              <span className="nx-mm-label">HEDGE FUND / INSTITUTIONAL</span>
-              <strong className="nx-mm-value nx-mm-value--purple">{hedgeFundActivity}</strong>
-            </div>
-          )}
-          {isMultifamily && (
-            <div className="nx-medium-buyer-metric">
-              <span className="nx-mm-label">AVG PRICE / UNIT</span>
-              <strong className={cls('nx-mm-value', !avgPricePerUnit && 'nx-mm-unavail')}>{avgPricePerUnit > 0 ? formatMoney(avgPricePerUnit) : 'Unavailable'}</strong>
-            </div>
-          )}
-          {marketAbsorption > 0 && (
-            <div className="nx-medium-buyer-metric">
-              <span className="nx-mm-label">ABSORPTION</span>
-              <strong className="nx-mm-value">{marketAbsorption}<span style={{ fontSize: '10px', opacity: 0.55 }}>d</span></strong>
-            </div>
-          )}
-        </div>
-        {/* Tactical signal chips */}
-        <div className="nx-mby-tactical-chips">
-          {demand >= 70 && <span className="nx-mby-tactical-chip is-red">STRONG DEMAND</span>}
-          {demand > 0 && demand < 40 && <span className="nx-mby-tactical-chip is-amber">LOW DEMAND</span>}
-          {cashBuyerPct >= 60 && <span className="nx-mby-tactical-chip is-green">CASH HEAVY MARKET</span>}
-          {flipVelocity >= 70 && <span className="nx-mby-tactical-chip is-amber">HIGH FLIP VELOCITY</span>}
-          {exitLiquidity === 'Low' && <span className="nx-mby-tactical-chip is-amber">LOW LIQUIDITY</span>}
-          {exitLiquidity === 'High' && <span className="nx-mby-tactical-chip is-green">HIGH LIQUIDITY</span>}
-          {hedgeFundActivity && <span className="nx-mby-tactical-chip is-purple">HEDGE FUND ACTIVE</span>}
-          {investorCompetition >= 70 && <span className="nx-mby-tactical-chip is-red">HIGH COMPETITION</span>}
-          {(dispoConfidence || dispositionConfidence) < 40 && (dispoConfidence || dispositionConfidence) > 0 && <span className="nx-mby-tactical-chip is-amber">SLOW DISPO</span>}
-          {buyerChips.map((chip) => (
-            <span key={chip.label} className={cls('nx-mby-tactical-chip', `is-${chip.tone}`)}>{chip.label}</span>
-          ))}
-          {demand === 0 && cashBuyerPct === 0 && flipVelocity === 0 && <span className="nx-mby-tactical-chip is-muted">BUYER DATA PENDING</span>}
-        </div>
+        <BuyerMatchingModule thread={thread} snapshot={snapshot} dealContext={dealContext} />
       </div>
 
       {/* ── PROPERTY INTELLIGENCE ────────────────────────── */}
@@ -5295,101 +5198,8 @@ const MediumDealWorkspace = ({
       <div className="nx-medium-section">
         <div className="nx-medium-section__title">
           CENSUS INTELLIGENCE
-          {neighborhoodScore > 0 && <span className="nx-medium-live-badge" style={{ background: 'rgba(10,132,255,0.15)', color: '#0a84ff' }}>SCORE {Math.round(neighborhoodScore)}</span>}
         </div>
-        <div className="nx-mpia">
-
-          {/* DEMOGRAPHICS */}
-          <div className={cls('nx-mpia-section', openCensus.has('demo') && 'is-open')}>
-            <button type="button" className="nx-mpia-hdr" onClick={() => toggleCensus('demo')}>
-              <span className="nx-mpia-hdr__label">DEMOGRAPHICS</span>
-              {populationGrowth > 0 && <span className="nx-mpia-hdr__badge is-green">+{populationGrowth.toFixed(1)}% GROWTH</span>}
-              {populationGrowth < 0 && <span className="nx-mpia-hdr__badge is-red">{populationGrowth.toFixed(1)}% DECLINE</span>}
-              <span className="nx-mpia-hdr__arrow">{openCensus.has('demo') ? '▲' : '▼'}</span>
-            </button>
-            <div className="nx-mpia-body">
-              <div className="nx-pi-stat-grid">
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">POPULATION</span>{censusPopulation > 0 ? <strong className="nx-pi-stat__value">{censusPopulation.toLocaleString()}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">MED INCOME</span>{censusMedianIncome > 0 ? <strong className="nx-pi-stat__value is-green">{formatMoney(censusMedianIncome)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">MED AGE</span>{censusMedianAge > 0 ? <strong className="nx-pi-stat__value">{Math.round(censusMedianAge)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">HH SIZE</span>{censusHouseholdSize > 0 ? <strong className="nx-pi-stat__value">{censusHouseholdSize.toFixed(1)}</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">OWNER OCC</span>{ownerOccupancyRate > 0 ? <strong className="nx-pi-stat__value is-blue">{Math.round(ownerOccupancyRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">RENTAL</span>{rentalRate > 0 ? <strong className="nx-pi-stat__value is-amber">{Math.round(rentalRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-                <div className="nx-pi-stat"><span className="nx-pi-stat__label">VACANCY</span>{vacancyRate > 0 ? <strong className={cls('nx-pi-stat__value', vacancyRate > 10 ? 'is-red' : '')}>{Math.round(vacancyRate)}%</strong> : <span className="nx-pi-stat__value nx-mm-unavail">—</span>}</div>
-              </div>
-              {ownerOccupancyRate > 0 && rentalRate > 0 && (
-                <div className="nx-pi-stacked-bar-wrap" style={{ marginTop: 10 }}>
-                  <span className="nx-pi-bar__label">Occupancy Mix</span>
-                  <div className="nx-pi-stacked-bar">
-                    <div className="nx-pi-stacked-bar__seg is-blue" style={{ width: `${ownerOccupancyRate}%` }} />
-                    <div className="nx-pi-stacked-bar__seg is-amber" style={{ width: `${rentalRate}%` }} />
-                    {vacancyRate > 0 && <div className="nx-pi-stacked-bar__seg is-red" style={{ width: `${vacancyRate}%` }} />}
-                  </div>
-                  <div className="nx-pi-stacked-bar__legend">
-                    <span className="is-blue">Owner {Math.round(ownerOccupancyRate)}%</span>
-                    <span className="is-amber">Rental {Math.round(rentalRate)}%</span>
-                    {vacancyRate > 0 && <span className="is-red">Vacant {Math.round(vacancyRate)}%</span>}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* MARKET HEALTH */}
-          <div className={cls('nx-mpia-section', openCensus.has('health') && 'is-open')}>
-            <button type="button" className="nx-mpia-hdr" onClick={() => toggleCensus('health')}>
-              <span className="nx-mpia-hdr__label">MARKET HEALTH</span>
-              {neighborhoodScore >= 70 && <span className="nx-mpia-hdr__badge is-green">STRONG</span>}
-              {neighborhoodScore > 0 && neighborhoodScore < 40 && <span className="nx-mpia-hdr__badge is-red">WEAK</span>}
-              <span className="nx-mpia-hdr__arrow">{openCensus.has('health') ? '▲' : '▼'}</span>
-            </button>
-            <div className="nx-mpia-body">
-              <div className="nx-pi-bars">
-                {schoolRating > 0 && (
-                  <div className="nx-pi-bar-row">
-                    <span className="nx-pi-bar__label">School Rating</span>
-                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', schoolRating >= 7 ? 'is-green' : schoolRating >= 5 ? 'is-amber' : 'is-red')} style={{ width: `${schoolRating * 10}%` }} /></div>
-                    <span className="nx-pi-bar__val">{schoolRating}/10</span>
-                  </div>
-                )}
-                {crimeIndex > 0 && (
-                  <div className="nx-pi-bar-row">
-                    <span className="nx-pi-bar__label">Crime Index</span>
-                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', crimeIndex >= 70 ? 'is-red' : crimeIndex >= 40 ? 'is-amber' : 'is-green')} style={{ width: `${crimeIndex}%` }} /></div>
-                    <span className="nx-pi-bar__val">{crimeIndex}</span>
-                  </div>
-                )}
-                {employmentStrength > 0 && (
-                  <div className="nx-pi-bar-row">
-                    <span className="nx-pi-bar__label">Employment</span>
-                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', employmentStrength >= 70 ? 'is-green' : employmentStrength >= 40 ? 'is-amber' : 'is-red')} style={{ width: `${employmentStrength}%` }} /></div>
-                    <span className="nx-pi-bar__val">{employmentStrength}</span>
-                  </div>
-                )}
-                {investorActivity > 0 && (
-                  <div className="nx-pi-bar-row">
-                    <span className="nx-pi-bar__label">Investor Activity</span>
-                    <div className="nx-pi-bar"><div className="nx-pi-bar__fill is-purple" style={{ width: `${investorActivity}%` }} /></div>
-                    <span className="nx-pi-bar__val">{investorActivity}</span>
-                  </div>
-                )}
-                {growthMomentum > 0 && (
-                  <div className="nx-pi-bar-row">
-                    <span className="nx-pi-bar__label">Growth Momentum</span>
-                    <div className="nx-pi-bar"><div className={cls('nx-pi-bar__fill', growthMomentum >= 70 ? 'is-green' : growthMomentum >= 40 ? 'is-amber' : 'is-blue')} style={{ width: `${growthMomentum}%` }} /></div>
-                    <span className="nx-pi-bar__val">{growthMomentum}</span>
-                  </div>
-                )}
-              </div>
-              <div className="nx-medium-prow-list" style={{ marginTop: 10 }}>
-                {migrationTrend && <div className="nx-medium-prow"><span>Migration</span><strong className={/inflow|positive|growing/i.test(migrationTrend) ? 'nx-mpia-ok' : /outflow|negative|declining/i.test(migrationTrend) ? 'nx-mpia-warn' : ''}>{migrationTrend}</strong></div>}
-                {economicTrend && <div className="nx-medium-prow"><span>Economic Trend</span><strong className={/grow|improve|positive/i.test(economicTrend) ? 'nx-mpia-ok' : /decline|contract|negative/i.test(economicTrend) ? 'nx-mpia-warn' : ''}>{economicTrend}</strong></div>}
-                {neighborhoodScore > 0 && <div className="nx-medium-prow"><span>Neighborhood Score</span><span className={cls('nx-mp-score', neighborhoodScore >= 70 ? 'is-green' : neighborhoodScore >= 45 ? 'is-amber' : 'is-danger')}>{Math.round(neighborhoodScore)}/100</span></div>}
-              </div>
-            </div>
-          </div>
-
-        </div>
+        <CensusPropertyPanel thread={thread} dealContext={dealContext} />
       </div>
 
       {/* ── OWNER PORTFOLIO INTELLIGENCE ─────────────────────── */}
@@ -5591,7 +5401,13 @@ const MediumDealWorkspace = ({
                 {isVacant && <span className="nx-pi-id-chip is-amber">VACANT</span>}
                 {isTaxDelinquent && <span className="nx-pi-id-chip is-red">TAX DELINQUENT</span>}
               </div>
+              {/* Embedded full panels for depth */}
+              <div style={{ marginTop: 24 }}>
+                <ProspectPanel thread={thread} intelligence={null} dealContext={dealContext} />
+                <SellerOwnerCard thread={thread} dealContext={dealContext} />
+              </div>
             </div>
+
           </div>
 
           {/* MOTIVATION */}
@@ -5965,8 +5781,10 @@ const DealCommandDossier = ({
   intelligence,
   layoutMode,
   onOpenMap,
+  onOpenComps,
   onOpenDossier,
   onOpenAi,
+  dealContext,
 }: {
   thread: WorkflowThread
   snapshot: NormalizedPropertySnapshot
@@ -5975,287 +5793,64 @@ const DealCommandDossier = ({
   intelligence: ThreadIntelligenceRecord | null
   layoutMode: ViewLayoutMode
   onOpenMap: () => void
+  onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
-}) => (
-  <div className={cls('nx-deal-command-dossier', `is-layout-${layoutMode}`, layoutMode === 'full' && 'is-full')}>
-    <DealCommandHeader thread={thread} snapshot={snapshot} phase3={phase3} />
-    <div className="nx-deal-command-dossier__grid">
-      <div className="nx-deal-command-dossier__media">
-        <PropertyHeroCard
-          thread={thread}
-          snapshot={snapshot}
-          panelMode={layoutMode === 'full' ? 'full' : 'default'}
-          layoutMode={layoutMode}
-        />
-      </div>
-      <div className="nx-deal-command-dossier__decision">
-        <DealDecisionStrip thread={thread} />
-      </div>
-      <div className="nx-deal-command-dossier__comp">
-        <CompIntelligenceModule thread={thread} snapshot={snapshot} />
-      </div>
-      <div className="nx-deal-command-dossier__buyer">
-        <BuyerMatchingModule thread={thread} snapshot={snapshot} />
-      </div>
-      <div className="nx-deal-command-dossier__seller-grid">
-        <ConversationBrainModule thread={thread} messages={messages} phase3={phase3} />
-        <ContactIntelligenceCard thread={thread} snapshot={snapshot} intelligence={intelligence} />
-        <TimelinePanel thread={thread} messages={messages} phase3={phase3} />
-      </div>
-      <div className="nx-deal-command-dossier__links">
-        <LinkedRecordsCard thread={thread} />
-      </div>
-    </div>
-    <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
-  </div>
-)
-
-// ── Raw Dossier Section ───────────────────────────────────────────────────────
-
-function RawDossierField({ label, value }: { label: string; value: unknown }) {
-  const [expanded, setExpanded] = useState(false)
-  if (value === null || value === undefined) return null
-  const isObj = typeof value === 'object'
-  const display = isObj ? JSON.stringify(value, null, 2) : String(value)
-  const isLong = display.length > 120 || display.includes('\n')
+  dealContext?: DealContext | null
+}) => {
   return (
-    <div style={{ marginBottom: 6 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 2 }}>
-        {label}
+    <div className={cls('nx-deal-command-dossier', `is-layout-${layoutMode}`, layoutMode === 'full' && 'is-full')}>
+      <DealCommandHeader thread={thread} snapshot={snapshot} phase3={phase3} />
+      <div className="nx-deal-command-dossier__grid">
+        <div className="nx-deal-command-dossier__media">
+          <PropertyHeroCard
+            thread={thread}
+            snapshot={snapshot}
+            panelMode={layoutMode === 'full' ? 'full' : 'default'}
+            layoutMode={layoutMode}
+          />
+        </div>
+        <div className="nx-deal-command-dossier__decision">
+          <DealDecisionStrip thread={thread} dealContext={dealContext} />
+        </div>
+        <div className="nx-deal-command-dossier__comp">
+          <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps || (() => undefined)} />
+          <CompIntelligenceModule thread={thread} snapshot={snapshot} dealContext={dealContext} />
+        </div>
+        <div className="nx-deal-command-dossier__buyer">
+          <BuyerMatchingModule thread={thread} snapshot={snapshot} dealContext={dealContext} />
+        </div>
+        <div className="nx-deal-command-dossier__seller-grid">
+          <ConversationBrainModule thread={thread} messages={messages} phase3={phase3} />
+          <ProspectPanel thread={thread} intelligence={intelligence} dealContext={dealContext} />
+          <SellerOwnerCard thread={thread} dealContext={dealContext} />
+          <ContactIntelligenceCard thread={thread} snapshot={snapshot} intelligence={intelligence} dealContext={dealContext} />
+          <PropertyIntelligenceTabs thread={thread} intelligence={intelligence} dealContext={dealContext} />
+          <CensusPropertyPanel thread={thread} dealContext={dealContext} />
+          <TimelinePanel thread={thread} messages={messages} phase3={phase3} />
+        </div>
+        <div className="nx-deal-command-dossier__links">
+          <LinkedRecordsCard thread={thread} />
+        </div>
       </div>
-      {isLong && !expanded ? (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--nx-accent, #4a9eff)', padding: 0 }}
-        >
-          {isObj ? '{ ... } expand' : `${display.slice(0, 80)}… expand`}
-        </button>
-      ) : (
-        <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--nx-text, #e0e0e0)', background: 'var(--nx-surface-2, rgba(255,255,255,0.05))', borderRadius: 4, padding: '4px 6px' }}>
-          {display}
-          {isLong && (
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              style={{ display: 'block', marginTop: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: 'var(--nx-text-muted, #888)', padding: 0 }}
-            >
-              collapse
-            </button>
-          )}
-        </pre>
-      )}
+
+      <DealContextPayloadCard thread={thread} intelligence={intelligence} />
+      <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenComps={onOpenComps} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
     </div>
   )
-}
-
-function RawDossierTable({ title, rows }: { title: string; rows: any }) {
-  const [open, setOpen] = useState(false)
-  if (!Array.isArray(rows) || rows.length === 0) return null
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--nx-text, #e0e0e0)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}
-      >
-        <span style={{ opacity: 0.5 }}>{open ? '▾' : '▸'}</span>
-        {title} <span style={{ opacity: 0.5, fontWeight: 400 }}>({rows.length})</span>
-      </button>
-      {open && rows.map((row, i) => (
-        <div key={i} style={{ borderLeft: '2px solid var(--nx-accent, #4a9eff)', paddingLeft: 8, marginBottom: 8 }}>
-          {Object.entries(row).map(([k, v]) => v !== null && v !== undefined && v !== '' ? (
-            <RawDossierField key={k} label={k} value={v} />
-          ) : null)}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function RawDossierRecord({ title, obj }: { title: string; obj: any }) {
-  const [open, setOpen] = useState(false)
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null
-  const entries = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && v !== '')
-  if (entries.length === 0) return null
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--nx-text, #e0e0e0)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}
-      >
-        <span style={{ opacity: 0.5 }}>{open ? '▾' : '▸'}</span>
-        {title}
-      </button>
-      {open && (
-        <div style={{ borderLeft: '2px solid var(--nx-accent, #4a9eff)', paddingLeft: 8 }}>
-          {entries.map(([k, v]) => <RawDossierField key={k} label={k} value={v} />)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RawDossierSection({ dossier, loading }: { dossier: ThreadDossier | null; loading: boolean }) {
-  if (loading) {
-    return (
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8 }}>
-          RAW DOSSIER
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--nx-text-muted, #888)' }}>Loading full dossier…</div>
-      </div>
-    )
-  }
-  if (!dossier) return null
-  const hasErrors = Array.isArray(dossier.errors) && dossier.errors.length > 0
-
-  return (
-    <ErrorBoundary fallbackName="RawDossierSection">
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nx-border, rgba(255,255,255,0.08))' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--nx-text-muted, #888)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-          <span>RAW DOSSIER</span>
-          {hasErrors && <span style={{ color: '#f59e0b', fontWeight: 400 }}>partial ({dossier.errors.length} warn)</span>}
-        </div>
-
-        <RawDossierRecord title="Master Owner" obj={dossier?.master_owner} />
-        <RawDossierRecord title="Property" obj={dossier?.property} />
-        <RawDossierRecord title="Prospect" obj={dossier?.prospect} />
-        <RawDossierRecord title="Inbox Thread State" obj={dossier?.inbox_thread_state} />
-        <RawDossierRecord title="Thread AI State" obj={dossier?.thread_ai_state} />
-        <RawDossierTable title="Send Queue" rows={dossier?.send_queue} />
-        <RawDossierTable title="Phones" rows={dossier?.phones} />
-        <RawDossierTable title="Emails" rows={dossier?.emails} />
-        <RawDossierTable title="Message Events" rows={dossier?.message_events} />
-
-        {hasErrors && (
-          <details style={{ marginTop: 8 }}>
-            <summary style={{ fontSize: 10, color: 'var(--nx-text-muted, #888)', cursor: 'pointer' }}>Diagnostics</summary>
-            <pre style={{ fontSize: 10, marginTop: 4, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', borderRadius: 4, padding: '4px 6px', whiteSpace: 'pre-wrap' }}>
-              {dossier.errors.join('\n')}
-            </pre>
-          </details>
-        )}
-      </div>
-    </ErrorBoundary>
-  )
-}
-
-function ProspectIntelSection({ prospect }: { prospect: any }) {
-  if (!prospect || typeof prospect !== 'object') return null;
-  return (
-    <ErrorBoundary fallbackName="ProspectIntelSection">
-      <DossierCard className="nx-mapped-intel-card">
-        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Prospect Intel</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <IntelField label="Full Name" value={prospect?.full_name} />
-          <IntelField label="First Name" value={prospect?.first_name} />
-          <IntelField label="Gender" value={prospect?.gender} />
-          <IntelField label="Language" value={prospect?.language_preference} />
-          <IntelField label="Marital Status" value={prospect?.marital_status} />
-          <IntelField label="Education" value={prospect?.education_model} />
-          <IntelField label="Occupation Group" value={prospect?.occupation_group} />
-          <IntelField label="Occupation Code" value={prospect?.occupation_code} />
-          <IntelField label="Household Income" value={prospect?.est_household_income} />
-          <IntelField label="Net Asset Value" value={prospect?.net_asset_value} />
-          <IntelField label="Buying Power" value={prospect?.buying_power} />
-          <IntelField label="Matching Flags" value={prospect?.matching_flags} />
-          <IntelField label="Person Flags" value={prospect?.person_flags_text} />
-          <IntelField label="Contact Score" value={prospect?.contact_score_final} />
-          <IntelField label="Best Phone" value={prospect?.best_phone} />
-          <IntelField label="Best Email" value={prospect?.best_email} />
-          <IntelField label="Rank Confidence" value={prospect?.rank_confidence} />
-          <IntelField label="Timezone" value={prospect?.timezone} />
-          <IntelField label="SMS Eligible" value={prospect?.sms_eligible ? 'Yes' : 'No'} />
-          <IntelField label="Priority Tier" value={prospect?.priority_tier} />
-        </div>
-      </DossierCard>
-    </ErrorBoundary>
-  );
-}
-
-function PropertyIntelSection({ property }: { property: any }) {
-  if (!property || typeof property !== 'object') return null;
-  return (
-    <ErrorBoundary fallbackName="PropertyIntelSection">
-      <DossierCard className="nx-mapped-intel-card">
-        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Property / Asset</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <IntelField label="Address" value={property?.property_address_full} />
-          <IntelField label="City/State/Zip" value={`${property?.property_address_city || ''} ${property?.property_address_state || ''} ${property?.property_address_zip || ''}`} />
-          <IntelField label="Market" value={property?.market} />
-          <IntelField label="Type" value={property?.property_type} />
-          <IntelField label="Estimated Value" value={property?.estimated_value} />
-          <IntelField label="Cash Offer" value={property?.cash_offer} />
-          <IntelField label="Equity Amount" value={property?.equity_amount} />
-          <IntelField label="Equity Percent" value={property?.equity_percent} />
-          <IntelField label="Total Loan Balance" value={property?.total_loan_balance} />
-          <IntelField label="Tax Amount" value={property?.tax_amt} />
-          <IntelField label="Sale Date" value={property?.sale_date} />
-          <IntelField label="Sale Price" value={property?.sale_price} />
-          <IntelField label="Units" value={property?.units_count} />
-          <IntelField label="Square Feet" value={property?.building_square_feet} />
-          <IntelField label="Year Built" value={property?.year_built} />
-          <IntelField label="Beds/Baths" value={`${property?.total_bedrooms || '-'}/${property?.total_baths || '-'}`} />
-          <IntelField label="Lot Size" value={property?.lot_acreage || property?.lot_square_feet} />
-          <IntelField label="Flood Zone" value={property?.flood_zone} />
-          <IntelField label="Property Flags" value={property?.property_flags_text} />
-          <IntelField label="Tags" value={property?.podio_tags} />
-          <IntelField label="AI Score" value={property?.ai_score} />
-          <IntelField label="Rehab Level" value={property?.rehab_level} />
-          <IntelField label="Final Score" value={property?.final_acquisition_score} />
-          <IntelField label="Repair Cost" value={property?.estimated_repair_cost} />
-        </div>
-      </DossierCard>
-    </ErrorBoundary>
-  );
-}
-
-function MasterOwnerIntelSection({ owner }: { owner: any }) {
-  if (!owner || typeof owner !== 'object') return null;
-  return (
-    <ErrorBoundary fallbackName="MasterOwnerIntelSection">
-      <DossierCard className="nx-mapped-intel-card">
-        <h4 style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--nx-accent)', textTransform: 'uppercase' }}>Master Owner / Portfolio</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <IntelField label="Display Name" value={owner?.display_name} />
-          <IntelField label="Primary Address" value={owner?.primary_owner_address} />
-          <IntelField label="Owner Type" value={owner?.owner_type_guess} />
-          <IntelField label="Routing Market" value={owner?.routing_market} />
-          <IntelField label="Best Language" value={owner?.best_language} />
-          <IntelField label="Contactability" value={owner?.contactability_score} />
-          <IntelField label="Financial Pressure" value={owner?.financial_pressure_score} />
-          <IntelField label="Urgency Score" value={owner?.urgency_score} />
-          <IntelField label="Priority Score" value={owner?.priority_score} />
-          <IntelField label="Total Value" value={owner?.portfolio_total_value} />
-          <IntelField label="Total Equity" value={owner?.portfolio_total_equity} />
-          <IntelField label="Total Loan" value={owner?.portfolio_total_loan_balance} />
-          <IntelField label="Total Payment" value={owner?.portfolio_total_loan_payment} />
-          <IntelField label="Total Tax" value={owner?.portfolio_total_tax_amount} />
-          <IntelField label="Total Units" value={owner?.portfolio_total_units} />
-          <IntelField label="Property Count" value={owner?.property_count} />
-          <IntelField label="Tax Delinquent" value={owner?.tax_delinquent_count} />
-          <IntelField label="Active Liens" value={owner?.active_lien_count} />
-          <IntelField label="Tags" value={owner?.seller_tags_text} />
-        </div>
-      </DossierCard>
-    </ErrorBoundary>
-  );
 }
 
 export interface IntelligencePanelProps {
   thread: WorkflowThread | null
   threadContext?: ThreadContext | null
   intelligence?: ThreadIntelligenceRecord | null
-  threadDossier?: ThreadDossier | null
-  dossierLoading?: boolean
+  dealContext?: DealContext | null
   panelMode?: Exclude<PanelMode, 'hidden'>
   layoutMode?: ViewLayoutMode
   isSuppressed?: boolean
   onCollapse?: () => void
   onOpenMap?: () => void
+  onOpenComps?: () => void
   onOpenDossier?: () => void
   onOpenAi?: () => void
   onStatusChange: (status: InboxStatus | 'sent_message') => void
@@ -6267,13 +5862,13 @@ export const IntelligencePanel = ({
   thread,
   threadContext,
   intelligence = null,
-  threadDossier = null,
-  dossierLoading = false,
+  dealContext = null,
   isSuppressed = false,
   panelMode = 'default',
   layoutMode = 'full',
   onCollapse,
   onOpenMap = () => undefined,
+  onOpenComps = () => undefined,
   onOpenDossier = () => undefined,
   onOpenAi = () => undefined,
   onStatusChange,
@@ -6284,6 +5879,9 @@ export const IntelligencePanel = ({
   void isSuppressed
   void onStatusChange
   void onStageChange
+
+  const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
+  const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
 
   if (!thread) {
     return (
@@ -6296,15 +5894,6 @@ export const IntelligencePanel = ({
     )
   }
 
-  const hydratedThread = useMemo(
-    () => buildHydratedThread(thread, intelligence, threadDossier),
-    [thread, intelligence, threadDossier],
-  )
-  const snapshot = useMemo(
-    () => normalizePropertySnapshot(intelligence || null, hydratedThread, threadDossier),
-    [intelligence, hydratedThread, threadDossier],
-  )
-  const { data: phase3 } = usePhase3Intelligence(thread.threadKey)
   const panelClassMode = layoutMode === 'compact'
     ? 'compact'
     : layoutMode === 'medium'
@@ -6312,70 +5901,54 @@ export const IntelligencePanel = ({
     : 'workspace'
   return (
     <aside className={cls('nx-intelligence-panel', `is-mode-${panelClassMode}`, `is-layout-${layoutMode}`, `is-panel-${panelMode}`)}>
-      <header className="nx-intel-header">
-        <span className="nx-section-label">DEAL COMMAND DOSSIER</span>
-        {onCollapse ? (
+      {layoutMode !== 'compact' ? (
+        <header className="nx-intel-header">
+          <span className="nx-section-label">DEAL COMMAND DOSSIER</span>
+          {onCollapse ? (
+            <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
+              <Icon name="close" />
+            </button>
+          ) : null}
+        </header>
+      ) : onCollapse ? (
+        <header className="nx-intel-header is-compact-only">
           <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
             <Icon name="close" />
           </button>
-        ) : null}
-      </header>
+        </header>
+      ) : null}
 
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
-          <ErrorBoundary fallbackName="CompactDealIntelligenceCapsule">
-            <CompactDealIntelligenceCapsule thread={hydratedThread} snapshot={snapshot} messages={messages} />
-          </ErrorBoundary>
+          <DealIntelligence25Panel
+            threadKey={thread.threadKey || thread.id}
+            propertyId={dealContext?.identity?.property_id || thread.propertyId}
+            prospectId={dealContext?.identity?.prospect_id || thread.prospectId}
+            masterOwnerId={dealContext?.identity?.master_owner_id || thread.masterOwnerId}
+            canonicalE164={dealContext?.identity?.canonical_e164 || thread.canonicalE164}
+            fallbackAddress={snapshot.fullAddress || thread.propertyAddress || thread.displayAddress}
+          />
         ) : layoutMode === 'medium' ? (
-          <ErrorBoundary fallbackName="MediumDealWorkspace">
-            <MediumDealWorkspace thread={hydratedThread} snapshot={snapshot} messages={messages} phase3={phase3} />
-          </ErrorBoundary>
+          <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} dealContext={dealContext} onOpenComps={onOpenComps} />
         ) : (
-          <ErrorBoundary fallbackName="DealCommandDossier">
-            <DealCommandDossier
-              thread={hydratedThread}
-              snapshot={snapshot}
-              messages={messages}
-              phase3={phase3}
-              intelligence={intelligence}
-              layoutMode={layoutMode}
-              onOpenMap={onOpenMap}
-              onOpenDossier={onOpenDossier}
-              onOpenAi={onOpenAi}
-            />
-          </ErrorBoundary>
+          <DealCommandDossier
+            thread={thread}
+            snapshot={snapshot}
+            messages={messages}
+            phase3={phase3}
+            intelligence={intelligence}
+            dealContext={dealContext}
+            layoutMode={layoutMode}
+            onOpenMap={onOpenMap}
+            onOpenComps={onOpenComps}
+            onOpenDossier={onOpenDossier}
+            onOpenAi={onOpenAi}
+          />
         )}
-        
-        {/* Visible Dossier Proof Strip */}
-        {(import.meta.env.DEV || import.meta.env.VITE_SHOW_DEBUG === "true") && (
-          <div style={{ background: '#111827', padding: '12px 16px', borderTop: '1px solid #374151', fontSize: '11px', fontFamily: 'monospace', color: '#9CA3AF' }}>
-            <div style={{ color: '#E5E7EB', fontWeight: 'bold', marginBottom: '8px' }}>DOSSIER PROOF STRIP</div>
-            <div>Thread Key: {thread.threadKey || thread.id}</div>
-            <div>Dossier Fetch Status: {dossierLoading ? 'Loading' : threadDossier ? 'Loaded' : 'None'}</div>
-            <div>Endpoint Called: /api/cockpit/inbox/thread-dossier?thread_key={thread.threadKey || thread.id}</div>
-            <div>Prospect Loaded: {threadDossier?.prospect ? 'Yes' : 'No'}</div>
-            <div>Property Loaded: {threadDossier?.property ? 'Yes' : 'No'}</div>
-            <div>Master Owner Loaded: {threadDossier?.master_owner ? 'Yes' : 'No'}</div>
-            <div>Message Events Count: {Array.isArray(threadDossier?.message_events) ? threadDossier?.message_events?.length : 0}</div>
-            <div>Send Queue Rows Count: {Array.isArray(threadDossier?.send_queue) ? threadDossier?.send_queue?.length : 0}</div>
-            <div>Buyer Entities Count: {Array.isArray(threadDossier?.buyer_entities) ? threadDossier?.buyer_entities?.length : 0}</div>
-            <div>Buyer Purchase Events Count: {Array.isArray(threadDossier?.buyer_purchase_events) ? threadDossier?.buyer_purchase_events?.length : 0}</div>
-            <div>Buyer Matches Count: {Array.isArray(threadDossier?.buyer_matches) ? threadDossier?.buyer_matches?.length : 0}</div>
-            <div>Recently Sold Count: {Array.isArray(threadDossier?.recently_sold) ? threadDossier?.recently_sold?.length : 0}</div>
-            <div>Failed Tables: {Array.isArray(threadDossier?.errors) && threadDossier.errors.length > 0 ? threadDossier.errors.map((e: any) => e.table || e.message || 'unknown').join(', ') : 'None'}</div>
-          </div>
-        )}
-
-        {threadDossier && !dossierLoading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '16px' }}>
-            <ProspectIntelSection prospect={threadDossier.prospect} />
-            <MasterOwnerIntelSection owner={threadDossier.master_owner} />
-            <PropertyIntelSection property={threadDossier.property} />
-          </div>
-        )}
-
-        <RawDossierSection dossier={threadDossier} loading={dossierLoading} />
       </div>
     </aside>
   )
 }
+
+/** @deprecated Legacy 25% capsule — preserved for 50/75/100 reference paths */
+export { _CompactDealIntelligenceCapsule as CompactDealIntelligenceCapsuleLegacy }

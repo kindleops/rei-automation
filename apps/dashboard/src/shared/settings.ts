@@ -20,7 +20,7 @@ export type CopilotReasoningDepth = 'minimal' | 'standard' | 'deep'
 export type CopilotVoiceMode = 'off' | 'text' | 'full'
 export type NexusTheme =
   // System-wide themes (aligned with map/global theme engine)
-  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome'
+  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
 export type AccentPalette = 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'ice'
@@ -304,6 +304,7 @@ export interface ThemeTokens {
 
 export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
   // ── New system-wide themes ─────────────────────────────────────────────
+
   dark: {
     id: 'dark', label: 'Dark',
     bg: '#07101a', surface: '#0c1828', elevated: '#111f34',
@@ -323,10 +324,10 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
     textPrimary: '#f6fee7', textSecondary: 'rgba(204,228,145,0.65)', textMuted: 'rgba(204,228,145,0.40)',
   },
   red_ops: {
-    id: 'red_ops', label: 'Red Ops',
-    bg: '#0e0608', surface: '#160a0d', elevated: '#200e12',
-    border: 'rgba(255,107,99,0.14)', accent: '#ff6b63', accentGlow: 'rgba(191,29,29,0.32)',
-    textPrimary: '#fff2ee', textSecondary: 'rgba(255,210,205,0.65)', textMuted: 'rgba(255,210,205,0.40)',
+    id: 'red_ops', label: 'RedOps',
+    bg: '#160305', surface: '#200609', elevated: '#2c0a0e',
+    border: 'rgba(255, 18, 18, 0.18)', accent: '#ff1212', accentGlow: 'rgba(255, 18, 18, 0.30)',
+    textPrimary: '#fff0f1', textSecondary: '#c99da2', textMuted: '#a68085',
   },
   matrix: {
     id: 'matrix', label: 'Matrix',
@@ -357,6 +358,12 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
     bg: '#060708', surface: '#0c0d0f', elevated: '#141618',
     border: 'rgba(148,163,184,0.10)', accent: '#d3dde8', accentGlow: 'rgba(148,163,184,0.16)',
     textPrimary: '#f8fafc', textSecondary: 'rgba(171,184,199,0.65)', textMuted: 'rgba(171,184,199,0.40)',
+  },
+  light: {
+    id: 'light', label: 'Light',
+    bg: '#f8fbff', surface: '#ffffff', elevated: '#f8fbff',
+    border: 'rgba(15,23,42,0.10)', accent: '#007aff', accentGlow: 'rgba(0,122,255,0.18)',
+    textPrimary: '#06111f', textSecondary: '#334155', textMuted: '#64748b',
   },
   // ── Legacy themes (preserved for localStorage backward compat) ─────────
   'dark-matter': {
@@ -418,6 +425,16 @@ export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: str
   ice:     { primary: '#a0d8f0', glow: 'rgba(160,216,240,0.22)', soft: 'rgba(160,216,240,0.12)' },
 }
 
+// Higher-contrast accent values for white/light-mode backgrounds
+export const LIGHT_ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
+  cyan:    { primary: '#00b8ff', glow: 'rgba(0,184,255,0.20)',   soft: 'rgba(0,184,255,0.10)'   },
+  emerald: { primary: '#14b86a', glow: 'rgba(20,184,106,0.20)',  soft: 'rgba(20,184,106,0.10)'  },
+  amber:   { primary: '#ffb020', glow: 'rgba(255,176,32,0.20)',  soft: 'rgba(255,176,32,0.12)'  },
+  violet:  { primary: '#7c3cff', glow: 'rgba(124,60,255,0.20)',  soft: 'rgba(124,60,255,0.10)'  },
+  rose:    { primary: '#ff2d75', glow: 'rgba(255,45,117,0.20)',  soft: 'rgba(255,45,117,0.10)'  },
+  ice:     { primary: '#0ea5e9', glow: 'rgba(14,165,233,0.20)',  soft: 'rgba(14,165,233,0.10)'  },
+}
+
 export function getActiveTheme(): ThemeTokens {
   const s = loadSettings()
   return THEME_PRESETS[s.nexusTheme] ?? THEME_PRESETS['dark-matter']
@@ -439,25 +456,63 @@ export function resolveDataThemeAttr(nexusTheme: NexusTheme): string {
   return LEGACY_THEME_MAP[nexusTheme] ?? nexusTheme
 }
 
+function hexToRgb(hex: string): string {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '10, 132, 255';
+}
+
 export function applyThemeToDOM(): void {
-  const theme = getActiveTheme()
   const settings = loadSettings()
-  const accent = ACCENT_PALETTES[settings.accentPalette] ?? ACCENT_PALETTES.cyan
+  const isLight = resolveDataThemeAttr(settings.nexusTheme) === 'light'
+  const paletteMap = isLight ? LIGHT_ACCENT_PALETTES : ACCENT_PALETTES
+  const accent = paletteMap[settings.accentPalette] ?? paletteMap.cyan
   const root = document.documentElement
 
   // Set the theme attribute — nexus-theme.css variables cascade from here
   root.setAttribute('data-nexus-theme', resolveDataThemeAttr(settings.nexusTheme))
   root.setAttribute('data-nexus-accent', settings.accentPalette)
 
-  // Legacy vars still used by components not yet on --nx-* variables
-  root.style.setProperty('--nx-bg', theme.bg)
-  root.style.setProperty('--nx-surface', theme.surface)
-  root.style.setProperty('--nx-elevated', theme.elevated)
-  root.style.setProperty('--nx-border', theme.border)
+  const rgb = hexToRgb(accent.primary);
+
+  // Set ONLY accent variables inline. Light/Dark full themes are managed by CSS classes/selectors.
+  // DO NOT inject --nx-bg / --nx-surface / text tokens inline as it corrupts CSS variable cascades.
   root.style.setProperty('--nx-accent', accent.primary)
-  root.style.setProperty('--nx-accent-glow', accent.glow)
+  root.style.setProperty('--nx-accent-rgb', rgb)
   root.style.setProperty('--nx-accent-soft', accent.soft)
-  root.style.setProperty('--nx-text-primary', theme.textPrimary)
-  root.style.setProperty('--nx-text-secondary', theme.textSecondary)
-  root.style.setProperty('--nx-text-muted', theme.textMuted)
+  root.style.setProperty('--nx-accent-muted', accent.soft)
+  root.style.setProperty('--nx-accent-strong', accent.primary)
+  root.style.setProperty('--nx-accent-contrast', '#ffffff')
+  root.style.setProperty('--nx-accent-glow', accent.glow)
+  root.style.setProperty('--nx-accent-border', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-start', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-mid', accent.primary)
+  root.style.setProperty('--nx-accent-gradient-end', accent.primary)
+  root.style.setProperty('--nx-badge-border', accent.primary)
+
+  root.style.setProperty('--nexus-accent', accent.primary)
+  root.style.setProperty('--nexus-accent-rgb', rgb)
+  root.style.setProperty('--nexus-accent-soft', accent.soft)
+  root.style.setProperty('--nexus-accent-glow', accent.glow)
+  root.style.setProperty('--nexus-accent-border', accent.primary)
+  
+  root.style.setProperty('--tone-primary', accent.primary)
+  root.style.setProperty('--accent-cyan', accent.primary) // legacy fallback
+
+  // Dev-only visual proof helper for token resolution
+  if (import.meta.env.DEV) {
+    setTimeout(() => {
+      const cs = getComputedStyle(document.body);
+      console.log(isLight ? '--- Light Mode Computed Vars ---' : '--- Dark Mode Computed Vars ---');
+      console.log('--nx-bg:', cs.getPropertyValue('--nx-bg'));
+      console.log('--nx-panel-bg:', cs.getPropertyValue('--nx-panel-bg'));
+      console.log('--nx-card-bg:', cs.getPropertyValue('--nx-card-bg'));
+      console.log('--nx-text:', cs.getPropertyValue('--nx-text'));
+      console.log('--bg-0:', cs.getPropertyValue('--bg-0'));
+      console.log('--surface-0:', cs.getPropertyValue('--surface-0'));
+      console.log('--dossier-bg-0:', cs.getPropertyValue('--dossier-bg-0'));
+      console.log('--saas-bg:', cs.getPropertyValue('--saas-bg'));
+      console.log('--aic-bg:', cs.getPropertyValue('--aic-bg'));
+      console.log('--nexus-accent:', cs.getPropertyValue('--nexus-accent'));
+    }, 100);
+  }
 }

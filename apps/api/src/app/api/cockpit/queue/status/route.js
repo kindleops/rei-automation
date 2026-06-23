@@ -6,11 +6,11 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return withCors(request, auth.response)
-  const result = await getCockpitQueueStatus()
-  return responseFromResult(result, 200)
-}
-
-export async function OPTIONS(request) {
-  return handleOptionsResponse(request);
+  if (!auth.ok) return auth.response
+  try {
+    const result = await getCockpitQueueStatus()
+    return responseFromResult(result, 200)
+  } catch (error) {
+    return responseFromResult({ ok: false, error: error?.message || 'queue_status_failed' }, 500)
+  }
 }

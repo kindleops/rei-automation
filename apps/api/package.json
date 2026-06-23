@@ -10,7 +10,8 @@
     "build": "next build",
     "proof:inbox": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/dashboard-ops-service.test.mjs tests/critical/inbound-sms-card.test.mjs tests/critical/context-summary-fallbacks.test.mjs tests/critical/inbox-thread-context-route.test.mjs",
     "proof:inbox-backfill": "node scripts/proof/inbox-backfill.mjs",
-    "proof:queue": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/queue-run-route.test.mjs tests/critical/queue-contact-window.test.mjs tests/critical/queue-outbound-duplicate-guard.test.mjs tests/critical/textgrid-number-selection.test.mjs tests/critical/delivery-status-reconcile.test.mjs tests/critical/queue-run-finalization.test.mjs tests/critical/queue-bookkeeping.test.mjs tests/critical/failed-send-guardrails.test.mjs",
+    "proof:campaign-target-graph-staged": "node ../../scripts/proof/campaign-target-graph-staged-refresh-proof.mjs",
+    "proof:queue": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/queue-run-route.test.mjs tests/critical/queue-contact-window.test.mjs tests/critical/queue-outbound-duplicate-guard.test.mjs tests/critical/textgrid-number-selection.test.mjs tests/critical/delivery-status-reconcile.test.mjs tests/critical/queue-run-selection.test.mjs tests/critical/queue-batch-dedup.test.mjs tests/critical/queue-bookkeeping.test.mjs tests/critical/failed-send-guardrails.test.mjs",
     "proof:supabase-queue": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/supabase-queue.test.mjs tests/critical/queue-run-route.test.mjs tests/critical/queue-outbound-duplicate-guard.test.mjs tests/critical/textgrid-number-selection.test.mjs tests/critical/delivery-status-reconcile.test.mjs",
     "proof:auto-replies": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/seller-auto-reply-plan.test.mjs tests/critical/negative-reply-suppression.test.mjs tests/critical/offer-stage-inbound-routing.test.mjs tests/critical/offer-stage-ai.test.mjs tests/critical/inbound-reply-template-alignment.test.mjs",
     "proof:template-automation": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/template-automation.proof.mjs",
@@ -22,6 +23,7 @@
     "audit:identity": "node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/audit-identity-mismatches.js",
     "proof:auto-reply-v2": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/proof/auto-reply-proof-v2.mjs",
     "proof:followup-scheduler": "node scripts/proof/followup-scheduler-proof.mjs",
+    "queue:emergency-cleanup": "node --import ./tests/register-aliases.mjs src/scripts/queue-emergency-cleanup.js",
     "proof:followups": "npm run proof:followup-scheduler",
     "proof:template-coverage": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --env-file=.env.local scripts/proof/template-coverage-audit.mjs",
     "proof:conversation-memory": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/conversation-memory.proof.mjs",
@@ -31,6 +33,10 @@
     "proof:no-repeated-questions": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/no-repeated-questions.proof.mjs",
     "proof:stage-progression": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/stage-progression.proof.mjs",
     "proof:seller-temperature": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/seller-temperature.proof.mjs",
+    "proof:wfv2-runtime": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-runtime-proof.test.mjs",
+    "proof:wfv2-ctx": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-context-propagation.test.mjs",
+    "proof:wfv2-system": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-system-automation-proof.test.mjs",
+    "proof:wfv2-studio-recovery": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/workflow-studio-v2-recovery.test.mjs",
     "start": "next start",
     "discord:register": "node scripts/register-discord-commands.mjs"
   },
@@ -41,6 +47,7 @@
     "axios": "^1.6.0",
     "next": "^14.2.0",
     "openai": "^4.0.0",
+    "pg": "^8.21.0",
     "posthog-node": "^5.29.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -48,10 +55,5 @@
   },
   "engines": {
     "node": ">=18.18.0"
-  },
-  "devDependencies": {
-    "@types/node": "^24.12.4",
-    "@types/react": "^19.2.15",
-    "typescript": "^6.0.3"
   }
 }

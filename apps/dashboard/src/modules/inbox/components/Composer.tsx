@@ -1,47 +1,25 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
 import type { InboxThread } from '../inbox.adapter'
 import type { ThreadContext } from '../../../lib/data/inboxData'
 import type { CommandSuggestion } from '../ai-command-center'
+import {
+  buildTemplateContextFromThread,
+  getRecommendedTemplates,
+  renderTemplate,
+  type SmsTemplate,
+} from '../../../lib/data/templateData'
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
+import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
-type IconName = Parameters<typeof Icon>[0]['name']
-
-// ── Quick template presets ──────────────────────────────────────────────────
-const QUICK_TEMPLATES: Array<{ id: string; label: string; text: string }> = [
-  { id: 'ownership_check', label: 'Ownership Check', text: 'Hi, are you still the owner of this property?' },
-  { id: 'investor_intro', label: 'Local Investor Intro', text: "I'm a local investor interested in making you an offer — no agents, no commissions." },
-  { id: 'asking_price', label: 'Asking Price', text: 'What price did you have in mind for the property?' },
-  { id: 'condition_probe', label: 'Condition Probe', text: 'How would you describe the current condition of the property?' },
-  { id: 'motivation_probe', label: 'Motivation Probe', text: 'What situation would make you consider selling?' },
-  { id: 'soft_close', label: 'Soft Close', text: "I can put together a quick offer — no commissions, no obligation. Interested?" },
-  { id: 'follow_up', label: 'Follow-Up', text: 'Just following up on my previous message. Still open to a quick conversation?' },
-  { id: 'not_interested', label: 'Not Interested Response', text: "Completely understood — I'll remove you from my outreach list. No further contact." },
-  { id: 'wrong_number', label: 'Wrong Number Response', text: "My apologies for the confusion. Removing this number from my list right away." },
-  { id: 'dnc_safe', label: 'DNC Safe Response', text: "Understood — you've been removed from all future outreach. Sorry for the inconvenience." },
-]
-
-const QUICK_ACTIONS: Array<{ id: string; label: string; icon: IconName; ready: boolean; action?: string }> = [
-  { id: 'browse_templates', label: 'Browse Templates', icon: 'file-text', ready: true },
-  { id: 'rewrite_draft', label: 'Rewrite Draft', icon: 'spark', ready: false },
-  { id: 'change_tone', label: 'Change Tone', icon: 'spark', ready: false },
-  { id: 'summarize_thread', label: 'Summarize Thread', icon: 'spark', ready: false },
-  { id: 'offer_language', label: 'Generate Offer Language', icon: 'zap', ready: false },
-  { id: 'add_note', label: 'Add Internal Note', icon: 'file-text', ready: true, action: 'add_note' },
-  { id: 'mark_hot', label: 'Mark Hot', icon: 'zap', ready: true, action: 'mark_hot' },
-  { id: 'mark_reviewed', label: 'Mark Reviewed', icon: 'check', ready: true, action: 'mark_reviewed' },
-]
-
 interface ComposerProps {
-  // Parent pushes values into Composer via this prop (translation results, template inserts, clear-after-send).
-  // Typing updates localDraft only — parent never re-renders on each keystroke.
   draftText: string
   onSend: (text: string) => void
-  // Receives current draft so parent can set schedule payload without tracking it.
   onOpenSchedule: (currentDraft: string) => void
   onAI: () => void
   thread: InboxThread | null
@@ -54,13 +32,12 @@ interface ComposerProps {
   disabled?: boolean
   disabledReason?: string
   aiSuggestions?: CommandSuggestion[]
-  // Translate
   sellerLanguageLabel?: string
   isSellerLanguageEnglish?: boolean
   isTranslatingDraft?: boolean
   onTranslateDraft?: (text: string) => void
-  // When true, auto-translate fires after 2s of typing inactivity.
   autoTranslateDraft?: boolean
+  layoutMode?: ViewLayoutMode
 }
 
 type SpeechRecognitionResultLike = {
@@ -86,6 +63,11 @@ type SpeechRecognitionLike = {
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 type MicState = 'idle' | 'recording' | 'processing'
 
+interface PolishPreview {
+  original: string
+  polished: string
+}
+
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
   const w = window as typeof window & {
     SpeechRecognition?: SpeechRecognitionConstructor
@@ -94,11 +76,17 @@ const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
 
+const formatRecordingDuration = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}:${String(secs).padStart(2, '0')}`
+}
+
 export const Composer = ({
   draftText,
   onSend,
   onOpenSchedule,
-  onAI: _onAI,
+  onAI,
   thread,
   threadContext,
   onSendTemplate,
@@ -114,6 +102,7 @@ export const Composer = ({
   isTranslatingDraft = false,
   onTranslateDraft,
   autoTranslateDraft = false,
+  layoutMode = 'full',
 }: ComposerProps) => {
   const [localDraft, setLocalDraft] = useState(draftText)
   const [micState, setMicState] = useState<MicState>('idle')
@@ -122,59 +111,79 @@ export const Composer = ({
   const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
   const [voiceLevel, setVoiceLevel] = useState(0)
   const [transcription, setTranscription] = useState('')
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
-  const baseDraftRef = useRef('')
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const animationFrameRef = useRef<number | undefined>(undefined)
-  // Tracks the last value we pushed to onTranslateDraft to prevent re-triggering.
-  const lastAutoTranslatedDraftRef = useRef<string>('')
-  const lastPolishedDraftRef = useRef<string>('')
-  const [polishEnabled, setPolishEnabled] = useState(false)
+  const [recommendedTemplates, setRecommendedTemplates] = useState<SmsTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [polishPreview, setPolishPreview] = useState<PolishPreview | null>(null)
   const [isPolishing, setIsPolishing] = useState(false)
   const [polishError, setPolishError] = useState<string | null>(null)
+  const [recordingElapsed, setRecordingElapsed] = useState(0)
+  const [qapPosition, setQapPosition] = useState<{ left: number; bottom: number } | null>(null)
+
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const baseDraftRef = useRef('')
+  const latestDraftRef = useRef('')
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const dockRef = useRef<HTMLDivElement | null>(null)
+  const quickActionsBtnRef = useRef<HTMLButtonElement | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationFrameRef = useRef<number | undefined>(undefined)
+  const recordingTimerRef = useRef<number | undefined>(undefined)
+  const lastAutoTranslatedDraftRef = useRef<string>('')
 
   const isListening = micState === 'recording'
   const isProcessing = micState === 'processing'
   const hasDraft = localDraft.trim().length > 0
   const composerDisabled = disabled || isSending || isPolishing
 
-  const polishDraftText = useCallback(async (text: string) => {
-    if (!text.trim() || text === lastPolishedDraftRef.current) return
+  useEffect(() => {
+    latestDraftRef.current = localDraft
+  }, [localDraft])
+
+  const polishDraftText = useCallback(async (text: string): Promise<string | null> => {
+    if (!text.trim()) return null
     setIsPolishing(true)
+    setPolishError(null)
     try {
       const res = await fetch(`${getBackendBaseUrl()}/api/cockpit/inbox/polish-draft`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'x-ops-dashboard-secret': getBackendSecret() 
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ops-dashboard-secret': getBackendSecret(),
         },
         body: JSON.stringify({ text }),
       })
       const data: { ok: boolean; polishedText: string } = await res.json()
-      if (data.ok) {
-        setLocalDraft(data.polishedText)
-        lastPolishedDraftRef.current = data.polishedText
-      } else {
-        setPolishError('Polish unavailable — using original draft.')
+      if (data.ok && data.polishedText?.trim()) {
+        return data.polishedText.trim()
       }
-    } catch (e) {
       setPolishError('Polish unavailable — using original draft.')
+      return null
+    } catch {
+      setPolishError('Polish unavailable — using original draft.')
+      return null
     } finally {
       setIsPolishing(false)
     }
   }, [])
 
-  // Sync: parent pushes new text (translation result, template insert, post-send clear) → update localDraft.
-  // Mark the pushed text as already-translated so auto-translate doesn't fire on it.
+  const runOperatorPolish = useCallback(async () => {
+    const text = localDraft.trim()
+    if (!text || composerDisabled) return
+    const polished = await polishDraftText(text)
+    if (polished) {
+      setPolishPreview({ original: text, polished })
+    }
+  }, [composerDisabled, localDraft, polishDraftText])
+
   useEffect(() => {
     setLocalDraft(draftText)
     lastAutoTranslatedDraftRef.current = draftText
-    lastPolishedDraftRef.current = draftText
+    if (!draftText.trim()) setPolishPreview(null)
   }, [draftText])
 
   useEffect(() => {
     setQuickActionsOpen(false)
+    setPolishPreview(null)
   }, [thread?.id])
 
   useEffect(() => {
@@ -190,20 +199,52 @@ export const Composer = ({
     textarea.focus({ preventScroll: true })
   }, [thread?.id, composerDisabled])
 
-  // Auto-polish & Auto-translate
   useEffect(() => {
-    if (polishEnabled && hasDraft && !isPolishing) {
-      const timer = setTimeout(() => polishDraftText(localDraft), 800)
-      return () => clearTimeout(timer)
-    }
-    
     const trimmed = localDraft.trim()
-    if (!autoTranslateDraft || !trimmed || isTranslatingDraft || polishEnabled) return
+    if (!autoTranslateDraft || !trimmed || isTranslatingDraft || polishPreview) return
     if (trimmed === lastAutoTranslatedDraftRef.current) return
     const timer = setTimeout(() => { onTranslateDraft?.(localDraft) }, 2000)
     return () => clearTimeout(timer)
-  }, [localDraft, autoTranslateDraft, isTranslatingDraft, onTranslateDraft, polishEnabled, polishDraftText, isPolishing, hasDraft])
+  }, [localDraft, autoTranslateDraft, isTranslatingDraft, onTranslateDraft, polishPreview])
 
+  useEffect(() => {
+    if (!quickActionsOpen || !thread) {
+      setRecommendedTemplates([])
+      return
+    }
+    let cancelled = false
+    setTemplatesLoading(true)
+    void getRecommendedTemplates(thread, threadContext)
+      .then((templates) => {
+        if (!cancelled) setRecommendedTemplates(templates)
+      })
+      .finally(() => {
+        if (!cancelled) setTemplatesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [quickActionsOpen, thread, threadContext])
+
+  const updateQuickActionsPosition = useCallback(() => {
+    const anchor = quickActionsBtnRef.current ?? dockRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    setQapPosition({ left: Math.max(12, rect.left), bottom: window.innerHeight - rect.top + 8 })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!quickActionsOpen) {
+      setQapPosition(null)
+      return
+    }
+    updateQuickActionsPosition()
+    const onResize = () => updateQuickActionsPosition()
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onResize, true)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onResize, true)
+    }
+  }, [quickActionsOpen, updateQuickActionsPosition, layoutMode])
 
   const stopVoiceAnalysis = () => {
     if (animationFrameRef.current) {
@@ -238,19 +279,31 @@ export const Composer = ({
     }
   }
 
-  const stopVoice = () => {
+  const clearRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = undefined
+    }
+    setRecordingElapsed(0)
+  }
+
+  const stopVoice = (cancelTranscript = false) => {
     recognitionRef.current?.stop()
     recognitionRef.current = null
     setMicState('idle')
     stopVoiceAnalysis()
+    clearRecordingTimer()
+    if (cancelTranscript) {
+      setLocalDraft(baseDraftRef.current)
+    }
     setTranscription('')
   }
 
-  const toggleVoice = () => {
+  const startVoice = () => {
     if (disabled) return
-    if (isListening || isProcessing) { stopVoice(); return }
     const Recognition = getSpeechRecognition()
     if (!Recognition) { setVoiceUnsupported(true); return }
+
     const recognition = new Recognition()
     baseDraftRef.current = localDraft.trim()
     recognition.continuous = true
@@ -267,252 +320,408 @@ export const Composer = ({
         .replace(/([.!?])\s*(\w)/g, '$1 $2')
         .replace(/\s+/g, ' ')
         .trim()
-      setLocalDraft([baseDraftRef.current, cleaned].filter(Boolean).join(' ').trim())
+      const nextDraft = [baseDraftRef.current, cleaned].filter(Boolean).join(' ').trim()
+      setLocalDraft(nextDraft)
+      latestDraftRef.current = nextDraft
     }
     recognition.onerror = () => {
       recognitionRef.current = null
       setMicState('idle')
       stopVoiceAnalysis()
+      clearRecordingTimer()
       setTranscription('')
     }
     recognition.onend = () => {
       recognitionRef.current = null
       setMicState('processing')
       stopVoiceAnalysis()
+      clearRecordingTimer()
       setTranscription('')
-      setTimeout(() => setMicState('idle'), 600)
+
+      const finalDraft = latestDraftRef.current.trim()
+      if (!isSellerLanguageEnglish && finalDraft && onTranslateDraft) {
+        window.setTimeout(() => onTranslateDraft(finalDraft), 120)
+      }
+
+      window.setTimeout(() => setMicState('idle'), 500)
     }
+
     recognitionRef.current = recognition
     recognition.start()
     setVoiceUnsupported(false)
     setMicState('recording')
-    startVoiceAnalysis()
+    setRecordingElapsed(0)
+    recordingTimerRef.current = window.setInterval(() => {
+      setRecordingElapsed((value) => value + 1)
+    }, 1000)
+    void startVoiceAnalysis()
   }
 
-  const submitDraft = useCallback(async () => {
-    if (composerDisabled || !hasDraft) return
-    let textToSubmit = localDraft
-    if (polishEnabled) {
-      await polishDraftText(localDraft)
-      textToSubmit = lastPolishedDraftRef.current || localDraft
+  const toggleVoice = () => {
+    if (composerDisabled) return
+    if (isListening || isProcessing) {
+      stopVoice(false)
+      return
     }
-    onSend(textToSubmit)
+    startVoice()
+  }
+
+  const submitDraft = useCallback(() => {
+    if (composerDisabled || !hasDraft) return
+    onSend(localDraft)
     setLocalDraft('')
-  }, [composerDisabled, hasDraft, localDraft, polishEnabled, polishDraftText, onSend])
+    setPolishPreview(null)
+  }, [composerDisabled, hasDraft, localDraft, onSend])
 
   const handleInsertTemplate = useCallback((text: string) => {
-    setLocalDraft(prev => prev.trim() ? `${prev.trim()}\n\n${text}` : text)
+    setLocalDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${text}` : text))
+    setPolishPreview(null)
   }, [])
 
   const handleReplaceTemplate = useCallback((text: string) => {
     setLocalDraft(text)
+    setPolishPreview(null)
   }, [])
 
-  const micTitle = voiceUnsupported
-    ? 'Voice dictation not supported'
-    : isProcessing ? 'Processing…' : isListening ? 'Stop recording' : 'Talk to type'
+  const insertRenderedTemplate = useCallback((template: SmsTemplate) => {
+    const context = buildTemplateContextFromThread(thread, threadContext)
+    const { renderedText } = renderTemplate(template, context)
+    setLocalDraft(renderedText)
+    setPolishPreview(null)
+    setQuickActionsOpen(false)
+  }, [thread, threadContext])
 
-  return (
-    <div className={cls('nx-composer', isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft')}>
-      <div className="nx-composer-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 10px' }}>
-         <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '12px' }}>
-            <input 
-              type="checkbox" 
-              checked={polishEnabled} 
-              onChange={e => setPolishEnabled(e.target.checked)} 
-              disabled={composerDisabled}
-            />
-            <span>Operator Polish</span>
-          </label>
-          {isPolishing && <span style={{ fontSize: '11px', color: '#64748b' }}>Polishing...</span>}
-          {polishError && <span style={{ fontSize: '11px', color: '#ef4444' }}>{polishError}</span>}
-      </div>
+  const acceptPolish = () => {
+    if (!polishPreview) return
+    setLocalDraft(polishPreview.polished)
+    setPolishPreview(null)
+  }
 
-      {/* ── Quick Actions Popover ─────────────────────────────────── */}
-      {quickActionsOpen && (
-        <div className="nx-quick-actions-popover" role="dialog" aria-label="Templates and quick actions">
+  const undoPolish = () => {
+    if (!polishPreview) return
+    setLocalDraft(polishPreview.original)
+    setPolishPreview(null)
+  }
+
+  const regeneratePolish = async () => {
+    if (!polishPreview) return
+    const polished = await polishDraftText(polishPreview.original)
+    if (polished) setPolishPreview({ original: polishPreview.original, polished })
+  }
+
+  const quickActionsPortal = quickActionsOpen && qapPosition && typeof document !== 'undefined'
+    ? createPortal(
+      <>
+        <div
+          className="nx-qap-backdrop"
+          role="presentation"
+          onMouseDown={() => setQuickActionsOpen(false)}
+        />
+        <div
+          className="nx-qap-anchor nx-quick-actions-popover"
+          role="dialog"
+          aria-label="Quick actions"
+          style={{ left: qapPosition.left, bottom: qapPosition.bottom }}
+        >
           <div className="nx-qap-header">
-            <span className="nx-qap-title">Templates &amp; Actions</span>
+            <span className="nx-qap-title">Quick Actions</span>
             <button type="button" className="nx-qap-close" onClick={() => setQuickActionsOpen(false)} aria-label="Close">
               <Icon name="x" />
             </button>
           </div>
 
           <div className="nx-qap-section">
-            <div className="nx-qap-section-label">Quick Templates</div>
+            <div className="nx-qap-section-label">Templates</div>
             <div className="nx-qap-templates">
-              {QUICK_TEMPLATES.map(t => (
+              {templatesLoading && (
+                <button type="button" className="nx-qap-template-btn" disabled>
+                  <Icon name="activity" /><span>Loading templates…</span>
+                </button>
+              )}
+              {!templatesLoading && recommendedTemplates.length === 0 && (
+                <button type="button" className="nx-qap-template-btn" disabled>
+                  <Icon name="file-text" /><span>No templates for this thread</span>
+                </button>
+              )}
+              {recommendedTemplates.map((template) => (
                 <button
-                  key={t.id}
+                  key={template.id}
                   type="button"
                   className="nx-qap-template-btn"
-                  onClick={() => { setLocalDraft(t.text); setQuickActionsOpen(false) }}
-                  title={t.text}
+                  onClick={() => insertRenderedTemplate(template)}
+                  title={template.templateText}
                 >
                   <Icon name="file-text" />
-                  <span>{t.label}</span>
+                  <span>{template.useCase || template.useCaseSlug}</span>
                 </button>
               ))}
+              <button
+                type="button"
+                className="nx-qap-template-btn"
+                onClick={() => { setQuickActionsOpen(false); setTemplatePopoverOpen(true) }}
+              >
+                <Icon name="search" /><span>Browse all templates</span>
+              </button>
             </div>
           </div>
 
           <div className="nx-qap-divider" />
 
           <div className="nx-qap-section">
-            <div className="nx-qap-section-label">Quick Actions</div>
+            <div className="nx-qap-section-label">Writing tools</div>
             <div className="nx-qap-actions">
-              {QUICK_ACTIONS.map(a => {
-                if (a.id === 'browse_templates') {
-                  return (
-                    <button key={a.id} type="button" className="nx-qap-action-btn" onClick={() => { setQuickActionsOpen(false); setTemplatePopoverOpen(true) }}>
-                      <Icon name={a.icon} /><span>{a.label}</span>
-                    </button>
-                  )
-                }
-                if (!a.ready) {
-                  return (
-                    <button key={a.id} type="button" className="nx-qap-action-btn is-not-ready" disabled title="Coming soon">
-                      <Icon name={a.icon} /><span>{a.label}</span><span className="nx-qap-badge">Soon</span>
-                    </button>
-                  )
-                }
-                return (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className={cls('nx-qap-action-btn', a.id === 'mark_hot' && 'is-hot')}
-                    onClick={() => { if (a.action) onQuickAction?.(a.action); setQuickActionsOpen(false) }}
-                  >
-                    <Icon name={a.icon} /><span>{a.label}</span>
-                  </button>
-                )
-              })}
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                disabled={composerDisabled || !hasDraft || isPolishing}
+                onClick={() => { void runOperatorPolish(); setQuickActionsOpen(false) }}
+              >
+                <Icon name="spark" /><span>Operator Polish</span>
+              </button>
+              {aiSuggestions.slice(0, 3).map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  className={cls('nx-qap-action-btn', suggestion.tone && `is-${suggestion.tone}`)}
+                  disabled={composerDisabled || !suggestion.text}
+                  onClick={() => {
+                    if (suggestion.text) setLocalDraft(suggestion.text)
+                    if (suggestion.id === 'ai_assist') onAI()
+                    setQuickActionsOpen(false)
+                  }}
+                >
+                  <Icon name="spark" /><span>{suggestion.label}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                disabled={composerDisabled || !hasDraft || isTranslatingDraft}
+                onClick={() => { onTranslateDraft?.(localDraft); setQuickActionsOpen(false) }}
+              >
+                <Icon name="globe" /><span>Translate Draft</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="nx-qap-divider" />
+
+          <div className="nx-qap-section">
+            <div className="nx-qap-section-label">Message actions</div>
+            <div className="nx-qap-actions">
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                disabled={composerDisabled}
+                onClick={() => { onOpenSchedule(localDraft); setQuickActionsOpen(false) }}
+              >
+                <Icon name="calendar" /><span>Schedule Message</span>
+              </button>
+              <button type="button" className="nx-qap-action-btn is-not-ready" disabled title="Coming soon">
+                <Icon name="paperclip" /><span>Attachment</span><span className="nx-qap-badge">Soon</span>
+              </button>
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                onClick={() => { onQuickAction?.('add_note'); setQuickActionsOpen(false) }}
+              >
+                <Icon name="file-text" /><span>Internal Note</span>
+              </button>
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                onClick={() => { onQuickAction?.('snooze'); setQuickActionsOpen(false) }}
+              >
+                <Icon name="clock" /><span>Follow-Up</span>
+              </button>
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                onClick={() => { onQuickAction?.('open_property'); setQuickActionsOpen(false) }}
+              >
+                <Icon name="zap" /><span>Offer / Deal</span>
+              </button>
+              <button
+                type="button"
+                className="nx-qap-action-btn"
+                onClick={() => { onQuickAction?.('mark_reviewed'); setQuickActionsOpen(false) }}
+              >
+                <Icon name="check" /><span>Mark Reviewed</span>
+              </button>
               {!disabled && (
-                <button type="button" className="nx-qap-action-btn is-danger" onClick={() => { onQuickAction?.('suppress'); setQuickActionsOpen(false) }}>
+                <button
+                  type="button"
+                  className="nx-qap-action-btn is-danger"
+                  onClick={() => { onQuickAction?.('suppress'); setQuickActionsOpen(false) }}
+                >
                   <Icon name="slash" /><span>Suppress / DNC</span>
                 </button>
               )}
             </div>
           </div>
         </div>
-      )}
+      </>,
+      document.body,
+    )
+    : null
 
-      {/* ── Adaptive suggestion chips ─────────────────────────────── */}
-      {aiSuggestions.length > 0 && (
-        <div className="nx-composer-ai-suggestions">
-          {aiSuggestions.slice(0, 3).map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={cls('nx-composer-ai-chip', s.tone && `is-${s.tone}`)}
-              onClick={() => setLocalDraft(s.text)}
-              disabled={composerDisabled}
-              title={s.label}
-            >
-              <span>{s.label}</span>
-            </button>
-          ))}
+  return (
+    <div className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft')}>
+      {polishPreview && (
+        <div className="nx-polish-preview" role="region" aria-label="Operator polish preview">
+          <div className="nx-polish-preview__label">Operator Polish Preview</div>
+          <div className="nx-polish-preview__text">{polishPreview.polished}</div>
+          <div className="nx-polish-preview__actions">
+            <button type="button" className="is-primary" onClick={acceptPolish}>Accept</button>
+            <button type="button" onClick={undoPolish}>Undo</button>
+            <button type="button" onClick={regeneratePolish} disabled={isPolishing}>Regenerate</button>
+          </div>
         </div>
       )}
 
-      {/* ── Main input area ──────────────────────────────────────────
-          [cmd] [textarea] [globe?] [cal] [mic] [send]
-      ──────────────────────────────────────────────────────────────── */}
-      <div
-        className={cls('nx-composer-input-area inbox-center-width', isListening && 'is-listening')}
-        aria-disabled={composerDisabled}
-      >
-        {/* LEFT: Templates & Quick Actions */}
-        <button
-          type="button"
-          className={cls('nx-composer-icon-btn nx-composer-cmd-btn', quickActionsOpen && 'is-active')}
-          title="Templates & Quick Actions"
-          onClick={() => setQuickActionsOpen(prev => !prev)}
-          aria-label="Open templates and quick actions"
-          aria-expanded={quickActionsOpen}
-        >
-          <Icon name="command" />
-        </button>
+      {polishError && !polishPreview && (
+        <div className="nx-polish-preview" role="alert">
+          <div className="nx-polish-preview__text">{polishError}</div>
+        </div>
+      )}
 
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
-          placeholder={disabled ? (disabledReason ?? 'Messaging disabled for this thread') : 'Type a message…'}
-          value={localDraft}
-          onChange={e => setLocalDraft(e.target.value)}
-          rows={1}
-          disabled={composerDisabled}
-          onKeyDown={e => {
-            if (composerDisabled) return
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitDraft(); return }
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && localDraft.trim()) { e.preventDefault(); submitDraft() }
-          }}
-          onInput={(e) => {
-            const el = e.target as HTMLTextAreaElement
-            el.style.height = 'auto'
-            el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-          }}
-        />
-
-        {/* Globe — translate draft to seller language (always visible) */}
-        <button
-          type="button"
-          className={cls(
-            'nx-composer-icon-btn nx-translate-globe-btn',
-            isTranslatingDraft && 'is-spinning',
-            isSellerLanguageEnglish && 'is-english-confirmed',
-          )}
-          title={isTranslatingDraft ? 'Translating…' : (
-            !isSellerLanguageEnglish && sellerLanguageLabel && sellerLanguageLabel !== 'Unknown'
-              ? `Translate to ${sellerLanguageLabel}`
-              : 'Translate draft'
-          )}
-          disabled={composerDisabled || !hasDraft || isTranslatingDraft}
-          onClick={() => onTranslateDraft?.(localDraft)}
-          aria-label="Translate draft"
-        >
-          <Icon name="globe" />
-        </button>
-
-        {/* Calendar */}
-        <button
-          type="button"
-          className="nx-composer-icon-btn nx-calendar-btn"
-          title="Schedule message"
-          disabled={composerDisabled}
-          onClick={() => onOpenSchedule(localDraft)}
-          aria-label="Schedule message"
-        >
-          <Icon name="calendar" />
-        </button>
-
-        {/* Mic */}
-        <button
-          type="button"
-          className={cls('nx-composer-icon-btn nx-voice-button', isListening && 'is-listening', isProcessing && 'is-processing')}
-          title={micTitle}
-          disabled={composerDisabled}
-          onClick={toggleVoice}
-          aria-pressed={isListening}
-          aria-label={micTitle}
-        >
-          {isListening && <span className="nx-voice-rings" aria-hidden="true"><i /><i /><i /></span>}
-          {isListening ? (
-            <span className="nx-voice-waveform" aria-hidden="true">
-              {Array.from({ length: 5 }, (_, i) => (
-                <span
-                  key={i}
-                  className="nx-voice-waveform-bar"
-                  style={{ height: `${Math.max(4, voiceLevel * 22 + 4)}px`, animationDelay: `${i * 0.1}s` }}
-                />
-              ))}
-            </span>
-          ) : (
+      {isListening && (
+        <div className="nx-voice-recording-panel" role="status" aria-live="polite">
+          <div className="nx-voice-recording-ring" aria-hidden="true">
             <Icon name="mic" />
-          )}
-        </button>
+          </div>
+          <div className="nx-voice-recording-meta">
+            <strong>Recording</strong>
+            <span>{formatRecordingDuration(recordingElapsed)}</span>
+            {transcription && <span>{transcription}</span>}
+          </div>
+          <div className="nx-voice-recording-actions">
+            <button type="button" onClick={() => stopVoice(false)}>Stop</button>
+            <button type="button" onClick={() => stopVoice(true)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
-        {/* Send */}
+      <div className="nx-composer-dock" ref={dockRef}>
+        <div className="nx-composer-dock__side">
+          <button
+            ref={quickActionsBtnRef}
+            type="button"
+            className={cls('nx-composer-tool-btn nx-composer-tool-btn--essential', quickActionsOpen && 'is-active')}
+            title="Templates and quick actions"
+            onClick={() => setQuickActionsOpen((open) => !open)}
+            aria-label="Open quick actions"
+            aria-expanded={quickActionsOpen}
+            disabled={composerDisabled}
+          >
+            <Icon name="command" />
+          </button>
+        </div>
+
+        <div className="nx-composer-dock__main">
+          <div className={cls('nx-composer-dock__input-wrap', isListening && 'is-listening')}>
+            <textarea
+              ref={textareaRef}
+              placeholder={disabled ? (disabledReason ?? 'Messaging disabled for this thread') : 'Type a message…'}
+              value={localDraft}
+              onChange={(e) => {
+                setLocalDraft(e.target.value)
+                setPolishPreview(null)
+              }}
+              rows={1}
+              disabled={composerDisabled}
+              onKeyDown={(e) => {
+                if (composerDisabled) return
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitDraft(); return }
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && localDraft.trim()) { e.preventDefault(); submitDraft() }
+              }}
+              onInput={(e) => {
+                const el = e.target as HTMLTextAreaElement
+                el.style.height = 'auto'
+                el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+              }}
+            />
+
+            <div className="nx-composer-dock__tools">
+              <button
+                type="button"
+                className={cls('nx-composer-tool-btn', isPolishing && 'is-active')}
+                title="Operator Polish"
+                disabled={composerDisabled || !hasDraft || isPolishing}
+                onClick={() => { void runOperatorPolish() }}
+                aria-label="Operator polish"
+              >
+                <Icon name="spark" />
+              </button>
+
+              <button
+                type="button"
+                className={cls(
+                  'nx-composer-tool-btn nx-composer-tool-btn--essential',
+                  isTranslatingDraft && 'is-active',
+                )}
+                title={isTranslatingDraft ? 'Translating…' : (
+                  !isSellerLanguageEnglish && sellerLanguageLabel && sellerLanguageLabel !== 'Unknown'
+                    ? `Translate to ${sellerLanguageLabel}`
+                    : 'Translate draft'
+                )}
+                disabled={composerDisabled || !hasDraft || isTranslatingDraft}
+                onClick={() => onTranslateDraft?.(localDraft)}
+                aria-label="Translate draft"
+              >
+                <Icon name="globe" />
+              </button>
+
+              <button
+                type="button"
+                className="nx-composer-tool-btn nx-composer-tool-btn--essential"
+                title="Schedule message"
+                disabled={composerDisabled}
+                onClick={() => onOpenSchedule(localDraft)}
+                aria-label="Schedule message"
+              >
+                <Icon name="calendar" />
+              </button>
+
+              <button
+                type="button"
+                className={cls(
+                  'nx-composer-tool-btn nx-composer-tool-btn--essential',
+                  isListening && 'is-active',
+                  isProcessing && 'is-active',
+                )}
+                title={
+                  voiceUnsupported
+                    ? 'Voice dictation not supported'
+                    : isProcessing
+                      ? 'Processing transcription…'
+                      : isListening
+                        ? 'Stop recording'
+                        : 'Voice input'
+                }
+                disabled={composerDisabled}
+                onClick={toggleVoice}
+                aria-pressed={isListening}
+                aria-label="Voice input"
+              >
+                {isListening ? (
+                  <span className="nx-voice-waveform" aria-hidden="true">
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <span
+                        key={i}
+                        className="nx-voice-waveform-bar"
+                        style={{ height: `${Math.max(4, voiceLevel * 22 + 4)}px`, animationDelay: `${i * 0.1}s` }}
+                      />
+                    ))}
+                  </span>
+                ) : (
+                  <Icon name="mic" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <button
           type="button"
           className={cls('nx-send-button', hasDraft && !composerDisabled && 'is-ready', isSending && 'is-sending')}
@@ -525,15 +734,8 @@ export const Composer = ({
         </button>
       </div>
 
-      {/* Live transcription */}
-      {isListening && transcription && (
-        <div className="nx-voice-transcription">
-          <div className="nx-voice-transcription__label"><Icon name="mic" /><span>Listening…</span></div>
-          <div className="nx-voice-transcription__text">{transcription}</div>
-        </div>
-      )}
+      {quickActionsPortal}
 
-      {/* Template popover (portal) */}
       <TemplatePopover
         open={templatePopoverOpen}
         onClose={() => setTemplatePopoverOpen(false)}

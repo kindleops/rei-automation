@@ -10,6 +10,15 @@ import {
   shouldUseSupabase,
   type AnyRecord,
 } from './shared'
+import { getDealContextList, type DealContext } from './dealContext'
+import {
+  loadDashboardViewModel,
+  logCacheAccess,
+} from './dashboardDataLayer'
+import {
+  commitDashboardDealIntel,
+  commitDashboardPipeline,
+} from './dashboardEntityStore'
 import type {
   AcquisitionAiBrain,
   AcquisitionAutomation,
@@ -24,7 +33,7 @@ import type {
   AcquisitionRecordSummary,
   AcquisitionRecordType,
   AcquisitionUnderwriting,
-} from '../../modules/acquisition/acquisition.types'
+} from '../../domain/acquisition/acquisition.types'
 
 export interface AcquisitionFilters {
   market?: string
@@ -87,6 +96,11 @@ export const normalizeAddress = (value: unknown): string =>
 
 export const getFirstAvailable = (row: AnyRecord, keys: string[], fallback = ''): string =>
   asString(getFirst(row, keys), fallback)
+
+const asRecord = (value: unknown): AnyRecord =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as AnyRecord)
+    : {}
 
 const getOwnerLinkKey = (row: AnyRecord) =>
   normalizeId(
@@ -156,6 +170,265 @@ export const linkOfferToContracts = (offer: AnyRecord, contracts: AnyRecord[]) =
   return contracts.filter((contract) =>
     offerId === normalizeId(getFirst(contract, ['offer_id', 'linked_offer_id'])),
   )
+}
+
+const DEAL_CONTEXT_DATASET_LIMIT = 1200
+const DATASET_CACHE_TTL_MS = 30_000
+
+let datasetCache: { data: Dataset; loadedAt: number } | null = null
+let datasetInFlight: Promise<Dataset> | null = null
+
+const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
+  const ownersById = new Map<string, AnyRecord>()
+  const propertiesById = new Map<string, AnyRecord>()
+  const prospectsById = new Map<string, AnyRecord>()
+  const phonesById = new Map<string, AnyRecord>()
+  const emailsById = new Map<string, AnyRecord>()
+  const queuesById = new Map<string, AnyRecord>()
+  const messagesById = new Map<string, AnyRecord>()
+  const aiById = new Map<string, AnyRecord>()
+  const offersById = new Map<string, AnyRecord>()
+  const underwritingById = new Map<string, AnyRecord>()
+  const marketsById = new Map<string, AnyRecord>()
+
+  for (const context of contexts) {
+    const ownerId = context.masterOwnerId || context.propertyId || context.id
+    const propertyId = context.propertyId || context.id
+    const prospectId = context.prospectId || context.canonicalProspectId || ''
+    const phoneId = context.phoneId || context.canonicalE164 || ''
+    const emailId = context.emailId || asString(context.email.email) || ''
+    const queueId = context.queueRowId || context.id
+    const messageId = asString(context.raw.latest_message_event_id) || context.threadKey || context.id
+    const marketKey = context.market || asString(context.property.market) || 'unknown'
+
+    if (ownerId && !ownersById.has(ownerId)) {
+      ownersById.set(ownerId, {
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        full_name: context.ownerName,
+        display_name: context.ownerName,
+        owner_type: asString(context.masterOwner.owner_type_guess || context.masterOwner.owner_type),
+        market: context.market,
+        state: asString(context.raw.property_state || context.property.property_state || context.property.property_address_state),
+        motivation_score: asNumber(context.raw.priority_score || context.property.structured_motivation_score),
+        ai_score: asNumber(context.raw.final_acquisition_score || context.property.final_acquisition_score),
+        risk_score: Math.max(0, 100 - asNumber(context.raw.priority_score, 0)),
+        status: context.status,
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (propertyId && !propertiesById.has(propertyId)) {
+      propertiesById.set(propertyId, {
+        property_id: propertyId,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        property_address: context.propertyAddress,
+        property_address_full: context.propertyAddress,
+        property_address_city: asString(context.raw.property_address_city || context.property.property_address_city),
+        property_address_state: asString(context.raw.property_state || context.property.property_address_state),
+        property_address_zip: asString(context.raw.property_zip || context.property.property_address_zip),
+        property_county_name: asString(context.raw.property_county_name || context.property.property_county_name),
+        market: context.market,
+        property_type: asString(context.raw.property_type || context.property.property_type),
+        property_class: asString(context.raw.property_class || context.property.property_class),
+        estimated_value: asNumber(context.raw.estimated_value || context.property.estimated_value),
+        arv: asNumber(context.raw.estimated_arv),
+        value: asNumber(context.raw.estimated_value || context.property.estimated_value),
+        equity: asNumber(context.property.equity_amount),
+        equity_percent: asNumber(context.raw.equity_percent || context.property.equity_percent),
+        tax_flag: asBoolean(context.property.property_tax_delinquent),
+        probate_flag: asBoolean(context.property.probate_flag),
+        foreclosure_flag: asBoolean(context.property.foreclosure_flag),
+        motivation_score: asNumber(context.raw.priority_score || context.property.structured_motivation_score),
+        ai_score: asNumber(context.raw.final_acquisition_score || context.property.final_acquisition_score),
+        offer_status: context.stage,
+        status: context.status,
+        latitude: asNumber(context.raw.latitude || context.property.latitude),
+        longitude: asNumber(context.raw.longitude || context.property.longitude),
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (prospectId && !prospectsById.has(prospectId)) {
+      prospectsById.set(prospectId, {
+        prospect_id: prospectId,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        full_name: asString(context.prospect.full_name || context.ownerName),
+        prospect_name: asString(context.prospect.full_name || context.ownerName),
+        relationship_type: asString(context.prospect.relationship_type, 'owner'),
+        market: context.market,
+        best_phone: context.phoneDisplay,
+        best_email: asString(context.email.email || context.prospect.best_email),
+        language: asString(context.prospect.language || context.masterOwner.best_language, 'en'),
+        lead_stage: context.stage,
+        status: context.status,
+        next_action: context.bucket === 'new_replies' ? 'Reply to seller' : 'Review context',
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (phoneId && !phonesById.has(phoneId)) {
+      phonesById.set(phoneId, {
+        phone_id: phoneId,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        prospect_id: prospectId || null,
+        canonical_e164: context.canonicalE164,
+        phone: context.phoneDisplay,
+        phone_number: context.phoneDisplay,
+        type: asString(context.phoneData.phone_type || context.phoneData.type, 'mobile'),
+        status: asString(context.queue.queue_status || 'active'),
+        sms_status: context.status,
+        suppressed: asBoolean(context.raw.opt_out),
+        dnc: asBoolean(context.raw.opt_out),
+        last_contacted: asString(context.raw.last_outbound_at || context.raw.updated_at),
+        last_reply: asString(context.raw.last_inbound_at),
+        owner_full_name: context.ownerName,
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (emailId && !emailsById.has(emailId)) {
+      emailsById.set(emailId, {
+        email_id: emailId,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        prospect_id: prospectId || null,
+        email: asString(context.email.email),
+        status: asString(context.email.verification_status || 'unverified'),
+        owner_full_name: context.ownerName,
+        last_contacted: asString(context.raw.updated_at),
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (queueId && !queuesById.has(queueId) && (context.queueRowId || Object.keys(context.queue).length > 0)) {
+      queuesById.set(queueId, {
+        queue_id: queueId,
+        id: queueId,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        property_id: propertyId || null,
+        market: context.market,
+        queue_status: asString(context.raw.queue_status),
+        status: asString(context.raw.queue_status),
+        message_text: context.latestMessageBody,
+        message_body: context.latestMessageBody,
+        scheduled_at: asString(context.raw.queue_scheduled_for),
+        scheduled_for: asString(context.raw.queue_scheduled_for),
+        created_at: asString(context.raw.created_at),
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (messageId && !messagesById.has(messageId) && (context.latestMessageBody || Object.keys(asRecord(context.raw.latest_message_event_data)).length > 0)) {
+      messagesById.set(messageId, {
+        event_id: messageId,
+        id: messageId,
+        thread_id: context.threadKey,
+        thread_key: context.threadKey,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        property_id: propertyId || null,
+        market: context.market,
+        direction: context.latestMessageDirection,
+        sentiment: asString(context.threadState.lead_temperature),
+        message_text: context.latestMessageBody,
+        message_body: context.latestMessageBody,
+        unread: context.bucket === 'new_replies',
+        created_at: asString(context.raw.latest_message_at || context.raw.updated_at),
+      })
+    }
+
+    if (context.id && !aiById.has(context.id)) {
+      aiById.set(context.id, {
+        id: context.id,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        seller_intent: asString(context.threadState.reply_intent || context.threadState.lead_temperature),
+        objections: asString(context.threadState.needs_review ? 'Needs operator review' : ''),
+        language: asString(context.masterOwner.best_language || context.prospect.language, 'en'),
+        sentiment: asString(context.threadState.lead_temperature || context.latestMessageDirection),
+        conversation_stage: context.stage,
+        recommended_next_action: context.bucket === 'new_replies' ? 'Reply to seller' : 'Review deal context',
+        confidence: asNumber(context.raw.final_acquisition_score),
+        agent_assigned: asString(context.masterOwner.agent_name),
+        template_recommendation: asString(context.raw.campaign_name),
+        negotiation_posture: context.status === 'seller_replied' ? 'active' : 'monitor',
+        follow_up_timing: asString(context.raw.queue_scheduled_for || context.raw.latest_message_at),
+      })
+    }
+
+    if (propertyId && !offersById.has(propertyId) && (asNumber(context.raw.cash_offer, 0) > 0 || asNumber(context.raw.estimated_value, 0) > 0)) {
+      offersById.set(propertyId, {
+        offer_id: `offer:${propertyId}`,
+        owner_id: ownerId,
+        master_owner_id: ownerId,
+        property_id: propertyId,
+        strategy: 'cash',
+        recommended_offer: asNumber(context.raw.cash_offer),
+        seller_asking_price: asNumber(context.property.list_price),
+        status: context.stage || context.status || 'draft',
+        confidence: asNumber(context.raw.final_acquisition_score),
+        next_action: context.bucket === 'new_replies' ? 'Review response' : 'Review offer',
+        updated_at: asString(context.raw.updated_at),
+      })
+    }
+
+    if (propertyId && !underwritingById.has(propertyId) && (asNumber(context.raw.estimated_value, 0) > 0 || asNumber(context.raw.cash_offer, 0) > 0)) {
+      underwritingById.set(propertyId, {
+        underwriting_id: `uw:${propertyId}`,
+        id: `uw:${propertyId}`,
+        property_id: propertyId,
+        arv: asNumber(context.raw.estimated_arv || context.raw.estimated_value),
+        estimated_value: asNumber(context.raw.estimated_value),
+        repair_estimate: asNumber(context.property.estimated_repair_cost),
+        equity: asNumber(context.property.equity_amount),
+        mao: asNumber(context.raw.cash_offer),
+        cash_offer: asNumber(context.raw.cash_offer),
+        creative_offer: asNumber(context.raw.cash_offer),
+        novation_path: asString(context.buyerMatch.best_candidate ? 'Buyer match available' : 'Evaluate novation path'),
+        multifamily_noi: asString(context.property.multifamily_noi),
+        rent_estimate: asNumber(context.property.rent_estimate),
+        ai_confidence: asNumber(context.raw.final_acquisition_score),
+        risk_notes: asString(context.raw.suppression_status ? 'Suppressed contact' : context.threadState.needs_review ? 'Needs review' : 'No critical risk notes'),
+      })
+    }
+
+    if (marketKey && !marketsById.has(marketKey)) {
+      marketsById.set(marketKey, {
+        market_id: marketKey,
+        name: marketKey,
+        market: marketKey,
+        latitude: asNumber(context.raw.latitude || context.property.latitude),
+        longitude: asNumber(context.raw.longitude || context.property.longitude),
+      })
+    }
+  }
+
+  return {
+    masterowners: [],
+    owners: [...ownersById.values()],
+    prospects: [...prospectsById.values()],
+    properties: [...propertiesById.values()],
+    phoneNumbers: [...phonesById.values()],
+    emails: [...emailsById.values()],
+    sendQueue: [...queuesById.values()],
+    messageEvents: [...messagesById.values()],
+    aiBrain: [...aiById.values()],
+    offers: [...offersById.values()],
+    underwriting: [...underwritingById.values()],
+    contracts: [],
+    markets: [...marketsById.values()],
+    zipCodes: [],
+    agents: [],
+    templates: [],
+    titleRouting: [],
+    closings: [],
+    dealRevenue: [],
+  }
 }
 
 const mockDataset = (): Dataset => {
@@ -552,8 +825,31 @@ const safeSelect = async (
   }
 }
 
-const fetchDataset = async (): Promise<Dataset> => {
+const fetchDatasetUncached = async (): Promise<Dataset> => {
   if (!shouldUseSupabase()) return mockDataset()
+
+  try {
+    const dealContext = await getDealContextList({
+      limit: DEAL_CONTEXT_DATASET_LIMIT,
+      order_by: 'priority_score',
+    })
+
+    if (dealContext.rows.length > 0) {
+      commitDashboardDealIntel(dealContext.rows as unknown as AnyRecord[], {
+        source: 'acquisition_deal_context',
+        viewModel: 'deal_intelligence_view',
+      })
+      commitDashboardPipeline(dealContext.rows as unknown as AnyRecord[], {
+        source: 'acquisition_deal_context',
+        viewModel: 'pipeline_cards_view',
+      })
+      return mapDealContextsToDataset(dealContext.rows)
+    }
+  } catch (error) {
+    if (isDev) {
+      console.warn('[NEXUS] acquisitionData: deal-context fallback', error)
+    }
+  }
 
   const [
     masterowners,
@@ -609,7 +905,7 @@ const fetchDataset = async (): Promise<Dataset> => {
     return mockDataset()
   }
 
-  return {
+  const dataset = {
     masterowners,
     owners,
     prospects,
@@ -629,6 +925,49 @@ const fetchDataset = async (): Promise<Dataset> => {
     titleRouting,
     closings,
     dealRevenue,
+  }
+  commitDashboardDealIntel(properties, {
+    source: 'acquisition_fallback_tables',
+    viewModel: 'deal_intelligence_view',
+  })
+  commitDashboardPipeline([...properties, ...offers], {
+    source: 'acquisition_fallback_tables',
+    viewModel: 'pipeline_cards_view',
+  })
+  return dataset
+}
+
+const fetchDataset = async (): Promise<Dataset> => {
+  const now = Date.now()
+  if (datasetCache && now - datasetCache.loadedAt < DATASET_CACHE_TTL_MS) {
+    logCacheAccess('acquisition_dataset', true, {
+      ageMs: now - datasetCache.loadedAt,
+      source: 'memory',
+    })
+    return datasetCache.data
+  }
+
+  if (datasetInFlight) {
+    logCacheAccess('acquisition_dataset', true, {
+      source: 'in_flight',
+    })
+    return datasetInFlight
+  }
+
+  logCacheAccess('acquisition_dataset', false, {
+    ttlMs: DATASET_CACHE_TTL_MS,
+  })
+  datasetInFlight = loadDashboardViewModel('deal_intelligence_view', fetchDatasetUncached, {
+    source: 'acquisition_workspace',
+    limit: DEAL_CONTEXT_DATASET_LIMIT,
+  })
+
+  try {
+    const data = await datasetInFlight
+    datasetCache = { data, loadedAt: Date.now() }
+    return data
+  } finally {
+    datasetInFlight = null
   }
 }
 

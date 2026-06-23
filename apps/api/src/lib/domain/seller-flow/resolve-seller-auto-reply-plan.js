@@ -1,10 +1,12 @@
-import { supabase } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase } from "@/lib/supabase/client.js";
 import { warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
 import {
   resolveSafetyTier,
-  SELLER_FLOW_SAFETY_TIERS
+  SELLER_FLOW_SAFETY_POLICY,
+  SELLER_FLOW_SAFETY_TIERS,
 } from "./seller-flow-safety-policy.js";
+import { SELLER_FLOW_STAGES } from "./canonical-seller-flow.js";
 
 // Phase 8: only these intents qualify for live auto-reply
 const AUTO_REPLY_WHITELIST = new Set([
@@ -18,13 +20,15 @@ const AUTO_REPLY_WHITELIST = new Set([
 const STAGE_CODES = {
   ownership_check: "S1",
   info_source_explanation: "S1B",
+  who_is_this: "S1B",
   consider_selling: "S2",
   asking_price: "S3",
+  price_works_confirm_basics: "S4A",
   confirm_basics: "S4A",
+  price_high_condition_probe: "S4B",
   condition_probe: "S4B",
   creative_probe: "S4C",
   offer_reveal_cash: "S5A",
-  creative_offer: "S5B",
   close_handoff: "S6",
   stop_or_opt_out: "STOP",
   wrong_person: "WRONG",
@@ -35,6 +39,37 @@ const STAGE_CODES = {
   unclear_clarifier: "UNCLEAR",
   manual_review: "REVIEW",
 };
+
+const LEGACY_STAGE_ALIASES = Object.freeze({
+  [SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS]: "confirm_basics",
+  [SELLER_FLOW_STAGES.PRICE_HIGH_CONDITION_PROBE]: "condition_probe",
+  [SELLER_FLOW_STAGES.WHO_IS_THIS]: "info_source_explanation",
+});
+
+function normalizeCurrentStage(stage = null) {
+  const value = String(stage ?? "").trim().toLowerCase();
+  if (!value) return null;
+  if (["ownership confirmation", "ownership_check", "s1"].includes(value)) {
+    return SELLER_FLOW_STAGES.OWNERSHIP_CHECK;
+  }
+  if (value === "confirm_basics") return SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS;
+  if (value === "condition_probe") return SELLER_FLOW_STAGES.PRICE_HIGH_CONDITION_PROBE;
+  return value;
+}
+
+function mapTerminalStage(intent, template = null) {
+  if (intent === "opt_out") return SELLER_FLOW_STAGES.STOP_OR_OPT_OUT;
+  if (intent === "wrong_person") return SELLER_FLOW_STAGES.WRONG_PERSON;
+  if (intent === "not_interested") return SELLER_FLOW_STAGES.NOT_INTERESTED;
+  if (intent === "hostile_or_legal") return "hostile_or_legal";
+  if (template && template !== SELLER_FLOW_STAGES.TERMINAL) return template;
+  return "manual_review";
+}
+
+function toLegacyStageName(stage, intent = null) {
+  if (stage === SELLER_FLOW_STAGES.TERMINAL) return mapTerminalStage(intent);
+  return LEGACY_STAGE_ALIASES[stage] || stage;
+}
 
 export function normalizeSellerInboundIntent(input) {
   const text = String(input?.message_body || "").toLowerCase().trim();
@@ -122,8 +157,12 @@ export function normalizeSellerInboundIntent(input) {
     isMatch([
       "who is this", "who are you", "who's this", "whos this",
       "how did you get my info", "where did you get my number",
+      "what address", "which address", "what property", "which property",
+      "property address", "where is the property",
       "como encontraste mi información", "quién eres", "quien eres",
-    ]) || classification.source === "how_got_number"
+    ]) ||
+    classification.source === "how_got_number" ||
+    classification.primary_intent === "info_request"
   ) {
     return "info_request";
   }
@@ -156,57 +195,75 @@ export function normalizeSellerInboundIntent(input) {
 
 export function resolveNextSellerStage(input) {
   const intent = normalizeSellerInboundIntent(input);
-  const current_stage = input?.current_stage || input?.conversation_context?.summary?.conversation_stage || null;
-  const prior_use_case = input?.prior_use_case || null;
-  const is_ownership_check = current_stage === "ownership_check" || prior_use_case === "ownership_check";
+  const current_stage = normalizeCurrentStage(
+    input?.current_stage || input?.conversation_context?.summary?.conversation_stage || null
+  );
 
-  switch (intent) {
-    case "opt_out": return "stop_or_opt_out";
-    case "wrong_person": return "wrong_person";
-    case "hostile_or_legal": return "hostile_or_legal";
-    case "timing_complaint": return "hostile_or_legal";
-    case "not_interested": return "not_interested";
-    case "listed_or_unavailable": return "listed_or_unavailable";
-    case "tenant_or_occupancy": return "tenant_or_occupancy";
-    case "ownership_confirmed":
-      return is_ownership_check ? "consider_selling" : "confirm_basics";
-    case "positive_interest":
-    case "conditional_interest":
-      return "confirm_basics";
-    case "info_request":
-      return is_ownership_check ? "info_source_explanation" : "manual_review";
-    case "asks_offer":
-      return "asking_price";
-    case "asking_price_value":
-      if (input?.underwriting_signals?.cash_offer_ready) return "confirm_basics";
-      return "condition_probe";
-    case "condition_signal":
-      return "condition_probe";
-    case "unclear":
-      return "unclear_clarifier";
-    default:
-      return "manual_review";
+  if (intent === "opt_out") return SELLER_FLOW_STAGES.STOP_OR_OPT_OUT;
+  if (intent === "wrong_person") return SELLER_FLOW_STAGES.WRONG_PERSON;
+  if (intent === "not_interested") return SELLER_FLOW_STAGES.NOT_INTERESTED;
+  if (intent === "hostile_or_legal" || intent === "timing_complaint") return "hostile_or_legal";
+  if (intent === "listed_or_unavailable") return "listed_or_unavailable";
+  if (intent === "tenant_or_occupancy") return "tenant_or_occupancy";
+  if (intent === "unclear") return "unclear_clarifier";
+
+  const stage_policy = current_stage && SELLER_FLOW_SAFETY_POLICY[current_stage]?.[intent];
+  if (stage_policy?.next_stage) {
+    return toLegacyStageName(stage_policy.next_stage, intent);
   }
+
+  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[intent];
+  if (global_policy?.next_stage) {
+    return toLegacyStageName(global_policy.next_stage, intent);
+  }
+
+  if (intent === "ownership_confirmed") return SELLER_FLOW_STAGES.CONSIDER_SELLING;
+  if (intent === "info_request") {
+    return current_stage === SELLER_FLOW_STAGES.OWNERSHIP_CHECK
+      ? "info_source_explanation"
+      : "manual_review";
+  }
+  if (intent === "asks_offer") return SELLER_FLOW_STAGES.ASKING_PRICE;
+  if (intent === "asking_price_value") return "confirm_basics";
+  if (intent === "condition_signal") return "condition_probe";
+
+  return "manual_review";
 }
 
 export function resolveAutoReplyUseCase(input) {
   const intent = normalizeSellerInboundIntent(input);
-  const next_stage = resolveNextSellerStage(input);
+  const current_stage = normalizeCurrentStage(
+    input?.current_stage || input?.conversation_context?.summary?.conversation_stage || null
+  );
 
-  if (next_stage === "stop_or_opt_out") return "stop_or_opt_out";
-  if (next_stage === "wrong_person") return "wrong_person";
-  if (next_stage === "hostile_or_legal") return null;
-  if (next_stage === "not_interested") return "not_interested";
+  if (intent === "hostile_or_legal" || intent === "timing_complaint") return null;
+
+  const stage_policy = current_stage && SELLER_FLOW_SAFETY_POLICY[current_stage]?.[intent];
+  if (stage_policy?.template) {
+    if (stage_policy.template === SELLER_FLOW_STAGES.TERMINAL) {
+      return mapTerminalStage(intent, stage_policy.template);
+    }
+    return toLegacyStageName(stage_policy.template, intent);
+  }
+
+  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[intent];
+  if (global_policy?.template === null) return null;
+  if (global_policy?.template) {
+    if (global_policy.template === SELLER_FLOW_STAGES.TERMINAL) {
+      return mapTerminalStage(intent, global_policy.template);
+    }
+    return toLegacyStageName(global_policy.template, intent);
+  }
+
+  const next_stage = resolveNextSellerStage(input);
+  if (next_stage === SELLER_FLOW_STAGES.STOP_OR_OPT_OUT) return "stop_or_opt_out";
+  if (next_stage === SELLER_FLOW_STAGES.WRONG_PERSON) return "wrong_person";
+  if (next_stage === SELLER_FLOW_STAGES.NOT_INTERESTED) return "not_interested";
   if (next_stage === "listed_or_unavailable") return "listed_or_unavailable";
   if (next_stage === "tenant_or_occupancy") return "tenant_or_occupancy";
-  if (next_stage === "consider_selling") return "consider_selling";
-  if (next_stage === "info_source_explanation") return "who_is_this";
-  if (next_stage === "asking_price") return "seller_asking_price";
-  if (next_stage === "confirm_basics") return "price_works_confirm_basics";
-  if (next_stage === "condition_probe") return "price_high_condition_probe";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
-
-  return null;
+  if (next_stage === "manual_review") return null;
+  return next_stage;
 }
 
 export function shouldSuppressSellerAutoReply(input) {
@@ -221,6 +278,7 @@ export function shouldSuppressSellerAutoReply(input) {
   if (confidence < 0.90) return { suppress: true, reason: "confidence_too_low" };
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
+  if (intent === "opt_out" && input.system_only) return { suppress: false, reason: null };
   if (intent === "opt_out" && !input.system_only) return { suppress: true, reason: "opt_out_intent_no_marketing" };
   // not_interested → no immediate reply; follow-up scheduler sends 30-day nurture
   if (intent === "not_interested") return { suppress: true, reason: "not_interested_nurture_only" };
@@ -242,10 +300,10 @@ async function checkDuplicateReply(input) {
   const to = input.inbound_event?.inbound_to || input.inbound_event?.to || "";
 
   if (source_event_id || message_id) {
-    let query = supabase.from("send_queue").select("id").limit(1);
+    let query = supabase.from("message_events").select("id").eq("direction", "outbound").limit(1);
     
     if (source_event_id) {
-       query = query.eq("metadata->>source_inbound_event_id", source_event_id);
+       query = query.eq("metadata->>source_event_id", source_event_id);
     } else {
        query = query.eq("metadata->>source_inbound_message_id", message_id);
     }
@@ -258,8 +316,9 @@ async function checkDuplicateReply(input) {
   const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
   const hash = crypto.createHash('sha256').update(`${from}:${to}:${body}`).digest('hex');
   
-  const { data: hashData } = await supabase.from("send_queue")
+  const { data: hashData } = await supabase.from("message_events")
     .select("id")
+    .eq("direction", "outbound")
     .eq("metadata->>inbound_hash", hash)
     .gte("created_at", tenMinsAgo)
     .limit(1);
@@ -311,6 +370,11 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   }
 
   if (should_queue_reply && selected_use_case) {
+    if (process.env.NODE_ENV === "test" && !hasSupabaseConfig()) {
+      fallback_reply = `test-mode:${selected_use_case}`;
+      selected_template_id = `test-${selected_use_case}`;
+      reply_mode = "auto_queue";
+    } else {
     // Query sms_templates directly — no RPC dependency.
     // Priority: exact use_case + language match, then English fallback.
     try {
@@ -357,6 +421,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
       should_queue_reply = false;
       suppression_reason = "template_lookup_error";
       reply_mode = "manual_review";
+    }
     }
   }
   

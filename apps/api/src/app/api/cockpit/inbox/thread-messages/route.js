@@ -1,105 +1,164 @@
-import { NextResponse } from "next/server.js";
-import { ensureMutationAuth, handleOptionsResponse, withCors } from "../../_shared.js";
-import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { NextResponse } from 'next/server.js'
+import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
+import { degradedThreadMessagesPayload } from '@/lib/domain/inbox/degraded-read-responses.js'
+import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 500;
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 function clean(value) {
-  return String(value ?? "").trim();
-}
-
-function asLimit(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(MAX_LIMIT, Math.floor(parsed));
-}
-
-function parseCursor(value) {
-  if (!value) return null;
-  try {
-    return JSON.parse(Buffer.from(clean(value), "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function encodeCursor(row) {
-  return Buffer.from(JSON.stringify({
-    created_at: row?.created_at || null,
-    id: row?.id || null,
-  })).toString("base64url");
-}
-
-function normalizeDirection(row) {
-  const direction = clean(row?.direction).toLowerCase();
-  const eventType = clean(row?.event_type).toLowerCase();
-  if (direction === "inbound" || row?.received_at || eventType.includes("inbound")) return "inbound";
-  if (direction === "outbound" || row?.sent_at || eventType === "outbound_send") return "outbound";
-  return direction || "unknown";
-}
-
-export async function GET(request) {
-  const auth = ensureMutationAuth(request);
-  if (!auth.ok) return withCors(request, auth.response);
-  if (!hasSupabaseConfig()) {
-    return withCors(request, NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 }));
-  }
-
-  const { searchParams } = new URL(request.url);
-  const thread_key = clean(searchParams.get("thread_key"));
-  const limit = asLimit(searchParams.get("limit"));
-  const cursor = parseCursor(searchParams.get("cursor"));
-
-  if (!thread_key) {
-    return withCors(request, NextResponse.json({ ok: false, error: "missing_thread_key" }, { status: 400 }));
-  }
-
-  try {
-    let query = supabase
-      .from("message_events")
-      .select("*")
-      .or(`thread_key.eq.${thread_key},from_phone_number.eq.${thread_key},to_phone_number.eq.${thread_key}`)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (cursor?.created_at) query = query.lt("created_at", cursor.created_at);
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const rows = Array.isArray(data) ? data : [];
-    const normalized = rows
-      .map((row) => ({
-        ...row,
-        direction: normalizeDirection(row),
-        timeline_at: row.event_timestamp || row.received_at || row.sent_at || row.created_at || null,
-      }))
-      .sort((a, b) => new Date(a.timeline_at || 0).getTime() - new Date(b.timeline_at || 0).getTime());
-
-    return withCors(request, NextResponse.json({
-      ok: true,
-      thread_key,
-      messages: normalized,
-      next_cursor: rows.length === limit ? encodeCursor(rows[rows.length - 1]) : null,
-      diagnostics: {
-        rows_returned: normalized.length,
-      },
-    }, { status: 200 }));
-  } catch (error) {
-    return withCors(request, NextResponse.json({
-      ok: false,
-      error: "thread_messages_failed",
-      message: error?.message || "Unknown thread message error",
-      thread_key,
-      messages: [],
-      next_cursor: null,
-    }, { status: 500 }));
-  }
+  return String(value ?? '').trim()
 }
 
 export async function OPTIONS(request) {
-  return handleOptionsResponse(request);
+  return new Response(null, { status: 204, headers: corsHeaders(request) })
+}
+
+export async function GET(request) {
+  const cors = corsHeaders(request)
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+
+  const { searchParams } = new URL(request.url)
+  const thread_key = clean(searchParams.get('thread_key'))
+  const conversation_thread_id = clean(searchParams.get('conversation_thread_id') || searchParams.get('conversationThreadId'))
+  const legacy_thread_key = clean(searchParams.get('legacy_thread_key') || searchParams.get('legacyThreadKey'))
+  const normalized_phone = clean(searchParams.get('normalized_phone') || searchParams.get('normalizedPhone'))
+  const canonical_e164 = clean(searchParams.get('canonical_e164'))
+  const phone_e164 = clean(searchParams.get('phone_e164'))
+  const phone = clean(searchParams.get('phone'))
+  const best_phone = clean(searchParams.get('best_phone'))
+  const seller_phone = clean(searchParams.get('seller_phone'))
+  const prospect_id = clean(searchParams.get('prospect_id'))
+  const property_id = clean(searchParams.get('property_id'))
+  const owner_id = clean(searchParams.get('owner_id'))
+  const master_owner_id = clean(searchParams.get('master_owner_id'))
+  const latest_message_id = clean(searchParams.get('latest_message_id') || searchParams.get('latestMessageId') || searchParams.get('latest_message_event_id') || searchParams.get('latestMessageEventId'))
+  const fetchAll = ['1', 'true', 'yes'].includes(clean(searchParams.get('fetch_all') || searchParams.get('fetchAll')).toLowerCase())
+  const offset = fetchAll ? 0 : Math.max(0, Number.parseInt(clean(searchParams.get('offset')) || '0', 10) || 0)
+  const limit = fetchAll
+    ? 2000
+    : Math.min(100, Math.max(1, Number.parseInt(clean(searchParams.get('limit')) || '50', 10) || 50))
+
+  if (!thread_key && !conversation_thread_id && !legacy_thread_key && !normalized_phone && !canonical_e164 && !phone_e164 && !phone && !best_phone && !seller_phone && !prospect_id && !property_id && !owner_id && !master_owner_id && !latest_message_id) {
+    return NextResponse.json(
+      degradedThreadMessagesPayload({
+        error: new Error('missing_thread_identity'),
+        thread_key: null,
+        canonical_e164: null,
+        offset,
+        limit,
+        diagnostics: {
+          error_code: 'missing_thread_identity',
+          identities_tried: {
+            thread_keys: [],
+            phones: [],
+            prospect_ids: [],
+            property_ids: [],
+            master_owner_ids: [],
+          },
+        },
+      }),
+      { status: 200, headers: cors },
+    )
+  }
+
+  try {
+    const startedAt = Date.now()
+    const { rows, total, diagnostics, threadKey, conversationThreadId, integrityBlocked, identityUsed, sourceUsed, queryMs } = await getThreadMessages({
+      selected_thread_key: thread_key,
+      conversation_thread_id,
+      legacy_thread_key,
+      normalized_phone,
+      canonical_e164,
+      phone_e164,
+      phone,
+      best_phone,
+      seller_phone,
+      prospect_id,
+      property_id,
+      owner_id,
+      master_owner_id,
+      latest_message_id,
+    }, { offset, limit, fetchAll })
+    const nextOffset = offset + rows.length
+    const hasMore = fetchAll ? false : nextOffset < total
+
+    return NextResponse.json(
+      {
+        ok: true,
+        action: 'thread-messages',
+        degraded: false,
+        fetch_all: fetchAll,
+        integrity_blocked: integrityBlocked === true,
+        integrityBlocked: integrityBlocked === true,
+        thread_key,
+        threadKey: threadKey || thread_key || null,
+        conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+        conversationThreadId: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+        identityUsed: identityUsed || null,
+        sourceUsed: sourceUsed || 'message_events',
+        queryMs: Number.isFinite(Number(queryMs)) ? Number(queryMs) : Date.now() - startedAt,
+        messages: rows,
+        pagination: {
+          offset,
+          limit,
+          total,
+          has_more: hasMore,
+          next_offset: hasMore ? nextOffset : null,
+        },
+        diagnostics: {
+          ...diagnostics,
+          thread_key,
+          threadKey: threadKey || thread_key || null,
+          conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+          conversationThreadId: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
+          integrity_blocked: integrityBlocked === true,
+          canonical_e164: canonical_e164 || diagnostics?.canonical_e164 || null,
+          phone_e164: phone_e164 || null,
+          canonical_thread_key: diagnostics?.canonical_thread_key || thread_key || null,
+          identityUsed: identityUsed || diagnostics?.identityUsed || null,
+          sourceUsed: sourceUsed || diagnostics?.sourceUsed || 'message_events',
+          queryMs: Number.isFinite(Number(queryMs)) ? Number(queryMs) : Date.now() - startedAt,
+          messages: rows,
+          pagination: {
+            offset,
+            limit,
+            total,
+            has_more: hasMore,
+            next_offset: hasMore ? nextOffset : null,
+          },
+        },
+      },
+      { status: 200, headers: cors },
+    )
+  } catch (error) {
+    return NextResponse.json(
+      degradedThreadMessagesPayload({
+        error,
+        thread_key: thread_key || null,
+        canonical_e164: canonical_e164 || phone_e164 || null,
+        offset,
+        limit,
+        diagnostics: {
+          input: {
+            thread_key,
+            conversation_thread_id,
+            legacy_thread_key,
+            normalized_phone,
+            canonical_e164,
+            phone_e164,
+            phone,
+            best_phone,
+            seller_phone,
+            prospect_id,
+            property_id,
+            owner_id,
+            master_owner_id,
+          },
+        },
+      }),
+      { status: 200, headers: cors },
+    )
+  }
 }

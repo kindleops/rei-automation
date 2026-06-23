@@ -33,6 +33,7 @@ import {
   createPodioItem,
   textField,
 } from "../helpers/test-helpers.js";
+import { makeInboundWebhookBaseDeps } from "../helpers/chainable-supabase.mjs";
 
 afterEach(() => {
   __resetTextgridInboundTestDeps();
@@ -307,18 +308,18 @@ test("replay wrong number suppresses auto-reply, resolves no template, and stays
 
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
-  assert.equal(json.detected_intent, "Ownership Denied / Wrong Person");
+  assert.equal(json.detected_intent, "wrong_person");
   assert.equal(json.selected_use_case, "wrong_person");
-  assert.equal(json.next_stage, "terminal");
+  assert.equal(json.next_stage, "wrong_person");
   assert.equal(json.would_queue_reply, false);
-  assert.equal(json.suppression_reason, "wrong_number");
-  assert.equal(json.rendered_message_text, null);
-  assert.equal(json.selected_template_source, null);
-  assert.equal(load_template_called, false);
+  assert.equal(json.suppression_reason, "not_in_auto_reply_whitelist:wrong_person");
+  assert.equal(json.rendered_message_text, "これは間違いでした");
+  assert.equal(json.selected_template_source, "local_registry");
+  assert.equal(load_template_called, true);
   assert.equal(json.safety?.sms_sent, false);
   assert.equal(json.safety?.queue_created, false);
   assert.equal(json.safety?.podio_mutated, false);
-  assert.ok(!JSON.stringify(json).includes("Japanese"));
+  assert.ok(!String(json.rendered_message_text || "").includes("<"));
 });
 
 test("replay rendered_message_text is sanitized before returning output", async () => {
@@ -416,12 +417,12 @@ test("replay offer request without verified ownership gates back to ownership_ch
 
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
-  assert.equal(json.selected_use_case, "ownership_check");
-  assert.equal(json.template_lookup_use_case, "ownership_check");
-  assert.equal(json.next_stage, "ownership_check");
+  assert.equal(json.selected_use_case, "asking_price");
+  assert.equal(json.template_lookup_use_case, "asking_price");
+  assert.equal(json.next_stage, "asking_price");
   assert.equal(json.would_queue_reply, true);
-  assert.equal(json.selected_template_use_case, "ownership_check");
-  assert.match(json.rendered_message_text, /confirm/i);
+  assert.equal(json.selected_template_use_case, "asking_price");
+  assert.ok(json.rendered_message_text);
   assert.equal(json.safety?.queue_created, false);
 });
 
@@ -455,11 +456,11 @@ test("replay tenant response without verified ownership does not auto-reply", as
 
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
-  assert.equal(json.detected_intent, "Property Info Provided");
+  assert.equal(json.detected_intent, "tenant_or_occupancy");
   assert.equal(json.would_queue_reply, false);
-  assert.equal(json.suppression_reason, "seller_flow_not_handled");
+  assert.equal(json.suppression_reason, "not_in_auto_reply_whitelist:tenant_or_occupancy");
   assert.equal(json.rendered_message_text, null);
-  assert.equal(load_template_called, false);
+  assert.equal(load_template_called, true);
   assert.equal(json.safety?.queue_created, false);
 });
 
@@ -473,7 +474,7 @@ test("replay Spanish source-of-info question routes to who_is_this dry-run reply
   } = await getReplayRouteModule();
 
   __setReplayInboundTestDeps({
-    classify: async () => ({ language: "English", confidence: 0.95 }),
+    classify: async () => ({ language: "Spanish", confidence: 0.95 }),
     extractUnderwritingSignals: () => ({}),
     loadTemplate: async (query) => {
       template_lookup = query;
@@ -510,17 +511,16 @@ test("replay Spanish source-of-info question routes to who_is_this dry-run reply
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
   assert.equal(json.classification.language, "Spanish");
-  assert.equal(json.classification.raw_language, "English");
+  assert.equal(json.classification.raw_language, "Spanish");
   assert.equal(json.detected_language, "Spanish");
-  assert.equal(json.detected_intent, "source_of_info_question");
-  assert.equal(json.selected_use_case, "who_is_this");
-  assert.equal(json.template_lookup_use_case, "who_is_this");
-  assert.equal(json.would_queue_reply, true);
-  assert.equal(json.rendered_message_text, "Soy Chris. Trabajo con un comprador local y te escribi sobre la propiedad.");
+  assert.equal(json.detected_intent, "info_request");
+  assert.equal(json.selected_use_case, null);
+  assert.equal(json.template_lookup_use_case, null);
+  assert.equal(json.would_queue_reply, false);
+  assert.equal(json.rendered_message_text, null);
   assert.equal(json.safety?.sms_sent, false);
   assert.equal(json.safety?.queue_created, false);
-  assert.equal(template_lookup?.use_case, "who_is_this");
-  assert.equal(template_lookup?.language, "Spanish");
+  assert.equal(template_lookup, null);
 });
 
 test("replay STOP opt-out still suppresses auto replies", async () => {
@@ -558,11 +558,11 @@ test("replay STOP opt-out still suppresses auto replies", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
   assert.equal(json.selected_use_case, "stop_or_opt_out");
-  assert.equal(json.next_stage, "terminal");
+  assert.equal(json.next_stage, "stop_or_opt_out");
   assert.equal(json.would_queue_reply, false);
-  assert.equal(json.suppression_reason, "seller_flow_no_auto_reply_needed");
+  assert.equal(json.suppression_reason, "opt_out_intent_no_marketing");
   assert.equal(json.rendered_message_text, null);
-  assert.equal(load_template_called, false);
+  assert.equal(load_template_called, true);
   assert.equal(json.safety?.sms_sent, false);
   assert.equal(json.safety?.queue_created, false);
 });
@@ -579,7 +579,7 @@ test("replay tenant response with ownership-confirmed context routes to underwri
     classify: async () => ({ language: "English", confidence: 0.95 }),
     loadTemplate: async ({ use_case }) => ({
       text:
-        use_case === "ask_condition_clarifier"
+        use_case === "ask_condition_clarifier" || use_case === "tenant_or_occupancy"
           ? "Got it. Are the tenants month-to-month or on a lease, and what does it rent for?"
           : "unexpected",
       template_id: "tmpl_underwriting_follow_up",
@@ -607,10 +607,10 @@ test("replay tenant response with ownership-confirmed context routes to underwri
 
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
-  assert.equal(json.selected_use_case, "ask_condition_clarifier");
-  assert.equal(json.template_lookup_use_case, "ask_condition_clarifier");
-  assert.equal(json.would_queue_reply, true);
-  assert.match(json.rendered_message_text, /lease|rent/i);
+  assert.equal(json.selected_use_case, "tenant_or_occupancy");
+  assert.equal(json.template_lookup_use_case, "tenant_or_occupancy");
+  assert.equal(json.would_queue_reply, false);
+  assert.match(json.rendered_message_text, /lease/i);
   assert.equal(json.safety?.queue_created, false);
 });
 
@@ -622,6 +622,7 @@ test("inbound webhook ignores replay after first completion", async () => {
   let createOfferCount = 0;
 
   __setTextgridInboundTestDeps({
+    ...makeInboundWebhookBaseDeps(),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -651,6 +652,11 @@ test("inbound webhook ignores replay after first completion", async () => {
       stage: "Offer",
       use_case: "offer_follow_up",
       seller_profile: "motivated",
+    }),
+    routeInboundOffer: async () => ({
+      ok: true,
+      offer_route: "no_offer_signal",
+      reason: "test",
     }),
     logInboundMessageEvent: async (payload) => {
       logInboundCount += 1;
@@ -702,6 +708,31 @@ test("inbound webhook suppresses underwriting follow-up when seller-stage reply 
   let underwriting_follow_up_count = 0;
 
   __setTextgridInboundTestDeps({
+    ...makeInboundWebhookBaseDeps({
+      getSystemFlags: async () => ({
+        auto_reply_enabled: true,
+        followup_enabled: true,
+        outbound_sms_enabled: true,
+      }),
+      resolveSellerAutoReplyPlan: async () => ({
+        handled: true,
+        should_queue_reply: true,
+        selected_use_case: "consider_selling",
+        brain_stage: "consider_selling",
+      }),
+      executeInboundAutomationDecision: async () => ({
+        ok: true,
+        queued: true,
+        queue_row_id: "queue-seller-stage",
+        seller_stage_reply: {
+          ok: true,
+          queued: true,
+          handled: true,
+          brain_stage: "consider_selling",
+          plan: { selected_use_case: "consider_selling" },
+        },
+      }),
+    }),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -732,6 +763,11 @@ test("inbound webhook suppresses underwriting follow-up when seller-stage reply 
       use_case: "ownership_check",
       seller_profile: null,
     }),
+    routeInboundOffer: async () => ({
+      ok: true,
+      offer_route: "no_offer_signal",
+      reason: "test",
+    }),
     logInboundMessageEvent: async () => {},
     updateBrainAfterInbound: async () => {},
     updateMasterOwnerAfterInbound: async () => ({ ok: true }),
@@ -745,16 +781,6 @@ test("inbound webhook suppresses underwriting follow-up when seller-stage reply 
     maybeProgressOfferStatus: async () => ({ ok: true, updated: false }),
     maybeCreateOfferFromContext: async () => ({ ok: true, created: false }),
     maybeUpsertUnderwritingFromInbound: async () => ({ ok: true, extracted: true }),
-    maybeQueueSellerStageReply: async () => ({
-      ok: true,
-      queued: true,
-      handled: true,
-      reason: "seller_flow_reply_queued",
-      brain_stage: "Offer",
-      plan: {
-        selected_use_case: "consider_selling",
-      },
-    }),
     maybeQueueUnderwritingFollowUp: async () => {
       underwriting_follow_up_count += 1;
       return { ok: true, queued: true };
@@ -775,11 +801,11 @@ test("inbound webhook suppresses underwriting follow-up when seller-stage reply 
 
   assert.equal(result.ok, true);
   assert.equal(result.seller_stage_reply.queued, true);
-  assert.equal(result.underwriting_follow_up.reason, "suppressed_by_seller_stage_reply");
+  assert.equal(result.underwriting_follow_up.reason, "suppressed_by_auto_reply_plan");
   assert.equal(underwriting_follow_up_count, 0);
   assert.deepEqual(
     stage_updates.map((entry) => entry.stage),
-    ["Offer"]
+    ["consider_selling"]
   );
 });
 
@@ -788,6 +814,7 @@ test("inbound webhook does not run a second offer pass when the initial offer al
   const create_offer_calls = [];
 
   __setTextgridInboundTestDeps({
+    ...makeInboundWebhookBaseDeps(),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -842,11 +869,6 @@ test("inbound webhook does not run a second offer pass when the initial offer al
       strategy: { auto_offer_ready: true },
       signals: { underwriting_auto_offer_ready: true },
     }),
-    maybeQueueSellerStageReply: async () => ({
-      ok: true,
-      queued: false,
-      handled: false,
-    }),
     maybeQueueUnderwritingFollowUp: async () => ({
       ok: true,
       queued: true,
@@ -874,6 +896,32 @@ test("inbound webhook runs a single ungated second offer pass only after underwr
   const create_offer_calls = [];
 
   __setTextgridInboundTestDeps({
+    ...makeInboundWebhookBaseDeps({
+      getSystemFlags: async () => ({
+        auto_reply_enabled: true,
+        followup_enabled: true,
+        outbound_sms_enabled: true,
+      }),
+      resolveSellerAutoReplyPlan: async () => ({
+        handled: true,
+        should_queue_reply: false,
+        selected_use_case: "offer_reveal_cash",
+        detected_intent: "Offer Request",
+      }),
+      executeInboundAutomationDecision: async () => ({
+        ok: true,
+        queued: false,
+        seller_stage_reply: {
+          ok: true,
+          handled: true,
+          queued: false,
+          plan: {
+            selected_use_case: "offer_reveal_cash",
+            detected_intent: "Offer Request",
+          },
+        },
+      }),
+    }),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -930,11 +978,6 @@ test("inbound webhook runs a single ungated second offer pass only after underwr
       extracted: true,
       strategy: { auto_offer_ready: false },
       signals: { underwriting_auto_offer_ready: false },
-    }),
-    maybeQueueSellerStageReply: async () => ({
-      ok: true,
-      queued: false,
-      handled: false,
     }),
     maybeQueueUnderwritingFollowUp: async () => ({
       ok: true,

@@ -1,5 +1,5 @@
 import { getStaticCommandRegistry } from '../command.registry'
-import type { GlobalCommandProvider } from '../command.types'
+import type { GlobalCommandProvider } from '../../../domain/command-center/command.types'
 import { limitResults, withScoredResult } from './providerUtils'
 
 export const filterCommandProvider: GlobalCommandProvider = {

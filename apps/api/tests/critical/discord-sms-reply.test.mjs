@@ -1019,7 +1019,7 @@ describe("Discord SMS Reply Action Handlers", () => {
   });
 
   it("wrong number creates suppression and does not queue outbound reply", async () => {
-    let suppression_inserted = false;
+    let phone_status_updated = false;
     let metadata_updated = false;
     globalThis.__rea_default_supabase_client__ = {
       from(table) {
@@ -1043,11 +1043,15 @@ describe("Discord SMS Reply Action Handlers", () => {
             },
           };
         }
-        if (table === "sms_suppression_list") {
+        if (table === "phones") {
           return {
-            insert() {
-              suppression_inserted = true;
-              return { maybeSingle: async () => ({ data: null, error: null }) };
+            update() {
+              phone_status_updated = true;
+              return {
+                eq: () => ({
+                  catch: () => null,
+                }),
+              };
             },
           };
         }
@@ -1062,7 +1066,7 @@ describe("Discord SMS Reply Action Handlers", () => {
 
     delete globalThis.__rea_default_supabase_client__;
     assert.strictEqual(result.ok, true);
-    assert.strictEqual(suppression_inserted, true);
+    assert.strictEqual(phone_status_updated, true);
     assert.strictEqual(metadata_updated, true);
   });
 

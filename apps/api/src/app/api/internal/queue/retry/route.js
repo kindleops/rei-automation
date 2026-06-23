@@ -23,6 +23,14 @@ function asNumber(value, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function statusForResult(result) {
   return result?.ok === false ? 400 : 200;
 }
@@ -56,11 +64,13 @@ export async function GET(request) {
       );
     }
     const limit = capRetryBatch(asNumber(searchParams.get("limit"), 50), 50);
+    const dry_run = asBoolean(searchParams.get("dry_run"), false);
 
     logger.info("queue_retry.requested", {
       method: "GET",
       limit,
       master_owner_id: master_owner_scope.effective_id,
+      dry_run,
       authenticated: auth.auth.authenticated,
       is_vercel_cron: auth.auth.is_vercel_cron,
     });
@@ -68,6 +78,7 @@ export async function GET(request) {
     const result = await runRetryRunner({
       limit,
       master_owner_id: master_owner_scope.effective_id,
+      dry_run,
     });
 
     logger.info("queue_retry.completed", {
@@ -80,6 +91,10 @@ export async function GET(request) {
       scheduled_count: result?.scheduled_count ?? 0,
       terminal_count: result?.terminal_count ?? 0,
       skipped_count: result?.skipped_count ?? 0,
+      retry_candidates_checked: result?.retry_candidates_checked ?? 0,
+      retryable_count: result?.retryable_count ?? 0,
+      terminal_skipped_count: result?.terminal_skipped_count ?? 0,
+      blocked_count: result?.blocked_count ?? 0,
       retry_after_seconds: result?.retry_after_seconds ?? null,
     });
 
@@ -160,11 +175,13 @@ export async function POST(request) {
       );
     }
     const limit = capRetryBatch(asNumber(body?.limit, 50), 50);
+    const dry_run = asBoolean(body?.dry_run, false);
 
     logger.info("queue_retry.requested", {
       method: "POST",
       limit,
       master_owner_id: master_owner_scope.effective_id,
+      dry_run,
       authenticated: auth.auth.authenticated,
       is_vercel_cron: auth.auth.is_vercel_cron,
     });
@@ -172,6 +189,7 @@ export async function POST(request) {
     const result = await runRetryRunner({
       limit,
       master_owner_id: master_owner_scope.effective_id,
+      dry_run,
     });
 
     logger.info("queue_retry.completed", {
@@ -184,6 +202,10 @@ export async function POST(request) {
       scheduled_count: result?.scheduled_count ?? 0,
       terminal_count: result?.terminal_count ?? 0,
       skipped_count: result?.skipped_count ?? 0,
+      retry_candidates_checked: result?.retry_candidates_checked ?? 0,
+      retryable_count: result?.retryable_count ?? 0,
+      terminal_skipped_count: result?.terminal_skipped_count ?? 0,
+      blocked_count: result?.blocked_count ?? 0,
       retry_after_seconds: result?.retry_after_seconds ?? null,
     });
 

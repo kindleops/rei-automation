@@ -8,7 +8,7 @@ import { propertySearchProvider } from './providers/propertySearchProvider'
 import { queueSearchProvider } from './providers/queueSearchProvider'
 import { sellerSearchProvider } from './providers/sellerSearchProvider'
 import { locationCommandProvider, getRecentCommandLocations } from './providers/locationCommandProvider'
-import type { CommandResult, CommandResultType, GlobalCommandProvider, GlobalCommandSearchContext } from './command.types'
+import type { CommandResult, CommandResultType, GlobalCommandProvider, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 
 const STATIC_PROVIDERS: GlobalCommandProvider[] = [
   appCommandProvider,
@@ -97,7 +97,7 @@ export const useGlobalCommandSearch = (query: string, context: GlobalCommandSear
           subtitle: `Recent Location`,
           icon: 'clock' as const,
           score: 100 - i,
-          route: '/dashboard/live',
+          route: '/map',
           action: {
             id: 'fly-to',
             kind: 'dispatch_event' as const,

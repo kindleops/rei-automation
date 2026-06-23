@@ -1086,7 +1086,7 @@ export const referenceCommandCenterData: CommandCenterReferenceDataset = {
       detail: 'Houston hot lead has not received follow-up. Auto-escalation triggered.',
       read: false,
       actionLabel: 'View Lead',
-      actionRoute: '/dashboard/live',
+      actionRoute: '/map',
       timestampIso: minutesAgo(2),
     },
     {
@@ -1097,7 +1097,7 @@ export const referenceCommandCenterData: CommandCenterReferenceDataset = {
       detail: 'Briar Creek Drive title is clean. Closing can proceed.',
       read: false,
       actionLabel: 'View Title',
-      actionRoute: '/title',
+      actionRoute: '/closing-desk',
       timestampIso: minutesAgo(8),
     },
     {
@@ -1119,7 +1119,7 @@ export const referenceCommandCenterData: CommandCenterReferenceDataset = {
       detail: '22% of sends in affected window are not reaching recipients.',
       read: true,
       actionLabel: 'View Alerts',
-      actionRoute: '/alerts',
+      actionRoute: '/inbox',
       timestampIso: minutesAgo(42),
     },
     {

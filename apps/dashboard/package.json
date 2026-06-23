@@ -8,9 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "guard:css-order": "node scripts/check-css-import-order.mjs",
     "setup:inbox": "node scripts/setup-inbox.mjs",
     "proof:queue-recovery": "node scripts/proof/queue-recovery.mjs",
-    "proof:inbox": "node scripts/proof/inbox-proof.mjs",
+    "proof:inbox": "npx tsx scripts/proof/inbox-store-proof.ts && node scripts/proof/inbox-bucket-resolver-proof.mjs",
     "proof:inbox-integrity": "node scripts/proof/inbox-integrity.mjs",
     "proof:smart-inboxes": "node scripts/proof/smart-inboxes.mjs",
     "proof:inbox-buttons": "node scripts/proof/inbox-buttons.mjs",
@@ -40,7 +41,8 @@
     "proof:deal-command-header-no-overflow": "node scripts/proof/deal-command-header-no-overflow.mjs",
     "proof:ui": "playwright test",
     "proof:deal": "playwright test tests/ui/deal-intelligence.spec.ts",
-    "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed"
+    "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
@@ -48,18 +50,23 @@
     "dotenv": "^17.4.2",
     "framer-motion": "^12.38.0",
     "maplibre-gl": "^5.22.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-window": "^2.2.7",
     "tslib": "^2.8.1",
     "vercel": "^54.4.1"
   },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.60.0",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^24.12.2",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",

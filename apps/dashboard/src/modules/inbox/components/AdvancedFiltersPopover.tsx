@@ -1,319 +1,475 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
-import type { InboxAdvancedFilters } from '../inbox-ui-helpers'
-import { type InboxViewSelectValue, type InboxStageSelectValue, viewOptions } from '../inbox-ui-helpers'
+import type { InboxAdvancedFilters, InboxViewSelectValue, InboxStageSelectValue } from '../inbox-ui-helpers'
+import { viewOptions } from '../inbox-ui-helpers'
 import { sellerStageOptions } from '../status-visuals'
 import type { AdvancedFilterOptions } from './InboxSidebar'
+import {
+  ADVANCED_FILTER_FIELDS,
+  buildAdvancedFilterChips,
+  clearAllAdvancedFilters,
+  countActiveAdvancedFilters,
+  type AdvancedFilterFieldSpec,
+  type AdvancedFilterGroupId,
+} from '../../../domain/inbox/inbox-advanced-filter-engine'
 
 interface AdvancedFiltersPopoverProps {
   open: boolean
   stageFilter: InboxStageSelectValue
-  setStageFilter: (filter: InboxStageSelectValue) => void
   viewFilter: InboxViewSelectValue
-  setViewFilter: (filter: InboxViewSelectValue) => void
   advancedFilters: InboxAdvancedFilters
-  onAdvancedFiltersChange: (patch: Partial<InboxAdvancedFilters>) => void
+  onAdvancedFiltersChange: (filters: InboxAdvancedFilters) => void
   advancedFilterOptions: AdvancedFilterOptions
   viewCounts: Record<string, number | string | null | undefined>
+  resultCount: number
   onReset: () => void
   onClose: () => void
-  onApply?: () => void
+  onApply: (payload: {
+    view: InboxViewSelectValue
+    stage: InboxStageSelectValue
+    advanced: InboxAdvancedFilters
+  }) => void
 }
 
-const numberInput = (value: number | undefined): string => (value === undefined ? '' : String(value))
-const asNumber = (value: string): number | undefined => {
-  if (!value.trim()) return undefined
-  const num = Number(value)
-  return Number.isFinite(num) ? num : undefined
+const SAVED_VIEWS_KEY = 'nx_inbox_saved_views'
+
+const GROUP_META: Array<{ id: AdvancedFilterGroupId; label: string }> = [
+  { id: 'property', label: 'Property' },
+  { id: 'owner', label: 'Owner' },
+  { id: 'prospect', label: 'Prospect' },
+  { id: 'conversation', label: 'Conversation' },
+  { id: 'phone', label: 'Phone & Delivery' },
+]
+
+interface SavedView {
+  id: string
+  name: string
+  state: { view: InboxViewSelectValue; stage: InboxStageSelectValue; advanced: InboxAdvancedFilters }
 }
 
-const selectOptions = (options: string[]) => (
-  <>
-    <option value="">Any</option>
-    {options.map((option) => (
-      <option key={option} value={option}>{option}</option>
-    ))}
-  </>
+const num = (v: number | undefined) => (v === undefined ? '' : String(v))
+const asNum = (v: string): number | undefined => {
+  const n = Number(v)
+  return v.trim() && Number.isFinite(n) ? n : undefined
+}
+
+function loadSavedViews(): SavedView[] {
+  try { return JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) ?? '[]') } catch { return [] }
+}
+function persistSavedViews(views: SavedView[]) {
+  try { localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views)) } catch { /* ignore */ }
+}
+
+const Sel = ({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) => (
+  <select className="nx-icf-input" value={value} onChange={(e) => onChange(e.target.value)}>
+    {children}
+  </select>
 )
 
-const FieldRow = ({ label, children, unwired }: { label: string; children: React.ReactNode; unwired?: boolean }) => (
-  <label className={`nx-filter-field ${unwired ? 'is-unwired' : ''}`} title={unwired ? 'Not wired yet' : ''}>
-    <span>{label}</span>
-    <div className="nx-filter-field-input" style={{ pointerEvents: unwired ? 'none' : 'auto', opacity: unwired ? 0.5 : 1 }}>
-      {children}
-    </div>
-  </label>
+const Num = ({ value, onChange, placeholder }: { value: number | undefined; onChange: (v: number | undefined) => void; placeholder?: string }) => (
+  <input className="nx-icf-input" type="number" value={num(value)} placeholder={placeholder ?? '—'} onChange={(e) => onChange(asNum(e.target.value))} />
+)
+
+const F = ({ label, children, half }: { label: string; children: React.ReactNode; half?: boolean }) => (
+  <div className={`nx-icf-field${half ? ' is-half' : ''}`}>
+    <span className="nx-icf-label">{label}</span>
+    {children}
+  </div>
 )
 
 export const AdvancedFiltersPopover = ({
   open,
   stageFilter,
-  setStageFilter,
   viewFilter,
-  setViewFilter,
   advancedFilters,
   onAdvancedFiltersChange,
   advancedFilterOptions,
   viewCounts,
+  resultCount,
   onReset,
   onClose,
   onApply,
 }: AdvancedFiltersPopoverProps) => {
-  const [activeCategory, setActiveCategory] = useState<string>('Workflow')
-  
-  const patch = useCallback((next: Partial<InboxAdvancedFilters>) => {
-    onAdvancedFiltersChange(next)
-  }, [onAdvancedFiltersChange])
+  const [localView, setLocalView] = useState(viewFilter)
+  const [localStage, setLocalStage] = useState(stageFilter)
+  const [localAdvanced, setLocalAdvanced] = useState(advancedFilters)
+  const [search, setSearch] = useState('')
+  const [collapsed, setCollapsed] = useState<Record<AdvancedFilterGroupId, boolean>>({
+    property: false,
+    owner: true,
+    prospect: true,
+    conversation: true,
+    phone: true,
+  })
+  const [savedViews, setSavedViews] = useState<SavedView[]>(loadSavedViews)
+  const [saveViewOpen, setSaveViewOpen] = useState(false)
+  const [saveViewName, setSaveViewName] = useState('')
+  const [applying, setApplying] = useState(false)
 
-  const handleClose = useCallback(() => {
-    onClose()
-  }, [onClose])
+  useEffect(() => {
+    if (open) {
+      setLocalView(viewFilter)
+      setLocalStage(stageFilter)
+      setLocalAdvanced(advancedFilters)
+      setSearch('')
+    }
+  }, [open, viewFilter, stageFilter, advancedFilters])
+
+  const patchAdv = useCallback((patch: Partial<InboxAdvancedFilters>) => {
+    setLocalAdvanced((current) => ({ ...current, ...patch }))
+  }, [])
+
+  const optionBuckets = useMemo(() => ({
+    markets: advancedFilterOptions.markets,
+    states: advancedFilterOptions.states,
+    cities: advancedFilterOptions.cities ?? [],
+    zips: advancedFilterOptions.zips,
+    propertyTypes: advancedFilterOptions.propertyTypes,
+    ownerTypes: advancedFilterOptions.ownerTypes,
+    languages: advancedFilterOptions.languages,
+    stages: sellerStageOptions.map((o) => o.value),
+    deliveryStatuses: advancedFilterOptions.deliveryStatuses ?? ['delivered', 'failed', 'pending', 'undelivered'],
+    propertyConditions: advancedFilterOptions.propertyConditions ?? [],
+    distressFlags: advancedFilterOptions.distressFlags ?? [],
+  }), [advancedFilterOptions])
+
+  const filteredFields = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return ADVANCED_FILTER_FIELDS
+    return ADVANCED_FILTER_FIELDS.filter((field) => field.label.toLowerCase().includes(q))
+  }, [search])
+
+  const activeCount = useMemo(
+    () => countActiveAdvancedFilters(localAdvanced) + (localView !== 'all_conversations' ? 1 : 0) + (localStage !== 'all_stages' ? 1 : 0),
+    [localAdvanced, localStage, localView],
+  )
+
+  const chips = useMemo(
+    () => buildAdvancedFilterChips(localAdvanced, { stage: localStage, view: localView }),
+    [localAdvanced, localStage, localView],
+  )
+
+  const handleApply = useCallback(() => {
+    setApplying(true)
+    onAdvancedFiltersChange(localAdvanced)
+    onApply({ view: localView, stage: localStage, advanced: localAdvanced })
+    setTimeout(() => { setApplying(false); onClose() }, 120)
+  }, [localAdvanced, localStage, localView, onAdvancedFiltersChange, onApply, onClose])
+
+  const handleClearAll = useCallback(() => {
+    const fresh = clearAllAdvancedFilters()
+    setLocalView('all_conversations')
+    setLocalStage('all_stages')
+    setLocalAdvanced(fresh)
+    onAdvancedFiltersChange(fresh)
+    onReset()
+  }, [onAdvancedFiltersChange, onReset])
+
+  const handleSaveView = useCallback(() => {
+    if (!saveViewName.trim()) return
+    const view: SavedView = {
+      id: Date.now().toString(),
+      name: saveViewName.trim(),
+      state: { view: localView, stage: localStage, advanced: localAdvanced },
+    }
+    const next = [...savedViews, view]
+    setSavedViews(next)
+    persistSavedViews(next)
+    setSaveViewName('')
+    setSaveViewOpen(false)
+  }, [localAdvanced, localStage, localView, saveViewName, savedViews])
+
+  const renderField = (field: AdvancedFilterFieldSpec) => {
+    if (field.id === 'ownerName') {
+      return (
+        <F key={field.id} label={field.label}>
+          <input className="nx-icf-input" type="text" value={localAdvanced.ownerNameSearch ?? ''} placeholder="Contains…" onChange={(e) => patchAdv({ ownerNameSearch: e.target.value || undefined })} />
+        </F>
+      )
+    }
+    if (field.id === 'phoneNumber') {
+      return (
+        <F key={field.id} label={field.label}>
+          <input className="nx-icf-input" type="text" value={localAdvanced.phoneNumberSearch ?? ''} placeholder="Contains…" onChange={(e) => patchAdv({ phoneNumberSearch: e.target.value || undefined })} />
+        </F>
+      )
+    }
+    if (field.id === 'addressSearch') {
+      return (
+        <F key={field.id} label={field.label}>
+          <input className="nx-icf-input" type="text" value={localAdvanced.addressSearch ?? ''} placeholder="Address, owner, phone…" onChange={(e) => patchAdv({ addressSearch: e.target.value || undefined })} />
+        </F>
+      )
+    }
+
+    if (field.kind === 'numberRange') {
+      const minKey = field.minKey!
+      const maxKey = field.maxKey!
+      return (
+        <F key={field.id} label={field.label} half>
+          <div className="nx-icf-range">
+            <Num value={localAdvanced[minKey] as number | undefined} onChange={(v) => patchAdv({ [minKey]: v } as Partial<InboxAdvancedFilters>)} placeholder="Min" />
+            <span>–</span>
+            <Num value={localAdvanced[maxKey] as number | undefined} onChange={(v) => patchAdv({ [maxKey]: v } as Partial<InboxAdvancedFilters>)} placeholder="Max" />
+          </div>
+        </F>
+      )
+    }
+
+    if (field.kind === 'dateRange') {
+      const minKey = field.minKey!
+      const maxKey = field.maxKey!
+      return (
+        <F key={field.id} label={field.label} half>
+          <div className="nx-icf-range">
+            <input className="nx-icf-input" type="date" value={(localAdvanced[minKey] as string) ?? ''} onChange={(e) => patchAdv({ [minKey]: e.target.value || undefined } as Partial<InboxAdvancedFilters>)} />
+            <span>–</span>
+            <input className="nx-icf-input" type="date" value={(localAdvanced[maxKey] as string) ?? ''} onChange={(e) => patchAdv({ [maxKey]: e.target.value || undefined } as Partial<InboxAdvancedFilters>)} />
+          </div>
+        </F>
+      )
+    }
+
+    if (field.kind === 'number') {
+      const key = field.minKey ?? field.id
+      return (
+        <F key={field.id} label={field.label} half>
+          <Num value={localAdvanced[key as keyof InboxAdvancedFilters] as number | undefined} onChange={(v) => patchAdv({ [key]: v } as Partial<InboxAdvancedFilters>)} />
+        </F>
+      )
+    }
+
+    if (field.kind === 'tri') {
+      const key = field.id as keyof InboxAdvancedFilters
+      const value = (localAdvanced[key] as string) ?? (key === 'outOfStateOwner' ? 'all' : '')
+      return (
+        <F key={field.id} label={field.label} half>
+          <Sel value={value} onChange={(v) => patchAdv({ [key]: (v || (key === 'outOfStateOwner' ? 'all' : undefined)) } as Partial<InboxAdvancedFilters>)}>
+            <option value={key === 'outOfStateOwner' ? 'all' : ''}>Any</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </Sel>
+        </F>
+      )
+    }
+
+    if (field.kind === 'toggle') {
+      const key = field.id as keyof InboxAdvancedFilters
+      const on = Boolean(localAdvanced[key])
+      return (
+        <button
+          key={field.id}
+          type="button"
+          className={`nx-icf-toggle${on ? ' is-on' : ''}`}
+          onClick={() => patchAdv({ [key]: on ? undefined : true } as Partial<InboxAdvancedFilters>)}
+        >
+          {field.label}
+        </button>
+      )
+    }
+
+    if (field.kind === 'select' && field.optionsKey) {
+      const key = field.id as keyof InboxAdvancedFilters
+      const options = optionBuckets[field.optionsKey] ?? []
+      return (
+        <F key={field.id} label={field.label} half>
+          <Sel value={(localAdvanced[key] as string) ?? ''} onChange={(v) => patchAdv({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)}>
+            <option value="">Any</option>
+            {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+          </Sel>
+        </F>
+      )
+    }
+
+    if (field.kind === 'text') {
+      const key = field.id as keyof InboxAdvancedFilters
+      return (
+        <F key={field.id} label={field.label} half>
+          <input className="nx-icf-input" type="text" value={(localAdvanced[key] as string) ?? ''} placeholder="Contains…" onChange={(e) => patchAdv({ [key]: e.target.value || undefined } as Partial<InboxAdvancedFilters>)} />
+        </F>
+      )
+    }
+
+    if (field.id === 'leadTemperature') {
+      return (
+        <F key={field.id} label={field.label} half>
+          <Sel value={localAdvanced.leadTemperature ?? ''} onChange={(v) => patchAdv({ leadTemperature: v || undefined })}>
+            <option value="">Any</option>
+            <option value="hot">Hot</option>
+            <option value="warm">Warm</option>
+            <option value="cold">Cold</option>
+          </Sel>
+        </F>
+      )
+    }
+
+    if (field.id === 'lastMessageDirection') {
+      return (
+        <F key={field.id} label={field.label} half>
+          <Sel value={localAdvanced.lastMessageDirection ?? ''} onChange={(v) => patchAdv({ lastMessageDirection: v || undefined })}>
+            <option value="">Any</option>
+            <option value="inbound">Inbound</option>
+            <option value="outbound">Outbound</option>
+          </Sel>
+        </F>
+      )
+    }
+
+    return null
+  }
 
   if (!open) return null
 
-  // Categories mapping
-  const categories = [
-    { id: 'Workflow', icon: 'activity', count: (viewFilter !== 'all_conversations' ? 1 : 0) + (stageFilter !== 'all_stages' ? 1 : 0) },
-    { id: 'Conversation', icon: 'message', count: [advancedFilters.latestIntent, advancedFilters.language].filter(Boolean).length },
-    { id: 'Property', icon: 'home', count: [advancedFilters.propertyType, advancedFilters.bedsMin, advancedFilters.bathsMin].filter(Boolean).length },
-    { id: 'Owner', icon: 'user', count: [advancedFilters.ownerType, advancedFilters.outOfStateOwner].filter(Boolean).length },
-    { id: 'Financials', icon: 'dollar-sign', count: [advancedFilters.estimatedValueMin, advancedFilters.cashOfferMin].filter(Boolean).length },
-    { id: 'Motivation / Distress', icon: 'alert', count: [advancedFilters.motivationMin].filter(Boolean).length },
-    { id: 'AI Intelligence', icon: 'brain', count: [advancedFilters.aiScoreMin, advancedFilters.persona].filter(Boolean).length },
-    { id: 'Campaign / Messaging', icon: 'send', count: [advancedFilters.assignedAgent].filter(Boolean).length },
-    { id: 'Market / Routing', icon: 'map', count: [advancedFilters.market, advancedFilters.state, advancedFilters.zip].filter(Boolean).length },
-    { id: 'Timeline', icon: 'clock', count: [advancedFilters.activityDateFrom, advancedFilters.activityDateTo].filter(Boolean).length },
-    { id: 'Custom', icon: 'settings', count: 0 },
-  ]
-
   return createPortal(
-    <div className="nx-filter-overlay" role="presentation" onMouseDown={handleClose}>
+    <div className="nx-filter-overlay nx-filter-overlay--slide" role="presentation" onMouseDown={onClose}>
       <section
-        className="nx-cmd-filter-modal"
+        className="nx-icf-modal nx-icf-slideover"
         role="dialog"
         aria-modal="true"
-        onMouseDown={(event) => event.stopPropagation()}
+        aria-label="Advanced Inbox Filters"
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        <header className="nx-cmd-filter-modal__header">
-          <div className="nx-cmd-filter-modal__titles">
-            <strong>Command Filters</strong>
-            <span>Build high-signal seller lists from live Supabase data.</span>
+        <header className="nx-icf-header">
+          <div className="nx-icf-header-left">
+            <strong>Advanced Filters</strong>
+            <span>{resultCount.toLocaleString()} matching threads</span>
           </div>
-          <button type="button" onClick={handleClose} aria-label="Close filters">
-            <Icon name="close" />
-          </button>
+          <div className="nx-icf-header-right">
+            {activeCount > 0 && <span className="nx-icf-count-badge">{activeCount} active</span>}
+            <button type="button" className="nx-icf-close" onClick={onClose} aria-label="Close">
+              <Icon name="close" />
+            </button>
+          </div>
         </header>
 
-        <div className="nx-cmd-filter-modal__body">
-          <nav className="nx-cmd-filter-modal__nav">
-            {categories.map(cat => (
-              <button 
-                key={cat.id} 
-                className={`nx-cmd-filter-nav-item ${activeCategory === cat.id ? 'is-active' : ''}`}
-                onClick={() => setActiveCategory(cat.id)}
-              >
-                <div className="nx-cmd-filter-nav-left">
-                  <Icon name={cat.icon as any} />
-                  <span>{cat.id}</span>
-                </div>
-                {cat.count > 0 && <span className="nx-cmd-filter-badge">{cat.count}</span>}
-              </button>
-            ))}
-          </nav>
-          
-          <div className="nx-cmd-filter-modal__content">
-            {/* Active Chips Area */}
-            <div className="nx-cmd-filter-chips">
-              {viewFilter !== 'all_conversations' && (
-                <span className="nx-cmd-chip">Inbox: {viewOptions.find(o => o.value === viewFilter)?.label || viewFilter} <button onClick={() => setViewFilter('all_conversations')}><Icon name="x"/></button></span>
-              )}
-              {stageFilter !== 'all_stages' && (
-                <span className="nx-cmd-chip">Stage: {sellerStageOptions.find(o => o.value === stageFilter)?.label || stageFilter} <button onClick={() => setStageFilter('all_stages')}><Icon name="x"/></button></span>
-              )}
-              {advancedFilters.market && (
-                <span className="nx-cmd-chip">Market: {advancedFilters.market} <button onClick={() => patch({ market: undefined })}><Icon name="x"/></button></span>
-              )}
-              {/* Could map over all active filters here eventually */}
-              {(viewFilter !== 'all_conversations' || stageFilter !== 'all_stages' || Object.keys(advancedFilters).length > 0) && (
-                <button className="nx-cmd-chip-clear" onClick={onReset}>Clear All</button>
-              )}
-            </div>
-
-            <div className="nx-cmd-filter-scroll-area">
-              {activeCategory === 'Workflow' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Workflow</h3>
-                  <FieldRow label="Inbox Status">
-                    <select value={viewFilter} onChange={(event) => setViewFilter(event.target.value as InboxViewSelectValue)}>
-                      {viewOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label} ({viewCounts[option.value] ?? '—'})</option>
-                      ))}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Seller Stage">
-                    <select value={stageFilter} onChange={(event) => setStageFilter(event.target.value as InboxStageSelectValue)}>
-                      <option value="all_stages">Any Stage</option>
-                      {sellerStageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Review Status" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Lead Temperature" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Queue Status" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Conversation' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Conversation</h3>
-                  <FieldRow label="Language">
-                    <select value={advancedFilters.language ?? ''} onChange={(event) => patch({ language: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.languages)}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Latest Intent" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Last Message Direction" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Has Seller Reply" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Property' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Property</h3>
-                  <FieldRow label="Property Type">
-                    <select value={advancedFilters.propertyType ?? ''} onChange={(event) => patch({ propertyType: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.propertyTypes)}
-                    </select>
-                  </FieldRow>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <FieldRow label="Beds Min"><input type="number" value={numberInput(advancedFilters.bedsMin)} onChange={(event) => patch({ bedsMin: asNumber(event.target.value) })} /></FieldRow>
-                    <FieldRow label="Baths Min"><input type="number" value={numberInput(advancedFilters.bathsMin)} onChange={(event) => patch({ bathsMin: asNumber(event.target.value) })} /></FieldRow>
-                  </div>
-                  <FieldRow label="Property Tags" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Property Condition" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Occupancy" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Owner' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Owner</h3>
-                  <FieldRow label="Owner Type">
-                    <select value={advancedFilters.ownerType ?? ''} onChange={(event) => patch({ ownerType: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.ownerTypes)}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Out of State">
-                    <select value={advancedFilters.outOfStateOwner ?? 'all'} onChange={(event) => patch({ outOfStateOwner: event.target.value as InboxAdvancedFilters['outOfStateOwner'] })}>
-                      <option value="all">Any</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Owner Age Min"><input type="number" value={numberInput(advancedFilters.sellerAgeMin)} onChange={(event) => patch({ sellerAgeMin: asNumber(event.target.value) })} /></FieldRow>
-                  <FieldRow label="Multiple Properties Owned" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Financials' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Financials</h3>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <FieldRow label="Est. Value Min"><input type="number" value={numberInput(advancedFilters.estimatedValueMin)} onChange={(event) => patch({ estimatedValueMin: asNumber(event.target.value) })} /></FieldRow>
-                    <FieldRow label="Est. Value Max"><input type="number" value={numberInput(advancedFilters.estimatedValueMax)} onChange={(event) => patch({ estimatedValueMax: asNumber(event.target.value) })} /></FieldRow>
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <FieldRow label="Cash Offer Min"><input type="number" value={numberInput(advancedFilters.cashOfferMin)} onChange={(event) => patch({ cashOfferMin: asNumber(event.target.value) })} /></FieldRow>
-                    <FieldRow label="Cash Offer Max"><input type="number" value={numberInput(advancedFilters.cashOfferMax)} onChange={(event) => patch({ cashOfferMax: asNumber(event.target.value) })} /></FieldRow>
-                  </div>
-                  <FieldRow label="Quick Financial Toggles" unwired><div style={{ display: 'flex', gap: '8px' }}><button className="nx-tag">High Equity</button><button className="nx-tag">Underwater</button></div></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Motivation / Distress' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Motivation / Distress</h3>
-                  <FieldRow label="Motivation Score Min"><input type="number" value={numberInput(advancedFilters.motivationMin)} onChange={(event) => patch({ motivationMin: asNumber(event.target.value) })} /></FieldRow>
-                  <FieldRow label="Seller Persona">
-                    <select value={advancedFilters.persona ?? ''} onChange={(event) => patch({ persona: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.personas)}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Motivation Tags" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'AI Intelligence' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>AI Intelligence</h3>
-                  <FieldRow label="AI Score Min"><input type="number" value={numberInput(advancedFilters.aiScoreMin)} onChange={(event) => patch({ aiScoreMin: asNumber(event.target.value) })} /></FieldRow>
-                  <FieldRow label="AI Recommended Action" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="AI Risk Flag" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Campaign / Messaging' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Campaign / Messaging</h3>
-                  <FieldRow label="Assigned Agent">
-                    <select value={advancedFilters.assignedAgent ?? ''} onChange={(event) => patch({ assignedAgent: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.assignedAgents)}
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="Campaign Name" unwired><input placeholder="Search..." /></FieldRow>
-                  <FieldRow label="Template Use Case" unwired><select><option>Any</option></select></FieldRow>
-                  <FieldRow label="Suppression Reason" unwired><select><option>Any</option></select></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Market / Routing' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Market / Routing</h3>
-                  <FieldRow label="Market">
-                    <select value={advancedFilters.market ?? ''} onChange={(event) => patch({ market: event.target.value || undefined })}>
-                      {selectOptions(advancedFilterOptions.markets)}
-                    </select>
-                  </FieldRow>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <FieldRow label="State"><select value={advancedFilters.state ?? ''} onChange={(event) => patch({ state: event.target.value || undefined })}>{selectOptions(advancedFilterOptions.states)}</select></FieldRow>
-                    <FieldRow label="Zip"><select value={advancedFilters.zip ?? ''} onChange={(event) => patch({ zip: event.target.value || undefined })}>{selectOptions(advancedFilterOptions.zips)}</select></FieldRow>
-                  </div>
-                  <FieldRow label="Best Contact Window"><input value={advancedFilters.bestContactWindow ?? ''} onChange={(event) => patch({ bestContactWindow: event.target.value || undefined })} placeholder="Morning, Evening..." /></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Timeline' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Timeline</h3>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <FieldRow label="Activity From"><input type="date" value={advancedFilters.activityDateFrom ?? ''} onChange={(event) => patch({ activityDateFrom: event.target.value || undefined })} /></FieldRow>
-                    <FieldRow label="Activity To"><input type="date" value={advancedFilters.activityDateTo ?? ''} onChange={(event) => patch({ activityDateTo: event.target.value || undefined })} /></FieldRow>
-                  </div>
-                  <FieldRow label="Days Since Last Contact" unwired><input type="number" /></FieldRow>
-                  <FieldRow label="Touch Count Min" unwired><input type="number" /></FieldRow>
-                </div>
-              )}
-
-              {activeCategory === 'Custom' && (
-                <div className="nx-cmd-filter-section">
-                  <h3>Custom Filters</h3>
-                  <p style={{color: 'var(--nx-text-muted)', fontSize: '13px'}}>Custom property and thread tag filtering coming soon.</p>
-                </div>
-              )}
-
-            </div>
-          </div>
+        <div className="nx-icf-cmdbar">
+          <Icon name="search" />
+          <input
+            className="nx-icf-cmdbar-input"
+            type="text"
+            placeholder="Search filter names…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
-        <footer className="nx-cmd-filter-modal__footer">
-          <button type="button" onClick={onReset} className="nx-cmd-btn-secondary">Reset</button>
-          <div className="nx-cmd-filter-modal__footer-actions">
-            <button type="button" disabled title="Save View is not available yet" className="nx-cmd-btn-secondary">Save View</button>
-            <button type="button" className="nx-cmd-btn-primary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onApply?.(); handleClose(); }}>Apply Filters</button>
+        <div className="nx-icf-grid nx-icf-grid--sm" style={{ padding: '12px 20px', borderBottom: '1px solid var(--nx-border-subtle)' }}>
+          <F label="Inbox Category" half>
+            <Sel value={localView} onChange={(v) => setLocalView(v as InboxViewSelectValue)}>
+              {viewOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}{viewCounts[o.value] != null ? ` (${viewCounts[o.value]})` : ''}
+                </option>
+              ))}
+            </Sel>
+          </F>
+          <F label="Stage" half>
+            <Sel value={localStage} onChange={(v) => setLocalStage(v as InboxStageSelectValue)}>
+              <option value="all_stages">Any Stage</option>
+              {sellerStageOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Sel>
+          </F>
+        </div>
+
+        {chips.length > 0 && (
+          <div className="nx-icf-chips">
+            {chips.map((chip) => (
+              <span key={chip.key} className="nx-icf-chip">
+                {chip.label}
+                <button type="button" onClick={() => setLocalAdvanced(chip.clear(localAdvanced))} aria-label={`Remove ${chip.label}`}>
+                  <Icon name="x" />
+                </button>
+              </span>
+            ))}
+            <button type="button" className="nx-icf-chip-clear" onClick={handleClearAll}>Clear All</button>
+          </div>
+        )}
+
+        <div className="nx-icf-body nx-icf-body--groups">
+          {GROUP_META.map((group) => {
+            const fields = filteredFields.filter((f) => f.group === group.id)
+            if (fields.length === 0) return null
+            const isCollapsed = collapsed[group.id]
+            return (
+              <div key={group.id} className="nx-icf-group">
+                <button
+                  type="button"
+                  className="nx-icf-group-toggle"
+                  onClick={() => setCollapsed((c) => ({ ...c, [group.id]: !c[group.id] }))}
+                  aria-expanded={!isCollapsed}
+                >
+                  <span>{group.label}</span>
+                  <Icon name={isCollapsed ? 'chevron-down' : 'chevron-up'} />
+                </button>
+                {!isCollapsed && (
+                  <div className="nx-icf-grid nx-icf-grid--sm">
+                    {group.id === 'property' && (
+                      <F label="Address Search" half>
+                        <input className="nx-icf-input" type="text" value={localAdvanced.addressSearch ?? ''} placeholder="Owner, phone, address…" onChange={(e) => patchAdv({ addressSearch: e.target.value || undefined })} />
+                      </F>
+                    )}
+                    {fields.map(renderField)}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {savedViews.length > 0 && (
+          <div className="nx-icf-saved-views">
+            <span className="nx-icf-saved-label">Saved Views</span>
+            <div className="nx-icf-saved-list">
+              {savedViews.map((sv) => (
+                <div key={sv.id} className="nx-icf-saved-item">
+                  <button type="button" className="nx-icf-saved-load" onClick={() => {
+                    setLocalView(sv.state.view)
+                    setLocalStage(sv.state.stage)
+                    setLocalAdvanced(sv.state.advanced)
+                  }}>
+                    {sv.name}
+                  </button>
+                  <button type="button" className="nx-icf-saved-del" onClick={() => {
+                    const next = savedViews.filter((v) => v.id !== sv.id)
+                    setSavedViews(next)
+                    persistSavedViews(next)
+                  }} aria-label={`Delete ${sv.name}`}>
+                    <Icon name="x" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <footer className="nx-icf-footer">
+          <button type="button" className="nx-icf-btn-ghost" onClick={handleClearAll}>Clear All</button>
+          <div className="nx-icf-footer-right">
+            {saveViewOpen ? (
+              <div className="nx-icf-save-row">
+                <input
+                  className="nx-icf-input nx-icf-save-input"
+                  type="text"
+                  placeholder="View name…"
+                  value={saveViewName}
+                  autoFocus
+                  onChange={(e) => setSaveViewName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveView(); if (e.key === 'Escape') setSaveViewOpen(false) }}
+                />
+                <button type="button" className="nx-icf-btn-secondary" onClick={handleSaveView} disabled={!saveViewName.trim()}>Save</button>
+                <button type="button" className="nx-icf-btn-ghost" onClick={() => setSaveViewOpen(false)}>Cancel</button>
+              </div>
+            ) : (
+              <button type="button" className="nx-icf-btn-secondary" onClick={() => setSaveViewOpen(true)}>Save View</button>
+            )}
+            <button type="button" className="nx-icf-btn-primary" onClick={handleApply} disabled={applying}>
+              {applying ? 'Applying…' : `Apply${activeCount > 0 ? ` (${activeCount})` : ''}`}
+            </button>
           </div>
         </footer>
       </section>
     </div>,
-    document.body
+    document.body,
   )
 }

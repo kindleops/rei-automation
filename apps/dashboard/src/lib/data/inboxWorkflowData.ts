@@ -1,4 +1,4 @@
-import type { InboxThread } from '../../modules/inbox/inbox.adapter'
+import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import { getSupabaseClient } from '../supabaseClient'
 import { getInboxThreads, getThreadMessagesForThread, normalizeMessageDirection } from './inboxData'
 import { asBoolean, asIso, asString, getSupabaseErrorMessage, mapErrorMessage, normalizeStatus, safeArray, type AnyRecord } from './shared'
@@ -27,6 +27,20 @@ export type SellerStage =
   | 'negotiation'
   | 'contract_path'
   | 'dead_suppressed'
+  | 'mf_ownership_check'
+  | 'mf_interested'
+  | 'mf_units_confirmed'
+  | 'mf_occupancy_requested'
+  | 'mf_rent_roll_requested'
+  | 'mf_gross_rents_requested'
+  | 'mf_asking_price_requested'
+  | 'mf_underwriting_needed'
+  | 'mf_offer_needed'
+  | 'mf_offer_sent'
+  | 'mf_negotiation'
+  | 'mf_contract_requested'
+  | 'mf_dead'
+  | 'mf_suppressed'
 
 // Aliases to prevent massive breakage during transition
 export type InboxStage = SellerStage
@@ -114,7 +128,7 @@ export type InboxWorkflowThread = InboxThread & InboxThreadWorkflow
 
 export interface WorkflowMutationResult {
   ok: boolean
-  writeTarget: 'inbox_thread_state' | 'none'
+  writeTarget: 'operator_thread_state' | 'none'
   errorMessage: string | null
   threadKey: string
   mutationPayload: AnyRecord | null
@@ -545,7 +559,6 @@ export const persistWorkflowPatch = async (
   patch: Partial<Pick<InboxThreadWorkflow, 'inboxStatus' | 'conversationStage' | 'isArchived' | 'isRead' | 'isPinned' | 'isStarred' | 'isHidden' | 'isSuppressed' | 'priority'>> & { isHotLead?: boolean; automationState?: AutomationState },
 
 ): Promise<WorkflowMutationResult> => {
-  const now = new Date().toISOString()
   const threadKey = toThreadKey(thread)
   
   if (DEV) {
@@ -556,51 +569,23 @@ export const persistWorkflowPatch = async (
     })
   }
 
-  if (await tableExists('inbox_thread_state')) {
-    const payload: AnyRecord = {
-      thread_key: threadKey,
-      master_owner_id: thread.ownerId ?? null,
-      prospect_id: thread.prospectId ?? null,
-      property_id: thread.propertyId ?? null,
-      seller_phone: thread.phoneNumber ?? null,
-      canonical_e164: thread.canonicalE164 ?? null,
-      our_number: thread.ourNumber ?? null,
-      market: thread.market ?? thread.marketId,
-      updated_at: now,
-      metadata: {
-        owner_name: thread.ownerName,
-        property_address: thread.propertyAddress ?? thread.subject,
-        thread_id: thread.id,
-      },
+  if (await tableExists('operator_thread_state')) {
+    const payload: AnyRecord = {}
+    if (patch.inboxStatus) payload['inbox_bucket'] = patch.inboxStatus === 'closed' ? 'all' : patch.inboxStatus
+    if (patch.conversationStage) {
+      payload['seller_stage'] = patch.conversationStage
+      payload['conversation_stage'] = patch.conversationStage
     }
-    if (patch.inboxStatus) payload['status'] = patch.inboxStatus
-    if (patch.conversationStage) payload['stage'] = patch.conversationStage
-    if (patch.isArchived != null) payload['is_archived'] = patch.isArchived
-    if (patch.isRead != null) {
-      payload['is_read'] = patch.isRead
-      payload['last_read_at'] = patch.isRead ? now : null
-    }
-    if (patch.isPinned != null) payload['is_pinned'] = patch.isPinned
-    if (patch.priority) payload['priority'] = patch.priority
-    if (patch.isStarred != null) payload['is_starred'] = patch.isStarred
-    if (patch.isHidden != null) {
-      payload['is_hidden'] = patch.isHidden
-      payload['hidden_at'] = patch.isHidden ? now : null
+    if (patch.priority) {
+      payload['lead_temperature'] = patch.priority === 'urgent' ? 'hot' : patch.priority === 'high' ? 'warm' : 'cold'
     }
     if (patch.isSuppressed != null) {
-      payload['is_suppressed'] = patch.isSuppressed
-      payload['suppressed_at'] = patch.isSuppressed ? now : null
+      payload['suppression_status'] = patch.isSuppressed ? 'suppressed' : null
     }
-    if (patch.isArchived != null) payload['archived_at'] = patch.isArchived ? now : null
-    if (patch.isHotLead != null) payload['is_hot_lead'] = patch.isHotLead
-    if (patch.automationState) payload['automation_status'] = patch.automationState
-    payload['is_urgent'] = (patch.priority ?? thread.priority) === 'urgent'
 
-
-    // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
     const result = await backendClient.updateThreadState(threadKey, payload)
     if (result.ok) {
-      return { ok: true, writeTarget: 'inbox_thread_state', errorMessage: null, threadKey, mutationPayload: payload }
+      return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: payload }
     }
     return { ok: false, writeTarget: 'none', errorMessage: result.message, threadKey, mutationPayload: payload }
   }
@@ -608,7 +593,7 @@ export const persistWorkflowPatch = async (
   return {
     ok: false,
     writeTarget: 'none',
-    errorMessage: 'inbox_thread_state table missing. Run the Inbox thread-state migration.',
+    errorMessage: 'operator_thread_state table missing. Run the Inbox thread-state migration.',
     threadKey,
     mutationPayload: null,
   }
@@ -619,13 +604,13 @@ export const fetchInboxThreads = async (params: InboxThreadsQuery = {}): Promise
   const supabase = getSupabaseClient()
 
   const stateRowsByKey = new Map<string, AnyRecord>()
-  if (await tableExists('inbox_thread_state')) {
+  if (await tableExists('operator_thread_state')) {
     const keys = base.map((thread) => toThreadKey(thread)).filter(Boolean)
     if (keys.length > 0) {
       const stateResponses = await Promise.all(
         chunk(keys, 40).map((keyBatch) => (
           supabase
-            .from('inbox_thread_state')
+            .from('operator_thread_state')
             .select('thread_key,stage,status,priority,is_archived,is_read,is_pinned,is_starred,is_hidden,is_suppressed,last_read_at,archived_at,updated_at,metadata')
             .in('thread_key', keyBatch)
         )),
@@ -637,7 +622,7 @@ export const fetchInboxThreads = async (params: InboxThreadsQuery = {}): Promise
             if (key) stateRowsByKey.set(key, row)
           }
         } else if (DEV) {
-          console.warn('[inboxWorkflow] inbox_thread_state read failed', getSupabaseErrorMessage(response.error))
+          console.warn('[inboxWorkflow] operator_thread_state read failed', getSupabaseErrorMessage(response.error))
         }
       }
     }
@@ -881,7 +866,7 @@ export const approveQueueItem = async (queueId: string, thread: InboxThread): Pr
     undo_payload: null
   })
 
-  return { ok: true, writeTarget: 'inbox_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'queued' } }
+  return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'queued' } }
 }
 
 export const cancelQueueItem = async (queueId: string, thread: InboxThread): Promise<WorkflowMutationResult> => {
@@ -903,7 +888,7 @@ export const cancelQueueItem = async (queueId: string, thread: InboxThread): Pro
     undo_payload: null
   })
 
-  return { ok: true, writeTarget: 'inbox_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'waiting' } }
+  return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'waiting' } }
 }
 export const unsuppressThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
   return persistWorkflowPatch(thread, { isSuppressed: false, inboxStatus: 'needs_review' })

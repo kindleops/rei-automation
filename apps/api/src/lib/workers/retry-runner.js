@@ -15,12 +15,15 @@ const DEFAULT_RETRY_LIMIT = 50;
 export async function runRetryRunner({
   limit = DEFAULT_RETRY_LIMIT,
   master_owner_id = null,
+  dry_run = false,
 } = {}, deps = {}) {
-  const retry_enabled = await getSystemFlag("retry_enabled");
+  const get_system_flag = deps.getSystemFlag || getSystemFlag;
+  const retry_enabled = await get_system_flag("retry_enabled");
   if (!retry_enabled) {
     warn("queue.retry_runner_disabled", {
       limit,
       master_owner_id: Number(master_owner_id || 0) || null,
+      dry_run,
       flag_key: "retry_enabled",
     });
 
@@ -60,12 +63,14 @@ export async function runRetryRunner({
     scanned_count: 0,
     results: [],
     master_owner_id: scoped_master_owner_id,
+    dry_run,
   });
 
   if (cooldown_skip?.podio_cooldown?.active) {
     warn("queue.retry_runner_skipped_podio_cooldown", {
       limit,
       master_owner_id: scoped_master_owner_id,
+      dry_run,
       retry_after_seconds: cooldown_skip.retry_after_seconds,
       retry_after_at: cooldown_skip.retry_after_at,
       podio_status: cooldown_skip.podio_cooldown?.status ?? null,
@@ -90,6 +95,7 @@ export async function runRetryRunner({
       scanned_count: 0,
       results: [],
       master_owner_id: scoped_master_owner_id,
+      dry_run,
     },
     {
       min_remaining: 100,
@@ -101,6 +107,7 @@ export async function runRetryRunner({
     warn("queue.retry_runner_skipped_podio_backpressure", {
       limit,
       master_owner_id: scoped_master_owner_id,
+      dry_run,
       reason: backpressure_skip.reason,
       min_remaining:
         backpressure_skip.podio_backpressure?.min_remaining ?? null,
@@ -164,12 +171,14 @@ export async function runRetryRunner({
       info("queue.retry_runner_started", {
         limit,
         master_owner_id: scoped_master_owner_id,
+        dry_run,
       });
 
       try {
         const result = await retry_send_queue({
           limit,
           master_owner_id: scoped_master_owner_id,
+          dry_run,
         });
 
         if ((result?.skipped_count || 0) > 0) {
@@ -205,6 +214,7 @@ export async function runRetryRunner({
           terminal_count: result?.terminal_count || 0,
           skipped_count: result?.skipped_count || 0,
           master_owner_id: scoped_master_owner_id,
+          dry_run,
         });
 
         return {

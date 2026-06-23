@@ -233,6 +233,7 @@ test("processEmailQueue dry_run=true does not invoke Brevo", async () => {
     supabase_override:      mock_supabase,
     is_suppressed_override: async () => ({ ok: true, suppressed: false }),
     send_brevo_override:    async () => { brevo_called = true; return { ok: true, message_id: "x" }; },
+    get_system_flag_override: async () => true,
   });
 
   try {
@@ -306,6 +307,7 @@ test("processEmailQueue dry_run=false calls Brevo and updates queue row", async 
     supabase_override:      mock_supabase,
     is_suppressed_override: async () => ({ ok: true, suppressed: false }),
     send_brevo_override:    async () => { brevo_called = true; return { ok: true, message_id: "brevo_msg_abc" }; },
+    get_system_flag_override: async () => true,
   });
 
   try {

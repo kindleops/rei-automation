@@ -2,7 +2,7 @@ import { Icon } from '../../../shared/icons'
 import { IntelligencePanel } from './IntelligencePanel'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { getStatusVisual, statusStyleVars } from '../status-visuals'
-import { InboxCommandMap } from '../InboxCommandMap'
+import { InboxCommandMap } from '../../../views/map/InboxCommandMap'
 
 const fallback = (value: unknown, placeholder = 'Unknown') => {
   const text = String(value ?? '').trim()

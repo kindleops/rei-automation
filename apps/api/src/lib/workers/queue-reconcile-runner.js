@@ -262,7 +262,8 @@ export async function runQueueReconcileRunner({
   now = new Date().toISOString(),
   master_owner_id = null,
 } = {}, deps = {}) {
-  const reconcile_enabled = await getSystemFlag("reconcile_enabled");
+  const get_system_flag = deps.getSystemFlag || getSystemFlag;
+  const reconcile_enabled = await get_system_flag("reconcile_enabled");
   if (!reconcile_enabled) {
     warn("queue.reconcile_runner_disabled", {
       limit,

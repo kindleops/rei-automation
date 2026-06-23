@@ -1,4 +1,12 @@
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
+import {
+  blockedSafetyResult,
+  blockedRuntimeBrakeResult,
+  evaluateQueueSendRuntimeBrakes,
+  normalizeSafetyInput,
+  validateLiveLimitedRails,
+} from "@/lib/domain/queue/queue-control-safety.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -18,6 +26,21 @@ function asNumber(value, fallback = null) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function rowMetadata(row = {}) {
+  const metadata = row?.metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
+}
+
+function isProofOrInternalQueueRow(row = {}) {
+  const metadata = rowMetadata(row);
+  return Boolean(
+    metadata.proof === true ||
+    metadata.proof_mode ||
+    metadata.internal_test_phone === true ||
+    metadata.exclude_from_kpis === true
+  );
 }
 
 export function statusForResult(result) {
@@ -55,11 +78,14 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
 
     if (!cron_auth.authorized) {
       const queue_secret = String(
-        deps.queueEngineSecret ?? process.env.QUEUE_ENGINE_SHARED_SECRET ?? ""
+        deps.queueEngineSecret ??
+        process.env.QUEUE_ENGINE_SHARED_SECRET ??
+        (await get_system_value("queue_engine_shared_secret")) ??
+        ""
       ).trim();
       if (!queue_secret) {
         route_logger?.warn?.("queue_engine_secret.not_configured", {
-          hint: "Set QUEUE_ENGINE_SHARED_SECRET to protect this endpoint from non-cron callers",
+          hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
         });
       } else {
         const get_secret_auth = deps.getSharedSecretAuthResult ||
@@ -107,6 +133,11 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       method === "POST" ? body?.dry_run : search_params.get("dry_run"),
       false
     );
+    const queue_row_id = clean(
+      method === "POST"
+        ? body?.queue_row_id || body?.queue_item_id || body?.item_id || body?.id
+        : search_params.get("queue_row_id") || search_params.get("queue_item_id") || search_params.get("item_id") || search_params.get("id")
+    );
 
     // Hard safety: if caller explicitly requested dry_run, never allow a live send through
     const body_dry_run_explicit = method === "POST" && body?.dry_run === true;
@@ -124,15 +155,7 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       is_vercel_cron: auth.auth.is_vercel_cron,
     });
 
-    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "off").toLowerCase();
-    if (!dry_run && queue_processor_mode === "off") {
-      return json_response({
-        ok: false,
-        skipped: true,
-        reason: "queue_processor_mode_off",
-        queue_processor_mode,
-      }, { status: 423 });
-    }
+    const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
     if (!dry_run && auth.auth.is_vercel_cron && queue_processor_mode === "safe") {
       return json_response({
         ok: true,
@@ -140,6 +163,73 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         reason: "queue_processor_mode_safe_cron_no_auto_send",
         queue_processor_mode,
       }, { status: 200 });
+    }
+
+    const safety_settings = {
+      queue_processor_mode,
+      campaign_mode: await get_system_value("campaign_mode"),
+      queue_hard_cap: await get_system_value("queue_hard_cap"),
+      queue_max_batch_size: await get_system_value("queue_max_batch_size"),
+      queue_daily_send_cap: await get_system_value("queue_daily_send_cap"),
+      queue_market_cap: await get_system_value("queue_market_cap"),
+      queue_per_number_cap: await get_system_value("queue_per_number_cap"),
+      queue_market_throttle: await get_system_value("queue_market_throttle"),
+      queue_sender_throttle: await get_system_value("queue_sender_throttle"),
+      queue_all_market_ack: await get_system_value("queue_all_market_ack"),
+      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+    };
+    const safety = normalizeSafetyInput({ ...body, limit }, safety_settings);
+    if (!dry_run) {
+      const runtime_brake = evaluateQueueSendRuntimeBrakes(safety_settings, {
+        action: "queue_run",
+        failClosed: true,
+      });
+      if (!runtime_brake.ok) {
+        return json_response(blockedRuntimeBrakeResult(runtime_brake, "queue_run"), {
+          status: runtime_brake.status,
+        });
+      }
+    }
+
+    if (queue_row_id) {
+      const { loadQueueRowById, processSendQueue } = await import("@/lib/domain/queue/process-send-queue.js");
+      const row = await loadQueueRowById(queue_row_id, deps);
+      if (!row) {
+        return json_response({ ok: false, error: "missing_queue_row", queue_row_id }, { status: 404 });
+      }
+      const proof_or_internal = isProofOrInternalQueueRow(row);
+      if (!dry_run && !proof_or_internal) {
+        const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true });
+        if (!validation.ok) {
+          return json_response(blockedSafetyResult(validation, "run_targeted_queue_row"), { status: validation.status });
+        }
+      }
+      if (!dry_run && isInternalTestPhone(row.to_phone_number) && !proof_or_internal) {
+        return json_response({
+          ok: false,
+          error: "internal_test_phone_requires_proof_mode",
+          reason: "internal_test_phone_requires_proof_mode",
+          queue_row_id,
+        }, { status: 423 });
+      }
+      const result = dry_run
+        ? { ok: true, dry_run: true, skipped: true, reason: "targeted_queue_row_dry_run", queue_row_id }
+        : await processSendQueue({ queue_row_id }, deps);
+      return json_response({
+        ok: result?.ok !== false,
+        dry_run: Boolean(dry_run),
+        route: "internal/queue/run",
+        action: "run_targeted_queue_row",
+        queue_row_id,
+        result,
+      }, { status: statusForResult(result) });
+    }
+
+    if (!dry_run) {
+      const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true });
+      if (!validation.ok) {
+        return json_response(blockedSafetyResult(validation, "queue_run"), { status: validation.status });
+      }
     }
 
     route_logger?.info?.("queue_run.before_run_send_queue", {
@@ -168,7 +258,7 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
     });
 
     const result = await run_send_queue({
-      limit,
+      limit: dry_run ? limit : Math.min(limit, safety.hard_cap || limit, safety.max_batch_size || limit),
       dry_run,
     });
 

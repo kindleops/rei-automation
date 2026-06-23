@@ -1,65 +1,55 @@
-import { Component } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react'
 
-interface Props {
-  children: ReactNode;
-  fallbackName?: string;
-  debugInfo?: any;
+interface ErrorBoundaryProps {
+  children: ReactNode
+  label?: string
+  resetKey?: string
 }
 
-interface State {
-  hasError: boolean;
-  error: Error | null;
-  errorInfo: ErrorInfo | null;
+interface ErrorBoundaryState {
+  error: Error | null
 }
 
-export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-    errorInfo: null
-  };
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { error: null }
 
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, errorInfo: null };
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error }
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    this.setState({ error, errorInfo });
-    console.error(`[ErrorBoundary caught error in ${this.props.fallbackName || 'Component'}]`, error, errorInfo);
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error('[DASHBOARD_ROUTE_RENDER_ERROR]', {
+      label: this.props.label ?? null,
+      resetKey: this.props.resetKey ?? null,
+      message: error.message,
+      componentStack: info.componentStack,
+    })
   }
 
-  public render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{
-          padding: '20px',
-          background: '#3f1111',
-          color: '#ffcccc',
-          borderRadius: '8px',
-          fontFamily: 'monospace',
-          border: '1px solid #ff4444',
-          margin: '10px'
-        }}>
-          <h3 style={{ margin: '0 0 10px 0', color: '#ff6666' }}>
-            Crash detected in: {this.props.fallbackName || 'Component'}
-          </h3>
-          <p style={{ margin: '0 0 10px 0' }}>{this.state.error?.message}</p>
-          <div style={{ maxHeight: '200px', overflowY: 'auto', background: '#220000', padding: '10px', fontSize: '11px', whiteSpace: 'pre-wrap' }}>
-            {this.state.error?.stack}
-          </div>
-          {this.props.debugInfo && (
-            <div style={{ marginTop: '10px', fontSize: '11px' }}>
-              <strong>Debug Info:</strong>
-              <pre style={{ margin: '5px 0 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {JSON.stringify(this.props.debugInfo, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      );
+  componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null })
     }
+  }
 
-    return this.props.children;
+  render(): ReactNode {
+    if (!this.state.error) return this.props.children
+
+    return (
+      <div className="app-state">
+        <div className="app-state__panel">
+          <span className="app-state__eyebrow">Render Error</span>
+          <h1>{this.props.label || 'Dashboard surface'} crashed</h1>
+          <p>{this.state.error.message || 'An unexpected render error occurred.'}</p>
+          <button
+            className="app-state__button"
+            type="button"
+            onClick={() => this.setState({ error: null })}
+          >
+            Retry surface
+          </button>
+        </div>
+      </div>
+    )
   }
 }

@@ -1,4 +1,4 @@
-import type { CommandResult, GlobalCommandProvider } from '../command.types'
+import type { CommandResult, GlobalCommandProvider } from '../../../domain/command-center/command.types'
 import { canUseSupabaseSearch, getSupabaseSearchClient, limitResults, sanitizeIlike, withScoredResult } from './providerUtils'
 
 type PropertyRow = Record<string, unknown>
@@ -66,7 +66,7 @@ export const propertySearchProvider: GlobalCommandProvider = {
     const safe = sanitizeIlike(query)
     const term = `%${safe}%`
     const { data, error } = await supabase
-      .from('v_inbox_enriched')
+      .from('v_operator_inbox_threads')
       .select('id,thread_key,property_id,property_address_full,property_address,property_address_city,property_address_state,property_address_zip,market,property_type,total_bedrooms,total_baths,building_square_feet,estimated_value')
       .or([
         `property_address_full.ilike.${term}`,

@@ -6,6 +6,7 @@ const ALLOWED_CANDIDATE_SOURCE_OVERRIDES = new Set([
   "v_outbound_discovery_fresh",
   "outbound_candidate_snapshot",
   "v_sms_ready_contacts",
+  "v_sms_ready_contacts_clean",
   "v_sms_campaign_queue_candidates",
   "v_launch_sms_tier1",
 ]);
@@ -38,6 +39,23 @@ export async function loadSupabaseOutboundCandidates(
   } = {},
   deps = {}
 ) {
+  if (typeof deps.loadSupabaseOutboundCandidates === "function") {
+    return deps.loadSupabaseOutboundCandidates(
+      {
+        limit,
+        scan_limit,
+        candidate_offset,
+        candidate_source,
+        market,
+        state,
+        template_use_case,
+        touch_number,
+        campaign_session_id,
+      },
+      deps,
+    );
+  }
+
   // Use provided supabase client or fallback to default
   const supabase = deps.supabase || (await import("../../supabase/client.js")).supabase;
 

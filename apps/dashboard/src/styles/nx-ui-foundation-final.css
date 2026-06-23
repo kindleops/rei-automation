@@ -1,0 +1,462 @@
+/* ============================================================================
+ * nx-ui-foundation-final.css
+ * ----------------------------------------------------------------------------
+ * FINAL AUTHORITY for /inbox theme, liquid-glass menus, and accent application.
+ *
+ * WHY THIS FILE EXISTS / WHY IT IS IMPORTED FROM InboxPage.tsx (NOT main.tsx):
+ *   main.tsx imports its global CSS *before* `import App`. The /inbox route is
+ *   reached through App -> CommandCenterApp -> routes.tsx -> InboxPage, and
+ *   InboxPage statically imports inbox-premium.css / inbox-polish.css. Because
+ *   those module sheets are evaluated LATER in the module graph than main.tsx's
+ *   own CSS, they WIN the cascade. Any override placed in main.tsx therefore
+ *   loses to the inbox sheets — which is exactly why prior "fixes" were
+ *   invisible in the browser.
+ *
+ *   To guarantee this file is the last sheet in the cascade for the inbox, it
+ *   is imported as the FINAL css import inside InboxPage.tsx, after
+ *   conversation-redesign.css. Do not also import it from main.tsx (Vite would
+ *   dedupe to the earlier position and this file would lose again).
+ *
+ * RULES:
+ *   - No broad destructive rules (no `* { opacity }`, no grayscale/invert on
+ *     app containers, no mix-blend-mode on app shells).
+ *   - Accent is driven exclusively by --nx-accent (set by [data-nexus-accent]).
+ *   - Themes are scoped under [data-nexus-theme="..."].
+ * ========================================================================== */
+
+/* ----------------------------------------------------------------------------
+ * 0. IMAGE PROTECTION — imagery must never be inverted/grayscale/dimmed
+ * -------------------------------------------------------------------------- */
+.nx-premium-inbox img,
+.nx-premium-inbox picture,
+.nx-premium-inbox video,
+.nx-premium-inbox canvas:not(.maplibregl-canvas) {
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+}
+
+/* ----------------------------------------------------------------------------
+ * 1. LIGHT THEME — bright, expensive, native
+ * -------------------------------------------------------------------------- */
+[data-nexus-theme="light"] body,
+[data-nexus-theme="light"] .nx-premium-inbox {
+  background: #fbfcff !important;
+  color: #020617 !important;
+}
+
+/* Panels / surfaces — solid premium white, never gray wash */
+[data-nexus-theme="light"] .nx-premium-inbox .nx-panel,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-surface,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-conversation,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence {
+  background: rgba(255, 255, 255, 0.96);
+  color: #020617;
+}
+
+/* No opacity-based "disabled-looking" secondary text in light mode */
+[data-nexus-theme="light"] .nx-premium-inbox small,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-muted,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-text-secondary {
+  color: #475569;
+  opacity: 1;
+}
+
+/* Empty / loading / error states — index.css:14376 paints these with a DARK
+ * `linear-gradient(rgba(21,30,38,.92)…) !important` that is NOT theme-scoped,
+ * so it darkened the conversation + intelligence panes in light mode. Verified
+ * via browser: .nx-inbox__workspace-empty rendered the dark gradient over an
+ * otherwise-white .nx-inbox-center. Neutralize it for light mode. */
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox__workspace-empty,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox__messages-error,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox__messages-loading,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-loading-state,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-chat-container.is-empty {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  color: #475569 !important;
+}
+
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-intelligence-fullscreen,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-contact-intel-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-contact-intel-v2,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intel-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intel-field,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intel-field-v2,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-seller-command-card {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: rgba(15, 23, 42, 0.10) !important;
+  color: #020617 !important;
+}
+
+/* ----------------------------------------------------------------------------
+ * 2. DARK THEME — true deep dark, strong text, no washed overlay
+ * -------------------------------------------------------------------------- */
+[data-nexus-theme="dark"] .nx-premium-inbox,
+[data-nexus-theme="satellite"] .nx-premium-inbox,
+[data-nexus-theme="monochrome"] .nx-premium-inbox {
+  background: #07101a;
+  color: #eaf7ff;
+}
+
+/* ----------------------------------------------------------------------------
+ * 3. RED OPS THEME — intentional red tactical, not dark-with-tint
+ * -------------------------------------------------------------------------- */
+[data-nexus-theme="red_ops"] .nx-premium-inbox {
+  background: radial-gradient(120% 120% at 50% 0%, #200609 0%, #160305 60%, #0c0204 100%);
+  color: #fff0f1;
+}
+
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-deal-intelligence-fullscreen,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-intelligence-panel,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-contact-intel-card,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-contact-intel-v2,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-intel-card,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-intel-field,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-intel-field-v2,
+[data-nexus-theme="red_ops"] .nx-premium-inbox .nx-seller-command-card {
+  background: rgba(32, 6, 9, 0.88) !important;
+  border-color: rgba(255, 18, 18, 0.22) !important;
+  color: #fff0f1 !important;
+}
+
+/* ----------------------------------------------------------------------------
+ * 4. LIQUID GLASS — unified menus / dropdowns / popovers
+ *    One premium look: visible border, inner highlight, blur, depth, z-index.
+ *    !important + last-load order guarantees victory over the faint
+ *    --nexus-surface-overlay wash used by inbox-polish.css.
+ * -------------------------------------------------------------------------- */
+
+/* Ownership: Shared Shell Glass Primitive Primitives 
+ * These classes standardize glass appearance across the dashboard.
+ */
+
+.nx-liquid-popover,
+.nx-workspace-drawer,
+.nx-glass-menu,
+.nx-command-menu,
+.nx-quick-menu-popover,
+.nx-avatar-popover,
+.nx-search-results-popover,
+.nx-workspace-menu-root,
+.nx-workspace-submenu-panel {
+  pointer-events: auto !important;
+}
+
+.nx-liquid-popover,
+.nx-liquid-surface,
+.nx-workspace-drawer,
+.nx-glass-menu,
+.nx-command-menu,
+.nx-quick-menu-popover,
+.nx-avatar-popover,
+.nx-search-results-popover,
+.nx-glass-panel,
+.nx-glass-dropdown,
+.nx-glass-popover {
+  background: var(--nx-glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
+  backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
+  border: 1px solid var(--nx-glass-border-strong, var(--nx-glass-border)) !important;
+  border-radius: 16px !important;
+  box-shadow:
+    var(--nx-glass-shadow, 0 24px 80px rgba(0, 0, 0, 0.45)),
+    var(--nx-glass-inner-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.08)) !important;
+  color: var(--nx-glass-text) !important;
+  z-index: var(--nx-shell-z-popover) !important;
+}
+
+/* Inner panel glass fallback for the COMPACT DRAWER variant only.
+ * The topbar workspace menu's inner panels are owned by nx-phase3-menus.css
+ * (imported last) which collapses them into one liquid surface (transparent
+ * inner panels + a single rail divider). These declarations are intentionally
+ * NON-!important so phase3 wins the topbar menu by specificity + load order;
+ * the drawer (which phase3 does not target) still gets a glass wash here. */
+.nx-workspace-drawer .nx-workspace-menu-root,
+.nx-workspace-drawer .nx-workspace-submenu-panel {
+  background: var(--nx-glass-bg-hover, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--nx-glass-divider, rgba(148, 163, 184, 0.12));
+  color: var(--nx-glass-text);
+}
+
+/* Light mode glass — white translucent with a clearly visible border.
+ * Scoped under .nx-premium-inbox (specificity 0,3,0) so it ties-and-wins (by
+ * last-load order) against inbox-premium.css's
+ * `[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-popover` rule, which
+ * was otherwise overriding the menu border down to rgba(15,23,42,0.12).
+ * A lower-specificity fallback covers any popover rendered outside the inbox. */
+[data-nexus-theme="light"] .nx-liquid-popover,
+[data-nexus-theme="light"] .nx-liquid-surface,
+[data-nexus-theme="light"] .nx-workspace-drawer,
+[data-nexus-theme="light"] .nx-glass-menu,
+[data-nexus-theme="light"] .nx-command-menu,
+[data-nexus-theme="light"] .nx-quick-menu-popover,
+[data-nexus-theme="light"] .nx-avatar-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-surface,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-drawer,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-glass-menu,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-menu,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-quick-menu-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-avatar-popover {
+  background: var(--nx-glass-bg-strong) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  box-shadow:
+    0 24px 80px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  color: #020617 !important;
+}
+/* Light-mode inner panels: drawer-only fallback. Non-!important so the topbar
+ * menu's inner panels stay owned by nx-phase3-menus.css (collapsed to one glass
+ * surface). */
+[data-nexus-theme="light"] .nx-workspace-drawer .nx-workspace-menu-root,
+[data-nexus-theme="light"] .nx-workspace-drawer .nx-workspace-submenu-panel {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+/* Menu item states — clear hover + accent-driven active/selected */
+.nx-workspace-menu-item,
+.nx-workspace-submenu-item,
+.nx-quick-menu-popover button,
+.nx-avatar-popover button {
+  color: var(--nx-glass-text);
+}
+.nx-workspace-menu-item:hover,
+.nx-workspace-submenu-item:hover,
+.nx-quick-menu-popover button:hover,
+.nx-avatar-popover button:hover {
+  background: var(--nx-glass-bg-hover, rgba(127, 127, 127, 0.1)) !important;
+  color: var(--nx-glass-text-strong) !important;
+}
+/* Active menu rows — accent-driven fallback (non-!important). The topbar
+ * workspace menu's active rows (background / border / glow) are owned by
+ * nx-phase3-menus.css, which wins by specificity + load order. This keeps a
+ * sensible accent wash for the drawer and any non-topbar menu surface. */
+.nx-workspace-menu-item.is-active,
+.nx-workspace-submenu-item.is-active,
+.nx-workspace-submenu-item--view.is-active {
+  background: color-mix(in srgb, var(--nx-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--nx-accent) 38%, transparent);
+  color: var(--nx-accent-text, var(--nx-accent));
+}
+.nx-workspace-submenu-item--view {
+  flex-direction: column;
+  align-items: stretch;
+}
+.nx-workspace-submenu-item__select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ----------------------------------------------------------------------------
+ * 5. ACCENT APPLICATION — everything below is driven by --nx-accent
+ * -------------------------------------------------------------------------- */
+
+/* Outbound message bubble gradient — fully accent driven (all 12 palettes) */
+.nx-premium-inbox {
+  --nx-bubble-outbound: linear-gradient(
+    180deg,
+    var(--nx-accent),
+    color-mix(in srgb, var(--nx-accent) 72%, #000)
+  );
+}
+
+/* Selected thread row — replace hardcoded blue with accent border/glow */
+.nx-premium-inbox .nx-thread-card-rebuilt.is-selected,
+.nx-sidebar--mode-rail25 .nx-thread-card-rebuilt.is-selected,
+.nx-premium-inbox .nx-thread-row.is-selected,
+.nx-premium-inbox .nx-row25.is-selected {
+  background: color-mix(in srgb, var(--nx-accent) 10%, transparent) !important;
+  box-shadow: inset 2px 0 0 var(--nx-accent) !important;
+}
+
+/* Width pills (View > 25/50/75/Full) active state */
+.nx-topbar-width-pill.is-active,
+.nx-active-view-chip.is-active {
+  background: color-mix(in srgb, var(--nx-accent) 18%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx-accent) 42%, transparent) !important;
+  color: var(--nx-accent-text, var(--nx-accent)) !important;
+}
+
+/* Primary buttons / pills / chips that should carry the accent */
+.nx-premium-inbox .nx-btn--primary,
+.nx-premium-inbox .nx-button--primary,
+.nx-premium-inbox .nx-pill--accent,
+.nx-premium-inbox .nx-chip--accent {
+  background: var(--nx-accent) !important;
+  border-color: var(--nx-accent) !important;
+  color: #fff !important;
+}
+
+/* Focus rings */
+.nx-premium-inbox :focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nx-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* Notification live dot + command-menu selected item */
+.nx-queue-indicator-dot,
+.nx-notification-button.has-alerts span {
+  background: var(--nx-accent) !important;
+}
+.nx-command-menu .is-active,
+.nx-command-menu [aria-selected="true"],
+.nx-search-result-item.is-active {
+  background: color-mix(in srgb, var(--nx-accent) 14%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx-accent) 34%, transparent) !important;
+}
+
+/* Workspace panes use exact 25/50/75/100 flex-basis values. Gaps make a
+ * 25+50+25 layout overflow, so separators replace physical gaps. */
+.nx-premium-inbox .nx-workspace-split-grid {
+  gap: 0 !important;
+}
+.nx-premium-inbox .nx-workspace-pane + .nx-workspace-pane {
+  border-left: 1px solid var(--nx-border, rgba(148, 163, 184, 0.16));
+}
+
+/* View menu width pills appear on row hover/focus without covering the row
+ * toggle button. Pills own their clicks; the row button owns only row toggles. */
+.nx-workspace-submenu-item--view .nx-workspace-view-widths {
+  position: relative;
+  z-index: 1;            /* sit above the row's select button hit-area */
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  flex-wrap: nowrap;     /* keep all four pills on one reachable row */
+  transition: opacity 120ms ease, max-height 120ms ease, margin-top 120ms ease;
+  margin-top: 0;
+}
+.nx-workspace-submenu-item--view:hover .nx-workspace-view-widths,
+.nx-workspace-submenu-item--view:focus-within .nx-workspace-view-widths {
+  opacity: 1;
+  /* min-height pills are 24px; the previous 32px clip cut off any wrapped
+   * pills (25/50/75/Full), making the lower controls visible-but-unclickable
+   * (bug #8). 72px comfortably clears one or two rows without re-introducing
+   * a clip on the clickable region. */
+  max-height: 72px;
+  pointer-events: auto;
+  margin-top: 8px;
+}
+
+/* Theme/accent preview dots in the submenu */
+.nx-accent-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.nx-accent-dot[data-accent="cyan"]    { background: #06b6d4; }
+.nx-accent-dot[data-accent="emerald"] { background: #10b981; }
+.nx-accent-dot[data-accent="amber"]   { background: #f59e0b; }
+.nx-accent-dot[data-accent="violet"]  { background: #8b5cf6; }
+.nx-accent-dot[data-accent="rose"]    { background: #f43f5e; }
+.nx-accent-dot[data-accent="ice"]     { background: #7dd3fc; }
+.nx-accent-dot[data-accent="blue"]    { background: #2563eb; }
+.nx-accent-dot[data-accent="teal"]    { background: #14b8a6; }
+.nx-accent-dot[data-accent="lime"]    { background: #84cc16; }
+.nx-accent-dot[data-accent="orange"]  { background: #f97316; }
+.nx-accent-dot[data-accent="pink"]    { background: #ec4899; }
+.nx-accent-dot[data-accent="gold"]    { background: #eab308; }
+
+/* Accent palette is defined in nexus-theme.css — do not redefine here */
+
+/* ----------------------------------------------------------------------------
+ * 6. LIGHT-MODE SURFACE LEAK SCRUB (P1)
+ * ----------------------------------------------------------------------------
+ * The inbox module sheets (inbox-premium / inbox-polish / conversation-redesign
+ * / inbox-rebuild*) style the app for its DEFAULT dark theme using UNSCOPED dark
+ * `background` literals. In light mode those leak through as gray/black panels
+ * (reported bugs #1, #3, #4). A leak audit (488 rules) showed ~110 structural
+ * surfaces in the inbox sheets had no light override.
+ *
+ * This block adds token-driven light overrides for the genuine STRUCTURAL
+ * surface containers only. It DELIBERATELY does NOT touch:
+ *   - image scrims / media overlays (.nx-property-hero__overlay,
+ *     .nx-*__media-scrim, .nx-property-snapshot__pane::after, .nx-hero-fallback-bg)
+ *   - header atmospheres (.nx-medium-header__atmosphere)
+ *   - map canvases (.nx-comp-module__map-canvas, .nx-icm__*)
+ *   - orbs / score dials (.nx-kpi-orb, .nx-orb-dashboard, .nx-score-ring__dial)
+ *   - accent-carrying primaries (.nx-command-button.is-primary, .is-active chips)
+ * …all of which are intentionally dark even in light mode for legibility over
+ * imagery or to preserve the accent. Scoped to component classes (no `*`).
+ * -------------------------------------------------------------------------- */
+[data-nexus-theme="light"] .nx-premium-inbox .nx-chat-header,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-composer-input-area,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-center,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-layout__sidebar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-list-toolbar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-table-view,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-inbox-table-wrap,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar-search,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar-empty,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar__load-more,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-bar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-viewbar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-header-strip,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-module,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-thread-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-dossier-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-dossier-header,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-dossier-empty,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-dossier-placeholder,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-queue-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-queue-group,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-queue-cc__hero-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-capsule__content,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-medium-header,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-medium-actions,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-deal-state-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-linked-apps-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-offer-memo-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-property-address-bar,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-property-snapshot-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intel-hero,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-force-card,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-intel-header,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-intel-scroll-body,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-next-action,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-property-tabs,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-intelligence-panel .nx-workflow-control {
+  background: var(--surface-0, rgba(255, 255, 255, 0.96)) !important;
+  background-image: none !important;
+  border-color: rgba(15, 23, 42, 0.10) !important;
+  color: var(--text-0, #020617) !important;
+}
+
+/* Search-results popover is a menu/dropdown — light liquid glass like the rest */
+[data-nexus-theme="light"] .nx-premium-inbox .nx-search-results-popover,
+[data-nexus-theme="light"] .nx-search-results-popover {
+  background: var(--nx-glass-bg-strong) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  box-shadow:
+    0 24px 80px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  color: #020617 !important;
+}
+[data-nexus-theme="light"] .nx-premium-inbox .nx-search-result-item:hover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-search-result-item.is-active {
+  background: color-mix(in srgb, var(--nx-accent) 12%, transparent) !important;
+  color: #020617 !important;
+}
+
+/* Advanced Filters modal is portaled to document.body (outside .nx-premium-inbox).
+   Pin search glyph size here so no upstream svg rule can stretch it in flex layout. */
+.nx-ifm-modal .nx-ifm-search-glyph {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  max-width: 14px !important;
+  flex: none !important;
+}

@@ -1,4 +1,4 @@
-import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext, LocationResult } from '../command.types'
+import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext, LocationResult } from '../../../domain/command-center/command.types'
 
 const LOCAL_STORAGE_KEY = 'leadcommand.commandBar.recentLocations'
 
@@ -123,7 +123,7 @@ export const locationCommandProvider: GlobalCommandProvider = {
           subtitle: `Navigate to ${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`,
           icon: 'pin',
           score: isTop ? 100 : 80 - index,
-          route: '/dashboard/live',
+          route: '/map',
           action: {
             id: 'fly-to',
             kind: 'dispatch_event',

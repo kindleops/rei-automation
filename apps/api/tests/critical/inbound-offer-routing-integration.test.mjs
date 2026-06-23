@@ -68,6 +68,12 @@ function buildContext({ property_id = 41, units = 1 } = {}) {
   };
 }
 
+function useCaseForOfferRoute(offer_route) {
+  if (offer_route === "sfh_cash_preview") return "offer_reveal_cash";
+  if (offer_route === "condition_clarifier") return "ask_condition_clarifier";
+  return "ownership_check";
+}
+
 function installDeps({
   context = buildContext(),
   classification = { source: "test", objection: null, compliance_flag: null },
@@ -77,10 +83,12 @@ function installDeps({
   const ledger = createInMemoryIdempotencyLedger();
   const calls = {
     maybeCreateOfferFromContext: [],
-    maybeQueueSellerStageReply: [],
+    executeInboundAutomationDecision: [],
     routeInboundOffer: [],
     transferDealToUnderwriting: [],
   };
+  const offer_route = offerRouting?.offer_route || null;
+  const selected_use_case = useCaseForOfferRoute(offer_route);
 
   __setTextgridInboundTestDeps({
     beginIdempotentProcessing: ledger.begin,
@@ -90,6 +98,8 @@ function installDeps({
     normalizeInboundTextgridPhone: (value) => value,
     info: () => {},
     warn: () => {},
+    notifyDiscordOps: async () => ({ ok: true }),
+    postInboundSmsDiscordCard: async () => ({ ok: true, skipped: true }),
     loadContext: async () => context,
     classify: async () => classification,
     resolveRoute: () => route,
@@ -98,6 +108,82 @@ function installDeps({
       return offerRouting;
     },
     logInboundMessageEvent: async () => ({ item_id: 901 }),
+    logInboundMessageEventSupabase: async () => ({ ok: true, id: "evt-901" }),
+    getSystemFlags: async () => ({ auto_reply_enabled: true, followup_enabled: false }),
+    getSystemValue: async (key) => (key === "auto_reply_mode" ? "dry_run" : null),
+    resolveSellerAutoReplyPlan: async () => ({
+      inbound_intent: "asks_offer",
+      should_queue_reply: true,
+      selected_use_case,
+      selected_language: "English",
+      safety: {},
+    }),
+    scheduleFollowUp: async () => ({ ok: false, skipped: true }),
+    executeInboundAutomationDecision: async (args) => {
+      calls.executeInboundAutomationDecision.push(args);
+      return {
+        ok: true,
+        queued: true,
+        queue_row_id: "queue-901",
+        seller_stage_reply: {
+          ok: true,
+          handled: true,
+          queued: true,
+          reason: "seller_flow_reply_queued",
+          plan: {
+            selected_use_case,
+            detected_intent: "Offer Request",
+          },
+          brain_stage: selected_use_case,
+        },
+        queue_result: {
+          raw: {
+            metadata: {
+              offer_route,
+              cash_offer_snapshot_id: offerRouting?.meta?.snapshot_id ?? null,
+              cash_offer_amount: offerRouting?.meta?.cash_offer ?? null,
+            },
+          },
+        },
+      };
+    },
+    emitAutomationEvent: async () => ({ ok: true }),
+    isOfferStageTrigger: () => false,
+    shouldSkipOfferStageAI: () => ({ skip: true, reason: "test" }),
+    runOfferStageAI: async () => ({ ok: true, dry_run: true, skipped: true }),
+    getSupabaseClient: () => ({
+      from: () => ({
+        select: (_cols, opts = {}) => {
+          if (opts?.head) {
+            return {
+              eq: () => ({
+                gte: async () => ({ count: 0, error: null }),
+              }),
+            };
+          }
+          return {
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  maybeSingle: async () => ({ data: null, error: null }),
+                }),
+              }),
+              maybeSingle: async () => ({ data: null, error: null }),
+            }),
+            in: () => ({
+              maybeSingle: async () => ({ data: null, error: null }),
+            }),
+          };
+        },
+        insert: () => ({ select: async () => ({ data: [{ id: 901 }], error: null }) }),
+        update: () => ({
+          eq: () => ({
+            select: async () => ({ data: [], error: null }),
+            catch: () => ({ eq: () => ({}) }),
+          }),
+        }),
+      }),
+    }),
     updateMasterOwnerAfterInbound: async () => ({ ok: true }),
     updateBrainAfterInbound: async () => ({ ok: true }),
     updateBrainStage: async () => ({ ok: true }),
@@ -113,20 +199,6 @@ function installDeps({
       return { ok: true, underwriting_item_id: 777, diagnostics: {} };
     },
     maybeUpsertUnderwritingFromInbound: async () => ({ ok: true, extracted: false }),
-    maybeQueueSellerStageReply: async (args) => {
-      calls.maybeQueueSellerStageReply.push(args);
-      return {
-        ok: true,
-        handled: true,
-        queued: true,
-        reason: "seller_flow_reply_queued",
-        plan: {
-          selected_use_case: args.explicit_use_case || "ownership_check",
-          detected_intent: "Offer Request",
-        },
-        brain_stage: args.explicit_use_case || "Ownership Confirmation",
-      };
-    },
     maybeQueueUnderwritingFollowUp: async () => ({ ok: true, queued: false, reason: "not_needed" }),
     maybeCreateContractFromAcceptedOffer: async () => ({ ok: true, created: false }),
     syncPipelineState: async () => ({ ok: true, reason: "pipeline_not_created" }),
@@ -164,10 +236,10 @@ test("how much would you pay + SFH snapshot queues offer_reveal_cash and include
   assert.equal(result.ok, true);
   assert.equal(result.offer_routing.offer_route, "sfh_cash_preview");
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(calls.maybeQueueSellerStageReply.length, 1);
-  assert.equal(calls.maybeQueueSellerStageReply[0].explicit_use_case, "offer_reveal_cash");
-  assert.equal(calls.maybeQueueSellerStageReply[0].cash_offer_snapshot_id, "snap-123");
-  assert.equal(calls.maybeQueueSellerStageReply[0].extra_queue_context.cash_offer_amount, 215000);
+  assert.equal(calls.executeInboundAutomationDecision.length, 1);
+  assert.equal(result.seller_stage_reply.plan.selected_use_case, "offer_reveal_cash");
+  assert.equal(result.offer_routing.meta.snapshot_id, "snap-123");
+  assert.equal(result.offer_routing.meta.cash_offer, 215000);
 });
 
 test("offer message does not create Podio Offer immediately", async () => {
@@ -198,12 +270,11 @@ test("sent offer path still defers Offer creation to the post-send sync hook pat
     },
   });
 
-  await sendInbound("how much can you pay");
+  const result = await sendInbound("how much can you pay");
 
-  const queueArgs = calls.maybeQueueSellerStageReply[0];
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(queueArgs.cash_offer_snapshot_id, "snap-sync");
-  assert.equal(queueArgs.explicit_use_case, "offer_reveal_cash");
+  assert.equal(result.seller_stage_reply.plan.selected_use_case, "offer_reveal_cash");
+  assert.equal(result.offer_routing.meta.snapshot_id, "snap-sync");
 });
 
 test("8 units routes to underwriting and never queues cash offer", async () => {
@@ -223,7 +294,7 @@ test("8 units routes to underwriting and never queues cash offer", async () => {
   assert.equal(result.diagnostics.underwriting_route_reason, "multifamily_property_signal");
   assert.equal(calls.transferDealToUnderwriting.length, 1);
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.notEqual(calls.maybeQueueSellerStageReply[0]?.explicit_use_case, "offer_reveal_cash");
+  assert.notEqual(result.seller_stage_reply?.plan?.selected_use_case, "offer_reveal_cash");
 });
 
 test("seller finance routes to underwriting and never queues cash offer", async () => {
@@ -241,7 +312,7 @@ test("seller finance routes to underwriting and never queues cash offer", async 
   assert.equal(result.ok, true);
   assert.equal(calls.transferDealToUnderwriting.length, 1);
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.notEqual(calls.maybeQueueSellerStageReply[0]?.explicit_use_case, "offer_reveal_cash");
+  assert.notEqual(result.seller_stage_reply?.plan?.selected_use_case, "offer_reveal_cash");
 });
 
 test("no snapshot + property known queues condition clarifier", async () => {
@@ -258,8 +329,8 @@ test("no snapshot + property known queues condition clarifier", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(calls.maybeQueueSellerStageReply.length, 1);
-  assert.equal(calls.maybeQueueSellerStageReply[0].explicit_use_case, "ask_condition_clarifier");
+  assert.equal(calls.executeInboundAutomationDecision.length, 1);
+  assert.equal(result.seller_stage_reply.plan.selected_use_case, "ask_condition_clarifier");
 });
 
 test("no snapshot + no property routes manual review with no auto-send", async () => {
@@ -276,7 +347,7 @@ test("no snapshot + no property routes manual review with no auto-send", async (
   const result = await sendInbound("how much would you pay");
 
   assert.equal(result.ok, true);
-  assert.equal(calls.maybeQueueSellerStageReply.length, 0);
+  assert.equal(calls.executeInboundAutomationDecision.length, 0);
   assert.equal(result.seller_stage_reply.queued, false);
   assert.equal(result.seller_stage_reply.reason, "offer_manual_review_no_auto_send");
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);

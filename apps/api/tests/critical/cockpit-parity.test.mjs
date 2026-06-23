@@ -48,10 +48,25 @@ function makeSupabase({ queueRow = null, threadStateRow = null } = {}) {
 }
 
 const flagsAllOn = async () => ({
+  automation_enabled: true,
+  operator_send_enabled: true,
   outbound_sms_enabled: true,
   queue_runner_enabled: true,
   followup_enabled: true,
   auto_reply_enabled: true,
+  feeder_enabled: true,
+  queue_auto_enqueue_enabled: true,
+})
+
+const flagsManualSendBypass = async () => ({
+  automation_enabled: false,
+  operator_send_enabled: true,
+  outbound_sms_enabled: false,
+  queue_runner_enabled: false,
+  followup_enabled: true,
+  auto_reply_enabled: true,
+  feeder_enabled: false,
+  queue_auto_enqueue_enabled: false,
 })
 
 test('unauthenticated mutation rejects', async () => {
@@ -97,6 +112,82 @@ test('incident quarantine cannot send-now', async () => {
   assert.equal(result.reason, 'incident_quarantine')
 })
 
+test('manual send dry-run bypasses automation, feeder, and queue batch flags', async () => {
+  const supabase = makeSupabase({
+    threadStateRow: { thread_key: '+18605733879', status: 'active', metadata: {} },
+  })
+  const result = await runInboxAction({
+    action: 'send-now',
+    payload: {
+      dry_run: true,
+      thread_key: '+18605733879',
+      to_phone_number: '+15550001111',
+    },
+    supabase,
+    getFlags: flagsManualSendBypass,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.dry_run, true)
+})
+
+test('manual send does not treat missing operator_send_enabled row as disabled', async () => {
+  const supabase = makeSupabase({
+    threadStateRow: { thread_key: '+18605733879', status: 'active', metadata: {} },
+  })
+  const result = await runInboxAction({
+    action: 'send-now',
+    payload: {
+      dry_run: true,
+      thread_key: '+18605733879',
+      to_phone_number: '+15550001111',
+    },
+    supabase,
+    getFlags: async () => ({
+      automation_enabled: false,
+      operator_send_enabled: false,
+      outbound_sms_enabled: false,
+      queue_runner_enabled: false,
+      followup_enabled: true,
+      auto_reply_enabled: true,
+      feeder_enabled: false,
+      queue_auto_enqueue_enabled: false,
+    }),
+    getFlagValue: async () => null,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.dry_run, true)
+})
+
+test('manual send bypasses operator_send_enabled gate', async () => {
+  const supabase = makeSupabase({
+    threadStateRow: { thread_key: '+18605733879', status: 'active', metadata: {} },
+  })
+  const result = await runInboxAction({
+    action: 'send-now',
+    payload: {
+      dry_run: true,
+      thread_key: '+18605733879',
+      to_phone_number: '+15550001111',
+    },
+    supabase,
+    getFlags: async () => ({
+      automation_enabled: true,
+      operator_send_enabled: false,
+      outbound_sms_enabled: true,
+      queue_runner_enabled: true,
+      followup_enabled: true,
+      auto_reply_enabled: true,
+      feeder_enabled: true,
+      queue_auto_enqueue_enabled: true,
+    }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.dry_run, true)
+})
+
 test('negative reply cannot auto-reply', async () => {
   const supabase = makeSupabase({ threadStateRow: { thread_key: '+18605733879', status: 'active', metadata: {} } })
   const result = await runInboxAction({
@@ -134,7 +225,7 @@ test('noncanonical thread_key rejected', async () => {
   assert.equal(result.reason, 'invalid_canonical_thread_key')
 })
 
-test('fallback template path does not exist', async () => {
+test('auto-reply without required routing payload returns explicit invalid_payload', async () => {
   const supabase = makeSupabase({ threadStateRow: { thread_key: '+18605733879', status: 'active', metadata: {} } })
   const result = await runInboxAction({
     action: 'auto-reply',
@@ -143,6 +234,6 @@ test('fallback template path does not exist', async () => {
     getFlags: flagsAllOn,
   })
   assert.equal(result.ok, false)
-  assert.equal(result.reason, 'BACKEND_ENDPOINT_NOT_READY')
+  assert.equal(result.reason, 'invalid_payload')
   assert.equal('template_fallback' in (result.diagnostics || {}), false)
 })

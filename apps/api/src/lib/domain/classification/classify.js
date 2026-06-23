@@ -633,6 +633,11 @@ const OBJECTION_MAP = [
       "doesnt belong to me", "dont belong to me",
       "allready sold", "alredy sold", "i sold it already",
       "sold it awhile ago", "been sold", "that was sold",
+      "sold it", "it sold", "no it sold", "sold last week",
+      "sold yrs ago", "sold years ago", "sold 10 yrs",
+      "this is not shirley", "not shirley",
+      "la mía es", "la mia es", "no la mía", "no la mia",
+      "esa casa", "llanoesmia",
       // Spanish
       "número equivocado", "equivocado de número",
       "no soy el dueño", "no soy la dueña",
@@ -699,16 +704,11 @@ const OBJECTION_MAP = [
     key: "property_correction",
     phrases: [
       "not a duplex", "not a multi", "is a house", "not a house",
-      "wrong address", "incorrect address", "don't own", "do not own",
-      "no longer own", "i no longer own", "i sold it", "already sold",
-      "sold that property", "sold that house", "sold years ago",
-      "not mine", "not my property", "this is not a", "this isn't a",
+      "wrong address", "incorrect address",
+      "this is not a", "this isn't a",
       "property type is wrong", "incorrect property",
-      // Spanish
-      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
-      "no es mía", "no es mia", "no es mi propiedad",
-      "la mía es", "la mia es",
-    ]
+      "not a condo", "not a triplex", "not commercial",
+    ],
   },
   {
     key: "who_is_this",
@@ -2034,7 +2034,9 @@ const OBJECTION_MAP = [
 
 function detectObjection(message) {
   const text = lower(message);
+  if (matchesPropertyTypeCorrection(text)) return "property_correction";
   for (const obj of OBJECTION_MAP) {
+    if (obj.key === "property_correction") continue;
     if (includesAny(text, obj.phrases)) return obj.key;
   }
   return null;
@@ -3262,6 +3264,82 @@ function matchesAnyPattern(text, patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+const INTENT_PRIORITY = Object.freeze([
+  "opt_out",
+  "wrong_number",
+  "who_is_this",
+  "hostile_or_legal",
+  "not_interested",
+  "need_time",
+  "seller_interested",
+  "asking_price_provided",
+  "asks_offer",
+  "callback_requested",
+  "property_correction",
+  "ownership_confirmed",
+  "latent_interest",
+  "tenant_occupied",
+  "condition_disclosed",
+  "info_request",
+  "reaction_only",
+  "acknowledgement",
+  "unclear",
+]);
+
+function matchesWrongNumberDisconnect(text = "") {
+  const normalized = lower(text);
+  if (
+    includesAny(normalized, [
+      "wrong number", "wrong #", "wrong person", "incorrect number",
+      "not the owner", "not the property owner", "not the homeowner",
+      "not this person", "don't own that", "dont own that",
+      "i don't own", "i dont own", "don't own this", "dont own this",
+      "no longer own", "not mine", "not my property", "never owned",
+      "sold it", "it sold", "no it sold", "already sold", "been sold",
+      "sold last week", "sold yrs ago", "sold years ago",
+      "this is not shirley",
+      "número equivocado", "equivocado", "no soy el dueño",
+      "no soy el propietario", "no soy la propietaria",
+      "la mía es", "la mia es", "no la mía", "no la mia",
+      "esa casa", "llanoesmia", "ya lo vendí", "ya lo vendi",
+      "no es mía", "no es mia", "no tengo esa propiedad",
+    ])
+  ) {
+    return true;
+  }
+
+  if (/\bsold\b/.test(normalized) && /\b(ago|yrs|years|week|month|last)\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\b(no|nah|nope)\b[\s\S]{0,24}\bsold\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+function matchesPropertyTypeCorrection(text = "") {
+  return includesAny(lower(text), [
+    "not a duplex", "not a multi", "is a house", "not a house",
+    "not a condo", "not a triplex", "not commercial",
+    "wrong address", "incorrect address",
+    "this is not a", "this isn't a",
+    "property type is wrong", "incorrect property",
+  ]);
+}
+
+function pickPrimaryIntent(unique_intents = []) {
+  for (const intent of INTENT_PRIORITY) {
+    if (unique_intents.includes(intent)) return intent;
+  }
+  return unique_intents[0] ?? "unclear";
+}
+
 /**
  * resolveIntents(message, signals)
  *
@@ -3298,36 +3376,22 @@ function resolveIntents(
     return { primary_intent: "opt_out", secondary_intent: null };
   }
 
-  // 2. WRONG NUMBER / NOT OWNER
-  if (
-    normalized_objection === "wrong_number" ||
-    includesAny(text, [
-      "wrong number", "wrong #", "wrong person", "incorrect number",
-      "not the owner", "not the property owner", "not the homeowner",
-      "not this person", "wrong person", "who is",
-      // Spanish / Portuguese
-      "número equivocado", "equivocado", "no soy el dueño",
-      "no soy el propietario", "no soy la propietaria",
-    ])
-  ) {
+  // 2. WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
+  if (normalized_objection === "wrong_number" || matchesWrongNumberDisconnect(text)) {
     intents.push("wrong_number");
   }
 
-  // 2.5 PROPERTY CORRECTION
+  // 2.5 PROPERTY CORRECTION (type/address only — not sold/disownership)
   if (
     normalized_objection === "property_correction" ||
-    includesAny(text, [
-      "not a duplex", "not a multi", "is a house", "not a house",
-      "wrong address", "incorrect address", "don't own", "dont own",
-      "no longer own", "i sold it", "sold it", "it sold", "its sold",
-      "already sold", "sold years ago", "not mine", "not my property",
-      "never owned", "this is not a", "this isn't a", "property type is wrong",
-      // Spanish
-      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
-      "no es mía", "no es mia", "no es mi casa",
-    ])
+    matchesPropertyTypeCorrection(text)
   ) {
     intents.push("property_correction");
+  }
+
+  // 2.6 AMBIGUOUS SHORT UTTERANCES — insufficient evidence for routing
+  if (/^(maybe|huh|hmm|idk|dunno|eh)[\s?!.]*$/i.test(text.trim())) {
+    return { primary_intent: "unclear", secondary_intent: null };
   }
 
   // 3. HOSTILE OR LEGAL
@@ -3384,6 +3448,24 @@ function resolveIntents(
 
   // 6. SELLER INTERESTED (Explicit)
   // Use regex to ensure "not" or "no" doesn't precede the interest phrase
+  if (
+    includesAny(text, [
+      "what address",
+      "which address",
+      "what property",
+      "which property",
+      "property address",
+      "address is this",
+      "address are you",
+      "where is the property",
+      "where is this property",
+      "what house",
+      "which house",
+    ])
+  ) {
+    intents.push("info_request");
+  }
+
   const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling)\b/i;
   if (positive_interest_regex.test(text)) {
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
@@ -3437,8 +3519,11 @@ function resolveIntents(
     }
   }
 
-  // 11. OWNERSHIP CONFIRMED
-  if (includesAny(text, [
+  // 11. OWNERSHIP CONFIRMED (skip when seller is correcting property type/address)
+  const is_property_correction = matchesPropertyTypeCorrection(text);
+  if (
+    !is_property_correction &&
+    includesAny(text, [
     "yes i own it",
     "yes i do",
     "i own it",
@@ -3456,7 +3541,8 @@ function resolveIntents(
     "yup",
     "so y siempre lo seré",
     "a si es",
-  ])) {
+  ])
+  ) {
     intents.push("ownership_confirmed");
   }
 
@@ -3486,7 +3572,7 @@ function resolveIntents(
     "who is this", "who's this", "whos this", "who be this", "how do you know my name", 
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
-    "identification", "identify", "porque", "por que", "why", "huh",
+    "identification", "identify", "porque", "por que", "why",
   ])) {
     intents.push("who_is_this");
   }
@@ -3501,10 +3587,11 @@ function resolveIntents(
     if (intents.length === 0) intents.push("ownership_confirmed");
   }
 
-  // Final dedupe and resolve
+  // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
   const unique_intents = [...new Set(intents)];
-  const primary = unique_intents[0] ?? "unclear";
-  const secondary = unique_intents.length > 1 ? unique_intents[1] : null;
+  const primary = pickPrimaryIntent(unique_intents);
+  const secondary =
+    unique_intents.find((intent) => intent !== primary) ?? null;
 
   return { primary_intent: primary, secondary_intent: secondary };
 }
@@ -3579,6 +3666,8 @@ function detectStageHint(message, brain_item = null, objection = null) {
     "how does it work", "tell me more", "what's the process",
     "how long", "any fees", "explain", "questions",
     "want to understand", "walk me through",
+    "what address", "which address", "what property", "which property",
+    "property address", "where is the property", "where is this property",
     // Spanish
     "cómo funciona", "explícame", "preguntas", "tarifas",
     // Portuguese
@@ -3644,7 +3733,9 @@ function computeHeuristicConfidence({
     seller_interested:  0.90,
     asking_price_provided: 0.88,
     asks_offer:         0.88,
+    info_request:       0.86,
     who_is_this:        0.85,
+    callback_requested: 0.85,
     need_time:          0.85,
     condition_disclosed: 0.85,
     tenant_occupied:    0.85,
@@ -3884,7 +3975,7 @@ function computeSellerState({
   if (primary_intent === "callback_requested") next_best_action = "schedule_call";
 
   return {
-    ownership_confirmed: primary_intent === "ownership_confirmed" || secondary_intent === "ownership_confirmed" || !!objection,
+    ownership_confirmed: primary_intent === "ownership_confirmed" || secondary_intent === "ownership_confirmed",
     seller_interest,
     motivation_level,
     emotional_state: emotion,
@@ -3894,6 +3985,98 @@ function computeSellerState({
     creative_finance_open,
     confidence,
     next_best_action,
+  };
+}
+
+function deriveAutomationDecision({
+  primary_intent,
+  objection = null,
+  compliance_flag = null,
+  confidence = 0,
+} = {}) {
+  const intent = cleanMessage(primary_intent) || "unclear";
+  const normalized_objection = cleanMessage(objection);
+  const confident = Number(confidence) >= 0.82;
+
+  if (compliance_flag === "stop_texting" || intent === "opt_out") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "opt_out",
+      human_review_required: false,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "wrong_number" || normalized_objection === "wrong_number") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "archive_wrong_number",
+      human_review_required: false,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "hostile_or_legal") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
+    };
+  }
+
+  if (intent === "not_interested") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
+  if (intent === "need_time") {
+    return {
+      auto_reply_allowed: confident,
+      queue_action: confident ? "queue_followup" : "none",
+      suppression_action: "none",
+      human_review_required: !confident,
+      risk_level: confident ? "low" : "medium",
+    };
+  }
+
+  if (
+    [
+      "ownership_confirmed",
+      "seller_interested",
+      "latent_interest",
+      "asks_offer",
+      "asking_price_provided",
+      "tenant_occupied",
+      "condition_disclosed",
+      "callback_requested",
+      "who_is_this",
+      "info_request",
+    ].includes(intent)
+  ) {
+    return {
+      auto_reply_allowed: confident,
+      queue_action: confident ? "queue_auto_reply" : "none",
+      suppression_action: "none",
+      human_review_required: !confident,
+      risk_level: confident ? "low" : "medium",
+    };
+  }
+
+  return {
+    auto_reply_allowed: false,
+    queue_action: "none",
+    suppression_action: "none",
+    human_review_required: true,
+    risk_level: "medium",
   };
 }
 
@@ -3945,7 +4128,7 @@ Return ONLY valid JSON. No markdown. No explanation outside the JSON object.
 
 {
   "language": "English|Spanish|Portuguese|...|Thai",
-  "primary_intent": "opt_out|wrong_number|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|unclear",
+  "primary_intent": "opt_out|wrong_number|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|info_request|unclear",
   "secondary_intent": "opt_out|...|null",
   "objection": "wrong_number|...|null",
   "emotion": "calm|skeptical|guarded|frustrated|curious|motivated|tired_landlord|overwhelmed|grieving",
@@ -4004,10 +4187,15 @@ Rules:
 
 const AI_CONFIDENCE_THRESHOLD = 0.82;
 
-export async function classify(message, brain_item = null) {
+export async function classify(message, brain_item = null, options = {}) {
   const text = cleanMessage(message);
+  const heuristicOnly = options?.heuristicOnly === true;
 
   if (!text) {
+    const automation_decision = deriveAutomationDecision({
+      primary_intent: "unclear",
+      confidence: 0.50,
+    });
     return {
       language:        "English",
       primary_intent:  "unclear",
@@ -4023,14 +4211,30 @@ export async function classify(message, brain_item = null) {
       source:          "heuristic",
       notes:           "",
       detected_intent: "unclear",
+      automation_decision,
     };
   }
 
   const heuristic = classifyHeuristic(text, brain_item);
 
+  if (heuristicOnly) {
+    const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
+    return {
+      ...heuristic,
+      motivation_score: final_motivation,
+      seller_state: computeSellerState({ message: text, ...heuristic, motivation_score: final_motivation }),
+      source: "heuristic",
+      notes: "",
+      detected_intent: heuristic.primary_intent,
+      automation_decision,
+    };
+  }
+
   // Compliance is absolute
   if (heuristic.compliance_flag === "stop_texting") {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4038,12 +4242,14 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
   // High-confidence heuristic
   if (heuristic.confidence >= AI_CONFIDENCE_THRESHOLD) {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4051,6 +4257,7 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
@@ -4062,6 +4269,7 @@ export async function classify(message, brain_item = null) {
 
   if (!ai_result) {
     const final_motivation = estimateMotivationScore(heuristic);
+    const automation_decision = deriveAutomationDecision(heuristic);
     return {
       ...heuristic,
       motivation_score: final_motivation,
@@ -4069,6 +4277,7 @@ export async function classify(message, brain_item = null) {
       source: "heuristic",
       notes:  "ai_assist_failed",
       detected_intent: heuristic.primary_intent,
+      automation_decision,
     };
   }
 
@@ -4092,6 +4301,7 @@ export async function classify(message, brain_item = null) {
   };
 
   const final_motivation = estimateMotivationScore(merged);
+  const automation_decision = deriveAutomationDecision(merged);
 
   return {
     ...merged,
@@ -4100,6 +4310,7 @@ export async function classify(message, brain_item = null) {
     source: "ai",
     notes:  ai_result.notes ?? "",
     detected_intent: merged.primary_intent,
+    automation_decision,
   };
 }
 

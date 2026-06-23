@@ -52,9 +52,6 @@ export function rankTemplateCandidates(candidates, context) {
     if (tpl.language === language) {
       score += 1000;
       matches.push("language");
-    } else if (tpl.language === "English") {
-      score += 500; // Accept English fallback
-      matches.push("language_fallback");
     }
 
     // 3. Agent Style Match

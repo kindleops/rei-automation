@@ -24,6 +24,11 @@ import { mapTextgridFailureBucket } from "@/lib/providers/textgrid.js";
 import {
   hashIdempotencyPayload,
 } from "@/lib/domain/events/idempotency-ledger.js";
+import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import {
+  AUTOMATION_LOG_TAGS,
+  logAutomationConsole,
+} from "@/lib/domain/automation/automation-audit.js";
 // logDeliveryEvent intentionally not imported — delivery callbacks only update
 // original outbound events, never create new Message Event items.
 import {
@@ -37,6 +42,7 @@ import { updateBrainAfterDelivery } from "@/lib/domain/brain/update-brain-after-
 import { info, warn } from "@/lib/logging/logger.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import { normalizeTextgridDeliveryPayload } from "@/lib/webhooks/textgrid-delivery-normalize.js";
+import { normalizeTextGridFailure } from "@/lib/domain/messaging/textgrid-failure-normalization.js";
 
 const QUEUE_FIELDS = {
   queue_status: "queue-status",
@@ -73,6 +79,7 @@ const defaultDeps = {
   findMessageEventItemsByProviderMessageId,
   mapTextgridFailureBucket,
   hashIdempotencyPayload,
+  emitAutomationEvent,
   // logDeliveryEvent removed — delivery callbacks update existing events only
   updateMessageEventStatus,
   updateBrainAfterDelivery,
@@ -206,6 +213,16 @@ function normalizeDeliveryState(status) {
 }
 
 function mapFailureReasonToQueueCategory({ error_message, error_status }) {
+  const normalized = normalizeTextGridFailure({
+    status: "failed",
+    error_message,
+    error_status,
+  });
+  if (normalized.failure_class === "content_filter_blocked") return "Carrier Block";
+  if (normalized.failure_class === "recipient_opted_out") return "Opt-Out";
+  if (normalized.failure_class === "invalid_to_number") return "Invalid Number";
+  if (normalized.failure_class === "recipient_out_of_credit") return "Network Error";
+
   const bucket = runtimeDeps.mapTextgridFailureBucket({
     ok: false,
     error_message,
@@ -522,6 +539,18 @@ async function updatePhoneComplianceFromDelivery(event_item, failure_bucket) {
 function deriveFailureBucket(extracted, normalized_state) {
   if (normalized_state !== "Failed") return null;
 
+  const normalized = normalizeTextGridFailure({
+    status: extracted.status || "failed",
+    error_message: extracted.error_message,
+    error_status: extracted.error_status,
+    reason: extracted.raw?.reason,
+    raw: extracted.raw,
+  });
+  if (normalized.failure_class === "content_filter_blocked") return "Spam";
+  if (normalized.failure_class === "recipient_opted_out") return "DNC";
+  if (normalized.failure_class === "invalid_to_number") return "Hard Bounce";
+  if (normalized.failure_class === "recipient_out_of_credit") return "Soft Bounce";
+
   return (
     runtimeDeps.mapTextgridFailureBucket({
       ok: false,
@@ -616,6 +645,22 @@ export async function resolveTextgridDeliveryCorrelation(extracted = {}) {
 export async function handleTextgridDeliveryWebhook(payload = {}) {
   const extracted = extractWebhookPayload(payload);
   const normalized_state = normalizeDeliveryState(extracted.status);
+  const normalized_failure = normalizeTextGridFailure({
+    status: extracted.status,
+    error_message: extracted.error_message,
+    error_status: extracted.error_status,
+    reason: extracted.raw?.reason,
+    raw: extracted.raw,
+  });
+  const normalized_failure_fields = normalized_failure.failure_class
+    ? {
+        failure_class: normalized_failure.failure_class,
+        provider_failure_reason: normalized_failure.provider_failure_reason,
+        normalized_reason: normalized_failure.normalized_reason,
+        retry_allowed: normalized_failure.retry_allowed,
+        is_terminal: normalized_failure.is_terminal,
+      }
+    : {};
   const failure_bucket = deriveFailureBucket(extracted, normalized_state);
   const idempotency_key = buildDeliveryIdempotencyKey(extracted);
   const queue_item_id_from_client_reference = parseQueueItemIdFromClientReference(
@@ -761,6 +806,7 @@ export async function handleTextgridDeliveryWebhook(payload = {}) {
             : null,
         failure_code: extracted.error_status,
         failure_reason: extracted.error_message,
+        ...normalized_failure_fields,
       });
     }
 
@@ -809,6 +855,63 @@ export async function handleTextgridDeliveryWebhook(payload = {}) {
       results,
       idempotency_key,
     };
+
+    if (normalized_state === "Delivered" || normalized_state === "Failed") {
+      try {
+        await runtimeDeps.emitAutomationEvent({
+          event_type:
+            normalized_state === "Delivered"
+              ? "outbound_message_delivered"
+              : "outbound_message_failed",
+          source: "textgrid_delivery",
+          dedupe_key: `textgrid-delivery:${idempotency_key}`,
+          conversation_thread_id: primary_brain_id || null,
+          prospect_id: primary_prospect_id || null,
+          master_owner_id: primary_master_owner_id || null,
+          phone_number_id: primary_phone_item_id || null,
+          queue_item_id:
+            queue_items[0]?.item_id ||
+            exact_queue_item_ids[0] ||
+            queue_item_id_from_client_reference ||
+            null,
+          payload: {
+            provider: "textgrid",
+            provider_message_sid: extracted.message_id || null,
+            message_id: extracted.message_id || null,
+            client_reference_id: extracted.client_reference_id || null,
+            from_phone_number: extracted.from || null,
+            to_phone_number: extracted.to || null,
+            status: extracted.status || null,
+            normalized_state,
+            delivery_status: normalized_state,
+            failure_bucket,
+            error_status: extracted.error_status || null,
+            error_message: extracted.error_message || null,
+            normalized_failure,
+            correlation_mode,
+            queue_results,
+            queue_item_ids: queue_items
+              .map((item) => item?.item_id || null)
+              .filter(Boolean),
+            matched_event_ids: linked_events
+              .map((event_item) => event_item?.item_id || null)
+              .filter(Boolean),
+          },
+        });
+      } catch (automation_error) {
+        logAutomationConsole(AUTOMATION_LOG_TAGS.emit_failed_non_blocking, {
+          source: "textgrid_delivery",
+          message_id: extracted.message_id,
+          normalized_state,
+          error: automation_error?.message || "automation_emit_failed",
+        });
+        runtimeDeps.warn("textgrid.delivery_automation_emit_failed", {
+          message_id: extracted.message_id,
+          normalized_state,
+          error: automation_error?.message || "automation_emit_failed",
+        });
+      }
+    }
 
     await runtimeDeps.notifyDiscordOps({
       event_type: normalized_state === "Delivered" ? "sms_delivered" : normalized_state === "Failed" ? "sms_failed" : "debug_log",

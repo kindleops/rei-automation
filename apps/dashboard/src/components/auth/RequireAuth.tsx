@@ -3,7 +3,22 @@ import { useAuth } from './AuthProvider'
 import { LoginPage } from '../../pages/LoginPage'
 
 export const RequireAuth = ({ children }: { children: ReactNode }) => {
-  const { session, loading } = useAuth()
+  // As requested: bypass auth when VITE_REQUIRE_AUTH !== 'true'
+  const requireAuth = import.meta.env.VITE_REQUIRE_AUTH === 'true'
+  const { session, loading, error } = useAuth()
+
+  if (!requireAuth) {
+    return (
+      <>
+        {error && (
+          <div style={{ background: '#f59e0b', color: '#000', padding: '0.5rem', textAlign: 'center', fontSize: '0.875rem' }}>
+            Warning: Supabase Auth unavailable ({error.message}). Running in local bypass mode.
+          </div>
+        )}
+        {children}
+      </>
+    )
+  }
 
   if (loading) {
     return (

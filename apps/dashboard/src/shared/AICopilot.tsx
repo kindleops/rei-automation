@@ -128,7 +128,7 @@ function generateSuggestions(ctx: CopilotContext): CopilotSuggestion[] {
   const suggestions: CopilotSuggestion[] = []
 
   switch (ctx.surface) {
-    case '/dashboard/live':
+    case '/map':
       suggestions.push({
         id: 'brief-home', type: 'brief', title: 'Dashboard Briefing',
         detail: `${ctx.hotCount ?? 0} hot leads require attention. ${ctx.alertCount ?? 0} alerts active. ${ctx.pendingActions ?? 0} autopilot actions pending review.`,
@@ -171,7 +171,7 @@ function generateSuggestions(ctx: CopilotContext): CopilotSuggestion[] {
         confidence: 71,
       })
       break
-    case '/alerts':
+    case '/analytics':
       suggestions.push({
         id: 'brief-alerts', type: 'brief', title: 'Alerts Briefing',
         detail: 'Active alerts span multiple markets. Critical items need immediate acknowledgment. P0 alerts age faster.',
@@ -183,21 +183,21 @@ function generateSuggestions(ctx: CopilotContext): CopilotSuggestion[] {
         confidence: 90, action: 'ack-alerts', actionLabel: 'Review P0',
       })
       break
-    case '/markets':
+    case '/map':
       suggestions.push({
         id: 'brief-markets', type: 'brief', title: 'Operations Intelligence',
         detail: 'Market coverage nominal. Delivery rates stable. Phoenix showing accelerating pressure.',
         confidence: 87,
       })
       break
-    case '/buyer':
+    case '/buyer-match':
       suggestions.push({
         id: 'brief-buyer', type: 'brief', title: 'Capital Deployment Brief',
         detail: 'Active buyer pool healthy. Match quality averaging 78%. Pre-approved buyers: 62% of active pool.',
         confidence: 83,
       })
       break
-    case '/title':
+    case '/closing-desk':
       suggestions.push({
         id: 'brief-title', type: 'brief', title: 'Execution Status',
         detail: 'Title pipeline normal. No critical blockers. Average days-in-phase within acceptable range.',

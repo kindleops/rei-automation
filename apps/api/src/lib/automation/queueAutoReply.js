@@ -8,6 +8,7 @@ import {
 } from "./templateSelector.js";
 import { ACTIONS, getIntentRoute } from "./intentMap.js";
 import { evaluateContactWindow as defaultWindowCheck } from "@/lib/supabase/sms-engine.js";
+import { enqueueCanonicalOutboundSms } from "@/lib/domain/queue/canonical-queue-writer.js";
 
 import {
   upsertThread,
@@ -267,47 +268,57 @@ export async function queueAutoReply(thread_key, inbound_message_id, { dry_run =
     };
   }
 
-  const { data: queued, error: queueError } = await deps.supabase
-    .from("send_queue")
-    .insert({
+  const enqueue_result = await enqueueCanonicalOutboundSms(
+    {
       thread_key,
       inbound_message_id,
+      source_event_id: inbound_message_id,
+      stage: selection.stage_code || inbound.current_stage || "auto_reply",
       message_body: render.text,
       to_phone_number: inbound.from_phone_number,
       from_phone_number: inbound.to_phone_number,
+      template_id: template.template_id,
+      use_case: selection.use_case,
       queue_status: "queued",
       scheduled_for,
-      template_id: template.template_id,
-      selected_template_id: template.id,
-      sms_agent_id: inbound.sms_agent_id,
-      current_stage: selection.stage_code,
-      stage_before: inbound.current_stage,
-      stage_after,
-      detected_intent: classification.primary_intent,
-      ai_confidence: classification.confidence,
+      language: classification.language || inbound.language || "English",
       metadata: {
         classification_snapshot: classification,
         template_selection_reason: template.matches,
         personalization_context: context.variables,
         seller_temperature,
         memory_used: memory.found,
+        selected_template_id: template.id,
+        sms_agent_id: inbound.sms_agent_id,
+        stage_before: inbound.current_stage,
+        stage_after,
+        detected_intent: classification.primary_intent,
+        ai_confidence: classification.confidence,
       },
-    })
-    .select()
-    .single();
+    },
+    {
+      supabase: deps.supabase,
+      canSendImpl: deps.canSendFn || deps.canSendImpl,
+      insertQueueImpl: deps.insertQueueImpl || deps.enqueue,
+      getSystemValue: deps.getSystemValue,
+    },
+  );
 
-  if (queueError) {
+  if (!enqueue_result.ok) {
     return {
       ok: false,
-      reason: "queue_insert_failed",
-      error: queueError.message,
+      action: enqueue_result.reason === "thread_paused_review" || enqueue_result.reason === "phone_suppressed"
+        ? "gate_blocked"
+        : "enqueue_failed",
+      reason: enqueue_result.reason || "queue_insert_failed",
+      error: enqueue_result.error || null,
     };
   }
 
   return {
     ok: true,
     action: ACTIONS.QUEUE_REPLY,
-    queue_id: queued.id,
+    queue_id: enqueue_result.queue_row_id || enqueue_result.queue_id || enqueue_result.id,
     use_case: selection.use_case,
     rendered_text: render.text,
   };

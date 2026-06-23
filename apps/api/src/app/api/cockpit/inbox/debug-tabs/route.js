@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { withCors, handleOptionsResponse } from '../../_shared.js'
 import { supabase } from '../../../../../lib/supabase/client.js'
 import { resolveInboxThreadState } from '../../../../../lib/domain/inbox/resolveInboxThreadState.js'
 

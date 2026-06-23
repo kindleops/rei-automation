@@ -100,6 +100,19 @@ function normalizeProviderDeliveryStatus(value = null) {
   return "Unknown";
 }
 
+export function mapPodioEventCategory(event_type = null) {
+  switch (lower(event_type)) {
+    case "outbound_send":
+      return "Seller Outbound SMS";
+    case "outbound_send_failed":
+      return "Send Failure";
+    case "inbound_sms":
+      return "Seller Inbound SMS";
+    default:
+      return clean(event_type) || null;
+  }
+}
+
 export function normalizeSellerDeliveryStatus(value = null, fallback = "Sent") {
   const raw = lower(value);
 
@@ -283,7 +296,8 @@ export function buildBaseSellerMessageEventFields({
       toPodioDateField(timestamp || new Date()) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.direction]: clean(direction) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.type]: clean(type) || undefined,
-    [SELLER_MESSAGE_EVENT_FIELDS.event_type]: clean(event_type) || undefined,
+    [SELLER_MESSAGE_EVENT_FIELDS.event_type]:
+      mapPodioEventCategory(event_type) || clean(event_type) || undefined,
     [SELLER_MESSAGE_EVENT_FIELDS.message]: normalized_message_body,
     [SELLER_MESSAGE_EVENT_FIELDS.character_count]: normalized_message_body.length,
     [SELLER_MESSAGE_EVENT_FIELDS.segment_count]:

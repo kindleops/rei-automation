@@ -29,6 +29,14 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = lower(value);
+  if (["1", "true", "yes", "on", "enabled"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) return false;
+  return fallback;
+}
+
 function uniq(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -301,10 +309,14 @@ function buildSelectionDiagnostics({
   selected = null,
   selection_reason = null,
   fallback_reason = null,
+  routing_tier = null,
+  require_local_routing = false,
+  first_touch = false,
 } = {}) {
   return {
     market_id: market_id || null,
     raw_seller_market: clean(raw_seller_market) || null,
+    seller_market: clean(raw_seller_market) || null,
     normalized_seller_market: resolution?.normalized_raw_market || null,
     resolved_sending_zone: resolution?.primary_cluster || null,
     allowed_phone_markets: Array.isArray(resolution?.allowed_phone_markets)
@@ -316,8 +328,13 @@ function buildSelectionDiagnostics({
     selected_item_id: selected?.item_id || null,
     selected_phone_number: selected?.normalized_phone || null,
     selected_phone_market: selected?.market_name || null,
+    selected_textgrid_market: selected?.market_name || null,
+    routing_tier: clean(routing_tier || selection_reason) || null,
     selection_reason: clean(selection_reason) || null,
     fallback_reason: clean(fallback_reason) || null,
+    rejected_candidate_count: Math.max(0, (Array.isArray(all_numbers) ? all_numbers.length : 0) - (selected ? 1 : 0)),
+    require_local_routing: Boolean(require_local_routing),
+    first_touch: Boolean(first_touch),
   };
 }
 
@@ -329,6 +346,10 @@ function buildNoSelectionResult({
   allowed_candidates = [],
   allowed_market_counts = [],
   selection_reason = null,
+  fallback_reason = null,
+  routing_tier = null,
+  require_local_routing = false,
+  first_touch = false,
 } = {}) {
   return {
     item_id: null,
@@ -338,7 +359,10 @@ function buildNoSelectionResult({
     phone_number: "",
     market_name: null,
     selection_reason: clean(selection_reason) || null,
-    fallback_reason: null,
+    fallback_reason: clean(fallback_reason) || null,
+    routing_tier: clean(routing_tier || selection_reason) || null,
+    routing_allowed: false,
+    routing_block_reason: clean(selection_reason) || "NO_VALID_LOCAL_TEXTGRID_NUMBER",
     selection_diagnostics: buildSelectionDiagnostics({
       market_id,
       raw_seller_market,
@@ -348,7 +372,10 @@ function buildNoSelectionResult({
       allowed_market_counts,
       selected: null,
       selection_reason,
-      fallback_reason: null,
+      fallback_reason,
+      routing_tier,
+      require_local_routing,
+      first_touch,
     }),
   };
 }
@@ -360,6 +387,9 @@ export async function chooseTextgridNumber({
   preferred_language = null,
   rotation_key = null,
   candidate_records = null,
+  first_touch = null,
+  require_local_routing = null,
+  allow_regional_fallback_for_first_touch = null,
 } = {}) {
   const market_id =
     context?.ids?.market_id ||
@@ -379,6 +409,21 @@ export async function chooseTextgridNumber({
     classification?.language ||
     context?.summary?.language_preference ||
     "English";
+  const first_touch_required = asBoolean(
+    first_touch ?? context?.summary?.first_touch,
+    Number(context?.summary?.touch_number || 0) === 1
+  );
+  const local_routing_required = asBoolean(
+    require_local_routing ?? context?.summary?.require_local_routing ?? process.env.REQUIRE_LOCAL_ROUTING,
+    false
+  );
+  const first_touch_regional_override = asBoolean(
+    allow_regional_fallback_for_first_touch ??
+      context?.summary?.allow_regional_fallback_for_first_touch ??
+      process.env.ALLOW_REGIONAL_FALLBACK_FOR_FIRST_TOUCH,
+    false
+  );
+  const exact_market_required = local_routing_required || first_touch_required;
 
   info("routing.choose_textgrid_number_started", {
     phone_item_id: context?.ids?.phone_item_id || null,
@@ -405,6 +450,8 @@ export async function chooseTextgridNumber({
       allowed_candidates: [],
       allowed_market_counts: [],
       selection_reason: "no_textgrid_numbers_available",
+      require_local_routing: local_routing_required,
+      first_touch: first_touch_required,
     });
   }
 
@@ -425,6 +472,8 @@ export async function chooseTextgridNumber({
       allowed_candidates: [],
       allowed_market_counts: [],
       selection_reason: resolution.reason,
+      require_local_routing: local_routing_required,
+      first_touch: first_touch_required,
     });
   }
 
@@ -470,23 +519,29 @@ export async function chooseTextgridNumber({
         (record) => lower(normalizeMarketLabel(record.market_name)) === normalizedExact
       ),
     },
-    {
-      tier: "alias_market_match",
-      reason: "alias_market_match",
-      candidates:
-        normalizedAlias === normalizedExact
-          ? []
-          : scored.filter(
-              (record) => lower(normalizeMarketLabel(record.market_name)) === normalizedAlias
-            ),
-    },
-    {
-      tier: "regional_cluster_fallback",
-      reason: "regional_cluster_fallback",
-      candidates: scored.filter((record) =>
-        clusterMarkets.includes(lower(normalizeMarketLabel(record.market_name)))
-      ),
-    },
+    ...(
+      exact_market_required
+        ? []
+        : [
+            {
+              tier: "alias_market_match",
+              reason: "alias_market_match",
+              candidates:
+                normalizedAlias === normalizedExact
+                  ? []
+                  : scored.filter(
+                      (record) => lower(normalizeMarketLabel(record.market_name)) === normalizedAlias
+                    ),
+            },
+            {
+              tier: "regional_cluster_fallback",
+              reason: "regional_cluster_fallback",
+              candidates: scored.filter((record) =>
+                clusterMarkets.includes(lower(normalizeMarketLabel(record.market_name)))
+              ),
+            },
+          ]
+    ),
   ];
 
   for (const tier of deterministic_tiers) {
@@ -509,6 +564,9 @@ export async function chooseTextgridNumber({
   }
 
   if (!selected) {
+    const no_selection_reason = exact_market_required
+      ? "NO_VALID_LOCAL_TEXTGRID_NUMBER"
+      : selection_reason;
     warn("routing.choose_textgrid_number_no_match", {
       market_id,
       raw_seller_market,
@@ -517,6 +575,10 @@ export async function chooseTextgridNumber({
       language,
       available_count: scored.length,
       allowed_candidate_count: allowed_candidates.length,
+      require_local_routing: local_routing_required,
+      first_touch: first_touch_required,
+      rejected_candidate_count: scored.length,
+      selection_reason: no_selection_reason,
     });
     return buildNoSelectionResult({
       market_id,
@@ -525,7 +587,13 @@ export async function chooseTextgridNumber({
       all_numbers,
       allowed_candidates,
       allowed_market_counts,
-      selection_reason,
+      selection_reason: no_selection_reason,
+      fallback_reason: exact_market_required
+        ? "exact_market_match_required"
+        : null,
+      routing_tier: "blocked",
+      require_local_routing: local_routing_required,
+      first_touch: first_touch_required,
     });
   }
 
@@ -539,6 +607,9 @@ export async function chooseTextgridNumber({
     selected,
     selection_reason,
     fallback_reason,
+    routing_tier: selection_reason,
+    require_local_routing: local_routing_required,
+    first_touch: first_touch_required,
   });
 
   info("routing.choose_textgrid_number_completed", {
@@ -553,12 +624,21 @@ export async function chooseTextgridNumber({
     phone_number: selected.normalized_phone,
     selection_reason,
     fallback_reason,
+    routing_tier: selection_reason,
+    selected_textgrid_market: selected.market_name,
+    seller_market: raw_seller_market,
+    rejected_candidate_count: Math.max(0, scored.length - 1),
   });
 
   return {
     ...selected,
     selection_reason,
     fallback_reason,
+    routing_tier: selection_reason,
+    routing_allowed: true,
+    selected_textgrid_market: selected.market_name || null,
+    seller_market: raw_seller_market || null,
+    rejected_candidate_count: Math.max(0, scored.length - 1),
     selection_diagnostics,
   };
 }

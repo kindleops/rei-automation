@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread } from './inbox.adapter'
-import { preloadKpis } from '../../lib/data/operationalKpis'
 import './inbox-universal.css'
 import {
   updateThreadStage,
@@ -33,8 +33,10 @@ import { executeAutoReply } from '../../lib/data/inboxAutoReply'
 
 import {
   getQueueProcessorHealth,
-  getThreadIntelligence,
+  getThreadHydrationForThread,
+  getThreadMessagesPageForThread,
   getThreadMessagesForThread,
+  getConversationThreadIdForThread,
   getThreadContext,
   queueReplyFromInbox,
   scheduleReplyFromInbox,
@@ -46,46 +48,48 @@ import {
   dedupeMessages,
   toThreadMessage,
 } from '../../lib/data/inboxData'
-import { ErrorBoundary } from '../../shared/ErrorBoundary'
+import { getDealContextByProperty, getDealContextByThread, normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
-import { fetchThreadDossier, type ThreadDossier } from '../../lib/data/threadDossier'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
-import { getQueueControlSettings, updateQueueControlSettings, getBackendApiSecretDebugSafe, getBackendBaseUrl } from '../../lib/api/backendClient'
+import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
+import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
+import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
 import { NexusTopBar } from './components/NexusTopBar'
-import { type QueueCommandCaps, type QueueCommandMode } from './components/QueueCommandCenter'
+import { type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './components/QueueCommandCenter'
 import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
-import { InboxDiagnosticsBanner } from './components/InboxDiagnosticsBanner'
-
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
-import { CompIntelligenceWorkspace } from './components/CompIntelligenceWorkspace'
+import { CompIntelligenceWorkspace } from '../../views/comp-intelligence/CompIntelligenceWorkspace'
 import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
-import { SendQueueDashboard } from './components/SendQueueDashboard'
-import { InboxPipelineView } from './components/InboxPipelineView'
-import { InboxCalendarView } from './components/InboxCalendarView'
+import { QueuePage } from '../../views/queue/QueuePage'
+import { PipelineWorkspace } from '../../views/pipeline/PipelineWorkspace'
+import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import { MetricsWarRoom } from './components/MetricsWarRoom'
 import type { TemplateActionPayload } from './components/TemplatePopover'
 import { InboxActivityPanel } from './components/InboxActivityPanel'
-import { InboxCommandMap, type MapStyleMode } from './InboxCommandMap'
+import { InboxCommandMap, type MapStyleMode } from '../../views/map/InboxCommandMap'
 import { InboxUtilityDrawer, MapDossierDrawer } from './components/InboxUtilityDrawer'
 import { LiveCopilotChat } from '../copilot/components/LiveCopilotChat'
-import { AdvancedFiltersPopover } from './components/AdvancedFiltersPopover'
+import { AdvancedFiltersModal } from './components/AdvancedFiltersModal'
 import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
+import { InboxCampaignView } from '../../views/campaign-command/InboxCampaignView'
+import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
+import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
   type BuyerMapFilters,
-} from '../buyer/buyerCommandData'
+} from '../../views/buyer-match/buyerCommandData'
 
 import { translateText } from './translate.api'
 import { buildThreadCommandIntel, type ThreadCommandIntel } from './ai-command-center'
@@ -103,8 +107,9 @@ import {
   openMapMode,
   resetLayoutMode,
   type ActiveOverlay,
+  type InboxLayoutState,
   type MapSourceMode,
-} from './inbox-layout-state'
+} from '../../domain/inbox/inbox-layout-state'
 import {
   buildContextFromActivityEvent,
   buildContextFromCalendarEvent,
@@ -114,6 +119,36 @@ import {
   type InboxWorkspaceView,
   type SetActiveContextOptions,
 } from './active-context'
+import { EntityGraphWorkspace } from '../entity-graph/EntityGraphWorkspace'
+import type { EntityGraphAction } from '../../domain/entity-graph/entity-graph.types'
+import { routeEntityGraphAction } from '../../domain/entity-graph/entity-graph-route-actions'
+import {
+  activeInboxFromUniversalContext,
+  EMPTY_UNIVERSAL_ENTITY_CONTEXT,
+  mergeUniversalContexts,
+  parseEntityGraphDeepLink,
+  syncUniversalContextToUrl,
+  universalContextFromActiveInbox,
+} from '../../domain/entity-graph/universal-entity-context'
+import type { UniversalEntityContext } from '../../domain/entity-graph/entity-graph.types'
+import {
+  patchUniversalEntityContextSnapshot,
+  setUniversalEntityContextSnapshot,
+  subscribeUniversalEntityContext,
+} from '../../domain/entity-graph/universal-entity-context-store'
+import {
+  activeContextMatchesThread,
+  dealContextFromActiveInbox,
+  findThreadByRef,
+  findThreadForActiveContext,
+  hasEntityAnchor,
+  resolveCanonicalWorkspaceContext,
+  resolveInboxHighlightId,
+  syncPayloadFromOpportunity,
+  syncPayloadFromUniversal,
+  threadStubFromActiveContext,
+} from '../../domain/entity-graph/universal-sync'
+import type { PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
 import {
   applyInboxFilters,
   getAdvancedFilterOptions,
@@ -126,20 +161,35 @@ import {
   type InboxStageSelectValue,
   type InboxViewSelectValue,
 } from './inbox-ui-helpers'
-import { buildConversationDecision } from './inbox-decisioning'
-import { getViewLayoutMode, type ViewWidthPercent } from './view-layout'
+import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
+import {
+  buildAdvancedFilterChips,
+  clearAllAdvancedFilters,
+  countActiveAdvancedFilters,
+  hasActiveAdvancedFilters,
+  serializeAdvancedFiltersForServer,
+} from '../../domain/inbox/inbox-advanced-filter-engine'
+import { getViewLayoutMode, type ViewWidthPercent } from '../../domain/inbox/view-layout'
 import './inbox-premium.css'
-import './inbox-rebuild.css'
-import './inbox-rebuild-v2.css'
+// inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
 import './inbox-polish.css'
-import './buyer-intel-upgrade.css'
-import './copilot/copilot.css'
+import './notification-hud.css'
+import './inbox-density-25.css' // compact nx-row25 styles for rail25/review50 modes
+import './inbox-elite-ui.css' // full-header gradient + category rail + four-zone rows
+import './inbox-workspace-layout.css' // 25/50/75/100 workspace mode layout system
+import '../../views/buyer-match/buyer-intel-upgrade.css'
+import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/copilot.css)
 import './conversation-redesign.css'
-import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../command-center/command.types'
+import './conversation-composer-premium.css'
+import './conversation-header-timeline.css'
+// !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
+import '../../styles/nx-ui-foundation-final.css'
+import './conversation-live.css'
+import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
-import type { NexusGlobalThemeId } from '../theme/nexusThemes'
+import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -191,6 +241,7 @@ const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; de
   { key: 'thread', label: 'Inbox', description: 'Acquisition thread rail with priority buckets and live sellers.' },
   { key: 'sms_thread', label: 'Conversation View', description: 'Full seller conversation with quick actions and composer.' },
   { key: 'list', label: 'List View', description: 'Dense sortable thread list across the acquisition inbox.' },
+  { key: 'entity_graph', label: 'Entity Graph', description: 'Universal entity selector across properties, owners, people, and contact methods.' },
   { key: 'deal_intelligence', label: 'Deal Intelligence', description: 'Full-screen seller, property, offer, and timeline intelligence.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signature timelines.' },
   { key: 'command_map', label: 'Command Map View', description: 'Cinematic acquisition map with ticker, pins, and live activity.' },
@@ -200,6 +251,9 @@ const WORKSPACE_VIEW_OPTIONS: Array<{ key: InboxWorkspaceView; label: string; de
   { key: 'metrics', label: 'Metrics View', description: 'Inbox KPI command center with automation and reply health.' },
   { key: 'comp_intelligence', label: 'Comp Intelligence View', description: 'Subject property, ARV, offer range, and comp signals.' },
   { key: 'buyer_match', label: 'Buyer Match View', description: 'Buyer demand, dispo fit, and buyer-match readiness.' },
+  { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
+  { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
+  { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
 ]
 
 type NexusWorkspaceKey =
@@ -314,9 +368,13 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'pipeline', label: 'Pipeline', description: 'Stage flow and deal movement.' },
   { key: 'calendar', label: 'Calendar', description: 'Follow-up schedule and event timeline.' },
   { key: 'list', label: 'List', description: 'Dense sortable thread command list.' },
+  { key: 'entity_graph', label: 'Entity Graph', description: 'Universal entity search, dossier, and relationship selector.' },
   { key: 'command_map', label: 'Map', description: 'Command map for market and routing context.' },
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
   { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
+  { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
+  { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
+  { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
 ]
 
 const MAX_TOGGLED_VIEWS = 4
@@ -330,6 +388,39 @@ const DEFAULT_WORKSPACE_WIDTHS: Partial<Record<InboxWorkspaceView, ViewWidthPerc
 const sumWidths = (values: ViewWidthPercent[]) => values.reduce((total, value) => total + Number(value), 0)
 const cloneDefaultWorkspaceViews = (): InboxWorkspaceView[] => [...DEFAULT_WORKSPACE_VIEWS]
 const cloneDefaultWorkspaceWidths = (): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => ({ ...DEFAULT_WORKSPACE_WIDTHS })
+
+type InboxRouteMode = 'workspace' | 'fullscreen'
+
+type InboxPageProps = {
+  initialWorkspaceView?: InboxWorkspaceView
+  routeMode?: InboxRouteMode
+}
+
+const resolveRouteEntryView = (
+  routeMode: InboxRouteMode,
+  initialWorkspaceView?: InboxWorkspaceView,
+): InboxWorkspaceView | undefined => {
+  if (routeMode !== 'fullscreen') return initialWorkspaceView
+  return initialWorkspaceView ?? 'thread'
+}
+
+const getInitialWorkspaceViews = (
+  initialWorkspaceView?: InboxWorkspaceView,
+  routeMode: InboxRouteMode = 'workspace',
+): InboxWorkspaceView[] => {
+  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
+  if (entryView) return [entryView]
+  return cloneDefaultWorkspaceViews()
+}
+
+const getInitialWorkspaceWidths = (
+  initialWorkspaceView?: InboxWorkspaceView,
+  routeMode: InboxRouteMode = 'workspace',
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
+  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
+  if (entryView) return {}
+  return cloneDefaultWorkspaceWidths()
+}
 const DEFAULT_WORKSPACE_KEY: NexusWorkspaceKey = 'deal_desk'
 const WORKSPACE_VIEWS_STORAGE_KEY = 'nx.inbox.workspace-views-by-key'
 const isDefaultWorkspaceSet = (views: InboxWorkspaceView[]) =>
@@ -406,33 +497,38 @@ const computeWorkspaceWidths = (
   } as Record<InboxWorkspaceView, ViewWidthPercent>
 }
 
-export default function InboxPage() {
-  return (
-    <ErrorBoundary fallbackName="InboxPage">
-      <InboxPageInternal />
-    </ErrorBoundary>
-  )
+const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): QueueCommandMode => {
+  const campaignMode = String(diagnostics?.campaign_mode || '').toLowerCase()
+  const processorMode = String(diagnostics?.queue_processor_mode || '').toLowerCase()
+  if (campaignMode === 'paused' || processorMode === 'off' || processorMode === 'paused') return 'paused'
+  if (campaignMode === 'live_limited' || processorMode === 'live' || processorMode === 'automatic') return 'automatic'
+  return 'assisted'
 }
 
-function InboxPageInternal() {
-  const DEV = import.meta.env.DEV
-
-  useEffect(() => {
-    preloadKpis()
-  }, [])
-
-  const { 
-    data, 
-    loading: dataLoading, 
+export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace' }: InboxPageProps = {}) {
+  const isRouteFullscreen = routeMode === 'fullscreen'
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messageRefetchKey, setMessageRefetchKey] = useState(0)
+  const {
+    data,
+    loading: _dataLoading,
     refresh: refreshInbox,
     loadMore,
     recentlyUpdatedThreadIds,
     sourceMode,
     setSourceMode
-  } = useInboxData()
+  } = useInboxData({ paused: messagesLoading })
+  const { user, loading: authLoading, signOut } = useAuth()
+  const DEV = Boolean(import.meta.env.DEV)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [activeContext, setActiveContextState] = useState<ActiveInboxContext>({ sourceView: 'inbox' })
+  const [previewContext, setPreviewContext] = useState<ActiveInboxContext | null>(null)
+  const effectiveActiveContext = previewContext ?? activeContext
+  const [universalEntityContext, setUniversalEntityContext] = useState<UniversalEntityContext>(() => {
+    const deepLink = typeof window !== 'undefined' ? parseEntityGraphDeepLink(window.location.pathname) : null
+    return deepLink ?? EMPTY_UNIVERSAL_ENTITY_CONTEXT
+  })
   const [stageFilter, setStageFilter] = useState<InboxStageSelectValue>('all_stages')
   const [viewFilter, setViewFilter] = useState<InboxViewSelectValue>('all_messages' as any)
   const [savedPreset, setSavedPreset] = useState<InboxSavedFilterPreset>('my_priority')
@@ -440,8 +536,8 @@ function InboxPageInternal() {
   const [rightViewFilter, setRightViewFilter] = useState<InboxViewSelectValue>('new_replies')
   const [rightSavedPreset, setRightSavedPreset] = useState<InboxSavedFilterPreset>('new_inbounds')
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<NexusWorkspaceKey>(DEFAULT_WORKSPACE_KEY)
-  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(cloneDefaultWorkspaceViews)
-  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(cloneDefaultWorkspaceWidths)
+  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() => getInitialWorkspaceViews(initialWorkspaceView, routeMode))
+  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() => getInitialWorkspaceWidths(initialWorkspaceView, routeMode))
   const [tableSort, setTableSort] = useState<ConversationTableSort>('last_activity_desc')
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
@@ -450,15 +546,17 @@ function InboxPageInternal() {
   const [selectedBuyerKey, setSelectedBuyerKey] = useState<string | null>(null)
   const [draftText, setDraftText] = useState('')
   const [selectedMessages, setSelectedMessages] = useState<ThreadMessage[]>([])
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false)
   const [pendingMessagesByThread, setPendingMessagesByThread] = useState<Record<string, ThreadMessage[]>>({})
   const [visibleThreadCount, setVisibleThreadCount] = useState(1000)
   const [mapSourceMode, setMapSourceMode] = useState<MapSourceMode>(defaultMapSourceMode)
   const [commandMapTheme, setCommandMapTheme] = useState<MapStyleMode>('dark_ops')
   const [commandMapMarket, setCommandMapMarket] = useState('')
 
-  const [messagesLoading, setMessagesLoading] = useState(false)
   const [threadContext, setThreadContext] = useState<ThreadContext | null>(null)
   const [threadIntelligence, setThreadIntelligence] = useState<ThreadIntelligenceRecord | null>(null)
+  const [dealContext, setDealContext] = useState<DealContext | null>(null)
   const [queueProcessorHealth, setQueueProcessorHealth] = useState<QueueProcessorHealth | null>(null)
   const [queueProcessorHealthLoading, setQueueProcessorHealthLoading] = useState(false)
   const [activeNexusThemeId, setActiveNexusThemeId] = useState<NexusGlobalThemeId>(() => {
@@ -466,10 +564,12 @@ function InboxPageInternal() {
     return (initial as NexusGlobalThemeId) || 'dark'
   })
   const [activeAccentPalette, setActiveAccentPalette] = useState<AccentPalette>(() => loadSettings().accentPalette)
-  const [queueCommandMode, setQueueCommandMode] = useState<QueueCommandMode>('off')
+  const [queueCommandMode, setQueueCommandMode] = useState<QueueCommandMode>('paused')
   const [queueCommandCaps, setQueueCommandCaps] = useState<QueueCommandCaps>(DEFAULT_QUEUE_COMMAND_CAPS)
   const [queueCommandActionLoading, setQueueCommandActionLoading] = useState<string | null>(null)
+  const [queueControlDiagnostics, setQueueControlDiagnostics] = useState<CampaignControlDiagnostics | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
+  const heavyLoadPaused = _dataLoading || messagesLoading
   const [threadViewMode, setThreadViewMode] = useState<ThreadTranslateViewMode>('original')
   const [threadTranslations, setThreadTranslations] = useState<Record<string, string>>({})
   const [detectedThreadLanguage, setDetectedThreadLanguage] = useState<string | null>(null)
@@ -480,11 +580,23 @@ function InboxPageInternal() {
   const [scheduledTime, setScheduledTime] = useState<ScheduledTime | null>(null)
   const [scheduledTemplatePayload, setScheduledTemplatePayload] = useState<TemplateActionPayload | null>(null)
   // translate panel is now local to Composer; showTranslation drives nothing
-  const [layoutState, setLayoutState] = useState(defaultInboxLayoutState)
+  const [layoutState, setLayoutState] = useState<InboxLayoutState>(() => ({
+    ...defaultInboxLayoutState,
+    theme: resolveDataThemeAttr(loadSettings().nexusTheme) === 'light' ? 'light' : 'dark',
+  }))
   const [dossierFull, setDossierFull] = useState(false)
-  const [threadDossier, setThreadDossier] = useState<ThreadDossier | null>(null)
-  const [dossierLoading, setDossierLoading] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
+  const hasLoadedInitialInboxRef = useRef(false)
+  const hasLoggedThemeRef = useRef(false)
+  // Tracks whether the live inbox has resolved at least once — gates heavy background queries.
+  const heavyQueriesStartedRef = useRef(false)
+  const autonomyQueriesStartedRef = useRef(false)
+  const healthIntervalRef = useRef<number | null>(null)
+  const autonomyIntervalRef = useRef<number | null>(null)
+  // Stable ref to selected thread — lets message effect depend on key (string) not object reference
+  const selectedRef = useRef<InboxWorkflowThread | null>(null)
+  const selectedThreadFallbackRef = useRef<InboxWorkflowThread | null>(null)
+  const publishingUniversalRef = useRef(false)
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -497,61 +609,41 @@ function InboxPageInternal() {
   const messageCacheRef = useRef<Record<string, ThreadMessage[]>>({})
   const optimisticMessageMapRef = useRef<Map<string, string>>(new Map()) // clientSendId → optimisticMessage.id
   const inFlightSendMapRef = useRef<Set<string>>(new Set()) // clientSendIds currently in-flight
+  const prevThreadsRef = useRef<InboxWorkflowThread[]>([])
+  useEffect(() => {
+    console.log('[InboxPage] mounted')
+  }, [initialWorkspaceView])
+
   const rawThreads = useMemo(() => (data.threads ?? []).map(toWorkflowThread), [data.threads])
   const threads = useMemo(() => {
     return rawThreads.map(t => optimisticPatches[t.id] ? { ...t, ...optimisticPatches[t.id] } : t)
   }, [rawThreads, optimisticPatches])
 
-  // GLOBAL ERROR LISTENERS
-  useEffect(() => {
-    const handleWindowError = (e: ErrorEvent) => {
-      console.error('[INBOX CRASH EVENT]', {
-        message: e.message,
-        stack: e.error?.stack,
-        selectedThreadKey
-      })
-    }
-    const handleRejection = (e: PromiseRejectionEvent) => {
-      console.error('[INBOX UNHANDLED REJECTION]', {
-        reason: e.reason,
-        selectedThreadKey
-      })
-    }
-    window.addEventListener('error', handleWindowError)
-    window.addEventListener('unhandledrejection', handleRejection)
-    return () => {
-      window.removeEventListener('error', handleWindowError)
-      window.removeEventListener('unhandledrejection', handleRejection)
-    }
-  }, [selectedThreadKey])
+  // O(1) lookups — replaces threads.find() in the hot selected-thread path
+  const threadById = useMemo(
+    () => new Map(threads.map((t) => [t.id, t])),
+    [threads],
+  )
+  const threadByKey = useMemo(
+    () => {
+      const byKey = new Map<string, InboxWorkflowThread>()
+      for (const thread of threads) {
+        const conversationId = getConversationThreadIdForThread(thread)
+        if (conversationId) byKey.set(conversationId, thread)
+        if (thread.threadKey) byKey.set(thread.threadKey, thread)
+        if (thread.id) byKey.set(thread.id, thread)
+      }
+      return byKey
+    },
+    [threads],
+  )
 
+  // Phase 2 trace — log whether the thread array reference is stable across refreshes
   useEffect(() => {
-    console.log('[INBOX STATE SNAPSHOT BEFORE RENDER]', {
-      threadsCount: threads.length,
-      selectedThreadKey,
-      selectedThread: selectedId,
-      dossierStatus: dossierLoading ? 'loading' : threadDossier ? 'loaded' : 'null',
-      dossierKeys: threadDossier ? Object.keys(threadDossier) : [],
-      prospectType: typeof threadDossier?.prospect,
-      propertyType: typeof threadDossier?.property,
-      masterOwnerType: typeof threadDossier?.master_owner,
-    })
-  }, [threads.length, selectedThreadKey, selectedId, dossierLoading, threadDossier])
-
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    const withCoords = threads.filter((t) => {
-      const lat = (t as any).lat ?? (t as any).latitude ?? 0
-      const lng = (t as any).lng ?? (t as any).longitude ?? 0
-      return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0
-    })
-    console.log('[InboxPage]', {
-      rawThreads: rawThreads.length,
-      threadsAfterPatches: threads.length,
-      withCoords: withCoords.length,
-      sampleLat: withCoords[0] ? ((withCoords[0] as any).lat ?? (withCoords[0] as any).latitude) : null,
-      sampleLng: withCoords[0] ? ((withCoords[0] as any).lng ?? (withCoords[0] as any).longitude) : null,
-    })
-  }
+    const stable = threads === prevThreadsRef.current
+    console.log('[THREADS_CHANGED]', { stable, length: threads.length })
+    prevThreadsRef.current = threads
+  }, [threads])
 
   const mapThreads = useMemo(() => {
     const pins = data.mapPins ?? []
@@ -597,7 +689,7 @@ function InboxPageInternal() {
     return [...hydrated, ...synthetic]
   }, [data.mapPins, threads])
 
-  const advancedFilterOptions = useMemo(() => getAdvancedFilterOptions(threads), [threads])
+  void useMemo(() => getAdvancedFilterOptions(threads), [threads])
   const decisions = useMemo(
     () => new Map(threads.map((thread) => [thread.id, buildConversationDecision(thread)])),
     [threads],
@@ -640,48 +732,58 @@ function InboxPageInternal() {
       return Number.isFinite(ts) && ts >= startOfDay && String(thread.deliveryStatus || '').toLowerCase() === 'delivered'
     }).length
 
-    // Canonical counts come from backend contract (/api/cockpit/inbox/threads).
+    // Category tab counts must be global backend counts (pagination-safe).
+    // Do NOT fall back to visible-row counts when the server returns 0 —
+    // that causes phantom count inflation when counts genuinely drop to zero.
     const srv = data.counts ?? {}
-    const sv = (key: string) => {
+    const sv = (key: string, fallback: number) => {
       const v = srv[key]
-      return (typeof v === 'number' && v >= 0) ? v : 0
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v
+      return fallback
     }
-    const newReplies = sv('new_replies')
-    const hotLeads = sv('priority')
-    const needsReview = sv('needs_review')
-    const automated = 0
-    const coldNoResp = sv('cold')
-    const suppressed = sv('suppressed')
-    const allCount = sv('all_messages')
-    const priorityCount = sv('priority')
-    const followUpCount = sv('follow_up')
-    const activeCount = Math.max(0, allCount - suppressed)
+
+    const allCount = sv('all', data.allInboxCount ?? local.all)
+    const newReplies = sv('new_replies', sv('new_inbound', sv('needs_reply', local.new_replies)))
+    const priorityCount = sv('priority', sv('hot_leads', local.priority ?? local.hot_leads))
+    const needsReview = sv('needs_review', sv('manual_review', local.needs_review))
+    const followUpCount = sv('follow_up', sv('follow_up_due', local.follow_up ?? local.follow_up_due ?? 0))
+    const suppressed = sv('suppressed', sv('dnc_opt_out', local.suppressed))
+    const coldNoResp = sv('cold', sv('cold_no_response', local.cold ?? local.cold_no_response))
+    const deadCount = sv('dead', local.dead ?? local.wrong_number ?? 0)
+    const automated = sv('automated', sv('auto_replied', local.automated))
+    const hotLeads = sv('hot_leads', local.hot_leads)
+    const activeCount = sv('active', local.active)
+    const waitingCount = sv('waiting', sv('waiting_on_seller', local.waiting ?? local.waiting_on_seller ?? 0))
 
     return {
       ...local,
+      all_messages: allCount,
       new_replies: newReplies,
       priority: priorityCount,
       negotiating: local.negotiating,
       // canonical bucket keys (sidebar uses these)
       follow_up: followUpCount,
       cold: coldNoResp,
+      dead: deadCount,
       suppressed,
       // legacy aliases kept for backwards compat
       follow_up_due: followUpCount,
-      waiting_on_seller: local.waiting_on_seller,
+      waiting_on_seller: waitingCount,
       automated,
       hot_leads: hotLeads,
       needs_review: needsReview,
       cold_no_response: coldNoResp,
+      wrong_number: deadCount,
       failed: local.failed,
       all: allCount,
       active: activeCount,
+      waiting: waitingCount,
       my_priority: priorityCount,
       new_inbounds: newReplies,
       offer_needed: followUpCount,
       review_required: needsReview,
       active_conversations: activeCount,
-      waiting_for_reply: local.waiting_on_seller,
+      waiting_for_reply: waitingCount,
       all_threads: allCount,
       archived_leads: local.archived,
       wrong_numbers: local.wrong_number,
@@ -694,70 +796,125 @@ function InboxPageInternal() {
     }
   }, [data.allInboxCount, data.counts, decisions, threads])
 
+  const serverAdvancedPayload = useMemo(
+    () => serializeAdvancedFiltersForServer(advancedFilters, { stage: stageFilter, view: viewFilter }),
+    [advancedFilters, stageFilter, viewFilter],
+  )
+
   const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
     skipViewFilter: false,
     skipStageFilter: false,
-  }), [])
+    skipAdvancedFilter: hasActiveAdvancedFilters(advancedFilters),
+  }), [advancedFilters])
 
-  const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => (
-    applyInboxFilters(threads, {
+  const resolveThreadsForView = useCallback((view: InboxViewSelectValue) => {
+    return applyInboxFilters(threads, {
       search: searchQuery,
       stage: stageFilter,
       view,
       advanced: advancedFilters,
     }, serverFilterOptions)
-  ), [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads])
+  }, [advancedFilters, searchQuery, serverFilterOptions, stageFilter, threads])
 
-  const listStatCounts = useMemo(() => {
-    const counts = {
-      new_replies: resolveThreadsForView('new_replies').length,
-      priority: resolveThreadsForView('priority').length,
-      needs_review: resolveThreadsForView('needs_review').length,
-      follow_up_due: resolveThreadsForView('follow_up_due').length,
-      automated: resolveThreadsForView('automated').length,
-    }
-    return [
-      { label: 'New Replies', value: counts.new_replies },
-      { label: 'Priority', value: counts.priority },
-      { label: 'Needs Review', value: counts.needs_review },
-      { label: 'Follow-Up Due', value: counts.follow_up_due },
-      { label: 'Auto-Eligible', value: counts.automated },
-    ]
-  }, [resolveThreadsForView])
-
-
+  const listStatCounts = useMemo(() => [
+    { label: 'New Replies', value: viewCounts.new_replies ?? 0 },
+    { label: 'Priority', value: viewCounts.priority ?? 0 },
+    { label: 'Needs Review', value: viewCounts.needs_review ?? 0 },
+    { label: 'Follow-Up Due', value: viewCounts.follow_up ?? 0 },
+    { label: 'Auto-Eligible', value: viewCounts.automated ?? 0 },
+  ], [viewCounts])
 
   const filtered = useMemo(() => resolveThreadsForView(viewFilter), [resolveThreadsForView, viewFilter])
-
-  // Pipeline view shows all loaded threads (not just priority-filtered ones).
-  // Search and advanced filters still apply; view filter is intentionally skipped
-  // so the kanban represents the full seller universe, not just unread/high-score threads.
-  const pipelineThreads = useMemo(() => (
-    applyInboxFilters(threads, {
-      search: searchQuery,
-      stage: 'all_stages',
-      view: 'all_conversations',
-      advanced: advancedFilters,
-    }, { skipViewFilter: false, skipStageFilter: false })
-  ), [advancedFilters, searchQuery, threads])
 
   const handleLoadMore = useCallback(async () => {
     await loadMore()
     setVisibleThreadCount(prev => prev + 200)
   }, [loadMore])
 
+  const currentInboxQuery = useMemo(() => ({
+    view: viewFilter,
+    stage: stageFilter,
+    query: searchQuery,
+    advanced: serverAdvancedPayload,
+  }), [searchQuery, serverAdvancedPayload, stageFilter, viewFilter])
+
+  const activeAdvancedFilterCount = useMemo(
+    () => countActiveAdvancedFilters(advancedFilters),
+    [advancedFilters],
+  )
+
+  const activeAdvancedFilterChips = useMemo(
+    () => buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter }).map((chip) => ({
+      key: chip.key,
+      label: chip.label,
+    })),
+    [advancedFilters, stageFilter, viewFilter],
+  )
+
   const selected = useMemo(() => {
     if (selectedId) {
-      const byId = threads.find((thread) => thread.id === selectedId)
+      const byId = threadById.get(selectedId)
       if (byId) return byId
     }
     if (selectedThreadKey) {
-      const byThreadKey = threads.find((thread) => (thread.threadKey || thread.id) === selectedThreadKey)
-      if (byThreadKey) return byThreadKey
+      const byKey = threadByKey.get(selectedThreadKey)
+      if (byKey) return byKey
     }
-    return selectedId ? null : (filtered[0] ?? threads[0] ?? null)
-  }, [filtered, threads, selectedId, selectedThreadKey])
-  const buyerCommandData = useBuyerCommandData(selected, buyerFilters)
+    const fallback = selectedThreadFallbackRef.current
+    if (fallback) {
+      if (selectedId && fallback.id === selectedId) return fallback
+      if (selectedThreadKey && (getConversationThreadIdForThread(fallback) || fallback.threadKey || fallback.id) === selectedThreadKey) return fallback
+    }
+    const hasExternalContext = hasEntityAnchor(effectiveActiveContext)
+    if (selectedId || hasExternalContext) return null
+    return filtered[0] ?? threads[0] ?? null
+  }, [effectiveActiveContext.masterOwnerId, effectiveActiveContext.opportunityId, effectiveActiveContext.propertyId, effectiveActiveContext.sellerId, effectiveActiveContext.threadKey, filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
+
+  // Keep ref in sync so message effect reads latest thread without it being a dep
+  selectedRef.current = selected
+  // Stable string key — message effect deps on this so it only fires when the thread changes,
+  // not on every inbox refresh that produces a new `selected` object reference
+  const selectedKeyForEffect = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || selected.id) : null
+  // Snapshots for use in useMemo deps — avoids optional-chaining in dep arrays
+  const selectedThreadKeySnapshot = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || null) : null
+  const selectedIdSnapshot = selected?.id ?? null
+
+  const canonicalSelectedContext = useMemo(
+    () => resolveCanonicalWorkspaceContext({
+      selected,
+      dealContext,
+      activeContext: effectiveActiveContext,
+    }),
+    [selected, dealContext, effectiveActiveContext],
+  )
+
+  const workspaceThread = useMemo(
+    () => selected ?? threadStubFromActiveContext(effectiveActiveContext, canonicalSelectedContext),
+    [selected, effectiveActiveContext, canonicalSelectedContext],
+  )
+
+  const inboxHighlightId = useMemo(
+    () => resolveInboxHighlightId(threads, selected, effectiveActiveContext),
+    [threads, selected, effectiveActiveContext],
+  )
+
+  // Phase 1 trace — fires ONLY when the actual thread identity changes (string key, not object ref)
+  useEffect(() => {
+    console.log('[SELECTED_KEY_CHANGED]', selectedKeyForEffect)
+  }, [selectedKeyForEffect])
+
+  useEffect(() => {
+    if (!selected) return
+    const selectedConversationId = getConversationThreadIdForThread(selected) || selected.threadKey || selected.id
+    const inLoadedThreads = threads.some((thread) => (
+      thread.id === selected.id ||
+      (getConversationThreadIdForThread(thread) || thread.threadKey || thread.id) === selectedConversationId
+    ))
+    if (inLoadedThreads) {
+      selectedThreadFallbackRef.current = selected
+    }
+  }, [selected, threads])
+  const buyerCommandData = useBuyerCommandData(workspaceThread, buyerFilters)
 
   useEffect(() => {
     if (selectedBuyerKey && buyerCommandData.matches.some((match) => match.buyerKey === selectedBuyerKey)) return
@@ -771,74 +928,66 @@ function InboxPageInternal() {
     )
   }, [buyerCommandData.matches, buyerCommandData.profilePoints, buyerCommandData.recentPurchases, selectedBuyerKey])
 
-  const selectedFilteredOut = useMemo(() => (
+  const _selectedFilteredOut = useMemo(() => (
     Boolean(selected && !filtered.some((thread) => thread.id === selected.id))
   ), [filtered, selected])
-  const showSelectedInFilter = useCallback(() => {
+  void _selectedFilteredOut
+  const _showSelectedInFilter = useCallback(() => {
     if (!selected) return
     const decision = decisions.get(selected.id)
+    let nextView: InboxViewSelectValue = 'all_conversations'
     setSearchQuery('')
     setAdvancedFilters({ outOfStateOwner: 'all' })
     setStageFilter('all_stages')
-    if (decision?.inbox_bucket === 'new_replies') setViewFilter('new_replies')
-    else if (decision?.inbox_bucket === 'priority') setViewFilter('priority')
-    else if (decision?.inbox_bucket === 'needs_review') setViewFilter('needs_review')
-    else if (decision?.inbox_bucket === 'follow_up' || decision?.inbox_bucket === 'follow_up_due') setViewFilter('follow_up')
-    else if (decision?.inbox_bucket === 'cold' || decision?.inbox_bucket === 'cold_no_response') setViewFilter('cold')
-    else if (decision?.inbox_bucket === 'suppressed' || decision?.inbox_bucket === 'dnc_suppressed') setViewFilter('suppressed')
-    else if (decision?.inbox_bucket === 'negotiating') setViewFilter('negotiating')
-    else if (decision?.inbox_bucket === 'waiting_on_seller') setViewFilter('waiting_on_seller')
-    else if (decision?.inbox_bucket === 'automated') setViewFilter('automated')
-    else setViewFilter('all_conversations')
-  }, [decisions, selected])
+    if (decision?.inbox_bucket === 'new_replies') nextView = 'new_replies'
+    else if (decision?.inbox_bucket === 'priority') nextView = 'priority'
+    else if (decision?.inbox_bucket === 'needs_review') nextView = 'needs_review'
+    else if (decision?.inbox_bucket === 'follow_up' || decision?.inbox_bucket === 'follow_up_due') nextView = 'follow_up'
+    else if (decision?.inbox_bucket === 'cold' || decision?.inbox_bucket === 'cold_no_response') nextView = 'cold'
+    else if (decision?.inbox_bucket === 'dead') nextView = 'dead'
+    else if (decision?.inbox_bucket === 'suppressed' || decision?.inbox_bucket === 'dnc_suppressed') nextView = 'suppressed'
+    else if (decision?.inbox_bucket === 'negotiating') nextView = 'negotiating'
+    else if (decision?.inbox_bucket === 'waiting_on_seller') nextView = 'waiting_on_seller'
+    else if (decision?.inbox_bucket === 'automated') nextView = 'automated'
+    setViewFilter(nextView)
+    void refreshInbox({
+      filters: {
+        view: nextView,
+        stage: 'all_stages',
+        query: '',
+        advanced: { outOfStateOwner: 'all' },
+      },
+      cursor: null,
+      limit: 100,
+    })
+  }, [decisions, refreshInbox, selected])
+  void _showSelectedInFilter
 
   useEffect(() => {
     if (!selected) return
+    const conversationThreadId = getConversationThreadIdForThread(selected) || selected.threadKey || selected.id
     if (selected.id !== selectedId) setSelectedId(selected.id)
-    if ((selected.threadKey || selected.id) !== selectedThreadKey) {
-      setSelectedThreadKey(selected.threadKey || selected.id)
+    if (conversationThreadId !== selectedThreadKey) {
+      setSelectedThreadKey(conversationThreadId)
     }
   }, [selected, selectedId, selectedThreadKey])
 
   useEffect(() => {
-    if (!activeContext.threadKey && !activeContext.propertyId && !activeContext.sellerId) return
-    if (selected && (
-      (activeContext.threadKey && (selected.threadKey || selected.id) === activeContext.threadKey)
-      || (activeContext.propertyId && selected.propertyId === activeContext.propertyId)
-      || (activeContext.sellerId && selected.ownerId === activeContext.sellerId)
-    )) {
+    if (!effectiveActiveContext.threadKey && !effectiveActiveContext.propertyId && !effectiveActiveContext.sellerId && !effectiveActiveContext.masterOwnerId) return
+    if (selected && activeContextMatchesThread(effectiveActiveContext, selected)) return
+
+    const match = findThreadForActiveContext(threads, effectiveActiveContext)
+    if (!match) {
+      if (effectiveActiveContext.threadKey) {
+        setSelectedThreadKey(effectiveActiveContext.threadKey)
+      }
       return
     }
-
-    const match = threads.find((thread) =>
-      (activeContext.threadKey && (thread.threadKey || thread.id) === activeContext.threadKey)
-      || (activeContext.propertyId && thread.propertyId === activeContext.propertyId)
-      || (activeContext.sellerId && thread.ownerId === activeContext.sellerId),
-    )
-
-    if (!match) return
     setSelectedId(match.id)
     setSelectedThreadKey(match.threadKey || match.id)
     setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
-  }, [activeContext.propertyId, activeContext.sellerId, activeContext.threadKey, selected, threads])
+  }, [effectiveActiveContext, selected, threads])
 
-  useEffect(() => {
-    if (!DEV) return
-    const first = filtered[0] as unknown as { uiIntent?: string; ui_intent?: string; priorityBucket?: string; priority_bucket?: string } | undefined
-    console.log('[NEXUS Inbox Diagnostics]', {
-      totalCount: data.totalCount,
-      loadedCount: data.loadedCount ?? threads.length,
-      activeFilterKey: viewFilter,
-      activeCategory: viewFilter,
-      fullyHydratedCount: data.fullyHydratedCount ?? 0,
-      partiallyHydratedCount: data.partiallyHydratedCount ?? 0,
-      orphanCount: data.orphanCount ?? 0,
-      latestFetchMs: data.latestFetchMs ?? 0,
-      realtimeConnected: data.realtimeConnected ?? false,
-      firstThreadUiIntent: first?.uiIntent ?? first?.ui_intent ?? null,
-      firstThreadPriorityBucket: first?.priorityBucket ?? first?.priority_bucket ?? null,
-    })
-  }, [DEV, data, filtered, threads.length, viewFilter])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
 
@@ -855,20 +1004,6 @@ function InboxPageInternal() {
   const displayedMessages = useMemo(() => {
     const events = selectedMessages.filter(m => m.direction === 'outbound')
     const pending = selectedPendingMessages
-
-    const dedupe = (all: ThreadMessage[]) => {
-      const seen = new Set<string>()
-      const result: ThreadMessage[] = []
-      for (const msg of all) {
-        // Create unique key based on message content and timestamp for deduping
-        const key = `${msg.direction}:${msg.body.trim().toLowerCase()}:${Math.floor(new Date(msg.createdAt).getTime() / 1000)}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          result.push(msg)
-        }
-      }
-      return result
-    }
 
     const filteredPending = pending.filter(p => {
       const match = events.some(e => {
@@ -914,7 +1049,7 @@ function InboxPageInternal() {
       }
     })
 
-    return dedupe([...selectedMessages, ...uniquePending])
+    return dedupeMessages([...selectedMessages, ...uniquePending])
   }, [selectedMessages, selectedPendingMessages])
 
   const commandIntel = useMemo(
@@ -923,17 +1058,19 @@ function InboxPageInternal() {
   )
 
   const liveCommandFeed = useMemo<ThreadCommandIntel[]>(() => {
-    const selectedKey = selected?.threadKey || selected?.id || null
+    const selectedKey = selectedThreadKeySnapshot || selectedIdSnapshot
     return threads
       .slice(0, 8)
-      .map((thread) => buildThreadCommandIntel(
-        thread,
-        (thread.threadKey || thread.id) === selectedKey ? displayedMessages : [],
-        (thread.threadKey || thread.id) === selectedKey ? threadContext : null,
-        (thread.threadKey || thread.id) === selectedKey ? threadIntelligence : null,
-      ))
+      .map((thread) =>
+        buildThreadCommandIntel(
+          thread,
+          (thread.threadKey || thread.id) === selectedKey ? displayedMessages : [],
+          (thread.threadKey || thread.id) === selectedKey ? threadContext : null,
+          (thread.threadKey || thread.id) === selectedKey ? threadIntelligence : null,
+        ),
+      )
       .filter((item): item is ThreadCommandIntel => Boolean(item))
-  }, [displayedMessages, selected?.id, selected?.threadKey, threadContext, threadIntelligence, threads])
+  }, [displayedMessages, selectedIdSnapshot, selectedThreadKeySnapshot, threadContext, threadIntelligence, threads])
 
   const activeWorkspaceView = selectedWorkspaceViews[0] ?? DEFAULT_WORKSPACE_VIEWS[0]
   const selectedWorkspacePreset = useMemo(
@@ -945,6 +1082,22 @@ function InboxPageInternal() {
     [selectedWorkspaceViews, workspaceWidthOverrides],
   )
   const activeWorkspaceLabel = selectedWorkspacePreset.label
+  const activeContextSubtitle = selectedWorkspacePreset.description
+
+  const handleNavigateInboxView = useCallback((view: string) => {
+    const viewMap: Record<string, InboxViewSelectValue> = {
+      needs_review: 'needs_review',
+      follow_up: 'follow_up_due',
+      failed: 'failed',
+    }
+    const nextView = viewMap[view] ?? (view as InboxViewSelectValue)
+    setViewFilter(nextView)
+    if (!selectedWorkspaceViews.includes('thread')) {
+      setSelectedWorkspaceViews((current) => (['thread', ...current] as InboxWorkspaceView[]).slice(0, MAX_TOGGLED_VIEWS))
+    }
+    pushRoutePath('/inbox')
+  }, [selectedWorkspaceViews])
+
   const viewLabelByKey = useMemo(
     () => new Map(WORKSPACE_VIEW_OPTIONS.map((view) => [view.key, view.label.replace(' View', '')])),
     [],
@@ -1036,6 +1189,7 @@ function InboxPageInternal() {
   }, [displayedMessages, threadTranslations, threadViewMode])
 
   const applySavedPreset = useCallback((preset: InboxSavedFilterPreset) => {
+    console.log('[BUCKET_CLICK]', preset)
     if (DEV) {
       console.log(`[NexusInboxActionNoRefresh]`, {
         action: `apply_preset_${preset}`,
@@ -1046,10 +1200,51 @@ function InboxPageInternal() {
     }
     setSavedPreset(preset)
     const config = getSavedPresetConfig(preset)
-    if (config.stage) setStageFilter(config.stage)
-    if (config.view) setViewFilter(config.view)
-    if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
-  }, [DEV])
+    const isPrimaryCategoryTab = (
+      preset === 'all_messages'
+      || preset === 'my_priority'
+      || preset === 'new_inbounds'
+      || preset === 'review_required'
+      || preset === 'waiting'
+    )
+    const nextView = (config.view ?? viewFilter)
+    const nextStage = isPrimaryCategoryTab ? 'all_stages' : (config.stage ?? stageFilter)
+    const nextSearch = searchQuery
+    const nextAdvanced = config.advanced
+      ? { ...advancedFilters, ...config.advanced }
+      : advancedFilters
+
+    if (isPrimaryCategoryTab) {
+      setStageFilter('all_stages')
+    } else {
+      if (config.stage) setStageFilter(config.stage)
+      if (config.advanced) setAdvancedFilters((current) => ({ ...current, ...config.advanced }))
+    }
+    if (config.view) {
+      console.log('[BUCKET_STATE_SET]', config.view)
+      setViewFilter(config.view)
+    }
+
+    // Clear selection so stale thread from the previous bucket is never shown in the new bucket.
+    setSelectedId(null)
+    setSelectedThreadKey(null)
+    selectedThreadFallbackRef.current = null
+
+    // Load category-specific rows from backend so paginated local state reflects the selected tab.
+    void refreshInbox({
+      filters: {
+        view: nextView,
+        stage: nextStage,
+        query: nextSearch,
+        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: nextStage, view: nextView }),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _timeoutMode: 'manual_bucket_switch',
+      _refreshReason: 'manual_bucket_switch',
+    })
+  }, [DEV, advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
 
   const applyRightSavedPreset = useCallback((preset: InboxSavedFilterPreset) => {
     if (DEV) {
@@ -1074,12 +1269,78 @@ function InboxPageInternal() {
   }, [])
 
   const handleResetFilters = useCallback(() => {
+    const cleared = clearAllAdvancedFilters()
     setSearchQuery('')
     setStageFilter('all_stages')
-    setViewFilter('priority')
-    setAdvancedFilters({ outOfStateOwner: 'all' })
-    setSavedPreset('my_priority')
-  }, [])
+    setViewFilter('all_conversations')
+    setAdvancedFilters(cleared)
+    setSavedPreset('all_messages')
+    setSelectedId(null)
+    setSelectedThreadKey(null)
+    selectedThreadFallbackRef.current = null
+    void refreshInbox({
+      filters: {
+        view: 'all_conversations',
+        stage: 'all_stages',
+        query: '',
+        advanced: serializeAdvancedFiltersForServer(cleared),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _refreshReason: 'clear_all_filters',
+    })
+  }, [refreshInbox])
+
+  const handleApplyAdvancedFilters = useCallback((payload: {
+    view: InboxViewSelectValue
+    stage: InboxStageSelectValue
+    advanced: InboxAdvancedFilters
+  }) => {
+    setViewFilter(payload.view)
+    setStageFilter(payload.stage)
+    setAdvancedFilters(payload.advanced)
+    void refreshInbox({
+      filters: {
+        view: payload.view,
+        stage: payload.stage,
+        query: searchQuery,
+        advanced: serializeAdvancedFiltersForServer(payload.advanced, { stage: payload.stage, view: payload.view }),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _refreshReason: 'advanced_filters_apply',
+    })
+  }, [refreshInbox, searchQuery])
+
+  const handleRemoveAdvancedFilterChip = useCallback((chipKey: string) => {
+    const chip = buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter })
+      .find((entry) => entry.key === chipKey)
+    if (!chip) return
+    const nextAdvanced = chip.clear(advancedFilters)
+    setAdvancedFilters(nextAdvanced)
+    void refreshInbox({
+      filters: {
+        view: viewFilter,
+        stage: stageFilter,
+        query: searchQuery,
+        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: stageFilter, view: viewFilter }),
+      },
+      cursor: null,
+      limit: 100,
+      _force: true,
+      _refreshReason: 'advanced_filter_chip_remove',
+    })
+  }, [advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
+
+  const handleRetryInboxLoad = useCallback(() => {
+    void refreshInbox({
+      filters: currentInboxQuery,
+      cursor: null,
+      limit: 100,
+    })
+  }, [currentInboxQuery, refreshInbox])
 
   const handleFocusWorkspaceView = useCallback((view: InboxWorkspaceView) => {
     setSelectedWorkspaceViews((current) => {
@@ -1288,19 +1549,41 @@ function InboxPageInternal() {
   }, [activeWorkspaceView, advancedFilters.market, commandMapMarket, commandMapTheme, searchQuery, selected?.market, sourceMode, stageFilter, viewFilter])
 
   const setActiveContext = useCallback((nextContext: ActiveInboxContext, options?: SetActiveContextOptions) => {
-    setActiveContextState((current) => ({ ...current, ...nextContext }))
-
-    const nextThreadKey = nextContext.threadKey ?? null
-    if (nextThreadKey) {
-      const match = threads.find((thread) => (thread.threadKey || thread.id) === nextThreadKey || thread.id === nextThreadKey)
+    setActiveContextState((current) => {
+      const merged = { ...current, ...nextContext }
+      if (nextContext.sourceView === 'inbox' && nextContext.opportunityId === undefined) {
+        delete merged.opportunityId
+      }
+      const match = findThreadForActiveContext(threads, merged)
       if (match) {
         setSelectedId(match.id)
         setSelectedThreadKey(match.threadKey || match.id)
-        setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
-      } else {
-        setSelectedThreadKey(nextThreadKey)
+        setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+        selectedThreadFallbackRef.current = match
+      } else if (nextContext.threadKey) {
+        setSelectedThreadKey(nextContext.threadKey)
       }
-    }
+      return merged
+    })
+    setPreviewContext(null)
+    setUniversalEntityContext((current) => {
+      const merged = mergeUniversalContexts(current, {
+        entityType: nextContext.entityType ?? (nextContext.propertyId ? 'property' : nextContext.prospectId ? 'prospect' : nextContext.masterOwnerId || nextContext.sellerId ? 'master_owner' : current.entityType),
+        entityId: nextContext.entityId ?? nextContext.propertyId ?? nextContext.prospectId ?? nextContext.masterOwnerId ?? nextContext.sellerId ?? current.entityId,
+        propertyId: nextContext.propertyId ?? current.propertyId,
+        masterOwnerId: nextContext.masterOwnerId ?? nextContext.sellerId ?? current.masterOwnerId,
+        prospectId: nextContext.prospectId ?? current.prospectId,
+        threadKey: nextContext.threadKey ?? current.threadKey,
+        contactMethodType: nextContext.contactMethodType ?? current.contactMethodType,
+        contactMethodId: nextContext.contactMethodId ?? current.contactMethodId,
+        opportunityId: nextContext.sourceView === 'inbox' && nextContext.opportunityId === undefined
+          ? null
+          : (nextContext.opportunityId ?? current.opportunityId),
+      })
+      publishingUniversalRef.current = true
+      setUniversalEntityContextSnapshot(merged)
+      return merged
+    })
 
     const focusTarget = options?.focusView
       || (options?.openThread ? 'sms_thread' : undefined)
@@ -1344,28 +1627,31 @@ function InboxPageInternal() {
     })
   }, [selectedWorkspaceViews])
 
-  const liveThreadQuery = useMemo(() => ({
-    view: 'all',
-    stage: 'all_stages',
-    query: '',
-    advanced: {},
-  }), [])
-
   useEffect(() => {
+    if (hasLoadedInitialInboxRef.current) return
+    hasLoadedInitialInboxRef.current = true
     setVisibleThreadCount(1000)
-    refreshInbox({ filters: liveThreadQuery })
-  }, [liveThreadQuery, refreshInbox])
+    void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
+  }, [currentInboxQuery, refreshInbox])
 
 
 
   const prevSelectedIdRef = useRef<string | null>(null)
 
+  // This effect fires ONLY when the thread key (string) changes — NOT on every inbox refresh.
+  // selectedRef.current always has the latest thread object without being in the dep array.
+  // Messages are fetched and committed IMMEDIATELY, independent of context/intelligence.
   useEffect(() => {
-    if (!selected) {
+    const thread = selectedRef.current
+    if (!thread || !selectedKeyForEffect) {
       setSelectedMessages([])
+      setHasOlderMessages(false)
+      setOlderMessagesLoading(false)
       setThreadContext(null)
       setThreadIntelligence(null)
-      setThreadDossier(null)
+      if (!hasEntityAnchor(effectiveActiveContext)) {
+        setDealContext(null)
+      }
       setThreadTranslations({})
       setThreadViewMode('original')
       setDetectedThreadLanguage(null)
@@ -1373,56 +1659,77 @@ function InboxPageInternal() {
       return
     }
 
-    const cacheKey = selected.threadKey || selected.id
+    const cacheKey = selectedKeyForEffect
+    // When messageRefetchKey > 0 this is an explicit user-triggered retry — drop the cache so
+    // we don't serve the previous 0-row result while waiting for the fresh fetch.
+    if (messageRefetchKey > 0) delete messageCacheRef.current[cacheKey]
     const cachedMessages = messageCacheRef.current[cacheKey] ?? []
-    const isNewSelection = prevSelectedIdRef.current !== selected.id
-    prevSelectedIdRef.current = selected.id
+    const fallbackDealContext = normalizeDealContext(thread as unknown as Record<string, unknown>)
+    prevSelectedIdRef.current = thread.id
+    const fetchStartTs = performance.now()
 
-    if (isNewSelection) {
-      setThreadTranslations({})
-      setThreadViewMode('original')
-      setDetectedThreadLanguage(null)
-      setSelectedMessages(cachedMessages)
-      setMessagesLoading(cachedMessages.length === 0)
-      setContextLoading(true)
-    }
-    setThreadIntelligence((selected ?? null) as unknown as ThreadIntelligenceRecord | null)
+    setThreadTranslations({})
+    setThreadViewMode('original')
+    setDetectedThreadLanguage(null)
+    setDealContext(fallbackDealContext)
+    setSelectedMessages([])
+    setHasOlderMessages(false)
+    setOlderMessagesLoading(false)
+    setMessagesLoading(true)
+    setContextLoading(true)
+    setThreadIntelligence((thread ?? null) as unknown as ThreadIntelligenceRecord | null)
 
-    let active = true
+    if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0 })
 
-    // Fetch full dossier independently — failure must not affect messages/context
-    const dossierKey = selected.threadKey || selected.id
-    if (dossierKey) {
-      setDossierLoading(true)
-      fetchThreadDossier(dossierKey)
-        .then(dossier => { if (active) setThreadDossier(dossier) })
-        .catch(err => { if (DEV) console.warn('[InboxPage] dossier fetch failed', err) })
-        .finally(() => { if (active) setDossierLoading(false) })
-    }
+    let cancelled = false
+    const controller = new AbortController()
+    const hydrationPromise = getThreadHydrationForThread(thread, controller.signal)
+    const contextPromise = getThreadContext(thread, controller.signal).catch((err: unknown) => {
+      console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
+      return null as unknown as ThreadContext
+    })
 
-    Promise.all([
-      getThreadMessagesForThread(selected),
-      getThreadContext(selected),
-      getThreadIntelligence(selected),
-    ]).then(([messages, context, intelligence]) => {
-      if (!active) return
-      const resolvedMessages = messages.length > 0 ? messages : cachedMessages
-      if (messages.length > 0) {
+    // ── Messages: fire immediately, commit as soon as done ──────────────────
+    console.log('[MESSAGES_FETCH_START]', selectedKeyForEffect)
+    hydrationPromise.then((hydration) => {
+      if (cancelled) return
+      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
+      if (activeConversationId !== selectedKeyForEffect) return
+      const durationMs = Math.round(performance.now() - fetchStartTs)
+      const messages = hydration.messages
+      const integrityBlocked = Boolean((hydration.diagnostics as Record<string, unknown> | undefined)?.integrity_blocked)
+      
+      console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, messages.length, `${durationMs}ms`)
+      if (durationMs > 1500) {
+        console.log('[MESSAGES_FETCH_SLOW]', selectedKeyForEffect, {
+          durationMs,
+          endpoint: '/api/cockpit/inbox/thread-messages',
+          status: 'completed',
+        })
+      }
+      const resolvedMessages = integrityBlocked ? [] : messages
+      if (messages.length > 0 && !integrityBlocked) {
         messageCacheRef.current[cacheKey] = messages
       } else if (DEV) {
         console.warn('[InboxPage] message hydration returned 0 rows', {
           threadKey: cacheKey,
-          ownerId: selected.ownerId,
-          propertyId: selected.propertyId,
-          phoneNumber: selected.phoneNumber,
+          integrityBlocked,
+          ownerId: thread.ownerId,
+          propertyId: thread.propertyId,
+          phoneNumber: thread.phoneNumber,
           cachedMessages: cachedMessages.length,
         })
       }
+      console.log('[MESSAGES_COMMIT]', selectedKeyForEffect, resolvedMessages.length)
       setSelectedMessages(resolvedMessages)
-      setThreadContext(context)
+      setHasOlderMessages(Boolean(hydration.pagination?.hasMore))
+      setMessagesLoading(false)
+      if (hydration.dealContext) {
+        setDealContext(hydration.dealContext)
+      }
       setThreadIntelligence({
-        ...((selected ?? {}) as unknown as ThreadIntelligenceRecord),
-        ...((intelligence ?? {}) as ThreadIntelligenceRecord),
+        ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+        ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
       })
 
       const deliveredByBody = new Set(
@@ -1430,39 +1737,117 @@ function InboxPageInternal() {
           .filter((message) => message.direction === 'outbound' && String(message.deliveryStatus || '').toLowerCase() === 'delivered')
           .map((message) => String(message.body || '').trim().toLowerCase()),
       )
-
       if (deliveredByBody.size > 0) {
         setPendingMessagesByThread((current) => {
-          const currentThreadPending = current[selected.id] ?? []
+          const currentThreadPending = current[thread.id] ?? []
           const unresolved = currentThreadPending.filter((pending) => !deliveredByBody.has(String(pending.body || '').trim().toLowerCase()))
           if (unresolved.length === currentThreadPending.length) return current
-          return {
-            ...current,
-            [selected.id]: unresolved,
-          }
+          return { ...current, [thread.id]: unresolved }
         })
       }
+    }).catch((err) => {
+      if (cancelled) {
+        console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
+      } else {
+        console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
+        setSelectedMessages(cachedMessages)
+        setHasOlderMessages(false)
+        setMessagesLoading(false)
+      }
+    })
+
+    // ── Context + hydration: fetch together, never block row fallback/messages ────
+    const threadKeyForCtx = thread.threadKey || thread.id
+    console.log('[THREAD_CONTEXT_START]', { threadKey: threadKeyForCtx, propertyId: thread.propertyId, prospectId: thread.prospectId, ownerId: thread.ownerId })
+    Promise.allSettled([contextPromise, hydrationPromise]).then((results) => {
+      if (cancelled) return
+      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
+      if (activeConversationId !== selectedKeyForEffect) return
+      const context = results[0].status === 'fulfilled' ? results[0].value : null
+      const hydration = results[1].status === 'fulfilled' ? results[1].value : null
+      setThreadContext(context)
+      if (hydration?.intelligence) {
+        setThreadIntelligence({
+          ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+          ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
+        })
+      }
+      if (hydration?.dealContext) {
+        const dc = hydration.dealContext
+        console.log('[THREAD_CONTEXT_DONE]', {
+          threadKey: threadKeyForCtx,
+          propertyId: dc.propertyId,
+          prospectId: dc.prospectId,
+          masterOwnerId: dc.masterOwnerId,
+          coordsResolved: Boolean(dc.latitude && dc.longitude),
+          intelligenceResolved: Boolean(dc.valuation?.id || dc.buyerMatch?.id),
+        })
+        setDealContext(dc)
+        console.log('[THREAD_CONTEXT_COMMIT]', threadKeyForCtx)
+      } else {
+        console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
+        setDealContext(fallbackDealContext)
+      }
+    }).catch((err: unknown) => {
+      if (!cancelled) {
+        console.warn('[ENRICHMENT_BATCH_ERROR_ISOLATED]', threadKeyForCtx, err)
+        console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
+        setDealContext(fallbackDealContext)
+      }
     }).finally(() => {
-      if (!active) return
-      setMessagesLoading(false)
-      setContextLoading(false)
+      if (!cancelled) setContextLoading(false)
     })
 
     return () => {
-      active = false
+      cancelled = true
+      controller.abort()
     }
-  }, [DEV, selected])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [DEV, selectedKeyForEffect, messageRefetchKey])
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    const thread = selectedRef.current
+    if (!thread || !selectedKeyForEffect || olderMessagesLoading) return
+    const requestKey = selectedKeyForEffect
+    setOlderMessagesLoading(true)
+    try {
+      const page = await getThreadMessagesPageForThread(thread, {
+        offset: selectedMessages.length,
+        maxMessages: 50,
+      })
+      const activeConversationId = selectedRef.current
+        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
+        : null
+      if (activeConversationId !== requestKey) return
+      setSelectedMessages((current) => dedupeMessages([...page.messages, ...current]))
+      setHasOlderMessages(page.pagination.hasMore)
+      messageCacheRef.current[requestKey] = dedupeMessages([
+        ...page.messages,
+        ...(messageCacheRef.current[requestKey] ?? []),
+      ])
+    } catch (err) {
+      if (DEV) console.warn('[InboxPage load older messages failed]', { threadKey: requestKey, err })
+    } finally {
+      setOlderMessagesLoading(false)
+    }
+  }, [DEV, olderMessagesLoading, selectedKeyForEffect, selectedMessages.length])
 
   useEffect(() => {
-    if (!selected || data.dataMode !== 'live') return
+    if (!selectedKeyForEffect || data.dataMode !== 'live') return
 
-    const selectedKey = selected.threadKey || selected.id
+    const selected = selectedRef.current
+    if (!selected) return
+
+    const selectedKey = selectedKeyForEffect
     const selectedPhone = selected.canonicalE164 || selected.phoneNumber || ''
     const selectedOwnerId = selected.ownerId || ''
     const selectedPropertyId = selected.propertyId || ''
     const selectedProspectId = selected.prospectId || ''
+    const shouldPollSelectedThread = data.connectionState !== 'live'
     const supabase = getSupabaseClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    let pollController: AbortController | null = null
+    let pollInFlight = false
     const scheduleRefreshInbox = () => {
       if (refreshTimer) return
       refreshTimer = setTimeout(() => {
@@ -1476,6 +1861,9 @@ function InboxPageInternal() {
         ...(messageCacheRef.current[selectedKey] ?? []),
         incoming,
       ])
+      commitDashboardMessages(selectedKey, [incoming], {
+        source: 'selected_thread_realtime',
+      })
 
       setSelectedMessages((current) => {
         return dedupeMessages([...current, incoming])
@@ -1483,19 +1871,21 @@ function InboxPageInternal() {
     }
 
     const belongsToSelection = (row: Record<string, unknown>) => {
+      const rowConversationThreadId = String(row.conversation_thread_id ?? row.conversationThreadId ?? '').trim()
       const rowThreadKey = String(row.thread_key ?? row.threadKey ?? '').trim()
       const rowFrom = String(row.from_phone_number ?? '').trim()
       const rowTo = String(row.to_phone_number ?? '').trim()
       const rowOwnerId = String(row.master_owner_id ?? '').trim()
       const rowPropertyId = String(row.property_id ?? '').trim()
       const rowProspectId = String(row.prospect_id ?? '').trim()
-      return Boolean(
-        (rowThreadKey && rowThreadKey === selectedKey) ||
-        (selectedPhone && (rowFrom === selectedPhone || rowTo === selectedPhone)) ||
-        (selectedOwnerId && rowOwnerId === selectedOwnerId) ||
-        (selectedPropertyId && rowPropertyId === selectedPropertyId) ||
-        (selectedProspectId && rowProspectId === selectedProspectId)
-      )
+      const phoneMatches = Boolean(selectedPhone && (rowFrom === selectedPhone || rowTo === selectedPhone || rowThreadKey === selectedPhone))
+      if (rowConversationThreadId && rowConversationThreadId === selectedKey) return true
+      if (rowThreadKey && rowThreadKey === selectedKey) return true
+      if (selectedProspectId && phoneMatches && rowProspectId === selectedProspectId) return true
+      if (selectedPropertyId && phoneMatches && rowPropertyId === selectedPropertyId) return true
+      if (selectedOwnerId && phoneMatches && rowOwnerId === selectedOwnerId) return true
+      if (!selectedProspectId && !selectedPropertyId && !selectedOwnerId && phoneMatches) return true
+      return false
     }
 
     const channel = supabase
@@ -1517,7 +1907,13 @@ function InboxPageInternal() {
         }
         const incoming = toThreadMessage(row)
         mergeRealtimeMessage(incoming)
-        scheduleRefreshInbox()
+        logRealtimePatchApplied({
+          table: 'message_events',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: ['messagesByThreadId'],
+          messageId: incoming.id,
+        })
 
         // Remove any pending optimistic message that this confirmed event supersedes
         const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
@@ -1575,12 +1971,33 @@ function InboxPageInternal() {
           })
           return changed ? { ...current, [selected.id]: dedupeMessages(nextPending) } : current
         })
-        scheduleRefreshInbox()
+        patchDashboardThread(selectedKey, {
+          deliveryStatus: nextStatus,
+          latestDeliveryStatus: nextStatus,
+          queueId,
+        }, {
+          source: 'selected_thread_realtime',
+          table: 'send_queue',
+          eventType: payload.eventType,
+        })
+        logRealtimePatchApplied({
+          table: 'send_queue',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: ['deliveryStatus', 'latestDeliveryStatus', 'queueId'],
+          queueId,
+        })
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, (payload) => {
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
         if (!belongsToSelection(row)) return
         if (DEV) console.log('[InboxPage realtime dossier update]', { threadKey: selectedKey, eventType: payload.eventType })
+        const patch = {
+          inboxCategory: row.inbox_category,
+          inbox_bucket: row.inbox_category,
+          uiIntent: row.detected_intent || row.ui_intent,
+          workflowStage: row.thread_stage,
+        }
         
         setThreadIntelligence((current) => {
           if (!current) return current
@@ -1593,16 +2010,55 @@ function InboxPageInternal() {
             workflowStage: row.thread_stage || current.workflowStage,
           }
         })
-        scheduleRefreshInbox()
+        patchDashboardThread(selectedKey, patch, {
+          source: 'selected_thread_realtime',
+          table: 'operator_thread_state',
+          eventType: payload.eventType,
+        })
+        logRealtimePatchApplied({
+          table: 'operator_thread_state',
+          eventType: payload.eventType,
+          threadKey: selectedKey,
+          patchKeys: Object.keys(patch),
+        })
       })
       .subscribe()
 
+    const pollSelectedMessages = () => {
+      if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
+      pollInFlight = true
+      pollController = new AbortController()
+      getThreadMessagesForThread(selected, { signal: pollController.signal, maxMessages: 50 }).then((messages) => {
+        if (!messages.length) return
+        commitDashboardMessages(selectedKey, messages, {
+          source: 'selected_thread_polling',
+          connectionState: data.connectionState ?? null,
+        })
+        messageCacheRef.current[selectedKey] = dedupeMessages([
+          ...(messageCacheRef.current[selectedKey] ?? []),
+          ...messages,
+        ])
+        setSelectedMessages((current) => {
+          const merged = dedupeMessages([...current, ...messages])
+          if (merged.length > current.length) scheduleRefreshInbox()
+          return merged
+        })
+      }).catch((err) => {
+        if ((err as { name?: string })?.name === 'AbortError') return
+        if (DEV) console.warn('[InboxPage selected message poll failed]', { threadKey: selectedKey, err })
+      }).finally(() => {
+        pollInFlight = false
+      })
+    }
+    const selectedMessagePollInterval = window.setInterval(pollSelectedMessages, 12_000)
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer)
+      window.clearInterval(selectedMessagePollInterval)
+      pollController?.abort()
       void supabase.removeChannel(channel)
     }
-  }, [DEV, data.dataMode, refreshInbox, selected])
+  }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect])
 
   const handleTranslateThread = useCallback(async () => {
     if (!threadHasInboundMessages) return
@@ -1711,38 +2167,41 @@ function InboxPageInternal() {
   useEffect(() => {
     try {
       setSelectedWorkspaceKey(DEFAULT_WORKSPACE_KEY)
-      setSelectedWorkspaceViews(cloneDefaultWorkspaceViews())
-      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
-      let initialViews = cloneDefaultWorkspaceViews()
-      let initialWidths = cloneDefaultWorkspaceWidths()
-      const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
-      let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
-      try {
-        const raw = window.localStorage.getItem(WORKSPACE_VIEWS_STORAGE_KEY)
-        if (raw) savedViewsByWorkspace = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
-      } catch {}
-      if (savedWorkspaceKey) {
-        const preset = NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === savedWorkspaceKey)
-        if (preset) {
-          setSelectedWorkspaceKey(preset.key)
-          const savedViews = savedViewsByWorkspace[preset.key]
-          const nextViews = Array.isArray(savedViews) && savedViews.length > 0
-            ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
-            : [...preset.views]
-          setSelectedWorkspaceViews(nextViews)
-          initialViews = nextViews
-          initialWidths = sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
-          setWorkspaceWidthOverrides(initialWidths)
+      let initialViews = getInitialWorkspaceViews(initialWorkspaceView, routeMode)
+      let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView, routeMode)
+      setSelectedWorkspaceViews(initialViews)
+      setWorkspaceWidthOverrides(initialWidths)
+
+      if (!isRouteFullscreen && initialWorkspaceView === undefined) {
+        const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
+        let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
+        try {
+          const raw = window.localStorage.getItem(WORKSPACE_VIEWS_STORAGE_KEY)
+          if (raw) savedViewsByWorkspace = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
+        } catch {}
+        if (savedWorkspaceKey) {
+          const preset = NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === savedWorkspaceKey)
+          if (preset) {
+            setSelectedWorkspaceKey(preset.key)
+            const savedViews = savedViewsByWorkspace[preset.key]
+            const nextViews = Array.isArray(savedViews) && savedViews.length > 0
+              ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
+              : [...preset.views]
+            setSelectedWorkspaceViews(nextViews)
+            initialViews = nextViews
+            initialWidths = sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
+            setWorkspaceWidthOverrides(initialWidths)
+          }
         }
-      }
-      const savedOverrides = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
-      if (savedOverrides) {
-        const parsed = JSON.parse(savedOverrides) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
-        setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(initialViews, { ...initialWidths, ...parsed }))
+        const savedOverrides = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
+        if (savedOverrides) {
+          const parsed = JSON.parse(savedOverrides) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
+          setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(initialViews, { ...initialWidths, ...parsed }))
+        }
       }
       const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
       const savedCaps = window.localStorage.getItem('nx.queue.caps')
-      if (savedMode === 'off' || savedMode === 'safe' || savedMode === 'live') setQueueCommandMode(savedMode)
+      if (savedMode === 'paused' || savedMode === 'assisted' || savedMode === 'automatic') setQueueCommandMode(savedMode)
       if (savedCaps) {
         const parsed = JSON.parse(savedCaps) as Partial<QueueCommandCaps>
         setQueueCommandCaps((current) => ({ ...current, ...parsed }))
@@ -1750,25 +2209,31 @@ function InboxPageInternal() {
     } catch {}
   }, [])
 
+  const refreshQueueControl = useCallback(async () => {
+    const res = await getQueueControlSettings()
+    if (!res.ok) return null
+    const d = res.data?.diagnostics as CampaignControlDiagnostics | undefined
+    if (!d) return null
+    setQueueControlDiagnostics(d)
+    setQueueCommandMode(queueModeFromControl(d))
+    setQueueCommandCaps((current) => ({
+      ...current,
+      sends_per_run: Math.max(1, Number(d.queue_run_limit || d.max_batch_size || current.sends_per_run)),
+      max_per_number_per_day: Math.max(1, Number(d.queue_per_number_cap || d.queue_sender_throttle || d.per_number_cap || current.max_per_number_per_day)),
+      max_per_market_per_hour: Math.max(1, Number(d.queue_market_cap || d.queue_market_throttle || d.market_cap || current.max_per_market_per_hour)),
+    }))
+    return d
+  }, [])
+
   useEffect(() => {
     let active = true
     const loadQueueControl = async () => {
-      const res = await getQueueControlSettings()
-      if (!active || !res.ok) return
-      const d = res.data?.diagnostics
-      if (!d) return
-      const mode = String(d.queue_processor_mode || 'off') as QueueCommandMode
-      if (mode === 'off' || mode === 'safe' || mode === 'live') setQueueCommandMode(mode)
-      setQueueCommandCaps((current) => ({
-        ...current,
-        sends_per_run: Math.max(1, Number(d.queue_run_limit || current.sends_per_run)),
-        max_per_number_per_day: Math.max(1, Number(d.queue_sender_throttle || current.max_per_number_per_day)),
-        max_per_market_per_hour: Math.max(1, Number(d.queue_market_throttle || current.max_per_market_per_hour)),
-      }))
+      const diagnostics = await refreshQueueControl()
+      if (!active || !diagnostics) return
     }
     void loadQueueControl()
     return () => { active = false }
-  }, [])
+  }, [refreshQueueControl])
 
   useEffect(() => {
     try {
@@ -1792,8 +2257,26 @@ function InboxPageInternal() {
   useEffect(() => {
     const sync = () => {
       const settings = loadSettings()
-      setActiveNexusThemeId(resolveDataThemeAttr(settings.nexusTheme) as NexusGlobalThemeId)
+      const resolvedThemeId = resolveDataThemeAttr(settings.nexusTheme) as NexusGlobalThemeId
+      setActiveNexusThemeId(resolvedThemeId)
       setActiveAccentPalette(settings.accentPalette)
+      setLayoutState((current) => {
+        const nextTheme = resolvedThemeId === 'light' ? 'light' : 'dark'
+        
+        if (!hasLoggedThemeRef.current) {
+          hasLoggedThemeRef.current = true
+          console.log('[InboxTheme] active theme + accent palette + root classes:', {
+            theme: resolvedThemeId,
+            accent: settings.accentPalette,
+            classes: getLayoutClassNames({
+              ...current,
+              theme: nextTheme
+            })
+          })
+        }
+
+        return current.theme === nextTheme ? current : { ...current, theme: nextTheme }
+      })
     }
     sync()
     return subscribeSettings(sync)
@@ -1818,25 +2301,20 @@ function InboxPageInternal() {
   ) => {
     setQueueCommandActionLoading(actionKey)
     try {
-      const { secret } = getBackendApiSecretDebugSafe()
-      const baseUrl = getBackendBaseUrl()
-      // Ensure endpoint starts with /
       const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
-      const url = `${baseUrl}${path}`
-
-      const response = await fetch(url, {
+      const result = await callBackend<any>(path, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-ops-dashboard-secret': secret
-        },
         body: JSON.stringify(options?.body ?? {}),
       })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok || payload?.ok === false) {
+      if (!result.ok) {
+        throw new Error(String(result.error || result.message || 'Queue action failed'))
+      }
+      const payload = result.data || {}
+      if (payload?.ok === false) {
         throw new Error(String(payload?.error || 'Queue action failed'))
       }
       await refreshQueueHealth()
+      await refreshQueueControl()
       emitNotification({
         title: options?.successTitle || 'Queue Updated',
         detail: options?.successDetail ? options.successDetail(payload) : 'Queue action completed successfully.',
@@ -1853,106 +2331,140 @@ function InboxPageInternal() {
     } finally {
       setQueueCommandActionLoading(null)
     }
-  }, [refreshQueueHealth])
+  }, [refreshQueueControl, refreshQueueHealth])
 
+  // Queue health polls send_queue (heavy). Only start once after live inbox has resolved.
+  // Cleanup does NOT clear the interval — a separate mount-only effect handles unmount cleanup.
   useEffect(() => {
-    let active = true
+    if (data.liveFetchStatus !== 'active') return
+    if (heavyQueriesStartedRef.current) return
+    heavyQueriesStartedRef.current = true
 
+    let active = true
     const refreshHealth = async () => {
       const snapshot = await refreshQueueHealth()
       if (!active) return
       setQueueProcessorHealth(snapshot)
     }
-
     void refreshHealth()
-    const interval = window.setInterval(() => {
-      void refreshHealth()
-    }, 30000)
+    healthIntervalRef.current = window.setInterval(() => { void refreshHealth() }, 30000)
+    return () => { active = false }  // cancel in-flight only; interval runs until unmount
+  }, [data.liveFetchStatus, refreshQueueHealth])
 
-    return () => {
-      active = false
-      window.clearInterval(interval)
-    }
-  }, [refreshQueueHealth])
+  useEffect(() => {
+    return () => { if (healthIntervalRef.current !== null) window.clearInterval(healthIntervalRef.current) }
+  }, [])
 
   const handleQueueCommandModeChange = useCallback((mode: QueueCommandMode) => {
-    if (mode === 'live') {
-      if (queueProcessorHealth?.liveAutopilotAllowed === false) {
-        emitNotification({
-          title: 'Live Autopilot Blocked',
-          detail: 'Queue health is Critical. Resolve blank rows, duplicate collisions, routing blocks, or stale webhooks first.',
-          severity: 'warning',
-        })
-        return
-      }
-      if (!window.confirm('Enable Live Autopilot? This allows normal scheduled processing with production caps.')) return
+    if (mode === 'automatic') {
+      if (!window.confirm('Set Live Limited mode? Queue work still requires explicit caps and scope before any live seller rows are created or sent.')) return
     }
     setQueueCommandMode(mode)
-    void updateQueueControlSettings({ queue_processor_mode: mode })
+    const action = mode === 'paused' ? 'pause_queue_processor' : 'resume_queue_processor'
+    const campaignMode = mode === 'automatic' ? 'live_limited' : mode === 'assisted' ? 'dry_run' : 'paused'
+    void callBackend('/api/cockpit/queue/control', {
+      method: 'POST',
+      body: JSON.stringify({ action, campaign_mode: campaignMode }),
+    }).then(() => refreshQueueControl())
     emitNotification({
       title: 'Queue Mode Updated',
-      detail: mode === 'off' ? 'Automatic queue processing is off.' : mode === 'safe' ? 'Safe Autopilot enabled with strict caps.' : 'Live Autopilot enabled.',
-      severity: mode === 'live' ? 'warning' : 'success',
+      detail: mode === 'paused' ? 'Queue processor is paused.' : mode === 'assisted' ? 'Dry-run preview mode enabled.' : 'Live Limited selected; caps and scope are still required for live work.',
+      severity: mode === 'automatic' ? 'warning' : 'success',
     })
-  }, [queueProcessorHealth?.liveAutopilotAllowed])
+  }, [refreshQueueControl])
 
   const handleQueueCapsChange = useCallback((patch: Partial<QueueCommandCaps>) => {
     setQueueCommandCaps((current) => {
       const next = { ...current, ...patch }
       void updateQueueControlSettings({
         queue_run_limit: String(next.sends_per_run),
+        queue_hard_cap: String(next.sends_per_run),
+        queue_max_batch_size: String(next.sends_per_run),
         queue_sender_throttle: String(next.max_per_number_per_day),
         queue_market_throttle: String(next.max_per_market_per_hour),
-      })
+        queue_market_cap: String(next.max_per_market_per_hour),
+        queue_per_number_cap: String(next.max_per_number_per_day),
+      }).then(() => refreshQueueControl())
       return next
     })
-  }, [])
+  }, [refreshQueueControl])
+
+  const buildQueueSafetyPayload = useCallback(() => {
+    const campaignMode = String(queueControlDiagnostics?.campaign_mode || (queueCommandMode === 'automatic' ? 'live_limited' : queueCommandMode === 'assisted' ? 'dry_run' : 'paused'))
+    const allMarketAck = queueControlDiagnostics?.all_market_ack ?? queueControlDiagnostics?.queue_all_market_ack
+    return {
+      campaign_mode: campaignMode,
+      hard_cap: queueControlDiagnostics?.hard_cap ?? queueControlDiagnostics?.queue_hard_cap ?? queueCommandCaps.sends_per_run,
+      max_batch_size: queueControlDiagnostics?.max_batch_size ?? queueControlDiagnostics?.queue_max_batch_size ?? queueCommandCaps.sends_per_run,
+      daily_cap: queueControlDiagnostics?.daily_cap ?? queueControlDiagnostics?.queue_daily_send_cap ?? queueCommandCaps.sends_per_run,
+      market_cap: queueControlDiagnostics?.market_cap ?? queueControlDiagnostics?.queue_market_cap ?? queueCommandCaps.max_per_market_per_hour,
+      per_number_cap: queueControlDiagnostics?.per_number_cap ?? queueControlDiagnostics?.queue_per_number_cap ?? queueCommandCaps.max_per_number_per_day,
+      scan_limit: queueControlDiagnostics?.scan_limit ?? queueControlDiagnostics?.queue_scan_limit ?? 1000,
+      market: (queueControlDiagnostics?.market ?? queueControlDiagnostics?.queue_market_filter ?? commandMapMarket) || undefined,
+      state: queueControlDiagnostics?.state ?? queueControlDiagnostics?.queue_state_filter ?? undefined,
+      all_market_ack: allMarketAck === true || String(allMarketAck || '').toLowerCase() === 'true',
+    }
+  }, [commandMapMarket, queueCommandCaps, queueCommandMode, queueControlDiagnostics])
 
   const handleRunSafeBatch = useCallback(() => (
-    runQueueCommand('safe_batch', '/api/cockpit/queue/run-safe-batch', {
-      body: { caps: queueCommandCaps },
-      successTitle: 'Safe Batch Completed',
+    runQueueCommand('safe_batch', '/api/cockpit/queue/control', {
+      body: { action: 'queue_limited_batch', limit: Math.max(1, Math.min(10, queueCommandCaps.sends_per_run)), caps: queueCommandCaps, ...buildQueueSafetyPayload() },
+      successTitle: 'Limited Queue Batch',
       successDetail: (payload) => {
-        const summary = payload?.summary ?? {}
-        return `${summary.sent ?? 0} sent • ${summary.blocked ?? 0} blocked • ${summary.routing_blocked ?? 0} routing blocked • ${summary.replied_before_send ?? 0} replied before send.`
+        if (!payload) return 'No response received'
+        const { rows_created = 0, rows_scheduled = 0, error } = payload
+        return `${rows_created} queued, ${rows_scheduled} scheduled.${error ? ` Error: ${error}` : ''}`
       },
     })
-  ), [queueCommandCaps, runQueueCommand])
+  ), [buildQueueSafetyPayload, queueCommandCaps, runQueueCommand])
 
   const handleRunQueueNow = useCallback(() => (
-    runQueueCommand('run_now', '/api/cockpit/queue/run', {
-      body: { caps: queueCommandCaps, mode: queueCommandMode },
-      successTitle: 'Queue Run Completed',
+    runQueueCommand('run_now', '/api/cockpit/queue/control', {
+      body: { action: 'run_small_queue_batch', limit: Math.max(1, Math.min(5, queueCommandCaps.sends_per_run)), caps: queueCommandCaps, mode: queueCommandMode, ...buildQueueSafetyPayload() },
+      successTitle: 'Limited Queue Run',
       successDetail: (payload) => {
-        const summary = payload?.summary ?? {}
-        return `${summary.sent ?? 0} sent • ${summary.failed ?? 0} failed • ${summary.blocked ?? 0} blocked.`
+        if (!payload) return 'No response received'
+        const { rows_sent = 0, block_reasons = {}, error } = payload
+        const reasons = Object.entries(block_reasons)
+          .filter(([_, count]) => Number(count) > 0)
+          .map(([reason, count]) => `${count} ${reason}`)
+          .join(', ')
+        return `${rows_sent} rows sent.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
-  ), [queueCommandCaps, queueCommandMode, runQueueCommand])
+  ), [buildQueueSafetyPayload, queueCommandCaps, queueCommandMode, runQueueCommand])
 
   const handleQueueMoreNow = useCallback(() => (
-    runQueueCommand('queue_more', '/api/cockpit/queue/auto-enqueue', {
+    runQueueCommand('queue_more', '/api/cockpit/queue/control', {
       body: {
-        candidate_source: 'v_sms_ready_contacts',
-        target_count: Math.max(25, queueCommandCaps.sends_per_run * 2),
+        action: 'run_dry_run_feeder',
+        dry_run: true,
+        candidate_source: 'v_sms_ready_contacts_expanded',
+        limit: Math.max(5, Math.min(25, queueCommandCaps.sends_per_run * 2)),
         scan_limit: 1000,
         respect_contact_window: true,
+        only_first_touch: true,
         mode: queueCommandMode,
       },
-      successTitle: 'Auto Queue Completed',
+      successTitle: 'Dry-Run Preview Completed',
       successDetail: (payload) => {
-        const d = payload?.diagnostics ?? {}
-        return `${d.queued_count ?? 0} queued • ${d.scanned_count ?? 0} scanned • ${d.passes ?? 0} passes.`
+        if (!payload) return 'No response received'
+        const { eligible_count = 0, skipped_count = 0, preview = {}, block_reasons = {}, error } = payload
+        const scanned = preview?.scanned_count ?? preview?.candidates_scanned ?? 0
+        const reasons = Object.entries(block_reasons)
+          .filter(([_, count]) => Number(count) > 0)
+          .map(([reason, count]) => `${count} ${reason}`)
+          .join(', ')
+        return `${eligible_count} eligible, ${skipped_count} skipped, ${scanned} scanned.${reasons ? ` Blocks: ${reasons}` : ''}${error ? ` Error: ${error}` : ''}`
       },
     })
   ), [queueCommandCaps.sends_per_run, queueCommandMode, runQueueCommand])
 
   const handleEmergencyPause = useCallback(async () => {
-    setQueueCommandMode('off')
-    await updateQueueControlSettings({
-      queue_processor_mode: 'off',
-      queue_auto_send_enabled: 'false',
-      queue_auto_enqueue_enabled: 'false',
+    setQueueCommandMode('paused')
+    await callBackend('/api/cockpit/queue/control', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'emergency_stop' }),
     })
     emitNotification({
       title: 'Emergency Pause Enabled',
@@ -1960,7 +2472,8 @@ function InboxPageInternal() {
       severity: 'warning',
     })
     await refreshQueueHealth()
-  }, [refreshQueueHealth])
+    await refreshQueueControl()
+  }, [refreshQueueControl, refreshQueueHealth])
 
   const handleReprocessPaused = useCallback((ids?: string[]) => (
     runQueueCommand(ids?.length ? `retry_routing:${ids[0]}` : 'reprocess_paused', '/api/cockpit/queue/reprocess-paused', {
@@ -1997,9 +2510,14 @@ function InboxPageInternal() {
     })
   ), [runQueueCommand])
 
+  // Templates, queue model, and activity are heavy Supabase queries. Only start once after live inbox resolves.
+  // Cleanup does NOT clear the interval — a separate mount-only effect handles unmount cleanup.
   useEffect(() => {
-    let active = true
+    if (data.liveFetchStatus !== 'active') return
+    if (autonomyQueriesStartedRef.current) return
+    autonomyQueriesStartedRef.current = true
 
+    let active = true
     const refreshAutonomyInputs = async () => {
       try {
         const [nextQueue, nextTemplates, nextActivity] = await Promise.all([
@@ -2007,7 +2525,6 @@ function InboxPageInternal() {
           fetchSmsTemplates({ includeInactive: true, limit: 800 }).catch(() => []),
           fetchInboxActivity().catch(() => []),
         ])
-
         if (!active) return
         setQueueModel(nextQueue)
         setTemplateInventory(nextTemplates)
@@ -2016,17 +2533,99 @@ function InboxPageInternal() {
         if (DEV) console.warn('[InboxPage autonomy inputs] refresh failed', error)
       }
     }
-
     void refreshAutonomyInputs()
-    const interval = window.setInterval(() => {
-      void refreshAutonomyInputs()
-    }, 45000)
+    autonomyIntervalRef.current = window.setInterval(() => { void refreshAutonomyInputs() }, 45000)
+    return () => { active = false }  // cancel in-flight only; interval runs until unmount
+  }, [DEV, data.liveFetchStatus])
+
+  useEffect(() => {
+    return () => { if (autonomyIntervalRef.current !== null) window.clearInterval(autonomyIntervalRef.current) }
+  }, [])
+
+  // ── ALWAYS-ON AUTOPILOT LOOP ──────────────────────────────────────────────
+  const autopilotStateRef = useRef({
+    mode: queueCommandMode,
+    caps: queueCommandCaps,
+    health: queueProcessorHealth
+  })
+
+  useEffect(() => {
+    autopilotStateRef.current = { mode: queueCommandMode, caps: queueCommandCaps, health: queueProcessorHealth }
+  }, [queueCommandMode, queueCommandCaps, queueProcessorHealth])
+
+  useEffect(() => {
+    let active = true
+
+    const runFeederSilently = async () => {
+      if (!active) return
+      const { mode, caps, health } = autopilotStateRef.current
+      if (mode !== 'assisted' && mode !== 'automatic') return
+      
+      const targetCount = Math.max(50, caps.sends_per_run * 2)
+      const currentActive = (health?.queuedCount ?? 0) + (health?.scheduledCount ?? 0)
+      
+      if (currentActive < targetCount) {
+        try {
+          await callBackend('/api/cockpit/queue/queue-more', {
+            method: 'POST',
+            body: JSON.stringify({
+              candidate_source: 'v_sms_ready_contacts',
+              target_count: targetCount,
+              scan_limit: 1000,
+              respect_contact_window: true,
+              only_first_touch: true,
+              mode: mode,
+            }),
+          })
+          void refreshQueueHealth()
+        } catch (error) {
+          if (DEV) console.warn('[Autopilot] Feeder run failed', error)
+        }
+      }
+    }
+
+    const runQueueSilently = async () => {
+      if (!active) return
+      const { mode, caps } = autopilotStateRef.current
+      if (mode !== 'automatic') return
+
+      try {
+        await callBackend('/api/cockpit/queue/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            caps: caps,
+            mode: mode,
+          }),
+        })
+        void refreshQueueHealth()
+      } catch (error) {
+        if (DEV) console.warn('[Autopilot] Queue runner failed', error)
+      }
+    }
+
+    const feederInterval = window.setInterval(() => { void runFeederSilently() }, 2 * 60 * 1000)
+    const runnerInterval = window.setInterval(() => { void runQueueSilently() }, 60 * 1000)
+
+    // Deferred to avoid competing with initial thread message fetch
+    const initialTimeout = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => {
+          void runFeederSilently()
+          void runQueueSilently()
+        }, { timeout: 30000 })
+      } else {
+        void runFeederSilently()
+        void runQueueSilently()
+      }
+    }, 20000)
 
     return () => {
       active = false
-      window.clearInterval(interval)
+      window.clearInterval(feederInterval)
+      window.clearInterval(runnerInterval)
+      window.clearTimeout(initialTimeout)
     }
-  }, [DEV])
+  }, [DEV, refreshQueueHealth])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2146,7 +2745,7 @@ function InboxPageInternal() {
       }
       if (!options?.skipRefresh) {
         if (DEV) console.log(`[NexusInbox] Refreshing data for: ${label}`)
-        await refreshInbox({ filters: liveThreadQuery })
+        await refreshInbox({ filters: currentInboxQuery })
       } else {
         if (DEV) console.log(`[NexusInbox] Skipping refresh (optimistic only) for: ${label}`)
       }
@@ -2159,7 +2758,7 @@ function InboxPageInternal() {
     } catch (err) {
       emitNotification({ title: 'Error', detail: String(err), severity: 'critical' })
     }
-  }, [refreshInbox, liveThreadQuery, DEV])
+  }, [refreshInbox, currentInboxQuery, DEV])
 
   const handleThreadAction = useCallback(async (target: string | InboxWorkflowThread, action: string) => {
     const thread = typeof target === 'string' ? threads.find((t) => t.id === target) : target
@@ -2187,6 +2786,10 @@ function InboxPageInternal() {
       mutation = () => cancelQueueItem(queueId!, thread)
       optimistic = { inboxStatus: 'waiting' }
       // Additional logic to focus composer could go here
+    } else if (action === 'refetch') {
+      // Re-trigger message hydration for the selected thread (e.g. after a failed hydration).
+      setMessageRefetchKey((k) => k + 1)
+      return
     } else if (action === 'open_map') {
       setSelectedWorkspaceViews(['command_map'])
       return
@@ -2332,13 +2935,225 @@ function InboxPageInternal() {
     handleThreadAction(selected, selected.isArchived ? 'unarchive' : 'archive')
   }, [handleThreadAction, selected])
 
-  const handleSelect = useCallback((id: string) => {
-    const thread = threads.find((candidate) => candidate.id === id)
-    setActiveContext(buildContextFromThread(thread ?? null, 'inbox'), { preserveCurrentViews: true })
+  const anchorThreadSelection = useCallback((id: string) => {
+    const thread = findThreadByRef(threads, id)
+    if (thread) {
+      setSelectedId(thread.id)
+      setSelectedThreadKey(thread.threadKey || thread.id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: thread.id }))
+      selectedThreadFallbackRef.current = thread
+      return
+    }
     setSelectedId(id)
-    setSelectedThreadKey(thread?.threadKey || thread?.id || null)
+    setSelectedThreadKey(id)
     setLayoutState((current) => ({ ...current, selectedThreadId: id }))
-  }, [setActiveContext, threads])
+  }, [threads])
+
+  const handleSelect = useCallback((id: string) => {
+    setPreviewContext(null)
+    const thread = findThreadByRef(threads, id)
+    const threadKey = thread?.threadKey || thread?.id || id
+    console.log('[THREAD_CLICK]', threadKey)
+    console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
+    // Immediately clear old messages and show skeleton — effect fetches fresh ones
+    setSelectedMessages([])
+    setMessagesLoading(true)
+    if (thread) {
+      setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+      setSelectedId(thread.id)
+      setSelectedThreadKey(thread.threadKey || thread.id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: thread.id }))
+      selectedThreadFallbackRef.current = thread
+    } else {
+      // Keep pipeline/queue/calendar context — only anchor selection by thread key ref.
+      setSelectedId(id)
+      setSelectedThreadKey(id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: id }))
+    }
+    // Mark thread read and clear unread count in canonical state
+    if (threadKey) {
+      void callBackend('/api/cockpit/inbox/thread-state', {
+        method: 'PATCH',
+        body: JSON.stringify({ thread_key: threadKey, is_read: true, unread_count: 0 }),
+      })
+    }
+  }, [setActiveContext, threads, viewFilter])
+
+  const handleUniversalEntityContextChange = useCallback((next: UniversalEntityContext, options?: { pushHistory?: boolean }) => {
+    publishingUniversalRef.current = true
+    setUniversalEntityContext(next)
+    setUniversalEntityContextSnapshot(next)
+    setActiveContext(activeInboxFromUniversalContext(next, 'entity_graph'), { preserveCurrentViews: true })
+    if (options?.pushHistory) syncUniversalContextToUrl(next, 'push')
+  }, [setActiveContext])
+
+  useEffect(() => {
+    return subscribeUniversalEntityContext((next) => {
+      setUniversalEntityContext(next)
+      if (publishingUniversalRef.current) {
+        publishingUniversalRef.current = false
+        return
+      }
+      if (!hasEntityAnchor(syncPayloadFromUniversal(next, 'inbox'))) return
+      const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'inbox')
+      setActiveContextState((current) => ({ ...current, ...active }))
+      const match = findThreadForActiveContext(threads, active)
+      if (match) {
+        setSelectedId(match.id)
+        setSelectedThreadKey(match.threadKey || match.id)
+        setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+        selectedThreadFallbackRef.current = match
+      } else if (active.threadKey) {
+        setSelectedThreadKey(active.threadKey)
+      }
+    })
+  }, [activeContext.sourceView, threads])
+
+  useEffect(() => {
+    const active = effectiveActiveContext
+    const hasAnchor = Boolean(active.threadKey || active.propertyId || active.masterOwnerId || active.sellerId || active.opportunityId)
+    if (!hasAnchor) return
+    if (selected && activeContextMatchesThread(active, selected) && dealContext) return
+
+    let cancelled = false
+    const controller = new AbortController()
+    const fallback = dealContextFromActiveInbox(active)
+    if (fallback && !dealContext) setDealContext(fallback)
+
+    void (async () => {
+      try {
+        let hydrated: DealContext | null = null
+        if (active.threadKey) {
+          hydrated = await getDealContextByThread(active.threadKey, controller.signal)
+        }
+        if (!hydrated && active.propertyId) {
+          hydrated = await getDealContextByProperty(active.propertyId, controller.signal)
+        }
+        if (cancelled || !hydrated) return
+        if (selected && !activeContextMatchesThread(active, selected)) return
+        setDealContext((current) => {
+          if (!current) return hydrated
+          return {
+            ...hydrated,
+            ...current,
+            ownerName: current.ownerName || hydrated.ownerName,
+            propertyAddress: current.propertyAddress || hydrated.propertyAddress,
+            market: current.market || hydrated.market,
+          }
+        })
+      } catch {
+        /* hydration is best-effort */
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [
+    dealContext,
+    effectiveActiveContext.masterOwnerId,
+    effectiveActiveContext.opportunityId,
+    effectiveActiveContext.propertyId,
+    effectiveActiveContext.sellerId,
+    effectiveActiveContext.threadKey,
+    selected,
+  ])
+
+  const syncOpportunityContext = useCallback((opportunity: PipelineOpportunity, mode: 'select' | 'preview') => {
+    const { active, universal } = syncPayloadFromOpportunity(opportunity)
+    if (mode === 'preview') {
+      setPreviewContext(active)
+      patchUniversalEntityContextSnapshot(universal, { silent: true })
+      return
+    }
+    setPreviewContext(null)
+    setMessagesLoading(true)
+    setSelectedMessages([])
+    publishingUniversalRef.current = true
+    setActiveContextState((current) => ({ ...current, ...active }))
+    setUniversalEntityContext(universal)
+    setUniversalEntityContextSnapshot(universal)
+    const match = findThreadForActiveContext(threads, active)
+    if (match) {
+      setSelectedId(match.id)
+      setSelectedThreadKey(match.threadKey || match.id)
+      setLayoutState((layout) => ({ ...layout, selectedThreadId: match.id }))
+      selectedThreadFallbackRef.current = match
+    } else if (active.threadKey) {
+      setSelectedThreadKey(active.threadKey)
+    }
+  }, [threads])
+
+  const clearOpportunityPreview = useCallback(() => {
+    setPreviewContext(null)
+  }, [])
+
+  const handleEntityGraphAction = useCallback((action: EntityGraphAction, context: UniversalEntityContext) => {
+    const threadMatch = context.threadKey
+      ? threads.find((thread) => (thread.threadKey || thread.id) === context.threadKey)
+      : threads.find((thread) =>
+        (context.propertyId && thread.propertyId === context.propertyId)
+        || (context.masterOwnerId && thread.ownerId === context.masterOwnerId)
+        || (context.prospectId && thread.prospectId === context.prospectId),
+      )
+
+    const routed = routeEntityGraphAction(action, context, {
+      onOpenThread: () => {
+        if (threadMatch) handleSelect(threadMatch.id)
+        else if (context.threadKey) setActiveContext({ threadKey: context.threadKey, ...activeInboxFromUniversalContext(context, 'list') }, { openThread: true })
+      },
+      onOpenConversationDraft: () => {
+        if (threadMatch) {
+          handleSelect(threadMatch.id)
+          focusWorkspaceView('sms_thread')
+          return
+        }
+        setActiveContext(activeInboxFromUniversalContext(context, 'list'), { openThread: true, focusView: 'sms_thread' })
+      },
+      onOpenDealIntelligence: () => {
+        if (threadMatch) handleOpenDealIntelligence(threadMatch.id)
+        else if (context.propertyId) setActiveContext({ propertyId: context.propertyId, ...activeInboxFromUniversalContext(context, 'list') }, { preserveCurrentViews: true })
+        setSelectedWorkspaceViews(['deal_intelligence'])
+      },
+      onOpenMap: () => setSelectedWorkspaceViews(['command_map']),
+      onOpenCompIntelligence: () => setSelectedWorkspaceViews(['comp_intelligence']),
+      onOpenBuyerMatch: () => setSelectedWorkspaceViews(['buyer_match']),
+    })
+    if (!routed) {
+      if (DEV) console.warn('[InboxPage] unhandled entity graph action', action)
+    }
+  }, [focusWorkspaceView, handleOpenDealIntelligence, handleSelect, setActiveContext, threads])
+
+  useEffect(() => {
+    if (!selected) return
+    // Cross-app sources own context until the inbox row matches.
+    if (activeContext.sourceView && activeContext.sourceView !== 'inbox' && hasEntityAnchor(activeContext)) {
+      if (!activeContextMatchesThread(activeContext, selected)) return
+    }
+    setUniversalEntityContext((current) => {
+      const merged = mergeUniversalContexts(current, universalContextFromActiveInbox({
+        ...activeContext,
+        threadKey: selected.threadKey || selected.id,
+        propertyId: selected.propertyId,
+        sellerId: selected.ownerId,
+        masterOwnerId: selected.ownerId,
+        prospectId: selected.prospectId,
+      }))
+      patchUniversalEntityContextSnapshot(merged, { silent: true })
+      return merged
+    })
+  }, [activeContext, selected])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseEntityGraphDeepLink(window.location.pathname)
+      if (parsed) handleUniversalEntityContextChange(parsed, { pushHistory: false })
+      else handleUniversalEntityContextChange(EMPTY_UNIVERSAL_ENTITY_CONTEXT, { pushHistory: false })
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [handleUniversalEntityContextChange])
 
   useEffect(() => {
     const handleCommandAction = (event: Event) => {
@@ -2399,6 +3214,19 @@ function InboxPageInternal() {
       if (kind === 'apply_inbox_view') {
         const nextView = typeof detail.view === 'string' ? detail.view as InboxViewSelectValue : 'priority'
         setViewFilter(nextView)
+        setSelectedId(null)
+        setSelectedThreadKey(null)
+        selectedThreadFallbackRef.current = null
+        void refreshInbox({
+          filters: {
+            view: nextView,
+            stage: stageFilter,
+            query: searchQuery,
+            advanced: advancedFilters,
+          },
+          cursor: null,
+          limit: 100,
+        })
         if (sourceModeFromEvent === 'all_sellers' || nextView === 'not_contacted') {
           setSourceMode('all_sellers')
         }
@@ -2427,7 +3255,7 @@ function InboxPageInternal() {
 
     window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
     return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
-  }, [handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, setSourceMode, setActiveContext])
+  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, searchQuery, setSourceMode, setActiveContext, stageFilter])
 
   const handleMapSellerContext = useCallback((context: {
     propertyId?: string
@@ -2435,10 +3263,14 @@ function InboxPageInternal() {
     sourceView: 'map'
     intent: 'open_seller' | 'open_queue'
   }) => {
+    const propertyId = context.propertyId
+    const masterOwnerId = context.masterOwnerId
     setActiveContext({
-      propertyId: context.propertyId,
-      masterOwnerId: context.masterOwnerId,
-      sellerId: context.masterOwnerId,
+      propertyId,
+      masterOwnerId,
+      sellerId: masterOwnerId,
+      entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+      entityId: propertyId || masterOwnerId || null,
       sourceView: context.sourceView,
       intent: context.intent,
     }, {
@@ -2448,13 +3280,27 @@ function InboxPageInternal() {
     })
   }, [setActiveContext])
 
-  const handleOperatorAction = useCallback(async (id: string, action: string) => {
+  const handleOperatorAction = useCallback(async (id: string, action: string, payload?: Record<string, unknown>) => {
     const thread = threads.find((t) => t.id === id)
     if (!thread) return
 
     if (DEV) console.log(`[OperatorAction] ${action} on ${id.slice(-8)}`)
 
+    if (action.startsWith('cancel_queue:') || action.startsWith('edit_queue:') || action.startsWith('approve_queue:')) {
+      await handleThreadAction(thread, action)
+      if (action.startsWith('edit_queue:')) {
+        const text = String(payload?.text ?? '').trim()
+        if (text) setDraftText(text)
+        setScheduledTemplatePayload({ text, template: null })
+        setSchedulePanelOpen(true)
+      }
+      return
+    }
+
     switch (action) {
+      case 'refetch':
+        setMessageRefetchKey((k) => k + 1)
+        break
       case 'auto_reply':
         await handleWorkflowMutation('Auto-Reply: Queueing...', () => executeAutoReply(thread, null, { dryRun: autonomyControls.dryRun }), { skipRefresh: false })
         break
@@ -2501,10 +3347,25 @@ function InboxPageInternal() {
       case 'unread':
         await handleThreadAction(thread, 'unread')
         break
+      case 'open_dossier':
+        setActiveOverlay('dossier')
+        break
+      case 'add_note':
+        setActiveOverlay('dossier')
+        break
+      case 'mark_reviewed':
+        await handleThreadAction(thread, 'read')
+        break
+      case 'open_property':
+        handleOpenDealIntelligence(thread.id)
+        break
+      case 'ai_assist':
+        setActiveOverlay('ai')
+        break
       default:
         console.warn('[OperatorAction] Unknown action', action)
     }
-  }, [threads, handleWorkflowMutation, handleThreadAction, DEV])
+  }, [threads, handleWorkflowMutation, handleThreadAction, handleOpenDealIntelligence, setActiveOverlay, DEV])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
@@ -2527,7 +3388,7 @@ function InboxPageInternal() {
       createdAt: timestamp,
       timelineAt: timestamp,
       deliveredAt: null,
-      deliveryStatus: 'pending',
+      deliveryStatus: 'sending',
       fromNumber: '',
       toNumber: selected.canonicalE164 || selected.phoneNumber || '',
       ownerId: selected.ownerId || '',
@@ -2539,7 +3400,7 @@ function InboxPageInternal() {
       templateName: template?.useCase ?? null,
       agentId: null,
       source: 'operator',
-      rawStatus: 'pending',
+      rawStatus: 'sending',
       error: null,
       metadata: { client_send_id: clientSendId },
       developerMeta: { client_send_id: clientSendId },
@@ -2556,33 +3417,67 @@ function InboxPageInternal() {
 
     setIsSending(true)
     try {
-      const result = await sendInboxMessageNow(selected, text, {
+      let result = await sendInboxMessageNow(selected, text, {
         selectedTemplate: template ?? null,
         threadContext,
         clientSendId,
       })
+      const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
+      if (overrideAllowed) {
+        const retryMessage =
+          result.backendReason === 'recent_delivery_failures'
+            ? 'Recent delivery issue detected. Retry anyway?'
+            : result.backendReason === 'content_blocked'
+              ? 'Potential content issue detected. Send anyway?'
+              : 'This send was blocked, but operator override is allowed. Retry anyway?'
+        const retry = window.confirm(retryMessage)
+        if (retry) {
+          result = await sendInboxMessageNow(selected, text, {
+            selectedTemplate: template ?? null,
+            threadContext,
+            clientSendId,
+            operatorOverride: true,
+          })
+        }
+      }
       emitNotification({
         title: result.ok
-          ? (result.queueProcessorEligible ? 'Queued For Immediate Send' : 'Queued (Processor Delayed)')
+          ? 'Message Sent'
           : 'Send Failed',
         detail: result.ok
-          ? (result.queueProcessorEligible
-            ? `Queue row ${result.queueId ?? 'created'} is eligible for immediate send`
-            : (result.errorMessage ?? `Queue row ${result.queueId ?? 'created'} created, but processing appears delayed`))
+          ? (result.deliveryStatus === 'delivered'
+            ? 'Message delivered.'
+            : 'Provider accepted the message.')
           : (result.errorMessage ?? 'Could not queue message for send'),
         severity: result.ok
-          ? (result.queueProcessorEligible ? 'success' : 'warning')
+          ? 'success'
           : 'critical',
       })
 
       if (!result.ok) {
-        optimisticMessageMapRef.current.delete(clientSendId)
         setPendingMessagesByThread((current) => ({
           ...current,
-          [selected.id]: (current[selected.id] ?? []).filter((pending) => pending.id !== optimisticMessage.id),
+          [selected.id]: dedupeMessages((current[selected.id] ?? []).map((pending) => (
+            pending.id !== optimisticMessage.id
+              ? pending
+              : {
+                  ...pending,
+                  deliveryStatus: 'failed',
+                  rawStatus: 'failed',
+                  error: result.errorMessage,
+                  metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
+                  developerMeta: {
+                    ...(pending.developerMeta ?? {}),
+                    client_send_id: clientSendId,
+                    ...(result.queueId ? { queue_id: result.queueId } : {}),
+                    ...(result.providerMessageSid ? { provider_message_sid: result.providerMessageSid } : {}),
+                    ...(result.messageEventId ? { message_event_id: result.messageEventId } : {}),
+                  },
+                }
+          ))),
         }))
       } else {
-        console.log('[MessageLifecycle] queue merged', { clientSendId, queueId: result.queueId, status: result.deliveryStatus })
+        console.log('[MessageLifecycle] send merged', { clientSendId, queueId: result.queueId, status: result.deliveryStatus })
 
         // Optimistically update the thread so it clears from the unread queue instantly
         setOptimisticPatches((prev) => ({
@@ -2597,7 +3492,7 @@ function InboxPageInternal() {
             latestMessageBody: text.trim(),
             latestMessageAt: timestamp,
             latestDirection: 'outbound',
-            inboxCategory: 'outbound_active'
+            inboxCategory: 'follow_up'
           }
         }))
 
@@ -2608,18 +3503,28 @@ function InboxPageInternal() {
               ? pending
               : {
                   ...pending,
-                  deliveryStatus: result.deliveryStatus || 'queued',
-                  rawStatus: result.deliveryStatus || 'queued',
+                  deliveryStatus: result.deliveryStatus || 'sent',
+                  rawStatus: result.deliveryStatus || 'sent',
                   metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
                   developerMeta: {
                     ...(pending.developerMeta ?? {}),
                     client_send_id: clientSendId,
                     queue_id: result.queueId ?? '',
                     provider_message_sid: result.providerMessageSid ?? '',
+                    ...(result.messageEventId ? { message_event_id: result.messageEventId } : {}),
                   },
                 }
           ))),
         }))
+
+        void refreshInbox({
+          filters: currentInboxQuery,
+          cursor: null,
+          limit: 100,
+          _force: true,
+          _timeoutMode: 'manual_bucket_switch',
+          _refreshReason: 'send_success',
+        })
       }
 
       setDraftText('')
@@ -2627,7 +3532,7 @@ function InboxPageInternal() {
       inFlightSendMapRef.current.delete(clientSendId)
       setIsSending(false)
     }
-  }, [isSending, selected, selectedSuppressed, threadContext])
+  }, [currentInboxQuery, isSending, refreshInbox, selected, selectedSuppressed, threadContext])
 
   const handleSendTemplate = useCallback(async (payload: TemplateActionPayload) => {
     await handleSend(payload.text, payload.template)
@@ -2651,16 +3556,6 @@ function InboxPageInternal() {
     }
   }, [selected, threadContext])
 
-  const handleSelectQueueItem = useCallback((item: import('../../lib/data/queueData').QueueItem) => {
-    setActiveContext(buildContextFromQueueItem(item, 'queue'), { preserveCurrentViews: true })
-    if (item.linkedInboxThreadId) {
-      const match = threads.find((thread) => thread.id === item.linkedInboxThreadId || (thread.threadKey || thread.id) === item.linkedInboxThreadId)
-      if (match) {
-        setSelectedId(match.id)
-        setSelectedThreadKey(match.threadKey || match.id)
-      }
-    }
-  }, [setActiveContext, threads])
 
   const handleSelectCalendarEvent = useCallback((event: import('../../lib/data/calendarData').CalendarEvent) => {
     setActiveContext(buildContextFromCalendarEvent(event), { preserveCurrentViews: true })
@@ -2673,7 +3568,7 @@ function InboxPageInternal() {
     }
   }, [setActiveContext, threads])
 
-  const handleActivityNavigation = useCallback((event: import('./commandMapLiveActivity').CommandMapActivityEvent) => {
+  const handleActivityNavigation = useCallback((event: import('../../views/map/commandMapLiveActivity').CommandMapActivityEvent) => {
     const openThread = event.targetView === 'thread' || event.type === 'new_reply' || event.type === 'positive_reply'
     const focusView: InboxWorkspaceView =
       event.targetView === 'queue'
@@ -2922,14 +3817,8 @@ function InboxPageInternal() {
     updateAutonomyControl,
   ])
 
-  if (dataLoading) return (
-    <div className="nx-premium-inbox">
-      <div className="nx-inbox-loading-state">
-        <div className="nx-loading-spinner" />
-        <span>Loading NEXUS Inbox...</span>
-      </div>
-    </div>
-  )
+  // Full-page loading guard removed: bucket switches must never flash a blank page.
+  // InboxSidebar shows an empty list while the fetch is in flight; that is intentional.
 
   const { leftPanelMode, rightPanelMode, inboxMode, mapMode, activeOverlay } = layoutState
   const layoutClasses = getLayoutClassNames(layoutState)
@@ -2946,6 +3835,8 @@ function InboxPageInternal() {
   const isCustomMultiView = isMultiView && !isDefaultWorkspaceShell
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
+  const isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
+  const useFullscreenShell = !workspaceBlocked && !isMultiView && (isRouteFullscreen || isDealIntelligenceView || isEntityGraphView)
   const showLeftPanel = isDefaultWorkspaceShell
   const isDoubleSided = inboxMode === 'full_double'
   const showRightCommandPanel = isDefaultWorkspaceShell
@@ -2993,8 +3884,7 @@ function InboxPageInternal() {
   }
 
   const renderSmsThreadPane = (layoutMode: ReturnType<typeof getViewLayoutMode> = 'full') => (
-    <section className="nx-workspace-pane-surface nx-workspace-pane-surface--sms-thread">
-      <ErrorBoundary fallbackName="ChatThread">
+    <section className={cls('nx-workspace-pane-surface', 'nx-workspace-pane-surface--sms-thread', `is-layout-${layoutMode}`)}>
       <ChatThread
         thread={selected}
         messages={displayedMessagesWithTranslation}
@@ -3012,10 +3902,12 @@ function InboxPageInternal() {
         sellerLanguageLabel={sellerLanguageLabel}
         isTranslatingThread={threadTranslationLoading}
         onTranslateThread={handleTranslateThread}
+        backgroundLoading={contextLoading}
+        hasOlderMessages={hasOlderMessages}
+        olderMessagesLoading={olderMessagesLoading}
+        onLoadOlder={handleLoadOlderMessages}
       />
-      </ErrorBoundary>
 
-      <ErrorBoundary fallbackName="Composer">
       <Composer
         draftText={draftText}
         onSend={handleSend}
@@ -3039,8 +3931,8 @@ function InboxPageInternal() {
         isTranslatingDraft={draftTranslationLoading}
         onTranslateDraft={handleTranslateDraft}
         autoTranslateDraft={!!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)}
+        layoutMode={layoutMode}
       />
-      </ErrorBoundary>
     </section>
   )
 
@@ -3056,10 +3948,9 @@ function InboxPageInternal() {
         `is-width-${paneWidth}`,
       )}
     >
-      <ErrorBoundary fallbackName="InboxSidebar">
       <InboxSidebar
         threads={threads}
-        selectedId={selected?.id ?? null}
+        selectedId={inboxHighlightId}
         activeViewFilter={viewFilter}
         onSelect={handleSelect}
         onThreadAction={handleThreadAction}
@@ -3067,7 +3958,11 @@ function InboxPageInternal() {
         onApplySavedPreset={applySavedPreset}
         viewCounts={viewCounts}
         onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+        activeFilterChips={activeAdvancedFilterChips}
+        activeFilterCount={activeAdvancedFilterCount}
+        onRemoveFilterChip={handleRemoveAdvancedFilterChip}
         onClearFilters={handleResetFilters}
+        onRetryLoad={handleRetryInboxLoad}
         onLoadMore={handleLoadMore}
         canLoadMore={Boolean(data.pagination?.hasMore)}
         recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -3076,11 +3971,13 @@ function InboxPageInternal() {
         sourceMode={sourceMode}
         onSourceModeChange={setSourceMode}
         visibleThreadCount={visibleThreadCount}
+        loading={_dataLoading}
         loadingError={data.liveFetchError}
+        realtimeStatus={data.realtimeStatus}
+        refreshMode={data.refreshMode}
         densityMode={paneMode === 'single' || paneWidth === '75' || paneWidth === '100' ? 'full' : 'compact'}
         inboxMode={paneWidth === '25' ? 'rail25' : paneWidth === '50' ? 'review50' : paneWidth === '75' ? 'ops75' : 'full100'}
       />
-      </ErrorBoundary>
     </section>
   )
 
@@ -3101,10 +3998,9 @@ function InboxPageInternal() {
 
     if (view === 'list') {
       return (
-        <ErrorBoundary fallbackName="InboxConversationTable">
         <InboxConversationTable
           threads={filtered}
-          selectedId={selected?.id ?? null}
+          selectedId={inboxHighlightId}
           sort={tableSort}
           density={paneMode === 'multi' && paneWidth === '75' ? 'compact' : tableDensity}
           layoutMode={layoutMode}
@@ -3113,7 +4009,28 @@ function InboxPageInternal() {
           onDensityChange={setTableDensity}
           onSelect={handleSelect}
         />
-        </ErrorBoundary>
+      )
+    }
+
+    if (view === 'entity_graph') {
+      return (
+        <section
+          className="nx-workspace-surface nx-workspace-surface--entity-graph"
+          style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}
+        >
+          <EntityGraphWorkspace
+            paneWidth={paneWidth}
+            themeMode={layoutState.theme}
+            universalContext={universalEntityContext}
+            onUniversalContextChange={handleUniversalEntityContextChange}
+            onAction={handleEntityGraphAction}
+            onSelectThreadKey={(threadKey) => {
+              const match = findThreadByRef(threads, threadKey)
+              if (match) handleSelect(match.id)
+              else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'entity_graph') }, { openThread: true })
+            }}
+          />
+        </section>
       )
     }
 
@@ -3121,39 +4038,38 @@ function InboxPageInternal() {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
           <div className="nx-map-right-body nx-map-right-body--workspace">
-            <ErrorBoundary fallbackName="InboxCommandMap">
-              <InboxCommandMap
-                threads={mapThreads}
-                visibleThreads={filtered}
-                selectedThread={selected}
-                selectedThreadMessages={displayedMessages}
-                selectedThreadMessagesLoading={messagesLoading}
-                quickReplyDraft={draftText}
-                onQuickReplyDraftChange={setDraftText}
-                onQuickReplySend={(text) => handleSend(text)}
-                quickReplyDisabled={selectedSuppressed || isSending}
-                zoomedIn
-                sourceMode={mapSourceMode}
-                onSourceModeChange={setMapSourceMode}
-                onSelectThreadId={handleSelect}
-                onSelectSellerContext={handleMapSellerContext}
-                onSelectActivity={handleActivityNavigation}
-                onBackgroundClick={() => {}}
-                onOpenDealIntelligence={handleOpenDealIntelligence}
-                buyerCommandData={buyerCommandData}
-                buyerFilters={buyerFilters}
-                onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
-                selectedBuyerKey={selectedBuyerKey}
-                onSelectBuyerKey={setSelectedBuyerKey}
-                initialMapStyleMode={commandMapTheme}
-                onStateChange={(state) => {
-                  setCommandMapTheme(state.mapStyleMode)
-                  setCommandMapMarket(state.filters.market || '')
-                }}
-                fullHeight={paneMode === 'single'}
-                layoutMode={layoutMode}
-              />
-            </ErrorBoundary>
+            <InboxCommandMap
+              threads={mapThreads}
+              visibleThreads={filtered}
+              selectedThread={workspaceThread}
+              selectedThreadMessages={displayedMessages}
+              selectedThreadMessagesLoading={messagesLoading}
+              quickReplyDraft={draftText}
+              onQuickReplyDraftChange={setDraftText}
+              onQuickReplySend={(text) => handleSend(text)}
+              quickReplyDisabled={selectedSuppressed || isSending}
+              zoomedIn
+              sourceMode={mapSourceMode}
+              onSourceModeChange={setMapSourceMode}
+              onSelectThreadId={handleSelect}
+              onSelectSellerContext={handleMapSellerContext}
+              onSelectActivity={handleActivityNavigation}
+              onBackgroundClick={() => {}}
+              onOpenDealIntelligence={handleOpenDealIntelligence}
+              buyerCommandData={buyerCommandData}
+              buyerFilters={buyerFilters}
+              onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
+              selectedBuyerKey={selectedBuyerKey}
+              onSelectBuyerKey={setSelectedBuyerKey}
+              initialMapStyleMode={commandMapTheme}
+              onStateChange={(state) => {
+                setCommandMapTheme(state.mapStyleMode)
+                setCommandMapMarket(state.filters.market || '')
+              }}
+              fullHeight={paneMode === 'single'}
+              layoutMode={layoutMode}
+              paused={heavyLoadPaused}
+            />
           </div>
         </section>
       )
@@ -3161,37 +4077,42 @@ function InboxPageInternal() {
 
     if (view === 'deal_intelligence') {
       return (
-        <ErrorBoundary fallbackName="IntelligencePanel">
         <IntelligencePanel
-          thread={selected}
+          thread={workspaceThread}
           threadContext={threadContext}
           intelligence={threadIntelligence}
-          threadDossier={threadDossier}
-          dossierLoading={dossierLoading}
+          dealContext={canonicalSelectedContext}
           onStatusChange={handleStatusChange}
           onStageChange={handleStageChange}
           onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-          onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
+          onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
+          onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
           messages={displayedMessages}
           panelMode={paneMode === 'single' ? 'full' : paneWidth === '25' || paneWidth === '50' ? 'half' : 'default'}
           layoutMode={layoutMode}
         />
-        </ErrorBoundary>
+
       )
     }
 
     if (view === 'pipeline') {
       return (
-        <InboxPipelineView
-          threads={pipelineThreads}
-          selectedId={selected?.id ?? null}
-          selectedThread={selected}
+        <PipelineWorkspace
+          selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
+          externalContext={effectiveActiveContext}
           layoutMode={layoutMode}
           onSelect={handleSelect}
-          onActivateThread={(thread) => setActiveContext(buildContextFromThread(thread, 'pipeline'), { preserveCurrentViews: true })}
-          onOpenCommandView={handleOpenDealIntelligence}
-          onThreadAction={handleOperatorAction}
+          onAnchorThread={anchorThreadSelection}
+          onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
+          onSyncOpportunity={syncOpportunityContext}
+          onClearOpportunityPreview={clearOpportunityPreview}
+          onOpenCommandView={(threadId) => {
+            if (threadId) handleSelect(threadId)
+            handleFocusWorkspaceView('sms_thread')
+          }}
+          onOpenDealIntelligence={handleOpenDealIntelligence}
+          onAction={handleOperatorAction}
         />
       )
     }
@@ -3199,13 +4120,11 @@ function InboxPageInternal() {
     if (view === 'queue') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--queue">
-          <SendQueueDashboard
-            queueModel={queueModel}
-            processorHealth={queueProcessorHealth}
-            queueCommandMode={queueCommandMode}
-            layoutMode={layoutMode}
-            selectedQueueId={activeContext.queueId ?? null}
-            onSelectItem={handleSelectQueueItem}
+          <QueuePage
+            externalContext={effectiveActiveContext}
+            onSelectItem={queueItem =>
+              setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
+            }
           />
         </section>
       )
@@ -3216,8 +4135,8 @@ function InboxPageInternal() {
         <section className="nx-workspace-surface nx-workspace-surface--calendar">
           <InboxCalendarView
             threads={filtered}
-            selectedThread={selected}
-            selectedId={selected?.id ?? null}
+            selectedThread={workspaceThread}
+            selectedId={workspaceThread?.id ?? null}
             layoutMode={layoutMode}
             onSelectThread={handleSelect}
             onSelectEvent={handleSelectCalendarEvent}
@@ -3230,24 +4149,7 @@ function InboxPageInternal() {
     if (view === 'metrics') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--metrics">
-          <div className="nx-workspace-card-grid">
-            {[
-              'Templates',
-              'Agents',
-              'Markets',
-              'Campaign Analytics',
-              'Delivery Analytics',
-              'Reply Analytics',
-              'Opt-out Analytics',
-              'Routing Performance',
-            ].map((title) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="stats" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">Analytics section mapped under Analytics view.</p>
-              </div>
-            ))}
-          </div>
-          <ErrorBoundary fallbackName="MetricsWarRoom"><MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} /></ErrorBoundary>
+          <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
         </section>
       )
     }
@@ -3255,40 +4157,75 @@ function InboxPageInternal() {
     if (view === 'comp_intelligence') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
-          <div className="nx-workspace-card-grid">
-            {['Comps', 'ARV', 'Repairs', 'Offer Stack', 'Underwriting', 'Creative Structure'].map((title) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="layers" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">Section mapped under Comp Intelligence.</p>
-              </div>
-            ))}
-          </div>
-          <CompIntelligenceWorkspace thread={selected} />
+          <CompIntelligenceWorkspace
+            thread={workspaceThread}
+            dealContext={canonicalSelectedContext}
+            paused={heavyLoadPaused}
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
+          />
         </section>
       )
     }
 
     if (view === 'buyer_match') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--intel-grid">
+        <section className="nx-workspace-surface nx-workspace-surface--map">
           <BuyerMatchWorkspace
-            buyerCommandData={buyerCommandData}
-            buyerFilters={buyerFilters}
-            onBuyerFiltersChange={setBuyerFilters}
-            selectedBuyerKey={selectedBuyerKey}
-            onSelectBuyerKey={setSelectedBuyerKey}
-            paneMode={paneMode}
+            paused={heavyLoadPaused}
+            dealContext={canonicalSelectedContext}
+            propertySnapshot={{
+              property_id: canonicalSelectedContext?.propertyId || '',
+              address: canonicalSelectedContext?.propertyAddress || 'Property Unknown',
+              market: canonicalSelectedContext?.market || '',
+              zip: canonicalSelectedContext?.propertyZip || '',
+              state: canonicalSelectedContext?.propertyState || '',
+              county: canonicalSelectedContext?.propertyCounty || '',
+              property_type: canonicalSelectedContext?.property_type || '',
+              asset_class: canonicalSelectedContext?.property_type || '',
+              beds: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_bedrooms as number | null,
+              baths: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_baths as number | null,
+              sqft: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.building_square_feet as number | null,
+              estimated_value: canonicalSelectedContext?.estimatedValue || null,
+              arv: canonicalSelectedContext?.estimated_arv || canonicalSelectedContext?.estimatedValue || null,
+              purchase_price: canonicalSelectedContext?.cashOffer || null,
+              dispo_strategy: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.dispo_strategy as string || '',
+            }}
             paneWidth={paneWidth}
-            selectedPropertyLabel={
-              selected?.propertyAddressFull
-              || (selected as Record<string, unknown> | null)?.property_address_full as string
-              || (selected as Record<string, unknown> | null)?.property_address as string
-              || ((selected as Record<string, unknown> | null)?.address as string)
-              || 'Property Unknown'
-            }
-            selectedMarket={selected?.market || ((selected as Record<string, unknown> | null)?.property_address_city as string) || 'Market Unknown'}
-            selectedZip={((selected as Record<string, unknown> | null)?.property_address_zip as string) || ''}
-            selectedPropertyType={selected?.propertyType || ((selected as Record<string, unknown> | null)?.property_type as string) || ''}
+            apiBase="/api/cockpit"
+          />
+        </section>
+      )
+    }
+
+    if (view === 'campaigns') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <InboxCampaignView
+            selectedThread={workspaceThread}
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
+          />
+        </section>
+      )
+    }
+
+    if (view === 'email') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <EmailCommandCenter
+            paneWidth={paneWidth}
+          />
+        </section>
+      )
+    }
+
+    if (view === 'workflow_studio') {
+      return (
+        <section className="nx-workspace-surface nx-workspace-surface--workflow-studio wfs2-isolation-root" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <WorkflowStudioV2
+            paneWidth={paneWidth}
+            layoutMode={layoutMode}
           />
         </section>
       )
@@ -3328,17 +4265,17 @@ function InboxPageInternal() {
     <WatchlistProvider>
     <div
       id="nx-inbox-root"
+      data-nexus-theme={activeNexusThemeId}
+      data-nexus-accent={activeAccentPalette}
       className={cls(
         'nx-premium-inbox nx-inbox',
         ...layoutClasses,
+        isRouteFullscreen && 'is-route-fullscreen',
         isCommandMapView && 'is-command-view-active',
         `is-workspace-${activeWorkspaceView}`,
         isCustomMultiView && 'is-multi-view-active',
       )}
     >
-      <InboxDiagnosticsBanner counts={data.counts} diagnostics={data.diagnostics} />
-
-
       <NexusTopBar
         onSelectSearchResult={handleSelect}
         topSearchQuery={topSearchQuery}
@@ -3346,10 +4283,11 @@ function InboxPageInternal() {
         topSearchGroups={topSearchGroups}
         topSearchLoading={topSearchLoading}
         onExecuteTopSearchResult={handleExecuteTopSearchResult}
-        selectedThread={selected}
+        selectedThread={workspaceThread}
         isSuppressed={selectedSuppressed}
         notificationCount={data.unreadCount}
         queueProcessorHealth={queueProcessorHealth}
+        queueControlDiagnostics={queueControlDiagnostics}
         queueProcessorHealthLoading={queueProcessorHealthLoading}
         onRefreshQueueHealth={refreshQueueHealth}
         queueCommandMode={queueCommandMode}
@@ -3373,6 +4311,7 @@ function InboxPageInternal() {
         activeThemeId={activeNexusThemeId}
         activeAccentId={activeAccentPalette}
         onSelectTheme={(themeId) => {
+          setLayoutState((current) => ({ ...current, theme: themeId === 'light' ? 'light' : 'dark' }))
           updateSetting('nexusTheme', themeId)
           applyThemeToDOM()
         }}
@@ -3385,6 +4324,22 @@ function InboxPageInternal() {
         onCloseOverlay={() => setActiveOverlay(null)}
         activeWorkspaceKey={selectedWorkspaceKey}
         activeWorkspaceLabel={activeWorkspaceLabel}
+        contextSubtitle={activeContextSubtitle}
+        actionCenterCounts={{
+          loading: _dataLoading,
+          humanReview: viewCounts.needs_review ?? 0,
+          followUps: viewCounts.follow_up ?? 0,
+          failedSends: queueProcessorHealth?.failedTodayCount ?? viewCounts.failed ?? 0,
+          decisionsRequired: viewCounts.needs_review ?? 0,
+          closingTasks: null,
+          systemTasks: null,
+        }}
+        onNavigateInboxView={handleNavigateInboxView}
+        onOpenQueueCommand={() => pushRoutePath('/queue')}
+        authReady={Boolean(user)}
+        authLoading={authLoading}
+        onSignOut={() => { void signOut() }}
+        profileInitials={(user?.email?.slice(0, 2) ?? 'RK').toUpperCase()}
         workspaceOptions={NEXUS_WORKSPACE_PRESETS.map((workspace) => ({
           key: workspace.key,
           label: workspace.label,
@@ -3407,34 +4362,25 @@ function InboxPageInternal() {
         onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
         onOpenAi={() => setActiveOverlay('ai')}
         onOpenKeys={() => setActiveOverlay('keys')}
-        onOpenKpis={() => pushRoutePath('/dashboard/kpis')}
+        onOpenKpis={() => pushRoutePath('/analytics')}
         onOpenActivity={() => setActiveOverlay('activity')}
-        onOpenTasks={() => emitNotification({ title: 'Tasks', detail: 'Tasks menu is coming soon.', severity: 'warning' })}
-        onOpenSettings={() => pushRoutePath('/settings')}
+        onOpenTasks={() => handleNavigateInboxView('needs_review')}
         onResetLayout={handleResetWorkspaceLayout}
         dryRun={autonomyControls.dryRun}
         onToggleDryRun={() => setAutonomyControls(prev => ({ ...prev, dryRun: !prev.dryRun }))}
       />
       {workspaceBlocked ? (
         <div className="nx-inbox-shell nx-inbox-shell--workspace-status">{renderWorkspaceStatusShell()}</div>
-      ) : isDealIntelligenceView && !isMultiView ? (
-        <div className="nx-deal-intelligence-fullscreen">
-          <IntelligencePanel
-            thread={selected}
-            threadContext={threadContext}
-            intelligence={threadIntelligence}
-            threadDossier={threadDossier}
-            dossierLoading={dossierLoading}
-            onStatusChange={handleStatusChange}
-            onStageChange={handleStageChange}
-            onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-          onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
-          onOpenAi={() => setActiveOverlay('ai')}
-          messages={displayedMessages}
-          panelMode="full"
-          layoutMode="full"
-        />
-      </div>
+      ) : useFullscreenShell ? (
+        <div
+          className={cls(
+            'nx-fullscreen-app-shell',
+            `is-view-${activeWorkspaceView}`,
+            isDealIntelligenceView && 'nx-deal-intelligence-fullscreen',
+          )}
+        >
+          {renderWorkspacePane(activeWorkspaceView, 'single', '100')}
+        </div>
       ) : (
       <div
         className={cls('nx-inbox-shell', mobileSidebarOpen && 'm-sidebar-open', mobileIntelOpen && 'm-intel-open')}
@@ -3466,8 +4412,7 @@ function InboxPageInternal() {
           )}
         </div>
         {showLeftPanel && !isDealIntelligenceView && (
-          <ErrorBoundary fallbackName="InboxSidebar">
-      <InboxSidebar
+          <InboxSidebar
             threads={threads}
             selectedId={selected?.id ?? null}
             activeViewFilter={viewFilter}
@@ -3477,7 +4422,11 @@ function InboxPageInternal() {
             onApplySavedPreset={applySavedPreset}
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+            activeFilterChips={activeAdvancedFilterChips}
+            activeFilterCount={activeAdvancedFilterCount}
+            onRemoveFilterChip={handleRemoveAdvancedFilterChip}
             onClearFilters={handleResetFilters}
+            onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
             canLoadMore={Boolean(data.pagination?.hasMore)}
             recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -3486,16 +4435,17 @@ function InboxPageInternal() {
             sourceMode={sourceMode}
             onSourceModeChange={setSourceMode}
             visibleThreadCount={visibleThreadCount}
+            loading={_dataLoading}
             loadingError={data.liveFetchError}
+            realtimeStatus={data.realtimeStatus}
+            refreshMode={data.refreshMode}
             densityMode={leftPanelMode === 'full' ? 'full' : 'compact'}
             inboxMode="rail25"
           />
-          </ErrorBoundary>
         )}
 
         {isDoubleSided && (
-          <ErrorBoundary fallbackName="InboxSidebar">
-      <InboxSidebar
+          <InboxSidebar
             threads={threads}
             selectedId={selected?.id ?? null}
             activeViewFilter={rightViewFilter}
@@ -3505,7 +4455,11 @@ function InboxPageInternal() {
             onApplySavedPreset={applyRightSavedPreset}
             viewCounts={viewCounts}
             onOpenAdvancedFilters={() => setActiveOverlay('filters')}
+            activeFilterChips={activeAdvancedFilterChips}
+            activeFilterCount={activeAdvancedFilterCount}
+            onRemoveFilterChip={handleRemoveAdvancedFilterChip}
             onClearFilters={handleResetFilters}
+            onRetryLoad={handleRetryInboxLoad}
             onLoadMore={handleLoadMore}
             canLoadMore={Boolean(data.pagination?.hasMore)}
             recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -3514,13 +4468,14 @@ function InboxPageInternal() {
             sourceMode={sourceMode}
             onSourceModeChange={setSourceMode}
             visibleThreadCount={visibleThreadCount}
+            loading={_dataLoading}
             loadingError={data.liveFetchError}
+            realtimeStatus={data.realtimeStatus}
+            refreshMode={data.refreshMode}
             densityMode="compact"
             inboxMode="review50"
           />
-          </ErrorBoundary>
         )}
-
 
         <main
           className={cls(
@@ -3534,28 +4489,21 @@ function InboxPageInternal() {
             activeWorkspaceView === 'metrics' && 'is-metrics-mode',
             activeWorkspaceView === 'comp_intelligence' && 'is-comp-mode',
             activeWorkspaceView === 'buyer_match' && 'is-buyer-mode',
+            activeWorkspaceView === 'campaigns' && 'is-campaigns-mode',
+            activeWorkspaceView === 'workflow_studio' && 'is-workflow-studio-mode',
+            activeWorkspaceView === 'entity_graph' && 'is-entity-graph-mode',
             isCommandMapView && 'is-command-map-mode',
           )}
         >
           {dossierOpen && (
             <MapDossierDrawer
               mode="dossier"
-              thread={selected}
+              thread={workspaceThread}
               context={threadContext}
               full={dossierFull}
               onToggleFull={() => setDossierFull((full) => !full)}
               onClose={() => setActiveOverlay(null)}
             />
-          )}
-
-          {selectedFilteredOut && selected && (
-            <div className="nx-filtered-out-notice">
-              <span>Selected thread is outside this filter.</span>
-              <div className="nx-filtered-out-notice__actions">
-                <button type="button" onClick={handleResetFilters}>Clear filters</button>
-                <button type="button" onClick={showSelectedInFilter}>Show selected</button>
-              </div>
-            </div>
           )}
 
           {isCustomMultiView ? (
@@ -3615,11 +4563,10 @@ function InboxPageInternal() {
               </div>
             </div>
             <div className="nx-map-right-body">
-              <ErrorBoundary fallbackName="InboxCommandMap">
               <InboxCommandMap
                 threads={mapThreads}
                 visibleThreads={filtered}
-                selectedThread={selected}
+                selectedThread={workspaceThread}
                 selectedThreadMessages={displayedMessages}
                 selectedThreadMessagesLoading={messagesLoading}
                 quickReplyDraft={draftText}
@@ -3629,59 +4576,53 @@ function InboxPageInternal() {
                 zoomedIn={mapMode !== 'side'}
                 sourceMode={mapSourceMode}
                 onSourceModeChange={setMapSourceMode}
-                onSelectThreadId={handleSelect}
-                onSelectSellerContext={handleMapSellerContext}
-                onBackgroundClick={() => {}}
-                onOpenDealIntelligence={handleOpenDealIntelligence}
-                buyerCommandData={buyerCommandData}
-                buyerFilters={buyerFilters}
-                onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
-                selectedBuyerKey={selectedBuyerKey}
-                onSelectBuyerKey={setSelectedBuyerKey}
-                initialMapStyleMode={commandMapTheme}
-                onStateChange={(state) => {
-                  setCommandMapTheme(state.mapStyleMode)
-                  setCommandMapMarket(state.filters.market || '')
-                }}
-              />
-              </ErrorBoundary>
+              onSelectThreadId={handleSelect}
+              onSelectSellerContext={handleMapSellerContext}
+              onBackgroundClick={() => {}}
+              onOpenDealIntelligence={handleOpenDealIntelligence}
+              buyerCommandData={buyerCommandData}
+              buyerFilters={buyerFilters}
+              onBuyerFiltersChange={(patch) => setBuyerFilters((current) => ({ ...current, ...patch }))}
+              selectedBuyerKey={selectedBuyerKey}
+              onSelectBuyerKey={setSelectedBuyerKey}
+              initialMapStyleMode={commandMapTheme}
+              onStateChange={(state) => {
+                setCommandMapTheme(state.mapStyleMode)
+                setCommandMapMarket(state.filters.market || '')
+              }}
+            />
           </div>
         </aside>
         ) : showRightCommandPanel ? (
-          <ErrorBoundary fallbackName="IntelligencePanel">
-            <IntelligencePanel
-              thread={selected}
-              threadContext={threadContext}
-              intelligence={threadIntelligence}
-              threadDossier={threadDossier}
-              dossierLoading={dossierLoading}
-              onStatusChange={handleStatusChange}
-              onStageChange={handleStageChange}
-              onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-              onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
-              onOpenAi={() => setActiveOverlay('ai')}
-              messages={displayedMessages}
-              panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
-              layoutMode={getViewLayoutMode(workspaceWidths['deal_intelligence'] ?? '25')}
-            />
-          </ErrorBoundary>
+          <IntelligencePanel
+            thread={workspaceThread}
+            threadContext={threadContext}
+            intelligence={threadIntelligence}
+            dealContext={canonicalSelectedContext}
+            onStatusChange={handleStatusChange}
+            onStageChange={handleStageChange}
+            onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
+            onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
+            onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
+            onOpenAi={() => setActiveOverlay('ai')}
+            messages={displayedMessages}
+            panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
+            layoutMode={getViewLayoutMode(workspaceWidths['deal_intelligence'] ?? '25')}
+          />
         ) : null}
       </div>
       )}
 
-      <AdvancedFiltersPopover
+      <AdvancedFiltersModal
         open={activeOverlay === 'filters'}
         stageFilter={stageFilter}
-        setStageFilter={setStageFilter}
         viewFilter={viewFilter}
-        setViewFilter={setViewFilter}
+        inboxBucket={viewFilter === 'all_conversations' ? 'all' : viewFilter}
         advancedFilters={advancedFilters}
-        onAdvancedFiltersChange={(patch) => setAdvancedFilters((current) => ({ ...current, ...patch }))}
-        advancedFilterOptions={advancedFilterOptions}
-        viewCounts={viewCounts}
+        onAdvancedFiltersChange={setAdvancedFilters}
         onReset={handleResetFilters}
         onClose={() => setActiveOverlay(null)}
-        onApply={() => { /* Handled by useEffect */ }}
+        onApply={handleApplyAdvancedFilters}
       />
 
       {activeOverlay === 'activity' && (

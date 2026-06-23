@@ -2,12 +2,13 @@ import type { CalendarEvent } from '../../lib/data/calendarData'
 import type { ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { QueueItem } from '../../lib/data/queueData'
-import type { CommandMapActivityEvent } from './commandMapLiveActivity'
+import type { CommandMapActivityEvent } from '../../views/map/commandMapLiveActivity'
 
 export type InboxWorkspaceView =
   | 'thread'
   | 'sms_thread'
   | 'list'
+  | 'entity_graph'
   | 'deal_intelligence'
   | 'closing_desk'
   | 'command_map'
@@ -17,6 +18,9 @@ export type InboxWorkspaceView =
   | 'metrics'
   | 'comp_intelligence'
   | 'buyer_match'
+  | 'campaigns'
+  | 'email'
+  | 'workflow_studio'
 
 export type ActiveInboxContextIntent =
   | 'open_thread'
@@ -31,10 +35,23 @@ export type ActiveInboxContextSource =
   | 'thread'
   | 'pipeline'
   | 'list'
+  | 'entity_graph'
   | 'queue'
   | 'map'
   | 'calendar'
   | 'live_activity'
+
+export type UniversalEntityType =
+  | 'property'
+  | 'master_owner'
+  | 'prospect'
+  | 'sub_owner'
+  | 'phone'
+  | 'email'
+  | 'organization'
+  | 'market'
+  | 'zip'
+  | null
 
 export type ActiveInboxContext = {
   sellerId?: string
@@ -47,8 +64,17 @@ export type ActiveInboxContext = {
   activityId?: string
   market?: string
   date?: string
+  // Property-aware payload so other apps can hydrate from a queue selection
+  toPhoneNumber?: string
+  propertyAddress?: string
+  sellerName?: string
   sourceView?: ActiveInboxContextSource
   intent?: ActiveInboxContextIntent
+  entityType?: UniversalEntityType
+  entityId?: string | null
+  contactMethodType?: 'phone' | 'email' | null
+  contactMethodId?: string | null
+  opportunityId?: string | null
 }
 
 export type SetActiveContextOptions = {
@@ -72,13 +98,21 @@ export const buildContextFromThread = (
   intent?: ActiveInboxContextIntent,
 ): ActiveInboxContext => {
   if (!thread) return { sourceView, intent }
+  const propertyId = text((thread as any).propertyId)
+  const masterOwnerId = text((thread as any).ownerId ?? (thread as any).masterOwnerId ?? (thread as any).sellerId)
+  const propertyAddress = text((thread as any).propertyAddress ?? (thread as any).property_address_full ?? (thread as any).subject)
+  const sellerName = text((thread as any).ownerName ?? (thread as any).seller_display_name ?? (thread as any).sellerName)
   return {
-    sellerId: text((thread as any).ownerId ?? (thread as any).sellerId),
+    sellerId: masterOwnerId,
     threadKey: text((thread as any).threadKey ?? thread.id),
-    propertyId: text((thread as any).propertyId),
-    masterOwnerId: text((thread as any).ownerId ?? (thread as any).masterOwnerId),
+    propertyId,
+    masterOwnerId,
     prospectId: text((thread as any).prospectId),
     market: text((thread as any).market ?? (thread as any).marketName),
+    propertyAddress,
+    sellerName,
+    entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+    entityId: propertyId || masterOwnerId || null,
     sourceView,
     intent,
   }
@@ -90,15 +124,22 @@ export const buildContextFromQueueItem = (
   intent: ActiveInboxContextIntent = 'open_queue',
 ): ActiveInboxContext => {
   if (!item) return { sourceView, intent }
+  const propertyId = text(item.linkedPropertyId)
+  const masterOwnerId = text(item.linkedOwnerId)
   return {
-    sellerId: text(item.linkedOwnerId),
+    sellerId: masterOwnerId,
     threadKey: text(item.linkedInboxThreadId),
-    propertyId: text(item.linkedPropertyId),
-    masterOwnerId: text(item.linkedOwnerId),
+    propertyId,
+    masterOwnerId,
     prospectId: text(item.metadata?.prospect_id),
     queueId: text(item.queueId ?? item.id),
     messageEventId: text(item.messageEventId),
     market: text(item.market),
+    toPhoneNumber: text(item.toPhoneNumber ?? item.phone),
+    propertyAddress: text(item.propertyAddress),
+    sellerName: text(item.sellerFullName ?? item.sellerName),
+    entityType: propertyId ? 'property' : masterOwnerId ? 'master_owner' : null,
+    entityId: propertyId || masterOwnerId || text(item.queueId ?? item.id) || null,
     sourceView,
     intent,
   }
@@ -109,14 +150,21 @@ export const buildContextFromCalendarEvent = (
   sourceView: ActiveInboxContextSource = 'calendar',
 ): ActiveInboxContext => {
   if (!event) return { sourceView }
+  const propertyId = text(event.propertyId)
+  const sellerId = text(event.sellerId)
   return {
-    sellerId: text(event.sellerId),
+    sellerId,
     threadKey: text(event.threadId),
-    propertyId: text(event.propertyId),
+    propertyId,
+    masterOwnerId: sellerId,
     queueId: text(event.metadata?.queue_id),
     messageEventId: text(event.metadata?.message_event_id),
     market: text(event.market),
+    propertyAddress: text((event as { propertyAddress?: string }).propertyAddress),
+    sellerName: text((event as { sellerName?: string }).sellerName),
     date: text(event.timestamp),
+    entityType: propertyId ? 'property' : sellerId ? 'master_owner' : null,
+    entityId: propertyId || sellerId || text(event.threadId) || null,
     sourceView,
     intent: event.type.includes('scheduled') || event.type.includes('follow_up') ? 'open_calendar' : 'open_thread',
   }
@@ -157,5 +205,41 @@ export const buildContextFromMessage = (
     messageEventId: text(message.id),
     sourceView,
     intent: 'open_thread',
+  }
+}
+
+export type PipelineOpportunityContextInput = {
+  id: string
+  primary_property_id?: string | null
+  primary_thread_key?: string | null
+  master_owner_id?: string | null
+  property_export_id?: string | null
+  seller_display_name?: string | null
+  property_address_full?: string | null
+  market?: string | null
+  workflow_enrollment_id?: string | null
+  acquisition_engine_run_id?: string | null
+  related_thread_keys?: string[] | null
+  campaign_ids?: string[] | null
+}
+
+export const buildContextFromOpportunity = (
+  opportunity: PipelineOpportunityContextInput | null | undefined,
+  sourceView: ActiveInboxContextSource = 'pipeline',
+): ActiveInboxContext => {
+  if (!opportunity?.id) return { sourceView, intent: 'open_seller' }
+  return {
+    opportunityId: text(opportunity.id),
+    sellerId: text(opportunity.master_owner_id),
+    masterOwnerId: text(opportunity.master_owner_id),
+    threadKey: text(opportunity.primary_thread_key),
+    propertyId: text(opportunity.primary_property_id),
+    propertyAddress: text(opportunity.property_address_full),
+    sellerName: text(opportunity.seller_display_name),
+    market: text(opportunity.market),
+    entityType: opportunity.primary_property_id ? 'property' : opportunity.master_owner_id ? 'master_owner' : null,
+    entityId: text(opportunity.primary_property_id || opportunity.master_owner_id),
+    sourceView,
+    intent: opportunity.primary_thread_key ? 'open_thread' : 'open_seller',
   }
 }

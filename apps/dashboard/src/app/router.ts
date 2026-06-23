@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useEffectEvent, useState } from 'react'
+import { startTransition, useCallback, useEffect, useState } from 'react'
 
 export const defaultRoutePath = '/inbox'
 
@@ -27,12 +27,12 @@ export const pushRoutePath = (path: string) => {
 export const useRoutePath = () => {
   const [path, setPath] = useState(() => normalizeRoutePath(window.location.pathname))
 
-  const syncPath = useEffectEvent(() => {
+  const syncPath = useCallback(() => {
     const nextPath = normalizeRoutePath(window.location.pathname)
     startTransition(() => {
       setPath(nextPath)
     })
-  })
+  }, [])
 
   useEffect(() => {
     const normalizedPath = normalizeRoutePath(window.location.pathname)
@@ -50,7 +50,7 @@ export const useRoutePath = () => {
     return () => {
       window.removeEventListener('popstate', handlePopState)
     }
-  }, [])
+  }, [syncPath])
 
   return path
 }

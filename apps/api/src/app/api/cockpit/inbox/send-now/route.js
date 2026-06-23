@@ -1,38 +1,12 @@
 import { NextResponse } from 'next/server.js'
-import { parseJsonSafe, ensureMutationAuth } from '../../_shared.js'
+import { parseJsonSafe, ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { runInboxAction } from '@/lib/cockpit/cockpit-service.js'
+import { child } from '@/lib/logging/logger.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
-
-const ALLOWED_ORIGINS = new Set([
-  'https://ops.leadcommand.ai',
-  'https://nexus-dashboard.vercel.app',
-])
-
-function resolveAllowedOrigin(origin) {
-  if (!origin) return null
-  if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
-  return null
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get('origin')
-  const allowedOrigin = resolveAllowedOrigin(origin)
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  }
-  if (allowedOrigin) {
-    headers['Access-Control-Allow-Origin'] = allowedOrigin
-  }
-  return headers
-}
+const logger = child({ module: 'api.cockpit.inbox.send_now' })
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -43,23 +17,35 @@ export async function OPTIONS(request) {
 export async function POST(request) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) {
-    return withCors(request, NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors }
-    ))
-  }
+  if (!auth.ok) return auth.response
+
   const payload = await parseJsonSafe(request)
+
+
+  logger.info('cockpit_send_now.route_request', {
+    thread_key: String(payload?.thread_key ?? payload?.metadata?.thread_key ?? payload?.to_phone_number ?? '').trim() || null,
+    to_phone_number: String(payload?.to_phone_number ?? payload?.phone ?? '').trim() || null,
+    from_phone_number: String(payload?.from_phone_number ?? payload?.our_number ?? '').trim() || null,
+    message_body_length: String(payload?.message_body ?? payload?.message_text ?? '').trim().length,
+  })
   
   try {
     const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
-    const status = result.ok ? 200 : (result.reason === 'invalid_canonical_thread_key' ? 400 : 423)
-    return withCors(request, NextResponse.json(result, { status, headers: cors }))
+    const status = result.ok ? 200 : Number(result.status || (result.reason === 'invalid_canonical_thread_key' ? 400 : 423))
+    logger.info('cockpit_send_now.route_response', {
+      ok: result.ok,
+      status,
+      reason: result.reason || null,
+      queue_inserted: result.queue_inserted === true,
+      queue_row_id: result.queue_row_id || null,
+      queue_id: result.queue_id || null,
+    })
+    return NextResponse.json(result, { status, headers: cors })
   } catch (error) {
-    console.error('send-now.failed', { error: error?.message })
-    return withCors(request, NextResponse.json(
+    logger.error('cockpit_send_now.route_failed', { error: error?.message || 'unknown_error' })
+    return NextResponse.json(
       { ok: false, error: 'send_now_failed', message: error?.message },
       { status: 500, headers: cors }
-    ))
+    )
   }
 }

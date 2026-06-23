@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../supabaseClient'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { InboxThread } from '../../modules/inbox/inbox.adapter'
+import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 
 type RoutingInput = Pick<InboxThread, 'marketId' | 'market' | 'ourNumber' | 'phoneNumber' | 'textgridNumberId' | 'property_address_state' | 'propertyId' | 'threadKey'> & { allow_cluster_routing?: boolean }
 
