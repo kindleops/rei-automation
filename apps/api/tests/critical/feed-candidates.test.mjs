@@ -1052,7 +1052,7 @@ test("chooseTextgridNumber blocks unknown state with no approved routing rule", 
 
   assert.equal(result.ok, false);
   assert.equal(result.routing_allowed, false);
-  assert.equal(result.routing_block_reason, "NO_VALID_LOCAL_TEXTGRID_NUMBER");
+  assert.equal(result.routing_block_reason, "NO_APPROVED_ROUTING_PATH");
 });
 
 test("chooseTextgridNumber allows approved regional fallback when routing_safe_only=true", async () => {
