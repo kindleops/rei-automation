@@ -28,13 +28,13 @@ export function shouldShowDevRuntimeDiagnostics(isDev: boolean): boolean {
   return isDev
 }
 
+function isProxyDevBaseUrl(baseUrl: string | null | undefined): boolean {
+  return !String(baseUrl ?? '').trim()
+}
+
 export function resolveRuntimeDiagnosticsState(input: RuntimeDiagnosticsInput): RuntimeDiagnosticsState {
   if (!input.isDev) {
     return { mode: 'hidden' }
-  }
-
-  if (!input.apiBaseUrl) {
-    return { mode: 'banner', reason: 'unexpected_environment' }
   }
 
   if (input.fetchError) {
@@ -66,6 +66,10 @@ export function resolveRuntimeDiagnosticsState(input: RuntimeDiagnosticsInput): 
 
   const apiEnv = String(input.apiIdentity.environment ?? '').trim().toLowerCase()
   if (apiEnv && !['development', 'dev', 'test', 'local'].includes(apiEnv)) {
+    return { mode: 'banner', reason: 'unexpected_environment' }
+  }
+
+  if (!isProxyDevBaseUrl(input.apiBaseUrl) && !input.apiBaseUrl) {
     return { mode: 'banner', reason: 'unexpected_environment' }
   }
 

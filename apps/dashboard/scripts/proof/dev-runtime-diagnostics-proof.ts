@@ -63,6 +63,14 @@ test('healthy collapse indicator', () => {
   assertEqual(shouldAutoCollapseHealthy(state), true, 'auto collapse')
 })
 
+test('healthy proxy mode with empty base URL', () => {
+  const state = resolveRuntimeDiagnosticsState({
+    ...healthyInput,
+    apiBaseUrl: '',
+  })
+  assertEqual(state.mode, 'indicator', 'proxy healthy mode')
+})
+
 test('SHA mismatch banner', () => {
   const state = resolveRuntimeDiagnosticsState({
     ...healthyInput,
