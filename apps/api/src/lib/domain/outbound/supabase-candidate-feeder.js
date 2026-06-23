@@ -579,7 +579,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     pick(row.normalized_property_id, row.property_id, row.property_export_id, row.property_item_id) || null;
   const property_export_id = pick(row.property_export_id) || null;
   const best_phone_id = pick(row.best_phone_id) || null;
-  const phone_id = pick(row.normalized_phone_id, row.best_phone_id, row.phone_id, row.phone_item_id) || null;
+  const phone_id = pick(row.normalized_phone_id, row.phone_id, row.phone_item_id, row.best_phone_id) || null;
   const primary_prospect_id = pick(row.primary_prospect_id) || null;
   const canonical_prospect_id = pick(row.canonical_prospect_id) || null;
 
