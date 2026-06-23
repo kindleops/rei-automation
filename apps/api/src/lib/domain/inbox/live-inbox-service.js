@@ -5,6 +5,13 @@ import {
   buildColdTransitionPatch,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
+import {
+  INBOX_THREAD_STATE_SELECT_FIELDS,
+  fetchDerivedNullBucketThreadKeysForTab,
+  resolveCanonicalInboxBucket,
+  resolveEffectiveInboxBucket,
+  threadMatchesInboxTab,
+} from "@/lib/domain/inbox/inbox-thread-state-contract.js";
 import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 import {
   parseAdvancedFiltersParam,
@@ -1311,7 +1318,9 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
   const { data, error } = await query;
   if (error) throw error;
 
-  return [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+  const explicitKeys = [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+  const derivedNullKeys = await fetchDerivedNullBucketThreadKeysForTab(supabase, normalized);
+  return [...new Set([...explicitKeys, ...derivedNullKeys])];
 }
 
 async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
@@ -1320,7 +1329,7 @@ async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
 
   const { data, error } = await supabase
     .from("inbox_thread_state")
-    .select("thread_key,inbox_bucket")
+    .select(INBOX_THREAD_STATE_SELECT_FIELDS)
     .in("thread_key", uniqueKeys);
 
   if (error) throw error;
@@ -1328,7 +1337,7 @@ async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
   const bucketByThreadKey = new Map();
   for (const row of data || []) {
     const threadKey = clean(row.thread_key);
-    const bucket = lower(row.inbox_bucket);
+    const bucket = resolveEffectiveInboxBucket(row);
     if (threadKey && bucket) bucketByThreadKey.set(threadKey, bucket);
   }
 
@@ -1717,9 +1726,7 @@ async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmpty
   while (hasMore) {
     const { data, error } = await supabase
       .from("inbox_thread_state")
-      .select(
-        "thread_key,inbox_bucket,inbox_category,latest_direction,last_inbound_at,last_outbound_at,latest_delivery_status,latest_provider_delivery_status,last_intent,disposition,is_suppressed,automation_lane,needs_review,confidence,metadata"
-      )
+      .select(INBOX_THREAD_STATE_SELECT_FIELDS)
       .is("inbox_bucket", null)
       .range(offset, offset + PAGE_SIZE - 1);
 
@@ -1731,7 +1738,7 @@ async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmpty
     }
 
     for (const row of rows) {
-      const derived = deriveInboxBucketFromThreadState(row);
+      const derived = resolveCanonicalInboxBucket(row);
       if (!derived || !Object.prototype.hasOwnProperty.call(counts, derived)) continue;
       counts[derived] += 1;
     }

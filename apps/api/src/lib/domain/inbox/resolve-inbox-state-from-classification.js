@@ -248,8 +248,20 @@ export function deriveInboxBucketFromThreadState(row = {}) {
 
   const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row);
   if (bucket) return bucket;
-  if (lower(row.automation_lane) === "cold_reactivation") return "cold";
+  if (hasExplicitColdEvidence(row)) return "cold";
   return null;
+}
+
+function hasExplicitColdEvidence(row = {}) {
+  if (lower(row.automation_lane) !== "cold_reactivation") return false;
+  const stage = lower(row.stage || row.status || "");
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return (
+    stage.includes("cold")
+    || stage === "nurture"
+    || metadata.cold_campaign === true
+    || metadata.automation_lane === "cold_reactivation"
+  );
 }
 
 export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}) {
@@ -318,6 +330,7 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
         messageEvent.delivery_status ||
         messageEvent.provider_delivery_status ||
         existingState.latest_delivery_status,
+      workflowRow: existingState,
     });
     return outboundState.inbox_bucket;
   }
