@@ -32,6 +32,7 @@ const DEFAULT_TEST_SYSTEM_FLAGS = Object.freeze({
   discord_actions_enabled: true,
   discord_alerts_enabled: true,
   allow_weak_identity_outbound: false,
+  feeder_enabled: true,
   outbound_sms_enabled: true,
   queue_auto_enqueue_enabled: true,
 })

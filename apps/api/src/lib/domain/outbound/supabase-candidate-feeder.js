@@ -424,8 +424,8 @@ export function resolveSellerIdentity(candidate = {}) {
     { source: "master_owner_first_name", value: candidate.master_owner_first_name, allow_single_token: true },
     { source: "master_owner_display_name", value: candidate.master_owner_display_name, allow_single_token: false },
     { source: "seller_full_name", value: candidate.seller_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted },
-    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, skip_if_untrusted: is_untrusted || skip_prospect_names, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
-    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false, skip_if_untrusted: is_untrusted || skip_prospect_names },
+    { source: "phone_first_name", value: candidate.phone_first_name, allow_single_token: true, skip_if_untrusted: skip_prospect_names, guard: () => hasMultipleNameTokens(candidate.phone_full_name || "") },
+    { source: "phone_full_name", value: candidate.phone_full_name, allow_single_token: false, skip_if_untrusted: skip_prospect_names },
   ];
 
   for (const { source, value, allow_single_token, guard, skip_if_untrusted } of sources) {
@@ -728,31 +728,36 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
   };
 
   // ── Identity Alignment Check ───────────────────────────────────────────
-  const identity_alignment = calculateOwnerProspectAlignment({
-    masterOwnerName: candidate.owner_display_name,
-    ownerDisplayName: candidate.owner_display_name,
-    ownerName: candidate.owner_display_name,
-    prospectFullName: candidate.prospect_full_name,
-    phoneFullName: candidate.phone_full_name,
-    phoneOwner: candidate.phone_owner,
-    cnam: candidate.prospect_cnam,
-    likelyOwner: candidate.likely_owner,
-    likelyRenting: candidate.likely_renting,
-    matchingFlags: candidate.matching_flags,
-    personFlagsText: candidate.person_flags_text,
-    bestPhoneScore: candidate.best_phone_score,
-    contactScoreFinal: candidate.contact_score_final,
-    linkedPropertyIdsText: candidate.linked_property_ids_text,
-    joinedPropertySource: candidate.joined_property_source,
-    smsEligible: candidate.sms_eligible,
-    canonicalProspectId: candidate.canonical_prospect_id,
-    primaryProspectId: candidate.primary_prospect_id,
-    normalizedPhoneId: pick(row.normalized_phone_id, row.phone_id),
-    bestPhoneId: candidate.best_phone_id,
-    phoneId: candidate.phone_id,
-    sellerFullName: candidate.seller_full_name,
-    sellerFirstName: candidate.seller_first_name
-  });
+  const identity_alignment =
+    row.identity_alignment &&
+    typeof row.identity_alignment === "object" &&
+    clean(row.identity_alignment.status)
+      ? row.identity_alignment
+      : calculateOwnerProspectAlignment({
+          masterOwnerName: candidate.owner_display_name,
+          ownerDisplayName: candidate.owner_display_name,
+          ownerName: candidate.owner_display_name,
+          prospectFullName: candidate.prospect_full_name,
+          phoneFullName: candidate.phone_full_name,
+          phoneOwner: candidate.phone_owner,
+          cnam: candidate.prospect_cnam,
+          likelyOwner: candidate.likely_owner,
+          likelyRenting: candidate.likely_renting,
+          matchingFlags: candidate.matching_flags,
+          personFlagsText: candidate.person_flags_text,
+          bestPhoneScore: candidate.best_phone_score,
+          contactScoreFinal: candidate.contact_score_final,
+          linkedPropertyIdsText: candidate.linked_property_ids_text,
+          joinedPropertySource: candidate.joined_property_source,
+          smsEligible: candidate.sms_eligible,
+          canonicalProspectId: candidate.canonical_prospect_id,
+          primaryProspectId: candidate.primary_prospect_id,
+          normalizedPhoneId: pick(row.normalized_phone_id, row.phone_id),
+          bestPhoneId: candidate.best_phone_id,
+          phoneId: candidate.phone_id,
+          sellerFullName: candidate.seller_full_name,
+          sellerFirstName: candidate.seller_first_name,
+        });
   candidate.identity_alignment = identity_alignment;
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1064,8 +1069,9 @@ function hasBlankLocationPattern(text = "") {
 
 export function hasBlankSellerGreeting(text = "") {
   const normalized = clean(text).replace(/\s+/g, " ");
-  // Blank greeting patterns (e.g. "Hey ,")
-  if (/^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(normalized)) return true;
+  // Blank greeting patterns (e.g. "Hey ," or trailing "Hi,") — not "Hi, this is {name}".
+  if (/^(hi|hey|hello|hola|ola|marhaba)\s+,/i.test(normalized)) return true;
+  if (/^(hi|hey|hello|hola|ola|marhaba)\s*,\s*$/i.test(normalized)) return true;
   
   // Unresolved variable patterns
   if (normalized.includes(", ,")) return true;
@@ -4248,6 +4254,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
 
+  const get_system_flag =
+    deps.getSystemFlag ||
+    (typeof getSystemFlag === "function" ? getSystemFlag : async () => true);
+
   // ── System control gate ────────────────────────────────────────────────
   if (!input.dry_run) {
     const runtime_brake = evaluateQueueCreationRuntimeBrakes(
@@ -4270,11 +4280,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
       };
     }
 
-    const feeder_enabled = await getSystemFlag("feeder_enabled");
+    const feeder_enabled = await get_system_flag("feeder_enabled");
     if (!feeder_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("feeder_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }
-    const outbound_sms_enabled = await getSystemFlag("outbound_sms_enabled");
+    const outbound_sms_enabled = await get_system_flag("outbound_sms_enabled");
     if (!outbound_sms_enabled) {
       return { ok: false, status: 423, ...buildDisabledResponse("outbound_sms_enabled", "runSupabaseCandidateFeeder"), queued_count: 0 };
     }

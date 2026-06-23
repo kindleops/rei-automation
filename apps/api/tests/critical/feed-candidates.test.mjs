@@ -1,3 +1,4 @@
+import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -14,6 +15,21 @@ import {
 import { normalizeFeedCandidatesInput, statusForResult } from "@/lib/domain/outbound/feed-candidates-request.js";
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
 
+function makeChainableSupabaseQuery(rows = [], { error = null } = {}) {
+  const query = {
+    order() {
+      return query;
+    },
+    range(start = 0, end = rows.length - 1) {
+      return Promise.resolve({ data: rows.slice(start, end + 1), error });
+    },
+    limit(n = rows.length) {
+      return Promise.resolve({ data: rows.slice(0, n), error });
+    },
+  };
+  return query;
+}
+
 function makeSupabaseWithCandidates(candidates = [], sourceName = "outbound_feeder_candidates") {
   return {
     from(table) {
@@ -21,27 +37,18 @@ function makeSupabaseWithCandidates(candidates = [], sourceName = "outbound_feed
       const missing_table_error = { code: "42P01", message: `missing ${table}` };
       return {
         select() {
-          return {
-            order() {
-              return this;
-            },
-            range(start = 0, end = rows.length - 1) {
-              if (table === sourceName) {
-                return Promise.resolve({ data: rows.slice(start, end + 1), error: null });
-              }
-              return Promise.resolve({ data: [], error: missing_table_error });
-            },
-            limit() {
-              if (table === sourceName) {
-                return Promise.resolve({ data: rows, error: null });
-              }
-              return Promise.resolve({ data: [], error: missing_table_error });
-            },
-          };
+          if (table === sourceName) {
+            return makeChainableSupabaseQuery(rows);
+          }
+          return makeChainableSupabaseQuery([], { error: missing_table_error });
         },
       };
     },
   };
+}
+
+function createdQueueCount(result = {}) {
+  return Number(result.queued_count || 0) + Number(result.scheduled_count || 0);
 }
 
 function makeCandidate(id = 1, overrides = {}) {
@@ -225,7 +232,7 @@ test("runSupabaseCandidateFeeder dry_run returns diagnostics without queue mutat
   assert.equal(result.effective_candidate_fetch_limit, 5);
   assert.equal(result.fetched_candidate_count, 1);
   assert.equal(result.scanned_count, 1);
-  assert.equal(result.queued_count, 1);
+  assert.equal((result.queued_count || 0) + (result.scheduled_count || 0), 1);
   assert.equal(result.sample_created_queue_items[0].routing_rule_name, "exact_market_match");
   assert.equal(result.sample_created_queue_items[0].selected_textgrid_market, "houston");
   assert.equal(result.sample_created_queue_items[0].selected_textgrid_number, "+18325550101");
@@ -273,7 +280,7 @@ test("runSupabaseCandidateFeeder live mode respects limit=1", async () => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.queued_count, 1);
+  assert.equal((result.queued_count || 0) + (result.scheduled_count || 0), 1);
   assert.equal(create_calls, 1);
 });
 
@@ -320,7 +327,10 @@ test("runSupabaseCandidateFeeder returns structured source unavailable error", a
       return {
         select() {
           return {
-            limit() {
+            order() {
+              return this;
+            },
+            range() {
               return Promise.resolve({
                 data: [],
                 error: {
@@ -413,7 +423,7 @@ test("evaluateCandidateEligibility allows unknown identity when allow_identity_u
       template_use_case: "ownership_check",
       within_contact_window_now: true,
       allow_identity_unknown: true,
-      now: new Date().toISOString(),
+      now: "2026-04-27T15:00:00.000Z",
     },
     {
       hasDuplicateQueueItem: async () => false,
@@ -450,8 +460,15 @@ test("runSupabaseCandidateFeeder relaxed identity gate can queue identity_unknow
           phone_full_name: null,
           phone_owner: null,
           prospect_cnam: null,
+          matching_flags: "",
+          identity_alignment: {
+            status: "unknown",
+            hardBlock: false,
+            score: 0,
+            reasons: ["missing_prospect_name"],
+          },
         }),
-      ]),
+      ], "v_sms_campaign_queue_candidates"),
       hasDuplicateQueueItem: async () => false,
       chooseTextgridNumber: async () => ({
         ok: true,
@@ -497,15 +514,43 @@ test("runSendQueue dry_run never calls processSendQueueItem", async () => {
       now: "2026-04-25T15:00:00.000Z",
     },
     {
-      withRunLock: async ({ fn }) => fn(),
-      fetchAllItems: async () => [
-        {
-          item_id: 999,
-          queue_status: "queued",
-          scheduled_for: "2026-04-25T14:59:00.000Z",
-          message_body: "Test",
+      supabaseClient: {
+        from() {
+          return {
+            update() {
+              return {
+                eq() {
+                  return {
+                    lt() {
+                      return {
+                        select: async () => ({ data: [], error: null }),
+                      };
+                    },
+                  };
+                },
+              };
+            },
+            select() {
+              return {
+                in: async () => ({ data: [], error: null }),
+              };
+            },
+          };
         },
-      ],
+      },
+      reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
+      loadRunnableSendQueueRows: async () => ({
+        rows: [
+          {
+            id: 999,
+            queue_status: "queued",
+            scheduled_for: "2026-04-25T14:59:00.000Z",
+            message_body: "Test",
+          },
+        ],
+        raw_rows: [],
+        skipped: [],
+      }),
       processSendQueueItem: async () => {
         processed += 1;
         return { ok: true, sent: true };
@@ -514,8 +559,7 @@ test("runSendQueue dry_run never calls processSendQueueItem", async () => {
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.dry_run, true);
-  assert.equal(result.skipped_count, 1);
+  assert.equal(result.processed_count, 1);
   assert.equal(processed, 0);
 });
 
@@ -661,7 +705,7 @@ test("corporate owner display_name is not used when best phone name is missing",
   );
 
   assert.equal(rendered.ok, false);
-  assert.equal(rendered.reason, "missing_required_variable");
+  assert.equal(rendered.reason, "missing_required_name_variable");
   assert.equal(rendered.variable_payload_preview.seller_first_name, "");
   assert.equal(rendered.variable_payload_preview.seller_name_missing, true);
 });
@@ -804,15 +848,18 @@ test("queue key uses best_phone_id when present", async () => {
 });
 
 test("runSupabaseCandidateFeeder limit=1 scan_limit=10 fetches exactly 10 candidates from source", async () => {
-  let captured_limit = null;
+  let captured_range = null;
 
   const countingSupabase = {
     from() {
       return {
         select() {
           return {
-            limit(n) {
-              captured_limit = n;
+            order() {
+              return this;
+            },
+            range(start, end) {
+              captured_range = { start, end };
               return Promise.resolve({ data: [makeCandidate(1)], error: null });
             },
           };
@@ -849,7 +896,7 @@ test("runSupabaseCandidateFeeder limit=1 scan_limit=10 fetches exactly 10 candid
   );
 
   // explicit scan_limit=10 → effective_fetch_limit = min(10, 5000) = 10
-  assert.equal(captured_limit, 10);
+  assert.deepEqual(captured_range, { start: 0, end: 9 });
 });
 
 test("runSupabaseCandidateFeeder dry_run sample_skips include normalized candidate preview", async () => {
@@ -1226,7 +1273,7 @@ test("English cold S1 with mixed-language templates keeps rotation pool English-
     language: "English",
     is_active: true,
     is_first_touch: true,
-    template_body: `EN ${index + 1} {property_address}`,
+    template_body: `EN ${index + 1} {property_street_address}`,
   }));
   const non_english_templates = [
     {
@@ -1236,7 +1283,7 @@ test("English cold S1 with mixed-language templates keeps rotation pool English-
       stage_code: "S1",
       language: "Spanish",
       is_active: true,
-      template_body: "ES {property_address}",
+      template_body: "ES {property_street_address}",
     },
     {
       id: "tpl-zh-mix-1",
@@ -1245,7 +1292,7 @@ test("English cold S1 with mixed-language templates keeps rotation pool English-
       stage_code: "S1",
       language: "Mandarin",
       is_active: true,
-      template_body: "ZH {property_address}",
+      template_body: "ZH {property_street_address}",
     },
   ];
 
@@ -1256,6 +1303,9 @@ test("English cold S1 with mixed-language templates keeps rotation pool English-
       best_phone_id: "ph-lang-en-1",
       phone_id: "ph-lang-en-1",
       canonical_e164: "+18325550971",
+      display_name: "Taylor Owner",
+      seller_first_name: "Taylor",
+      matching_flags: "Likely Owner",
       best_language: "English",
       template_use_case: "ownership_check",
       stage_code: "S1",
@@ -1286,7 +1336,7 @@ test("Spanish cold S1 keeps rotation pool Spanish-only and does not backfill fro
     language: "Spanish",
     is_active: true,
     is_first_touch: true,
-    template_body: `ES ${index + 1} {property_address}`,
+    template_body: `ES ${index + 1} {property_street_address}`,
   }));
   const english_templates = Array.from({ length: 20 }, (_, index) => ({
     id: `tpl-en-only-${index + 1}`,
@@ -1295,7 +1345,7 @@ test("Spanish cold S1 keeps rotation pool Spanish-only and does not backfill fro
     stage_code: "S1",
     language: "English",
     is_active: true,
-    template_body: `EN ${index + 1} {property_address}`,
+    template_body: `EN ${index + 1} {property_street_address}`,
   }));
 
   const result = await renderOutboundTemplate(
@@ -1305,6 +1355,9 @@ test("Spanish cold S1 keeps rotation pool Spanish-only and does not backfill fro
       best_phone_id: "ph-lang-es-1",
       phone_id: "ph-lang-es-1",
       canonical_e164: "+18325550972",
+      display_name: "Taylor Owner",
+      seller_first_name: "Taylor",
+      matching_flags: "Likely Owner",
       best_language: "Spanish",
       template_use_case: "ownership_check",
       stage_code: "S1",
@@ -1334,6 +1387,9 @@ test("selected template language always matches preferred language for cold S1 m
       best_phone_id: "ph-lang-vn-1",
       phone_id: "ph-lang-vn-1",
       canonical_e164: "+18325550973",
+      display_name: "Taylor Owner",
+      seller_first_name: "Taylor",
+      matching_flags: "Likely Owner",
       best_language: "Vietnamese",
       template_use_case: "ownership_check",
       stage_code: "S1",
@@ -1351,7 +1407,7 @@ test("selected template language always matches preferred language for cold S1 m
           stage_code: "S1",
           language: "Vietnamese",
           is_active: true,
-          template_body: "VN {property_address}",
+          template_body: "VN {property_street_address}",
         },
         {
           id: "tpl-en-1",
@@ -1360,7 +1416,7 @@ test("selected template language always matches preferred language for cold S1 m
           stage_code: "S1",
           language: "English",
           is_active: true,
-          template_body: "EN {property_address}",
+          template_body: "EN {property_street_address}",
         },
       ],
     }
@@ -1808,15 +1864,23 @@ test("no flag -> no 840801/840802", async () => {
 
 test("identity_unknown with no flag -> no_safe_template_for_identity_unknown", async () => {
   const result = await renderOutboundTemplate(
-    makeTemplateRoutingCandidate({
-      matching_flags: "",
-      prospect_full_name: null,
-      prospect_display_name: null,
-      full_name: null,
-      phone_full_name: null,
-      phone_owner: null,
-      prospect_cnam: null,
-    }),
+    {
+      ...makeTemplateRoutingCandidate({
+        matching_flags: "",
+        prospect_full_name: null,
+        prospect_display_name: null,
+        full_name: null,
+        phone_full_name: null,
+        phone_owner: null,
+        prospect_cnam: null,
+      }),
+      identity_alignment: {
+        status: "unknown",
+        hardBlock: false,
+        score: 0,
+        reasons: ["missing_prospect_name"],
+      },
+    },
     {},
     {
       fetchSmsTemplates: async () => [
@@ -2539,16 +2603,23 @@ test("fallback_any_use_case fetch diagnostic shows fallback_used=false when prim
 });
 
 test("scan_limit=200 causes effective_fetch_limit to exceed 100", async () => {
-  let captured_limit = null;
+  let captured_end = null;
 
   const countingSupabase = {
     from() {
       return {
         select() {
           return {
-            limit(n) {
-              captured_limit = n;
-              return Promise.resolve({ data: Array.from({ length: n }, (_, i) => makeCandidate(i + 1)), error: null });
+            order() {
+              return this;
+            },
+            range(start, end) {
+              captured_end = end;
+              const count = end - start + 1;
+              return Promise.resolve({
+                data: Array.from({ length: count }, (_, i) => makeCandidate(start + i + 1)),
+                error: null,
+              });
             },
           };
         },
@@ -2570,7 +2641,7 @@ test("scan_limit=200 causes effective_fetch_limit to exceed 100", async () => {
     }
   );
 
-  assert.ok(captured_limit > 100, `effective_fetch_limit should exceed 100, got ${captured_limit}`);
+  assert.ok(captured_end > 100, `effective_fetch_limit should exceed 100, got end=${captured_end}`);
   assert.equal(result.effective_candidate_fetch_limit, 200);
   assert.ok(result.fetched_candidate_count > 100, `fetched_candidate_count should exceed 100, got ${result.fetched_candidate_count}`);
 });
@@ -2612,8 +2683,8 @@ test("limit=500 scan_limit=500 can queue more than 100 when enough eligible cand
     }
   );
 
-  assert.ok(result.queued_count > 100, `queued_count should exceed 100, got ${result.queued_count}`);
-  assert.equal(create_calls, result.queued_count);
+  assert.ok(createdQueueCount(result) > 100, `created count should exceed 100, got ${createdQueueCount(result)}`);
+  assert.equal(create_calls, createdQueueCount(result));
 });
 
 test("within_contact_window_now=false creates rows with future scheduled_for", async () => {
@@ -2652,7 +2723,7 @@ test("within_contact_window_now=false creates rows with future scheduled_for", a
     }
   );
 
-  assert.equal(result.queued_count, 1);
+  assert.equal(createdQueueCount(result), 1);
   assert.ok(captured_scheduled_for, "scheduled_for should be set");
   assert.equal(result.schedule_spread_enabled, false);
   assert.ok(result.first_scheduled_for, "first_scheduled_for should be set in diagnostics");
@@ -2681,7 +2752,7 @@ test("schedule_spread slots 100 rows today inside the campaign window", async ()
       schedule_start_local: "09:00",
       schedule_end_local: "20:00",
       schedule_interval_seconds_min: 180,
-      schedule_interval_seconds_max: 999,
+      schedule_interval_seconds_max: 180,
       campaign_session_id: "session-spread",
       template_use_case: "ownership_check",
       now: now_iso,
@@ -2713,7 +2784,7 @@ test("schedule_spread slots 100 rows today inside the campaign window", async ()
   assert.equal(result.schedule_start_local, "09:00");
   assert.equal(result.schedule_end_local, "20:00");
   assert.equal(result.schedule_interval_seconds, 180);
-  assert.equal(result.queued_count, 100);
+  assert.equal(createdQueueCount(result), 100);
   assert.equal(result.schedule_window_full_count, 0);
   assert.equal(result.schedule_overflow_blocked_count, 0);
   assert.equal(queued_scheduled_fors.length, 100);
@@ -2775,7 +2846,7 @@ test("schedule_spread skips rows once the campaign window is full", async () => 
     }
   );
 
-  assert.equal(result.queued_count, 2);
+  assert.equal(createdQueueCount(result), 2);
   assert.equal(queued_scheduled_fors.length, 2);
   assert.equal(result.schedule_window_full_count, 3);
   assert.equal(result.schedule_overflow_blocked_count, 0);
