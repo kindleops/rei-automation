@@ -295,6 +295,7 @@ export async function runSendQueue(
             });
         }
     } catch (err) {
+        processed_count += 1;
         failed_count += 1;
         results.push({ ok: false, queue_item_id, reason: err?.message || 'queue_processing_exception' });
         log_warn("queue_row_failed", { queue_item_id, error: err.message });

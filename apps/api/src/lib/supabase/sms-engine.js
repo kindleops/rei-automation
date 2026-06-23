@@ -555,6 +555,25 @@ function getCandidateSnapshot(row = null) {
     : null;
 }
 
+function buildWithinBatchDedupeKey(row = null) {
+  const normalized = normalizeSendQueueRow(row);
+  const explicit = clean(normalized.dedupe_key);
+  if (explicit) return `dedupe:${explicit}`;
+
+  const snapshot = getCandidateSnapshot(normalized);
+  const owner_id = clean(normalized.master_owner_id || snapshot?.master_owner_id);
+  const phone_id = clean(
+    normalized.phone_number_id ||
+      normalized.phone_id ||
+      snapshot?.phone_id ||
+      snapshot?.best_phone_id
+  );
+  const touch_number = normalized.touch_number ?? snapshot?.touch_number;
+
+  if (!owner_id && !phone_id) return null;
+  return `owner_phone_touch:${owner_id || "no_owner"}:${phone_id || "no_phone"}:${touch_number ?? "no_touch"}`;
+}
+
 function hasSelectedTemplateReference(row = null) {
   const metadata = ensureObject(row?.metadata);
   return Boolean(
@@ -641,6 +660,7 @@ function resolvePreclaimScanLimit(limit = 50, deps = {}) {
 
 export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   const supabase = getSupabase(deps);
+  const log_warn = deps.warn || warn;
   const now = deps.now || nowIso();
   const requested_limit = Math.max(1, Math.trunc(asNumber(limit, 50)));
   const preclaim_scan_limit = resolvePreclaimScanLimit(requested_limit, deps);
@@ -712,6 +732,8 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   const raw_rows = Array.isArray(data) ? data : [];
   const runnable = [];
   const skipped = [];
+  const seen_batch_dedupe_keys = new Set();
+  let batch_duplicate_suppressed_count = 0;
   let preclaim_scanned_count = 0;
   let preclaim_outside_window_excluded_count = 0;
   let preclaim_retry_pending_excluded_count = 0;
@@ -812,6 +834,24 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       continue;
     }
 
+    const batch_dedupe_key = buildWithinBatchDedupeKey(decision.row);
+    if (batch_dedupe_key && seen_batch_dedupe_keys.has(batch_dedupe_key)) {
+      batch_duplicate_suppressed_count += 1;
+      skipped.push({
+        id: decision.row?.id || null,
+        reason: "batch_duplicate_suppressed",
+        row: decision.row,
+        batch_dedupe_key,
+      });
+      log_warn("queue.run_batch_duplicates_suppressed", {
+        batch_dedupe_key,
+        queue_item_id: decision.row?.id || null,
+        duplicate_count: 1,
+      });
+      continue;
+    }
+    if (batch_dedupe_key) seen_batch_dedupe_keys.add(batch_dedupe_key);
+
     runnable.push(decision.row);
     if (runnable.length >= requested_limit) break;
   }
@@ -831,6 +871,7 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
     skipped_missing_body_count,
     eligible_claim_count: Math.min(runnable.length, requested_limit),
     preclaim_scan_limit,
+    batch_duplicate_suppressed_count,
   };
 }
 
@@ -2621,10 +2662,12 @@ export async function logInboundMessageEvent(payload, options = {}) {
     null
   );
 
-  let existing_row = null;
-  const supabase = getSupabase(options);
+  const use_injected_logger = typeof options.logInboundMessageEvent === "function";
 
-  if (message_sid) {
+  let existing_row = null;
+  const supabase = use_injected_logger ? null : getSupabase(options);
+
+  if (!use_injected_logger && message_sid) {
     let existing_query = await supabase
       .from(MESSAGE_EVENTS_TABLE)
       .select("id, message_event_key, metadata, created_at")
@@ -2715,14 +2758,16 @@ export async function logInboundMessageEvent(payload, options = {}) {
     },
   };
 
-  try {
-    const enrichment = await enrichMessageEventContext(event, getSupabase(options));
-    event = { ...event, ...buildMessageEventEnrichmentUpdate(enrichment) };
-    event.thread_key =
-      canonicalThreadKeyForDirection("inbound", event.from_phone_number, event.to_phone_number) ||
-      event.thread_key;
-  } catch (_) {
-    event.metadata = { ...event.metadata, enrichment: { source: "inbound_enrichment_failed", enriched_at: now } };
+  if (!use_injected_logger) {
+    try {
+      const enrichment = await enrichMessageEventContext(event, getSupabase(options));
+      event = { ...event, ...buildMessageEventEnrichmentUpdate(enrichment) };
+      event.thread_key =
+        canonicalThreadKeyForDirection("inbound", event.from_phone_number, event.to_phone_number) ||
+        event.thread_key;
+    } catch (_) {
+      event.metadata = { ...event.metadata, enrichment: { source: "inbound_enrichment_failed", enriched_at: now } };
+    }
   }
 
   // Analytics fires regardless of DI injection path — the inbound message
@@ -2732,7 +2777,7 @@ export async function logInboundMessageEvent(payload, options = {}) {
     character_count: event.character_count,
   });
 
-  if (typeof options.logInboundMessageEvent === "function") {
+  if (use_injected_logger) {
     return options.logInboundMessageEvent(event);
   }
 

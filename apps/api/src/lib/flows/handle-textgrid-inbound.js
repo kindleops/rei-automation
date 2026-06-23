@@ -802,7 +802,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     return { ok: true, stage: "handler_entry" };
   }
 
-  let extracted, inbound_from, inbound_to, message_body;
+  let extracted, inbound_from, inbound_to, message_body, offer_stage_ai_result = null;
   try {
     extracted = extractWebhookPayload(payload);
     if (inbound_debug_stage === "after_extract") {
@@ -1268,7 +1268,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
 
     // ── SEGMENT: offer_stage_ai ──────────────────────────────────────
     // Wire in Offer Stage AI in dry-run mode for price/offer intent.
-    let offer_stage_ai_result = null;
     try {
       const offerTrigger = runtimeDeps.isOfferStageTrigger
         ? runtimeDeps.isOfferStageTrigger({ message: message_body, classification, sellerStage: route?.stage || context?.summary?.conversation_stage || null, route })
@@ -1461,7 +1460,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     // All offer, underwriting, contract, and pipeline writes happen here.
     let maybe_offer_progress, initial_offer, underwriting, seller_stage_reply,
       underwriting_follow_up, maybe_offer, active_offer_item_id,
-      contract, pipeline, underwriting_transfer, autopilot_queue_row = null;
+      contract, pipeline, underwriting_transfer, autopilot_queue_row = null,
+      seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" };
 
     try {
       const offer_route = offer_routing?.offer_route || null;
@@ -1550,7 +1550,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       // Wire follow-up after safety+classification decision. Gated by system_followup_enabled.
       // Never schedules for: opt_out, wrong_person, hostile_or_legal, timing_complaint.
       // not_interested → 30-day nurture. Active whitelisted intents → no nurture (active workflow).
-      let seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" };
       try {
         if (system_followup_enabled) {
           seller_followup_result = await runtimeDeps.scheduleFollowUp(

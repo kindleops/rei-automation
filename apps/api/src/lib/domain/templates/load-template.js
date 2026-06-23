@@ -41,6 +41,14 @@ function uniq(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function hasReengagementEvidence(context = null) {
+  const summary = context?.summary && typeof context.summary === "object" ? context.summary : {};
+  const recent = context?.recent && typeof context.recent === "object" ? context.recent : {};
+  const last_inbound_message = clean(summary.last_inbound_message);
+  const touch_count = Number(recent.touch_count ?? context?.touch_count ?? 0);
+  return Boolean(last_inbound_message) || (Number.isFinite(touch_count) && touch_count >= 2);
+}
+
 /**
  * Strip HTML tags and trim whitespace.  Used to detect whether a template text
  * field is genuinely empty even when Podio returns HTML-wrapped values such as
@@ -1277,6 +1285,12 @@ export async function loadTemplateCandidates({
 
     for (const fallback_uc of fallback_use_cases) {
       if (already_tried.has(normalizeSelectorText(fallback_uc))) continue;
+      if (
+        normalizeSelectorText(fallback_uc) === normalizeSelectorText("reengagement") &&
+        !hasReengagementEvidence(context)
+      ) {
+        continue;
+      }
 
       const fallback_selector = { ...selector_input, use_case: fallback_uc, deal_strategy: null };
       const fallback_candidates = expandSelectorUseCases(fallback_uc, variant_group);
@@ -1313,11 +1327,16 @@ export async function loadTemplateCandidates({
             survivor_count: result.survivors.length,
           });
 
+          const template_fallback_reason =
+            normalizeSelectorText(fallback_uc) === normalizeSelectorText("reengagement")
+              ? "reengagement_fallback"
+              : `degraded_use_case_fallback_${fallback_uc}`;
+
           return result.survivors.map((template) => ({
             ...template,
             rotation_key,
             template_resolution_source,
-            template_fallback_reason: `degraded_use_case_fallback_${fallback_uc}`,
+            template_fallback_reason,
             template_fallback_use_case: fallback_uc,
             template_selection_diagnostics: {
               selector_input: fallback_selector,
