@@ -212,6 +212,25 @@ const firstNumber = (...values: unknown[]): number => {
   return 0
 }
 
+const firstPositiveNumber = (...values: unknown[]): number | null => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue
+    const numeric = asNumber(value, Number.NaN)
+    if (Number.isFinite(numeric) && numeric > 0) return numeric
+  }
+  return null
+}
+
+const firstCoordinate = (...values: unknown[]): number | null => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue
+    const numeric = asNumber(value, Number.NaN)
+    if (!Number.isFinite(numeric) || Math.abs(numeric) < 0.0001) continue
+    return numeric
+  }
+  return null
+}
+
 const firstBoolean = (...values: unknown[]): boolean => {
   for (const value of values) {
     if (value === null || value === undefined || value === '') continue
@@ -343,8 +362,8 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
       first_name: pros.first_name || '',
       cnam: pros.cnam || '',
 
-      latitude: prop.latitude || 0,
-      longitude: prop.longitude || 0,
+      latitude: firstCoordinate(prop.latitude, prop.lat, row.latitude, row.lat) ?? 0,
+      longitude: firstCoordinate(prop.longitude, prop.lng, row.longitude, row.lng) ?? 0,
       property_type: prop.property_type || '',
       property_class: prop.property_class || '',
       propertyState: prop.state || '',
@@ -367,8 +386,22 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
       priority_score: dossier.prospect.motivation_score || 0,
       propertyTags: [],
       sellerTags: asStringArray(pros.person_flags_text),
-      lat: prop.latitude || 0,
-      lng: prop.longitude || 0,
+      lat: firstCoordinate(prop.latitude, prop.lat, row.latitude, row.lat) ?? 0,
+      lng: firstCoordinate(prop.longitude, prop.lng, row.longitude, row.lng) ?? 0,
+      building_square_feet: firstPositiveNumber(
+        prop.building_square_feet,
+        prop.square_feet,
+        prop.sqft,
+        row.building_square_feet,
+        row.square_feet,
+      ),
+      square_feet: firstPositiveNumber(
+        prop.building_square_feet,
+        prop.square_feet,
+        prop.sqft,
+        row.building_square_feet,
+        row.square_feet,
+      ),
       optOut: dossier.primary_phone.dnc_status || false,
       wrongNumber: false,
       notInterested: false,
@@ -674,8 +707,8 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     cnam: asString(prospect.cnam || row.cnam),
     
     // Property fields
-    latitude: firstNumber(row.latitude, property.latitude, 0),
-    longitude: firstNumber(row.longitude, property.longitude, 0),
+    latitude: firstCoordinate(row.latitude, row.lat, property.latitude, property.lat, propertyRaw.latitude, propertyRaw.lat) ?? 0,
+    longitude: firstCoordinate(row.longitude, row.lng, property.longitude, property.lng, propertyRaw.longitude, propertyRaw.lng) ?? 0,
     property_type: firstString(row.property_type, property.property_type),
     property_class: firstString(row.property_class, property.property_class),
     propertyState,
@@ -698,8 +731,24 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     priority_score: firstNumber(row.priority_score, 0),
     propertyTags: asStringArray(row.podio_tags, property.podio_tags),
     sellerTags: asStringArray(row.seller_tags_text, prospect.seller_tags_text),
-    lat: firstNumber(row.latitude, property.latitude, 0),
-    lng: firstNumber(row.longitude, property.longitude, 0),
+    lat: firstCoordinate(row.latitude, row.lat, property.latitude, property.lat, propertyRaw.latitude, propertyRaw.lat) ?? 0,
+    lng: firstCoordinate(row.longitude, row.lng, property.longitude, property.lng, propertyRaw.longitude, propertyRaw.lng) ?? 0,
+    building_square_feet: firstPositiveNumber(
+      row.building_square_feet,
+      row.square_feet,
+      property.building_square_feet,
+      property.square_feet,
+      propertyRaw.building_square_feet,
+      propertyRaw.square_feet,
+    ),
+    square_feet: firstPositiveNumber(
+      row.building_square_feet,
+      row.square_feet,
+      property.building_square_feet,
+      property.square_feet,
+      propertyRaw.building_square_feet,
+      propertyRaw.square_feet,
+    ),
     optOut: firstBoolean(row.opt_out, threadState.opt_out),
     wrongNumber: firstBoolean(row.wrong_number, threadState.wrong_number),
     notInterested: firstBoolean(row.not_interested, threadState.not_interested),

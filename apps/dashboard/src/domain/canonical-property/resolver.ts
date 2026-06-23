@@ -50,7 +50,7 @@ function parsePositiveNumber(value: unknown): number | null {
   return n
 }
 
-function _parseCoordinate(value: unknown): number | null {
+function parseCoordinate(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null
   const n = Number(String(value).replace(/,/g, ''))
   if (!Number.isFinite(n) || Math.abs(n) < 0.0001) return null
@@ -67,7 +67,7 @@ function normalizeAssetType(value: unknown, propertyType?: unknown): string {
   return raw
 }
 
-function _buildAddress(...parts: Array<unknown>): string {
+function buildAddress(...parts: Array<unknown>): string {
   return parts.map(clean).filter(Boolean).join(', ')
 }
 
@@ -165,7 +165,7 @@ export function resolveCanonicalProperty({
     zip: clean(bag.property_address_zip ?? bag.property_zip ?? bag.zip ?? dealContext?.propertyZip) || null,
     owner_id: clean(dealContext?.masterOwnerId ?? dealContext?.master_owner_id ?? t?.master_owner_id) || null,
     master_owner_id: clean(dealContext?.masterOwnerId ?? dealContext?.master_owner_id ?? t?.master_owner_id) || null,
-    opportunity_id: clean(opportunityId ?? (dealContext as { opportunityId?: string; opportunity_id?: string } | null)?.opportunityId ?? (dealContext as { opportunity_id?: string } | null)?.opportunity_id) || null,
+    opportunity_id: clean(opportunityId ?? dealContext?.opportunityId) || null,
     thread_key: clean(dealContext?.threadKey ?? dealContext?.thread_key ?? t?.thread_key) || null,
     coordinate_source: coords.coordinate_source,
     coordinate_confidence: coords.coordinate_confidence,
@@ -176,6 +176,3 @@ export function resolveCanonicalProperty({
     coordinate_failure_reason: coords.failure_reason,
   }
 }
-
-void _parseCoordinate
-void _buildAddress
