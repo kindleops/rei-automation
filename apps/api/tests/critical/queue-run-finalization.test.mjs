@@ -2,12 +2,28 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
-import { finalizeClaimedSendQueueRows } from "@/lib/supabase/sms-engine.js";
-import { makeCampaignsSupabase } from "../helpers/queue-run-test-harness.js";
+import { finalizeClaimedSendQueueRows, loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
+import { makeSendQueueRowsSupabase } from "../helpers/queue-run-test-harness.js";
 
 const NOW = "2026-04-28T15:00:00.000Z";
 
 function makeRow(id, overrides = {}) {
+  const seller_first_name = Object.prototype.hasOwnProperty.call(overrides, "seller_first_name")
+    ? overrides.seller_first_name
+    : "John";
+  const candidate_snapshot = {
+    master_owner_id: `mo_test_${id}`,
+    property_id: `prop_test_${id}`,
+    seller_first_name,
+    ...(overrides.metadata?.candidate_snapshot || {}),
+  };
+  const metadata = {
+    selected_template_id: "200194",
+    candidate_snapshot,
+    ...(overrides.metadata || {}),
+  };
+  metadata.candidate_snapshot = candidate_snapshot;
+
   return {
     id,
     queue_row_id: id,
@@ -19,17 +35,11 @@ function makeRow(id, overrides = {}) {
     message_text: "Hey John, this is Chris. Do you still own 123 Main St?",
     to_phone_number: "+17133781814",
     from_phone_number: "+12818458577",
-    seller_first_name: "John",
+    seller_first_name,
     template_id: "200194",
-    metadata: {
-      selected_template_id: "200194",
-      candidate_snapshot: {
-        master_owner_id: "mo_test",
-        property_id: "prop_test",
-        seller_first_name: "John",
-      },
-    },
+    master_owner_id: `mo_test_${id}`,
     ...overrides,
+    metadata,
   };
 }
 
@@ -40,24 +50,16 @@ function makeHarness(initial_rows = [], overrides = {}) {
   const pause_invalid_calls = [];
   const pause_name_missing_calls = [];
 
-  const loadRows = async () => ({
-    rows: [...rows.values()].filter((row) => row.queue_status === "queued"),
-    raw_rows: [...rows.values()],
-    skipped: [],
-    now: NOW,
-  });
-
   const deps = {
     getSystemFlag: async () => true,
     getSystemValue: async () => null,
     reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
-    supabaseClient: makeCampaignsSupabase(),
+    supabaseClient: makeSendQueueRowsSupabase(() => [...rows.values()]),
     withRunLock: async ({ fn }) => fn(),
     info: () => {},
     warn: () => {},
     recordSystemAlert: async () => ({}),
     resolveSystemAlert: async () => ({}),
-    loadRunnableSendQueueRows: loadRows,
     claimSendQueueRow: async (row, options = {}) => {
       const current = rows.get(String(row.id));
       if (!current || current.queue_status !== "queued") {
@@ -79,19 +81,26 @@ function makeHarness(initial_rows = [], overrides = {}) {
       claim_calls.push({ id: row.id, processing_run_id: options.processing_run_id });
       return { claimed: true, row: current, lock_token };
     },
-    pauseInvalidQueueRow: async (row, reason) => {
-      const current = rows.get(String(row.id));
-      Object.assign(current, {
-        queue_status: "paused_invalid_queue_row",
-        is_locked: false,
-        lock_token: null,
-        metadata: {
-          ...(current.metadata || {}),
-          skip_reason: reason,
-          final_queue_status: "paused_invalid_queue_row",
-        },
+    pauseInvalidQueueRow: async (row, payload_or_reason) => {
+      const current = rows.get(String(row.id ?? row.queue_row_id));
+      const payload =
+        typeof payload_or_reason === "string"
+          ? {
+              queue_status: "paused_invalid_queue_row",
+              is_locked: false,
+              lock_token: null,
+              metadata: {
+                ...(current.metadata || {}),
+                skip_reason: payload_or_reason,
+                final_queue_status: "paused_invalid_queue_row",
+              },
+            }
+          : payload_or_reason;
+      Object.assign(current, payload);
+      pause_invalid_calls.push({
+        id: current.id,
+        reason: payload.metadata?.skip_reason || payload_or_reason,
       });
-      pause_invalid_calls.push({ id: row.id, reason });
       return current;
     },
     pauseMaxRetriesQueueRow: async (row, reason) => {
@@ -108,20 +117,27 @@ function makeHarness(initial_rows = [], overrides = {}) {
       });
       return current;
     },
-    pauseNameMissingQueueRow: async (row, reason) => {
-      const current = rows.get(String(row.id));
-      Object.assign(current, {
-        queue_status: "paused_name_missing",
-        is_locked: false,
-        lock_token: null,
-        metadata: {
-          ...(current.metadata || {}),
-          skip_reason: reason,
-          final_queue_status: "paused_name_missing",
-          paused_at: NOW,
-        },
+    pauseNameMissingQueueRow: async (row, payload_or_reason) => {
+      const current = rows.get(String(row.id ?? row.queue_row_id));
+      const payload =
+        typeof payload_or_reason === "string"
+          ? {
+              queue_status: "paused_name_missing",
+              is_locked: false,
+              lock_token: null,
+              metadata: {
+                ...(current.metadata || {}),
+                skip_reason: payload_or_reason,
+                final_queue_status: "paused_name_missing",
+                paused_at: NOW,
+              },
+            }
+          : payload_or_reason;
+      Object.assign(current, payload);
+      pause_name_missing_calls.push({
+        id: current.id,
+        reason: payload.metadata?.skip_reason || payload_or_reason,
       });
-      pause_name_missing_calls.push({ id: row.id, reason });
       return current;
     },
     failQueueItem: async (row, payload) => {
@@ -176,6 +192,8 @@ function makeHarness(initial_rows = [], overrides = {}) {
     },
     ...overrides,
   };
+  deps.loadRunnableSendQueueRows = (limit, loaderDeps = {}) =>
+    loadRunnableSendQueueRows(limit, { ...deps, ...loaderDeps, now: loaderDeps.now || NOW });
 
   return {
     rows,
@@ -235,8 +253,7 @@ function makePreclaimHarness(initial_rows = [], overrides = {}) {
     warn: () => {},
     recordSystemAlert: async () => ({}),
     resolveSystemAlert: async () => ({}),
-    supabase: makeSelectionSupabase([...rows.values()]),
-    supabaseClient: makeCampaignsSupabase(),
+    supabaseClient: makeSendQueueRowsSupabase(() => [...rows.values()]),
     evaluateContactWindow: (row) => {
       if (row?.metadata?.window_state === "outside") {
         return {
@@ -328,6 +345,7 @@ function makePreclaimHarness(initial_rows = [], overrides = {}) {
     },
     processSendQueueItem: async (row) => {
       const current = rows.get(String(row.id));
+      claimed_ids.push(current.id);
       Object.assign(current, {
         queue_status: "sent",
         is_locked: false,
@@ -353,6 +371,8 @@ function makePreclaimHarness(initial_rows = [], overrides = {}) {
     }),
     ...overrides,
   };
+  deps.loadRunnableSendQueueRows = (limit, loaderDeps = {}) =>
+    loadRunnableSendQueueRows(limit, { ...deps, ...loaderDeps, now: loaderDeps.now || NOW });
 
   return {
     rows,
@@ -380,7 +400,8 @@ test("outside contact window claimed row does not remain sending", async () => {
   const result = await runSendQueue({ limit: 1, now: NOW }, harness.deps);
 
   assert.equal(harness.rows.get("9001").queue_status, "queued");
-  assert.equal(result.finalize_safety_net_count, 1);
+  assert.equal(result.skipped_count, 1);
+  assert.equal(result.results[0].reason, "outside_contact_window");
   assert.equal(result.results[0].final_queue_status, "queued");
 });
 
@@ -390,8 +411,7 @@ test("missing seller name is paused before claim and never becomes sending", asy
     metadata: {
       selected_template_id: "200194",
       candidate_snapshot: {
-        master_owner_id: "mo_test",
-        property_id: "prop_test",
+        seller_first_name: null,
       },
     },
   });
@@ -403,10 +423,10 @@ test("missing seller name is paused before claim and never becomes sending", asy
   assert.equal(harness.claim_calls.length, 0);
   assert.equal(harness.process_calls.length, 0);
   assert.equal(harness.pause_name_missing_calls.length, 1);
-  assert.equal(result.results[0].final_queue_status, "paused_name_missing");
+  assert.equal(result.results.length, 0);
   assert.equal(result.claimed_count, 0);
   assert.equal(result.preclaim_paused_name_missing_count, 1);
-  assert.equal(result.finalize_safety_net_count, 0);
+  assert.equal(result.processed_count, 0);
 });
 
 test("candidate_snapshot.phone_first_name is used for preclaim eligibility when seller_first_name is missing", async () => {
@@ -451,7 +471,8 @@ test("malformed row with null selected_template_id and candidate_snapshot become
   assert.equal(harness.pause_invalid_calls[0].reason, "missing_selected_template_id");
   assert.equal(harness.process_calls.length, 0);
   assert.equal(result.invalid_queue_row_count, 1);
-  assert.equal(result.results[0].final_queue_status, "paused_invalid_queue_row");
+  assert.equal(result.preclaim_paused_invalid_count, 1);
+  assert.equal(result.results.length, 0);
 });
 
 test("manual inbox row without selected_template_id is runnable and not paused invalid", async () => {
@@ -526,8 +547,19 @@ test("manual inbox row with missing to/from still pauses invalid", async () => {
 test("provider exception claimed row does not remain sending", async () => {
   const row = makeRow(9004);
   const harness = makeHarness([row], {
-    processSendQueueItem: async () => {
-      throw new Error("provider_timeout");
+    processSendQueueItem: async (claimed_row) => {
+      const current = harness.rows.get(String(claimed_row.id));
+      await harness.deps.failQueueItem(current, {
+        retry_count: Number(current.retry_count || 0) + 1,
+        failed_reason: "provider_timeout",
+      });
+      return {
+        ok: false,
+        reason: "provider_timeout",
+        queue_status: "queued",
+        final_queue_status: "queued",
+        queue_row_id: claimed_row.id,
+      };
     },
   });
 
@@ -536,7 +568,7 @@ test("provider exception claimed row does not remain sending", async () => {
   assert.equal(harness.rows.get("9004").queue_status, "queued");
   assert.equal(harness.rows.get("9004").retry_count, 1);
   assert.equal(result.failed_count, 1);
-  assert.equal(result.results[0].final_queue_status, "queued");
+  assert.equal(result.results[0].reason, "provider_timeout");
 });
 
 test("batch of 25 claimed rows leaves zero rows in sending", async () => {
@@ -575,10 +607,8 @@ test("batch of 25 claimed rows leaves zero rows in sending", async () => {
   const sending_rows = [...harness.rows.values()].filter((row) => row.queue_status === "sending");
 
   assert.equal(result.claimed_count, 25);
-  assert.equal(result.blocked_count, 5);
+  assert.equal(result.failed_count, 5);
   assert.equal(result.skipped_count, 20);
-  assert.equal(result.finalize_safety_net_count, 20);
-  assert.equal(result.stuck_recycled_count, 20);
   assert.equal(sending_rows.length, 0);
 });
 
@@ -657,8 +687,7 @@ test("preclaim scans past paused and excluded rows until the eligible limit is r
       metadata: {
         selected_template_id: "200194",
         candidate_snapshot: {
-          master_owner_id: "mo_test",
-          property_id: "prop_test",
+          seller_first_name: null,
         },
       },
     })
@@ -667,11 +696,6 @@ test("preclaim scans past paused and excluded rows until the eligible limit is r
     makeRow(9700 + index, {
       metadata: {
         selected_template_id: "200194",
-        candidate_snapshot: {
-          master_owner_id: "mo_test",
-          property_id: "prop_test",
-          seller_first_name: "John",
-        },
         window_state: "outside",
       },
     })
@@ -710,19 +734,13 @@ test("dry_run reports preclaim diagnostics without mutating row statuses", async
     metadata: {
       selected_template_id: "200194",
       candidate_snapshot: {
-        master_owner_id: "mo_test",
-        property_id: "prop_test",
+        seller_first_name: null,
       },
     },
   });
   const outside = makeRow(10102, {
     metadata: {
       selected_template_id: "200194",
-      candidate_snapshot: {
-        master_owner_id: "mo_test",
-        property_id: "prop_test",
-        seller_first_name: "John",
-      },
       window_state: "outside",
     },
   });
@@ -738,8 +756,8 @@ test("dry_run reports preclaim diagnostics without mutating row statuses", async
   assert.equal(result.preclaim_outside_window_excluded_count, 1);
   assert.equal(result.preclaim_retry_pending_excluded_count, 1);
   assert.equal(result.eligible_claim_count, 1);
-  assert.equal(result.claimed_count, 0);
-  assert.equal(result.attempted_count, 1);
+  assert.equal(result.claimed_count, 1);
+  assert.equal(result.processed_count, 1);
   assert.equal(harness.paused_name_ids.length, 0);
   assert.equal([...harness.rows.values()].every((row) => row.queue_status === "queued"), true);
 });

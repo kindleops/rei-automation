@@ -1,7 +1,9 @@
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-process.env.OPENCODE_ZEN_API_KEY = "test-key-for-testing";
+beforeEach(() => {
+  process.env.OPENCODE_ZEN_API_KEY = "test-key-for-testing";
+});
 
 import {
   callBigPickle,

@@ -1,4 +1,4 @@
-import { normalizeSendQueueRow, shouldRunSendQueueRow } from '@/lib/supabase/sms-engine.js'
+import { normalizeSendQueueRow, shouldRunSendQueueRow, sortQueuedRows } from '@/lib/supabase/sms-engine.js'
 
 export function buildSupabaseQueueRow(id, overrides = {}) {
   return normalizeSendQueueRow({
@@ -122,6 +122,79 @@ export function makeSelectSupabase(rows = []) {
         },
       }
       return query
+    },
+  }
+}
+
+export function makeSendQueueRowsSupabase(getRows = () => []) {
+  const listRows = () => {
+    const rows = typeof getRows === 'function' ? getRows() : getRows
+    if (Array.isArray(rows)) return rows.map((row) => normalizeSendQueueRow(row))
+    return [...rows.values()].map((row) => normalizeSendQueueRow(row))
+  }
+
+  function makeSendQueueQuery() {
+    const state = {
+      statuses: null,
+      excludeLocked: false,
+      limit: 50,
+    }
+    const query = {
+      select() {
+        return query
+      },
+      in(_field, values) {
+        state.statuses = new Set(values)
+        return query
+      },
+      not(_field, _op, _value) {
+        state.excludeLocked = true
+        return query
+      },
+      order() {
+        return query
+      },
+      limit(value) {
+        state.limit = value
+        let rows = listRows().filter((row) => {
+          if (state.statuses && !state.statuses.has(row.queue_status)) return false
+          if (state.excludeLocked && row.is_locked) return false
+          return true
+        })
+        rows = sortQueuedRows(rows)
+        return Promise.resolve({
+          data: rows.slice(0, state.limit),
+          error: null,
+        })
+      },
+      update() {
+        return {
+          or() {
+            return this
+          },
+          eq() {
+            return this
+          },
+          lt() {
+            return {
+              select: async () => ({ data: [], error: null }),
+            }
+          },
+        }
+      },
+    }
+    return query
+  }
+
+  return {
+    from(table) {
+      if (table === 'campaigns') {
+        return makeCampaignsSupabase().from('campaigns')
+      }
+      if (table === 'send_queue') {
+        return makeSendQueueQuery()
+      }
+      return makeSendQueueQuery()
     },
   }
 }
