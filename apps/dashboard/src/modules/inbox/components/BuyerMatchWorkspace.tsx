@@ -281,25 +281,6 @@ function emitHook(event: string, detail?: Record<string, unknown>) {
   }
 }
 
-function makeDealEvent(
-  icon: string,
-  action: string,
-  result: string,
-  source: string,
-  extra: Partial<DealMemoryEvent> = {},
-): DealMemoryEvent {
-  return {
-    id: Math.random().toString(36).slice(2),
-    timestamp: new Date().toISOString(),
-    icon,
-    action,
-    result: sanitizeBuyerMatchError(result),
-    source,
-    structured: true,
-    ...extra,
-  }
-}
-
 function structuredToDealEvent(ev: StructuredBuyerMatchEvent): DealMemoryEvent {
   const iconMap: Record<string, string> = {
     buyer_match_requested: '🎯',
