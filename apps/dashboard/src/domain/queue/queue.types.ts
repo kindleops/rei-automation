@@ -147,20 +147,24 @@ export interface QueueItem {
 // ── Stage taxonomy (Phase 3) ────────────────────────────────────────────────
 export type StageCode =
   | 'S1'
+  | 'S1F'
   | 'S2'
   | 'S3'
   | 'S4'
   | 'S5'
+  | 'S6'
   | 'manual_reply'
   | 'auto_reply'
   | 'other'
 
 export const STAGE_LABELS: Record<StageCode, string> = {
-  S1: 'Ownership S1',
-  S2: 'Ownership S2',
-  S3: 'Ownership S3',
-  S4: 'Ownership S4',
-  S5: 'Ownership S5',
+  S1: 'Ownership Confirmation',
+  S1F: 'Ownership Follow-Up',
+  S2: 'Selling Interest',
+  S3: 'Asking Price',
+  S4: 'Condition & Underwriting',
+  S5: 'Offer & Negotiation',
+  S6: 'Contract to Close',
   manual_reply: 'Manual Reply',
   auto_reply: 'Auto Reply',
   other: 'Other',

@@ -13,7 +13,7 @@ import {
 } from '../../lib/data/queueData'
 import { shouldUseSupabase } from '../../lib/data/shared'
 import { adaptQueueModel } from './queue.adapter'
-import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis, StageCode, ConfiguredMarket } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis, ConfiguredMarket } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { Icon } from '../../shared/icons'
@@ -33,7 +33,8 @@ import { QueueConfirmModal } from './components/QueueConfirmModal'
 import { QueueExceptionBadges } from './components/QueueExceptionBadges'
 import { QueueInlineFlow } from './components/QueueInlineFlow'
 import { SenderFleetOverview } from './components/SenderFleetOverview'
-import { TemplatesLabOverview } from './components/TemplatesLabOverview'
+import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
+import './components/templates/template-intelligence.css'
 import { useQueueLayout } from './hooks/useQueueLayout'
 import {
   BLOCKED_STATUSES,
@@ -84,19 +85,6 @@ const fmtPhone = (p: string | null | undefined) =>
 
 const resolveStageLabel = (item: QueueItem): string =>
   item.stageLabel ?? (item.stageCode ? STAGE_LABELS[item.stageCode] : '—')
-
-type StageFilter = 'all' | StageCode
-
-const STAGE_FILTER_OPTIONS: Array<{ key: StageFilter; label: string }> = [
-  { key: 'all', label: 'All Stages' },
-  { key: 'S1', label: 'Ownership S1' },
-  { key: 'S2', label: 'Ownership S2' },
-  { key: 'S3', label: 'Ownership S3' },
-  { key: 'S4', label: 'Ownership S4' },
-  { key: 'S5', label: 'Ownership S5' },
-  { key: 'manual_reply', label: 'Manual Reply' },
-  { key: 'auto_reply', label: 'Auto Reply' },
-]
 
 const STAGE_TONE: Record<string, string> = {
   S1: 'blue', S2: 'cyan', S3: 'violet', S4: 'amber', S5: 'green',
@@ -919,82 +907,6 @@ const _TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose
   </aside>
 )
 
-const TemplatesModule = ({
-  items,
-  onViewRows: _onViewRows,
-  selectedId,
-  onSelectId,
-}: {
-  items: QueueItem[]
-  onViewRows: (name: string) => void
-  selectedId: string | null
-  onSelectId: (id: string | null) => void
-}) => {
-  const stats = useMemo(() => buildTemplateStats(items), [items])
-  void (stats.find(s => s.id === selectedId) ?? null)
-
-  return (
-    <div className="occ-tpl-layout">
-      <TemplatesLabOverview templates={stats.map(s => ({
-        id: s.id, name: s.name, health: s.health, healthLabel: s.healthLabel,
-        sent: s.sent, usage: s.usage, deliveryPct: s.deliveryPct, failPct: s.failPct,
-      }))} />
-      <div className="occ-module">
-        <div className="occ-module-head">
-          <div className="occ-module-col occ-col-name">Template</div>
-          <div className="occ-module-col occ-col-num">Usage</div>
-          <div className="occ-module-col occ-col-num">Sent</div>
-          <div className="occ-module-col occ-col-num">Del</div>
-          <div className="occ-module-col occ-col-num">Fail</div>
-          <div className="occ-module-col occ-col-num">Blk</div>
-          <div className="occ-module-col occ-col-num">Opt-Outs</div>
-          <div className="occ-module-col occ-col-pct">Del%</div>
-          <div className="occ-module-col occ-col-pct">Fail%</div>
-          <div className="occ-module-col occ-col-badge">Health</div>
-        </div>
-        <div className="occ-module-body">
-          {stats.length === 0 && (
-            <div className="occ-module-empty">No template data for this date range.</div>
-          )}
-          {stats.map(s => (
-            <button
-              key={s.id}
-              type="button"
-              className={cls('occ-module-row occ-module-row--clickable', selectedId === s.id && 'is-selected')}
-              onClick={() => onSelectId(selectedId === s.id ? null : s.id)}
-            >
-              <div className="occ-module-col occ-col-name occ-col-name--strong">
-                <span>{truncate(s.name, 28)}</span>
-                <div className="occ-perf-bar" aria-hidden="true">
-                  <span className="is-green" style={{ width: `${s.deliveryPct}%` }} />
-                  <span className="is-red" style={{ width: `${s.failPct}%` }} />
-                </div>
-                {s.id !== 'no-template' && <small className="occ-mono">{truncate(s.id, 20)}</small>}
-              </div>
-              <div className="occ-module-col occ-col-num">{s.usage}</div>
-              <div className="occ-module-col occ-col-num">{s.sent}</div>
-              <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
-              <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
-              <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
-              <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
-              <div className={cls('occ-module-col occ-col-pct', s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
-                {s.deliveryPct}%
-              </div>
-              <div className={cls('occ-module-col occ-col-pct', s.failPct > 15 ? 'is-red' : s.failPct > 5 ? 'is-amber' : '')}>
-                {s.failPct}%
-              </div>
-              <div className="occ-module-col occ-col-badge">
-                <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health === 'insufficient' ? 'watch' : s.health]}`)}>{s.healthLabel}</span>
-                {s.sent < 5 && <small className="occ-sample-badge">n={s.sent}</small>}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Sender Numbers Module ───────────────────────────────────────────────────
 
 const SendersModule = ({
@@ -1726,8 +1638,6 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
   const [customTo, setCustomTo] = useState('')
   const [dateBasis, setDateBasis] = useState<QueueDateBasis>('created_at')
   const [section, setSection] = useState<QueueSection>('queue')
-  const [stageFilter, setStageFilter] = useState<StageFilter>('all')
-  const [templateSearch, setTemplateSearch] = useState('')
   const [density, setDensity] = useState<QueueDensity>('compact')
   const [confirmPreview, setConfirmPreview] = useState<BulkActionPreview | null>(null)
   const [dossierOpen, setDossierOpen] = useState(true)
@@ -1739,8 +1649,23 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
   const [selectedEventItem, setSelectedEventItem] = useState<QueueItem | null>(null)
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('compact')
   const [exceptionsOpen, setExceptionsOpen] = useState(false)
+  const [templateSearchParams, setTemplateSearchParams] = useState(
+    () => new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
+  )
   const realtimeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dateFilterMounted = useRef(false)
+
+  const syncTemplateSearchParams = useCallback((next: URLSearchParams) => {
+    setTemplateSearchParams(next)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      for (const key of [...url.searchParams.keys()]) {
+        if (key.startsWith('tpl_')) url.searchParams.delete(key)
+      }
+      next.forEach((value, key) => url.searchParams.set(key, value))
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [])
 
   const buildOpts = useCallback(
     (page: number) => buildFetchOptions({
@@ -1875,17 +1800,6 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
     }
     return result
   }, [items, statusFilter, marketFilter, templateFilter, senderFilter, searchQuery, causeFilter])
-
-  // Items scoped by the Templates section's stage dropdown + search (Phase 3).
-  const stageScopedItems = useMemo(() => {
-    let result = items
-    if (stageFilter !== 'all') result = result.filter(i => i.stageCode === stageFilter)
-    if (templateSearch.trim()) {
-      const q = templateSearch.toLowerCase()
-      result = result.filter(i => i.templateName.toLowerCase().includes(q))
-    }
-    return result
-  }, [items, stageFilter, templateSearch])
 
   const selectedItem = model?.items.find(i => i.id === selectedId) ?? null
 
@@ -2274,7 +2188,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
           <span className="occ-topbar__total">
             {rowStart}–{rowEnd} of {totalCount.toLocaleString()}
           </span>
-          {layoutMode === 'full' && (
+          {layoutMode === 'full' && section === 'queue' && (
             <>
               <button
                 type="button"
@@ -2295,6 +2209,11 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
                 {busyAction === 'run-queue-now' ? ' Running…' : ' Run Queue'}
               </button>
             </>
+          )}
+          {import.meta.env.DEV && (
+            <span className={cls('occ-runtime-dev', model?.engineMode === 'proxy' ? 'is-healthy' : 'is-degraded')} title="Runtime health">
+              {model?.engineMode === 'proxy' ? 'runtime ok' : `runtime ${model?.engineMode ?? 'unknown'}`}
+            </span>
           )}
           <button
             type="button"
@@ -2529,29 +2448,22 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
               <h2 className="occ-section-view__title">
                 {QUEUE_SECTIONS.find(s => s.key === section)?.label}
               </h2>
-              {section === 'templates' && (
-                <div className="occ-section-view__controls">
-                  <select className="occ-filter-select" value={stageFilter} onChange={e => setStageFilter(e.target.value as StageFilter)}>
-                    {STAGE_FILTER_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                  <input
-                    type="search"
-                    className="occ-search"
-                    placeholder="Search templates…"
-                    value={templateSearch}
-                    onChange={e => setTemplateSearch(e.target.value)}
-                  />
-                </div>
+              {section !== 'templates' && (
+                <span className="occ-section-view__meta">{DATE_PRESET_LABELS[datePreset]} · {items.length.toLocaleString()} rows on page</span>
               )}
-              <span className="occ-section-view__meta">{DATE_PRESET_LABELS[datePreset]} · {items.length.toLocaleString()} rows on page</span>
+              {section === 'templates' && (
+                <span className="occ-section-view__meta">Server-paginated catalog · shadow autopilot</span>
+              )}
             </div>
             <div className="occ-section-view__body">
               {section === 'templates' && (
-                <TemplatesModule
-                  items={stageScopedItems}
-                  selectedId={selectedTemplateId}
-                  onSelectId={setSelectedTemplateId}
-                  onViewRows={name => { setTemplateFilter(name); setSection('queue') }}
+                <TemplateIntelligenceModule
+                  searchParams={templateSearchParams}
+                  setSearchParams={syncTemplateSearchParams}
+                  onViewQueueRows={(templateId) => {
+                    setTemplateFilter(templateId)
+                    setSection('queue')
+                  }}
                 />
               )}
               {section === 'senders' && (
