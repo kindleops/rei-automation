@@ -1,6 +1,6 @@
 # Critical Suite Failure Manifest
 
-Last refreshed: 2026-06-23 @ `5e831e7` (misc cluster closed)
+Last refreshed: 2026-06-23 @ `66e5b69` (misc + repaired-cluster gates)
 
 ## Baseline (pre-repair full suite @ `77441a0` ancestor)
 
@@ -26,7 +26,7 @@ Source log: `/tmp/canonical-full-critical.log`
 
 | Cluster | Files run | Tests | Pass | Fail | Status |
 |---------|----------:|------:|-----:|-----:|--------|
-| Queue (`proof:queue`) | 8 | 71 | 71 | 0 | **GREEN** @ `77441a0` |
+| Queue (`proof:queue`) | 9 | 74 | 74 | 0 | **GREEN** @ `66e5b69` |
 | Template | 9 | 170 | 170 | 0 | **GREEN** @ `77441a0` |
 | TextGrid provider | 9 | 54 | 54 | 0 | **GREEN** @ `77441a0` |
 | Classification | 5 | 98 | 98 | 0 | **GREEN** @ `ed2ce51` |
@@ -109,11 +109,44 @@ None — all 358 misc tests retained with same or stronger invariants.
 | `8c1e5fc` | test(inbound): webhook deps + canonical replay labels |
 | `5e831e7` | test(acquisition-email): runtime gate + email queue stubs |
 
-## Remaining gates
+## Repaired-cluster combined gate (@ `66e5b69`)
 
-- [ ] Repaired-cluster combined gate (Queue + Template + TextGrid + Classification + Discord + Feed-candidates + Risk-010 + Misc)
-- [ ] Full 185-file critical suite
-- [ ] API lint/build + Dashboard typecheck/build + runtime doctor
+| Metric | Value |
+|--------|------:|
+| Files | 62 |
+| Tests | 1161 |
+| Pass | 1161 |
+| Fail | 0 |
+
+Log: `/tmp/repaired-cluster-gate2.log`
+
+## Full 185-file suite (@ `66e5b69`)
+
+| Metric | Value |
+|--------|------:|
+| Files | 185 |
+| Tests | 2493 |
+| Pass | 2456 |
+| Fail | 37 |
+| Skipped | 0 |
+
+Log: `/tmp/canonical-full-critical-final.log`
+
+### Remaining failing files (13 unique)
+
+`big-pickle`, `first-touch-template-selection`, `message-event-webhook-compat`, `queue-reconcile`, `queue-run-finalization`, `queue-run-lock`, `queue-run-revision-limit`, `risk-002-send-now-routes`, `risk-006-suppression-read`, `seller-flow-auto-queue`, `supabase-queue`, `supabase-sms-runtime`, `touch-one-queue-integrity`
+
+> `queue-run-finalization` (13 tests) targets pre-`77441a0` preclaim/finalize contract; production `runSendQueue` no longer exposes `finalize_safety_net_count`. Harness rewrite tracked separately.
+
+## Build gates (@ `66e5b69`)
+
+| Gate | Result |
+|------|--------|
+| API lint | PASS |
+| API build | PASS |
+| Dashboard typecheck | PASS |
+| Dashboard build | PASS |
+| Runtime doctor | FAIL (dev servers not running — expected in CI-style gate) |
 
 ## Commands
 
