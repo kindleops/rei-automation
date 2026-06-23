@@ -1,4 +1,4 @@
-import { parseJsonSafe, responseFromResult, ensureMutationAuth } from '../../_shared.js'
+import { parseJsonSafe, responseFromResult, ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shared.js'
 import { runInboxAction } from '@/lib/cockpit/cockpit-service.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

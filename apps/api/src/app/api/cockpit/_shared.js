@@ -56,9 +56,12 @@ export function workflowErrorFromLegacy(result, startedAt = Date.now()) {
 const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',
   'https://nexus-dashboard.vercel.app',
+  'https://real-estate-automation-three.vercel.app',
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5180',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
 ])
 
 const ALLOWED_ORIGIN_PATTERNS = [
@@ -78,12 +81,32 @@ export function corsHeaders(request) {
   const allowedOrigin = resolveAllowedOrigin(origin)
   const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE, PATCH',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization, x-ops-dashboard-secret, x-internal-api-secret, x-queue-engine-secret, X-Requested-With, Accept',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   }
   if (allowedOrigin) headers['Access-Control-Allow-Origin'] = allowedOrigin
   return headers
+}
+
+export function getCorsHeaders(request) {
+  return corsHeaders(request)
+}
+
+export function handleOptionsResponse(request) {
+  return new Response(null, {
+    status: 204,
+    headers: getCorsHeaders(request),
+  })
+}
+
+export function withCors(request, response) {
+  const headers = getCorsHeaders(request)
+  Object.entries(headers).forEach(([key, value]) => {
+    response.headers.set(key, value)
+  })
+  return response
 }
 
 export function parseJsonSafe(request) {
@@ -105,41 +128,4 @@ export function ensureMutationAuth(request) {
     return { ok: false, response }
   }
   return { ok: true, auth: auth.auth }
-}
-
-const ALLOWED_ORIGINS = [
-  'https://ops.leadcommand.ai',
-  'https://real-estate-automation-three.vercel.app',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:5173'
-];
-
-export function getCorsHeaders(request) {
-  const origin = request.headers.get("origin") || "";
-  const isAllowed = ALLOWED_ORIGINS.includes(origin);
-  const allowOrigin = isAllowed ? origin : ALLOWED_ORIGINS[0];
-
-  return {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-ops-dashboard-secret, x-internal-api-secret, x-queue-engine-secret",
-    "Vary": "Origin"
-  };
-}
-
-export function handleOptionsResponse(request) {
-  return new Response(null, {
-    status: 204,
-    headers: getCorsHeaders(request)
-  });
-}
-
-export function withCors(request, response) {
-  const headers = getCorsHeaders(request);
-  Object.entries(headers).forEach(([key, value]) => {
-    response.headers.set(key, value);
-  });
-  return response;
 }

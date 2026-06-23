@@ -763,8 +763,8 @@ export const InboxKpiOrb = () => {
                   <Icon name="check" /> Canonical Backend Verification
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <div><strong>Generated At:</strong> {new Date(kpis.diagnostics.metric_source_debug.metrics_generated_at).toLocaleString()}</div>
-                  <div><strong>Window (UTC):</strong> {new Date(kpis.diagnostics.metric_source_debug.window_start).toLocaleDateString()} - {new Date(kpis.diagnostics.metric_source_debug.window_end).toLocaleDateString()}</div>
+                  <div><strong>Generated At:</strong> {kpis.diagnostics.metric_source_debug.metrics_generated_at ? new Date(kpis.diagnostics.metric_source_debug.metrics_generated_at).toLocaleString() : '—'}</div>
+                  <div><strong>Window (UTC):</strong> {kpis.diagnostics.metric_source_debug.window_start ? new Date(kpis.diagnostics.metric_source_debug.window_start).toLocaleDateString() : '—'} - {kpis.diagnostics.metric_source_debug.window_end ? new Date(kpis.diagnostics.metric_source_debug.window_end).toLocaleDateString() : '—'}</div>
                   <div><strong>Backend Core:</strong> {kpis.diagnostics.metric_source_debug.backend_version}</div>
                   <div><strong>Cache Status:</strong> {kpis.diagnostics.metric_source_debug.cached ? 'HIT' : 'MISS (Live DB)'}</div>
                   <div><strong>Execution Time:</strong> {kpis.diagnostics.metric_source_debug.aggregation_runtime_ms}ms</div>

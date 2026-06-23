@@ -1,4 +1,4 @@
-import { parseJsonSafe, responseFromResult, ensureMutationAuth } from '../../_shared.js'
+import { parseJsonSafe, responseFromResult, ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shared.js'
 import { patchThreadStateSafe } from '@/lib/cockpit/cockpit-service.js'
 import { emitAutomationEvent } from '@/lib/domain/automation/automation-events.js'
 import { AUTOMATION_LOG_TAGS, logAutomationConsole } from '@/lib/domain/automation/automation-audit.js'

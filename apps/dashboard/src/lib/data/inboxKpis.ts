@@ -28,6 +28,18 @@ export interface OperationalKpis {
     tone: 'good' | 'warning' | 'critical' | 'neutral'
   }>
   sections: CockpitOpsSections | null
+  diagnostics?: {
+    metric_source_debug?: {
+      metrics_generated_at?: string
+      window_start?: string
+      window_end?: string
+      backend_version?: string
+      cached?: boolean
+      aggregation_runtime_ms?: number
+      duplicate_rows_detected?: number
+      message_rows?: number
+    }
+  }
   lastUpdated: string
 }
 
@@ -97,6 +109,7 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
       financial,
       volume,
       sections: metrics.sections ?? null,
+      diagnostics: metrics.metric_source_debug ? { metric_source_debug: metrics.metric_source_debug } : undefined,
       lastUpdated: new Date().toISOString()
     }
   } catch (err) {

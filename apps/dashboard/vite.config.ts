@@ -636,14 +636,12 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA || 'local'),
       'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
-      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard')
-    },
-    plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
-    define: {
+      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard'),
       'import.meta.env.VITE_DASHBOARD_GIT_SHA': JSON.stringify(devIdentity.commitSha),
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
+    plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {
       host: '0.0.0.0',
       port: 5173,
