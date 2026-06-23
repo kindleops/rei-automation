@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const ROOT = path.resolve(process.cwd())
-const resolverPath = path.join(ROOT, 'src/modules/inbox/resolveInboxThreadState.ts')
+const resolverPath = path.join(ROOT, 'src/domain/inbox/resolveInboxThreadState.ts')
 const tmpPath = path.join(ROOT, '.tmp-inbox-bucket-resolver-proof.mjs')
 
 const source = fs.readFileSync(resolverPath, 'utf8')
