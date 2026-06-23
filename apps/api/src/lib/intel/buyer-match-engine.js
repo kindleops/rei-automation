@@ -16,6 +16,10 @@ import {
   normalizeAssetClass,
   normalizeMarket,
 } from './normalize.js';
+import {
+  flattenSubjectForConsumers,
+  loadCanonicalSubjectProperty,
+} from '@/lib/domain/comp-intelligence/canonical-subject-property.js';
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
@@ -54,7 +58,7 @@ export function normalizeSubject(subject = {}) {
   );
   return {
     property_id: subject.property_id ?? null,
-    address: subject.address ?? subject.property_address_full ?? null,
+    address: subject.address ?? subject.canonical_address ?? subject.property_address_full ?? null,
     lat,
     lng,
     zip,
@@ -194,6 +198,74 @@ function scoreSubject(candidates, rollup, fallbackLevel) {
   return { demand_score, liquidity_score: Math.round(liquidity), confidence };
 }
 
+function hasExactCoordinates(subject = {}) {
+  return num(subject.lat ?? subject.latitude) !== null
+    && num(subject.lng ?? subject.longitude) !== null;
+}
+
+/**
+ * Hydrate a Buyer Match subject from the Comp Intelligence canonical contract
+ * when callers supply property_id without coordinates.
+ */
+export async function hydrateBuyerMatchSubjectFromCanonical(rawSubject = {}, deps = {}) {
+  if (hasExactCoordinates(rawSubject)) {
+    return { subject: rawSubject, canonical: null };
+  }
+
+  const propertyId = rawSubject.property_id ?? rawSubject.propertyId ?? null;
+  if (!propertyId) {
+    return { subject: rawSubject, canonical: null };
+  }
+
+  const loadCanonical = deps.loadCanonicalSubjectProperty ?? loadCanonicalSubjectProperty;
+  const canonicalResult = await loadCanonical(
+    propertyId,
+    rawSubject.context ?? {},
+    { db: deps.supabase ?? deps.db, ...deps },
+  );
+
+  if (!canonicalResult?.ok || !canonicalResult.subject) {
+    return { subject: rawSubject, canonical: canonicalResult ?? null };
+  }
+
+  const flat = flattenSubjectForConsumers(canonicalResult.subject);
+  if (!flat) {
+    return { subject: rawSubject, canonical: canonicalResult };
+  }
+
+  const hydrated = {
+    ...flat,
+    ...rawSubject,
+    property_id: propertyId,
+    address: rawSubject.address ?? flat.canonical_address ?? null,
+    lat: flat.lat,
+    lng: flat.lng,
+    latitude: flat.latitude,
+    longitude: flat.longitude,
+    zip: rawSubject.zip ?? flat.zip,
+    market: rawSubject.market ?? flat.market,
+    state: rawSubject.state ?? flat.state,
+    county: rawSubject.county ?? flat.county ?? null,
+    asset_class: rawSubject.asset_class ?? rawSubject.normalized_asset_class ?? flat.asset_type,
+    property_type: rawSubject.property_type ?? flat.property_type ?? null,
+    beds: rawSubject.beds ?? flat.bedrooms,
+    baths: rawSubject.baths ?? flat.bathrooms,
+    sqft: rawSubject.sqft ?? flat.square_feet,
+    estimated_value: rawSubject.estimated_value ?? flat.estimated_value,
+    coordinate_source: flat.coordinate_source,
+    is_subject_resolved: flat.is_subject_resolved,
+    is_market_fallback: flat.is_market_fallback,
+  };
+
+  if (flat.is_subject_resolved === true && !hasExactCoordinates(hydrated)) {
+    const err = new Error('coordinates_unavailable_for_resolved_subject');
+    err.code = 'coordinates_unavailable';
+    throw err;
+  }
+
+  return { subject: hydrated, canonical: canonicalResult };
+}
+
 /**
  * Main entry point. Resolves a subject property's buyer demand intelligence and
  * (optionally) persists a run + candidate rows.
@@ -204,9 +276,13 @@ function scoreSubject(candidates, rollup, fallbackLevel) {
  * @param {boolean} [args.persist]  Persist buyer_match_runs + candidates (default true)
  * @param {number}  [args.limit]    Max buyers to return (default 25)
  */
-export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, persist = true, limit = 25 }) {
+export async function buildBuyerMatchIntel({ supabase, subject: rawSubject, persist = true, limit = 25, ...deps }) {
   const startedAt = Date.now();
-  const subject = normalizeSubject(rawSubject);
+  const { subject: hydratedSubject } = await hydrateBuyerMatchSubjectFromCanonical(rawSubject, {
+    supabase,
+    ...deps,
+  });
+  const subject = normalizeSubject(hydratedSubject);
 
   // 1. Core geospatial match
   const { data: candidates, error: rpcError } = await supabase.rpc('get_buyer_match_candidates', {
@@ -410,4 +486,8 @@ async function persistRun({
   return { run_id, candidates };
 }
 
-export default { buildBuyerMatchIntel, normalizeSubject };
+export default {
+  buildBuyerMatchIntel,
+  normalizeSubject,
+  hydrateBuyerMatchSubjectFromCanonical,
+};
