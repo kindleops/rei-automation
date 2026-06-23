@@ -1,16 +1,19 @@
 /**
- * Acquisition Engine V3 — Item 5D §15 & §16: storage acquisition strategies +
+ * Acquisition Engine V3 — Item 5E §20–§22: retail acquisition strategies +
  * class-first qualification.
  *
- *   - Cash: full dollar bridge anchored on the conservative storage-operator exit.
+ *   - Cash: full dollar bridge anchored on the conservative retail-buyer exit,
+ *     including repairs, TI/LC, rollover, downtime, diligence, environmental.
  *   - Seller finance: cash-flow-optimized / balanced / seller-price-optimized.
  *   - Commercial debt takeover: SUBJECT_TO slot but a DISTINCT commercial debt
  *     model — never labeled residential subject-to.
- *   - Storage marketed disposition: separate from residential novation; NOT
- *     labeled residential novation.
+ *   - Retail marketed disposition: a commercial brokered sale; NOT residential
+ *     novation.
  *
- * Each strategy carries its OWN qualification state. AUTO states stay disabled.
- * Pure & deterministic.
+ * Each strategy carries its OWN qualification state with hardened, unambiguous
+ * authorization semantics (preflight §0): a non-EXECUTABLE status is a LIVE-
+ * EXECUTION gate, never an "economics failed" signal. AUTO / live authorization
+ * stay disabled. Pure & deterministic.
  */
 
 import {
@@ -26,51 +29,51 @@ import {
   clamp,
 } from './modelConstants.js';
 import { dscr as dscrOf, debtYield as debtYieldOf } from './incomeUnderwriting.js';
-import {
-  STORAGE_DISPOSITION_STRATEGY,
-  STORAGE_DEBT_MODEL,
-} from './selfStorageConstants.js';
+import { RETAIL_DISPOSITION_STRATEGY, RETAIL_DEBT_MODEL } from './retailConstants.js';
 
 /* -------------------------------------------------------------------------- */
-/* Cash (§15)                                                                  */
+/* Cash (§20)                                                                  */
 /* -------------------------------------------------------------------------- */
 
-export function buildStorageCashOffer({ buyerExit, capital, noi, operationalStatus, demand = 50, confidence = 0 }) {
+export function buildRetailCashOffer({ buyerExit, capital, rollover, noi, operationalStatus, environmental = false, demand = 50, confidence = 0 }) {
   const exit = num(buyerExit?.conservative_buyer_exit) ?? num(buyerExit?.scenario_conservative_exit);
   if (exit === null) {
     return { strategy: S.CASH, qualification: SQ.DATA_REQUIRED, available: false, reason: 'no_conservative_buyer_exit', bridge: [] };
   }
   const oneTimeCapital = num(capital?.double_count_guard?.offer_one_time_capital) ?? 0;
+  // TI/LC + rollover come from the rollover model ONLY (no double-count w/ NOI/capital).
+  const leasingCapital = num(rollover?.required_leasing_capital) ?? 0;
 
   const closing = exit * OFFER_COSTS.buyer_closing_pct;
   const holding = exit * OFFER_COSTS.buyer_holding_pct;
   const disposition = exit * OFFER_COSTS.buyer_disposition_pct;
   const contingency = exit * OFFER_COSTS.contingency_pct;
   const dueDiligence = exit * 0.006;
-  const environmental = 6_000; // Phase I environmental (storage has fuel/vehicle exposure)
+  const environmentalCost = environmental ? 9_000 : 4_000; // Phase I (higher if fuel/auto exposure)
   const legal = exit * 0.004;
   const financing = exit * 0.015;
-  // Stabilization loss: NOI lost while ramping a value-add/lease-up facility.
+  // Downtime/stabilization loss for value-add / lease-up while re-tenanting.
   const currentNoi = num(noi?.current_noi?.noi);
   const stabilizedNoi = num(noi?.stabilized_noi?.noi);
-  const stabilizationLoss = (operationalStatus === 'VALUE_ADD' || operationalStatus === 'LEASE_UP') && currentNoi !== null && stabilizedNoi !== null && stabilizedNoi > currentNoi
-    ? (stabilizedNoi - currentNoi) * 1.5 // ~18 months of lost upside (labeled)
+  const stabilizationLoss = (operationalStatus === 'VALUE_ADD' || operationalStatus === 'LEASE_UP' || operationalStatus === 'DARK') && currentNoi !== null && stabilizedNoi !== null && stabilizedNoi > currentNoi
+    ? (stabilizedNoi - currentNoi) * 1.5
     : 0;
 
-  const marginPct = clamp((MARGIN_BASE_PCT.COMMERCIAL ?? 0.12) + (50 - demand) / 1000, 0.05, 0.3);
+  const marginPct = clamp((MARGIN_BASE_PCT.COMMERCIAL ?? 0.07) + (50 - demand) / 1000, 0.05, 0.3);
   const margin = Math.max(MARGIN_MIN_USD, exit * marginPct);
 
-  const deductions = oneTimeCapital + closing + holding + disposition + contingency + dueDiligence + environmental + legal + financing + stabilizationLoss + margin;
+  const deductions = oneTimeCapital + leasingCapital + closing + holding + disposition + contingency + dueDiligence + environmentalCost + legal + financing + stabilizationLoss + margin;
   const recommended = roundMoney(exit - deductions);
 
   const bridge = [
     { line: 'conservative_buyer_exit', amount: roundMoney(exit) },
-    { line: 'one_time_capital', amount: -roundMoney(oneTimeCapital) },
+    { line: 'one_time_capital_repairs', amount: -roundMoney(oneTimeCapital) },
+    { line: 'ti_lc_rollover_capital', amount: -roundMoney(leasingCapital) },
     { line: 'buyer_closing', amount: -roundMoney(closing) },
     { line: 'holding', amount: -roundMoney(holding) },
     { line: 'disposition', amount: -roundMoney(disposition) },
     { line: 'due_diligence', amount: -roundMoney(dueDiligence) },
-    { line: 'environmental_phase_I', amount: -roundMoney(environmental) },
+    { line: 'environmental_phase_I', amount: -roundMoney(environmentalCost) },
     { line: 'legal', amount: -roundMoney(legal) },
     { line: 'financing', amount: -roundMoney(financing) },
     { line: 'stabilization_loss', amount: -roundMoney(stabilizationLoss) },
@@ -82,13 +85,13 @@ export function buildStorageCashOffer({ buyerExit, capital, noi, operationalStat
   const exitQualified = (buyerExit?.exit_classification === 'QUALIFIED') && recommended > 0;
   const qualification = recommended <= 0 ? SQ.DISQUALIFIED
     : !exitQualified ? SQ.PROVISIONAL_SCENARIO
-      : SQ.UNDERWRITTEN_SHADOW; // EXECUTABLE requires the exec flag (confidence layer)
+      : SQ.UNDERWRITTEN_SHADOW;
 
   return {
     strategy: S.CASH,
     qualification,
     available: recommended > 0,
-    authorized_offer: false, // AUTO disabled — never authorized here
+    authorized_offer: false,
     recommended_cash_offer: recommended > 0 ? recommended : null,
     opening_cash_offer: recommended > 0 ? roundMoney(recommended * 0.92) : null,
     maximum_cash_offer: recommended > 0 ? roundMoney(recommended * 1.08) : null,
@@ -99,7 +102,7 @@ export function buildStorageCashOffer({ buyerExit, capital, noi, operationalStat
 }
 
 /* -------------------------------------------------------------------------- */
-/* Seller finance (§15)                                                        */
+/* Seller finance (§20)                                                        */
 /* -------------------------------------------------------------------------- */
 
 function sellerFinanceStructure({ price, noi, downPct, rate, amortMonths, balloonMonths, label }) {
@@ -124,7 +127,7 @@ function sellerFinanceStructure({ price, noi, downPct, rate, amortMonths, balloo
   };
 }
 
-export function buildStorageSellerFinance({ valuation, noi, capitalRequired = 0 }) {
+export function buildRetailSellerFinance({ valuation, noi, rollover, capitalRequired = 0 }) {
   const price = num(valuation?.reconciliation?.reconciled_value_mid);
   const noiVal = num(noi?.current_noi?.noi);
   const incomeSupported = Boolean(noi?.income_supported);
@@ -132,6 +135,7 @@ export function buildStorageSellerFinance({ valuation, noi, capitalRequired = 0 
     return { strategy: S.SELLER_FINANCE, qualification: SQ.DATA_REQUIRED, available: false, reason: 'no_value_basis' };
   }
   const rate = SELLER_FINANCE.default_rate;
+  const leasingCapital = num(rollover?.required_leasing_capital) ?? 0;
   const structures = {
     cash_flow_optimized: sellerFinanceStructure({ price, noi: noiVal, downPct: SELLER_FINANCE.min_down_pct, rate, amortMonths: 360, balloonMonths: 84, label: 'cash_flow_optimized' }),
     balanced: sellerFinanceStructure({ price, noi: noiVal, downPct: 0.15, rate, amortMonths: 300, balloonMonths: 60, label: 'balanced' }),
@@ -145,7 +149,7 @@ export function buildStorageSellerFinance({ valuation, noi, capitalRequired = 0 
     available: true,
     authorized_offer: false,
     income_supported: incomeSupported,
-    capital_required: roundMoney(capitalRequired),
+    capital_required: roundMoney(capitalRequired + leasingCapital),
     structures,
     confidence: incomeSupported ? 50 : 25,
     note: incomeSupported ? null : 'Unsupported income — seller-finance economics are provisional.',
@@ -153,10 +157,10 @@ export function buildStorageSellerFinance({ valuation, noi, capitalRequired = 0 
 }
 
 /* -------------------------------------------------------------------------- */
-/* Commercial debt takeover (§15) — distinct from residential subject-to        */
+/* Commercial debt takeover (§20) — distinct from residential subject-to        */
 /* -------------------------------------------------------------------------- */
 
-export function buildStorageCommercialDebt({ contract, noi }) {
+export function buildRetailCommercialDebt({ contract, noi }) {
   const debt = contract?.debt ?? {};
   const balance = num(debt.loan_balance?.value);
   const payment = num(debt.monthly_payment?.value);
@@ -170,14 +174,13 @@ export function buildStorageCommercialDebt({ contract, noi }) {
     ? (dscrVal !== null && dscrVal >= 1.2 ? SQ.UNDERWRITTEN_SHADOW : SQ.PROVISIONAL_SCENARIO)
     : SQ.DATA_REQUIRED;
 
-  // Refinance risk: near-term balloon/maturity with thin debt yield.
   const balloonMonths = num(debt.balloon_months?.value);
   const refinanceRisk = balloonMonths !== null && balloonMonths <= 24
     ? 'HIGH' : (debtYieldVal !== null && debtYieldVal < 0.08 ? 'ELEVATED' : 'MODERATE');
 
   return {
     strategy: S.SUBJECT_TO, // slot
-    debt_model: STORAGE_DEBT_MODEL,
+    debt_model: RETAIL_DEBT_MODEL,
     is_residential_subject_to: false,
     qualification,
     available: balance !== null,
@@ -202,21 +205,21 @@ export function buildStorageCommercialDebt({ contract, noi }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Storage marketed disposition (§15) — NOT residential novation                */
+/* Retail marketed disposition (§20) — NOT residential novation                 */
 /* -------------------------------------------------------------------------- */
 
-export function buildStorageDisposition({ valuation, buyerExit, cashRecommended }) {
+export function buildRetailDisposition({ valuation, buyerExit, cashRecommended }) {
   const value = num(valuation?.reconciliation?.reconciled_value_mid);
   if (value === null) {
-    return { strategy: STORAGE_DISPOSITION_STRATEGY, is_residential_novation: false, qualification: SQ.DATA_REQUIRED, available: false, reason: 'no_value_basis' };
+    return { strategy: RETAIL_DISPOSITION_STRATEGY, is_residential_novation: false, qualification: SQ.DATA_REQUIRED, available: false, reason: 'no_value_basis' };
   }
-  const brokerage = value * 0.03;
+  const brokerage = value * 0.04; // retail brokerage typically higher than residential
   const closing = value * 0.015;
   const sellerNet = roundMoney(value - brokerage - closing);
   const advantage = cashRecommended ? round((sellerNet - cashRecommended) / cashRecommended, 3) : null;
   const qualified = buyerExit?.exit_classification === 'QUALIFIED';
   return {
-    strategy: STORAGE_DISPOSITION_STRATEGY,
+    strategy: RETAIL_DISPOSITION_STRATEGY,
     is_residential_novation: false,
     qualification: qualified ? SQ.UNDERWRITTEN_SHADOW : SQ.PROVISIONAL_SCENARIO,
     available: true,
@@ -225,17 +228,16 @@ export function buildStorageDisposition({ valuation, buyerExit, cashRecommended 
     projected_seller_net: sellerNet,
     seller_net_advantage_pct: advantage,
     expected_disposition_days: buyerExit?.expected_disposition_days ?? null,
-    note: 'Storage marketed disposition — a commercial brokered sale; NOT residential novation.',
+    note: 'Retail marketed disposition — a commercial brokered sale; NOT residential novation.',
   };
 }
 
 /* -------------------------------------------------------------------------- */
-/* Monetary tiers + strategy semantics (Item 5D.5 §2, §3)                       */
+/* Monetary tiers + strategy semantics (§21, §22; preflight §0)                 */
 /* -------------------------------------------------------------------------- */
 
 const UNDERWRITTEN_SET = new Set([SQ.UNDERWRITTEN_SHADOW, SQ.EXECUTABLE]);
 
-/** Extract a strategy's primary offer figures for monetary tiering, or null. */
 function extractOfferFigures(entry) {
   if (entry.strategy === S.CASH) {
     if (num(entry.recommended_cash_offer) === null) return null;
@@ -243,27 +245,20 @@ function extractOfferFigures(entry) {
       opening: entry.opening_cash_offer ?? null,
       recommended: entry.recommended_cash_offer ?? null,
       maximum: entry.maximum_cash_offer ?? null,
-      walkaway: entry.maximum_cash_offer ?? null, // max price before walking
+      walkaway: entry.maximum_cash_offer ?? null,
     };
   }
-  if (entry.strategy === STORAGE_DISPOSITION_STRATEGY) {
+  if (entry.strategy === RETAIL_DISPOSITION_STRATEGY) {
     if (num(entry.projected_seller_net) === null) return null;
-    return {
-      opening: null,
-      recommended: entry.projected_seller_net ?? null,
-      maximum: entry.expected_disposition_value ?? null,
-      walkaway: null,
-    };
+    return { opening: null, recommended: entry.projected_seller_net ?? null, maximum: entry.expected_disposition_value ?? null, walkaway: null };
   }
-  // Seller-finance / commercial-debt carry structures/terms, not a single offer.
   return null;
 }
 
 /**
  * Split a strategy's primary offer figures into three mutually-exclusive tiers.
- * scenario_* exist only for PROVISIONAL_SCENARIO; shadow_* only for underwritten
- * economics; authorized_* only when LIVE authorization is granted (flags off ⇒
- * always null). No consumer should infer authorization from a generic figure.
+ * scenario_* only for PROVISIONAL_SCENARIO; shadow_* only for underwritten;
+ * authorized_* only when LIVE authorization is granted (flags off ⇒ always null).
  */
 export function tierMonetary({ status, liveAuthorized, opening = null, recommended = null, maximum = null, walkaway = null }) {
   const scenario = status === SQ.PROVISIONAL_SCENARIO;
@@ -286,10 +281,10 @@ export function tierMonetary({ status, liveAuthorized, opening = null, recommend
 }
 
 /**
- * Derive the full, unambiguous semantic-flag set for a single strategy.
- * Distinguishes: economically modeled / provisional scenario / fully
- * underwritten / shadow-eligible / shadow-approved / live-execution-eligible /
- * live-authorized. live_authorized is false while unsafe execution flags are off.
+ * Derive the full, unambiguous semantic-flag set for a single retail strategy.
+ * Mirrors the hardened storage semantics: a non-EXECUTABLE status is a LIVE-
+ * EXECUTION gate (`live_execution_not_authorized`), NOT an economic-gate failure
+ * — so shadow approval is never conflated with live authorization.
  */
 function strategySemantics({ status, available, classFirstOk, buyerExitQualified, incomeLedRequired, incomeLedOk, recordGated, liveFlagsEnabled }) {
   const modeled = available && (UNDERWRITTEN_SET.has(status) || status === SQ.PROVISIONAL_SCENARIO);
@@ -308,12 +303,9 @@ function strategySemantics({ status, available, classFirstOk, buyerExitQualified
   if (!buyerExitQualified) blockers.push('no_qualified_buyer_exit');
   // Preflight §0 (Case B): a non-EXECUTABLE status means the strategy has not
   // reached the LIVE-executable state — NOT that its economics failed a gate. An
-  // UNDERWRITTEN_SHADOW strategy is `underwritten` (in UNDERWRITTEN_SET) and can be
-  // `shadow_approved`; it is held out of EXECUTABLE only by the exec/confidence
-  // flag layer. The prior `not_executable_economics` label wrongly implied an
-  // economic failure. Name it as the live-execution gate it actually is, so shadow
-  // approval is never conflated with live authorization. (Economic-gate failures
-  // are already surfaced via not_underwritten / scenario_only_economics above.)
+  // UNDERWRITTEN_SHADOW strategy is underwritten + can be shadow_approved; it is
+  // held out of EXECUTABLE only by the exec/confidence flag layer. Economic-gate
+  // failures are surfaced via not_underwritten / scenario_only_economics above.
   if (status !== SQ.EXECUTABLE) blockers.push('live_execution_not_authorized');
   if (!liveFlagsEnabled) blockers.push('unsafe_execution_flags_disabled');
 
@@ -330,42 +322,34 @@ function strategySemantics({ status, available, classFirstOk, buyerExitQualified
   };
 }
 
-/* -------------------------------------------------------------------------- */
-/* Qualification (§16) + execution-state basis (Item 5D.5 §2)                   */
-/* -------------------------------------------------------------------------- */
-
 /**
- * Class-first storage strategy qualification with hardened, unambiguous
- * authorization semantics. SHADOW_MODE_READY requires supportable asset
- * classification, transaction OR income evidence, reliable NRSF/physical size, a
- * qualified buyer exit and at least one shadow-approved underwritten strategy.
- * Income-led strategies additionally require rent/revenue, occupancy, expenses,
- * NOI and cap-rate evidence. AUTO / live authorization stay disabled.
- *
- * @param {object} args
- * @param {boolean} [args.recordGated]       record class is not pricing-eligible
- * @param {boolean} [args.liveFlagsEnabled]  unsafe execution flags (always false here)
+ * Class-first retail strategy qualification. Retail SHADOW_MODE_READY requires a
+ * reliable retail classification, GLA / defensible rentable area, sufficient
+ * compatible pricing OR income evidence, a supportable buyer exit, capital +
+ * rollover costs and the invariants. Income-led strategies additionally require
+ * lease/rent, occupancy, expenses, NOI and cap-rate/DCF support. AUTO / live
+ * authorization stay disabled.
  */
-export function qualifyStorageStrategies({
-  classification, contract, valuation, noi, revenue, capRate, buyerExit, capital,
+export function qualifyRetailStrategies({
+  classification, contract, valuation, noi, revenue, capRate, rollover, buyerExit, capital,
   strategies, recordGated = false, liveFlagsEnabled = false,
 }) {
   const buyerExitQualified = buyerExit?.exit_classification === 'QUALIFIED';
   const requirements = {
-    asset_classification: Boolean(classification?.is_self_storage && classification?.genuine_facility) && !recordGated,
-    reliable_size: Boolean(num(contract?.physical?.net_rentable_square_feet?.value)),
+    asset_classification: Boolean(classification?.is_retail && classification?.genuine_retail) && !recordGated,
+    reliable_size: Boolean(num(contract?.physical?.gross_leasable_area?.value)),
     transaction_or_income_evidence:
       (valuation?.reconciliation?.qualified_method_count ?? 0) > 0 || Boolean(noi?.income_supported),
     buyer_exit: buyerExitQualified,
-    capital_requirements: capital?.one_time_capital !== null || (capital?.known_items?.length ?? 0) >= 0,
+    capital_and_rollover: capital?.one_time_capital !== null || rollover?.available === true || (capital?.known_items?.length ?? 0) >= 0,
     invariants_ok: true,
   };
   const incomeEvidence = {
-    rent_revenue: num(revenue?.current_actual_base_annual) !== null && revenue?.current_base_basis === 'ACTUAL',
+    rent_revenue: num(revenue?.current_contractual_base_annual) !== null && revenue?.current_base_basis === 'ACTUAL',
     occupancy: revenue?.physical_occupancy !== null && revenue?.physical_occupancy !== undefined,
     expenses: (valuation?.income_supported ?? false),
     noi: Boolean(noi?.income_supported),
-    cap_evidence: capRate?.selected?.kind === 'OBSERVED' && capRate.selected.qualified,
+    cap_or_dcf_support: (capRate?.selected?.kind === 'OBSERVED' && capRate.selected.qualified) || Boolean(valuation?.dcf?.available),
   };
 
   const classFirstOk = !recordGated && requirements.asset_classification && requirements.reliable_size && requirements.transaction_or_income_evidence;
@@ -375,13 +359,11 @@ export function qualifyStorageStrategies({
   const evaluate = (entry) => {
     if (!entry || entry.qualification === undefined) return;
     let status = entry.qualification;
-    // Record gate: an ambiguous / false-positive record cannot be underwritten.
     if (recordGated && UNDERWRITTEN_SET.has(status)) status = SQ.DATA_REQUIRED;
-    // Demote above-provisional economics when class-first gates fail.
     if (!classFirstOk && UNDERWRITTEN_SET.has(status)) {
       status = status === SQ.DATA_REQUIRED ? SQ.DATA_REQUIRED : SQ.PROVISIONAL_SCENARIO;
     }
-    const isIncomeLed = entry.strategy === S.SELLER_FINANCE || entry.debt_model === STORAGE_DEBT_MODEL;
+    const isIncomeLed = entry.strategy === S.SELLER_FINANCE || entry.debt_model === RETAIL_DEBT_MODEL;
     if (isIncomeLed && !incomeLedOk && UNDERWRITTEN_SET.has(status)) status = SQ.PROVISIONAL_SCENARIO;
 
     const semantics = strategySemantics({
@@ -389,7 +371,6 @@ export function qualifyStorageStrategies({
       incomeLedRequired: isIncomeLed, incomeLedOk, recordGated, liveFlagsEnabled,
     });
 
-    // Tier the strategy's primary offer figures by the FINAL (post-demotion) status.
     const fig = extractOfferFigures(entry);
     const monetary = fig
       ? tierMonetary({ status, liveAuthorized: semantics.live_authorized, ...fig })
@@ -400,7 +381,6 @@ export function qualifyStorageStrategies({
       debt_model: entry.debt_model ?? null,
       qualification_status: status,
       ...semantics,
-      // Backward-compatible alias (consumers migrating to live_authorized).
       authorized_offer: semantics.live_authorized,
       available: Boolean(entry.available),
       monetary,
@@ -433,18 +413,17 @@ export function qualifyStorageStrategies({
  * underwritten shadow strategy's identity is preserved even though live
  * authorization is null while unsafe flags are disabled.
  */
-export function buildStorageExecutionBasis({ ranked = [], executionState, liveFlagsEnabled = false }) {
+export function buildRetailExecutionBasis({ ranked = [], executionState, liveFlagsEnabled = false }) {
   const underwritten = ranked.filter((r) => r.underwritten).map((r) => r.strategy);
   const shadowApproved = ranked.filter((r) => r.shadow_approved).map((r) => r.strategy);
   const provisional = ranked.filter((r) => r.scenario_only).map((r) => r.strategy);
 
-  // SHADOW_MODE_READY must name a shadow-approved basis (prefer CASH).
   let basisStrategy = null;
   if (executionState === 'SHADOW_MODE_READY' && shadowApproved.length) {
     basisStrategy = shadowApproved.includes(S.CASH) ? S.CASH : shadowApproved[0];
   }
 
-  const liveAuthorized = ranked.find((r) => r.live_authorized) ?? null; // null while flags off
+  const liveAuthorized = ranked.find((r) => r.live_authorized) ?? null;
   const cash = ranked.find((r) => r.strategy === S.CASH) ?? null;
 
   return {
@@ -456,12 +435,10 @@ export function buildStorageExecutionBasis({ ranked = [], executionState, liveFl
     live_authorized_strategy: liveAuthorized ? liveAuthorized.strategy : null,
     live_authorized_offer_type: liveAuthorized ? `${liveAuthorized.strategy}_OFFER` : null,
     outbound_execution_enabled: false,
-    // Per-cash explicit flags (mission §2 worked example).
     cash_underwritten: Boolean(cash?.underwritten),
     cash_shadow_approved: Boolean(cash?.shadow_approved),
     cash_scenario_only: Boolean(cash?.scenario_only),
     cash_live_authorized: Boolean(cash?.live_authorized),
-    // Backward-compatible keys (now semantically precise: authorized == live).
     authorized_strategy: liveAuthorized ? liveAuthorized.strategy : null,
     authorized_offer_type: liveAuthorized ? `${liveAuthorized.strategy}_OFFER` : null,
     cash_authorized: Boolean(cash?.live_authorized),

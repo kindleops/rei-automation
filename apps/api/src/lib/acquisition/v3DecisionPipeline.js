@@ -35,13 +35,14 @@ import { buildConfidenceAndExecution } from './acquisitionConfidence.js';
 import { buildStrategyRanking } from './acquisitionStrategyRanking.js';
 import { buildResidentialIncomeAnalysis, isIncomeFamily } from './residentialIncomeDecision.js';
 import { buildSelfStorageAnalysis, isSelfStorageLane } from './selfStorageDecision.js';
+import { buildRetailAnalysis, isRetailLane } from './retailDecision.js';
 import { buildExecutionStateBasis } from './executionStateBasis.js';
 
 const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
 ]);
 
-export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {}, storage = {} }) {
+export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {}, storage = {}, retail = {} }) {
   const classification = classifyAssetLane(subjectRow);
   const { universes, family } = buildValuationUniverses(subjectRow, qualification, buyerPurchases, now);
   const reconciliation = reconcileValuation(universes, family);
@@ -121,6 +122,21 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
         competitors: storage.competitors ?? null,
         pipeline: storage.pipeline ?? null,
         repairInputs: storage.repair_inputs ?? {},
+      })
+    : null;
+
+  // ---- Item 5E: additive retail analysis (RETAIL_* lanes only) ----
+  const retailAnalysis = isRetailLane(classification.lane)
+    ? buildRetailAnalysis({
+        subjectRow,
+        retail: retail.subject ?? retail,
+        retailComps: retail.comps ?? [],
+        retailBuyers: retail.buyers ?? [],
+        capRateEvidence: retail.cap_rate_evidence ?? [],
+        market: retail.market ?? {},
+        competingCenters: retail.competing_centers ?? null,
+        pipeline: retail.pipeline ?? null,
+        repairInputs: retail.repair_inputs ?? {},
       })
     : null;
 
@@ -248,6 +264,8 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     residential_income: residentialIncome,
     // Item 5D: self-storage specialization (null for non-storage lanes).
     self_storage: selfStorage,
+    // Item 5E: retail & strip-center specialization (null for non-retail lanes).
+    retail: retailAnalysis,
     loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),

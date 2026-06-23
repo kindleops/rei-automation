@@ -498,3 +498,118 @@ populated, authorized figures remain null while unsafe execution flags are off.
   **LIVE_TRANSACTION_DATA_UNAVAILABLE**, **LIVE_OPERATING_DATA_UNAVAILABLE** →
   ceiling **PRODUCTION_PRICING_NOT_CALIBRATED**. `AUTONOMOUS_READY` is never
   reachable while execution flags are disabled.
+
+---
+
+## Item 5E — Retail & strip-center intelligence & underwriting (2026-06-22)
+
+### 0. Preflight semantic result (storage authorization blocker)
+
+Reviewed the storage representative strategy blocker (`qualification_status =
+UNDERWRITTEN_SHADOW`, `underwritten = true`, `shadow_approved = true`,
+authorization blocker included `not_executable_economics`).
+
+**Determination: Case B** — the economics are underwritten; only LIVE execution
+is disabled. `UNDERWRITTEN_SHADOW` is in `UNDERWRITTEN_SET` (so `underwritten =
+true`) and `shadow_approved` is computed independently of `EXECUTABLE`; the only
+reason `status !== EXECUTABLE` is the exec/confidence flag layer (see
+`selfStorageStrategies.js` line ~85: "EXECUTABLE requires the exec flag"). The
+prior label `not_executable_economics` wrongly implied the *economics* failed a
+gate. **Fix:** renamed the blocker to the unambiguous live-execution gate
+`live_execution_not_authorized`, preserving `underwritten` + `shadow_approved`;
+added a regression test (`acquisition-v3-item5e-retail.test.mjs` §0). No economic
+gate was weakened — economic-gate failures remain surfaced via `not_underwritten`
+/ `scenario_only_economics`. The same hardened semantics are mirrored in the new
+retail strategy module.
+
+### 1 & 24. Live retail inventory / source audit (read-only calibration)
+
+Read-only Supabase calibration against `public.properties` (124,046 rows) and the
+two buyer fact tables.
+
+**Likely-retail inventory:** 237 records. Subtype distribution: **100% labeled
+`property_type = 'Strip Malls'`** — a single coarse import label; there is no
+granular retail subtype, single-tenant/NNN flag, anchor field, or suite roster in
+the data. A generic flag alone cannot establish a high-confidence subtype
+(mission §2), so every live record classifies AMBIGUOUS/center-only.
+
+| Dimension | Coverage |
+| --- | ---: |
+| States / markets | **TX only** (237/237) |
+| GLA / building sqft | 237 / 237 (100%) — range 1,000–112,072, avg 14,770 |
+| Land (lot) sqft | 237 / 237 (100%) |
+| Suite / unit coverage | 22 / 237 (9.3%) — coarse parcel units, **not** retail suites |
+| Sub-10k sqft share | 123 / 237 (51.9%) — many likely freestanding/storefront, not centers |
+| Occupancy coverage | **0** (no column populated) |
+| Lease / tenant coverage | **0** (no lease/tenant/GLA/anchor/CAM/WALE columns exist) |
+| Rent coverage (`monthly_rent`/`rent_estimate`) | **0** |
+| Expense coverage | **0** |
+| NOI coverage (`noi_estimate`) | **0** |
+| Cap-rate coverage (`cap_rate`) | **0** |
+| Listing price (`mls_current_listing_price`) | **0** |
+| Debt coverage | n/a on `properties` for retail |
+
+**Schema reality:** the only income-ish columns on `properties` are the generic
+`cap_rate, noi_estimate, monthly_rent, rent_estimate, mls_current_listing_price`
+(shared across all asset classes) — **all zero/NULL for the 237 retail records**.
+No lease-level, tenant, GLA, anchor, CAM, or WALE columns exist anywhere.
+
+### 4. Qualified retail comparable transactions
+
+| Source | Retail rows | With price | States |
+| --- | ---: | ---: | ---: |
+| `buyer_comp_raw_v2` | **0** | 0 | 0 |
+| `buyer_purchase_events_v2` | **0** | 0 | 0 |
+
+The buyer transaction universe is **residential-only** (`single_family`,
+`multifamily`, `apartment`). No retail/strip/net-lease/shopping transactions at
+all. Retail buyer-identity coverage is **0%**; package/portfolio rate is undefined
+(no transactions). False-positive risk is material: the coarse `'Strip Malls'`
+label cannot distinguish a genuine multi-tenant center from a freestanding/single-
+tenant storefront, a specialty use (gas/auto/restaurant), or a mixed-use parcel.
+
+### 5. Source / record-grain summary
+
+| Table / view | Grain | Retail-relevant fields | Source | Coverage | Reliability | Join key | As-of | Suitability |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `public.properties` | 1 / property | `property_type='Strip Malls'`, `building_square_feet`, `lot_square_feet`, `units_count`, `land_use`, `zoning` | provider import | size 100%; operating 0% | LOW for tenancy-truth; OK for size | `property_id` | sparse | physical size + provisional classification only |
+| `public.buyer_comp_raw_v2` | 1 / comp sale | `property_type`, `sale_price`, `building_square_feet`, state, `sale_date` | provider/MLS | 0 retail rows | n/a | identity keys | `sale_date` | none for retail |
+| `public.buyer_purchase_events_v2` | 1 / buyer purchase | `normalized_asset_class`, `purchase_price`, `sqft`, `buyer_type` | derived | 0 retail rows (residential-only) | n/a | `normalized_buyer_name` | event date | none for retail |
+
+### 6. Conclusion → engine behavior
+
+The retail model is built to be **correct when evidence exists**, but on the
+**current production inventory it returns DATA_REQUIRED / PROVISIONAL_SCENARIO for
+every record** — never a fabricated qualified value, NOI, cap rate, lease, or
+authorized offer. Item 5E ships deterministic, source-traceable retail models +
+a class-first qualifier that gates on real evidence depth (genuine retail
+classification, GLA/defensible rentable area, lease/transaction evidence,
+supportable buyer exit, capital + rollover costs); specialty uses (gas station,
+car wash, auto service, dealership, restaurant business sale, business
+opportunity) are separated and routed to DATA_REQUIRED / a future specialty lane
+and never enter generic retail pricing; mixed-use and warehouse-showroom are
+likewise separated. Qualified paths are exercised with **clearly-labeled
+deterministic fixtures** (not a production sample). All outbound execution and
+persistence remain disabled.
+
+No retail-specific migration is required — the canonical income snapshot (JSONB +
+structured provenance, Item 5C) absorbs all retail/lease/tenant fields via the
+additive `retail` analysis block; the lease-level entity fits the existing
+canonical architecture without a new normalized table (mission §25).
+
+### Production-readiness ceiling (Item 5E)
+
+- Architecture: **ARCHITECTURE_VALIDATED**, **DATA_MODEL_READY**,
+  **DETERMINISTIC_FIXTURE_VALIDATED** (45 retail tests green).
+- Live data: **LIVE_CLASSIFICATION_PARTIAL**, **LIVE_LEASE_DATA_UNAVAILABLE**,
+  **LIVE_TRANSACTION_DATA_UNAVAILABLE**, **LIVE_OPERATING_DATA_UNAVAILABLE** →
+  ceiling **PRODUCTION_PRICING_NOT_CALIBRATED**. `AUTONOMOUS_READY` is never
+  reachable while execution flags are disabled.
+
+### V2 additivity & isolation
+
+`buildRetailAnalysis` runs ONLY for `RETAIL_STRIP_CENTER` / `RETAIL_SINGLE_TENANT`
+lanes and is surfaced as an additive `v3.retail` block; non-retail lanes return
+`null` and the generic V2/residential flow stays byte-identical. Retail is
+isolated from office / industrial / self-storage / multifamily — no cross-lane
+comp substitution, cap rate, or expense ratio.
