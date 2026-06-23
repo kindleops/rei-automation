@@ -7,6 +7,7 @@ import {
   __resetTextgridInboundTestDeps,
 } from "@/lib/flows/handle-textgrid-inbound.js";
 import { createInMemoryIdempotencyLedger, createPodioItem } from "../helpers/test-helpers.js";
+import { makeInboundWebhookBaseDeps } from "../helpers/chainable-supabase.mjs";
 
 // ─── Shared payload & setup helpers ─────────────────────────────────────
 
@@ -33,6 +34,7 @@ function baseDeps(ledger) {
 
 function happyPathDeps() {
   return {
+    ...makeInboundWebhookBaseDeps(),
     loadContext: async () => ({
       found: true,
       ids: {
@@ -59,7 +61,20 @@ function happyPathDeps() {
     maybeProgressOfferStatus: async () => ({ ok: true, updated: false }),
     maybeCreateOfferFromContext: async () => ({ ok: true, created: false }),
     maybeUpsertUnderwritingFromInbound: async () => ({ ok: true, extracted: false }),
-    maybeQueueSellerStageReply: async () => ({ ok: true, handled: false, queued: false }),
+    routeInboundOffer: async () => ({
+      ok: true,
+      offer_route: "no_offer_signal",
+      reason: "test",
+    }),
+    resolveSellerAutoReplyPlan: async () => ({
+      handled: false,
+      should_queue_reply: false,
+    }),
+    executeInboundAutomationDecision: async () => ({
+      ok: true,
+      queued: false,
+      seller_stage_reply: { ok: true, handled: false, queued: false },
+    }),
     maybeQueueUnderwritingFollowUp: async () => ({ ok: true, queued: false }),
     maybeCreateContractFromAcceptedOffer: async () => ({ ok: true, created: false }),
     syncPipelineState: async () => ({ pipeline_item_id: 61, current_stage: "Ownership" }),
