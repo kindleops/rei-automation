@@ -4253,8 +4253,6 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-  const get_system_flag = deps.getSystemFlag || getSystemFlag;
-
   const get_system_flag =
     deps.getSystemFlag ||
     (typeof getSystemFlag === "function" ? getSystemFlag : async () => true);
