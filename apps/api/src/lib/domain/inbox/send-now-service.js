@@ -20,6 +20,7 @@ import {
   writeOutboundSuccessMessageEvent,
   writeOutboundFailureMessageEvent,
 } from "@/lib/supabase/sms-engine.js";
+import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
 
 const logger = child({ module: "domain.inbox.send_now_service" });
 
@@ -80,6 +81,79 @@ function isTransportFailureReason(reason = "") {
     r.includes("unavailable") ||
     r.includes("carrier")
   );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// OUTBOUND SEND GATE
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function canSend(input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase;
+  const thread_key = clean(input.thread_key) || normalizePhone(input.to_phone_number);
+
+  const validation = validateOutboundSmsPayload(input);
+  if (!validation.ok) return validation;
+
+  if (thread_key) {
+    try {
+      const { data: thread_state } = await supabase
+        .from("inbox_thread_state")
+        .select("status,metadata")
+        .eq("thread_key", thread_key)
+        .maybeSingle();
+
+      if (thread_state?.status === "paused_review") {
+        return { ok: false, reason: "thread_paused_review" };
+      }
+      if (thread_state?.metadata?.incident_quarantine === true) {
+        return { ok: false, reason: "thread_quarantined" };
+      }
+    } catch {
+      // non-fatal; suppression check remains authoritative
+    }
+  }
+
+  const normalized_to = normalizePhone(input.to_phone_number);
+  if (!normalized_to) {
+    return { ok: true, reason: null };
+  }
+
+  const phone_filter = [
+    `phone_number.eq.${quotePostgrestValue(normalized_to)}`,
+    `phone_e164.eq.${quotePostgrestValue(normalized_to)}`,
+  ].join(",");
+
+  try {
+    const base_query = supabase.from("sms_suppression_list").select("id");
+    let count = 0;
+
+    if (typeof base_query.eq === "function") {
+      const scoped = base_query.eq("is_active", true);
+      if (typeof scoped.or === "function") {
+        const filtered = scoped.or(phone_filter);
+        const terminal =
+          typeof filtered.eq === "function" ? filtered.eq("is_active", true) : filtered;
+        const result = await Promise.resolve(terminal);
+        count = Number(result?.count ?? 0);
+      }
+    }
+
+    if (count === 0 && typeof base_query.or === "function") {
+      const filtered = base_query.or(phone_filter);
+      const terminal =
+        typeof filtered.eq === "function" ? filtered.eq("is_active", true) : filtered;
+      const result = await Promise.resolve(terminal);
+      count = Number(result?.count ?? 0);
+    }
+
+    if (count > 0) {
+      return { ok: false, reason: "phone_suppressed" };
+    }
+  } catch {
+    return { ok: false, reason: "suppression_check_unavailable" };
+  }
+
+  return { ok: true, reason: null };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -812,6 +886,38 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   const operator_override = normalized.operator_override || normalized.force;
   const is_manual_send_now = clean(normalized.action).toLowerCase() === "send_now";
   const warning_codes = [];
+
+  const can_send_impl = deps.canSendImpl || deps.canSend || canSend;
+  const send_gate = await can_send_impl(normalized, { supabase });
+  if (!send_gate.ok) {
+    const gate_status =
+      ["phone_suppressed", "thread_paused_review", "thread_quarantined", "suppression_check_unavailable"].includes(
+        send_gate.reason
+      )
+        ? 423
+        : 400;
+    const proof = buildManualSendProof({
+      input,
+      normalized,
+      queue_inserted: false,
+      detail_reason: send_gate.reason,
+      warning_codes,
+    });
+    logger.warn("inbox_send_now.early_exit", {
+      ...request_log,
+      reason: send_gate.reason,
+      queue_inserted: false,
+    });
+    return {
+      ok: false,
+      status: gate_status,
+      error: send_gate.reason,
+      reason: send_gate.reason,
+      queue_created: false,
+      queue_inserted: false,
+      proof,
+    };
+  }
 
   // ── Step 3a: non-bypassable compliance guard ───────────────────────
   const compliance_block = await hardComplianceCheckImpl({

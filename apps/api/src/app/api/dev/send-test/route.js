@@ -50,7 +50,7 @@ async function parseQueueRunResponse(response) {
   }
 }
 
-async function runDevSendTest({
+export async function runDevSendTest({
   request_url = "http://localhost/api/dev/send-test",
   insertSupabaseSendQueueRowImpl = insertSupabaseSendQueueRow,
   fetchImpl = fetch,
@@ -110,7 +110,7 @@ async function runDevSendTest({
   };
 }
 
-async function handleDevSendTestRequest(request, deps = {}) {
+export async function handleDevSendTestRequest(request, deps = {}) {
   const denied = requireDevRouteAccess(request);
 
   if (denied) {

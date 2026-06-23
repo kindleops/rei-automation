@@ -324,9 +324,11 @@ export function normalizeSendQueueRow(row) {
 
   const normalized_to_phone = normalizePhone(safe_row.to_phone_number || null) || null;
   const normalized_from_phone = normalizePhone(safe_row.from_phone_number || null) || null;
+  const raw_thread_key = clean(safe_row.thread_key || safe_row.metadata?.thread_key) || null;
   const canonical_thread_key =
     normalized_to_phone ||
-    normalizePhone(safe_row.thread_key || safe_row.metadata?.thread_key || null) ||
+    normalizePhone(raw_thread_key) ||
+    raw_thread_key ||
     null;
 
   return {
@@ -396,6 +398,7 @@ export function normalizeSendQueueRow(row) {
     owner_id: safe_row.owner_id || null,
     agent_id: safe_row.agent_id || null,
     template_source: safe_row.template_source || null,
+    template_selected: clean(safe_row.template_selected) || null,
     rendered_message: safe_row.rendered_message || null,
     sms_eligible: safe_row.sms_eligible,
     routing_allowed: safe_row.routing_allowed,
@@ -406,6 +409,7 @@ export function normalizeSendQueueRow(row) {
     stage_before: safe_row.stage_before || null,
     stage_after: safe_row.stage_after || null,
     textgrid_message_id: safe_row.textgrid_message_id || null,
+    textgrid_number: clean(safe_row.textgrid_number) || null,
     market: safe_row.market || null,
     offer_podio_item_id:       safe_row.offer_podio_item_id       || null,
     offer_record_sync_status:  safe_row.offer_record_sync_status  || null,
@@ -3289,6 +3293,7 @@ function sanitizeSendQueuePayload(payload) {
         metadata.agent_id = value;
       } else if (key === "owner_id") {
         metadata.owner_id = value;
+        sanitized.owner_id = value;
       } else if (key !== "metadata") {
         unknown[key] = value;
       }
@@ -3546,6 +3551,8 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     delivered_at: row.delivered_at || null,
     failed_reason: row.failed_reason || null,
     delivery_confirmed: row.delivery_confirmed || null,
+    owner_id: row.owner_id || row.metadata?.owner_id || null,
+    agent_id: row.agent_id || row.metadata?.agent_id || null,
     master_owner_id: row.master_owner_id || null,
     prospect_id: row.prospect_id || null,
     property_id: row.property_id || null,

@@ -463,10 +463,10 @@ function buildUseCaseMatch(template = null, requested_use_case = null) {
 
 function evaluateTouchOnePrefetchCandidate(template = null, selector_input = null) {
   const template_use_case = normalizeTemplateSelectorUseCase(template);
-  const canonical_use_case = canonicalizeTemplateUseCase(
-    template_use_case,
-    template?.variant_group || template?.stage_label || null
-  );
+  const variant_group = template?.variant_group || template?.stage_label || null;
+  const canonical_use_case = template_use_case
+    ? canonicalizeTemplateUseCase(template_use_case, null)
+    : canonicalizeTemplateUseCase(null, variant_group);
   const explicit_is_first_touch = readExplicitFirstTouchValue(template);
   const property_type_scope = normalizeTemplatePropertyTypeScope(template);
   const prefetch_rejection_reasons = [];

@@ -11,7 +11,7 @@ function isProductionRuntime(env = process.env) {
   return clean(env.NODE_ENV) === "production" || clean(env.VERCEL_ENV) === "production";
 }
 
-async function handleDevForceSendRequest(request, deps = {}) {
+export async function handleDevForceSendRequest(request, deps = {}) {
   const env = deps.env || process.env;
   const logger = deps.logger || console;
 

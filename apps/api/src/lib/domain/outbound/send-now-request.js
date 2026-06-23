@@ -90,6 +90,29 @@ export async function buildAndSendNow(
     };
   }
 
+  const can_send_fn = deps.canSend || deps.canSendImpl;
+  if (typeof can_send_fn === "function") {
+    const gate = await can_send_fn(
+      {
+        to_phone_number: phone,
+        thread_key: phone,
+        message_body: rendered_message_text,
+      },
+      deps
+    );
+    if (!gate.ok) {
+      return {
+        queued: {
+          ok: false,
+          stage: "can_send_gate",
+          status: 423,
+          reason: gate.reason,
+        },
+        processed: null,
+      };
+    }
+  }
+
   try {
     queued = await queueOutboundMessageImpl({
       phone,
