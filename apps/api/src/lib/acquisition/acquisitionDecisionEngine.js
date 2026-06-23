@@ -5,6 +5,11 @@ import {
   normalizeState,
   normalizeZip,
 } from '@/lib/intel/normalize.js';
+import { classifyAssetLane } from './assetClassification.js';
+import { qualifyComps } from './transactionQualification.js';
+import { buildV3Decision } from './v3DecisionPipeline.js';
+import { loadV3CompCandidates } from './compCandidateLoader.js';
+import { readFeatureFlag } from './modelConstants.js';
 
 const SCORE_TABLE = 'property_acquisition_scores';
 const DEFAULT_TARGET_ASSIGNMENT_FEE = 15_000;
@@ -2795,12 +2800,35 @@ export function calculateAcquisitionDecision({
   buyerPurchases = [],
   now = new Date(),
   targetAssignmentFee = DEFAULT_TARGET_ASSIGNMENT_FEE,
+  v3Enabled = readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED'),
+  v3CompCandidates = null,
+  v3LoaderDiagnostics = null,
 } = {}) {
   const subject =
     rawSubject?.asset_family
       ? { ...rawSubject }
       : normalizePropertyFeatures(rawSubject, { source: 'properties', now });
-  const scored = rawComps.map((comp) =>
+
+  // V3 transaction-qualification layer (mission §2–§4). Default OFF behind a
+  // feature flag — when disabled the V2 path below is byte-for-byte unchanged.
+  // When enabled, package/duplicate/lane-mismatched/implausible comps are
+  // removed BEFORE scoring so a contaminated consideration can never reach
+  // valuation, and the result is gated by hard invariants + an execution state.
+  // Item 5A: the production path supplies identity-enriched candidates via
+  // v3CompCandidates; tests/direct callers without it fall back to rawComps.
+  const subjectRow = subject.raw ?? rawSubject ?? subject;
+  let v3 = null;
+  let compsForScoring = rawComps;
+  if (v3Enabled) {
+    const v3Source = Array.isArray(v3CompCandidates) ? v3CompCandidates : rawComps;
+    const classification = classifyAssetLane(subjectRow);
+    subject.canonical_asset_lane = classification.lane;
+    const qualification = qualifyComps(subjectRow, v3Source);
+    compsForScoring = qualification.accepted.map((entry) => entry.raw).filter(Boolean);
+    v3 = { classification, qualification, loaderDiagnostics: v3LoaderDiagnostics };
+  }
+
+  const scored = compsForScoring.map((comp) =>
     scoreComparable(subject, comp, {
       source: comp.source,
       distance_miles: comp.distance_miles,
@@ -2941,6 +2969,37 @@ export function calculateAcquisitionDecision({
       : selected.length === 0
         ? 'no_eligible_comps_found'
         : 'comps_selected';
+  let v3Block = null;
+  if (v3Enabled && v3) {
+    const v3Decision = buildV3Decision({
+      subjectRow,
+      qualification: v3.qualification,
+      buyerPurchases,
+      now,
+      loaderDiagnostics: v3.loaderDiagnostics,
+    });
+    v3Block = v3Decision.v3;
+    const surfaced = v3Decision.surfaced;
+    // Surface V3 reconciled valuation + (executable-only) offer onto the
+    // V2-facing objects. Non-executable states yield null authorized offers;
+    // the scenario figures live under v3.cash_offer and v3 offer_summary.
+    if (surfaced.valuation_mid != null) {
+      valuation.low = surfaced.valuation_low;
+      valuation.mid = surfaced.valuation_mid;
+      valuation.high = surfaced.valuation_high;
+      valuation.confidence = surfaced.market_confidence;
+      valuation.calculation = {
+        ...valuation.calculation,
+        v3_override: true,
+        v3_market_value_classification: surfaced.market_value_classification,
+      };
+    }
+    offer.recommended_cash_offer = surfaced.recommended_cash_offer;
+    offer.minimum_acceptable_offer = surfaced.minimum_acceptable_offer;
+    offer.expected_assignment_fee = surfaced.expected_assignment_fee;
+    offer.summary = { ...offer.summary, v3: surfaced.offer_summary };
+  }
+
   const evidence = {
     engine: {
       name: 'acquisition_decision_engine',
@@ -3043,6 +3102,7 @@ export function calculateAcquisitionDecision({
       writes_only: [SCORE_TABLE],
       ...ownerSituation.evidence.safety_gates,
     },
+    v3: v3Block,
   };
 
   return {
@@ -3059,6 +3119,7 @@ export function calculateAcquisitionDecision({
     confidence,
     decision,
     best_strategy: bestStrategy,
+    v3: v3Block,
     evidence,
   };
 }
@@ -3528,9 +3589,12 @@ export async function scoreProperty(propertyId, deps = {}) {
     source: 'properties',
     now,
   });
-  const [comps, buyerPurchases] = await Promise.all([
+  const v3Enabled = deps.v3Enabled ?? readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED');
+  const v3Loader = deps.loadV3CompCandidates ?? loadV3CompCandidates;
+  const [comps, buyerPurchases, v3Loaded] = await Promise.all([
     compLoader(subject, deps),
     buyerLoader(subject, deps),
+    v3Enabled ? v3Loader(subject, deps) : Promise.resolve(null),
   ]);
   const targetAssignmentFee = Math.max(
     0,
@@ -3546,6 +3610,9 @@ export async function scoreProperty(propertyId, deps = {}) {
     buyerPurchases,
     now,
     targetAssignmentFee,
+    v3Enabled,
+    v3CompCandidates: v3Loaded?.candidates ?? null,
+    v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
   });
   const row = scoreRowFromDecision(normalizedId, decision, now);
   const score = await persister(row, deps);

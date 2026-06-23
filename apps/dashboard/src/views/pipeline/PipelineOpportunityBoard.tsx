@@ -140,7 +140,7 @@ export function PipelineOpportunityBoard({
   onClearSelection,
   onRetryDetail,
   onOpenCommandView,
-  onOpenDealIntelligence: _onOpenDealIntelligence,
+  onOpenDealIntelligence,
   onAction,
   onMoveStage,
   onMoveStatus,
@@ -680,7 +680,7 @@ function ScopeBar({
   compact?: boolean
 }) {
   const scopeLabel = PIPELINE_SCOPE_OPTIONS.find((o) => o.value === scope)?.label?.toLowerCase() ?? scope
-  void (metrics.active_opportunities ?? scopedTotal)
+  const filteredCards = metrics.active_opportunities ?? scopedTotal
   return (
     <div className={cls('plv-scope-bar', compact && 'plv-scope-bar--compact')}>
       <div

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { supabase } from '@/lib/supabase/client.js'
+import { buyerMatchErrorResponse } from '@/lib/intel/buyer-match-api-errors.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -144,7 +145,7 @@ export async function GET(request, { params }) {
     )
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: 'fetch_failed', message: error?.message },
+      buyerMatchErrorResponse(error?.message, { error: 'fetch_failed' }),
       { status: 500, headers: cors },
     )
   }

@@ -132,10 +132,6 @@ export interface PipelineOpportunity {
   acquisition_engine_run_id?: string | null
   workflow_enrollment_id?: string | null
   workflow_definition_id?: string | null
-  prospect_id?: string | null
-  primary_phone_id?: string | null
-  latest_queue_id?: string | null
-  campaign_target_id?: string | null
   metadata?: Record<string, unknown>
   history?: PipelineOpportunityHistoryEvent[]
   activity_timeline?: PipelineActivityEvent[]

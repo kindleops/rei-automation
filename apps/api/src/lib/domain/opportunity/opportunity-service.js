@@ -272,7 +272,11 @@ export async function listOpportunities(params = {}, deps = {}) {
   const normalized = (data ?? []).map((raw) => normalizeOpportunityRow(raw)).filter(Boolean);
   let rows = await batchHydrateOpportunityProperties(client, normalized);
   if (hydrateFollowUpEnabled) {
-    rows = await Promise.all(rows.map((row) => hydrateFollowUp(client, row)));
+    const hydrated = [];
+    for (const row of rows) {
+      hydrated.push(await hydrateFollowUp(client, row));
+    }
+    rows = hydrated;
   }
 
   return {

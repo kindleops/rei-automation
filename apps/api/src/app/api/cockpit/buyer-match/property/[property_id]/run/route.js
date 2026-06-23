@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, parseJsonSafe } from '../../../../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { buildBuyerMatchIntel } from '@/lib/intel/buyer-match-engine.js'
+import { buyerMatchErrorResponse } from '@/lib/intel/buyer-match-api-errors.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -85,15 +86,18 @@ export async function POST(request, { params }) {
           buyer_rollup: result.buyer_rollup,
           comps: result.comps,
           source_counts: result.source_counts,
+          buyer_demand: result.buyer_demand,
+          cached: result.cached ?? false,
+          model_version: result.model_version,
           generated_at: result.generated_at,
         },
       },
       { status: 200, headers: cors },
     )
   } catch (error) {
-    console.error('[BUYER_MATCH_RUN_ERROR]', { property_id, error: error?.message })
+    console.error('[BUYER_MATCH_RUN_ERROR]', { property_id, error: error?.message, stack: error?.stack })
     return NextResponse.json(
-      { ok: false, error: 'run_failed', message: error?.message },
+      buyerMatchErrorResponse(error?.message, { property_id }),
       { status: 500, headers: cors },
     )
   }
