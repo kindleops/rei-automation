@@ -633,6 +633,11 @@ const OBJECTION_MAP = [
       "doesnt belong to me", "dont belong to me",
       "allready sold", "alredy sold", "i sold it already",
       "sold it awhile ago", "been sold", "that was sold",
+      "sold it", "it sold", "no it sold", "sold last week",
+      "sold yrs ago", "sold years ago", "sold 10 yrs",
+      "this is not shirley", "not shirley",
+      "la mía es", "la mia es", "no la mía", "no la mia",
+      "esa casa", "llanoesmia",
       // Spanish
       "número equivocado", "equivocado de número",
       "no soy el dueño", "no soy la dueña",
@@ -699,16 +704,11 @@ const OBJECTION_MAP = [
     key: "property_correction",
     phrases: [
       "not a duplex", "not a multi", "is a house", "not a house",
-      "wrong address", "incorrect address", "don't own", "do not own",
-      "no longer own", "i no longer own", "i sold it", "already sold",
-      "sold that property", "sold that house", "sold years ago",
-      "not mine", "not my property", "this is not a", "this isn't a",
+      "wrong address", "incorrect address",
+      "this is not a", "this isn't a",
       "property type is wrong", "incorrect property",
-      // Spanish
-      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
-      "no es mía", "no es mia", "no es mi propiedad",
-      "la mía es", "la mia es",
-    ]
+      "not a condo", "not a triplex", "not commercial",
+    ],
   },
   {
     key: "who_is_this",
@@ -2034,7 +2034,9 @@ const OBJECTION_MAP = [
 
 function detectObjection(message) {
   const text = lower(message);
+  if (matchesPropertyTypeCorrection(text)) return "property_correction";
   for (const obj of OBJECTION_MAP) {
+    if (obj.key === "property_correction") continue;
     if (includesAny(text, obj.phrases)) return obj.key;
   }
   return null;
@@ -3262,6 +3264,82 @@ function matchesAnyPattern(text, patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+const INTENT_PRIORITY = Object.freeze([
+  "opt_out",
+  "wrong_number",
+  "who_is_this",
+  "hostile_or_legal",
+  "not_interested",
+  "need_time",
+  "seller_interested",
+  "asking_price_provided",
+  "asks_offer",
+  "callback_requested",
+  "property_correction",
+  "ownership_confirmed",
+  "latent_interest",
+  "tenant_occupied",
+  "condition_disclosed",
+  "info_request",
+  "reaction_only",
+  "acknowledgement",
+  "unclear",
+]);
+
+function matchesWrongNumberDisconnect(text = "") {
+  const normalized = lower(text);
+  if (
+    includesAny(normalized, [
+      "wrong number", "wrong #", "wrong person", "incorrect number",
+      "not the owner", "not the property owner", "not the homeowner",
+      "not this person", "don't own that", "dont own that",
+      "i don't own", "i dont own", "don't own this", "dont own this",
+      "no longer own", "not mine", "not my property", "never owned",
+      "sold it", "it sold", "no it sold", "already sold", "been sold",
+      "sold last week", "sold yrs ago", "sold years ago",
+      "this is not shirley",
+      "número equivocado", "equivocado", "no soy el dueño",
+      "no soy el propietario", "no soy la propietaria",
+      "la mía es", "la mia es", "no la mía", "no la mia",
+      "esa casa", "llanoesmia", "ya lo vendí", "ya lo vendi",
+      "no es mía", "no es mia", "no tengo esa propiedad",
+    ])
+  ) {
+    return true;
+  }
+
+  if (/\bsold\b/.test(normalized) && /\b(ago|yrs|years|week|month|last)\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\b(no|nah|nope)\b[\s\S]{0,24}\bsold\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+function matchesPropertyTypeCorrection(text = "") {
+  return includesAny(lower(text), [
+    "not a duplex", "not a multi", "is a house", "not a house",
+    "not a condo", "not a triplex", "not commercial",
+    "wrong address", "incorrect address",
+    "this is not a", "this isn't a",
+    "property type is wrong", "incorrect property",
+  ]);
+}
+
+function pickPrimaryIntent(unique_intents = []) {
+  for (const intent of INTENT_PRIORITY) {
+    if (unique_intents.includes(intent)) return intent;
+  }
+  return unique_intents[0] ?? "unclear";
+}
+
 /**
  * resolveIntents(message, signals)
  *
@@ -3298,36 +3376,22 @@ function resolveIntents(
     return { primary_intent: "opt_out", secondary_intent: null };
   }
 
-  // 2. WRONG NUMBER / NOT OWNER
-  if (
-    normalized_objection === "wrong_number" ||
-    includesAny(text, [
-      "wrong number", "wrong #", "wrong person", "incorrect number",
-      "not the owner", "not the property owner", "not the homeowner",
-      "not this person", "wrong person",
-      // Spanish / Portuguese
-      "número equivocado", "equivocado", "no soy el dueño",
-      "no soy el propietario", "no soy la propietaria",
-    ])
-  ) {
+  // 2. WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
+  if (normalized_objection === "wrong_number" || matchesWrongNumberDisconnect(text)) {
     intents.push("wrong_number");
   }
 
-  // 2.5 PROPERTY CORRECTION
+  // 2.5 PROPERTY CORRECTION (type/address only — not sold/disownership)
   if (
     normalized_objection === "property_correction" ||
-    includesAny(text, [
-      "not a duplex", "not a multi", "is a house", "not a house",
-      "wrong address", "incorrect address", "don't own", "dont own",
-      "no longer own", "i sold it", "sold it", "it sold", "its sold",
-      "already sold", "sold years ago", "not mine", "not my property",
-      "never owned", "this is not a", "this isn't a", "property type is wrong",
-      // Spanish
-      "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
-      "no es mía", "no es mia", "no es mi casa",
-    ])
+    matchesPropertyTypeCorrection(text)
   ) {
     intents.push("property_correction");
+  }
+
+  // 2.6 AMBIGUOUS SHORT UTTERANCES — insufficient evidence for routing
+  if (/^(maybe|huh|hmm|idk|dunno|eh)[\s?!.]*$/i.test(text.trim())) {
+    return { primary_intent: "unclear", secondary_intent: null };
   }
 
   // 3. HOSTILE OR LEGAL
@@ -3455,8 +3519,11 @@ function resolveIntents(
     }
   }
 
-  // 11. OWNERSHIP CONFIRMED
-  if (includesAny(text, [
+  // 11. OWNERSHIP CONFIRMED (skip when seller is correcting property type/address)
+  const is_property_correction = matchesPropertyTypeCorrection(text);
+  if (
+    !is_property_correction &&
+    includesAny(text, [
     "yes i own it",
     "yes i do",
     "i own it",
@@ -3474,7 +3541,8 @@ function resolveIntents(
     "yup",
     "so y siempre lo seré",
     "a si es",
-  ])) {
+  ])
+  ) {
     intents.push("ownership_confirmed");
   }
 
@@ -3504,7 +3572,7 @@ function resolveIntents(
     "who is this", "who's this", "whos this", "who be this", "how do you know my name", 
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
-    "identification", "identify", "porque", "por que", "why", "huh",
+    "identification", "identify", "porque", "por que", "why",
   ])) {
     intents.push("who_is_this");
   }
@@ -3519,10 +3587,11 @@ function resolveIntents(
     if (intents.length === 0) intents.push("ownership_confirmed");
   }
 
-  // Final dedupe and resolve
+  // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
   const unique_intents = [...new Set(intents)];
-  const primary = unique_intents[0] ?? "unclear";
-  const secondary = unique_intents.length > 1 ? unique_intents[1] : null;
+  const primary = pickPrimaryIntent(unique_intents);
+  const secondary =
+    unique_intents.find((intent) => intent !== primary) ?? null;
 
   return { primary_intent: primary, secondary_intent: secondary };
 }
