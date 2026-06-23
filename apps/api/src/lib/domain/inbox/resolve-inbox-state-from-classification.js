@@ -221,6 +221,37 @@ function shouldRouteToNeedsReview(classification = {}) {
   return false;
 }
 
+export function deriveInboxBucketFromThreadState(row = {}) {
+  const explicit = normalizeLegacyBucket(row.inbox_bucket || row.inbox_category || "");
+  if (explicit) return explicit;
+
+  if (row.is_suppressed === true || lower(row.disposition) === "suppressed") return "suppressed";
+  if (lower(row.disposition) === "wrong_number") return "dead";
+  if (lower(row.disposition) === "not_interested") return "dead";
+
+  const classification = {
+    primary_intent: row.last_intent || row.primary_intent || row.detected_intent || null,
+    objection: row.objection || null,
+    compliance_flag: row.compliance_flag || null,
+    confidence: row.confidence ?? null,
+    needs_review: row.needs_review === true,
+    automation_decision: row.metadata?.automation_decision || row.automation_decision || null,
+  };
+
+  const messageEvent = {
+    direction: row.latest_direction || row.latest_message_direction || null,
+    sent_at: row.last_outbound_at || null,
+    received_at: row.last_inbound_at || null,
+    delivery_status: row.latest_delivery_status || null,
+    provider_delivery_status: row.latest_provider_delivery_status || null,
+  };
+
+  const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row);
+  if (bucket) return bucket;
+  if (lower(row.automation_lane) === "cold_reactivation") return "cold";
+  return null;
+}
+
 export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}) {
   const direction = clean(messageEvent.direction).toLowerCase();
   const is_outbound = direction === "outbound";

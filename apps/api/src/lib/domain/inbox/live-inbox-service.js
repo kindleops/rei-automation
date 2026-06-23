@@ -4,6 +4,7 @@ import {
   WAITING_REPLY_WINDOW_MS,
   buildColdTransitionPatch,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 import {
   parseAdvancedFiltersParam,
@@ -771,7 +772,11 @@ function normalizeThreadRow(row = {}, query = {}) {
     direction: normalizedDirection,
     canonical_e164: normalizedPhone || row.canonical_e164,
   }) || canonicalThreadKey;
-  const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
+  const computedBucket =
+    lower(row.inbox_bucket) ||
+    bucketFromEnrichedRow(row) ||
+    deriveInboxBucketFromThreadState(row) ||
+    null;
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
   const latestDeliveryStatus =
     clean(row.latest_delivery_status) ||
@@ -1704,6 +1709,40 @@ async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
   return transitioned;
 }
 
+async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmptyCounts()) {
+  const PAGE_SIZE = 1000;
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("inbox_thread_state")
+      .select(
+        "thread_key,inbox_bucket,inbox_category,latest_direction,last_inbound_at,last_outbound_at,latest_delivery_status,latest_provider_delivery_status,last_intent,disposition,is_suppressed,automation_lane,needs_review,confidence,metadata"
+      )
+      .is("inbox_bucket", null)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) {
+      hasMore = false;
+      break;
+    }
+
+    for (const row of rows) {
+      const derived = deriveInboxBucketFromThreadState(row);
+      if (!derived || !Object.prototype.hasOwnProperty.call(counts, derived)) continue;
+      counts[derived] += 1;
+    }
+
+    offset += rows.length;
+    hasMore = rows.length === PAGE_SIZE;
+  }
+
+  return counts;
+}
+
 async function fetchAuthoritativeInboxCounts(supabase) {
   await transitionStaleWaitingThreads(supabase);
 
@@ -1754,6 +1793,7 @@ async function fetchAuthoritativeInboxCounts(supabase) {
   counts.all = Number(allCount || 0);
   counts.all_messages = counts.all;
   counts.unlinked = Number(unlinkedCount || 0);
+  await augmentCountsWithDerivedNullBuckets(supabase, counts);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;

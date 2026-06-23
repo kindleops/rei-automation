@@ -30,14 +30,14 @@ function makeSupabaseStub(rows = []) {
           state.filters.push({ type: "is", col, val });
           return api;
         },
-        in() { return api; },
-        lt() { return api; },
-        or() { return api; },
-        order() { return api; },
         range(start, end) {
           state.range = [start, end];
           return api;
         },
+        in() { return api; },
+        lt() { return api; },
+        or() { return api; },
+        order() { return api; },
         limit() { return api; },
         async then(resolve) {
           if (table === "inbox_thread_state" && state.head && state.countMode === "exact") {
@@ -64,6 +64,9 @@ function makeSupabaseStub(rows = []) {
           for (const filter of state.filters) {
             if (filter.type === "eq") {
               data = data.filter((row) => String(row[filter.col] ?? "") === String(filter.val ?? ""));
+            }
+            if (filter.type === "is" && filter.val === null) {
+              data = data.filter((row) => row[filter.col] == null);
             }
           }
 
