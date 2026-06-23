@@ -613,3 +613,149 @@ lanes and is surfaced as an additive `v3.retail` block; non-retail lanes return
 `null` and the generic V2/residential flow stays byte-identical. Retail is
 isolated from office / industrial / self-storage / multifamily — no cross-lane
 comp substitution, cap rate, or expense ratio.
+
+---
+
+## Item 5F — Office & Medical-Office Intelligence & Underwriting
+
+### Cross-lane reuse audit (§0)
+
+The codebase already establishes the pattern that each commercial lane
+(`selfStorage*`, `retail*`) is a parallel sibling reusing only the genuinely
+asset-neutral foundation. Item 5F follows that pattern exactly rather than
+extracting new shared modules out of retail (which would risk retail regressions
+for no benefit and force office concepts into retail's GLA/anchor abstractions).
+
+- **Reused (asset-neutral, unchanged):** `incomeSnapshotContract.js`
+  (provField / EVIDENCE_BASIS / VALIDATION_STATUS / isKnown — field-level
+  provenance), `incomeUnderwriting.js` (`computeNOI`, `valueFromCap`,
+  `capRateFromValue`, `dscr`, `debtYield`), `modelConstants.js` (lanes, families,
+  strategy-qualification states, offer-cost stack, monetary-tier semantics).
+- **Office-specific (new):** `officeConstants.js`, `officeClassification.js`,
+  `officeContract.js`, `officeLeaseModel.js`, `officeUnderwriting.js`,
+  `officeComps.js`, `officeValuation.js`, `officeBuyerExit.js`,
+  `officeStrategies.js`, `officeDecision.js`.
+- **Medical-office-specific (within the office modules):** medical subtypes +
+  record classes, `classifyMedicalTenantCredit`, medical buildout / specialized-TI
+  / restoration / regulatory contract fields, `buildMedicalSpecialization`
+  (earned-premium-only), medical buyer archetypes, medical comp universes.
+- **Regression risk:** none observed — retail/storage modules untouched; the full
+  retail suite (45) and storage suite (48) remain green, and a 5F regression test
+  exercises `buildRetailAnalysis` directly.
+
+### Live inventory & data audit (§1) — read-only, prod (lcppdrmrdfblstpcbgpf)
+
+| Metric | Value |
+| --- | --- |
+| Total properties | 124,046 |
+| Dedicated office category | **0** (no `Office` / `Medical Office` `property_type`) |
+| Dedicated medical-office category | **0** |
+| Generic commercial bucket | 805 `Commercial` + 6 `Special Use` + 3 `Other` = 814 |
+| Office keyword in any free-text column (814 bucket) | **0** |
+| Medical keyword in any free-text column | **0** |
+| Special-review (lab/data-center/hospital/coworking) keyword | **0** |
+| `building_class` populated (whole table) | **0** |
+| `normalized_asset_class` / `commercial_property_type` populated | **0** |
+| `cap_rate` / `noi_estimate` for office | **0** |
+| sqft coverage (814 bucket) | 814 / 814 (100%) |
+| Distinct states (814 bucket) | 11 |
+
+**Finding:** there is **no identifiable office or medical-office asset in
+production**. Any office building is buried, unlabeled, inside the generic
+`Commercial` bucket with no office/medical sub-classification, no building class,
+no rentable area, no occupancy/lease/tenant/rent/expense/NOI/cap/transaction/
+buyer-identity data. This is even thinner than retail (which has 237 `Strip
+Malls`). Office-specific coverage — rentable-area, suite, floor, parking,
+occupancy, lease, tenant, rent, expense, NOI, cap-rate, debt, transaction and
+buyer-identity — is therefore **0** live, and package rate / false-positive risk
+are undefined for office because no office records are classifiable yet.
+
+Source grain/reliability is identical to the retail finding: a single
+`properties` row per parcel, `property_type` the only populated asset signal
+(coarse, provider-reported), no rent-roll/lease/operating grain, no time-aligned
+NOI, no qualified office sale comp. Not suitable for live office underwriting
+today; suitable only for classification + deterministic-fixture validation.
+
+### Classification architecture (§2)
+
+`officeClassification.js` separates three questions: (1) genuine ordinary office
+vs **medical office** (distinct `OFFICE_MEDICAL` lane) vs **special review**
+(life science / data center / hospital / coworking operating business / converted
+residential / mixed-use); (2) subtype (CBD/suburban × Class A/B/C, low/mid/high-
+rise, single/multi-tenant, owner-user, **office condominium** ≠ whole building,
+government, corporate campus, creative, vacant, redevelopment, or a specific
+medical subtype); (3) tenancy + operational status. A generic office flag alone
+never proves a high-confidence subtype, medical use, life-science or data-center
+use; special-review keywords are recognized so they route to review rather than
+silently pricing as ordinary office.
+
+### Canonical contract, lease, tenant (§3–§5)
+
+`officeContract.js` layers an office contract on the canonical income snapshot:
+rentable vs usable area + **load factor**, floors/suites/floor-plate/elevators/
+parking (covered/structured)/systems, physical vs **leased** vs economic occupancy
++ direct/sublease/shadow vacancy, separated parking/signage/amenity income, and a
+medical block (buildout %, specialized electrical/gas/shielding/surgery infra,
+specialized-TI replacement cost, conversion cost). `officeLeaseModel.js`
+recognizes FSG / modified-gross / NNN-family / owner-occupied / **coworking
+license** / ground lease (a coworking license is never durable lease income; NNN
+is never inferred from one pass-through), and classifies office and medical tenant
+credit where a **brand is not a guaranty** and **hospital proximity is not health-
+system credit**.
+
+### Underwriting, valuation, strategies (§6–§22)
+
+Rent-roll (no fabricated suite precision; WALE/WALT, tenant + industry
+concentration, unknown-credit exposure), revenue (parking/signage separated;
+coworking service revenue excluded), expense (FSG retains opex, NNN ≠ full
+recovery, reimbursement leakage, elevator only for mid/high-rise, medical-systems
+maintenance), NOI (debt/capex/TI-LC/business income excluded), rollover
+(12/24/36/60-mo, office and higher medical TI/LC + downtime, medical buildout
+exposure), distress/obsolescence (WFH risk, sublease overhang, conversion
+feasibility, dark/redevelopment value), cap rate (OBSERVED / IMPLIED /
+MODELED_MARKET separated; observed requires observed NOI), valuation methods A–K
+computed independently with **owner-user value a separate universe** excluded from
+the investor blend and **medical-specialized value capped at ordinary-office
+support unless an earned premium is evidenced**, business-value separation
+(coworking/practice/equipment/goodwill excluded), buyer-exit (general vs medical
+archetypes; portfolio = demand-only), and class-first strategy qualification
+(cash / seller-finance / commercial-debt-takeover / office marketed disposition ≠
+residential novation / owner-user disposition) with hardened monetary tiers and an
+explicit execution-state basis. AUTO and live authorization stay disabled; shadow
+amounts never populate authorized fields.
+
+### Production-readiness ceiling (Item 5F)
+
+- Architecture / data model / deterministic fixtures:
+  **DETERMINISTIC_FIXTURE_VALIDATED** (57 office tests green).
+- Live data: **LIVE_CLASSIFICATION_UNAVAILABLE** (no office records),
+  **LIVE_LEASE_DATA_UNAVAILABLE**, **LIVE_TRANSACTION_DATA_UNAVAILABLE**,
+  **LIVE_OPERATING_DATA_UNAVAILABLE** → ceiling
+  **PRODUCTION_PRICING_NOT_CALIBRATED**. `AUTONOMOUS_READY` is never returned while
+  execution flags are disabled.
+
+### Calibration (§24)
+
+Qualified office paths (observed cap, qualified comp universe, qualified buyer
+exit, CASH `UNDERWRITTEN_SHADOW`, `SHADOW_MODE_READY`) are exercised only with
+clearly-labeled deterministic fixtures (a stabilized suburban Class B office and a
+hospital-affiliated MOB), never a production sample, because no office operating /
+lease / transaction evidence exists in production. Live-authorization rate is
+**null/0** by construction.
+
+### Migrations (§25)
+
+No migration required or applied. The canonical income snapshot (JSONB +
+structured provenance, Item 5C) absorbs all office/medical lease/tenant/rentable-
+area/medical-buildout fields via the additive `office` analysis block; the lease-
+level entity fits the existing canonical architecture without a new normalized
+table. A future normalized commercial-lease model remains a recorded pre-shadow-
+persistence option, not a 5F requirement.
+
+### Additivity
+
+`buildOfficeAnalysis` runs ONLY for `OFFICE_GENERAL` / `OFFICE_MEDICAL` lanes and
+is surfaced as an additive `v3.office` block; non-office lanes return `null` and
+the generic V2/residential flow stays byte-identical. Office is isolated from
+retail / industrial / self-storage / multifamily, and medical office is isolated
+from general office — no cross-lane comp substitution, cap rate, or expense ratio.

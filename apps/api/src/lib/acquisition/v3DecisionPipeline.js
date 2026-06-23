@@ -36,13 +36,14 @@ import { buildStrategyRanking } from './acquisitionStrategyRanking.js';
 import { buildResidentialIncomeAnalysis, isIncomeFamily } from './residentialIncomeDecision.js';
 import { buildSelfStorageAnalysis, isSelfStorageLane } from './selfStorageDecision.js';
 import { buildRetailAnalysis, isRetailLane } from './retailDecision.js';
+import { buildOfficeAnalysis, isOfficeLane } from './officeDecision.js';
 import { buildExecutionStateBasis } from './executionStateBasis.js';
 
 const EXECUTABLE_STATES = new Set([
   ES.SHADOW_MODE_READY, ES.AUTO_RANGE_READY, ES.AUTO_OFFER_READY, ES.AUTO_CREATIVE_READY,
 ]);
 
-export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {}, storage = {}, retail = {} }) {
+export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), loaderDiagnostics = null, income = {}, storage = {}, retail = {}, office = {} }) {
   const classification = classifyAssetLane(subjectRow);
   const { universes, family } = buildValuationUniverses(subjectRow, qualification, buyerPurchases, now);
   const reconciliation = reconcileValuation(universes, family);
@@ -137,6 +138,21 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
         competingCenters: retail.competing_centers ?? null,
         pipeline: retail.pipeline ?? null,
         repairInputs: retail.repair_inputs ?? {},
+      })
+    : null;
+
+  // ---- Item 5F: additive office & medical-office analysis (OFFICE_* lanes only) ----
+  const officeAnalysis = isOfficeLane(classification.lane)
+    ? buildOfficeAnalysis({
+        subjectRow,
+        office: office.subject ?? office,
+        officeComps: office.comps ?? [],
+        officeBuyers: office.buyers ?? [],
+        capRateEvidence: office.cap_rate_evidence ?? [],
+        market: office.market ?? {},
+        competingVacancy: office.competing_vacancy ?? null,
+        pipeline: office.pipeline ?? null,
+        repairInputs: office.repair_inputs ?? {},
       })
     : null;
 
@@ -266,6 +282,8 @@ export function buildV3Decision({ subjectRow = {}, qualification, buyerPurchases
     self_storage: selfStorage,
     // Item 5E: retail & strip-center specialization (null for non-retail lanes).
     retail: retailAnalysis,
+    // Item 5F: office & medical-office specialization (null for non-office lanes).
+    office: officeAnalysis,
     loader_diagnostics: loaderDiagnostics,
     invariants,
     clusters: (qualification.clusters_summary ?? []).slice(0, 50),
