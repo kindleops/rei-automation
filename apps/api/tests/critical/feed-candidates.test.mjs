@@ -45,6 +45,7 @@ function makeSupabaseWithCandidates(candidates = [], sourceName = "outbound_feed
 }
 
 function makeCandidate(id = 1, overrides = {}) {
+  const suffix = String(id).padStart(4, "0");
   return {
     master_owner_id: `mo_${String(id).padStart(8, "0")}aabbccdd`,
     property_id: String(id + 2100000000),
@@ -54,10 +55,20 @@ function makeCandidate(id = 1, overrides = {}) {
     canonical_e164: `+12085550${String(100 + id).slice(-3)}`,
     market: "houston",
     property_address_state: "TX",
+    property_address_full: `123 Main St, Houston, TX 7700${String(id % 10)}`,
+    display_name: `Taylor Owner ${suffix}`,
+    seller_first_name: "Taylor",
+    primary_prospect_id: `prospect_${suffix}`,
+    matching_flags: "Likely Owner",
+    likely_owner: true,
     contact_window: "9:00 AM - 8:00 PM",
     timezone: "America/Chicago",
     ...overrides,
   };
+}
+
+function safeRenderedMessage(firstName = "Taylor") {
+  return `Hi ${firstName} — is this still your property?`;
 }
 
 function makeFeederReadyCandidate(id = 1, overrides = {}) {
@@ -198,7 +209,7 @@ test("runSupabaseCandidateFeeder dry_run returns diagnostics without queue mutat
         ok: true,
         template: { item_id: "tpl_1", source: "supabase" },
         template_use_case: "ownership_check",
-        rendered_message_body: "Hi, is this still your property?",
+        rendered_message_body: safeRenderedMessage("Taylor"),
       }),
       createSendQueueItem: async () => {
         create_calls += 1;
@@ -2592,7 +2603,7 @@ test("limit=500 scan_limit=500 can queue more than 100 when enough eligible cand
         ok: true,
         template: { item_id: "tpl_large", source: "supabase" },
         template_use_case: "ownership_check",
-        rendered_message_body: "Hi, is this your property?",
+        rendered_message_body: safeRenderedMessage("Taylor"),
       }),
       createSendQueueItem: async () => {
         create_calls += 1;
@@ -2991,7 +3002,7 @@ test("diagnostics include effective_candidate_offset", async () => {
 
 test("candidate_offset does not weaken duplicate suppression", async () => {
   const candidates = Array.from({ length: 120 }, (_, i) => makeFeederReadyCandidate(i + 1));
-  const { supabase } = makeSupabaseWithCandidates(candidates);
+  const supabase = makeSupabaseWithCandidates(candidates);
 
   const result = await runSupabaseCandidateFeeder(
     {

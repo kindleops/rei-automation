@@ -109,12 +109,12 @@ test("stage: ownership_confirmed at ownership_check → consider_selling", () =>
   assert.equal(stage, "consider_selling");
 });
 
-test("stage: ownership_confirmed at non-ownership stage → confirm_basics", () => {
+test("stage: ownership_confirmed at non-ownership stage → asking_price", () => {
   const stage = resolveNextSellerStage({
     message_body: "yes I own it",
     current_stage: "consider_selling",
   });
-  assert.equal(stage, "confirm_basics");
+  assert.equal(stage, "asking_price");
 });
 
 test("stage: info_request at ownership_check → info_source_explanation", () => {

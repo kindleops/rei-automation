@@ -13,7 +13,7 @@
  * true, 1, yes, on, enabled (case-insensitive).
  */
 
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { warn, info } from "@/lib/logging/logger.js";
 
 const TABLE = "system_control";
@@ -22,6 +22,7 @@ const TABLE = "system_control";
 const CACHE_TTL_MS = 30_000; // 30 seconds
 
 const _cache = new Map(); // key -> { value, expires_at }
+const _value_cache = new Map(); // key -> { value, expires_at }
 
 const TRUE_FLAG_VALUES = new Set(["true", "1", "yes", "on", "enabled"]);
 
@@ -64,6 +65,11 @@ export async function getSystemFlag(key, opts = {}) {
   const cached = getCachedFlag(normalized_key);
   if (cached !== null) return cached;
 
+  if (!opts.supabase && !hasSupabaseConfig()) {
+    setCachedFlag(normalized_key, false);
+    return false;
+  }
+
   try {
     const { data, error } = await supabase
       .from(TABLE)
@@ -92,9 +98,31 @@ export async function getSystemFlag(key, opts = {}) {
   }
 }
 
+function getCachedValue(key) {
+  const entry = _value_cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expires_at) {
+    _value_cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setCachedValue(key, value) {
+  _value_cache.set(key, { value, expires_at: Date.now() + CACHE_TTL_MS });
+}
+
 export async function getSystemValue(key, opts = {}) {
   const { supabase = defaultSupabase } = opts;
   const normalized_key = clean(key);
+  const cached = getCachedValue(normalized_key);
+  if (cached !== undefined) return cached;
+
+  if (!opts.supabase && !hasSupabaseConfig()) {
+    setCachedValue(normalized_key, null);
+    return null;
+  }
+
   try {
     const { data, error } = await supabase
       .from(TABLE)
@@ -103,11 +131,15 @@ export async function getSystemValue(key, opts = {}) {
       .maybeSingle();
     if (error) {
       warn("system_control.fetch_value_error", { key: normalized_key, message: error.message });
+      setCachedValue(normalized_key, null);
       return null;
     }
-    return data ? clean(data.value) : null;
+    const resolved = data ? clean(data.value) : null;
+    setCachedValue(normalized_key, resolved);
+    return resolved;
   } catch (err) {
     warn("system_control.fetch_value_unexpected_error", { key: normalized_key, message: err?.message });
+    setCachedValue(normalized_key, null);
     return null;
   }
 }
@@ -240,9 +272,15 @@ export function buildDisabledResponse(key, context = "unknown") {
 /** Invalidate the in-process cache (useful in tests or after manual flag updates). */
 export function clearSystemControlCache() {
   _cache.clear();
+  _value_cache.clear();
 }
 
 /** Prime a flag directly into the cache (test-only — avoids hitting Supabase). */
 export function primeSystemControlCache(key, value) {
   setCachedFlag(String(key), Boolean(value));
+}
+
+/** Prime a raw system_control value (test-only — avoids hitting Supabase). */
+export function primeSystemControlValue(key, value) {
+  setCachedValue(String(key), value == null ? null : clean(value));
 }

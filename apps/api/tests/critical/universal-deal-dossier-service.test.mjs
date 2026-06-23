@@ -62,18 +62,17 @@ test("getUniversalDealDossier handles contact_threads object instead of array sa
       };
     }
     
-    // For other tables, just return null data to simulate no enrichment
+    const terminal = {
+      maybeSingle: async () => ({ data: null }),
+      limit: () => terminal,
+      order: () => terminal,
+      abortSignal: () => terminal,
+    };
     return {
       select: () => ({
-        eq: () => ({
-          maybeSingle: async () => ({ data: null }),
-          order: () => ({
-            limit: () => ({
-              maybeSingle: async () => ({ data: null })
-            })
-          })
-        })
-      })
+        eq: () => terminal,
+        or: () => terminal,
+      }),
     };
   });
 

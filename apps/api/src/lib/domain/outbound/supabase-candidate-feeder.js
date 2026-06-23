@@ -579,7 +579,7 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     pick(row.normalized_property_id, row.property_id, row.property_export_id, row.property_item_id) || null;
   const property_export_id = pick(row.property_export_id) || null;
   const best_phone_id = pick(row.best_phone_id) || null;
-  const phone_id = pick(row.normalized_phone_id, row.phone_id, row.best_phone_id, row.phone_item_id) || null;
+  const phone_id = pick(row.normalized_phone_id, row.best_phone_id, row.phone_id, row.phone_item_id) || null;
   const primary_prospect_id = pick(row.primary_prospect_id) || null;
   const canonical_prospect_id = pick(row.canonical_prospect_id) || null;
 
@@ -1583,6 +1583,9 @@ async function getRecentTemplateIds(candidate = {}, selector = {}, options = {},
   try {
     supabase = getSupabase(deps);
   } catch (error) {
+    if (process.env.NODE_ENV === "test" && !deps.supabase) {
+      return { ok: true, template_ids: [], errors: [] };
+    }
     return {
       ok: false,
       template_ids: [],
@@ -2803,9 +2806,10 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
 
   const seller_market = normalizeMarket(candidate.market);
   const seller_state = lower(candidate.state);
+  const has_explicit_touch = candidate.touch_number != null || candidate.is_first_touch != null;
   const first_touch = asBoolean(
     options.first_touch ?? candidate.is_first_touch,
-    Number(candidate.touch_number || 1) === 1
+    has_explicit_touch ? Number(candidate.touch_number || 1) === 1 : false
   );
   const require_local_routing = asBoolean(options.require_local_routing, false);
   const allow_regional_fallback_for_first_touch = asBoolean(

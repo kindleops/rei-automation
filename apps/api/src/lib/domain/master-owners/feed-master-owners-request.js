@@ -56,8 +56,7 @@ function asPositiveNumber(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function 
-(value) {
+function toTimestamp(value) {
   if (!value) return null;
   const ts = new Date(value).getTime();
   return Number.isNaN(ts) ? null : ts;

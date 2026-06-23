@@ -7,6 +7,7 @@ import { after, before, beforeEach } from 'node:test'
 import {
   clearSystemControlCache,
   primeSystemControlCache,
+  primeSystemControlValue,
 } from '../../src/lib/system-control.js'
 
 const ALLOWED_HOSTS = new Set([
@@ -18,6 +19,9 @@ const ALLOWED_HOSTS = new Set([
 
 const originalFetch = globalThis.fetch
 const envSnapshot = { ...process.env }
+delete envSnapshot.SUPABASE_URL
+delete envSnapshot.SUPABASE_SERVICE_ROLE_KEY
+delete envSnapshot.SUPABASE_ANON_KEY
 let fetchGuardInstalled = false
 let activeFile = null
 
@@ -27,6 +31,16 @@ const PRESERVED_ENV_PREFIXES = ['DISCORD_']
 const DEFAULT_TEST_SYSTEM_FLAGS = Object.freeze({
   discord_actions_enabled: true,
   discord_alerts_enabled: true,
+  allow_weak_identity_outbound: false,
+  outbound_sms_enabled: true,
+  queue_auto_enqueue_enabled: true,
+})
+
+const DEFAULT_TEST_SYSTEM_VALUES = Object.freeze({
+  require_local_routing: 'false',
+  allow_regional_fallback_for_first_touch: 'false',
+  campaign_mode: 'test',
+  queue_emergency_stop_at: '',
 })
 
 function isAllowedUrl(url) {
@@ -83,6 +97,9 @@ export function primeDefaultTestSystemFlags() {
   for (const [key, value] of Object.entries(DEFAULT_TEST_SYSTEM_FLAGS)) {
     primeSystemControlCache(key, value)
   }
+  for (const [key, value] of Object.entries(DEFAULT_TEST_SYSTEM_VALUES)) {
+    primeSystemControlValue(key, value)
+  }
 }
 
 export function bindCriticalTestFile(fileUrl) {
@@ -95,6 +112,9 @@ before(() => {
 
 beforeEach(() => {
   resetCriticalProcessEnv()
+  delete process.env.SUPABASE_URL
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY
+  delete process.env.SUPABASE_ANON_KEY
   for (const key of Object.keys(process.env)) {
     if (PRESERVED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)) && !process.env[key]) {
       delete process.env[key]

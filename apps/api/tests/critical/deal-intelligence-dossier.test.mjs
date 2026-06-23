@@ -87,19 +87,16 @@ test('buildDealIntelligenceDossier returns canonical sections', async (t) => {
       }
     }
 
+    const terminal = {
+      maybeSingle: async () => ({ data: null }),
+      limit: () => terminal,
+      order: () => terminal,
+      abortSignal: () => terminal,
+    }
     return {
       select: () => ({
-        eq: () => ({
-          maybeSingle: async () => ({ data: null }),
-          order: () => ({
-            limit: () => ({ maybeSingle: async () => ({ data: null }) }),
-          }),
-        }),
-        or: () => ({
-          order: () => ({
-            limit: async () => ({ data: [] }),
-          }),
-        }),
+        eq: () => terminal,
+        or: () => terminal,
       }),
     }
   })
