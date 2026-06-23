@@ -50,13 +50,6 @@ function parsePositiveNumber(value: unknown): number | null {
   return n
 }
 
-function parseCoordinate(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null
-  const n = Number(String(value).replace(/,/g, ''))
-  if (!Number.isFinite(n) || Math.abs(n) < 0.0001) return null
-  return n
-}
-
 function normalizeAssetType(value: unknown, propertyType?: unknown): string {
   const raw = clean(value || propertyType).toLowerCase()
   if (!raw) return 'single_family'
@@ -65,10 +58,6 @@ function normalizeAssetType(value: unknown, propertyType?: unknown): string {
   if (raw.includes('commercial') || raw.includes('retail') || raw.includes('industrial')) return 'commercial'
   if (raw.includes('single') || raw.includes('sfr') || raw.includes('sfh') || raw === 'sfr') return 'single_family'
   return raw
-}
-
-function buildAddress(...parts: Array<unknown>): string {
-  return parts.map(clean).filter(Boolean).join(', ')
 }
 
 function pickPropertyBag(

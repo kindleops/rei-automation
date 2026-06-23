@@ -3,15 +3,13 @@ import type { PipelineViewState } from '../../../domain/pipeline/pipeline-card-d
 import type { PipelineSavedView } from '../../../domain/pipeline/pipeline-opportunity.types'
 import { viewStateToSavePayload } from '../../../domain/pipeline/pipeline-view-state'
 
-const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
-
 interface PipelineViewManagerProps {
   open: boolean
   onClose: () => void
   viewState: PipelineViewState
   savedViews: PipelineSavedView[]
   onApplyView: (view: PipelineSavedView) => void
-  onSaveView: (payload: Partial<PipelineSavedView>) => Promise<void>
+  onSaveView: (payload: Partial<PipelineSavedView>) => Promise<PipelineSavedView | void>
   onDuplicateView: (view: PipelineSavedView) => Promise<void>
 }
 

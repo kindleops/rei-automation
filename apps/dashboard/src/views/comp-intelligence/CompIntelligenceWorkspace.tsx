@@ -478,9 +478,9 @@ function mapEvidenceToCompCandidate(
     id: d.comp_property_id || `comp-${index}`,
     propertyId: d.property_id || d.comp_property_id,
     address: d.address || 'Unknown address',
-    city: d.city,
-    state: d.state,
-    zip: d.zip,
+    city: d.city ?? undefined,
+    state: d.state ?? undefined,
+    zip: d.zip ?? undefined,
     soldPrice,
     soldDate,
     soldSource,
@@ -491,7 +491,7 @@ function mapEvidenceToCompCandidate(
     yearBuilt: null,
     condition: d.condition || 'Unknown',
     assetClass: normalizeAssetClass(d.asset_type),
-    propertyType: d.asset_type,
+    propertyType: d.asset_type ?? null,
     constructionType: null,
     lotSizeAcres: null,
     lat: d.latitude ?? 0,
@@ -604,8 +604,8 @@ export function CompIntelligenceWorkspace({
     pipelineState,
     loading,
     error: pipelineError,
-    dataSource,
-    refresh,
+    dataSource: _dataSource,
+    refresh: _refresh,
   } = useCompIntelligence({
     thread,
     dealContext,
@@ -1477,7 +1477,7 @@ function ValuationPipelineStatus({
         ) : null}
       </div>
       {detail && <p className="ci-pipeline-status__detail">{detail}</p>}
-      {discovery?.is_market_fallback && !coords.is_subject_resolved && (
+      {discovery?.is_market_fallback && !(coords as { is_subject_resolved?: boolean }).is_subject_resolved && (
         <p className="ci-pipeline-status__warn">Market-level comp search active — distance ranking unavailable.</p>
       )}
       {lastRelaxation && (

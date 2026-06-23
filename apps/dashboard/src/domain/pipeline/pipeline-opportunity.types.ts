@@ -73,8 +73,12 @@ export interface PipelineOpportunity {
   id: string
   dedupe_key: string
   master_owner_id: string | null
+  prospect_id?: string | null
   primary_property_id: string | null
+  primary_phone_id?: string | null
   primary_thread_key: string | null
+  latest_queue_id?: string | null
+  campaign_target_id?: string | null
   portfolio_property_count: number
   portfolio_property_ids?: string[]
   /** Universal pipeline stage (canonical). */

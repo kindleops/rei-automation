@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Icon } from '../../../shared/icons'
+
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import type { DealContext } from '../../../lib/data/dealContext'
@@ -1297,7 +1297,7 @@ interface BuyersTabProps {
 function BuyersTab({
   filteredCandidates, selectedKey, gradeFilter, typeFilter, gradeCounts,
   loading, running, hasEntityGraph, demandStats, demandScore,
-  setSelectedKey, setGradeFilter, setTypeFilter, runMatch,
+  setSelectedKey, setGradeFilter, setTypeFilter, runMatch: _runMatch,
   sendPackage, updateCandidateStatus, selectBuyer, purchases
 }: BuyersTabProps) {
   const selectedCandidate = filteredCandidates.find(c => c.buyer_key === selectedKey)
@@ -1704,7 +1704,7 @@ interface NextBestActionCardProps {
   setActiveTab: (t: DossierTab) => void
 }
 
-function NextBestActionCard({ hasData, demandScore, matchCount, runMatch, running, setActiveTab }: NextBestActionCardProps) {
+function NextBestActionCard({ hasData, demandScore, matchCount, runMatch: _runMatch, running, setActiveTab }: NextBestActionCardProps) {
   const isHighLiquidity = hasData && demandScore !== null && demandScore >= 70
   const isRiskAlert     = hasData && (demandScore === null || demandScore < 40)
 
@@ -2104,7 +2104,7 @@ interface SidebarProps {
   noDataReason?: string[] | null
 }
 
-function PropertyIntelSidebar({ propertySnapshot: ps, running, hasData, demandScore, entityCount, matchCount, candidates, runMatch, setActiveTab, paneWidth, latestRun, demandRollup, noDataReason }: SidebarProps) {
+function PropertyIntelSidebar({ propertySnapshot: ps, running, hasData, demandScore, entityCount, matchCount, candidates, runMatch, setActiveTab: _setActiveTab, paneWidth, latestRun, demandRollup, noDataReason }: SidebarProps) {
   const isCompact = paneWidth === '25'
 
   return (
@@ -2256,19 +2256,6 @@ export function BuyerMatchWorkspace({
   useEffect(() => {
     autoRunRef.current = null
   }, [property_id])
-
-  const addDealEvent = useCallback((
-    icon: string,
-    action: string,
-    result: string,
-    source: string,
-    extra: Partial<DealMemoryEvent> = {},
-  ) => {
-    setDealEvents(prev => {
-      const next = [makeDealEvent(icon, action, result, source, extra), ...prev]
-      return next.slice(0, 40)
-    })
-  }, [])
 
   const addStructuredEvents = useCallback((events: StructuredBuyerMatchEvent[]) => {
     const mapped = dedupeStructuredEvents(events).map(structuredToDealEvent)

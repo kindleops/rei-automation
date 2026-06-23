@@ -21,7 +21,7 @@ import type {
   PipelineSavedView,
 } from '../../../domain/pipeline/pipeline-opportunity.types'
 import {
-  loadPipelineGroupBy,
+  loadPipelineGroupBy as _loadPipelineGroupBy,
   savePipelineGroupBy,
   savePipelineScope,
   type PipelineScope,

@@ -6,7 +6,6 @@ import type {
 } from './pipeline-card-design.types'
 import type { PipelineGroupByMode, PipelineSavedView } from './pipeline-opportunity.types'
 import {
-  cloneCardDesign,
   DEFAULT_PIPELINE_CARD_DESIGN,
   getRecommendedCardDesign,
   normalizeCardDesign,
@@ -145,7 +144,7 @@ export function applySavedViewToState(view: PipelineSavedView, current: Pipeline
   }
   const cardDesign = normalizeCardDesign(
     view.card_design && Object.keys(view.card_design).length > 0
-      ? view.card_design as PipelineCardDesign
+      ? view.card_design as unknown as PipelineCardDesign
       : getCardDesignForGroup(groupBy, cardDesignsByGroup),
     groupBy,
   )
@@ -167,11 +166,11 @@ export function viewStateToSavePayload(state: PipelineViewState, label: string, 
   return {
     view_key: viewKey ?? label.toLowerCase().replace(/\s+/g, '_'),
     label,
-    filters: state.filters,
+    filters: state.filters as unknown as Record<string, unknown>,
     group_by: state.groupBy,
     scope: state.scope,
     sorts: state.sorts,
-    card_design: state.cardDesign,
+    card_design: state.cardDesign as unknown as Record<string, unknown>,
     card_designs_by_group: state.cardDesignsByGroup,
     density: state.density,
     is_system: false,

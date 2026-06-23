@@ -57,6 +57,8 @@ export interface DealContext extends DealDossier {
   campaign_id: string | null
   campaignTargetId: string | null
   campaign_target_id: string | null
+  opportunityId?: string | null
+  opportunity_id?: string | null
   queueRowId: string | null
   queue_row_id: string | null
   textgridNumberId: string | null
