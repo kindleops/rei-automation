@@ -166,6 +166,22 @@ export function makeCampaignsSupabase(liveIds = []) {
   }
 }
 
+export function makeLiveQueueSystemValue(overrides = {}) {
+  const values = {
+    queue_processor_mode: 'live',
+    campaign_mode: 'live_limited',
+    queue_hard_cap: '50',
+    queue_max_batch_size: '50',
+    queue_daily_send_cap: '100',
+    queue_market_cap: '50',
+    queue_per_number_cap: '25',
+    queue_all_market_ack: 'true',
+    queue_emergency_stop_at: '',
+    ...overrides,
+  }
+  return async (key) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null)
+}
+
 export function makeRunSendQueueDeps({
   rows = [],
   now = '2026-04-04T15:00:00.000Z',

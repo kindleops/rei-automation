@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
 import { finalizeClaimedSendQueueRows } from "@/lib/supabase/sms-engine.js";
+import { makeCampaignsSupabase } from "../helpers/queue-run-test-harness.js";
 
 const NOW = "2026-04-28T15:00:00.000Z";
 
@@ -48,6 +49,9 @@ function makeHarness(initial_rows = [], overrides = {}) {
 
   const deps = {
     getSystemFlag: async () => true,
+    getSystemValue: async () => null,
+    reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
+    supabaseClient: makeCampaignsSupabase(),
     withRunLock: async ({ fn }) => fn(),
     info: () => {},
     warn: () => {},
@@ -224,12 +228,15 @@ function makePreclaimHarness(initial_rows = [], overrides = {}) {
 
   const deps = {
     getSystemFlag: async () => true,
+    getSystemValue: async () => null,
+    reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
     withRunLock: async ({ fn }) => fn(),
     info: () => {},
     warn: () => {},
     recordSystemAlert: async () => ({}),
     resolveSystemAlert: async () => ({}),
     supabase: makeSelectionSupabase([...rows.values()]),
+    supabaseClient: makeCampaignsSupabase(),
     evaluateContactWindow: (row) => {
       if (row?.metadata?.window_state === "outside") {
         return {

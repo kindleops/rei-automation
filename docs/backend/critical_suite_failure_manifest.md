@@ -1,6 +1,6 @@
 # Critical Suite Failure Manifest
 
-Last refreshed: 2026-06-23 (post `c1180ad` feed-candidates + partial misc)
+Last refreshed: 2026-06-23 @ `5e831e7` (misc cluster closed)
 
 ## Baseline (pre-repair full suite @ `77441a0` ancestor)
 
@@ -22,90 +22,98 @@ Source log: `/tmp/canonical-full-critical.log`
 |-------|------:|--------|
 | 9 queue/template/textgrid files | 78 | Queue (71), Template (170), TextGrid provider (54) — subsets of full cluster counts |
 
-## Post-repair targeted cluster status (@ `7e975c3`)
+## Post-repair targeted cluster status (@ `5e831e7`)
 
 | Cluster | Files run | Tests | Pass | Fail | Status |
 |---------|----------:|------:|-----:|-----:|--------|
-| Classification (3-file gate) | 3 | 82 | 82 | 0 | **GREEN** |
-| Discord (3-file spot gate) | 3 | 117 | 117 | 0 | **GREEN** (full 302/302 @ `ca697ef`) |
-| Seller autopilot | 2 | 70 | 70 | 0 | **GREEN** |
+| Queue (`proof:queue`) | 8 | 71 | 71 | 0 | **GREEN** @ `77441a0` |
+| Template | 9 | 170 | 170 | 0 | **GREEN** @ `77441a0` |
+| TextGrid provider | 9 | 54 | 54 | 0 | **GREEN** @ `77441a0` |
+| Classification | 5 | 98 | 98 | 0 | **GREEN** @ `ed2ce51` |
+| Discord | 10 | 302 | 302 | 0 | **GREEN** @ `ca697ef` |
 | Feed-candidates | 1 | 91 | 91 | 0 | **GREEN** @ `b58f287` |
-| Misc batch (23 files @ `c1180ad` partial) | 23 | 358 | 305 | 53 | IN PROGRESS |
+| Risk-010 | 1 | 7 | 7 | 0 | **GREEN** @ `c1180ad` |
+| Misc route/service batch | 23 | 358 | 358 | 0 | **GREEN** @ `5e831e7` |
 
-### Remaining after green clusters (evidence @ `c1180ad` misc batch)
+### Misc cluster refresh (@ `5e831e7`)
 
-| Metric | Value |
-|--------|------:|
-| Remaining failing files (misc batch spot run) | ~15 unique files |
-| Remaining failing tests (misc batch spot run) | 53 |
+| Metric | Pre-fix (`8754e60` partial) | Post-fix (`5e831e7`) |
+|--------|----------------------------:|---------------------:|
+| Files | 23 | 23 |
+| Tests | 358 | 358 |
+| Pass | 312 | 358 |
+| Fail | 46 | 0 |
 
-> Exact post-repair full-suite count requires one final 183-file run after all targeted clusters are green.
+Source logs: `/tmp/misc-cluster-current.log` (46 fail), `/tmp/misc-cluster-verify.log` (0 fail)
 
-## Failing files by domain (remaining work)
+**Resolved since stale 53-fail estimate (7 tests):** risk-010 gate overlap (3), partial inbox chain fixes, inbound second-pass supabase mock success path, feed-candidates already green before final misc pass.
 
-### Outbound feeder / routing (`feed-candidates.test.mjs` — 22 fail)
+### Misc cluster files (23)
 
-- Template rotation/render lint (S1 guards, persona flags, property group)
-- Schedule spread / cap tests (supabase chain mocks for outreach history)
-- `renderOutboundTemplate` prospect-routing blocks for identity_unknown rows
+`dashboard-ops-service`, `deal-intelligence-dossier`, `default-acquisition-engine`, `email-layer-brevo-discord`, `feed-candidates`, `feed-master-owners-route`, `inbound-autopilot-verification`, `inbound-failure-idempotency`, `inbound-offer-routing-integration`, `inbound-stage-lifecycle`, `inbox-bucket-counting`, `inbox-compact-row-regression`, `inbox-live-v2-service`, `message-events-noise-prevention`, `posthog-analytics`, `property-context-source`, `property-hydration-feeder`, `replay-handlers`, `risk-003-feeder-lock`, `risk-010-auto-reply-dedup`, `seller-auto-reply-plan`, `universal-deal-dossier-service`, `wfv2-runtime-proof`
 
-**Signatures:** `TEMPLATE_RENDER_LINT_FAILURE`, `OUTREACH_HISTORY_UNAVAILABLE`, `no_safe_template_for_identity_unknown`
+### Misc subcluster closure (@ `5e831e7`)
 
-### Inbound lifecycle / idempotency
+| Subcluster | Result | Primary repair class |
+|------------|--------|----------------------|
+| A. Inbox / dossier | 100% PASS | Production regression + stale mock chains |
+| B. Inbound lifecycle / idempotency | 100% PASS | Environment isolation + canonical label drift |
+| C. Workflow / acquisition runtime | 100% PASS | Stale harness + runtime gate stubs |
+| D. Locking / concurrency | 100% PASS | Stale lock mock timing |
+| E. Email / Brevo isolation | 100% PASS | Production dep injection + queue stubs |
 
-- `inbound-stage-lifecycle.test.mjs` — missing injected supabase in webhook path
-- `inbound-failure-idempotency.test.mjs` — `CRITICAL_TEST_NETWORK_BLOCKED: placeholder.supabase.co`
-- `message-events-noise-prevention.test.mjs` — same network guard
+### Misc combined gate (@ `5e831e7`)
 
-**Classification:** environment isolation / stale supabase chain mocks
+Normal order, concurrency=1, and default concurrency — all **358/358 PASS**.
 
-### Inbox / cockpit
+## Fix classification (misc closure `8754e60` → `5e831e7`)
 
-- `inbox-live-v2-service.test.mjs` — thread ordering + supabase view mocks
-- `inbox-bucket-counting.test.mjs` — `.in is not a function`
-- `inbox-compact-row-regression.test.mjs` — `THREAD_SOURCE` constant drift
-- `dashboard-ops-service.test.mjs` — needsReply direction filter
-- `deal-intelligence-dossier.test.mjs` / `universal-deal-dossier-service.test.mjs` — `.then` chain on supabase mock
+### Production regressions fixed
 
-### Discord (extended console — not in 3-file spot gate)
+| Module | Fix |
+|--------|-----|
+| `live-inbox-service.js` | Thread listing order + waiting bucket contracts |
+| `run-supabase-outbound-feeder.js` | Cooperative lock + `feeder_already_running` |
+| `v3DecisionPipeline.js` / acquisition gates | Runtime gates, `seller_asking_price` routing |
+| `process-email-queue.js` | `get_system_flag_override` dep injection |
+| `handle-textgrid-inbound.js` / `sms-engine.js` | Message event error handling |
 
-- `discord-targeting-console.test.mjs`, `discord-command-center.test.mjs`, `discord-alerts.test.mjs`, `discord-daily-briefing.test.mjs` — env/deferred routing (may be green after `ca697ef`; verify full discord batch)
+### Stale harness / fixture fixes
 
-### Replay / webhooks
+- Chainable supabase helper (`.then`, `.lt`, `.in`, `.range`, `.maybeSingle`)
+- Dossier/inbox stub alignment (table names, JSON envelopes)
+- Inbound webhook deps injection
+- Canonical replay labels (`wrong_person`, `seller_asking_price`, `tenant_or_occupancy`, `stop_or_opt_out`)
+- Property hydration reason `insufficient_identifiers`
+- Risk-003 lock mock timing
 
-- `replay-handlers.test.mjs` — label drift (`wrong_person` vs legacy string), inbound replay deps
+### Environment / order isolation
 
-### Acquisition / risk / misc routes
+- `critical-test-environment.mjs` network guard
+- Injected supabase/system flags on inbound tests
 
-- `risk-003-feeder-lock.test.mjs`, `risk-010-auto-reply-dedup.test.mjs`
-- `default-acquisition-engine.test.mjs`, `property-hydration-feeder.test.mjs`
-- `email-layer-brevo-discord.test.mjs`, `wfv2-runtime-proof.test.mjs`
-- `feed-master-owners-route.test.mjs` — **syntax fixed** @ `7e975c3` (`toTimestamp`); re-run required
+### Tests removed or replaced
 
-## Unique root-cause signatures (evidence-based)
+None — all 358 misc tests retained with same or stronger invariants.
 
-| Signature | Classification | Repair |
-|-----------|----------------|--------|
-| `CRITICAL_TEST_NETWORK_BLOCKED: placeholder.supabase.co` | Harness isolation | Inject `deps.supabase`; strip `SUPABASE_*` in critical-test-environment |
-| `Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY` | Harness isolation | Same + `hasSupabaseConfig()` short-circuit in system-control |
-| `supabase.from(...).select(...).in is not a function` | Stale mock chain | Chainable supabase helper |
-| `supabase.from(...).select(...).eq(...).then is not a function` | Stale mock chain | Return thenable from terminal builder |
-| `selling_interest` vs `consider_selling` | Production regression | **Fixed** @ `7e975c3` via `SELLER_FLOW_SAFETY_POLICY` routing |
-| `outbound_gate_unsafe_seller_name_blank_greeting` | Test fixture | Use `safeRenderedMessage()` — no `Hi,` prefix |
-| `NO_VALID_LOCAL_TEXTGRID_NUMBER` on regional routing | Production default | **Fixed** — routing-only calls default `first_touch=false` |
-| `Function statements require a function name` @ feed-master-owners-request | Production syntax | **Fixed** `toTimestamp` @ `7e975c3` |
+## Commits (misc closure)
 
-## Tests fixed indirectly by `77441a0`
+| SHA | Message |
+|-----|---------|
+| `dc2c0cf` | fix(inbox): live thread listing + waiting bucket contracts |
+| `da3ecc8` | fix(feeder): cooperative lock + feeder_already_running |
+| `7a09a9b` | fix(acquisition): runtime gates, seller_asking_price, message_event errors |
+| `579b044` | fix(email): get_system_flag_override dep injection |
+| `5b52ded` | test(helpers): chainable supabase inbox/inbound helpers |
+| `f77952f` | test(inbox): dossier/inbox stub alignment |
+| `8c1e5fc` | test(inbound): webhook deps + canonical replay labels |
+| `5e831e7` | test(acquisition-email): runtime gate + email queue stubs |
 
-Queue cluster (71), template cluster (170), textgrid provider cluster (54) — **do not rewrite**.
+## Remaining gates
 
-## Tests fixed in this closure branch (post-`77441a0`)
-
-| Commit | Domain | Tests restored (targeted runs) |
-|--------|--------|-------------------------------|
-| `ed2ce51` | Classification | 98/98 |
-| `ca697ef` | Discord interactions | 302/302 |
-| `7e975c3` | Harness + feeder + seller flow | 70/70 autopilot; 69/91 feeder (+51 vs pre-fix) |
+- [ ] Repaired-cluster combined gate (Queue + Template + TextGrid + Classification + Discord + Feed-candidates + Risk-010 + Misc)
+- [ ] Full 185-file critical suite
+- [ ] API lint/build + Dashboard typecheck/build + runtime doctor
 
 ## Commands
 
