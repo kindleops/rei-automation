@@ -93,10 +93,26 @@ test('runSendQueue fails soft on unexpected process crash and continues later wo
   const crash = buildSupabaseQueueRow(2012, {
     scheduled_for: '2026-04-04T09:00:00.000Z',
     scheduled_for_utc: '2026-04-04T09:00:00.000Z',
+    touch_number: 1,
+    metadata: {
+      candidate_snapshot: {
+        master_owner_id: 'mo_test',
+        phone_id: 'ph_test',
+        touch_number: 1,
+      },
+    },
   })
   const ok = buildSupabaseQueueRow(2013, {
     scheduled_for: '2026-04-04T10:00:00.000Z',
     scheduled_for_utc: '2026-04-04T10:00:00.000Z',
+    touch_number: 2,
+    metadata: {
+      candidate_snapshot: {
+        master_owner_id: 'mo_test',
+        phone_id: 'ph_test',
+        touch_number: 2,
+      },
+    },
   })
   const { deps } = makeRunSendQueueDeps({
     rows: [crash, ok],
