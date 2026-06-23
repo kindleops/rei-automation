@@ -4,6 +4,10 @@
  * - Resets env snapshot between test files
  */
 import { after, before, beforeEach } from 'node:test'
+import {
+  clearSystemControlCache,
+  primeSystemControlCache,
+} from '../../src/lib/system-control.js'
 
 const ALLOWED_HOSTS = new Set([
   'localhost',
@@ -16,6 +20,14 @@ const originalFetch = globalThis.fetch
 const envSnapshot = { ...process.env }
 let fetchGuardInstalled = false
 let activeFile = null
+
+/** Env keys set at test-file module scope (e.g. Discord role fixtures) must survive per-test reset. */
+const PRESERVED_ENV_PREFIXES = ['DISCORD_']
+
+const DEFAULT_TEST_SYSTEM_FLAGS = Object.freeze({
+  discord_actions_enabled: true,
+  discord_alerts_enabled: true,
+})
 
 function isAllowedUrl(url) {
   try {
@@ -51,12 +63,25 @@ export function installCriticalFetchGuard() {
   }
 }
 
+function shouldPreserveEnvKey(key) {
+  return PRESERVED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
 export function resetCriticalProcessEnv() {
   for (const key of Object.keys(process.env)) {
-    if (!(key in envSnapshot)) delete process.env[key]
+    if (!(key in envSnapshot) && !shouldPreserveEnvKey(key)) delete process.env[key]
   }
   for (const [key, value] of Object.entries(envSnapshot)) {
-    process.env[key] = value
+    if (!shouldPreserveEnvKey(key)) {
+      process.env[key] = value
+    }
+  }
+}
+
+export function primeDefaultTestSystemFlags() {
+  clearSystemControlCache()
+  for (const [key, value] of Object.entries(DEFAULT_TEST_SYSTEM_FLAGS)) {
+    primeSystemControlCache(key, value)
   }
 }
 
@@ -70,6 +95,12 @@ before(() => {
 
 beforeEach(() => {
   resetCriticalProcessEnv()
+  for (const key of Object.keys(process.env)) {
+    if (PRESERVED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix)) && !process.env[key]) {
+      delete process.env[key]
+    }
+  }
+  primeDefaultTestSystemFlags()
 })
 
 after(() => {

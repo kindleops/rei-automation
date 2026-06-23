@@ -83,7 +83,7 @@ const ACQUISITIONS_ROLE_ID = "111000000000000004";
 const CLOSINGS_ROLE_ID     = "111000000000000005";
 const UNRELATED_ROLE_ID    = "999999999999999999";
 
-function withRoleEnv(fn) {
+async function withRoleEnv(fn) {
   const prev = {
     DISCORD_ROLE_OWNER_ID:        process.env.DISCORD_ROLE_OWNER_ID,
     DISCORD_ROLE_TECH_OPS_ID:     process.env.DISCORD_ROLE_TECH_OPS_ID,
@@ -97,13 +97,12 @@ function withRoleEnv(fn) {
   process.env.DISCORD_ROLE_ACQUISITIONS_ID = ACQUISITIONS_ROLE_ID;
   process.env.DISCORD_ROLE_CLOSINGS_ID     = CLOSINGS_ROLE_ID;
   try {
-    return fn();
+    return await fn();
   } finally {
-    process.env.DISCORD_ROLE_OWNER_ID        = prev.DISCORD_ROLE_OWNER_ID        ?? "";
-    process.env.DISCORD_ROLE_TECH_OPS_ID     = prev.DISCORD_ROLE_TECH_OPS_ID    ?? "";
-    process.env.DISCORD_ROLE_SMS_OPS_ID      = prev.DISCORD_ROLE_SMS_OPS_ID     ?? "";
-    process.env.DISCORD_ROLE_ACQUISITIONS_ID = prev.DISCORD_ROLE_ACQUISITIONS_ID ?? "";
-    process.env.DISCORD_ROLE_CLOSINGS_ID     = prev.DISCORD_ROLE_CLOSINGS_ID    ?? "";
+    for (const [key, value] of Object.entries(prev)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 
@@ -215,8 +214,8 @@ test("pong() returns type=1 PONG response", () => {
 // 4. Missing role rejected
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("checkPermission: user with no matching role is denied", () => {
-  withRoleEnv(() => {
+test("checkPermission: user with no matching role is denied", async () => {
+  await withRoleEnv(() => {
     const user_has_roles = [UNRELATED_ROLE_ID];
     const result = checkPermission(user_has_roles, ["owner", "tech_ops"]);
     assert.equal(result, false, "user with no relevant role must be denied");
@@ -247,23 +246,23 @@ test("routeDiscordInteraction: user without Tech Ops gets denied for /queue run"
 // 5. Owner passes permission checks for all restricted commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("isOwner: returns true for user with owner role ID", () => {
-  withRoleEnv(() => {
+test("isOwner: returns true for user with owner role ID", async () => {
+  await withRoleEnv(() => {
     assert.equal(isOwner([OWNER_ROLE_ID]), true);
     assert.equal(isOwner([TECH_OPS_ROLE_ID]), false);
   });
 });
 
-test("isTechOps: owner implicitly has tech_ops permission", () => {
-  withRoleEnv(() => {
+test("isTechOps: owner implicitly has tech_ops permission", async () => {
+  await withRoleEnv(() => {
     assert.equal(isTechOps([OWNER_ROLE_ID]),    true,  "Owner must satisfy Tech Ops check");
     assert.equal(isTechOps([TECH_OPS_ROLE_ID]), true,  "Tech Ops must satisfy Tech Ops check");
     assert.equal(isTechOps([SMS_OPS_ROLE_ID]),  false, "SMS Ops must NOT satisfy Tech Ops check");
   });
 });
 
-test("checkPermission: owner satisfies any role requirement", () => {
-  withRoleEnv(() => {
+test("checkPermission: owner satisfies any role requirement", async () => {
+  await withRoleEnv(() => {
     for (const roles of [["owner"], ["tech_ops"], ["sms_ops"], ["acquisitions"]]) {
       assert.equal(
         checkPermission([OWNER_ROLE_ID], roles),
@@ -278,8 +277,8 @@ test("checkPermission: owner satisfies any role requirement", () => {
 // 6. Tech Ops can run /sync podio (permission check passes)
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("checkPermission: tech_ops passes for sync podio requirement", () => {
-  withRoleEnv(() => {
+test("checkPermission: tech_ops passes for sync podio requirement", async () => {
+  await withRoleEnv(() => {
     assert.equal(
       checkPermission([TECH_OPS_ROLE_ID], ["owner", "tech_ops"]),
       true,
@@ -334,9 +333,11 @@ test("routeDiscordInteraction: feeder limit > 25 with Tech Ops creates approval 
     "must be a regular message (with buttons)");
 
   // Must NOT be ephemeral — approval requests must be visible to the channel.
-  assert.ok(
-    !(response.data.flags & MESSAGE_FLAGS.EPHEMERAL),
-    "approval request must be public"
+  const ephemeral_flag = Number(response.data?.flags ?? 0) & MESSAGE_FLAGS.EPHEMERAL;
+  assert.equal(
+    ephemeral_flag,
+    0,
+    `approval request must be public (flags=${response.data?.flags ?? "undefined"})`
   );
 
   // Must have components (approve/reject buttons).
@@ -549,8 +550,8 @@ test("routeDiscordInteraction: /queue status resolves to a channel message", asy
 // 15. Acquisitions can run /lead summarize
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("isAcquisitions: returns true for acquisitions role and for owner", () => {
-  withRoleEnv(() => {
+test("isAcquisitions: returns true for acquisitions role and for owner", async () => {
+  await withRoleEnv(() => {
     assert.equal(isAcquisitions([ACQUISITIONS_ROLE_ID]), true);
     assert.equal(isAcquisitions([OWNER_ROLE_ID]),        true);
     assert.equal(isAcquisitions([TECH_OPS_ROLE_ID]),     false);
@@ -558,29 +559,55 @@ test("isAcquisitions: returns true for acquisitions role and for owner", () => {
 });
 
 test("routeDiscordInteraction: /lead summarize with acquisitions role does not get denied", async () => {
-  const response = await withRoleEnv(async () => {
-    const interaction = makeInteraction({
-      command_name: "lead",
-      subcommand:   "summarize",
-      sub_options:  [{ name: "phone_or_owner_id", value: "+15551234567" }],
-      role_ids:     [ACQUISITIONS_ROLE_ID],
-    });
-    return routeDiscordInteraction(interaction);
-  });
-
-  // Must not be a 🚫 denied response.
-  assert.ok(
-    !response.data?.content?.includes("🚫"),
-    "acquisitions user must not be denied for /lead summarize"
+  const { __setActionRouterDeps, __resetActionRouterDeps } = await import(
+    "@/lib/discord/discord-action-router.js"
   );
+  const mock = {
+    from(table) {
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        or: () => chain,
+        order: () => chain,
+        limit: () => chain,
+        then(resolve) {
+          const data = table === "message_events"
+            ? [{ event_type: "sms", direction: "inbound", delivery_status: "delivered", created_at: "2026-01-01T00:00:00Z" }]
+            : [];
+          return Promise.resolve({ data, error: null }).then(resolve);
+        },
+      };
+      return chain;
+    },
+  };
+  __setActionRouterDeps({ supabase_override: mock });
+
+  try {
+    const response = await withRoleEnv(async () => {
+      const interaction = makeInteraction({
+        command_name: "lead",
+        subcommand:   "summarize",
+        sub_options:  [{ name: "phone_or_owner_id", value: "+15551234567" }],
+        role_ids:     [ACQUISITIONS_ROLE_ID],
+      });
+      return routeDiscordInteraction(interaction);
+    });
+
+    assert.ok(
+      !response.data?.content?.includes("🚫"),
+      `acquisitions user must not be denied for /lead summarize: ${response.data?.content ?? ""}`
+    );
+  } finally {
+    __resetActionRouterDeps();
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16. SMS Ops cannot /lock release
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("checkPermission: sms_ops does NOT satisfy [owner, tech_ops] requirement", () => {
-  withRoleEnv(() => {
+test("checkPermission: sms_ops does NOT satisfy [owner, tech_ops] requirement", async () => {
+  await withRoleEnv(() => {
     assert.equal(
       checkPermission([SMS_OPS_ROLE_ID], ["owner", "tech_ops"]),
       false,
@@ -668,8 +695,8 @@ test("channelMessage: truncates content at 2000 characters", () => {
   assert.equal(r.data.content.length, 2000);
 });
 
-test("resolveRoleIds: returns only configured non-empty role IDs", () => {
-  withRoleEnv(() => {
+test("resolveRoleIds: returns only configured non-empty role IDs", async () => {
+  await withRoleEnv(() => {
     const ids = resolveRoleIds(["owner", "tech_ops", "nonexistent_role"]);
     assert.ok(ids.includes(OWNER_ROLE_ID),    "must include owner ID");
     assert.ok(ids.includes(TECH_OPS_ROLE_ID), "must include tech_ops ID");

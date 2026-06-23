@@ -503,10 +503,12 @@ test("/replay inbound sends message_body/from_number/to_number/dry_run payload t
 });
 
 test("/replay inbound backend failure edits Discord response cleanly without leaking INTERNAL_API_SECRET", async () => {
+  const leaked_secret = "secret_must_not_appear_in_output";
+  process.env.INTERNAL_API_SECRET = leaked_secret;
   const editCalls = [];
   const callInternal_override = async () => ({
     ok: false,
-    error: `upstream failed ${process.env.INTERNAL_API_SECRET}`,
+    error: `upstream failed ${leaked_secret}`,
   });
 
   __setActionRouterDeps({
@@ -531,7 +533,7 @@ test("/replay inbound backend failure edits Discord response cleanly without lea
     assert.equal(editCalls.length, 1, "one edit call expected");
     const serialized = JSON.stringify(editCalls[0]);
     assert.ok(serialized.includes("Replay failed"), "clean replay failure message is returned");
-    assert.ok(!serialized.includes(process.env.INTERNAL_API_SECRET), "INTERNAL_API_SECRET must not leak");
+    assert.ok(!serialized.includes(leaked_secret), "INTERNAL_API_SECRET must not leak");
   } finally {
     __resetActionRouterDeps();
   }
