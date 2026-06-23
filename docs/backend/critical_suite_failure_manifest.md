@@ -1,6 +1,6 @@
 # Critical Suite Failure Manifest
 
-Last refreshed: 2026-06-23 (post `7e975c3` targeted cluster runs)
+Last refreshed: 2026-06-23 (post `c1180ad` feed-candidates + partial misc)
 
 ## Baseline (pre-repair full suite @ `77441a0` ancestor)
 
@@ -29,17 +29,15 @@ Source log: `/tmp/canonical-full-critical.log`
 | Classification (3-file gate) | 3 | 82 | 82 | 0 | **GREEN** |
 | Discord (3-file spot gate) | 3 | 117 | 117 | 0 | **GREEN** (full 302/302 @ `ca697ef`) |
 | Seller autopilot | 2 | 70 | 70 | 0 | **GREEN** |
-| Feed-candidates | 1 | 91 | 69 | 22 | IN PROGRESS |
-| Misc batch (24 files, pre-`7e975c3`) | 24 | 258 | 189 | 69 | IN PROGRESS |
+| Feed-candidates | 1 | 91 | 91 | 0 | **GREEN** @ `b58f287` |
+| Misc batch (23 files @ `c1180ad` partial) | 23 | 358 | 305 | 53 | IN PROGRESS |
 
-### Estimated remaining after green clusters
+### Remaining after green clusters (evidence @ `c1180ad` misc batch)
 
-Subtracting classification/discord/seller-autopilot/queue-template-textgrid fixes from baseline:
-
-| Metric | Estimate |
-|--------|----------|
-| Remaining failing files | ~40–45 |
-| Remaining failing tests | ~180–220 |
+| Metric | Value |
+|--------|------:|
+| Remaining failing files (misc batch spot run) | ~15 unique files |
+| Remaining failing tests (misc batch spot run) | 53 |
 
 > Exact post-repair full-suite count requires one final 183-file run after all targeted clusters are green.
 
