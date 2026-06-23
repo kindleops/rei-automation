@@ -4,6 +4,11 @@ import { Icon } from '../../shared/icons'
 import './agents.css'
 
 export const AgentsPage = ({ data }: { data: AgentsModel }) => {
+  const formatNumber = (value: number | undefined | null, digits = 1): string => {
+    const n = Number(value)
+    return Number.isFinite(n) ? n.toFixed(digits) : "0.0"
+  }
+
   const [filterStrategy, setFilterStrategy] = useState<string>('All')
 
   const { performance, attribution } = data
@@ -29,7 +34,7 @@ export const AgentsPage = ({ data }: { data: AgentsModel }) => {
     // Find opt out risks
     const risky = performance.filter(a => a.auto_pause_candidate)
     for (const r of risky) {
-      recs.push(`Reduce volume for Agent ${r.agent_name || r.sms_agent_id} due to rising stop rate (${r.opt_out_rate_pct.toFixed(1)}%).`)
+      recs.push(`Reduce volume for Agent ${r.agent_name || r.sms_agent_id} due to rising stop rate (${formatNumber(r.opt_out_rate_pct)}%).`)
     }
     
     // Default rec if none
@@ -68,12 +73,12 @@ export const AgentsPage = ({ data }: { data: AgentsModel }) => {
         <div className="nx-agent-attribution-bar">
           <div className="nx-agent-attribution-metric">
             <span className="label">Attribution Coverage</span>
-            <span className="value">{(attribution.attribution_coverage_pct || 0).toFixed(1)}%</span>
+            <span className="value">{formatNumber(attribution.attribution_coverage_pct)}%</span>
             <span className={`confidence is-${attribution.agent_attribution_confidence}`}>{attribution.agent_attribution_confidence} confidence</span>
           </div>
           <div className="nx-agent-attribution-metric">
             <span className="label">Unknown Agent</span>
-            <span className="value">{(attribution.unknown_agent_pct || 0).toFixed(1)}%</span>
+            <span className="value">{formatNumber(attribution.unknown_agent_pct)}%</span>
           </div>
         </div>
       )}
@@ -123,15 +128,15 @@ export const AgentsPage = ({ data }: { data: AgentsModel }) => {
                   <span className="nx-metric-secondary">{agent.replies.toLocaleString()} replies</span>
                 </div>
                 <div className="col-metrics">
-                  <span className="nx-metric-primary">{agent.reply_rate_pct.toFixed(1)}%</span>
+                  <span className="nx-metric-primary">{formatNumber(agent.reply_rate_pct)}%</span>
                   {agent.reply_rate_pct > 20 && <Icon name="trending-up" className="nx-trend-arrow is-up" />}
                 </div>
                 <div className="col-metrics">
-                  <span className="nx-metric-primary">{agent.positive_rate_pct.toFixed(1)}%</span>
+                  <span className="nx-metric-primary">{formatNumber(agent.positive_rate_pct)}%</span>
                   {agent.positive_rate_pct > 10 ? <Icon name="trending-up" className="nx-trend-arrow is-up" /> : <Icon name="trending-up" className="nx-trend-arrow is-down" style={{transform: 'rotate(180deg)'}} />}
                 </div>
                 <div className="col-metrics">
-                  <span className={`nx-metric-primary ${agent.opt_out_rate_pct > 8 ? 'is-danger' : ''}`}>{agent.opt_out_rate_pct.toFixed(1)}%</span>
+                  <span className={`nx-metric-primary ${agent.opt_out_rate_pct > 8 ? 'is-danger' : ''}`}>{formatNumber(agent.opt_out_rate_pct)}%</span>
                 </div>
                 <div className="col-metrics nx-agent-status-col">
                   {agent.recommended_status === 'scale_up' && <span className="nx-status-badge is-scale-up"><span className="nx-live-pulse" /> Scale Up</span>}
@@ -149,19 +154,19 @@ export const AgentsPage = ({ data }: { data: AgentsModel }) => {
                     </div>
                     <div>
                       <label>Avg Response</label>
-                      <span>{agent.avg_response_hours ? `${agent.avg_response_hours.toFixed(1)}h` : 'N/A'}</span>
+                      <span>{agent.avg_response_hours != null ? `${formatNumber(agent.avg_response_hours)}h` : 'N/A'}</span>
                     </div>
                     <div>
                       <label>Qualified</label>
-                      <span>{agent.qualification_rate_pct.toFixed(1)}%</span>
+                      <span>{formatNumber(agent.qualification_rate_pct)}%</span>
                     </div>
                     <div>
                       <label>Current Vol. Weight</label>
-                      <span>{agent.current_volume_weight.toFixed(1)}x</span>
+                      <span>{formatNumber(agent.current_volume_weight)}x</span>
                     </div>
                     <div>
                       <label>Recommended Weight</label>
-                      <span>{agent.recommended_volume_weight.toFixed(1)}x</span>
+                      <span>{formatNumber(agent.recommended_volume_weight)}x</span>
                     </div>
                   </div>
                 </div>

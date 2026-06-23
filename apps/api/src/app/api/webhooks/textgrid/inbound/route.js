@@ -170,13 +170,13 @@ async function parseRequestBody(request) {
   return { raw_text: text };
 }
 
-export const __normalizeInboundPayloadForTest = normalizeTextgridInboundPayload;
+const __normalizeInboundPayloadForTest = normalizeTextgridInboundPayload;
 
-export function __setTextgridInboundRouteTestDeps(overrides = {}) {
+function __setTextgridInboundRouteTestDeps(overrides = {}) {
   runtimeDeps = { ...runtimeDeps, ...overrides };
 }
 
-export function __resetTextgridInboundRouteTestDeps() {
+function __resetTextgridInboundRouteTestDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 

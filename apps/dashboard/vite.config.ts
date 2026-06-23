@@ -633,6 +633,11 @@ export default defineConfig(({ mode }) => {
   const backendProxyTarget = resolveBackendProxyTarget(env, mode)
   const devIdentity = resolveDevGitIdentity()
   return {
+    define: {
+      'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA || 'local'),
+      'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
+      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard')
+    },
     plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     define: {
       'import.meta.env.VITE_DASHBOARD_GIT_SHA': JSON.stringify(devIdentity.commitSha),

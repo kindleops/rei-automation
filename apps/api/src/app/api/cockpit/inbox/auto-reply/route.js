@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
   const payload = await parseJsonSafe(request)
   try {
     const result = await runInboxAction({ action: 'auto-reply', payload })
@@ -15,4 +15,8 @@ export async function POST(request) {
   } catch (error) {
     return responseFromResult({ ok: false, error: error?.message || 'auto_reply_failed' }, 500)
   }
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }

@@ -142,16 +142,35 @@ export const buildAerialViewUrl = (
  */
 export const normalizePropertySnapshot = (
   intelligence: ThreadIntelligenceRecord | null,
-  thread: InboxWorkflowThread | null
+  thread: InboxWorkflowThread | null,
+  dossier?: import('../../lib/data/threadDossier').ThreadDossier | null
 ): NormalizedPropertySnapshot => {
   const get = (key: string, aliases: string[] = []) => {
-    let val = intelligence?.[key]
-    if (val === undefined || val === null || val === '') {
-      for (const alias of aliases) {
-        val = intelligence?.[alias]
-        if (val !== undefined && val !== null && val !== '') break
+    let val: any
+    
+    // 1. Check Dossier (most authoritative)
+    if (dossier) {
+      val = dossier.prospect?.[key] ?? dossier.master_owner?.[key] ?? dossier.property?.[key] ?? dossier.inbox_thread_state?.[key]
+      if (val === undefined || val === null || val === '') {
+        for (const alias of aliases) {
+          val = dossier.prospect?.[alias] ?? dossier.master_owner?.[alias] ?? dossier.property?.[alias] ?? dossier.inbox_thread_state?.[alias]
+          if (val !== undefined && val !== null && val !== '') break
+        }
       }
     }
+
+    // 2. Check Intelligence
+    if (val === undefined || val === null || val === '') {
+      val = intelligence?.[key]
+      if (val === undefined || val === null || val === '') {
+        for (const alias of aliases) {
+          val = intelligence?.[alias]
+          if (val !== undefined && val !== null && val !== '') break
+        }
+      }
+    }
+    
+    // 3. Check Thread
     if (val === undefined || val === null || val === '') {
       val = (thread as any)?.[key]
       if (val === undefined || val === null || val === '') {

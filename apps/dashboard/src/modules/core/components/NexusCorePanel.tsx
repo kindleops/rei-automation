@@ -71,7 +71,7 @@ export function NexusCorePanel({ metrics, activeState, onClose }: NexusCorePanel
           <MetricCard label="AI Classifications" value={metrics.classificationsPerMin} suffix="ops" />
           <MetricCard label="Active Underwriting" value={metrics.activeUnderwritingJobs} suffix="jobs" />
           <MetricCard label="Hot Leads" value={metrics.hotLeadCount} suffix="active" color="var(--nx-gold)" />
-          <MetricCard label="Core Temperature" value={(metrics.heatIndex * 100).toFixed(1)} suffix="%" color={metrics.heatIndex > 0.8 ? 'var(--nx-red)' : 'var(--nx-cyan)'} />
+          <MetricCard label="Core Temperature" value={Number.isFinite(Number(metrics.heatIndex)) ? (Number(metrics.heatIndex) * 100).toFixed(1) : "0.0"} suffix="%" color={metrics.heatIndex > 0.8 ? 'var(--nx-red)' : 'var(--nx-cyan)'} />
 
           <div className="live-feed-container">
             <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

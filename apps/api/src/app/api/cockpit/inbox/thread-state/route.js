@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(request) {
   const auth = ensureMutationAuth(request)
-  if (!auth.ok) return auth.response
+  if (!auth.ok) return withCors(request, auth.response)
   const payload = await parseJsonSafe(request)
   const result = await patchThreadStateSafe({ payload }).catch((err) => ({
     ok: false,
@@ -52,4 +52,8 @@ export async function PATCH(request) {
 
   const status = result.ok ? 200 : 400
   return responseFromResult(result, status)
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }

@@ -9,7 +9,7 @@ export async function GET(request) {
       .select('*')
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return withCors(request, NextResponse.json({ error: error.message }, { status: 500 }))
     }
 
     const debugResults = threads.map(thread => {
@@ -47,8 +47,12 @@ export async function GET(request) {
       counts.all++
     })
 
-    return NextResponse.json({ counts, threads: debugResults })
+    return withCors(request, NextResponse.json({ counts, threads: debugResults }))
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return withCors(request, NextResponse.json({ error: err.message }, { status: 500 }))
   }
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request);
 }
