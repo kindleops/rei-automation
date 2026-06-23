@@ -8,6 +8,7 @@ let _deps = {
   send_brevo_override: null,
   is_suppressed_override: null,
   now_iso_override: null,
+  get_system_flag_override: null,
 };
 
 function getDb() {
@@ -124,14 +125,22 @@ export function __resetProcessEmailQueueDeps() {
     send_brevo_override: null,
     is_suppressed_override: null,
     now_iso_override: null,
+    get_system_flag_override: null,
   };
+}
+
+function getSystemFlagValue(key) {
+  if (typeof _deps.get_system_flag_override === "function") {
+    return _deps.get_system_flag_override(key);
+  }
+  return getSystemFlag(key);
 }
 
 export async function processEmailQueue({ limit = 25, dry_run = false } = {}) {
   const db = getDb();
   const final_limit = asLimit(limit, 25);
 
-  const email_enabled = await getSystemFlag("email_enabled");
+  const email_enabled = await getSystemFlagValue("email_enabled");
   if (!email_enabled) {
     return {
       ok: false,
