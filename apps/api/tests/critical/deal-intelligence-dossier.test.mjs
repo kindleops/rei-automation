@@ -91,7 +91,16 @@ test('buildDealIntelligenceDossier returns canonical sections', async (t) => {
       maybeSingle: async () => ({ data: null }),
       limit: () => terminal,
       order: () => terminal,
+      lt: () => terminal,
+      lte: () => terminal,
+      gt: () => terminal,
+      gte: () => terminal,
+      in: () => terminal,
+      eq: () => terminal,
       abortSignal: () => terminal,
+      then(resolve, reject) {
+        return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+      },
     }
     return {
       select: () => ({
@@ -110,9 +119,9 @@ test('buildDealIntelligenceDossier returns canonical sections', async (t) => {
   assert.equal(dossier.acquisition_decision.status, 'not_run')
   assert.equal(dossier.buyer_market.source, 'buyer_geo_rollups_v2')
   assert.equal(dossier.buyer_market.signal, 'Active')
-  assert.equal(dossier.census.status, 'not_loaded')
+  assert.equal(dossier.census.status, 'pending')
   assert.ok(Array.isArray(dossier.activity_timeline))
-  assert.equal(ENGINE_PROGRESS_STAGES.length, 7)
+  assert.equal(ENGINE_PROGRESS_STAGES.length, 11)
 
   supabase.from = originalFrom
   supabase.rpc = originalRpc

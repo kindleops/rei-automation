@@ -139,8 +139,9 @@ function makeMessageEventSupabaseStub(rows = []) {
 }
 
 test("live inbox service reads canonical v2 sources", () => {
-  assert.match(SERVICE_SRC, /const THREAD_SOURCE = "v_inbox_threads_live_v2";/);
-  assert.match(SERVICE_SRC, /const COUNT_SOURCE = "v_inbox_thread_counts_live_v2";/);
+  assert.match(SERVICE_SRC, /const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";/);
+  assert.match(SERVICE_SRC, /const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";/);
+  assert.match(SERVICE_SRC, /const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";/);
 });
 
 test("canonical inbox migration partitions by canonical_thread_key and keeps one latest row per thread", () => {

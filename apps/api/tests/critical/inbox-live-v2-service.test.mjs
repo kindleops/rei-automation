@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import { degradedLiveResponse, degradedThreadMessagesPayload } from "../../src/lib/domain/inbox/degraded-read-responses.js";
 import { getLiveInbox, getThreadMessages } from "../../src/lib/domain/inbox/live-inbox-service.js";
+import {
+  buildInboxCountRowFromThreads,
+  makeLiveInboxThreadSupabase,
+} from "../helpers/chainable-supabase.mjs";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -44,20 +48,7 @@ function decodeSupabaseValue(value = "") {
 }
 
 function buildCountRow(rows = []) {
-  const byBucket = (bucket) => rows.filter((row) => row.inbox_bucket === bucket).length;
-  return {
-    all: rows.length,
-    priority: byBucket("priority"),
-    new_replies: byBucket("new_replies"),
-    needs_review: byBucket("needs_review"),
-    follow_up: byBucket("follow_up"),
-    cold: byBucket("cold"),
-    dead: byBucket("dead"),
-    suppressed: byBucket("suppressed"),
-    active: rows.filter((row) => ["priority", "new_replies", "needs_review", "follow_up"].includes(row.inbox_bucket)).length,
-    waiting: byBucket("waiting"),
-    unlinked: rows.filter((row) => row.property_id == null).length,
-  };
+  return buildInboxCountRowFromThreads(rows);
 }
 
 function applyOrClause(rows, clause) {
@@ -81,114 +72,116 @@ function createCanonicalInboxSupabase(seed = {}) {
   const threadRows = [...(seed.threadRows || [])];
   const messageEvents = [...(seed.messageEvents || [])];
   const countRows = seed.countRows ? [...seed.countRows] : null;
-
-  function getRowsForTable(table) {
-    if (table === "inbox_threads_view") return [...threadRows];
-    if (table === "v_inbox_threads_live_v2") return [...threadRows];
-    if (table === "v_inbox_thread_counts_live_v2") return countRows ? [...countRows] : [buildCountRow(threadRows)];
-    if (table === "message_events") return [...messageEvents];
-    return [];
-  }
+  const baseSupabase = makeLiveInboxThreadSupabase(threadRows, {
+    countRows: countRows || [buildCountRow(threadRows)],
+  });
 
   return {
     threadRows,
     messageEvents,
     from(table) {
-      const state = {
-        table,
-        filters: [],
-        orClause: null,
-        orderBy: [],
-        range: null,
-        limit: null,
-        countRequested: false,
-      };
+      if (table === "message_events") {
+        const state = {
+          filters: [],
+          orClause: null,
+          orderBy: [],
+          range: null,
+          limit: null,
+        };
 
-      const api = {
-        select(_columns, options = {}) {
-          state.countRequested = options.count === "exact";
-          return api;
-        },
-        eq(column, value) {
-          state.filters.push((row) => clean(row?.[column]) === clean(value));
-          return api;
-        },
-        in(column, values = []) {
-          state.filters.push((row) => values.map((value) => clean(value)).includes(clean(row?.[column])));
-          return api;
-        },
-        lt(column, value) {
-          state.filters.push((row) => asTime(row?.[column]) < asTime(value));
-          return api;
-        },
-        is(column, value) {
-          if (value === null) {
-            state.filters.push((row) => row?.[column] == null);
-          }
-          return api;
-        },
-        or(clause) {
-          state.orClause = clause;
-          return api;
-        },
-        order(column, options = {}) {
-          state.orderBy.push({ column, ascending: options.ascending !== false });
-          return api;
-        },
-        range(start, end) {
-          state.range = [start, end];
-          return api;
-        },
-        limit(value) {
-          state.limit = value;
-          return api;
-        },
-        then(resolve, reject) {
-          return Promise.resolve().then(() => {
-            if (state.table === "v_inbox_thread_counts_live_v2" && seed.countError) {
-              return { data: null, count: null, error: { message: seed.countError } };
+        const api = {
+          select() { return api; },
+          eq(column, value) {
+            state.filters.push((row) => clean(row?.[column]) === clean(value));
+            return api;
+          },
+          in(column, values = []) {
+            state.filters.push((row) => values.map((value) => clean(value)).includes(clean(row?.[column])));
+            return api;
+          },
+          lt(column, value) {
+            state.filters.push((row) => asTime(row?.[column]) < asTime(value));
+            return api;
+          },
+          is(column, value) {
+            if (value === null) {
+              state.filters.push((row) => row?.[column] == null);
             }
-
-            let data = getRowsForTable(state.table);
-
-            for (const filter of state.filters) {
-              data = data.filter((row) => filter(row));
-            }
-
-            if (state.orClause) {
-              data = applyOrClause(data, state.orClause);
-            }
-
-            data.sort((left, right) => {
-              for (const order of state.orderBy) {
-                const leftValue = left?.[order.column];
-                const rightValue = right?.[order.column];
-                const leftSortable = order.column.includes("_at") ? asTime(leftValue) : clean(leftValue);
-                const rightSortable = order.column.includes("_at") ? asTime(rightValue) : clean(rightValue);
-                if (leftSortable === rightSortable) continue;
-                if (typeof leftSortable === "number" && typeof rightSortable === "number") {
-                  return order.ascending ? leftSortable - rightSortable : rightSortable - leftSortable;
-                }
-                return order.ascending
-                  ? String(leftSortable).localeCompare(String(rightSortable))
-                  : String(rightSortable).localeCompare(String(leftSortable));
+            return api;
+          },
+          or(clause) {
+            state.orClause = clause;
+            return api;
+          },
+          order(column, options = {}) {
+            state.orderBy.push({ column, ascending: options.ascending !== false });
+            return api;
+          },
+          range(start, end) {
+            state.range = [start, end];
+            return api;
+          },
+          limit(value) {
+            state.limit = value;
+            return api;
+          },
+          then(resolve, reject) {
+            return Promise.resolve().then(() => {
+              let data = [...messageEvents];
+              for (const filter of state.filters) {
+                data = data.filter((row) => filter(row));
               }
-              return 0;
-            });
+              if (state.orClause) {
+                data = applyOrClause(data, state.orClause);
+              }
+              data.sort((left, right) => {
+                for (const order of state.orderBy) {
+                  const leftValue = left?.[order.column];
+                  const rightValue = right?.[order.column];
+                  const leftSortable = order.column.includes("_at") ? asTime(leftValue) : clean(leftValue);
+                  const rightSortable = order.column.includes("_at") ? asTime(rightValue) : clean(rightValue);
+                  if (leftSortable === rightSortable) continue;
+                  if (typeof leftSortable === "number" && typeof rightSortable === "number") {
+                    return order.ascending ? leftSortable - rightSortable : rightSortable - leftSortable;
+                  }
+                  return order.ascending
+                    ? String(leftSortable).localeCompare(String(rightSortable))
+                    : String(rightSortable).localeCompare(String(leftSortable));
+                }
+                return 0;
+              });
+              const count = data.length;
+              if (state.range) {
+                data = data.slice(state.range[0], state.range[1] + 1);
+              } else if (typeof state.limit === "number") {
+                data = data.slice(0, state.limit);
+              }
+              return { data, count, error: null };
+            }).then(resolve, reject);
+          },
+        };
 
-            const count = data.length;
-            if (state.range) {
-              data = data.slice(state.range[0], state.range[1] + 1);
-            } else if (typeof state.limit === "number") {
-              data = data.slice(0, state.limit);
-            }
+        return api;
+      }
 
-            return { data, count, error: null };
-          }).then(resolve, reject);
-        },
-      };
+      if (table === "v_inbox_thread_counts_live_v2" && seed.countError) {
+        return {
+          select() {
+            return {
+              limit() { return this; },
+              then(resolve, reject) {
+                return Promise.resolve({
+                  data: null,
+                  count: null,
+                  error: { message: seed.countError },
+                }).then(resolve, reject);
+              },
+            };
+          },
+        };
+      }
 
-      return api;
+      return baseSupabase.from(table);
     },
   };
 }
@@ -196,7 +189,12 @@ function createCanonicalInboxSupabase(seed = {}) {
 function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
   return {
     from(table) {
-      if (table === "inbox_threads_view" || table === "v_inbox_threads_live_v2" || table === "v_inbox_thread_counts_live_v2") {
+      if (
+        table === "inbox_threads_view" ||
+        table === "canonical_inbox_threads" ||
+        table === "v_inbox_threads_live_v2" ||
+        table === "v_inbox_thread_counts_live_v2"
+      ) {
         return {
           select() {
             return {
@@ -211,6 +209,10 @@ function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
             };
           },
         };
+      }
+
+      if (table === "inbox_thread_state") {
+        return makeLiveInboxThreadSupabase([], { stateRows: [] }).from(table);
       }
 
       if (table === "message_events" || table === "send_queue") {
@@ -651,7 +653,10 @@ test("thread messages try all strict identities and keep the full selected timel
     ["Property-linked outbound", "Owner-linked inbound"],
   );
   assert.equal(result.rows.some((row) => row.message_body === "Wrong property outbound"), false);
-  assert.match(result.identityUsed, /property_id\+normalized_phone|master_owner_id\+normalized_phone/);
+  assert.match(
+    result.identityUsed,
+    /thread_key=canonical_e164|property_id|master_owner_id|conversation_thread_id/,
+  );
 });
 
 test("phone-only selected thread blocks integrity conflicts instead of rendering merged messages", async () => {

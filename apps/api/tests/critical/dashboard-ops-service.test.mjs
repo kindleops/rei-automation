@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { getOpsFeederSnapshot, parseOpsFilters } from "@/lib/dashboard/ops-service.js";
+import { makeLiveInboxThreadSupabase } from "../helpers/chainable-supabase.mjs";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -50,106 +51,9 @@ function buildLiveInboxCountRow(rows = []) {
 }
 
 function makeLiveInboxSupabaseStub(rows = []) {
-  return {
-    from(table) {
-      const state = {
-        table,
-        filters: [],
-        searchClause: null,
-        orders: [],
-        limit: null,
-        range: null,
-      };
-
-      const api = {
-        select() { return api; },
-        eq(column, value) {
-          state.filters.push((row) => clean(row?.[column]) === clean(value));
-          return api;
-        },
-        in(column, values) {
-          const allowed = new Set((values || []).map(clean));
-          state.filters.push((row) => allowed.has(clean(row?.[column])));
-          return api;
-        },
-        or(clause) {
-          state.searchClause = clause;
-          return api;
-        },
-        order(column, options = {}) {
-          state.orders.push({ column, ascending: options.ascending !== false });
-          return api;
-        },
-        range(start, end) {
-          state.range = [start, end];
-          return api;
-        },
-        limit(value) {
-          state.limit = value;
-          return api;
-        },
-        then(resolve, reject) {
-          return Promise.resolve().then(() => {
-            let data;
-            if (table === "canonical_inbox_counts") {
-              data = [buildLiveInboxCountRow(rows)];
-            } else if (table === "message_events" || table === "send_queue") {
-              data = [];
-            } else {
-              data = [...rows];
-            }
-
-            for (const filter of state.filters) {
-              data = data.filter((row) => filter(row));
-            }
-
-            if (state.searchClause) {
-              const needle = state.searchClause
-                .split(",")
-                .map((entry) => entry.split(".").slice(2).join("."))
-                .map((entry) => clean(entry).replaceAll("%", "").toLowerCase())
-                .find(Boolean);
-              if (needle) {
-                data = data.filter((row) => [
-                  row.thread_key,
-                  row.canonical_e164,
-                  row.seller_phone,
-                  row.owner_name,
-                  row.property_address_full,
-                  row.latest_message_body,
-                ].some((value) => clean(value).toLowerCase().includes(needle)));
-              }
-            }
-
-            data.sort((left, right) => {
-              for (const order of state.orders) {
-                const leftValue = order.column.includes("_at") ? asTime(left?.[order.column]) : clean(left?.[order.column]);
-                const rightValue = order.column.includes("_at") ? asTime(right?.[order.column]) : clean(right?.[order.column]);
-                if (leftValue === rightValue) continue;
-                if (typeof leftValue === "number" && typeof rightValue === "number") {
-                  return order.ascending ? leftValue - rightValue : rightValue - leftValue;
-                }
-                return order.ascending
-                  ? String(leftValue).localeCompare(String(rightValue))
-                  : String(rightValue).localeCompare(String(leftValue));
-              }
-              return 0;
-            });
-
-            const count = data.length;
-            if (state.range) {
-              data = data.slice(state.range[0], state.range[1] + 1);
-            } else if (typeof state.limit === "number") {
-              data = data.slice(0, state.limit);
-            }
-
-            return { data, count, error: null };
-          }).then(resolve, reject);
-        },
-      };
-      return api;
-    },
-  };
+  return makeLiveInboxThreadSupabase(rows, {
+    countRows: [buildLiveInboxCountRow(rows)],
+  });
 }
 
 test("parseOpsFilters defaults dashboard feeder to v_sms_ready_contacts with safe routing", () => {

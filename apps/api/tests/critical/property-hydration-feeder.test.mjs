@@ -149,7 +149,7 @@ test("hydratePropertyForCandidate returns ok:false when no master_owner_id", asy
   const supabase = makeMockSupabase();
   const result = await hydratePropertyForCandidate({}, { supabase });
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "no_master_owner_id");
+  assert.equal(result.reason, "insufficient_identifiers");
 });
 
 // ── Integration tests: runSupabaseCandidateFeeder with v_sms_ready_contacts ────

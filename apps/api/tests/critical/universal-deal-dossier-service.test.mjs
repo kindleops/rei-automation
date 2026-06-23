@@ -85,7 +85,8 @@ test("getUniversalDealDossier handles contact_threads object instead of array sa
   const dossier = await getUniversalDealDossier({ thread_key: "+14802257752" });
 
   assert.ok(dossier, "Dossier should be returned");
-  assert.equal(dossier.phones.length, 1, "phones array should have 1 item");
-  assert.equal(dossier.phones[0].channel, "phone", "phone channel should match");
+  assert.ok(dossier.phone, "phone section should be present");
+  assert.equal(dossier.phone.status, "available");
+  assert.equal(dossier.phone.number, "+14802257752");
   assert.equal(dossier.identity.thread_key, "+14802257752", "thread key should match");
 });
