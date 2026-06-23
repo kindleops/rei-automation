@@ -667,7 +667,7 @@ export function PipelineOpportunityBoard({
 function ScopeBar({
   scope,
   onScopeChange,
-  metrics,
+  metrics: _metrics,
   scopedTotal,
   globalTotal,
   compact,
