@@ -887,38 +887,6 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   const is_manual_send_now = clean(normalized.action).toLowerCase() === "send_now";
   const warning_codes = [];
 
-  const can_send_impl = deps.canSendImpl || deps.canSend || canSend;
-  const send_gate = await can_send_impl(normalized, { supabase });
-  if (!send_gate.ok) {
-    const gate_status =
-      ["phone_suppressed", "thread_paused_review", "thread_quarantined", "suppression_check_unavailable"].includes(
-        send_gate.reason
-      )
-        ? 423
-        : 400;
-    const proof = buildManualSendProof({
-      input,
-      normalized,
-      queue_inserted: false,
-      detail_reason: send_gate.reason,
-      warning_codes,
-    });
-    logger.warn("inbox_send_now.early_exit", {
-      ...request_log,
-      reason: send_gate.reason,
-      queue_inserted: false,
-    });
-    return {
-      ok: false,
-      status: gate_status,
-      error: send_gate.reason,
-      reason: send_gate.reason,
-      queue_created: false,
-      queue_inserted: false,
-      proof,
-    };
-  }
-
   // ── Step 3a: non-bypassable compliance guard ───────────────────────
   const compliance_block = await hardComplianceCheckImpl({
     thread_key: normalized.thread_key,
@@ -948,6 +916,38 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       error: "compliance_blocked",
       reason: "compliance_blocked",
       detail_reason: compliance_block.reason,
+      queue_created: false,
+      queue_inserted: false,
+      proof,
+    };
+  }
+
+  const can_send_impl = deps.canSendImpl || deps.canSend || canSend;
+  const send_gate = await can_send_impl(normalized, { supabase });
+  if (!send_gate.ok) {
+    const gate_status =
+      ["phone_suppressed", "thread_paused_review", "thread_quarantined", "suppression_check_unavailable"].includes(
+        send_gate.reason
+      )
+        ? 423
+        : 400;
+    const proof = buildManualSendProof({
+      input,
+      normalized,
+      queue_inserted: false,
+      detail_reason: send_gate.reason,
+      warning_codes,
+    });
+    logger.warn("inbox_send_now.early_exit", {
+      ...request_log,
+      reason: send_gate.reason,
+      queue_inserted: false,
+    });
+    return {
+      ok: false,
+      status: gate_status,
+      error: send_gate.reason,
+      reason: send_gate.reason,
       queue_created: false,
       queue_inserted: false,
       proof,
