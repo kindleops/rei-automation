@@ -140,10 +140,10 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     };
   }
 
-  // Unclear / fallback
+  // Unclear inbound replies stay in the automation lane until a true exception is detected.
   return {
-    universal_status: "needs_review",
-    universal_stage: classification.stage_hint || "needs_review"
+    universal_status: "active",
+    universal_stage: classification.stage_hint || "new_reply"
   };
 }
 
@@ -164,12 +164,13 @@ const PRIORITY_OBJECTIONS = [
   "wants_proof_of_funds",
 ];
 
-const NEEDS_REVIEW_INTENTS = [
-  "unclear",
+const OPERATOR_EXCEPTION_INTENTS = new Set([
   "property_correction",
-  "info_request",
   "hostile_or_legal",
-];
+  "identity_conflict",
+  "legal_exception",
+  "compliance_exception",
+]);
 
 const NEW_REPLY_INTENTS = [
   "who_is_this",
@@ -178,7 +179,26 @@ const NEW_REPLY_INTENTS = [
   "need_time",
 ];
 
-const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
+function isOperatorEscalation(classification = {}) {
+  const decision = classification.automation_decision || {};
+  return (
+    decision.human_review_required === true &&
+    (decision.operator_escalation === true || decision.escalation_policy === "operator_exception")
+  );
+}
+
+function isSystemFailureException(classification = {}) {
+  const decision = classification.automation_decision || {};
+  const reasonCodes = Array.isArray(decision.reason_codes)
+    ? decision.reason_codes.map((code) => lower(code))
+    : [];
+  return (
+    decision.system_failure === true ||
+    decision.retry_exhausted === true ||
+    reasonCodes.includes("retry_exhausted") ||
+    reasonCodes.includes("system_failure")
+  );
+}
 
 function normalizeLegacyBucket(bucket = "") {
   const normalized = clean(bucket).toLowerCase();
@@ -188,16 +208,15 @@ function normalizeLegacyBucket(bucket = "") {
 
 function shouldRouteToNeedsReview(classification = {}) {
   const primary = clean(classification.primary_intent);
-  const confidence = Number(classification.confidence);
+  const compliance = clean(classification.compliance_flag);
 
-  if (NEEDS_REVIEW_INTENTS.includes(primary)) return true;
-  if (classification.needs_review === true) return true;
-  if (classification.automation_decision?.human_review_required === true && primary === "unclear") {
+  if (OPERATOR_EXCEPTION_INTENTS.has(primary)) return true;
+  if (classification.needs_review === true && (OPERATOR_EXCEPTION_INTENTS.has(primary) || isOperatorEscalation(classification))) {
     return true;
   }
-  if (Number.isFinite(confidence) && confidence > 0 && confidence < REVIEW_CONFIDENCE_THRESHOLD) {
-    return true;
-  }
+  if (compliance === "legal_hold" || compliance === "compliance_exception") return true;
+  if (isOperatorEscalation(classification)) return true;
+  if (isSystemFailureException(classification)) return true;
 
   return false;
 }

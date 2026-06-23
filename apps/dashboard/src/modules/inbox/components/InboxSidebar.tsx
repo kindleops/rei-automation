@@ -83,15 +83,15 @@ type BucketConfig = {
 }
 
 const BUCKETS: BucketConfig[] = [
-  { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'High-intent sellers, active negotiation', accentClass: 'is-hot', countKey: 'priority' },
-  { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', shortLabel: 'New', icon: '📥', description: 'Unread inbound replies', accentClass: 'is-inbound', countKey: 'new_replies' },
-  { bucket: 'needs_review', view: 'needs_review', label: 'Needs Review', shortLabel: 'Review', icon: '🧠', description: 'Low AI confidence or legal/hostile flags', accentClass: 'is-review', countKey: 'needs_review' },
+  { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'Evidence-driven high-intent threads (list shows top 50; count is full population)', accentClass: 'is-hot', countKey: 'priority' },
+  { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', shortLabel: 'New', icon: '📥', description: 'Inbound replies awaiting canonical automation', accentClass: 'is-inbound', countKey: 'new_replies' },
+  { bucket: 'needs_review', view: 'needs_review', label: 'Needs Review', shortLabel: 'Review', icon: '🧠', description: 'True operator exceptions only (legal, identity conflict, retry exhaustion)', accentClass: 'is-review', countKey: 'needs_review' },
   { bucket: 'waiting', view: 'waiting', label: 'Waiting', shortLabel: 'Waiting', icon: '⏳', description: 'Outbound sent, awaiting seller response', accentClass: 'is-wait', countKey: 'waiting' },
   { bucket: 'follow_up', view: 'follow_up', label: 'Follow Up', shortLabel: 'Follow Up', icon: '⏰', description: 'Follow-up due or waiting on seller', accentClass: 'is-outbound', countKey: 'follow_up' },
   { bucket: 'cold', view: 'cold', label: 'Cold', shortLabel: 'Cold', icon: '🥶', description: 'Stale leads with no inbound reply', accentClass: 'is-cold', countKey: 'cold' },
   { bucket: 'dead', view: 'dead', label: 'Dead', shortLabel: 'Dead', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
   { bucket: 'suppressed', view: 'suppressed', label: 'Suppressed', shortLabel: 'DNC', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
-  { bucket: 'all_messages', view: 'all_conversations', label: 'All Messages', shortLabel: 'All', icon: '📦', description: 'Every thread', accentClass: 'is-neutral', countKey: 'all_messages' },
+  { bucket: 'all_messages', view: 'all_conversations', label: 'All Threads', shortLabel: 'All', icon: '📦', description: 'Canonical thread universe', accentClass: 'is-neutral', countKey: 'all_messages' },
 ]
 
 const VISIBLE_INBOX_CHIPS: BucketConfig[] = [

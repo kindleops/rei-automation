@@ -1289,14 +1289,16 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      return null;
+      query = query.eq("inbox_bucket", "waiting");
+      break;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
       }
       break;
     case "unlinked":
-      return null;
+      if (typeof query.is === "function") query = query.is("property_id", null);
+      break;
     default:
       return null;
   }
@@ -1356,7 +1358,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
           ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
           : query;
       case "waiting":
-        return query;
+        return query.eq("inbox_bucket", "waiting");
       case "unlinked":
         return typeof query.is === "function" ? query.is("property_id", null) : query;
       default:
@@ -1393,11 +1395,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
         : query;
     case "waiting":
-      query = query.eq(sourceConfig.directionColumn || "latest_message_direction", "outbound");
-      if (typeof query.not === "function") {
-        query = query.not("inbox_bucket", "in", "(dead,suppressed)");
-      }
-      return query;
+      return query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     default:
@@ -1501,7 +1499,8 @@ async function queryAuthoritativeInboxThreads(params = {}, {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      return null;
+      query = query.eq("inbox_bucket", "waiting");
+      break;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
