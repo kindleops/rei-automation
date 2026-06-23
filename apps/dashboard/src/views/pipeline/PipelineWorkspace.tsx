@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActiveInboxContext } from '../../modules/inbox/active-context'
-import { buildContextFromOpportunity } from '../../modules/inbox/active-context'
+
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { fetchPipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity-api'
 import type { PipelineSavedView, PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'

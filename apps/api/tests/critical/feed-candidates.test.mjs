@@ -1088,7 +1088,7 @@ test("chooseTextgridNumber blocks random nationwide fallback when routing_safe_o
 
   assert.equal(result.ok, false);
   assert.equal(result.routing_allowed, false);
-  assert.equal(result.routing_block_reason, "NO_VALID_LOCAL_TEXTGRID_NUMBER");
+  assert.equal(result.routing_block_reason, "NO_APPROVED_ROUTING_PATH");
 });
 
 test("v_sms_ready_contacts candidate without template fields selects ownership_check S1", async () => {

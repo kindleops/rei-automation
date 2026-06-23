@@ -81,7 +81,7 @@ interface PipelineOpportunityBoardProps {
   onFiltersChange?: (filters: PipelineFilterGroup) => void
   onSortsChange?: (sorts: PipelineSortSpec[]) => void
   onCardDesignChange?: (design: PipelineCardDesign) => void
-  onPersistView?: (payload: Partial<PipelineSavedView>) => Promise<void>
+  onPersistView?: (payload: Partial<PipelineSavedView>) => Promise<PipelineSavedView | void>
   onDuplicateView?: (view: PipelineSavedView) => Promise<void>
   onResetView?: () => void
   selectedId: string | null
@@ -140,7 +140,7 @@ export function PipelineOpportunityBoard({
   onClearSelection,
   onRetryDetail,
   onOpenCommandView,
-  onOpenDealIntelligence,
+  onOpenDealIntelligence: _onOpenDealIntelligence,
   onAction,
   onMoveStage,
   onMoveStatus,
@@ -680,7 +680,7 @@ function ScopeBar({
   compact?: boolean
 }) {
   const scopeLabel = PIPELINE_SCOPE_OPTIONS.find((o) => o.value === scope)?.label?.toLowerCase() ?? scope
-  const filteredCards = metrics.active_opportunities ?? scopedTotal
+  const _filteredCards = metrics.active_opportunities ?? scopedTotal
   return (
     <div className={cls('plv-scope-bar', compact && 'plv-scope-bar--compact')}>
       <div
