@@ -117,6 +117,10 @@ function createCanonicalInboxSupabase(seed = {}) {
           state.filters.push((row) => values.map((value) => clean(value)).includes(clean(row?.[column])));
           return api;
         },
+        lt(column, value) {
+          state.filters.push((row) => asTime(row?.[column]) < asTime(value));
+          return api;
+        },
         is(column, value) {
           if (value === null) {
             state.filters.push((row) => row?.[column] == null);

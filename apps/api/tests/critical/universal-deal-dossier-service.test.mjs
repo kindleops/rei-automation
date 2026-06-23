@@ -63,16 +63,22 @@ test("getUniversalDealDossier handles contact_threads object instead of array sa
     }
     
     const terminal = {
-      maybeSingle: async () => ({ data: null }),
+      maybeSingle: async () => ({ data: null, error: null }),
+      single: async () => ({ data: null, error: null }),
       limit: () => terminal,
       order: () => terminal,
+      lt: () => terminal,
+      lte: () => terminal,
+      in: () => terminal,
+      eq: () => terminal,
+      or: () => terminal,
       abortSignal: () => terminal,
+      then(resolve) {
+        return Promise.resolve({ data: [], error: null }).then(resolve);
+      },
     };
     return {
-      select: () => ({
-        eq: () => terminal,
-        or: () => terminal,
-      }),
+      select: () => terminal,
     };
   });
 

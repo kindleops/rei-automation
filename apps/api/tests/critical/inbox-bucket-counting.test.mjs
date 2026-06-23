@@ -44,6 +44,8 @@ function makeSupabaseStub(rows = []) {
         },
         eq(col, val) { state.filters.push({ type: 'eq', col, val }); return api; },
         not(col, op, val) { state.filters.push({ type: 'not', col, op, val }); return api; },
+        in(col, val) { state.filters.push({ type: 'in', col, val }); return api; },
+        lt(col, val) { state.filters.push({ type: 'lt', col, val }); return api; },
         or(val) { state.or = val; return api; },
         order() { return api; },
         range(start, end) { state.range = [start, end]; return api; },

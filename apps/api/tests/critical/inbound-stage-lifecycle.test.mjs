@@ -1,6 +1,8 @@
+import "../helpers/critical-test-environment.mjs";
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 
+import { makeInboundLifecycleSupabase } from "../helpers/chainable-supabase.mjs";
 import {
   handleTextgridInboundWebhook,
   __setTextgridInboundTestDeps,
@@ -70,7 +72,8 @@ function installInboundDeps({
       scheduled_for_local: scheduled_for,
     };
   },
-  getSupabaseClient = () => null,
+  getSupabaseClient = () => makeInboundLifecycleSupabase(),
+  logInboundMessageEventSupabase = async () => ({ ok: true, id: "evt-mock-1" }),
 } = {}) {
   const ledger = createInMemoryIdempotencyLedger();
   const load_context_calls = [];
@@ -109,6 +112,13 @@ function installInboundDeps({
     findInboundAutopilotQueue,
     buildInboundAutopilotSchedule,
     getSupabaseClient,
+    logInboundMessageEventSupabase,
+    getSystemFlags: async () => ({
+      auto_reply_enabled: true,
+      followup_enabled: false,
+      outbound_sms_enabled: true,
+    }),
+    getSystemValue: async () => null,
   });
 
   return {

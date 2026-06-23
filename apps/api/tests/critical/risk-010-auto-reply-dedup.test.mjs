@@ -13,6 +13,7 @@ function makeInboundRow() {
   return {
     id: INBOUND_MSG_ID,
     from_phone_number: FROM_PHONE,
+    to_phone_number: "+15005550002",
     message_body: "Yes I am interested in selling",
     conversation_brain_id: "brain-1",
     language: "English",
@@ -28,8 +29,13 @@ function makeSupabase() {
   return {
     from: (table) => {
       if (table === "send_queue") {
+        const noRow = { maybeSingle: async () => ({ data: null, error: null }) };
+        const afterEq = {
+          ...noRow,
+          limit: () => noRow,
+        };
         return {
-          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+          select: () => ({ eq: () => afterEq }),
           insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: "q-1", status: "queued" }, error: null }) }) }),
         };
       }
@@ -46,7 +52,7 @@ function makeSupabase() {
   };
 }
 
-function makePassingPipelineDeps({ canSendFn, enqueue }) {
+function makePassingPipelineDeps({ canSendFn, insertQueueImpl }) {
   return {
     supabase: makeSupabase(),
     classify: async () => ({
@@ -71,7 +77,7 @@ function makePassingPipelineDeps({ canSendFn, enqueue }) {
     validateTemplateForIntent: () => ({ ok: true }),
     evaluateContactWindow: () => ({ allowed: true }),
     canSendFn,
-    enqueue: enqueue || (async () => ({ ok: true, id: "q-enqueued-1" })),
+    insertQueueImpl: insertQueueImpl || (async () => ({ ok: true, queue_row_id: "q-enqueued-1" })),
     memory: {
       loadConversationMemory: async () => ({ found: false, thread: null, turns: [] }),
       upsertThread: async () => "thread-1",
@@ -88,7 +94,7 @@ test("RISK-010: paused_review thread → gate blocks before enqueue", async () =
   let enqueue_called = false;
   __setQueueDeps(makePassingPipelineDeps({
     canSendFn: async () => ({ ok: false, reason: "thread_paused_review" }),
-    enqueue: async () => { enqueue_called = true; return { ok: true }; },
+    insertQueueImpl: async () => { enqueue_called = true; return { ok: true, queue_row_id: "q-1" }; },
   }));
 
   try {
@@ -106,7 +112,7 @@ test("RISK-010: phone_suppressed → gate blocks before enqueue", async () => {
   let enqueue_called = false;
   __setQueueDeps(makePassingPipelineDeps({
     canSendFn: async () => ({ ok: false, reason: "phone_suppressed" }),
-    enqueue: async () => { enqueue_called = true; return { ok: true }; },
+    insertQueueImpl: async () => { enqueue_called = true; return { ok: true, queue_row_id: "q-1" }; },
   }));
 
   try {
@@ -123,30 +129,14 @@ test("RISK-010: phone_suppressed → gate blocks before enqueue", async () => {
 test("RISK-010: healthy thread → gate passes, enqueue called once", async () => {
   let enqueue_count = 0;
 
-  // queueAutoReply writes directly via deps.supabase.from("send_queue").insert — track that
-  function makeCountingSupabase() {
-    return {
-      from: (table) => {
-        if (table === "send_queue") {
-          return {
-            select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
-            insert: () => { enqueue_count++; return { select: () => ({ single: () => Promise.resolve({ data: { id: "q-1", status: "queued" }, error: null }) }) }; },
-          };
-        }
-        if (table === "message_events") {
-          return { select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: makeInboundRow(), error: null }) }) }) };
-        }
-        return {
-          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }), single: () => Promise.resolve({ data: null, error: null }) }) }),
-          insert: () => { enqueue_count++; return { select: () => ({ single: () => Promise.resolve({ data: { id: "q-1" }, error: null }) }) }; },
-        };
-      },
-    };
-  }
-
   __setQueueDeps({
-    ...makePassingPipelineDeps({ canSendFn: async () => ({ ok: true, reason: null }) }),
-    supabase: makeCountingSupabase(),
+    ...makePassingPipelineDeps({
+      canSendFn: async () => ({ ok: true, reason: null }),
+      insertQueueImpl: async () => {
+        enqueue_count += 1;
+        return { ok: true, queue_row_id: "q-1" };
+      },
+    }),
   });
 
   try {
@@ -195,26 +185,26 @@ test("RISK-010: resolve-seller-auto-reply-plan has no enqueue call", async () =>
 
 // ─── canSend import checks ────────────────────────────────────────────────────
 
-test("RISK-010: queueAutoReply.js imports canSend from send-now-service", async () => {
+test("RISK-010: queueAutoReply.js routes enqueue through canonical-queue-writer", async () => {
   const { execSync } = await import("node:child_process");
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const file = path.resolve(__dirname, "../../src/lib/automation/queueAutoReply.js");
 
-  const output = execSync(`grep -n "canSend" "${file}"`, { encoding: "utf8" }).trim();
-  assert.ok(output.length > 0, "queueAutoReply.js must reference canSend");
-  assert.ok(output.includes("send-now-service"), "must import canSend from send-now-service");
+  const output = execSync(`grep -n "enqueueCanonicalOutboundSms\\|canSendImpl\\|canSendFn" "${file}"`, { encoding: "utf8" }).trim();
+  assert.ok(output.includes("enqueueCanonicalOutboundSms"), "queueAutoReply must use canonical queue writer");
+  assert.ok(output.includes("canSendImpl") || output.includes("canSendFn"), "queueAutoReply must wire send gate deps");
 });
 
-test("RISK-010: execute-autonomous-reply.js imports canSend from send-now-service", async () => {
+test("RISK-010: execute-autonomous-reply.js routes enqueue through canonical-queue-writer", async () => {
   const { execSync } = await import("node:child_process");
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const file = path.resolve(__dirname, "../../src/lib/domain/seller-flow/execute-autonomous-reply.js");
 
-  const output = execSync(`grep -n "canSend" "${file}"`, { encoding: "utf8" }).trim();
-  assert.ok(output.length > 0, "execute-autonomous-reply.js must reference canSend");
-  assert.ok(output.includes("send-now-service"), "must import canSend from send-now-service");
+  const output = execSync(`grep -n "enqueueCanonicalOutboundSms\\|canSendImpl" "${file}"`, { encoding: "utf8" }).trim();
+  assert.ok(output.includes("enqueueCanonicalOutboundSms"), "execute-autonomous-reply must use canonical queue writer");
+  assert.ok(output.includes("canSendImpl"), "execute-autonomous-reply must wire canSendImpl");
 });
