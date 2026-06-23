@@ -3195,6 +3195,33 @@ export async function syncDeliveryEvent(payload, options = {}) {
     message_events_updated: Array.isArray(message_events_data) ? message_events_data.length : 0,
   });
 
+  const acquisition_delivery_handler =
+    options.handleAcquisitionDeliveryReceipt || options.handleDeliveryReceipt || null;
+  if (typeof acquisition_delivery_handler === "function") {
+    for (const row of send_queue_data || []) {
+      const metadata = ensureObject(row?.metadata);
+      const source = clean(row?.source || metadata.source).toLowerCase();
+      const acquisition_managed =
+        metadata.acquisition_managed === true ||
+        metadata.default_acquisition_engine === true ||
+        source.startsWith("default_acquisition_") ||
+        source === "campaign_launch_execution";
+      if (!acquisition_managed) continue;
+      await acquisition_delivery_handler(
+        { queue_row: row, ...metadata },
+        {
+          delivery_status: final_delivery_status,
+          provider_delivery_status: provider_status || null,
+          failure_reason:
+            final_delivery_status === "failed" ? provider_failure_reason : null,
+          delivered_at: final_delivery_status === "delivered" ? incoming_delivered_at : null,
+          provider_message_id: provider_message_sid,
+        },
+        options,
+      );
+    }
+  }
+
   return {
     provider_message_sid,
     provider_status,

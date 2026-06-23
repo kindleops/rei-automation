@@ -1,4 +1,9 @@
 import {
+  acquisitionQueueOperation,
+  acquisitionRuntimeDisabled,
+  getAcquisitionRuntimeControl,
+} from "@/lib/domain/acquisition/acquisition-runtime-control.js";
+import {
   buildQueueMessageEventMetadata,
   buildQueueSendFailedTriggerName,
 } from "@/lib/domain/events/message-event-metadata.js";
@@ -1266,6 +1271,20 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
   const queue_row_id = getQueueRowId(queue_row);
   const manual_inbox_send = isManualInboxSend(queue_row);
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
+
+  const acquisition_operation = acquisitionQueueOperation(queue_row);
+  if (acquisition_operation) {
+    const runtime = await getAcquisitionRuntimeControl(acquisition_operation, deps);
+    if (!runtime.enabled) {
+      const disabled = acquisitionRuntimeDisabled(runtime);
+      return {
+        ...disabled,
+        sent: false,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+  }
 
   if (!queue_row_id) {
     logMissingQueueRowId(queue_row, "processSupabaseQueueItem");

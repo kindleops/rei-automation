@@ -712,7 +712,10 @@ function shouldCreatePipelineForInbound({
     seller_stage_reply?.plan?.selected_variant_group
   );
 
-  if (seller_stage_use_case === SELLER_FLOW_STAGES.ASKING_PRICE) {
+  if (
+    seller_stage_use_case === SELLER_FLOW_STAGES.ASKING_PRICE ||
+    seller_stage_use_case === "seller_asking_price"
+  ) {
     return true;
   }
 
@@ -1121,12 +1124,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         error_message: err?.message || "unknown_message_event_create_error",
         error_stack: err?.stack || null,
       });
-      safeWarn("textgrid.inbound_message_event_create_failed", {
-        message_id: extracted.message_id,
-        inbound_from,
-        inbound_to,
-        error_message: err?.message || "unknown_message_event_create_error",
-      });
+      return failStepAndReturn("textgrid_inbound_failed_message_event_create", err);
     }
 
     if (inbound_debug_stage === "after_message_event_create") {

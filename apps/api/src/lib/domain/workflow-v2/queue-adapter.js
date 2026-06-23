@@ -113,7 +113,12 @@ async function enqueueWorkflowMessage(input = {}, deps = {}) {
 
   const result = await insertSupabaseSendQueueRow(payload, { supabase: client, ...deps });
 
-  if (result?.reason === 'duplicate_blocked' || result?.duplicate === true) {
+  if (
+    result?.reason === 'duplicate_blocked' ||
+    result?.reason === 'idempotent_replay' ||
+    result?.idempotent_replay === true ||
+    result?.duplicate === true
+  ) {
     return {
       ok: true,
       duplicate: true,
