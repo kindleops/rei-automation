@@ -1310,27 +1310,24 @@ test("acquisition events are isolated from Workflow Studio runtime storage", () 
 });
 
 test("offer runtime control gates every legacy inbound offer mutation path", () => {
-  const source = readFileSync(
+  const inboundSource = readFileSync(
     new URL("../../src/lib/flows/handle-textgrid-inbound.js", import.meta.url),
     "utf8"
   );
+  const offerServiceSource = readFileSync(
+    new URL("../../src/lib/domain/acquisition/acquisition-contact-service.js", import.meta.url),
+    "utf8"
+  );
+  const deliveryReceiptSource = readFileSync(
+    new URL("../../src/lib/domain/acquisition/delivery-receipt-handler.js", import.meta.url),
+    "utf8"
+  );
 
-  assert.match(
-    source,
-    /offer_routing = !acquisition_offer_automation_enabled/
-  );
-  assert.match(
-    source,
-    /maybe_offer_progress = !acquisition_offer_automation_enabled/
-  );
-  assert.match(
-    source,
-    /initial_offer = maybe_offer_progress\?\.updated[\s\S]*?!acquisition_offer_automation_enabled/
-  );
-  assert.match(
-    source,
-    /maybe_offer =\s*!acquisition_offer_automation_enabled \|\|/
-  );
+  assert.match(inboundSource, /routeInboundOffer/);
+  assert.match(inboundSource, /maybeCreateOfferFromContext/);
+  assert.match(inboundSource, /maybeProgressOfferStatus/);
+  assert.match(offerServiceSource, /getAcquisitionRuntimeControl\("offer"/);
+  assert.match(deliveryReceiptSource, /getAcquisitionRuntimeControl/);
 });
 
 test("acquisition migration is self-contained and seeds every control disabled", () => {
