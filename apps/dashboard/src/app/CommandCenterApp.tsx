@@ -67,7 +67,7 @@ const navItems: NavItem[] = [
   { path: '/entity-graph', label: 'Entity Graph', icon: 'grid', shortcut: 'E', room: 'Entity Graph' },
   { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'stats', shortcut: 'O', room: 'Comp Intelligence' },
   { path: '/buyer-match', label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match' },
-  { path: '/queue', label: 'Queue', icon: 'send', shortcut: 'Q', room: 'Queue' },
+  { path: '/queue', label: 'Outbound Command Center', icon: 'send', shortcut: 'Q', room: 'Outbound Command Center' },
   { path: '/pipeline', label: 'Pipeline', icon: 'radar', shortcut: 'P', room: 'Pipeline' },
   { path: '/calendar', label: 'Calendar', icon: 'bell', shortcut: 'L', room: 'Calendar' },
   { path: '/map', label: 'Map', icon: 'map', shortcut: 'M', room: 'Map' },

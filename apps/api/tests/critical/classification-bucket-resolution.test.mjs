@@ -103,8 +103,25 @@ describe("Classification Bucket Resolution", () => {
     assert.strictEqual(flags.not_interested, false);
   });
 
-  it("resolves unclear low-confidence inbound to needs_review bucket", () => {
+  it("resolves unclear low-confidence inbound to new_replies bucket (not operator review)", () => {
     const classification = { primary_intent: "unclear", confidence: 0.55 };
+    const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
+    const status = resolveUniversalStatusFromClassification(classification, { direction: "inbound" });
+    assert.strictEqual(bucket, "new_replies");
+    assert.strictEqual(status.universal_status, "active");
+  });
+
+  it("resolves hostile_or_legal inbound to needs_review bucket", () => {
+    const classification = { primary_intent: "hostile_or_legal" };
+    const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
+    assert.strictEqual(bucket, "needs_review");
+  });
+
+  it("resolves retry-exhausted system failure to needs_review bucket", () => {
+    const classification = {
+      primary_intent: "unclear",
+      automation_decision: { system_failure: true, retry_exhausted: true },
+    };
     const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
     assert.strictEqual(bucket, "needs_review");
   });

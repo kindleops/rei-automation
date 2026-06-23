@@ -4,6 +4,14 @@ import {
   WAITING_REPLY_WINDOW_MS,
   buildColdTransitionPatch,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
+import {
+  INBOX_THREAD_STATE_SELECT_FIELDS,
+  fetchDerivedNullBucketThreadKeysForTab,
+  resolveCanonicalInboxBucket,
+  resolveEffectiveInboxBucket,
+  threadMatchesInboxTab,
+} from "@/lib/domain/inbox/inbox-thread-state-contract.js";
 import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 import {
   parseAdvancedFiltersParam,
@@ -771,7 +779,11 @@ function normalizeThreadRow(row = {}, query = {}) {
     direction: normalizedDirection,
     canonical_e164: normalizedPhone || row.canonical_e164,
   }) || canonicalThreadKey;
-  const computedBucket = lower(row.inbox_bucket) || bucketFromEnrichedRow(row);
+  const computedBucket =
+    lower(row.inbox_bucket) ||
+    bucketFromEnrichedRow(row) ||
+    deriveInboxBucketFromThreadState(row) ||
+    null;
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
   const latestDeliveryStatus =
     clean(row.latest_delivery_status) ||
@@ -1289,14 +1301,16 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      return null;
+      query = query.eq("inbox_bucket", "waiting");
+      break;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
       }
       break;
     case "unlinked":
-      return null;
+      if (typeof query.is === "function") query = query.is("property_id", null);
+      break;
     default:
       return null;
   }
@@ -1304,7 +1318,9 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
   const { data, error } = await query;
   if (error) throw error;
 
-  return [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+  const explicitKeys = [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+  const derivedNullKeys = await fetchDerivedNullBucketThreadKeysForTab(supabase, normalized);
+  return [...new Set([...explicitKeys, ...derivedNullKeys])];
 }
 
 async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
@@ -1313,7 +1329,7 @@ async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
 
   const { data, error } = await supabase
     .from("inbox_thread_state")
-    .select("thread_key,inbox_bucket")
+    .select(INBOX_THREAD_STATE_SELECT_FIELDS)
     .in("thread_key", uniqueKeys);
 
   if (error) throw error;
@@ -1321,7 +1337,7 @@ async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
   const bucketByThreadKey = new Map();
   for (const row of data || []) {
     const threadKey = clean(row.thread_key);
-    const bucket = lower(row.inbox_bucket);
+    const bucket = resolveEffectiveInboxBucket(row);
     if (threadKey && bucket) bucketByThreadKey.set(threadKey, bucket);
   }
 
@@ -1356,7 +1372,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
           ? query.in("inbox_category", ["hot_leads", "new_inbound", "automated", "outbound_active"])
           : query;
       case "waiting":
-        return query;
+        return query.eq("inbox_bucket", "waiting");
       case "unlinked":
         return typeof query.is === "function" ? query.is("property_id", null) : query;
       default:
@@ -1393,11 +1409,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
         : query;
     case "waiting":
-      query = query.eq(sourceConfig.directionColumn || "latest_message_direction", "outbound");
-      if (typeof query.not === "function") {
-        query = query.not("inbox_bucket", "in", "(dead,suppressed)");
-      }
-      return query;
+      return query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     default:
@@ -1501,7 +1513,8 @@ async function queryAuthoritativeInboxThreads(params = {}, {
       query = query.eq("inbox_bucket", "suppressed");
       break;
     case "waiting":
-      return null;
+      query = query.eq("inbox_bucket", "waiting");
+      break;
     case "active":
       if (typeof query.in === "function") {
         query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
@@ -1705,6 +1718,38 @@ async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
   return transitioned;
 }
 
+async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmptyCounts()) {
+  const PAGE_SIZE = 1000;
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("inbox_thread_state")
+      .select(INBOX_THREAD_STATE_SELECT_FIELDS)
+      .is("inbox_bucket", null)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) {
+      hasMore = false;
+      break;
+    }
+
+    for (const row of rows) {
+      const derived = resolveCanonicalInboxBucket(row);
+      if (!derived || !Object.prototype.hasOwnProperty.call(counts, derived)) continue;
+      counts[derived] += 1;
+    }
+
+    offset += rows.length;
+    hasMore = rows.length === PAGE_SIZE;
+  }
+
+  return counts;
+}
+
 async function fetchAuthoritativeInboxCounts(supabase) {
   await transitionStaleWaitingThreads(supabase);
 
@@ -1755,6 +1800,7 @@ async function fetchAuthoritativeInboxCounts(supabase) {
   counts.all = Number(allCount || 0);
   counts.all_messages = counts.all;
   counts.unlinked = Number(unlinkedCount || 0);
+  await augmentCountsWithDerivedNullBuckets(supabase, counts);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;

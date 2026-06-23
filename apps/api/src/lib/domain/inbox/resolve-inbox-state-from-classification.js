@@ -140,10 +140,10 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     };
   }
 
-  // Unclear / fallback
+  // Unclear inbound replies stay in the automation lane until a true exception is detected.
   return {
-    universal_status: "needs_review",
-    universal_stage: classification.stage_hint || "needs_review"
+    universal_status: "active",
+    universal_stage: classification.stage_hint || "new_reply"
   };
 }
 
@@ -164,12 +164,13 @@ const PRIORITY_OBJECTIONS = [
   "wants_proof_of_funds",
 ];
 
-const NEEDS_REVIEW_INTENTS = [
-  "unclear",
+const OPERATOR_EXCEPTION_INTENTS = new Set([
   "property_correction",
-  "info_request",
   "hostile_or_legal",
-];
+  "identity_conflict",
+  "legal_exception",
+  "compliance_exception",
+]);
 
 const NEW_REPLY_INTENTS = [
   "who_is_this",
@@ -178,7 +179,26 @@ const NEW_REPLY_INTENTS = [
   "need_time",
 ];
 
-const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
+function isOperatorEscalation(classification = {}) {
+  const decision = classification.automation_decision || {};
+  return (
+    decision.human_review_required === true &&
+    (decision.operator_escalation === true || decision.escalation_policy === "operator_exception")
+  );
+}
+
+function isSystemFailureException(classification = {}) {
+  const decision = classification.automation_decision || {};
+  const reasonCodes = Array.isArray(decision.reason_codes)
+    ? decision.reason_codes.map((code) => lower(code))
+    : [];
+  return (
+    decision.system_failure === true ||
+    decision.retry_exhausted === true ||
+    reasonCodes.includes("retry_exhausted") ||
+    reasonCodes.includes("system_failure")
+  );
+}
 
 function normalizeLegacyBucket(bucket = "") {
   const normalized = clean(bucket).toLowerCase();
@@ -188,18 +208,60 @@ function normalizeLegacyBucket(bucket = "") {
 
 function shouldRouteToNeedsReview(classification = {}) {
   const primary = clean(classification.primary_intent);
-  const confidence = Number(classification.confidence);
+  const compliance = clean(classification.compliance_flag);
 
-  if (NEEDS_REVIEW_INTENTS.includes(primary)) return true;
-  if (classification.needs_review === true) return true;
-  if (classification.automation_decision?.human_review_required === true && primary === "unclear") {
+  if (OPERATOR_EXCEPTION_INTENTS.has(primary)) return true;
+  if (classification.needs_review === true && (OPERATOR_EXCEPTION_INTENTS.has(primary) || isOperatorEscalation(classification))) {
     return true;
   }
-  if (Number.isFinite(confidence) && confidence > 0 && confidence < REVIEW_CONFIDENCE_THRESHOLD) {
-    return true;
-  }
+  if (compliance === "legal_hold" || compliance === "compliance_exception") return true;
+  if (isOperatorEscalation(classification)) return true;
+  if (isSystemFailureException(classification)) return true;
 
   return false;
+}
+
+export function deriveInboxBucketFromThreadState(row = {}) {
+  const explicit = normalizeLegacyBucket(row.inbox_bucket || row.inbox_category || "");
+  if (explicit) return explicit;
+
+  if (row.is_suppressed === true || lower(row.disposition) === "suppressed") return "suppressed";
+  if (lower(row.disposition) === "wrong_number") return "dead";
+  if (lower(row.disposition) === "not_interested") return "dead";
+
+  const classification = {
+    primary_intent: row.last_intent || row.primary_intent || row.detected_intent || null,
+    objection: row.objection || null,
+    compliance_flag: row.compliance_flag || null,
+    confidence: row.confidence ?? null,
+    needs_review: row.needs_review === true,
+    automation_decision: row.metadata?.automation_decision || row.automation_decision || null,
+  };
+
+  const messageEvent = {
+    direction: row.latest_direction || row.latest_message_direction || null,
+    sent_at: row.last_outbound_at || null,
+    received_at: row.last_inbound_at || null,
+    delivery_status: row.latest_delivery_status || null,
+    provider_delivery_status: row.latest_provider_delivery_status || null,
+  };
+
+  const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row);
+  if (bucket) return bucket;
+  if (hasExplicitColdEvidence(row)) return "cold";
+  return null;
+}
+
+function hasExplicitColdEvidence(row = {}) {
+  if (lower(row.automation_lane) !== "cold_reactivation") return false;
+  const stage = lower(row.stage || row.status || "");
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return (
+    stage.includes("cold")
+    || stage === "nurture"
+    || metadata.cold_campaign === true
+    || metadata.automation_lane === "cold_reactivation"
+  );
 }
 
 export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}) {
@@ -268,6 +330,7 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
         messageEvent.delivery_status ||
         messageEvent.provider_delivery_status ||
         existingState.latest_delivery_status,
+      workflowRow: existingState,
     });
     return outboundState.inbox_bucket;
   }

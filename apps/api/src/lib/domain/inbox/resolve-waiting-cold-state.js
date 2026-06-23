@@ -37,11 +37,82 @@ export function isFailedDeliveryStatus(status = "") {
   return normalized.includes("fail") || normalized.includes("undeliver");
 }
 
+const PENDING_WORKFLOW_STAGES = new Set([
+  "awaiting_response",
+  "waiting",
+  "pending",
+  "probate",
+  "title",
+  "closing",
+  "document_pending",
+  "buyer_pending",
+  "paused",
+]);
+
+function object(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export function resolveWorkflowWaitingState(row = {}, now = Date.now()) {
+  const followUpMs = parseTimestampMs(row.follow_up_at);
+  if (followUpMs > now) {
+    return { is_waiting: true, reason: "follow_up_scheduled" };
+  }
+
+  const nextScheduledMs = parseTimestampMs(row.next_scheduled_for);
+  if (nextScheduledMs > now) {
+    return { is_waiting: true, reason: "next_scheduled_for" };
+  }
+
+  const nextActionMs = parseTimestampMs(row.next_action_at);
+  if (nextActionMs > now) {
+    return { is_waiting: true, reason: "next_action_at" };
+  }
+
+  const nextAction = lower(row.next_action);
+  if (nextAction && !["none", "closed", "complete", "completed", "dead"].includes(nextAction)) {
+    return { is_waiting: true, reason: "next_action_pending" };
+  }
+
+  const stage = lower(row.stage || row.status || row.automation_status || "");
+  if (PENDING_WORKFLOW_STAGES.has(stage) || stage.includes("pending") || stage.includes("awaiting")) {
+    return { is_waiting: true, reason: "workflow_stage_pending" };
+  }
+
+  const metadata = object(row.metadata);
+  if (metadata.awaiting_external_event === true || metadata.workflow_paused === true) {
+    return { is_waiting: true, reason: "workflow_paused" };
+  }
+
+  if (isOutboundLastWithoutReply({
+    lastOutboundAt: row.last_outbound_at || row.lastOutboundAt,
+    lastInboundAt: row.last_inbound_at || row.lastInboundAt,
+  })) {
+    const automationStatus = lower(row.automation_status || row.automation_state || "");
+    if (
+      automationStatus.includes("await")
+      || automationStatus.includes("pending")
+      || Number(row.pending_queue_count || 0) > 0
+    ) {
+      return { is_waiting: true, reason: "awaiting_seller_response" };
+    }
+
+    const outboundMs = parseTimestampMs(row.last_outbound_at || row.lastOutboundAt);
+    const ageMs = now - outboundMs;
+    if (outboundMs && ageMs <= WAITING_REPLY_WINDOW_MS) {
+      return { is_waiting: true, reason: "recent_outbound_grace" };
+    }
+  }
+
+  return { is_waiting: false, reason: null };
+}
+
 export function resolveOutboundReplyState({
   lastOutboundAt,
   lastInboundAt,
   latestDeliveryStatus,
   now = Date.now(),
+  workflowRow = {},
 } = {}) {
   if (!isOutboundLastWithoutReply({ lastOutboundAt, lastInboundAt })) {
     return {
@@ -59,9 +130,12 @@ export function resolveOutboundReplyState({
     };
   }
 
-  const outboundMs = parseTimestampMs(lastOutboundAt);
-  const ageMs = now - outboundMs;
-  if (ageMs <= WAITING_REPLY_WINDOW_MS) {
+  const workflow = resolveWorkflowWaitingState({
+    ...workflowRow,
+    last_outbound_at: lastOutboundAt,
+    last_inbound_at: lastInboundAt,
+  }, now);
+  if (workflow.is_waiting) {
     return {
       inbox_bucket: "waiting",
       automation_lane: null,
@@ -71,7 +145,7 @@ export function resolveOutboundReplyState({
 
   return {
     inbox_bucket: null,
-    automation_lane: "cold_reactivation",
+    automation_lane: null,
     disposition: null,
   };
 }

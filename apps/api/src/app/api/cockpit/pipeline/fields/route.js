@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js';
 import { exportRegistryForClient } from '@/lib/domain/opportunity/pipeline-display-field-registry.js';
-import { corsHeaders, ensureMutationAuth, unauthorizedJson } from '../../_shared.js';
+import { corsHeaders, ensureMutationAuth, unauthorizedJson } from '../_shared.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
