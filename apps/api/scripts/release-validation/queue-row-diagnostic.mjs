@@ -9,7 +9,7 @@ const nowIso = now.toISOString()
 
 const { data: rows, error } = await supabase
   .from('send_queue')
-  .select('id,queue_status,scheduled_for,scheduled_for_utc,to_phone_number,from_phone_number,master_owner_id,property_id,message_type,metadata,retry_count,provider_status,updated_at')
+  .select('id,queue_status,scheduled_for,scheduled_for_utc,to_phone_number,from_phone_number,master_owner_id,property_id,message_type,metadata,retry_count,updated_at')
   .in('queue_status', ['scheduled', 'queued', 'pending'])
   .order('scheduled_for_utc', { ascending: true, nullsFirst: false })
   .limit(5)
@@ -45,7 +45,7 @@ console.log(JSON.stringify({
     master_owner_id: row.master_owner_id,
     property_id: row.property_id,
     retry_count: row.retry_count,
-    provider_status: row.provider_status,
+
   },
   chain: {
     due_evaluation: due,
