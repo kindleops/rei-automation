@@ -49,6 +49,41 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function batchDedupKey(row = {}) {
+  const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const owner = clean(row.master_owner_id || meta.master_owner_id);
+  const phone = clean(row.phone_id || row.best_phone_id || meta.phone_id || row.to_phone_number);
+  const touch = row.touch_number ?? meta.touch_number;
+  if (!owner && !phone) return null;
+  return `${owner}:${phone}:${touch ?? ""}`;
+}
+
+function dedupeRunnableRows(rows = [], log_warn = warn) {
+  const seen = new Set();
+  const runnable = [];
+  let duplicate_count = 0;
+
+  for (const row of rows) {
+    const key = batchDedupKey(row);
+    if (key && seen.has(key)) {
+      duplicate_count += 1;
+      continue;
+    }
+    if (key) seen.add(key);
+    runnable.push(row);
+  }
+
+  if (duplicate_count > 0) {
+    log_warn("queue.run_batch_duplicates_suppressed", {
+      duplicate_count,
+      input_count: rows.length,
+      runnable_count: runnable.length,
+    });
+  }
+
+  return { rows: runnable, duplicate_count };
+}
+
 async function buildSupabaseCandidateSummary(limit = 50, now = nowIso(), deps = {}) {
   const load_runnable_send_queue_rows = deps.loadRunnableSendQueueRows || loadRunnableSendQueueRows;
   const loaded = await load_runnable_send_queue_rows(limit, {
@@ -201,12 +236,15 @@ export async function runSendQueue(
   // 2b. Campaign-gated dispatch. Rows belonging to a campaign only send while
   // that campaign is live (ACTIVE/activating). Unlinked rows flow as today.
   const liveCampaignIds = await fetchLiveCampaignIds(supabase);
-  const rows = candidateRows.filter((row) => {
+  const campaign_filtered = candidateRows.filter((row) => {
     const campaignId = row.campaign_id || row.metadata?.campaign_id || null;
     if (!campaignId) return true;
     return liveCampaignIds ? liveCampaignIds.has(campaignId) : false;
   });
-  const campaign_gated_held_back = candidateRows.length - rows.length;
+  const campaign_gated_held_back = candidateRows.length - campaign_filtered.length;
+  const deduped = dedupeRunnableRows(campaign_filtered, log_warn);
+  const rows = deduped.rows;
+  const batch_duplicate_suppressed_count = deduped.duplicate_count;
   if (campaign_gated_held_back > 0) {
     log_info("queue.campaign_gated_rows_held", {
       held_back: campaign_gated_held_back,
@@ -308,6 +346,7 @@ export async function runSendQueue(
       sent_count,
       failed_count,
       skipped_count,
+      batch_duplicate_suppressed_count,
       batch_duration_ms: Date.now() - new Date(run_started_at).getTime()
   });
 
@@ -316,6 +355,7 @@ export async function runSendQueue(
     sent_count, 
     failed_count, 
     skipped_count,
+    batch_duplicate_suppressed_count,
     claimed_count: rows.length,
     processed_count,
     attempted_count: processed_count,

@@ -4253,6 +4253,7 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
   const now = input.now || new Date().toISOString();
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  const get_system_flag = deps.getSystemFlag || getSystemFlag;
 
   const get_system_flag =
     deps.getSystemFlag ||
@@ -4296,11 +4297,11 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
 
   // ── Fetch Identity Policy Flags ───────────────────────────────────────
   const allow_weak_identity_outbound = asBoolean(
-    input.allow_weak_identity_outbound ?? (await getSystemFlag("allow_weak_identity_outbound")),
+    input.allow_weak_identity_outbound ?? (await get_system_flag("allow_weak_identity_outbound")),
     asBoolean(process.env.ALLOW_WEAK_IDENTITY_OUTBOUND, false)
   );
 
-  const identity_blocked_markets = input.identity_blocked_markets ?? (await getSystemFlag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
+  const identity_blocked_markets = input.identity_blocked_markets ?? (await get_system_flag("identity_blocked_markets")) ?? process.env.IDENTITY_BLOCKED_MARKETS;
   const identity_gate_mode = clean(input.identity_gate_mode || "strict").toLowerCase();
   const allow_identity_unknown = asBoolean(input.allow_identity_unknown, false);
   // ─────────────────────────────────────────────────────────────────────────
