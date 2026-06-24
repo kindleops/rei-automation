@@ -34,10 +34,7 @@ async function main() {
   moduleRes.ok ? pass('AuthProvider module', `status=${moduleRes.status}`) : fail('AuthProvider module', `status=${moduleRes.status}`)
   moduleBody.includes('$RefreshSig$') ? pass('AuthProvider refresh transform') : fail('AuthProvider refresh transform')
 
-  if (failures > 0) {
-    console.error(`FAIL dashboard-react-refresh-proof failures=${failures}`)
-    process.exit(1)
-  }
+  if (failures > 0) process.exit(1)
   console.log('PASS dashboard-react-refresh-proof')
 }
 

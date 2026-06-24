@@ -3365,12 +3365,25 @@ export const getThreadMessagesPageForThread = async (
         diagnostics,
       }
     }
+    return emptyThreadMessagePage(offset, limit, {
+      degraded: true,
+      fetch_failed: true,
+      network_unavailable: result.error === 'BACKEND_UNAVAILABLE' || result.status === 502,
+      error_code: asString(result.error, 'thread_messages_failed'),
+      error_message: asString(result.message, ''),
+    })
   } catch (err) {
     if (options.signal?.aborted || (err as { name?: string })?.name === 'AbortError') throw err
-    if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages degraded; preserving empty messages', err)
+    if (DEV) console.warn('[ThreadMessageHydration] cockpit thread-messages fetch failed; preserving cached messages', err)
+    return emptyThreadMessagePage(offset, limit, {
+      degraded: true,
+      fetch_failed: true,
+      network_unavailable: true,
+      error_message: err instanceof Error ? err.message : String(err),
+    })
   }
 
-  return emptyThreadMessagePage(offset, limit, { degraded: true })
+  return emptyThreadMessagePage(offset, limit, { degraded: true, fetch_failed: true })
 }
 
 export const getAllThreadMessagesForThread = async (
@@ -3438,18 +3451,21 @@ export const getThreadHydrationForThread = async (
   const page = await getAllThreadMessagesForThread(thread, { signal })
   const diagnostics = asRecord(page.diagnostics)
   const integrityBlocked = Boolean(diagnostics.integrity_blocked || diagnostics.integrityBlocked)
+  const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
   const messages = integrityBlocked ? [] : page.messages
 
-  commitDashboardMessages(
-    threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''),
-    messages as unknown as AnyRecord[],
-    {
-      phase: 'messages',
-      source: 'thread_messages',
-      integrityBlocked,
-      replace: true,
-    },
-  )
+  if (!fetchFailed && messages.length > 0) {
+    commitDashboardMessages(
+      threadKey || asString(threadRecord.id ?? threadRecord.threadKey ?? threadRecord.thread_key, ''),
+      messages as unknown as AnyRecord[],
+      {
+        phase: 'messages',
+        source: 'thread_messages',
+        integrityBlocked,
+        replace: true,
+      },
+    )
+  }
   logHydrationPhaseDone('messages', hydrationStartedAt, {
     threadKey,
     messages: messages.length,

@@ -498,21 +498,4 @@ export function applyThemeToDOM(): void {
   root.style.setProperty('--tone-primary', accent.primary)
   root.style.setProperty('--accent-cyan', accent.primary) // legacy fallback
 
-  // Dev-only visual proof helper for token resolution
-  if (import.meta.env.DEV) {
-    setTimeout(() => {
-      const cs = getComputedStyle(document.body);
-      console.log(isLight ? '--- Light Mode Computed Vars ---' : '--- Dark Mode Computed Vars ---');
-      console.log('--nx-bg:', cs.getPropertyValue('--nx-bg'));
-      console.log('--nx-panel-bg:', cs.getPropertyValue('--nx-panel-bg'));
-      console.log('--nx-card-bg:', cs.getPropertyValue('--nx-card-bg'));
-      console.log('--nx-text:', cs.getPropertyValue('--nx-text'));
-      console.log('--bg-0:', cs.getPropertyValue('--bg-0'));
-      console.log('--surface-0:', cs.getPropertyValue('--surface-0'));
-      console.log('--dossier-bg-0:', cs.getPropertyValue('--dossier-bg-0'));
-      console.log('--saas-bg:', cs.getPropertyValue('--saas-bg'));
-      console.log('--aic-bg:', cs.getPropertyValue('--aic-bg'));
-      console.log('--nexus-accent:', cs.getPropertyValue('--nexus-accent'));
-    }, 100);
-  }
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Nexus local dev supervisor — single API + Dashboard process tree with health gates.
+ * Nexus dev supervisor — API and Dashboard are independent lifecycles.
+ * API restarts (build-pause, crash) must never terminate Vite on :5173.
  */
 
 import { execSync, spawn } from 'node:child_process'
@@ -40,15 +41,19 @@ const API_HEALTH_TIMEOUT_MS = Number(process.env.DEV_ALL_API_HEALTH_TIMEOUT_MS |
 const API_HEALTH_INTERVAL_MS = Number(process.env.DEV_ALL_API_HEALTH_INTERVAL_MS || 500)
 const DASHBOARD_HEALTH_TIMEOUT_MS = Number(process.env.DEV_ALL_DASHBOARD_HEALTH_TIMEOUT_MS || 120_000)
 const DASHBOARD_HEALTH_INTERVAL_MS = Number(process.env.DEV_ALL_DASHBOARD_HEALTH_INTERVAL_MS || 500)
-const MAX_API_RESTARTS = Number(process.env.DEV_ALL_MAX_API_RESTARTS || 5)
+const MAX_API_RESTARTS = Number(process.env.DEV_ALL_MAX_API_RESTARTS || 8)
 const LOCK_DIR = path.join(ROOT, '.dev-all')
 const LOCK_FILE = path.join(LOCK_DIR, 'supervisor.lock.json')
 const BUILD_PAUSE_FILE = path.join(LOCK_DIR, 'build-pause.json')
+const EXIT_LOG_FILE = path.join(LOCK_DIR, 'child-exit.log.jsonl')
 const VITE_CACHE_DIR = path.join(ROOT, 'apps/dashboard/node_modules/.vite')
+const DASHBOARD_ROOT = path.join(ROOT, 'apps/dashboard')
+const VITE_BIN = path.join(ROOT, 'node_modules/.bin/vite')
 
-const children = []
+const children = new Map()
 let shuttingDown = false
 let apiRestartCount = 0
+let dashboardRestartCount = 0
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -79,16 +84,68 @@ function listPortPids(port) {
   }
 }
 
-async function stopPort(port, label) {
-  const pids = listPortPids(port)
+function readProcessDiagnostics(pid) {
+  if (!pid) return {}
+  try {
+    const ps = execSync(`ps -o pid=,ppid=,pgid=,rss=,vsz=,etime=,command= -p ${pid}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return { ps }
+  } catch {
+    return {}
+  }
+}
+
+function logChildExit(name, child, code, signal) {
+  const entry = {
+    at: new Date().toISOString(),
+    name,
+    pid: child?.pid ?? null,
+    exitCode: code,
+    signal: signal ?? null,
+    supervisorPid: process.pid,
+    buildPauseActive: isBuildPauseActive(),
+    ...readProcessDiagnostics(child?.pid),
+  }
+  try {
+    fs.mkdirSync(LOCK_DIR, { recursive: true })
+    fs.appendFileSync(EXIT_LOG_FILE, `${JSON.stringify(entry)}\n`)
+  } catch {
+    // ignore
+  }
+  console.error(`[dev:all] ${name} child exit diagnostics:`, JSON.stringify(entry))
+}
+
+async function stopApiPortOnly() {
+  const pids = listPortPids(API_PORT)
   if (!pids.length) return
-  console.log(`[dev:all] Stopping stale ${label} listener(s) on port ${port}: ${pids.join(', ')}`)
+  console.log(`[dev:all] Stopping API listener(s) on port ${API_PORT}: ${pids.join(', ')}`)
   for (const pid of pids) {
-    try { process.kill(pid, 'SIGTERM') } catch { /* already exited */ }
+    if (listPortPids(DASHBOARD_PORT).includes(pid)) {
+      console.warn(`[dev:all] Skipping pid ${pid} — also owns Dashboard port ${DASHBOARD_PORT}`)
+      continue
+    }
+    try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
   }
   await sleep(STOP_WAIT_MS)
-  for (const pid of listPortPids(port)) {
-    try { process.kill(pid, 'SIGKILL') } catch { /* already exited */ }
+  for (const pid of listPortPids(API_PORT)) {
+    if (listPortPids(DASHBOARD_PORT).includes(pid)) continue
+    try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
+  }
+}
+
+async function stopDashboardPortOnly() {
+  const pids = listPortPids(DASHBOARD_PORT)
+  if (!pids.length) return
+  console.log(`[dev:all] Stopping Dashboard listener(s) on port ${DASHBOARD_PORT}: ${pids.join(', ')}`)
+  for (const pid of pids) {
+    if (listPortPids(API_PORT).includes(pid) && !listPortPids(DASHBOARD_PORT).includes(pid)) continue
+    try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
+  }
+  await sleep(STOP_WAIT_MS)
+  for (const pid of listPortPids(DASHBOARD_PORT)) {
+    try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
   }
 }
 
@@ -96,28 +153,21 @@ function isBuildPauseActive() {
   return fs.existsSync(BUILD_PAUSE_FILE)
 }
 
-function readBuildPause() {
-  if (!fs.existsSync(BUILD_PAUSE_FILE)) return null
-  try {
-    return JSON.parse(fs.readFileSync(BUILD_PAUSE_FILE, 'utf8'))
-  } catch {
-    return { since: null, pid: null }
-  }
-}
-
 function acquireLock() {
   fs.mkdirSync(LOCK_DIR, { recursive: true })
   if (fs.existsSync(LOCK_FILE)) {
     try {
       const existing = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8'))
-      const ageMs = Date.now() - Number(existing.started_at_ms || 0)
-      if (existing.pid && ageMs < 30_000) {
+      if (existing.pid) {
         try {
           process.kill(existing.pid, 0)
-          console.error(`[dev:all] Another supervisor is running (pid=${existing.pid}). Stop it first.`)
-          process.exit(1)
+          const ageMs = Date.now() - Number(existing.started_at_ms || 0)
+          if (ageMs < 60_000) {
+            console.error(`[dev:all] Another supervisor is running (pid=${existing.pid}). Stop it first.`)
+            process.exit(1)
+          }
         } catch {
-          // stale lock
+          // stale
         }
       }
     } catch {
@@ -153,16 +203,13 @@ async function verifyApiHealth() {
     process.env.VITE_BACKEND_API_SECRET ||
     ''
   if (opsSecret) headers['x-ops-dashboard-secret'] = opsSecret
-
   const response = await fetch(`http://127.0.0.1:${API_PORT}/api/cockpit/health`, {
     headers,
     signal: AbortSignal.timeout(5000),
   })
   if (!response.ok) return false
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('json')) return false
   const json = await response.json()
-  return json?.ok === true || json?.status === 'ok' || response.ok
+  return json?.ok === true || json?.status === 'ok'
 }
 
 async function waitForApiHealth() {
@@ -181,24 +228,19 @@ async function verifyDashboardDevRuntime() {
   const htmlResponse = await fetch(base, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
   if (!htmlResponse.ok) return false
   const html = await htmlResponse.text()
-  if (!html.includes('$RefreshSig$') || !html.includes('/@react-refresh')) return false
-  if (!html.includes('/@vite/client')) return false
-
+  if (!html.includes('$RefreshSig$') || !html.includes('/@react-refresh') || !html.includes('/@vite/client')) {
+    return false
+  }
   const clientResponse = await fetch(`${base}/@vite/client`, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
   if (!clientResponse.ok) return false
-
   const refreshResponse = await fetch(`${base}/@react-refresh`, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
   if (!refreshResponse.ok) return false
-  const refreshBody = await refreshResponse.text()
-  if (!refreshBody.includes('injectIntoGlobalHook')) return false
-
   const moduleResponse = await fetch(`${base}/src/components/auth/AuthProvider.tsx`, {
     cache: 'no-store',
     signal: AbortSignal.timeout(8000),
   })
   if (!moduleResponse.ok) return false
-  const moduleBody = await moduleResponse.text()
-  return moduleBody.includes('$RefreshSig$')
+  return (await moduleResponse.text()).includes('$RefreshSig$')
 }
 
 async function waitForDashboardDevRuntime() {
@@ -220,35 +262,96 @@ async function waitForDashboardDevRuntime() {
   return false
 }
 
-function spawnWorkspace(name, workspace, script) {
+function isDashboardPortListening() {
+  return listPortPids(DASHBOARD_PORT).length > 0
+}
+
+function spawnWorkspace(name, workspace, script, { detached = false } = {}) {
   const child = spawn('npm', ['--workspace', workspace, 'run', script], {
     cwd: ROOT,
     stdio: 'inherit',
+    detached,
     env: { ...process.env, NODE_ENV: 'development', FORCE_COLOR: '1' },
   })
 
-  child.on('exit', (code, signal) => {
-    if (shuttingDown) return
+  if (detached && child.pid) {
+    child.unref()
+  }
 
-    if (name === 'API' && isBuildPauseActive()) {
-      const pause = readBuildPause()
-      console.log(`[dev:all] API stopped for production build (build-pause pid=${pause?.pid || 'unknown'}) — waiting...`)
+  child.on('exit', (code, signal) => {
+    logChildExit(name, child, code, signal)
+    if (shuttingDown) return
+    void handleChildExit(name, code, signal)
+  })
+
+  children.set(name, child)
+  return child
+}
+
+function spawnDashboardVite() {
+  const child = spawn(process.execPath, [VITE_BIN], {
+    cwd: DASHBOARD_ROOT,
+    stdio: 'inherit',
+    detached: true,
+    env: { ...process.env, NODE_ENV: 'development', FORCE_COLOR: '1' },
+  })
+
+  if (child.pid && process.platform !== 'win32') {
+    // New session — Vite cannot receive signals sent to the supervisor/API npm group.
+    try { process.kill(-child.pid, 0) } catch {
+      try { process.kill(child.pid, 0) } catch { /* ignore */ }
+    }
+    child.unref()
+  }
+
+  child.on('exit', (code, signal) => {
+    logChildExit('Dashboard', child, code, signal)
+    if (shuttingDown) return
+    void handleChildExit('Dashboard', code, signal)
+  })
+
+  children.set('Dashboard', child)
+  return child
+}
+
+async function handleChildExit(name, code, signal) {
+  if (name === 'API') {
+    if (isBuildPauseActive()) {
+      console.log('[dev:all] API stopped for production build — Dashboard stays alive; waiting for build-pause clear...')
       void watchBuildPauseAndRestartApi()
       return
     }
-
-    console.error(`[dev:all] ${name} exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
-    if (name === 'API' && apiRestartCount < MAX_API_RESTARTS) {
+    if (apiRestartCount < MAX_API_RESTARTS) {
       apiRestartCount += 1
-      console.log(`[dev:all] Restarting API (${apiRestartCount}/${MAX_API_RESTARTS})...`)
-      spawnWorkspace('API', 'apps/api', 'dev')
+      console.log(`[dev:all] Restarting API only (${apiRestartCount}/${MAX_API_RESTARTS}); Dashboard untouched`)
+      await restartApiOnly()
       return
     }
-    void shutdown(typeof code === 'number' ? code : 1)
-  })
+    console.error('[dev:all] API exceeded restart budget; Dashboard continues running')
+    return
+  }
 
-  children.push({ name, child, workspace, script })
-  return child
+  if (name === 'Dashboard') {
+    if (isBuildPauseActive() && isDashboardPortListening()) {
+      console.log('[dev:all] Dashboard wrapper exited during API build but Vite still listening — no restart')
+      return
+    }
+    if (dashboardRestartCount < 3) {
+      dashboardRestartCount += 1
+      console.log(`[dev:all] Restarting Dashboard only (${dashboardRestartCount}/3); API untouched`)
+      await restartDashboardOnly()
+      return
+    }
+    console.error('[dev:all] Dashboard exceeded restart budget')
+  }
+}
+
+async function restartApiOnly() {
+  await stopApiPortOnly()
+  spawnWorkspace('API', 'apps/api', 'dev')
+  const healthy = await waitForApiHealth()
+  console.log(healthy ? '[dev:all] API recovered' : '[dev:all] API failed health gate after restart')
+  if (healthy) apiRestartCount = 0
 }
 
 async function watchBuildPauseAndRestartApi() {
@@ -257,29 +360,33 @@ async function watchBuildPauseAndRestartApi() {
   }
   if (shuttingDown) return
   apiRestartCount = 0
-  console.log('[dev:all] Build pause cleared — restarting API once')
-  await stopPort(API_PORT, 'API')
-  spawnWorkspace('API', 'apps/api', 'dev')
-  const healthy = await waitForApiHealth()
-  console.log(healthy ? '[dev:all] API recovered after build pause' : '[dev:all] API failed to recover after build pause')
+  console.log('[dev:all] Build pause cleared — restarting API once (Dashboard unchanged)')
+  await restartApiOnly()
+}
+
+async function restartDashboardOnly() {
+  const apiPids = listPortPids(API_PORT)
+  await stopDashboardPortOnly()
+  clearViteCache()
+  await sleep(DASHBOARD_START_DELAY_MS)
+  spawnDashboardVite()
+  const ready = await waitForDashboardDevRuntime()
+  console.log(ready ? '[dev:all] Dashboard dev runtime recovered' : '[dev:all] Dashboard failed dev runtime gate')
 }
 
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return
   shuttingDown = true
   console.log('[dev:all] Shutting down API and Dashboard...')
-  for (const { name, child } of children) {
+  for (const [name, child] of children.entries()) {
     if (!child.killed) {
       console.log(`[dev:all] Stopping ${name}...`)
       child.kill('SIGTERM')
     }
   }
   await sleep(STOP_WAIT_MS)
-  for (const { child } of children) {
-    if (!child.killed) child.kill('SIGKILL')
-  }
-  await stopPort(API_PORT, 'API')
-  await stopPort(DASHBOARD_PORT, 'Dashboard')
+  await stopApiPortOnly()
+  await stopDashboardPortOnly()
   releaseLock()
   process.exit(exitCode)
 }
@@ -289,33 +396,32 @@ async function main() {
   process.on('SIGTERM', () => { void shutdown(0) })
 
   acquireLock()
-  await stopPort(API_PORT, 'API')
-  await stopPort(DASHBOARD_PORT, 'Dashboard')
+  await stopApiPortOnly()
+  await stopDashboardPortOnly()
 
   console.log(`[dev:all] Starting API and Dashboard (sha=${readGitSha()})...`)
   spawnWorkspace('API', 'apps/api', 'dev')
 
   console.log('[dev:all] Waiting for API health...')
-  const apiReady = await waitForApiHealth()
-  if (!apiReady) {
+  if (!(await waitForApiHealth())) {
     console.error('[dev:all] API failed health gate')
     await shutdown(1)
   }
   console.log('[dev:all] API healthy')
 
   await sleep(DASHBOARD_START_DELAY_MS)
-  spawnWorkspace('Dashboard', 'apps/dashboard', 'dev')
+  spawnDashboardVite()
 
   console.log('[dev:all] Waiting for Dashboard React Refresh runtime...')
-  const dashboardReady = await waitForDashboardDevRuntime()
-  if (!dashboardReady) {
+  if (!(await waitForDashboardDevRuntime())) {
     console.error('[dev:all] Dashboard failed dev runtime gate')
     await shutdown(1)
   }
 
+  const dashPid = listPortPids(DASHBOARD_PORT)[0] ?? null
   console.log('[dev:all] Ready')
   console.log(`[dev:all] API -> http://localhost:${API_PORT}`)
-  console.log(`[dev:all] Dashboard -> http://localhost:${DASHBOARD_PORT}`)
+  console.log(`[dev:all] Dashboard -> http://localhost:${DASHBOARD_PORT} (vite pid=${dashPid ?? 'unknown'})`)
   console.log('[dev:all] Press Ctrl+C to stop both servers.')
 }
 

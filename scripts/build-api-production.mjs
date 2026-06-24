@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+/**
+ * Production API build — touches only port 3000. Never kills Vite on :5173.
+ */
 
 import { execSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -9,6 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LOCK_DIR = path.join(ROOT, '.dev-all')
 const BUILD_PAUSE_FILE = path.join(LOCK_DIR, 'build-pause.json')
 const API_PORT = Number(process.env.DEV_ALL_API_PORT || 3000)
+const DASHBOARD_PORT = Number(process.env.DEV_ALL_DASHBOARD_PORT || 5173)
 const API_ROOT = path.join(ROOT, 'apps/api')
 const NEXT_DIR = path.join(API_ROOT, '.next')
 
@@ -34,15 +38,22 @@ function listPortPids(port) {
   }
 }
 
-async function stopApiListener() {
-  const pids = listPortPids(API_PORT)
-  if (!pids.length) return
-  console.log(`[build:api] Stopping API listener(s) on :${API_PORT}: ${pids.join(', ')}`)
-  for (const pid of pids) {
+async function stopApiListenerOnly() {
+  const apiPids = listPortPids(API_PORT)
+  const dashPids = new Set(listPortPids(DASHBOARD_PORT))
+  const targets = apiPids.filter((pid) => !dashPids.has(pid))
+  if (!targets.length) return
+
+  console.log(`[build:api] Stopping API-only listener(s) on :${API_PORT}: ${targets.join(', ')}`)
+  for (const pid of targets) {
     try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
   }
   await sleep(1200)
   for (const pid of listPortPids(API_PORT)) {
+    if (dashPids.has(pid)) {
+      console.warn(`[build:api] Refusing to kill pid ${pid} — also listens on Dashboard :${DASHBOARD_PORT}`)
+      continue
+    }
     try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
   }
 }
@@ -52,17 +63,22 @@ function runBuild() {
     const child = spawn('npm', ['--workspace', 'apps/api', 'run', 'build'], {
       cwd: ROOT,
       stdio: 'inherit',
-      env: { ...process.env, NODE_ENV: 'production' },
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        // Cap build heap so macOS memory pressure is less likely to SIGKILL sibling Vite.
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--max-old-space-size=3072'].filter(Boolean).join(' ').trim(),
+      },
     })
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`API build failed with exit code ${code}`))))
   })
 }
 
 async function main() {
-  console.log('[build:api] Starting supervised production build')
+  console.log('[build:api] Starting supervised production build (API port only)')
   setBuildPause(true)
   try {
-    await stopApiListener()
+    await stopApiListenerOnly()
     if (fs.existsSync(NEXT_DIR)) {
       console.log('[build:api] Cleaning apps/api/.next')
       fs.rmSync(NEXT_DIR, { recursive: true, force: true })

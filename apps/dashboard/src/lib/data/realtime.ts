@@ -55,7 +55,7 @@ export const subscribeToInboxRealtime = (onChange?: () => void): RealtimeSubscri
   for (const table of relevantTables) {
     const channel = supabase
       .channel(`nexus:inbox:${table}:live`)
-      .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (_payload) => {
         // Invalidate operational caches so next fetch is fresh (no stale counts/threads)
         invalidateRequestCache('/api/cockpit/inbox')
         if (onChange) onChange()

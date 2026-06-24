@@ -54,7 +54,7 @@ import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { subscribeToInboxRealtime } from '../../lib/data/realtime'
-import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
+import { getQueueControlSettings, updateQueueControlSettings, callBackend, getBackendHealth } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
@@ -515,6 +515,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const isRouteFullscreen = routeMode === 'fullscreen'
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messageRefetchKey, setMessageRefetchKey] = useState(0)
+  const [messageFetchDegraded, setMessageFetchDegraded] = useState(false)
   const {
     data,
     loading: _dataLoading,
@@ -1703,8 +1704,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (activeConversationId !== selectedKeyForEffect) return
       const durationMs = Math.round(performance.now() - fetchStartTs)
       const messages = hydration.messages
-      const integrityBlocked = Boolean((hydration.diagnostics as Record<string, unknown> | undefined)?.integrity_blocked)
-      
+      const diagnostics = (hydration.diagnostics as Record<string, unknown> | undefined) ?? {}
+      const integrityBlocked = Boolean(diagnostics.integrity_blocked)
+      const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+
       console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, messages.length, `${durationMs}ms`)
       if (durationMs > 1500) {
         console.log('[MESSAGES_FETCH_SLOW]', selectedKeyForEffect, {
@@ -1713,19 +1716,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           status: 'completed',
         })
       }
-      const resolvedMessages = integrityBlocked ? [] : messages
+      let resolvedMessages = integrityBlocked ? [] : messages
+      if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
+        resolvedMessages = cachedMessages
+        if (DEV) console.warn('[InboxPage] preserving cached messages after fetch failure', { threadKey: cacheKey, cached: cachedMessages.length })
+      }
       if (messages.length > 0 && !integrityBlocked) {
         messageCacheRef.current[cacheKey] = messages
-      } else if (DEV) {
+      } else if (resolvedMessages.length === 0 && DEV) {
         console.warn('[InboxPage] message hydration returned 0 rows', {
           threadKey: cacheKey,
           integrityBlocked,
+          fetchFailed,
           ownerId: thread.ownerId,
           propertyId: thread.propertyId,
           phoneNumber: thread.phoneNumber,
           cachedMessages: cachedMessages.length,
         })
       }
+      setMessageFetchDegraded(fetchFailed)
       console.log('[MESSAGES_COMMIT]', selectedKeyForEffect, resolvedMessages.length)
       setSelectedMessages(resolvedMessages)
       setHasOlderMessages(Boolean(hydration.pagination?.hasMore))
@@ -1756,6 +1765,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
       } else {
         console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
+        setMessageFetchDegraded(true)
         setSelectedMessages(cachedMessages)
         setHasOlderMessages(false)
         setMessagesLoading(false)
@@ -1810,6 +1820,36 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [DEV, selectedKeyForEffect, messageRefetchKey])
+
+  useEffect(() => {
+    if (!selectedKeyForEffect || !messageFetchDegraded) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const schedule = (delayMs = 3000) => {
+      if (cancelled) return
+      timer = setTimeout(() => { void probe() }, delayMs)
+    }
+
+    const probe = async () => {
+      const health = await getBackendHealth()
+      if (cancelled) return
+      if (health.ok && (health.data?.status === 'ok' || health.data?.ok === true)) {
+        setMessageFetchDegraded(false)
+        setMessageRefetchKey((key) => key + 1)
+        void refreshInbox()
+        return
+      }
+      schedule()
+    }
+
+    schedule(1500)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [messageFetchDegraded, refreshInbox, selectedKeyForEffect])
 
   const handleLoadOlderMessages = useCallback(async () => {
     const thread = selectedRef.current

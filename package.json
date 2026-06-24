@@ -11,9 +11,12 @@
   },
   "scripts": {
     "build:api": "node scripts/build-api-production.mjs",
+    "proof:vite-stability": "node scripts/proof/vite-stability-proof.mjs",
+    "proof:dashboard-react-refresh": "node scripts/proof/dashboard-react-refresh-proof.mjs",
     "build:dashboard": "npm --workspace apps/dashboard run build",
     "build": "npm run build:api && npm run build:dashboard",
     "dev:all": "node scripts/dev-all.mjs",
+    "dev:all:detached": "node scripts/start-dev-all-detached.mjs",
     "doctor:dev": "node scripts/dev-runtime-doctor.mjs",
     "boundary:audit": "node scripts/proof/monorepo-boundary-audit.mjs",
     "proof:health": "node scripts/proof/cockpit-health-proof.mjs",
@@ -23,9 +26,6 @@
     "proof:sms-autopilot-dry-run": "node scripts/proof/sms-autopilot-dry-run-proof.mjs",
     "proof:sms-health-guard": "node scripts/proof/sms-health-guard-proof.mjs",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
-    "proof:dashboard-react-refresh": "node scripts/proof/dashboard-react-refresh-proof.mjs",
-    "proof:build-while-dev": "node scripts/proof/build-while-dev-proof.mjs",
-    "proof:inbox-50-thread": "node scripts/proof/inbox-50-thread-validation.mjs",
     "build:safe": "npm run boundary:audit && npm run build"
   }
 }

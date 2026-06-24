@@ -267,7 +267,15 @@ async function executeBackendRequest<T>(
     })
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
-    const isCors = errMsg === 'Failed to fetch' || errMsg.includes('NetworkError') || errMsg.includes('CORS')
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown'
+    const sameOriginProxy = !base || base === origin
+    const isLikelyDevServerDown = sameOriginProxy && (errMsg === 'Failed to fetch' || errMsg.includes('NetworkError'))
+    const isExplicitCors = /cors/i.test(errMsg)
+    const networkReason = isLikelyDevServerDown
+      ? 'BACKEND_UNAVAILABLE'
+      : isExplicitCors
+        ? 'BACKEND_CORS_ERROR'
+        : 'BACKEND_NETWORK_ERROR'
     console.warn('[BACKEND_API_RESPONSE]', {
       status: null,
       ok: false,
@@ -277,6 +285,7 @@ async function executeBackendRequest<T>(
       url,
       path,
       error: errMsg,
+      networkReason,
     })
     logDataLayerQueryDone(path, dataLayerStartedAt, {
       transport: 'backend',
@@ -289,10 +298,12 @@ async function executeBackendRequest<T>(
     return {
       ok: false,
       status: 502,
-      error: 'BACKEND_NETWORK_ERROR',
-      message: isCors
-        ? `CORS or network error calling ${url} — check that the API allows origin ${typeof window !== 'undefined' ? window.location.origin : 'unknown'} and that VITE_BACKEND_API_URL is correct. Raw: ${errMsg}`
-        : `Network error calling ${url}: ${errMsg}`,
+      error: networkReason,
+      message: isLikelyDevServerDown
+        ? `Backend unreachable at ${url} — the dev server or API may be restarting. Connection was refused or dropped (not a CORS policy block). Raw: ${errMsg}`
+        : isExplicitCors
+          ? `CORS error calling ${url} from origin ${origin}. Raw: ${errMsg}`
+          : `Network error calling ${url}: ${errMsg}`,
     }
   }
 
