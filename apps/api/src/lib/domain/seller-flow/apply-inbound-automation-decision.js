@@ -16,6 +16,9 @@ import {
   normalizeAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
+import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
+import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
@@ -247,7 +250,7 @@ function buildDecisionResult({
   };
 }
 
-export function applyInboundAutomationDecision({
+function computeInboundAutomationDecisionRaw({
   message,
   threadKey,
   propertyId,
@@ -258,7 +261,10 @@ export function applyInboundAutomationDecision({
   conversationBrain,
   latestThreadContext,
 } = {}) {
-  const primary_intent = clean(classification?.primary_intent) || "unclear";
+  // Normalize through the canonical aliaser so vocabulary drift cannot defeat
+  // suppression: wrong_person ≡ wrong_number, opt-out synonyms ≡ opt_out, etc.
+  // No-op for already-canonical classifier output (the live case).
+  const primary_intent = normalizeCanonicalIntent(classification?.primary_intent);
   const objection = clean(classification?.objection) || null;
   const compliance_flag = clean(classification?.compliance_flag) || null;
   const confidence =
@@ -491,6 +497,36 @@ export function applyInboundAutomationDecision({
     next_action: "mark_human_review",
     audit_reason: "unhandled_classification",
   });
+}
+
+/**
+ * Public decision entry point. Computes the raw deterministic decision, then runs
+ * it through the Stages 1–6 coverage net so the returned decision ALWAYS carries:
+ * canonical_intent, contact_identity, safety_status, reply_disposition, an owned
+ * exception workflow + SLA (when human/suppress), a stage-aware safe fallback
+ * (when ambiguous), a guaranteed scheduled_next_action, and a coverage_state.
+ *
+ * The net is additive: it never changes should_queue_reply / should_suppress_contact
+ * / reply_mode / next_action / suppression_reason, so no new automated sends are
+ * introduced — only owned-workflow + fallback metadata are attached.
+ */
+export function applyInboundAutomationDecision(args = {}) {
+  const raw = computeInboundAutomationDecisionRaw(args);
+  const classification = args.classification || {};
+  const stage =
+    clean(classification.stage_hint) ||
+    clean(args.latestThreadContext?.summary?.conversation_stage) ||
+    clean(args.conversationBrain?.conversation_stage) ||
+    null;
+  const contact_identity = resolveContactIdentityClass({
+    detected_intent: classification.primary_intent || classification.detected_intent || null,
+    master_owner_id: args.ownerId || args.latestThreadContext?.ids?.master_owner_id || null,
+    prospect_id: args.prospectId || args.latestThreadContext?.ids?.prospect_id || null,
+    property_id: args.propertyId || args.latestThreadContext?.ids?.property_id || null,
+    conversation_stage: stage,
+    metadata: classification.metadata || {},
+  });
+  return ensureInboundCoverage(raw, { stage, contact_identity, classification });
 }
 
 function templateCandidateSet(decision = {}, classification = {}) {

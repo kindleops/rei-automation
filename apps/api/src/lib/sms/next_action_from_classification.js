@@ -1,6 +1,15 @@
 // ─── next_action_from_classification.js ───────────────────────────────────
 // Orchestrator: consume classify() result → update brain → decide next action
 // → resolve template → personalize → schedule → queue (or stop/escalate).
+//
+// @deprecated (Stages 1–6 audit) — DEAD / NOT ON THE LIVE INBOUND PATH.
+// Repo-wide caller analysis (apps/api/src + apps/api/tests) found NO importers
+// of `processClassification`. The live inbound webhook path is
+// handle-textgrid-inbound.js → classify() → resolveRoute() →
+// executeInboundAutomationDecision() (apply-inbound-automation-decision.js),
+// which is coverage-guaranteed by coverage/ensure-inbound-coverage.js. Retained
+// (not deleted) pending the consolidation pass; see
+// audit/stages-1-6/08-next-consolidation-sequence.md.
 
 import { updateBrain, getCategoryValue, getTextValue, getNumberValue } from "@/lib/providers/podio.js";
 import { normalizeLanguage, resolveLanguage } from "@/lib/sms/language_aliases.js";

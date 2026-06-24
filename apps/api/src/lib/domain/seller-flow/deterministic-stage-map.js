@@ -37,6 +37,16 @@ const EXPLICIT_INTENT_RULES = Object.freeze({
     should_queue_reply: false,
     suppression_reason: "wrong_person_intent",
   }),
+  // wrong_number ≡ wrong_person for suppression (Stages 1–6 unification). The
+  // live classifier emits wrong_number; both must suppress and never advance.
+  wrong_number: Object.freeze({
+    next_stage: "wrong_person",
+    template_use_case: "wrong_person",
+    safety_tier: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
+    auto_send_eligible: false,
+    should_queue_reply: false,
+    suppression_reason: "wrong_number_intent",
+  }),
   opt_out: Object.freeze({
     next_stage: "stop_or_opt_out",
     template_use_case: null,

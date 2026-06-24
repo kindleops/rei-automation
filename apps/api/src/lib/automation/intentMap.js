@@ -1,5 +1,15 @@
 // ─── intentMap.js ─────────────────────────────────────────────────────────
 // Deterministic intent → stage → action map.
+//
+// @deprecated (Stages 1–6 audit) — ISOLATED / NOT ON THE LIVE INBOUND PATH.
+// Repo-wide caller analysis (apps/api/src + apps/api/tests) found NO external
+// importers of this module, `queueAutoReply.js`, or `templateSelector.js`.
+// This table also contains the `unclear → ESCALATE → "needs_review"` dead end
+// that the live path explicitly avoids (see apply-inbound-automation-decision.js
+// + coverage/ensure-inbound-coverage.js). The live taxonomy is classify.js
+// INTENT_PRIORITY, reconciled by coverage/canonical-intent-aliases.js. Do NOT
+// wire this into the inbound webhook. Retained (not deleted) pending the
+// consolidation pass; see audit/stages-1-6/08-next-consolidation-sequence.md.
 
 import { STAGES } from "./negotiationEngine.js";
 
