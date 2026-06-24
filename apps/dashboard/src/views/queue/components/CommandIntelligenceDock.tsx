@@ -1,14 +1,9 @@
 import { useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { resolveAssetTypeIcon } from '../../../shared/asset-type-icons'
+import { OccPropertyInspector } from './OccPropertyInspector'
 import {
   buildOperationsPulse,
   isNonRetryableRow,
-  resolveMessageLanguage,
-  resolveMessageSource,
-  resolveSellerIdentity,
-  resolveStatusPresentation,
-  resolveTemplateLabel,
   type QueueKpiCounts,
   type QueueSection,
 } from '../queue-ui-helpers'
@@ -142,56 +137,22 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
 
   if (props.section === 'queue' && props.selectedItem) {
     const item = props.selectedItem
-    const identity = resolveSellerIdentity(item)
-    const statusView = resolveStatusPresentation(item)
-    const asset = resolveAssetTypeIcon(item.propertyType)
     const retryBlocked = isNonRetryableRow(item)
-    const cityState = [item.propertyCity, item.propertyState].filter(Boolean).join(', ')
     return (
-      <aside className="occ-cmd-dock occ-dossier">
-        <header className="occ-cmd-dock__head">
-          <div>
-            <strong>{identity.primary}</strong>
-            {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
-            <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
-          </div>
-          <div className="occ-cmd-dock__head-actions">
-            <button type="button" onClick={() => onAction('deselect', item.id)} aria-label="Close"><Icon name="close" size={12} /></button>
-            <CollapseBtn />
-          </div>
-        </header>
-        <div className="occ-cmd-dock__body">
-          <InspRow label="Property" value={<><span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={10} /></span> {item.propertyAddress}</>} />
-          {cityState && <InspRow label="Location" value={`${cityState} · ${item.market}`} />}
-          <InspRow label="Source" value={resolveMessageSource(item)} />
-          <InspRow label="Stage" value={`${item.stageLabel ?? '—'} · T${item.touchNumber}`} />
-          <InspRow label="Template" value={resolveTemplateLabel(item)} />
-          <InspRow label="Sender" value={item.fromPhoneNumber} />
-          {item.messageText && (
-            <div className="occ-insp-section">
-              <div className="occ-insp-section-title">Message</div>
-              <p className="occ-insp-message">{item.messageText}</p>
-            </div>
-          )}
-          <InspRow label="Provider" value={item.deliveryStatus} />
-          <InspRow label="Language" value={resolveMessageLanguage(item)} />
-          <InspRow label="Retry" value={retryBlocked ? 'Non-retryable' : item.retryEligible ? 'Eligible' : 'No'} tone={item.retryEligible && !retryBlocked ? 'green' : undefined} />
-          {statusView.blocking && <InspRow label="Current issue" value={statusView.blocking} tone="red" />}
-          {statusView.historicalWarnings.length > 0 && (
-            <div className="occ-insp-section">
-              <div className="occ-insp-section-title">Historical</div>
-              <p className="occ-insp-hist">{statusView.historicalWarnings.join(' · ')}</p>
-            </div>
-          )}
-        </div>
-        <footer className="occ-cmd-dock__actions">
-          {item.status === 'approval' && <button className="occ-action-btn is-primary" onClick={() => onAction('approve', item.id)}>Approve</button>}
-          {(item.status === 'failed' || item.status === 'retry') && item.retryEligible && !retryBlocked && (
-            <button className="occ-action-btn is-primary" onClick={() => onAction('retry', item.id)}>Retry</button>
-          )}
-          <button className="occ-action-btn is-danger" onClick={() => onAction('cancel', item.id)}>Suppress</button>
-        </footer>
-      </aside>
+      <OccPropertyInspector
+        item={item}
+        mode="queue"
+        onClose={() => onAction('deselect', item.id)}
+        actions={(
+          <>
+            {item.status === 'approval' && <button type="button" className="occ-action-btn is-primary" onClick={() => onAction('approve', item.id)}>Approve</button>}
+            {(item.status === 'failed' || item.status === 'retry') && item.retryEligible && !retryBlocked && (
+              <button type="button" className="occ-action-btn is-primary" onClick={() => onAction('retry', item.id)}>Retry</button>
+            )}
+            <button type="button" className="occ-action-btn is-danger" onClick={() => onAction('cancel', item.id)}>Suppress</button>
+          </>
+        )}
+      />
     )
   }
 
@@ -300,25 +261,13 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
 
   if (props.section === 'events' && props.selectedEvent) {
     const item = props.selectedEvent
-    const identity = resolveSellerIdentity(item)
-    const statusView = resolveStatusPresentation(item)
-    const asset = resolveAssetTypeIcon(item.propertyType)
     return (
-      <aside className="occ-cmd-dock occ-dossier">
-        <header className="occ-cmd-dock__head">
-          <div><strong>{identity.primary}</strong><span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{item.lastEventType ?? statusView.primary}</span></div>
-          <button type="button" onClick={() => onAction('deselect-event', item.id)} aria-label="Close"><Icon name="close" size={12} /></button>
-        </header>
-        <div className="occ-cmd-dock__body">
-          <InspRow label="Event" value={item.lastEventType ?? item.status} />
-          <InspRow label="Detail" value={statusView.blocking || item.lastEventStatus || '—'} />
-          <InspRow label="Property" value={<><span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={10} /></span> {item.propertyAddress}</>} />
-          <InspRow label="Market" value={item.market} />
-          <InspRow label="Template" value={resolveTemplateLabel(item)} />
-          <InspRow label="Sender" value={item.fromPhoneNumber ? `…${item.fromPhoneNumber.slice(-4)}` : '—'} />
-          <InspRow label="Timestamp" value={item.lastEventAt ? new Date(item.lastEventAt).toLocaleString() : '—'} />
-        </div>
-      </aside>
+      <OccPropertyInspector
+        item={item}
+        mode="event"
+        onClose={() => onAction('deselect-event', item.id)}
+        onOpenQueueRow={() => onAction('open-queue-row', item.id)}
+      />
     )
   }
 

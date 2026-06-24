@@ -8,6 +8,15 @@ interface TemplateIntelligenceHeaderProps {
   onCardClick?: (key: string) => void
 }
 
+function formatValue(card: TemplateKpiCard) {
+  if (card.unavailable) return '—'
+  if (card.insufficientData) return 'Insufficient data'
+  if (card.current == null) return '—'
+  if (card.denominator != null) return `${card.current}%`
+  if (card.key === 'cost') return `$${Number(card.current).toFixed(2)}`
+  return String(card.current)
+}
+
 export function TemplateIntelligenceHeader({ cards, loading, onCardClick }: TemplateIntelligenceHeaderProps) {
   return (
     <div className="occ-tpl-intel-header">
@@ -20,23 +29,26 @@ export function TemplateIntelligenceHeader({ cards, loading, onCardClick }: Temp
           <button
             key={card.key}
             type="button"
-            className={cls('occ-tpl-kpi-card', loading && 'is-loading')}
+            className={cls('occ-tpl-kpi-card', loading && 'is-loading', card.unavailable && 'is-unavailable')}
             onClick={() => onCardClick?.(card.key)}
+            title={card.unavailable ? card.unavailableReason : undefined}
           >
             <span className="occ-tpl-kpi-card__label">{card.label}</span>
-            <span className="occ-tpl-kpi-card__value">
-              {loading ? '—' : card.current != null ? (card.denominator != null ? `${card.current}%` : card.current) : '—'}
-            </span>
-            {card.numerator != null && card.denominator != null && (
+            <span className="occ-tpl-kpi-card__value">{loading ? '—' : formatValue(card)}</span>
+            {card.unavailable && !loading && (
+              <span className="occ-tpl-kpi-card__denom">{card.unavailableReason ?? 'Unavailable'}</span>
+            )}
+            {card.numerator != null && card.denominator != null && !card.unavailable && (
               <span className="occ-tpl-kpi-card__denom">{card.numerator}/{card.denominator}</span>
             )}
-            {card.priorDelta != null && !loading && (
+            {card.priorDelta != null && !loading && !card.unavailable && (
               <span className={cls('occ-tpl-kpi-card__delta', card.priorDelta >= 0 ? 'is-up' : 'is-down')}>
                 {card.priorDelta >= 0 ? '+' : ''}{card.priorDelta}{card.denominator != null ? 'pp' : ''}
+                {card.priorLabel ? ` ${card.priorLabel}` : ''}
               </span>
             )}
-            {card.baseline != null && !loading && (
-              <span className="occ-tpl-kpi-card__baseline">all-time {card.baseline}{card.denominator != null ? '%' : ''}</span>
+            {card.baseline != null && !loading && !card.unavailable && (
+              <span className="occ-tpl-kpi-card__baseline">all-time {card.baseline}{card.denominator != null ? '%' : card.key === 'cost' ? '' : ''}</span>
             )}
           </button>
         ))}

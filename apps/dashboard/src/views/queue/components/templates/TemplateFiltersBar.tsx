@@ -1,4 +1,3 @@
-import { STAGE_FILTER_OPTIONS } from '../../../../domain/templates/template-stage-labels'
 import type { ColumnPreset, TableDensity, TemplateIntelligenceFilters } from '../../../../domain/templates/template-intelligence.types'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -40,7 +39,14 @@ export function TemplateFiltersBar({
           {RANGE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
         <select className="occ-filter-select" value={filters.stage ?? 'all'} onChange={(e) => onFiltersChange({ stage: e.target.value === 'all' ? undefined : e.target.value })}>
-          {STAGE_FILTER_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+          <option value="all">All Stages</option>
+          <option value="S1">S1 Ownership Confirmation</option>
+          <option value="S1F">S1F Ownership Follow-Up</option>
+          <option value="S2">S2 Selling Interest</option>
+          <option value="S3">S3 Asking Price</option>
+          <option value="S4">S4 Condition &amp; Underwriting</option>
+          <option value="S5">S5 Offer &amp; Negotiation</option>
+          <option value="S6">S6 Contract to Close</option>
         </select>
         <select className="occ-filter-select" value={filters.touch ?? ''} onChange={(e) => onFiltersChange({ touch: e.target.value ? Number(e.target.value) : undefined })}>
           <option value="">All Touches</option>

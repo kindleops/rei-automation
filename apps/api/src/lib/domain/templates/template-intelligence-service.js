@@ -9,6 +9,7 @@ import {
 } from './template-stage-labels.js'
 import {
   buildCountMetric,
+  buildRate,
   buildRateMetric,
   DEFAULT_AUTOPILOT_MODE,
   emptyMetrics,
@@ -20,6 +21,15 @@ import {
   computeCopyScore,
   evaluateTemplateAutopilot,
 } from './template-autopilot-policy.js'
+import {
+  buildIntelligenceRail,
+  buildStageFunnel,
+  fetchAttributedReplyAggregates,
+  fetchQueueExecutionAggregates,
+  mergeAggregateIntoMetrics,
+  priorWindowLabel,
+  senderDiversityFromBucket,
+} from './template-intelligence-aggregates.js'
 
 const KPI_WINDOWS = ['today', '24h', '7d', '30d', 'all_time']
 
@@ -177,8 +187,8 @@ function buildMetricsBlock(currentRow, priorRow, baselineRow) {
 
   const countFields = [
     'sends', 'delivered', 'failed', 'replies', 'positive_replies', 'negative_replies',
-    'ownership_confirmed', 'selling_interest', 'price_captured', 'opt_outs',
-    'wrong_numbers', 'hostile_legal', 'unclear',
+    'ownership_confirmed', 'selling_interest', 'stage_advanced', 'price_captured', 'opt_outs',
+    'wrong_numbers', 'hostile_legal', 'unclear', 'cost',
   ]
   const metrics = {}
   for (const field of countFields) {
@@ -212,21 +222,36 @@ function buildAutopilotControl(row) {
 }
 
 function buildDataQuality(row, metrics) {
-  const vars = Array.isArray(row.variables) ? row.variables : []
-  const body = clean(row.template_body)
+  const vars = Array.isArray(row.variables) ? row.variables : (row.metadata?.variables ?? [])
+  const body = clean(row.template_body) || clean(row.template_text)
   const unresolved = vars.some((v) => body.includes(`[[${v}]]`) || body.includes(`{{${v}}}`))
+  const issues = []
+  if (!vars.length) issues.push({ code: 'variables_undeclared', message: 'Required variables not declared in catalog metadata' })
+  if (!clean(row.stage_code)) issues.push({ code: 'stage_missing', message: 'Stage metadata missing — resolver may mis-route' })
+  if (row.touch_number == null && !row.metadata?.touch_number) issues.push({ code: 'touch_missing', message: 'Touch number missing' })
+  if (!clean(row.use_case)) issues.push({ code: 'use_case_missing', message: 'Use case missing' })
+  if (!clean(row.language)) issues.push({ code: 'translation_absent', message: 'Language metadata absent' })
+  if (!clean(row.property_type_scope)) issues.push({ code: 'asset_scope_broad', message: 'Asset scope unset — may be too broad' })
+  if (!body) issues.push({ code: 'body_malformed', message: 'Template body empty or malformed' })
+  if (metrics.sends <= 0) issues.push({ code: 'no_sends', message: 'No sends in selected range — attribution unavailable' })
+  else if (metrics.replies <= 0) issues.push({ code: 'no_attribution', message: 'No attributable replies in selected range' })
+  const recommended = issues[0]?.message ?? (unresolved ? 'Validate merge variables against declared contract' : 'No issues detected')
   return {
     variable_contract_valid: vars.length > 0,
-    asset_scope_match: true,
-    language_quality: clean(row.language) ? 'ok' : 'unknown',
-    attribution_status: metrics.sends > 0 ? 'attributed' : 'no_sends',
+    variable_contract_detail: vars.length > 0 ? 'ok' : 'missing — required variables not declared',
+    asset_scope_match: Boolean(clean(row.property_type_scope)),
+    asset_scope_detail: clean(row.property_type_scope) ? 'ok' : 'asset scope too broad or unset',
+    language_quality: clean(row.language) ? 'ok' : 'translation metadata absent',
+    attribution_status: metrics.sends > 0 ? (metrics.replies > 0 ? 'attributed' : 'no_replies') : 'no_sends',
     render_failures: unresolved ? 1 : 0,
-    metadata_issues: [],
-    attribution_healthy: metrics.sends > 0,
+    render_failure_detail: unresolved ? 'Unsupported or unresolved merge variable in body' : 'none',
+    metadata_issues: issues,
+    recommended_fix: recommended,
+    attribution_healthy: metrics.sends > 0 && metrics.replies > 0,
     variable_rendering_healthy: !unresolved,
     unresolved_merge_variable: unresolved,
     wrong_language: false,
-    asset_mismatch: false,
+    asset_mismatch: !clean(row.property_type_scope),
     prohibited_content: false,
     duplicate_outreach_violation: false,
     carrier_content_rejection_spike: false,
@@ -294,36 +319,58 @@ export async function fetchTemplateIntelligence({
   if (error) throw error
 
   const keys = (templates ?? []).map(templateKey).filter(Boolean)
-  const { currentMap, priorMap, baselineMap } = await fetchKpiMapsForWindows(keys, kpiWindow, priorWindow)
+  const [kpiMaps, attrCurrent, attrPrior, execCurrent] = await Promise.all([
+    fetchKpiMapsForWindows(keys, kpiWindow, priorWindow),
+    fetchAttributedReplyAggregates(keys, kpiWindow),
+    fetchAttributedReplyAggregates(keys, priorWindow),
+    fetchQueueExecutionAggregates(keys, kpiWindow),
+  ])
+  const { currentMap, priorMap, baselineMap } = kpiMaps
 
   let rows = (templates ?? []).map((row) => {
     const key = templateKey(row)
     const identity = buildIdentity(row)
-    const metrics = buildMetricsBlock(currentMap.get(key), priorMap.get(key), baselineMap.get(key))
+    const baseCurrent = kpiRowToMetrics(currentMap.get(key))
+    const basePrior = kpiRowToMetrics(priorMap.get(key))
+    const baseBaseline = kpiRowToMetrics(baselineMap.get(key))
+    const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent.get(key), execCurrent.get(key), identity.stage_code)
+    const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior.get(key), null, identity.stage_code)
+    const metrics = buildMetricsBlock(
+      { ...currentMap.get(key), ...enrichedCurrent, inbound_replies: enrichedCurrent.replies, positive_replies: enrichedCurrent.positive_replies, ownership_confirmed_replies: enrichedCurrent.ownership_confirmed, stage_advanced_count: enrichedCurrent.stage_advanced, opt_outs: enrichedCurrent.opt_outs },
+      { ...priorMap.get(key), ...enrichedPrior, inbound_replies: enrichedPrior.replies, positive_replies: enrichedPrior.positive_replies, ownership_confirmed_replies: enrichedPrior.ownership_confirmed, stage_advanced_count: enrichedPrior.stage_advanced, opt_outs: enrichedPrior.opt_outs },
+      baselineMap.get(key),
+    )
+    metrics.current = enrichedCurrent
+    const execBucket = execCurrent.get(key)
+    const senderDiv = senderDiversityFromBucket(execBucket)
     const dataQuality = buildDataQuality(row, metrics.current)
     const control = buildAutopilotControl(row)
     return {
       identity,
       metrics,
       execution: {
-        selected: 0,
-        queued: 0,
+        selected: execBucket?.selected ?? 0,
+        queued: execBucket?.queued ?? 0,
         scheduled: 0,
         due: 0,
         claimed: 0,
         guard_passed: 0,
-        blocked: 0,
+        blocked: execBucket?.blocked ?? 0,
         sent: metrics.current.sends,
         delivered: metrics.current.delivered,
         failed: metrics.current.failed,
-        retries: metrics.current.retries,
+        retries: execBucket?.retries ?? metrics.current.retries,
         rotations: metrics.current.rotations,
-        cost: metrics.current.cost,
-        sender_mix: [],
-        markets: [],
-        campaigns: [],
+        cost: metrics.current.cost_available ? metrics.current.cost : null,
+        cost_available: metrics.current.cost_available ?? false,
+        sender_diversity: senderDiv,
+        sender_mix: senderDiv.label,
+        markets: [...(execBucket?.markets ?? attrCurrent.get(key)?.markets ?? [])],
+        campaigns: [...(execBucket?.campaigns ?? [])],
+        last_used: execBucket?.last_used ?? null,
       },
       data_quality: dataQuality,
+      funnel: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent.get(key) }),
       autopilot: null,
       control,
     }
@@ -363,10 +410,14 @@ export async function fetchTemplateIntelligence({
       page_size: pageSize,
       total_count: count ?? rows.length,
       filtered_count: rows.length,
+      matching_templates: rows.length,
+      displayed_rows: rows.length,
+      tracked_templates: rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0).length,
       range: kpiWindow,
       prior_range: priorWindow,
+      prior_label: priorWindowLabel(kpiWindow),
       baseline_range: 'all_time',
-      kpi_source: 'template_performance_kpis_v',
+      kpi_source: 'template_performance_kpis_v+attributed_replies_v+send_queue',
       autopilot_mode: autopilotMode,
       shadow_mode: autopilotMode === 'shadow',
       production_mutations_enabled: false,
@@ -389,30 +440,42 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
   const { count: totalTemplates, error: totalError } = await totalQuery
   if (totalError) throw totalError
 
-  const [currentRows, priorRows, baselineRows] = await Promise.all([
-    fetchAllKpiRowsForWindow(kpiWindow),
-    fetchAllKpiRowsForWindow(priorWindow),
-    fetchAllKpiRowsForWindow('all_time'),
-  ])
+  const list = await fetchTemplateIntelligence({
+    page: 0,
+    pageSize: 5000,
+    sort: 'template_name',
+    sortDir: 'asc',
+    filters,
+    range: params.range ?? '7d',
+    autopilotMode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
+  })
+  const rows = list.data ?? []
+  const sumMetric = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.current?.[field]) || 0), 0)
+  const sumPrior = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.prior) || 0), 0)
+  const sumBaseline = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.baseline) || 0), 0)
 
-  const sumField = (rows, field) => rows.reduce((acc, row) => acc + (Number(row[field]) || 0), 0)
-  const sends = sumField(currentRows, 'sends')
-  const delivered = sumField(currentRows, 'delivered')
-  const replies = sumField(currentRows, 'inbound_replies')
-  const positive = sumField(currentRows, 'positive_replies')
-  const ownership = sumField(currentRows, 'ownership_confirmed_replies')
-  const stageAdvanced = sumField(currentRows, 'positive_replies')
-  const optOuts = sumField(currentRows, 'opt_outs')
-  const priorSends = sumField(priorRows, 'sends')
-  const priorDelivered = sumField(priorRows, 'delivered')
-  const priorReplies = sumField(priorRows, 'inbound_replies')
-  const priorPositive = sumField(priorRows, 'positive_replies')
-  const priorOwnership = sumField(priorRows, 'ownership_confirmed_replies')
-  const priorStage = sumField(priorRows, 'positive_replies')
-  const priorOptOuts = sumField(priorRows, 'opt_outs')
-  const baselineSends = sumField(baselineRows, 'sends')
-  const baselineDelivered = sumField(baselineRows, 'delivered')
-  const usedTemplates = currentRows.filter((row) => Number(row.sends) > 0).length
+  const sends = sumMetric('sends')
+  const delivered = sumMetric('delivered')
+  const replies = sumMetric('replies')
+  const positive = sumMetric('positive_replies')
+  const ownership = sumMetric('ownership_confirmed')
+  const stageAdvanced = sumMetric('stage_advanced')
+  const optOuts = sumMetric('opt_outs')
+  const priorSends = sumPrior('sends')
+  const priorDelivered = sumPrior('delivered')
+  const priorReplies = sumPrior('replies')
+  const priorPositive = sumPrior('positive_replies')
+  const priorOwnership = sumPrior('ownership_confirmed')
+  const priorStage = sumPrior('stage_advanced')
+  const priorOptOuts = sumPrior('opt_outs')
+  const baselineSends = sumBaseline('sends')
+  const baselineDelivered = sumBaseline('delivered')
+  const usedTemplates = rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0).length
+  const costRows = rows.filter((r) => r.metrics?.current?.cost_available)
+  const cost = costRows.reduce((n, r) => n + (Number(r.metrics?.current?.cost) || 0), 0)
+  const priorCost = sumPrior('cost')
+  const baselineCost = sumBaseline('cost')
+  const costAvailable = costRows.length > 0
 
   return {
     ok: true,
@@ -421,38 +484,44 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
       templates_used: buildCountMetric(usedTemplates, usedTemplates, usedTemplates),
       sends: buildCountMetric(sends, priorSends, baselineSends),
       delivery_rate: buildRateMetric(
-        { numerator: delivered, denominator: sends, value: sends > 0 ? Math.round((delivered / sends) * 10000) / 100 : null },
-        { numerator: priorDelivered, denominator: priorSends, value: priorSends > 0 ? Math.round((priorDelivered / priorSends) * 10000) / 100 : null },
-        { numerator: baselineDelivered, denominator: baselineSends, value: baselineSends > 0 ? Math.round((baselineDelivered / baselineSends) * 10000) / 100 : null },
+        buildRate(delivered, sends),
+        buildRate(priorDelivered, priorSends),
+        buildRate(baselineDelivered, baselineSends),
       ),
       reply_rate: buildRateMetric(
-        { numerator: replies, denominator: delivered || sends, value: (delivered || sends) > 0 ? Math.round((replies / (delivered || sends)) * 10000) / 100 : null },
-        { numerator: priorReplies, denominator: priorDelivered || priorSends, value: (priorDelivered || priorSends) > 0 ? Math.round((priorReplies / (priorDelivered || priorSends)) * 10000) / 100 : null },
-        { numerator: 0, denominator: 0, value: null },
+        buildRate(replies, delivered),
+        buildRate(priorReplies, priorDelivered),
+        buildRate(sumBaseline('replies'), baselineDelivered),
       ),
       positive_rate: buildRateMetric(
-        { numerator: positive, denominator: replies, value: replies > 0 ? Math.round((positive / replies) * 10000) / 100 : null },
-        { numerator: priorPositive, denominator: priorReplies, value: priorReplies > 0 ? Math.round((priorPositive / priorReplies) * 10000) / 100 : null },
-        { numerator: 0, denominator: 0, value: null },
+        buildRate(positive, replies),
+        buildRate(priorPositive, priorReplies),
+        buildRate(sumBaseline('positive_replies'), sumBaseline('replies')),
       ),
-      ownership_confirmed: buildCountMetric(ownership, priorOwnership, ownership),
-      stage_advanced: buildCountMetric(stageAdvanced, priorStage, stageAdvanced),
+      ownership_confirmed: buildCountMetric(ownership, priorOwnership, sumBaseline('ownership_confirmed')),
+      stage_advanced: buildCountMetric(stageAdvanced, priorStage, sumBaseline('stage_advanced')),
       opt_out_rate: buildRateMetric(
-        { numerator: optOuts, denominator: delivered || sends, value: (delivered || sends) > 0 ? Math.round((optOuts / (delivered || sends)) * 10000) / 100 : null },
-        { numerator: priorOptOuts, denominator: priorDelivered || priorSends, value: (priorDelivered || priorSends) > 0 ? Math.round((priorOptOuts / (priorDelivered || priorSends)) * 10000) / 100 : null },
-        { numerator: 0, denominator: 0, value: null },
+        buildRate(optOuts, delivered),
+        buildRate(priorOptOuts, priorDelivered),
+        buildRate(sumBaseline('opt_outs'), baselineDelivered),
       ),
-      cost: buildCountMetric(0, 0, 0),
+      cost: costAvailable
+        ? buildCountMetric(cost, priorCost, baselineCost)
+        : { current: null, prior: null, baseline: null, delta_absolute: null, unavailable: true, unavailable_reason: 'Cost attribution unavailable — no estimated_cost on queue rows in range' },
     },
+    intelligence_rail: buildIntelligenceRail(rows),
     meta: {
       page: 0,
       page_size: 0,
       total_count: totalTemplates ?? 0,
-      filtered_count: totalTemplates ?? 0,
+      filtered_count: list.meta?.filtered_count ?? rows.length,
+      matching_templates: rows.length,
+      tracked_templates: rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0).length,
       range: kpiWindow,
       prior_range: priorWindow,
+      prior_label: priorWindowLabel(kpiWindow),
       baseline_range: 'all_time',
-      kpi_source: 'template_performance_kpis_v',
+      kpi_source: 'template_performance_kpis_v+attributed_replies_v+send_queue',
       autopilot_mode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
       shadow_mode: (params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE) === 'shadow',
       production_mutations_enabled: false,
@@ -480,9 +549,25 @@ export async function fetchTemplateDossier(templateId, params = {}) {
   const { currentMap, priorMap, baselineMap } = kpiMapsFromRows(allKpiRows, kpiWindow, priorWindow)
 
   const identity = buildIdentity(templateRow)
-  const metrics = buildMetricsBlock(currentMap.get(key), priorMap.get(key), baselineMap.get(key))
+  const [attrCurrent, attrPrior, execCurrent] = await Promise.all([
+    fetchAttributedReplyAggregates([key], kpiWindow),
+    fetchAttributedReplyAggregates([key], priorWindow),
+    fetchQueueExecutionAggregates([key], kpiWindow),
+  ])
+  const baseCurrent = kpiRowToMetrics(currentMap.get(key))
+  const basePrior = kpiRowToMetrics(priorMap.get(key))
+  const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent.get(key), execCurrent.get(key), identity.stage_code)
+  const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior.get(key), null, identity.stage_code)
+  const metrics = buildMetricsBlock(
+    { ...currentMap.get(key), ...enrichedCurrent, inbound_replies: enrichedCurrent.replies, positive_replies: enrichedCurrent.positive_replies, ownership_confirmed_replies: enrichedCurrent.ownership_confirmed, stage_advanced_count: enrichedCurrent.stage_advanced },
+    { ...priorMap.get(key), ...enrichedPrior, inbound_replies: enrichedPrior.replies },
+    baselineMap.get(key),
+  )
+  metrics.current = enrichedCurrent
   const dataQuality = buildDataQuality(templateRow, metrics.current)
   const control = buildAutopilotControl(templateRow)
+  const execBucket = execCurrent.get(key)
+  const senderDiv = senderDiversityFromBucket(execBucket)
   const cohortBaselines = buildCohortBaseline([{ ...identity, metrics: metrics.current, intelligence: { copy_score: computeCopyScore(metrics.current) } }])
   const autopilot = evaluateTemplateAutopilot({
     template: identity,
@@ -497,10 +582,13 @@ export async function fetchTemplateDossier(templateId, params = {}) {
     identity,
     metrics,
     execution: {
-      selected: 0, queued: 0, scheduled: 0, due: 0, claimed: 0, guard_passed: 0, blocked: 0,
+      selected: execBucket?.selected ?? 0, queued: execBucket?.queued ?? 0, scheduled: 0, due: 0, claimed: 0, guard_passed: 0, blocked: execBucket?.blocked ?? 0,
       sent: metrics.current.sends, delivered: metrics.current.delivered, failed: metrics.current.failed,
-      retries: metrics.current.retries, rotations: metrics.current.rotations, cost: metrics.current.cost,
-      sender_mix: [], markets: [], campaigns: [],
+      retries: execBucket?.retries ?? metrics.current.retries, rotations: metrics.current.rotations,
+      cost: metrics.current.cost_available ? metrics.current.cost : null,
+      cost_available: metrics.current.cost_available ?? false,
+      sender_diversity: senderDiv, sender_mix: senderDiv.label, markets: [...(execBucket?.markets ?? [])], campaigns: [...(execBucket?.campaigns ?? [])],
+      last_used: execBucket?.last_used ?? null,
     },
     data_quality: dataQuality,
     autopilot,
@@ -555,18 +643,19 @@ export async function fetchTemplateDossier(templateId, params = {}) {
       },
       performance: { ...row.metrics, all_windows: kpiByWindow },
       funnel: {
-        stages: [
-          { key: 'sent', value: row.metrics.current.sends },
-          { key: 'delivered', value: row.metrics.current.delivered },
-          { key: 'replied', value: row.metrics.current.replies },
-          { key: 'ownership_confirmed', value: row.metrics.current.ownership_confirmed },
-          { key: 'selling_interest', value: row.metrics.current.selling_interest },
-          { key: 'price', value: row.metrics.current.price_captured },
-          { key: 'offer', value: row.metrics.current.offer_delivered },
-          { key: 'contract', value: row.metrics.current.contracts_signed },
-        ],
+        stage_code: identity.stage_code,
+        stages: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent.get(key) }),
       },
-      cohorts: { market: [], asset: [], sender: [], campaign: [], contact_confidence: [], phone_position: [], day_time: [] },
+      cohorts: {
+        market: [...(execBucket?.markets ?? [])].map((m) => ({ key: m, sends: metrics.current.sends })),
+        asset: identity.asset_scope ? [{ key: identity.asset_scope, sends: metrics.current.sends }] : [],
+        sender: senderDiv.distinct > 0 ? [{ key: senderDiv.dominant_sender, sends: metrics.current.sends, concentration_pct: senderDiv.concentration_pct }] : [],
+        campaign: [...(execBucket?.campaigns ?? [])].map((c) => ({ key: c, sends: metrics.current.sends })),
+        missing_fields: metrics.current.replies <= 0 ? ['reply_attribution'] : [],
+        backfill_note: metrics.current.replies <= 0
+          ? 'Future attributable replies will populate cohort breakdowns when message_events link inbound responses.'
+          : 'Cohort slices derive from send_queue execution attribution.',
+      },
       executions,
       resolver,
       autopilot: row.autopilot,

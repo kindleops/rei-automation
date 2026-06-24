@@ -48,7 +48,6 @@ import {
   isManualMessage,
   isNonRetryableRow,
   pct,
-  resolveMessageLanguage,
   resolveMessageSource,
   resolveSellerIdentity,
   resolveStatusPresentation,
@@ -1643,7 +1642,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
   const [dossierOpen, setDossierOpen] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedSenderPhone, setSelectedSenderPhone] = useState<string | null>(null)
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedMarketName, setSelectedMarketName] = useState<string | null>(null)
   const [selectedFailureCause, setSelectedFailureCause] = useState<string | null>(null)
   const [selectedEventItem, setSelectedEventItem] = useState<QueueItem | null>(null)
@@ -2012,25 +2011,6 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
       setBusyAction(null)
     }
   }, [confirmPreview, selectedRows, handleAction, refreshData, currentPage, clearSelection])
-
-  const selectedTemplateDock = useMemo(() => {
-    if (!selectedTemplateId) return null
-    const s = templateStatsMemo.find(t => t.id === selectedTemplateId)
-    if (!s) return null
-    const isManual = s.id === 'no-template' || s.name.toLowerCase().includes('manual')
-    return {
-      id: s.id, name: s.name, sent: s.sent, delivered: s.delivered, failed: s.failed,
-      blocked: s.blocked, optOuts: s.optOuts, usage: s.usage, deliveryPct: s.deliveryPct, failPct: s.failPct,
-      healthLabel: s.healthLabel,
-      healthReason: (s as TemplateStat & { healthReason?: string }).healthReason ?? s.healthLabel,
-      sampleBody: s.sampleBody, stageLabel: s.stageLabel, useCase: s.useCase,
-      language: s.language?.toUpperCase() || (() => {
-        const sample = items.find(i => (isManualMessage(i) ? 'manual-reply' : (i.templateId ?? 'no-template')) === s.id)
-        return sample ? resolveMessageLanguage(sample) : 'Unknown'
-      })(),
-      markets: s.markets, senders: s.senders, firstSeen: s.firstSeen, lastSeen: s.lastSeen, isManual,
-    }
-  }, [selectedTemplateId, templateStatsMemo, items])
 
   const selectedSenderDock = useMemo(() => {
     if (!selectedSenderPhone) return null
@@ -2500,7 +2480,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
           </div>
         )}
 
-        {(layoutMode === 'full' || layoutMode === 'expanded' || dossierOpen) && (
+        {section !== 'templates' && (layoutMode === 'full' || layoutMode === 'expanded' || dossierOpen) && (
           <CommandIntelligenceDock
             section={section}
             items={items}
@@ -2508,7 +2488,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
             model={model}
             runnableCount={runnableCount}
             selectedItem={section === 'queue' ? selectedItem : null}
-            selectedTemplate={section === 'templates' ? selectedTemplateDock : null}
+            selectedTemplate={null}
             selectedSender={section === 'senders' ? selectedSenderDock : null}
             selectedMarket={section === 'market' ? selectedMarketDock : null}
             selectedFailure={section === 'failures' ? selectedFailureDock : null}

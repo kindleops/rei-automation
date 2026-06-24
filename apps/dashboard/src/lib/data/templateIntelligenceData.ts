@@ -123,50 +123,95 @@ export async function applyTemplateControlShadow(params: {
   return result.data
 }
 
-export function kpiCardsFromSummary(cards: Record<string, unknown>): TemplateKpiCard[] {
+export function kpiCardsFromSummary(cards: Record<string, unknown>, meta?: TemplateIntelligenceMeta): TemplateKpiCard[] {
+  const priorLabel = (meta as { prior_label?: string })?.prior_label ?? 'vs previous period'
   const defs: Array<{ key: string; label: string; rate?: boolean }> = [
     { key: 'active_templates', label: 'Active Templates' },
     { key: 'templates_used', label: 'Templates Used' },
     { key: 'sends', label: 'Sends' },
     { key: 'delivery_rate', label: 'Delivery Rate', rate: true },
     { key: 'reply_rate', label: 'Reply Rate', rate: true },
-    { key: 'positive_rate', label: 'Positive Rate', rate: true },
+    { key: 'positive_rate', label: 'Positive Reply Rate', rate: true },
     { key: 'ownership_confirmed', label: 'Ownership Confirmed' },
     { key: 'stage_advanced', label: 'Stage Advanced' },
     { key: 'opt_out_rate', label: 'Opt-Out Rate', rate: true },
-    { key: 'cost', label: 'Cost' },
+    { key: 'cost', label: 'Estimated Cost' },
   ]
   return defs.map(({ key, label, rate }) => {
     const raw = cards[key] as Record<string, unknown> | undefined
-    if (!raw) return { key, label, current: null }
-    if (rate) {
-      const current = raw.current as RateValue | undefined
+    if (!raw) return { key, label, current: null, priorLabel }
+    if (raw.unavailable) {
       return {
         key,
         label,
-        current: current?.value ?? null,
+        current: null,
+        unavailable: true,
+        unavailableReason: String(raw.unavailable_reason ?? 'Unavailable'),
+        priorLabel,
+      }
+    }
+    if (rate) {
+      const current = raw.current as RateValue | undefined
+      const denom = current?.denominator ?? 0
+      const insufficient = denom > 0 && denom < 10
+      return {
+        key,
+        label,
+        current: current?.value ?? (denom === 0 ? null : current?.value ?? null),
         numerator: current?.numerator,
         denominator: current?.denominator,
         priorDelta: raw.delta_absolute as number | null,
         baseline: (raw.baseline as RateValue | undefined)?.value ?? null,
+        priorLabel,
+        insufficientData: insufficient,
       }
     }
+    const cur = raw.current as number
     return {
       key,
       label,
-      current: raw.current as number,
+      current: cur,
       priorDelta: raw.delta_absolute as number,
       baseline: raw.baseline as number,
+      priorLabel,
     }
   })
 }
 
-export const COLUMN_PRESETS: Record<ColumnPreset, string[]> = {
-  performance: ['identity', 'rotation_state', 'sends', 'delivery', 'replies', 'positive', 'stage_advancement', 'opt_out', 'confidence', 'trend'],
-  execution: ['selected', 'queued', 'sent', 'delivered', 'failed', 'blocked', 'retries', 'cost', 'sender_mix'],
-  funnel: ['delivered', 'replied', 'owner_confirmed', 'seller_open', 'price_captured', 'condition_complete', 'offer', 'contract'],
-  autopilot: ['state', 'weight', 'daily_cap', 'proposed_weight', 'proposed_state', 'decision', 'reevaluation'],
-  data_quality: ['variable_contract', 'asset_scope', 'language_quality', 'attribution', 'render_failures', 'metadata_issues'],
+const FUNNEL_BY_STAGE: Record<string, string[]> = {
+  S1: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'selling_interest', 'advanced_s2'],
+  S1F: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'selling_interest', 'advanced_s2'],
+  S2: ['delivered', 'replied', 'seller_open', 'not_interested', 'timeline_captured', 'advanced_s3'],
+  S3: ['delivered', 'replied', 'asking_price', 'price_objection', 'advanced_s4'],
+  S4: ['delivered', 'replied', 'condition_captured', 'repairs_captured', 'occupancy_captured', 'advanced_s5'],
+  S5: ['delivered', 'replied', 'offer_presented', 'counteroffer', 'accepted', 'advanced_s6'],
+  S6: ['delivered', 'replied', 'agreement_sent', 'agreement_viewed', 'agreement_signed', 'closing_milestone', 'completed'],
+}
+
+export const COLUMN_PRESETS: Record<ColumnPreset, (stage?: string) => string[]> = {
+  performance: () => ['identity', 'rotation_state', 'sends', 'delivery', 'replies', 'reply_rate', 'positive', 'positive_rate', 'stage_advancement', 'stage_rate', 'opt_out', 'confidence', 'trend'],
+  execution: () => ['identity', 'selected', 'queued', 'sent', 'delivered', 'failed', 'blocked', 'retries', 'sender_diversity', 'cost', 'last_used'],
+  funnel: (stage) => ['identity', ...(FUNNEL_BY_STAGE[stage ?? ''] ?? ['delivered', 'replied', 'ownership_confirmed', 'selling_interest', 'advanced_s2'])],
+  autopilot: () => ['identity', 'state', 'weight', 'daily_cap', 'proposed_weight', 'proposed_state', 'decision', 'confidence', 'reevaluation'],
+  data_quality: () => ['identity', 'variable_contract', 'asset_scope', 'language_quality', 'attribution', 'render_failures', 'metadata_issues', 'recommended_fix'],
+}
+
+export async function exportFilteredTemplates(
+  filters: TemplateIntelligenceFilters,
+  sort: string,
+  sortDir: 'asc' | 'desc',
+  totalCount: number,
+  pageSize = 500,
+): Promise<TemplateIntelligenceRow[]> {
+  const pages = Math.ceil(totalCount / pageSize)
+  const all: TemplateIntelligenceRow[] = []
+  for (let page = 0; page < pages; page++) {
+    const res = await fetchTemplateIntelligenceList(filters, page, pageSize, sort, sortDir, 'shadow')
+    if (!res.ok) break
+    all.push(...res.data)
+    if (res.data.length < pageSize) break
+  }
+  return all
 }
 
 export const SAVED_VIEW_KEY = 'occ-template-intelligence-views'

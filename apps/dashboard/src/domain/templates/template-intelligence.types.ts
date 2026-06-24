@@ -111,5 +111,9 @@ export interface TemplateKpiCard {
   numerator?: number
   denominator?: number
   priorDelta?: number | null
+  priorLabel?: string
   baseline?: number | null
+  unavailable?: boolean
+  unavailableReason?: string
+  insufficientData?: boolean
 }
