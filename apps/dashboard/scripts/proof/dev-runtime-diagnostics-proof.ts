@@ -4,6 +4,8 @@
  */
 
 import {
+  formatApiBaseLabel,
+  isProxyDevBaseUrl,
   resolveRuntimeDiagnosticsState,
   shouldAutoCollapseHealthy,
   shouldShowDevRuntimeDiagnostics,
@@ -33,12 +35,12 @@ function assertEqual<T>(actual: T, expected: T, message: string) {
 const healthyInput = {
   isDev: true,
   dashboardSha: 'abc123def456',
-  dashboardBranch: 'release/test',
+  dashboardBranch: 'main',
   dashboardWorktreeId: 'inbox-outbound-lock',
   apiBaseUrl: 'http://localhost:3001',
   apiIdentity: {
     commit_sha: 'abc123def456',
-    branch: 'release/test',
+    branch: 'main',
     worktree_id: 'inbox-outbound-lock',
     environment: 'development',
     api_port: 3001,
@@ -57,9 +59,9 @@ test('production hidden state', () => {
   assertEqual(shouldShowDevRuntimeDiagnostics(false), false, 'should not show in production')
 })
 
-test('healthy collapse indicator', () => {
+test('healthy development hidden by default', () => {
   const state = resolveRuntimeDiagnosticsState(healthyInput)
-  assertEqual(state.mode, 'indicator', 'healthy mode')
+  assertEqual(state.mode, 'hidden', 'healthy mode')
   assertEqual(shouldAutoCollapseHealthy(state), true, 'auto collapse')
 })
 
@@ -68,10 +70,12 @@ test('healthy proxy mode with empty base URL', () => {
     ...healthyInput,
     apiBaseUrl: '',
   })
-  assertEqual(state.mode, 'indicator', 'proxy healthy mode')
+  assertEqual(state.mode, 'hidden', 'proxy healthy mode')
+  assertEqual(isProxyDevBaseUrl(''), true, 'empty base is proxy mode')
+  assertEqual(formatApiBaseLabel(''), 'same-origin proxy', 'proxy label')
 })
 
-test('SHA mismatch banner', () => {
+test('same worktree + different SHA does not block', () => {
   const state = resolveRuntimeDiagnosticsState({
     ...healthyInput,
     apiIdentity: {
@@ -79,10 +83,19 @@ test('SHA mismatch banner', () => {
       commit_sha: 'different-sha',
     },
   })
-  assertEqual(state.mode, 'banner', 'banner mode')
-  if (state.mode === 'banner') {
-    assertEqual(state.reason, 'sha_mismatch', 'sha mismatch reason')
-  }
+  assertEqual(state.mode, 'hidden', 'stale process mode')
+})
+
+test('same worktree + different SHA + empty API base stays healthy', () => {
+  const state = resolveRuntimeDiagnosticsState({
+    ...healthyInput,
+    apiBaseUrl: '',
+    apiIdentity: {
+      ...healthyInput.apiIdentity,
+      commit_sha: 'older-sha-before-commit',
+    },
+  })
+  assertEqual(state.mode, 'hidden', 'stale proxy mode')
 })
 
 test('API unavailable banner', () => {
@@ -108,12 +121,41 @@ test('missing identity banner when API has no commit_sha', () => {
   }
 })
 
-test('wrong worktree banner', () => {
+test('different worktrees banner', () => {
   const state = resolveRuntimeDiagnosticsState({
     ...healthyInput,
     apiIdentity: {
       ...healthyInput.apiIdentity,
       worktree_id: 'other-worktree',
+    },
+  })
+  assertEqual(state.mode, 'banner', 'banner mode')
+  if (state.mode === 'banner') {
+    assertEqual(state.reason, 'wrong_worktree', 'wrong worktree reason')
+  }
+})
+
+test('different branches banner', () => {
+  const state = resolveRuntimeDiagnosticsState({
+    ...healthyInput,
+    apiIdentity: {
+      ...healthyInput.apiIdentity,
+      branch: 'feature/other-branch',
+    },
+  })
+  assertEqual(state.mode, 'banner', 'banner mode')
+  if (state.mode === 'banner') {
+    assertEqual(state.reason, 'branch_mismatch', 'branch mismatch reason')
+  }
+})
+
+test('different worktree still blocks even when SHAs match', () => {
+  const state = resolveRuntimeDiagnosticsState({
+    ...healthyInput,
+    apiIdentity: {
+      ...healthyInput.apiIdentity,
+      worktree_id: 'other-worktree',
+      commit_sha: healthyInput.dashboardSha,
     },
   })
   assertEqual(state.mode, 'banner', 'banner mode')

@@ -14,7 +14,7 @@ export const DevApiBanner = () => {
   const commitSha = import.meta.env.VITE_COMMIT_SHA || 'local'
   const buildTime = import.meta.env.VITE_BUILD_TIME || new Date().toISOString()
   const projectName = import.meta.env.VITE_VERCEL_PROJECT || 'rei-automation-dashboard'
-  const backendUrl = import.meta.env.VITE_BACKEND_API_URL || config?.baseUrl || 'MISSING'
+  const backendUrl = import.meta.env.VITE_BACKEND_API_URL || config?.baseUrl || 'same-origin proxy'
 
   return (
     <div style={{
@@ -38,7 +38,7 @@ export const DevApiBanner = () => {
       <span>PROJECT: {projectName}</span>
       <span>COMMIT: {commitSha}</span>
       <span>BUILD: {new Date(buildTime).toLocaleString()}</span>
-      <span>API BASE: {backendUrl}</span>
+      <span>Connection: {backendUrl}</span>
       <span>AUTH: {config?.hasSecret ? 'YES' : 'NO'}</span>
       {config?.secretDebug && (
         <span>SECRET: {config.secretDebug.first6}...{config.secretDebug.last4} ({config.secretDebug.secretLength} chars)</span>

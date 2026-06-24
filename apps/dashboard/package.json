@@ -42,7 +42,8 @@
     "proof:ui": "playwright test",
     "proof:deal": "playwright test tests/ui/deal-intelligence.spec.ts",
     "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "proof:dev-runtime": "npx tsx scripts/proof/dev-runtime-diagnostics-proof.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

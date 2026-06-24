@@ -20,16 +20,26 @@ export type RuntimeDiagnosticsInput = {
 
 export type RuntimeDiagnosticsState =
   | { mode: 'hidden' }
-  | { mode: 'banner'; reason: 'sha_mismatch' | 'api_unavailable' | 'missing_identity' | 'stale_api' | 'wrong_worktree' | 'unexpected_environment' }
-  | { mode: 'indicator'; healthy: true }
-  | { mode: 'panel'; healthy: true }
+  | { mode: 'banner'; reason: 'api_unavailable' | 'missing_identity' | 'wrong_worktree' | 'branch_mismatch' | 'unexpected_environment' }
 
 export function shouldShowDevRuntimeDiagnostics(isDev: boolean): boolean {
   return isDev
 }
 
-function isProxyDevBaseUrl(baseUrl: string | null | undefined): boolean {
+export function isProxyDevBaseUrl(baseUrl: string | null | undefined): boolean {
   return !String(baseUrl ?? '').trim()
+}
+
+function worktreesMatch(dashboardWorktreeId: string, apiWorktree?: string): boolean {
+  if (dashboardWorktreeId === 'unknown') return true
+  if (!apiWorktree || apiWorktree === 'unknown') return true
+  return apiWorktree === dashboardWorktreeId
+}
+
+function branchesMatch(dashboardBranch: string, apiBranch?: string): boolean {
+  if (dashboardBranch === 'unknown') return true
+  if (!apiBranch || apiBranch === 'unknown') return true
+  return apiBranch === dashboardBranch
 }
 
 export function resolveRuntimeDiagnosticsState(input: RuntimeDiagnosticsInput): RuntimeDiagnosticsState {
@@ -49,19 +59,18 @@ export function resolveRuntimeDiagnosticsState(input: RuntimeDiagnosticsInput): 
     return { mode: 'banner', reason: 'missing_identity' }
   }
 
-  if (input.apiIdentity.commit_sha !== input.dashboardSha) {
-    return { mode: 'banner', reason: 'sha_mismatch' }
+  if (!worktreesMatch(input.dashboardWorktreeId, input.apiIdentity.worktree_id)) {
+    return { mode: 'banner', reason: 'wrong_worktree' }
   }
 
-  const expectedWorktree = input.dashboardWorktreeId
-  const apiWorktree = input.apiIdentity.worktree_id
-  if (
-    expectedWorktree !== 'unknown' &&
-    apiWorktree &&
-    apiWorktree !== 'unknown' &&
-    apiWorktree !== expectedWorktree
-  ) {
-    return { mode: 'banner', reason: 'wrong_worktree' }
+  if (!branchesMatch(input.dashboardBranch, input.apiIdentity.branch)) {
+    return { mode: 'banner', reason: 'branch_mismatch' }
+  }
+
+  // Same worktree + same branch with different SHAs means one process started before the latest commit.
+  // That is ordinary stale-process state in local dev, not a blocking mismatch.
+  if (input.apiIdentity.commit_sha !== input.dashboardSha) {
+    return { mode: 'hidden' }
   }
 
   const apiEnv = String(input.apiIdentity.environment ?? '').trim().toLowerCase()
@@ -69,13 +78,17 @@ export function resolveRuntimeDiagnosticsState(input: RuntimeDiagnosticsInput): 
     return { mode: 'banner', reason: 'unexpected_environment' }
   }
 
-  if (!isProxyDevBaseUrl(input.apiBaseUrl) && !input.apiBaseUrl) {
-    return { mode: 'banner', reason: 'unexpected_environment' }
-  }
-
-  return { mode: 'indicator', healthy: true }
+  // Empty API base on localhost is healthy same-origin proxy mode.
+  return { mode: 'hidden' }
 }
 
 export function shouldAutoCollapseHealthy(state: RuntimeDiagnosticsState): boolean {
-  return state.mode === 'indicator' && state.healthy === true
+  return state.mode === 'hidden'
+}
+
+export function formatApiBaseLabel(baseUrl: string | null | undefined): string {
+  if (isProxyDevBaseUrl(baseUrl)) {
+    return 'same-origin proxy'
+  }
+  return String(baseUrl ?? '').trim()
 }

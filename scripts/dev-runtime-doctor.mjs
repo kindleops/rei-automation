@@ -22,19 +22,17 @@ const envFiles = [
 const recovery = {
   deadApi: [
     `cd ${ROOT}`,
-    "npm --workspace apps/api run dev",
-    "npm --workspace apps/dashboard run dev",
+    "npm run dev:all",
   ],
   nonJson: [
     `cd ${ROOT}`,
     "rm -rf apps/api/.next",
-    "npm --workspace apps/api run dev",
-    "npm --workspace apps/dashboard run dev",
+    "npm run dev:all",
   ],
   staleNext: [
     `cd ${ROOT}`,
     "rm -rf apps/api/.next",
-    "npm --workspace apps/api run dev",
+    "npm run dev:all",
   ],
   auth: [
     `cd ${ROOT}`,
@@ -306,9 +304,7 @@ function checkPortInventory() {
       `port ${port} has listener`,
       listeners.length > 0,
       listeners.length ? listeners.join(" | ") : "no listener",
-      port === EXPECTED_API_PORT
-        ? [`cd ${ROOT}`, "npm --workspace apps/api run dev"]
-        : [`cd ${ROOT}`, "npm --workspace apps/dashboard run dev"],
+      [`cd ${ROOT}`, "npm run dev:all"],
     );
   }
 
