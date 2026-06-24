@@ -647,6 +647,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       allowedHosts: true,
+      headers: mode === 'development' ? { 'Cache-Control': 'no-store' } : undefined,
       proxy: {
         '/api/cockpit': {
           target: backendProxyTarget,

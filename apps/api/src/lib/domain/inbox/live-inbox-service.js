@@ -6,6 +6,7 @@ import {
   isOutboundLastWithoutReply,
   parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { threadMatchesBucketFilter } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
   INBOX_THREAD_STATE_SELECT_FIELDS,
@@ -652,18 +653,19 @@ function countFromRow(row = {}) {
 
 function computeCountsFromThreads(rows = []) {
   const counts = buildEmptyCounts();
+  const nowMs = Date.now();
   for (const row of rows) {
     const bucket = lower(row.inbox_bucket);
     counts.all += 1;
     if (bucket === "priority") counts.priority += 1;
-    if (bucket === "new_replies") counts.new_replies += 1;
+    if (threadMatchesBucketFilter(row, "new_replies", nowMs)) counts.new_replies += 1;
     if (bucket === "needs_review") counts.needs_review += 1;
     if (bucket === "follow_up") counts.follow_up += 1;
     if (bucket === "cold") counts.cold += 1;
     if (bucket === "dead") counts.dead += 1;
     if (bucket === "suppressed") counts.suppressed += 1;
     if (["priority", "new_replies", "needs_review", "follow_up"].includes(bucket)) counts.active += 1;
-    if (bucket === "waiting") counts.waiting += 1;
+    if (threadMatchesBucketFilter(row, "waiting", nowMs)) counts.waiting += 1;
     if (!row.property_id) counts.unlinked += 1;
   }
   counts.all_messages = counts.all;
@@ -702,7 +704,8 @@ function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
     const numericValue = Number(value);
     const currentValue = Number(next[key]);
     if (!Number.isFinite(numericValue) || numericValue <= 0) continue;
-    if (!Number.isFinite(currentValue) || currentValue <= 0) {
+    // Preserve authoritative zero counts from canonical views; only fill missing buckets.
+    if (!Number.isFinite(currentValue)) {
       next[key] = numericValue;
       applied = true;
     }
@@ -712,60 +715,7 @@ function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
 }
 
 function threadMatchesFilter(thread = {}, filter = "all") {
-  const bucket = lower(thread.inbox_bucket);
-  const direction = normalizeDirection(thread.latest_message_direction || thread.direction);
-  switch (filter) {
-    case "all":
-      return true;
-    case "priority":
-      return bucket === "priority";
-    case "new_replies":
-      // Canonical: inbound latest + (explicit bucket or within recent window), unread/not actioned, not terminal
-      if (["dead", "suppressed"].includes(bucket)) return false;
-      if (bucket === "new_replies") return true; // explicit stored classification wins for visibility until actioned
-      {
-        const dir = normalizeDirection(thread.latest_message_direction || thread.direction);
-        if (dir !== "inbound") return false;
-        const inAt = thread.last_inbound_at || thread.latest_message_at;
-        const inMs = parseTimestampMs(inAt);
-        if (!inMs) return false;
-        const within = (Date.now() - inMs) <= WAITING_REPLY_WINDOW_MS;
-        const notReadOrActioned = thread.is_read !== true && !thread.is_actioned;
-        const notTerminal = !thread.opt_out && !thread.wrong_number && !thread.not_interested;
-        return within && notReadOrActioned && notTerminal;
-      }
-    case "needs_review":
-      return bucket === "needs_review" || thread.needs_review === true;
-    case "follow_up":
-      return bucket === "follow_up";
-    case "cold":
-      return bucket === "cold" || lower(thread.automation_lane) === "cold_reactivation";
-    case "dead":
-      return bucket === "dead" || thread.wrong_number === true || thread.not_interested === true;
-    case "suppressed":
-      return bucket === "suppressed" || thread.opt_out === true || lower(thread.suppression_status) === "suppressed";
-    case "active":
-      return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
-    case "waiting":
-      // Canonical Waiting predicate:
-      // explicit bucket or (outbound last + <24h + no newer inbound + active)
-      if (["dead", "suppressed"].includes(bucket)) return false;
-      if (bucket === "waiting") return true;
-      {
-        const lastOut = thread.last_outbound_at || thread.lastOutboundAt || thread.latest_message_at;
-        const lastIn = thread.last_inbound_at || thread.lastInboundAt;
-        const outMs = parseTimestampMs(lastOut);
-        if (!outMs) return false;
-        const ageOk = (Date.now() - outMs) <= WAITING_REPLY_WINDOW_MS;
-        const noNewerInbound = isOutboundLastWithoutReply({ lastOutboundAt: lastOut, lastInboundAt: lastIn });
-        const isOutboundLatest = (direction === "outbound") || noNewerInbound;
-        return isOutboundLatest && ageOk;
-      }
-    case "unlinked":
-      return !thread.property_id;
-    default:
-      return true;
-  }
+  return threadMatchesBucketFilter(thread, filter);
 }
 
 function threadMatchesSearch(thread = {}, query = "") {
@@ -1595,7 +1545,8 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
       return typeof query.or === "function"
         ? query.or(
           "inbox_bucket.eq.waiting,"
-          + `and(latest_message_direction.eq.outbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed)`,
+          + "and(latest_message_direction.eq.outbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed,"
+          + `last_outbound_at.gte.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
         )
         : query.eq("inbox_bucket", "waiting");
     case "unlinked":
@@ -2012,7 +1963,6 @@ async function fetchAuthoritativeInboxCounts(supabase) {
     "follow_up",
     "dead",
     "suppressed",
-    "waiting",
   ];
 
   const counts = buildEmptyCounts();
@@ -2027,6 +1977,13 @@ async function fetchAuthoritativeInboxCounts(supabase) {
     if (error) throw error;
     counts[bucket] = Number(count || 0);
   }
+
+  const { data: alignedCountRows, error: alignedCountError } = await supabase
+    .from("canonical_inbox_counts")
+    .select("waiting")
+    .limit(1);
+  if (alignedCountError) throw alignedCountError;
+  counts.waiting = Number(alignedCountRows?.[0]?.waiting ?? 0);
 
   const { count: coldCount, error: coldError } = await supabase
     .from("inbox_thread_state")

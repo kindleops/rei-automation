@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const API_ROOT = path.join(ROOT, "apps/api");
 const TEST_PHONE = "+16127433952";
 const PROOF_SOURCE = "cockpit-realtime-live-proof";
-const PRIMARY_THREAD_SOURCE = "v_inbox_threads_live_v2";
+const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const KEEP_ROWS = ["1", "true", "yes"].includes(
   String(process.env.COCKPIT_PROOF_KEEP_ROWS || "").toLowerCase(),

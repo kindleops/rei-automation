@@ -10,7 +10,7 @@
     "react-dom": "18.3.1"
   },
   "scripts": {
-    "build:api": "npm --workspace apps/api run build",
+    "build:api": "node scripts/build-api-production.mjs",
     "build:dashboard": "npm --workspace apps/dashboard run build",
     "build": "npm run build:api && npm run build:dashboard",
     "dev:all": "node scripts/dev-all.mjs",
@@ -23,6 +23,9 @@
     "proof:sms-autopilot-dry-run": "node scripts/proof/sms-autopilot-dry-run-proof.mjs",
     "proof:sms-health-guard": "node scripts/proof/sms-health-guard-proof.mjs",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
+    "proof:dashboard-react-refresh": "node scripts/proof/dashboard-react-refresh-proof.mjs",
+    "proof:build-while-dev": "node scripts/proof/build-while-dev-proof.mjs",
+    "proof:inbox-50-thread": "node scripts/proof/inbox-50-thread-validation.mjs",
     "build:safe": "npm run boundary:audit && npm run build"
   }
 }

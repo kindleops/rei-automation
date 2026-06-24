@@ -47,6 +47,8 @@ async function assertHealthyPage(page: Page, routeName: string) {
     /vendor-chunks\/@sentry/i,
     /Unhandled Runtime Error/i,
     /TypeError: Failed to fetch dynamically imported module/i,
+    /\$RefreshSig\$ is not defined/i,
+    /\$RefreshReg\$ is not defined/i,
   ]
   for (const pattern of fatalPatterns) {
     expect(bodyText, `${routeName} fatal error`).not.toMatch(pattern)

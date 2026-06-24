@@ -202,7 +202,12 @@ async function main() {
     dead: await countThreads((query) => query.eq("inbox_bucket", "dead")),
     suppressed: await countThreads((query) => query.eq("inbox_bucket", "suppressed")),
     active: await countThreads((query) => query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"])),
-    waiting: await countThreads((query) => query.or("inbox_bucket.eq.waiting,and(latest_message_direction.eq.outbound,inbox_bucket.not.in.(dead,suppressed))")),
+    waiting: await (async () => {
+      const { data, error } = await supabase.from("canonical_inbox_threads").select("thread_key,inbox_bucket,latest_message_direction,last_outbound_at,last_inbound_at,latest_message_at,opt_out,wrong_number,not_interested");
+      if (error) throw error;
+      const { threadMatchesBucketFilter } = await import("../../apps/api/src/lib/domain/inbox/inbox-bucket-predicates.js");
+      return (Array.isArray(data) ? data : []).filter((row) => threadMatchesBucketFilter(row, "waiting")).length;
+    })(),
     unlinked: await countThreads((query) => query.is("property_id", null)),
   };
 
