@@ -54,7 +54,6 @@ import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { subscribeToInboxRealtime } from '../../lib/data/realtime'
-import { invalidateRequestCache } from '../../lib/api/requestCache'
 import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
