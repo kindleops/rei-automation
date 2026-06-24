@@ -2784,6 +2784,41 @@ function buildPhoneAnyFilter(normalizedPhone) {
   };
 }
 
+const MESSAGE_EVENT_LOOKUP_COLUMNS = [
+  "id",
+  "message_event_key",
+  "message_id",
+  "provider_message_sid",
+  "thread_key",
+  "direction",
+  "message_body",
+  "event_timestamp",
+  "created_at",
+  "updated_at",
+  "sent_at",
+  "received_at",
+  "delivered_at",
+  "failed_at",
+  "delivery_status",
+  "raw_carrier_status",
+  "provider_delivery_status",
+  "failure_reason",
+  "failure_code",
+  "error_message",
+  "from_phone_number",
+  "to_phone_number",
+  "property_id",
+  "prospect_id",
+  "master_owner_id",
+  "detected_intent",
+  "is_opt_out",
+  "queue_id",
+  "metadata",
+  "source_app",
+  "current_stage",
+  "auto_reply_status",
+].join(",");
+
 function buildStrictMessageStrategies(lookup = {}) {
   const normalizedPhone = getLookupNormalizedPhone(lookup);
   const conversationThreadId = buildLookupConversationThreadId(lookup);
@@ -2798,6 +2833,53 @@ function buildStrictMessageStrategies(lookup = {}) {
       },
       apply(query) {
         return query.eq("id", lookup.latestMessageId);
+      },
+    });
+  }
+
+  if (lookup.propertyId && normalizedPhone) {
+    strategies.push({
+      name: "property_id+to_phone",
+      filter: {
+        table: "message_events",
+        eq: { property_id: lookup.propertyId, to_phone_number: normalizedPhone },
+      },
+      apply(query) {
+        return query.eq("property_id", lookup.propertyId).eq("to_phone_number", normalizedPhone);
+      },
+    });
+    strategies.push({
+      name: "property_id+from_phone",
+      filter: {
+        table: "message_events",
+        eq: { property_id: lookup.propertyId, from_phone_number: normalizedPhone },
+      },
+      apply(query) {
+        return query.eq("property_id", lookup.propertyId).eq("from_phone_number", normalizedPhone);
+      },
+    });
+  }
+
+  if ((lookup.masterOwnerId || lookup.ownerId) && normalizedPhone) {
+    const ownerId = clean(lookup.masterOwnerId || lookup.ownerId);
+    strategies.push({
+      name: "master_owner_id+to_phone",
+      filter: {
+        table: "message_events",
+        eq: { master_owner_id: ownerId, to_phone_number: normalizedPhone },
+      },
+      apply(query) {
+        return query.eq("master_owner_id", ownerId).eq("to_phone_number", normalizedPhone);
+      },
+    });
+    strategies.push({
+      name: "master_owner_id+from_phone",
+      filter: {
+        table: "message_events",
+        eq: { master_owner_id: ownerId, from_phone_number: normalizedPhone },
+      },
+      apply(query) {
+        return query.eq("master_owner_id", ownerId).eq("from_phone_number", normalizedPhone);
       },
     });
   }
@@ -2859,6 +2941,26 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   }
 
   const normalizedPhone = getLookupNormalizedPhone(lookup);
+  if (strategyName === "property_id+to_phone") {
+    return clean(row.property_id) === clean(lookup.propertyId)
+      && clean(row.to_phone_number) === normalizedPhone
+      && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "property_id+from_phone") {
+    return clean(row.property_id) === clean(lookup.propertyId)
+      && clean(row.from_phone_number) === normalizedPhone
+      && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "master_owner_id+to_phone") {
+    return clean(row.master_owner_id) === clean(lookup.masterOwnerId || lookup.ownerId)
+      && clean(row.to_phone_number) === normalizedPhone
+      && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "master_owner_id+from_phone") {
+    return clean(row.master_owner_id) === clean(lookup.masterOwnerId || lookup.ownerId)
+      && clean(row.from_phone_number) === normalizedPhone
+      && !rowConflictsWithLookup(row, lookup);
+  }
   if (strategyName === "thread_key=canonical_e164") {
     return clean(row.thread_key) === normalizedPhone && !rowConflictsWithLookup(row, lookup);
   }
@@ -2891,6 +2993,17 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   return true;
 }
 
+function lookupUsesExplicitPropertyScope(lookup = {}) {
+  const lookupPropertyId = clean(lookup.propertyId);
+  if (!lookupPropertyId) return false;
+  const conversationId = buildLookupConversationThreadId(lookup);
+  const selectedKey = clean(lookup.selectedThreadKey);
+  const compoundKey = conversationId?.startsWith("ct:") ? conversationId : (selectedKey?.startsWith("ct:") ? selectedKey : "");
+  if (!compoundKey.includes("|property:")) return false;
+  const parsed = parseConversationThreadId(compoundKey);
+  return clean(parsed.propertyId) === lookupPropertyId;
+}
+
 function rowConflictsWithLookup(row = {}, lookup = {}) {
   const rowProspectId = clean(row.prospect_id || row.canonical_prospect_id || row.final_prospect_id);
   const rowPropertyId = clean(row.property_id || row.final_property_id);
@@ -2900,7 +3013,12 @@ function rowConflictsWithLookup(row = {}, lookup = {}) {
   const lookupOwnerId = clean(lookup.masterOwnerId || lookup.ownerId);
 
   if (lookupProspectId && rowProspectId && rowProspectId !== lookupProspectId) return true;
-  if (lookupPropertyId && rowPropertyId && rowPropertyId !== lookupPropertyId) return true;
+  if (lookupPropertyId && rowPropertyId && rowPropertyId !== lookupPropertyId) {
+    if (lookupUsesExplicitPropertyScope(lookup)) return true;
+    if (lookupOwnerId && rowOwnerId && rowOwnerId === lookupOwnerId) return false;
+    if (!lookupOwnerId) return false;
+    return true;
+  }
   if (lookupOwnerId && rowOwnerId && rowOwnerId !== lookupOwnerId) return true;
   return false;
 }
@@ -3021,20 +3139,10 @@ async function queryMessageEventsByStrictStrategy({
   limit,
   diagnostics,
 }) {
-  const MESSAGE_EVENT_COLUMNS = [
-    "id", "message_event_id", "message_id", "thread_key", "conversation_thread_id",
-    "direction", "message_body", "body", "event_timestamp", "created_at", "updated_at",
-    "sent_at", "delivered_at", "failed_at", "delivery_status", "provider_delivery_status",
-    "provider_status", "failure_reason", "error_message", "from_phone_number", "to_phone_number",
-    "normalized_phone", "canonical_e164", "phone_e164", "seller_phone", "property_id",
-    "prospect_id", "master_owner_id", "owner_id", "detected_intent", "metadata", "queue_id",
-    "source_app", "latest_message_source",
-  ].join(",");
-
   // NOTE: no `{ count: "exact" }` and no `select('*')` — both caused multi-second scans.
   let query = supabase
     .from("message_events")
-    .select(MESSAGE_EVENT_COLUMNS);
+    .select(MESSAGE_EVENT_LOOKUP_COLUMNS);
 
   query = strategy.apply(query);
   const filterAudit = {
@@ -3141,6 +3249,10 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     strategies_tried: strategies.map((strategy) => strategy.name),
     fallback_order: [
       "latest_message_id_exact",
+      "property_id+to_phone",
+      "property_id+from_phone",
+      "master_owner_id+to_phone",
+      "master_owner_id+from_phone",
       "thread_key=canonical_e164",
       "to_phone_number=canonical_e164",
       "from_phone_number=canonical_e164",
@@ -3188,11 +3300,6 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
 
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
-  const canonicalStrategyNames = new Set([
-    "latest_message_id_exact",
-    "conversation_thread_id",
-    "thread_key=canonical_e164",
-  ]);
   for (const strategy of strategies) {
     const result = await queryMessageEventsByStrictStrategy({
       supabase,
@@ -3206,12 +3313,15 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
       diagnostics.fallback_used = true;
       continue;
     }
-    strategyResults.push({ ...result, strategy });
-    if (result.rows.length > 0 && canonicalStrategyNames.has(strategy.name)) {
+    if (result.rows.length > 0) {
+      strategyResults.push({ ...result, strategy });
+    }
+    // Only short-circuit on exact latest-message lookup; merge all other strategies.
+    if (result.rows.length > 0 && strategy.name === "latest_message_id_exact") {
       diagnostics.lookup_strategy_used = strategy.name;
       break;
     }
-    const totalFound = strategyResults.reduce((sum, r) => sum + r.rows.length, 0);
+    const totalFound = dedupeRowsByMessageId(strategyResults.flatMap((entry) => entry.rows)).length;
     if (totalFound >= fetchLimit) break;
   }
 
@@ -3292,10 +3402,23 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     master_owner_ids: lookup.masterOwnerId || lookup.ownerId ? [lookup.masterOwnerId || lookup.ownerId] : [],
     latest_message_id: lookup.latestMessageId || null,
   };
+  const lookupStrategyUsed = diagnostics.lookup_strategy_used === "latest_message_id_exact"
+    ? diagnostics.lookup_strategy_used
+    : (identityUsed || (rows.length > 0 ? "message_events_merged" : "message_events:empty"));
+
   const finalDiagnostics = {
     ...diagnostics,
+    lookup_strategy_used: lookupStrategyUsed,
     identityUsed,
     sourceUsed,
+    identifiers_used: {
+      conversation_thread_id: conversationThreadId,
+      normalized_phone: normalizedPhone,
+      property_id: lookup.propertyId || null,
+      master_owner_id: lookup.masterOwnerId || lookup.ownerId || null,
+      prospect_id: lookup.prospectId || null,
+      latest_message_id: lookup.latestMessageId || null,
+    },
     identities_tried: identitiesTried,
     identitiesTried,
     threadIdentityAudit: audit,
