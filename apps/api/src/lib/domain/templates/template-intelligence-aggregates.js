@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/supabase/client.js'
 import { chunk, unique } from '@/lib/utils/arrays.js'
+import {
+  buildAttributionRates,
+  buildPortfolioInsightRail,
+  reconcileAttributionCounts,
+} from './template-attribution-contract.js'
 import { kpiRowToMetrics } from './template-intelligence-contract.js'
 import { normalizeStageCode } from './template-stage-labels.js'
 
@@ -148,16 +153,18 @@ export function buildStageFunnel(stageCode, bucket = {}) {
   ]
   const stageCols = {
     S1: [
-      { key: 'ownership_confirmed', label: 'Ownership Confirmed', value: b.ownership_confirmed ?? 0 },
+      { key: 'ownership_confirmed', label: 'Owner Confirmed', value: b.ownership_confirmed ?? 0 },
       { key: 'wrong_person', label: 'Wrong Person', value: b.wrong_numbers ?? 0 },
-      { key: 'selling_interest', label: 'Selling Interest Captured', value: b.selling_interest ?? 0 },
-      { key: 'advanced_s2', label: 'Advanced to S2', value: b.stage_advanced ?? 0 },
+      { key: 'not_interested', label: 'Not Interested', value: b.not_interested ?? 0 },
+      { key: 'selling_interest', label: 'Selling Interest', value: b.selling_interest ?? 0 },
+      { key: 'advanced_s2', label: 'Advanced to Stage 2', value: b.stage_advanced ?? 0 },
     ],
     S1F: [
-      { key: 'ownership_confirmed', label: 'Ownership Confirmed', value: b.ownership_confirmed ?? 0 },
+      { key: 'ownership_confirmed', label: 'Owner Confirmed', value: b.ownership_confirmed ?? 0 },
       { key: 'wrong_person', label: 'Wrong Person', value: b.wrong_numbers ?? 0 },
-      { key: 'selling_interest', label: 'Selling Interest Captured', value: b.selling_interest ?? 0 },
-      { key: 'advanced_s2', label: 'Advanced to S2', value: b.stage_advanced ?? 0 },
+      { key: 'not_interested', label: 'Not Interested', value: b.not_interested ?? 0 },
+      { key: 'selling_interest', label: 'Selling Interest', value: b.selling_interest ?? 0 },
+      { key: 'advanced_s2', label: 'Advanced to Stage 2', value: b.stage_advanced ?? 0 },
     ],
     S2: [
       { key: 'seller_open', label: 'Seller Open', value: b.selling_interest ?? 0 },
@@ -217,22 +224,26 @@ export function buildAggregateFromKpiRow(kpiRow) {
   const metricStatus = String(kpiRow.metric_status ?? 'ok')
   const hasKpiAttribution = metricStatus !== 'missing_source'
   const hasSends = Number(kpiRow.sends ?? kpiRow.sample_size ?? 0) > 0
+  const replyTracked = hasKpiAttribution || metrics.replies > 0
   return {
     ...emptyBucket(),
-    replies: hasKpiAttribution || metrics.replies > 0 ? metrics.replies : null,
-    positive_replies: hasKpiAttribution || metrics.positive_replies > 0 ? metrics.positive_replies : null,
-    ownership_confirmed: metrics.ownership_confirmed > 0 ? metrics.ownership_confirmed : null,
-    selling_interest: metrics.selling_interest > 0 ? metrics.selling_interest : null,
-    price_captured: metrics.price_captured > 0 ? metrics.price_captured : null,
-    stage_advanced: metrics.stage_advanced > 0 ? metrics.stage_advanced : null,
-    opt_outs: hasKpiAttribution || metrics.opt_outs > 0 ? metrics.opt_outs : null,
-    wrong_numbers: hasKpiAttribution || metrics.wrong_numbers > 0 ? metrics.wrong_numbers : null,
-    not_interested: metrics.not_interested > 0 ? metrics.not_interested : null,
-    hostile_legal: metrics.hostile_legal > 0 ? metrics.hostile_legal : null,
-    unclear: metrics.unclear > 0 ? metrics.unclear : null,
-    attribution_available: hasSends && hasKpiAttribution,
-    attribution_partial: hasSends && !hasKpiAttribution,
-    attribution_source: 'template_performance_kpis_v',
+    ...reconcileAttributionCounts({
+      sends: metrics.sends,
+      delivered: metrics.delivered,
+      failed: metrics.failed,
+      replies: replyTracked ? metrics.replies : null,
+      positive_replies: replyTracked ? metrics.positive_replies : null,
+      negative_replies: replyTracked ? metrics.negative_replies : null,
+      ownership_confirmed: replyTracked ? metrics.ownership_confirmed : null,
+      selling_interest: replyTracked ? metrics.selling_interest : null,
+      stage_advanced: replyTracked ? metrics.stage_advanced : null,
+      opt_outs: hasKpiAttribution ? metrics.opt_outs : (metrics.opt_outs > 0 ? metrics.opt_outs : null),
+      wrong_numbers: replyTracked ? metrics.wrong_numbers : null,
+      not_interested: replyTracked ? metrics.not_interested : null,
+      attribution_available: hasSends && hasKpiAttribution,
+      attribution_partial: hasSends && !hasKpiAttribution,
+      attribution_source: 'template_performance_kpis_v',
+    }),
   }
 }
 
@@ -444,107 +455,44 @@ export function mergeAggregateIntoMetrics(metrics, attr, exec) {
     if (attr && field in attr) return attr[field]
     return metrics[field]
   }
-  const repliesRaw = useAttr('replies')
-  const positiveRaw = useAttr('positive_replies')
-  const ownershipRaw = useAttr('ownership_confirmed')
-  const stageAdvancedRaw = useAttr('stage_advanced')
-  const optOutsRaw = useAttr('opt_outs')
   const delivered = metrics.delivered ?? exec?.delivered ?? 0
   const sends = metrics.sends ?? exec?.sends ?? 0
   const costAvail = exec?.cost_available ?? false
-  const replies = numOrZero(repliesRaw)
-  const positive = numOrZero(positiveRaw)
-  const ownership = numOrZero(ownershipRaw)
-  const stageAdvanced = numOrZero(stageAdvancedRaw)
-  const optOuts = numOrZero(optOutsRaw)
-  const attributionAvailable = Boolean(attr?.attribution_available)
-  const attributionPartial = Boolean(attr?.attribution_partial)
+  const reconciled = reconcileAttributionCounts({
+    sends,
+    delivered,
+    failed: metrics.failed ?? exec?.failed ?? 0,
+    replies: useAttr('replies'),
+    positive_replies: useAttr('positive_replies'),
+    negative_replies: useAttr('negative_replies') ?? metrics.negative_replies,
+    ownership_confirmed: useAttr('ownership_confirmed'),
+    selling_interest: attr?.selling_interest ?? metrics.selling_interest,
+    stage_advanced: useAttr('stage_advanced'),
+    opt_outs: useAttr('opt_outs'),
+    wrong_numbers: attr?.wrong_numbers ?? metrics.wrong_numbers,
+    not_interested: attr?.not_interested ?? metrics.not_interested,
+    attribution_available: Boolean(attr?.attribution_available),
+    attribution_partial: Boolean(attr?.attribution_partial),
+    attribution_source: attr?.attribution_source ?? metrics.attribution_source ?? null,
+  })
+  const rates = {
+    ...metrics.rates,
+    ...buildAttributionRates(reconciled),
+    failure: metrics.rates?.failure,
+  }
   return {
     ...metrics,
-    replies: repliesRaw,
-    positive_replies: positiveRaw,
-    ownership_confirmed: ownershipRaw,
-    selling_interest: attr?.selling_interest ?? metrics.selling_interest ?? null,
+    ...reconciled,
+    selling_interest: reconciled.selling_interest ?? attr?.selling_interest ?? metrics.selling_interest ?? null,
     price_captured: attr?.price_captured ?? metrics.price_captured ?? null,
-    stage_advanced: stageAdvancedRaw,
-    opt_outs: optOutsRaw,
-    wrong_numbers: attr?.wrong_numbers ?? metrics.wrong_numbers ?? null,
-    not_interested: attr?.not_interested ?? metrics.not_interested ?? null,
+    not_interested: reconciled.not_interested ?? attr?.not_interested ?? metrics.not_interested ?? null,
     retries: exec?.retries ?? metrics.retries,
     cost: costAvail ? (exec?.cost ?? 0) : null,
     cost_available: costAvail,
-    attribution_available: attributionAvailable,
-    attribution_partial: attributionPartial,
-    attribution_source: attr?.attribution_source ?? metrics.attribution_source ?? null,
-    rates: {
-      ...metrics.rates,
-      reply: {
-        numerator: repliesRaw,
-        denominator: delivered,
-        value: delivered > 0 && repliesRaw != null ? Math.round((replies / delivered) * 10000) / 100 : null,
-        unit: 'percent',
-        unavailable: repliesRaw == null && attributionPartial,
-      },
-      positive_reply: {
-        numerator: positiveRaw,
-        denominator: repliesRaw,
-        value: replies > 0 && positiveRaw != null ? Math.round((positive / replies) * 10000) / 100 : null,
-        unit: 'percent',
-        unavailable: positiveRaw == null && attributionPartial,
-      },
-      ownership_confirmation: {
-        numerator: ownershipRaw,
-        denominator: repliesRaw,
-        value: replies > 0 && ownershipRaw != null ? Math.round((ownership / replies) * 10000) / 100 : null,
-        unit: 'percent',
-        unavailable: ownershipRaw == null && !attributionAvailable,
-      },
-      stage_advancement: {
-        numerator: stageAdvancedRaw,
-        denominator: repliesRaw,
-        value: replies > 0 && stageAdvancedRaw != null ? Math.round((stageAdvanced / replies) * 10000) / 100 : null,
-        unit: 'percent',
-        unavailable: stageAdvancedRaw == null && !attributionAvailable,
-      },
-      opt_out: {
-        numerator: optOutsRaw,
-        denominator: delivered,
-        value: delivered > 0 && optOutsRaw != null ? Math.round((optOuts / delivered) * 10000) / 100 : null,
-        unit: 'percent',
-        unavailable: optOutsRaw == null && attributionPartial,
-      },
-      delivery: { numerator: delivered, denominator: sends, value: sends > 0 ? Math.round((delivered / sends) * 10000) / 100 : null, unit: 'percent' },
-      failure: metrics.rates?.failure,
-    },
+    rates,
   }
 }
 
 export function buildIntelligenceRail(rows = []) {
-  const tracked = rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0)
-  const healthy = tracked.filter((r) => ['winner', 'champion', 'rising'].includes(String(r.autopilot?.rotation_state))).length
-  const watch = tracked.filter((r) => r.autopilot?.rotation_state === 'watch').length
-  const degraded = tracked.filter((r) => ['cooldown', 'paused'].includes(String(r.autopilot?.rotation_state))).length
-  const critical = tracked.filter((r) => r.metrics?.performance_label === 'critical' || (r.metrics?.rates?.opt_out?.value ?? 0) >= 8).length
-  const byCopy = [...tracked].sort((a, b) => (b.autopilot?.intelligence?.copy_score ?? 0) - (a.autopilot?.intelligence?.copy_score ?? 0))
-  const byOptOut = [...tracked].sort((a, b) => (b.metrics?.rates?.opt_out?.value ?? 0) - (a.metrics?.rates?.opt_out?.value ?? 0))
-  const byStage = [...tracked].sort((a, b) => (b.metrics?.current?.stage_advanced ?? 0) - (a.metrics?.current?.stage_advanced ?? 0))
-  const byDeliveryDrop = [...tracked].sort((a, b) => (a.metrics?.comparison?.rates?.delivery?.delta_absolute ?? 0) - (b.metrics?.comparison?.rates?.delivery?.delta_absolute ?? 0))
-  const noAttribution = tracked.filter((r) => r.data_quality?.attribution_status !== 'attributed').length
-  return {
-    tracked_templates: tracked.length,
-    healthy,
-    watch,
-    degraded,
-    critical,
-    current_winner: byCopy[0]?.identity?.canonical_display_name ?? null,
-    highest_opt_out_risk: byOptOut[0]?.identity?.canonical_display_name ?? null,
-    strongest_stage_advancement: byStage[0]?.identity?.canonical_display_name ?? null,
-    largest_delivery_decline: byDeliveryDrop[0]?.identity?.canonical_display_name ?? null,
-    lacking_attribution: noAttribution,
-    recommended_actions: [
-      noAttribution > 0 ? `${noAttribution} templates lack attribution — review Data Quality` : null,
-      critical > 0 ? `${critical} templates in critical/opt-out risk` : null,
-      degraded > 0 ? `${degraded} templates in cooldown/paused` : null,
-    ].filter(Boolean),
-  }
+  return buildPortfolioInsightRail(rows)
 }

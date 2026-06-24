@@ -2432,7 +2432,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
                 <span className="occ-section-view__meta">{DATE_PRESET_LABELS[datePreset]} · {items.length.toLocaleString()} rows on page</span>
               )}
               {section === 'templates' && (
-                <span className="occ-section-view__meta">Server-paginated catalog · shadow autopilot</span>
+                <span className="occ-section-view__meta">Template range independent · {DATE_PRESET_LABELS[datePreset]} queue context</span>
               )}
             </div>
             <div className="occ-section-view__body">
@@ -2440,6 +2440,7 @@ export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: 
                 <TemplateIntelligenceModule
                   searchParams={templateSearchParams}
                   setSearchParams={syncTemplateSearchParams}
+                  globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
                   onViewQueueRows={(templateId) => {
                     setTemplateFilter(templateId)
                     setSection('queue')

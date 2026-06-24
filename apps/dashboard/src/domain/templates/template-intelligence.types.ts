@@ -1,6 +1,6 @@
 export type TemplateTimeRange = 'today' | '24h' | '7d' | '30d' | '90d' | 'all' | 'custom'
 export type AutopilotMode = 'off' | 'shadow' | 'recommend' | 'controlled' | 'autonomous'
-export type ColumnPreset = 'performance' | 'execution' | 'funnel' | 'autopilot' | 'data_quality'
+export type ColumnPreset = 'performance' | 'execution' | 'funnel' | 'optimization' | 'template_health'
 export type TableDensity = 'compact' | 'comfortable'
 
 export interface RateValue {

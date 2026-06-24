@@ -1,30 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ColumnPreset, TableDensity, TemplateIntelligenceRow } from '../../../../domain/templates/template-intelligence.types'
 import {
-  applyTemplateControlShadow,
   exportFilteredTemplates,
   fetchTemplateDossier,
   fetchTemplateIntelligenceList,
   fetchTemplateIntelligenceSummary,
   kpiCardsFromSummary,
+  DEFAULT_PERFORMANCE_COLUMNS,
 } from '../../../../lib/data/templateIntelligenceData'
 import { useTemplateIntelligenceFilters } from '../../hooks/useTemplateIntelligenceFilters'
-import { TemplateDossierDrawer } from './TemplateDossierDrawer'
+import { TemplateDetailModal } from './TemplateDetailModal'
 import { TemplateFiltersBar } from './TemplateFiltersBar'
+import { TemplateInsightStrip } from './TemplateInsightStrip'
 import { TemplateIntelligenceHeader } from './TemplateIntelligenceHeader'
-import { TemplateIntelligenceRail } from './TemplateIntelligenceRail'
 import { TemplateIntelligenceTable } from './TemplateIntelligenceTable'
 import './template-intelligence.css'
 
 interface TemplateIntelligenceModuleProps {
   searchParams: URLSearchParams
   setSearchParams: (next: URLSearchParams) => void
+  globalRangeLabel?: string
   onViewQueueRows?: (templateId: string) => void
 }
 
 export function TemplateIntelligenceModule({
   searchParams,
   setSearchParams,
+  globalRangeLabel,
   onViewQueueRows,
 }: TemplateIntelligenceModuleProps) {
   const { filters, updateFilters, resetFilters } = useTemplateIntelligenceFilters(searchParams, setSearchParams)
@@ -41,6 +43,7 @@ export function TemplateIntelligenceModule({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [preset, setPreset] = useState<ColumnPreset>('performance')
   const [density, setDensity] = useState<TableDensity>('comfortable')
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([...DEFAULT_PERFORMANCE_COLUMNS])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dossier, setDossier] = useState<Record<string, unknown> | null>(null)
   const [dossierLoading, setDossierLoading] = useState(false)
@@ -64,7 +67,7 @@ export function TemplateIntelligenceModule({
       setMeta(list.meta as unknown as Record<string, unknown>)
       if (summary.ok) {
         setKpiCards(kpiCardsFromSummary(summary.cards, summary.meta))
-        setRail((summary as { intelligence_rail?: Record<string, unknown> }).intelligence_rail ?? null)
+        setRail(summary.intelligence_rail ?? null)
       }
       setStale(false)
     } catch (err) {
@@ -102,15 +105,6 @@ export function TemplateIntelligenceModule({
     else { setSort(col); setSortDir('asc') }
   }
 
-  const handleControl = async (action: string) => {
-    if (!selectedId) return
-    const reason = window.prompt('Reason for control action (required):')
-    if (!reason?.trim()) return
-    if (!window.confirm(`Confirm ${action} for ${selectedId}?`)) return
-    await applyTemplateControlShadow({ templateId: selectedId, action, reason: reason.trim() })
-    void load()
-  }
-
   const handleExport = async () => {
     setExporting(true)
     try {
@@ -131,22 +125,36 @@ export function TemplateIntelligenceModule({
 
   return (
     <div className="occ-tpl-intel-layout">
-      <TemplateIntelligenceHeader cards={kpiCards} loading={loading} />
+      <TemplateIntelligenceHeader
+        cards={kpiCards}
+        loading={loading}
+        filters={filters}
+        globalRangeLabel={globalRangeLabel}
+        onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
+      />
       <TemplateFiltersBar
         filters={filters}
         preset={preset}
         density={density}
+        visibleColumns={visibleColumns}
         onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
         onPresetChange={setPreset}
         onDensityChange={setDensity}
+        onVisibleColumnsChange={setVisibleColumns}
         onReset={() => { setPage(0); resetFilters() }}
         onExport={exporting ? undefined : handleExport}
       />
-      <div className={selectedId ? 'occ-tpl-intel-main occ-tpl-intel-main--split' : 'occ-tpl-intel-main'}>
+      <TemplateInsightStrip
+        data={rail as Parameters<typeof TemplateInsightStrip>[0]['data']}
+        loading={loading}
+        onSelectTemplate={setSelectedId}
+      />
+      <div className="occ-tpl-intel-main">
         <TemplateIntelligenceTable
           rows={rows}
           preset={preset}
           density={density}
+          visibleColumns={visibleColumns}
           loading={loading}
           error={error}
           stale={stale}
@@ -157,33 +165,24 @@ export function TemplateIntelligenceModule({
           onSort={handleSort}
           stageCode={stageCode}
         />
-        {selectedId ? (
-          <TemplateDossierDrawer
-            row={selectedRow}
-            dossier={dossier}
-            loading={dossierLoading}
-            onClose={() => setSelectedId(null)}
-            onControl={handleControl}
-            onViewQueueRows={onViewQueueRows}
-          />
-        ) : (
-          <TemplateIntelligenceRail
-            data={rail as Parameters<typeof TemplateIntelligenceRail>[0]['data']}
-            loading={loading}
-            onFilter={(patch) => {
-              const next = new URLSearchParams(searchParams)
-              for (const [k, v] of Object.entries(patch)) next.set(k, v)
-              setSearchParams(next)
-            }}
-          />
-        )}
       </div>
+      {selectedRow && (
+        <TemplateDetailModal
+          row={selectedRow}
+          rows={rows}
+          dossier={dossier}
+          loading={dossierLoading}
+          onClose={() => setSelectedId(null)}
+          onNavigate={setSelectedId}
+          onViewQueueRows={onViewQueueRows}
+        />
+      )}
       <div className="occ-tpl-intel-footer">
         <span>
           Matching {matchingCount.toLocaleString()} templates
-          {' · '}Active catalog {totalCount.toLocaleString()}
-          {' · '}Tracked {trackedCount.toLocaleString()}
-          {' · '}Displayed {rows.length.toLocaleString()} (page {page + 1} of {totalPages}, size {pageSize})
+          {' · '}Catalog {totalCount.toLocaleString()}
+          {' · '}With activity {trackedCount.toLocaleString()}
+          {' · '}Page {page + 1} of {totalPages}
         </span>
         <label className="occ-page-size">
           <span>Per page</span>
@@ -195,17 +194,11 @@ export function TemplateIntelligenceModule({
           </select>
         </label>
         <div className="occ-pagination">
-          <span className="occ-pagination__range">{page * pageSize + 1}–{Math.min((page + 1) * pageSize, matchingCount)} of {matchingCount.toLocaleString()}</span>
-          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage(0)}>« First</button>
-          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
-          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>Next ›</button>
-          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>Last »</button>
+          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage(0)}>«</button>
+          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>‹</button>
+          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>›</button>
+          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
         </div>
-        {selectedRow && onViewQueueRows && (
-          <button type="button" className="occ-action-btn is-secondary" onClick={() => onViewQueueRows(selectedRow.identity.template_id)}>
-            View queue rows
-          </button>
-        )}
       </div>
     </div>
   )

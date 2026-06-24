@@ -80,9 +80,9 @@ export async function fetchTemplateIntelligenceList(
 export async function fetchTemplateIntelligenceSummary(
   filters: TemplateIntelligenceFilters,
   autopilotMode: AutopilotMode = 'shadow',
-): Promise<{ ok: boolean; cards: Record<string, unknown>; meta?: TemplateIntelligenceMeta; error?: string }> {
+): Promise<{ ok: boolean; cards: Record<string, unknown>; meta?: TemplateIntelligenceMeta; intelligence_rail?: Record<string, unknown>; error?: string }> {
   const qs = buildQuery(filters, { summary: '1', autopilot_mode: autopilotMode })
-  const result = await backendClient.callBackend<{ ok: boolean; cards: Record<string, unknown>; meta?: TemplateIntelligenceMeta }>(
+  const result = await backendClient.callBackend<{ ok: boolean; cards: Record<string, unknown>; meta?: TemplateIntelligenceMeta; intelligence_rail?: Record<string, unknown> }>(
     `/api/cockpit/templates/intelligence?${qs}`,
   )
   if (!result.ok) return { ok: false, cards: {}, error: result.message ?? result.error }
@@ -125,19 +125,23 @@ export async function applyTemplateControlShadow(params: {
 
 export function kpiCardsFromSummary(cards: Record<string, unknown>, meta?: TemplateIntelligenceMeta): TemplateKpiCard[] {
   const priorLabel = (meta as { prior_label?: string })?.prior_label ?? 'vs previous period'
-  const defs: Array<{ key: string; label: string; rate?: boolean }> = [
+  const defs: Array<{ key: string; label: string; rate?: boolean; time?: boolean }> = [
     { key: 'active_templates', label: 'Active Templates' },
     { key: 'templates_used', label: 'Templates Used' },
     { key: 'sends', label: 'Sends' },
     { key: 'delivery_rate', label: 'Delivery Rate', rate: true },
+    { key: 'replies', label: 'Replies' },
     { key: 'reply_rate', label: 'Reply Rate', rate: true },
+    { key: 'average_reply_time', label: 'Average Reply Time', time: true },
     { key: 'positive_rate', label: 'Positive Reply Rate', rate: true },
+    { key: 'negative_rate', label: 'Negative Reply Rate', rate: true },
     { key: 'ownership_confirmed', label: 'Ownership Confirmed' },
-    { key: 'stage_advanced', label: 'Stage Advanced' },
+    { key: 'stage_advanced', label: 'Stage Advancement' },
     { key: 'opt_out_rate', label: 'Opt-Out Rate', rate: true },
+    { key: 'wrong_number_rate', label: 'Wrong Number Rate', rate: true },
     { key: 'cost', label: 'Estimated Cost' },
   ]
-  return defs.map(({ key, label, rate }) => {
+  return defs.map(({ key, label, rate, time }) => {
     const raw = cards[key] as Record<string, unknown> | undefined
     if (!raw) return { key, label, current: null, priorLabel }
     if (raw.unavailable) {
@@ -150,20 +154,34 @@ export function kpiCardsFromSummary(cards: Record<string, unknown>, meta?: Templ
         priorLabel,
       }
     }
+    if (time) {
+      const cur = raw.current as number | null
+      return {
+        key,
+        label,
+        current: cur,
+        priorLabel,
+        unavailable: cur == null,
+        unavailableReason: cur == null ? String(raw.unavailable_reason ?? 'Unavailable') : undefined,
+      }
+    }
     if (rate) {
       const current = raw.current as RateValue | undefined
       const denom = current?.denominator ?? 0
       const insufficient = denom > 0 && denom < 10
+      const unattributed = Boolean((current as { unattributed?: boolean })?.unattributed)
       return {
         key,
         label,
-        current: current?.value ?? (denom === 0 ? null : current?.value ?? null),
-        numerator: current?.numerator,
+        current: unattributed ? null : (current?.value ?? (denom === 0 ? null : current?.value ?? null)),
+        numerator: current?.numerator ?? undefined,
         denominator: current?.denominator,
         priorDelta: raw.delta_absolute as number | null,
         baseline: (raw.baseline as RateValue | undefined)?.value ?? null,
         priorLabel,
         insufficientData: insufficient,
+        unavailable: unattributed,
+        unavailableReason: unattributed ? 'Reply tracking unavailable for part of range' : undefined,
       }
     }
     const cur = raw.current as number
@@ -179,8 +197,8 @@ export function kpiCardsFromSummary(cards: Record<string, unknown>, meta?: Templ
 }
 
 const FUNNEL_BY_STAGE: Record<string, string[]> = {
-  S1: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'selling_interest', 'advanced_s2'],
-  S1F: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'selling_interest', 'advanced_s2'],
+  S1: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'not_interested', 'selling_interest', 'advanced_s2'],
+  S1F: ['delivered', 'replied', 'ownership_confirmed', 'wrong_person', 'not_interested', 'selling_interest', 'advanced_s2'],
   S2: ['delivered', 'replied', 'seller_open', 'not_interested', 'timeline_captured', 'advanced_s3'],
   S3: ['delivered', 'replied', 'asking_price', 'price_objection', 'advanced_s4'],
   S4: ['delivered', 'replied', 'condition_captured', 'repairs_captured', 'occupancy_captured', 'advanced_s5'],
@@ -188,13 +206,26 @@ const FUNNEL_BY_STAGE: Record<string, string[]> = {
   S6: ['delivered', 'replied', 'agreement_sent', 'agreement_viewed', 'agreement_signed', 'closing_milestone', 'completed'],
 }
 
+export const PERFORMANCE_COLUMNS = [
+  'sends', 'delivered', 'delivery_rate', 'failed', 'replies', 'reply_rate', 'avg_reply_time',
+  'positive_replies', 'positive_rate', 'negative_replies', 'negative_rate',
+  'ownership_confirmed', 'stage_advanced', 'opt_outs', 'wrong_numbers', 'confidence', 'trend',
+] as const
+
+export const DEFAULT_PERFORMANCE_COLUMNS = [
+  'sends', 'delivery_rate', 'reply_rate', 'avg_reply_time', 'positive_rate',
+  'stage_advanced', 'opt_out_rate', 'confidence', 'trend',
+] as const
+
 export const COLUMN_PRESETS: Record<ColumnPreset, (stage?: string) => string[]> = {
-  performance: () => ['identity', 'rotation_state', 'sends', 'delivery', 'replies', 'reply_rate', 'positive', 'positive_rate', 'stage_advancement', 'stage_rate', 'opt_out', 'confidence', 'trend'],
-  execution: () => ['identity', 'selected', 'queued', 'sent', 'delivered', 'failed', 'blocked', 'retries', 'sender_diversity', 'cost', 'last_used'],
+  performance: () => [...DEFAULT_PERFORMANCE_COLUMNS],
+  execution: () => ['identity', 'queue_rows', 'queued', 'sent', 'delivered', 'failed', 'blocked', 'retries', 'senders_used', 'sender_concentration', 'cost', 'last_used'],
   funnel: (stage) => ['identity', ...(FUNNEL_BY_STAGE[stage ?? ''] ?? ['delivered', 'replied', 'ownership_confirmed', 'selling_interest', 'advanced_s2'])],
-  autopilot: () => ['identity', 'state', 'weight', 'daily_cap', 'proposed_weight', 'proposed_state', 'decision', 'confidence', 'reevaluation'],
-  data_quality: () => ['identity', 'variable_contract', 'asset_scope', 'language_quality', 'attribution', 'render_failures', 'metadata_issues', 'recommended_fix'],
+  optimization: () => ['identity', 'optimization_state', 'traffic_share', 'recommended_share', 'reason', 'confidence', 'next_review'],
+  template_health: () => ['identity', 'variables', 'property_match', 'language', 'reply_tracking', 'message_errors', 'issues', 'recommended_fix'],
 }
+
+export const ALL_PERFORMANCE_COLUMNS = PERFORMANCE_COLUMNS
 
 export async function exportFilteredTemplates(
   filters: TemplateIntelligenceFilters,

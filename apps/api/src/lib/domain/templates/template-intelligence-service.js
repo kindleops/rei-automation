@@ -22,6 +22,10 @@ import {
   evaluateTemplateAutopilot,
 } from './template-autopilot-policy.js'
 import {
+  aggregatePortfolioAttribution,
+  detectUndeclaredPlaceholders,
+} from './template-attribution-contract.js'
+import {
   buildIntelligenceRail,
   buildStageFunnel,
   fetchQueueExecutionAggregates,
@@ -222,39 +226,42 @@ function buildAutopilotControl(row) {
   }
 }
 
-function buildDataQuality(row, metrics) {
+function buildDataQuality(row, metrics, identity = null) {
   const vars = Array.isArray(row.variables) ? row.variables : (row.metadata?.variables ?? [])
   const body = clean(row.template_body) || clean(row.template_text)
-  const unresolved = vars.some((v) => body.includes(`[[${v}]]`) || body.includes(`{{${v}}}`))
+  const touch = identity?.touch_number ?? deriveTouchNumber(row)
+  const undeclared = detectUndeclaredPlaceholders(body, vars)
   const issues = []
-  if (!vars.length) issues.push({ code: 'variables_undeclared', message: 'Required variables not declared in catalog metadata' })
-  if (!clean(row.stage_code)) issues.push({ code: 'stage_missing', message: 'Stage metadata missing — resolver may mis-route' })
-  if (row.touch_number == null && !row.metadata?.touch_number) issues.push({ code: 'touch_missing', message: 'Touch number missing' })
-  if (!clean(row.use_case)) issues.push({ code: 'use_case_missing', message: 'Use case missing' })
-  if (!clean(row.language)) issues.push({ code: 'translation_absent', message: 'Language metadata absent' })
-  if (!clean(row.property_type_scope)) issues.push({ code: 'asset_scope_broad', message: 'Asset scope unset — may be too broad' })
-  if (!body) issues.push({ code: 'body_malformed', message: 'Template body empty or malformed' })
-  if (metrics.sends <= 0) issues.push({ code: 'no_sends', message: 'No sends in selected range — attribution unavailable' })
-  else if (metrics.attribution_partial) issues.push({ code: 'partial_attribution', message: 'Reply attribution partially unavailable for this range' })
-  else if (metrics.replies == null) issues.push({ code: 'no_attribution', message: 'Reply attribution unavailable — KPI source missing for range' })
-  else if (Number(metrics.replies) <= 0) issues.push({ code: 'no_replies', message: 'No attributable replies in selected range' })
-  const recommended = issues[0]?.message ?? (unresolved ? 'Validate merge variables against declared contract' : 'No issues detected')
+  if (!vars.length) issues.push({ code: 'variables_undeclared', message: 'Missing required variables in catalog', field: 'variables' })
+  if (!clean(row.stage_code)) issues.push({ code: 'stage_missing', message: 'Stage metadata missing', field: 'stage' })
+  if (touch == null) issues.push({ code: 'touch_missing', message: 'Touch metadata missing', field: 'touch' })
+  if (!clean(row.use_case)) issues.push({ code: 'use_case_missing', message: 'Use case missing', field: 'use_case' })
+  if (!clean(row.language)) issues.push({ code: 'language_missing', message: 'Language metadata missing', field: 'language' })
+  if (!body) issues.push({ code: 'body_empty', message: 'Template body is empty', field: 'body' })
+  for (const placeholder of undeclared) {
+    issues.push({ code: 'unsupported_placeholder', message: `Unsupported placeholder: ${placeholder}`, field: 'variables' })
+  }
+  if (metrics.sends <= 0) issues.push({ code: 'no_sends', message: 'No sends in selected period', field: 'sends' })
+  else if (metrics.attribution_partial) issues.push({ code: 'partial_attribution', message: 'Reply tracking partially unavailable', field: 'attribution' })
+  else if (metrics.replies == null) issues.push({ code: 'no_attribution', message: 'No attributable replies — tracking unavailable', field: 'attribution' })
+  const messageErrors = undeclared.length
+  const recommended = issues[0]?.message ?? 'No issues detected'
   return {
     variable_contract_valid: vars.length > 0,
-    variable_contract_detail: vars.length > 0 ? 'ok' : 'missing — required variables not declared',
+    variable_contract_detail: vars.length > 0 ? 'Declared' : 'Missing seller-name or property variables',
     asset_scope_match: Boolean(clean(row.property_type_scope)),
-    asset_scope_detail: clean(row.property_type_scope) ? 'ok' : 'asset scope too broad or unset',
-    language_quality: clean(row.language) ? 'ok' : 'translation metadata absent',
+    asset_scope_detail: clean(row.property_type_scope) ? 'Matched' : 'Property match not set',
+    language_quality: clean(row.language) ? row.language : 'Missing',
     attribution_status: metrics.sends > 0
       ? (metrics.attribution_partial ? 'partial' : metrics.replies == null ? 'unavailable' : Number(metrics.replies) > 0 ? 'attributed' : 'no_replies')
       : 'no_sends',
-    render_failures: unresolved ? 1 : 0,
-    render_failure_detail: unresolved ? 'Unsupported or unresolved merge variable in body' : 'none',
+    render_failures: messageErrors,
+    render_failure_detail: messageErrors > 0 ? `${messageErrors} unsupported placeholder(s)` : 'None',
     metadata_issues: issues,
     recommended_fix: recommended,
-    attribution_healthy: metrics.sends > 0 && metrics.attribution_available && Number(metrics.replies) > 0,
-    variable_rendering_healthy: !unresolved,
-    unresolved_merge_variable: unresolved,
+    attribution_healthy: metrics.sends > 0 && metrics.attribution_available && metrics.replies != null,
+    variable_rendering_healthy: messageErrors === 0,
+    unresolved_merge_variable: messageErrors > 0,
     wrong_language: false,
     asset_mismatch: !clean(row.property_type_scope),
     prohibited_content: false,
@@ -367,12 +374,13 @@ export async function fetchTemplateIntelligence({
     metrics.current = enrichedCurrent
     const execBucket = execCurrent.get(key)
     const senderDiv = senderDiversityFromBucket(execBucket)
-    const dataQuality = buildDataQuality(row, metrics.current)
+    const dataQuality = buildDataQuality(row, metrics.current, identity)
     const control = buildAutopilotControl(row)
     return {
       identity,
       metrics,
       execution: {
+        queue_rows: execBucket?.selected ?? 0,
         selected: execBucket?.selected ?? 0,
         queued: execBucket?.queued ?? 0,
         scheduled: 0,
@@ -474,24 +482,19 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
     autopilotMode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
   })
   const rows = list.data ?? []
-  const sumMetric = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.current?.[field]) || 0), 0)
   const sumPrior = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.prior) || 0), 0)
   const sumBaseline = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.baseline) || 0), 0)
 
-  const sends = sumMetric('sends')
-  const delivered = sumMetric('delivered')
-  const replies = sumMetric('replies')
-  const positive = sumMetric('positive_replies')
-  const ownership = sumMetric('ownership_confirmed')
-  const stageAdvanced = sumMetric('stage_advanced')
-  const optOuts = sumMetric('opt_outs')
+  const portfolio = aggregatePortfolioAttribution(rows)
   const priorSends = sumPrior('sends')
   const priorDelivered = sumPrior('delivered')
   const priorReplies = sumPrior('replies')
   const priorPositive = sumPrior('positive_replies')
+  const priorNegative = sumPrior('negative_replies')
   const priorOwnership = sumPrior('ownership_confirmed')
   const priorStage = sumPrior('stage_advanced')
   const priorOptOuts = sumPrior('opt_outs')
+  const priorWrong = sumPrior('wrong_numbers')
   const baselineSends = sumBaseline('sends')
   const baselineDelivered = sumBaseline('delivered')
   const usedTemplates = rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0).length
@@ -501,6 +504,8 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
   const baselineCost = sumBaseline('cost')
   const costAvailable = costRows.length > 0
 
+  const { sends, delivered, replies, positive_replies: positive, negative_replies: negative, ownership_confirmed: ownership, stage_advanced: stageAdvanced, opt_outs: optOuts, wrong_numbers: wrongNumbers, rates } = portfolio
+
   return {
     ok: true,
     cards: {
@@ -508,30 +513,49 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
       templates_used: buildCountMetric(usedTemplates, usedTemplates, usedTemplates),
       sends: buildCountMetric(sends, priorSends, baselineSends),
       delivery_rate: buildRateMetric(
-        buildRate(delivered, sends),
+        rates.delivery,
         buildRate(priorDelivered, priorSends),
         buildRate(baselineDelivered, baselineSends),
       ),
+      replies: buildCountMetric(replies ?? 0, priorReplies, sumBaseline('replies')),
       reply_rate: buildRateMetric(
-        buildRate(replies, delivered),
+        rates.reply,
         buildRate(priorReplies, priorDelivered),
         buildRate(sumBaseline('replies'), baselineDelivered),
       ),
+      average_reply_time: {
+        current: portfolio.average_response_time,
+        prior: null,
+        baseline: null,
+        delta_absolute: null,
+        unavailable: portfolio.average_response_time == null,
+        unavailable_reason: portfolio.average_response_time == null ? 'Average reply time unavailable for range' : null,
+      },
       positive_rate: buildRateMetric(
-        buildRate(positive, replies),
+        rates.positive_reply,
         buildRate(priorPositive, priorReplies),
         buildRate(sumBaseline('positive_replies'), sumBaseline('replies')),
       ),
-      ownership_confirmed: buildCountMetric(ownership, priorOwnership, sumBaseline('ownership_confirmed')),
-      stage_advanced: buildCountMetric(stageAdvanced, priorStage, sumBaseline('stage_advanced')),
+      negative_rate: buildRateMetric(
+        rates.negative_reply,
+        buildRate(priorNegative, priorReplies),
+        buildRate(sumBaseline('negative_replies'), sumBaseline('replies')),
+      ),
+      ownership_confirmed: buildCountMetric(ownership ?? 0, priorOwnership, sumBaseline('ownership_confirmed')),
+      stage_advanced: buildCountMetric(stageAdvanced ?? 0, priorStage, sumBaseline('stage_advanced')),
       opt_out_rate: buildRateMetric(
-        buildRate(optOuts, delivered),
+        rates.opt_out,
         buildRate(priorOptOuts, priorDelivered),
         buildRate(sumBaseline('opt_outs'), baselineDelivered),
       ),
+      wrong_number_rate: buildRateMetric(
+        rates.wrong_number,
+        buildRate(priorWrong, priorReplies),
+        buildRate(sumBaseline('wrong_numbers'), sumBaseline('replies')),
+      ),
       cost: costAvailable
         ? buildCountMetric(cost, priorCost, baselineCost)
-        : { current: null, prior: null, baseline: null, delta_absolute: null, unavailable: true, unavailable_reason: 'Cost attribution unavailable — no estimated_cost on queue rows in range' },
+        : { current: null, prior: null, baseline: null, delta_absolute: null, unavailable: true, unavailable_reason: 'Estimated cost unavailable — no cost data on queue rows in range' },
     },
     intelligence_rail: buildIntelligenceRail(rows),
     meta: {
@@ -599,7 +623,7 @@ export async function fetchTemplateDossier(templateId, params = {}) {
     baselineMap.get(key),
   )
   metrics.current = enrichedCurrent
-  const dataQuality = buildDataQuality(templateRow, metrics.current)
+  const dataQuality = buildDataQuality(templateRow, metrics.current, identity)
   const control = buildAutopilotControl(templateRow)
   const execBucket = execCurrent.get(key)
   const senderDiv = senderDiversityFromBucket(execBucket)
@@ -635,7 +659,7 @@ export async function fetchTemplateDossier(templateId, params = {}) {
 
   const { data: queueRows } = await supabase
     .from('send_queue')
-    .select('id, queue_status, message_body, template_id, selected_template_id, template_selection_reason, selected_template_score, market, campaign_id, from_phone_number, created_at, updated_at')
+    .select('id, queue_status, message_body, template_id, selected_template_id, template_selection_reason, selected_template_score, market, campaign_id, from_phone_number, created_at, updated_at, seller_id, property_id')
     .or(`template_id.eq.${cleanId},selected_template_id.eq.${cleanId}`)
     .order('updated_at', { ascending: false })
     .limit(100)
@@ -646,21 +670,56 @@ export async function fetchTemplateDossier(templateId, params = {}) {
     rendered_body: q.message_body,
     provider: 'textgrid',
     market: q.market,
+    campaign: q.campaign_id,
     sender: q.from_phone_number,
+    seller_id: q.seller_id,
+    property_id: q.property_id,
+    selection_reason: q.template_selection_reason,
+    selected_at: q.created_at,
+    sent_at: ['sent', 'delivered'].includes(String(q.queue_status ?? '').toLowerCase()) ? q.updated_at : null,
+    delivery_result: q.queue_status,
     created_at: q.created_at,
     updated_at: q.updated_at,
   }))
 
+  const selectionReason = queueRows?.[0]?.template_selection_reason ?? null
   const resolver = {
-    candidate_pool_size: null,
-    selected_rank: null,
-    ranking_inputs: [],
-    selection_reason: queueRows?.[0]?.template_selection_reason ?? null,
-    fallback: null,
-    excluded_candidates: [],
-    exclusion_reasons: [],
-    rotation_history: [],
+    eligible_reason: selectionReason ? 'Matched stage, language, and property scope for this seller' : 'Eligible when stage, language, and variables are satisfied',
+    selected_reason: selectionReason ?? 'Selected as best match among eligible templates',
+    alternatives_considered: null,
+    language_match: identity.language,
+    property_match: identity.asset_scope ?? 'Any property type',
+    variables_available: row.identity.variable_contract?.length ? 'All required variables available' : 'Variable availability unknown',
+    concentration_limits: senderDiv.warning ? `Sender concentration ${senderDiv.concentration_pct}% — rotation recommended` : 'Within sender concentration limits',
+    fallback_used: selectionReason?.toLowerCase().includes('fallback') ?? false,
+    selection_reason: selectionReason,
   }
+
+  let decisionHistory = []
+  try {
+    const { data: decisions } = await supabase
+      .from('template_autopilot_decision_log')
+      .select('*')
+      .eq('template_id', cleanId)
+      .order('timestamp', { ascending: false })
+      .limit(50)
+    decisionHistory = (decisions ?? []).map((d) => ({
+      action: d.action,
+      actor: d.actor,
+      reason: d.reason,
+      timestamp: d.timestamp,
+      before: d.before_state,
+      after: d.after_state,
+      applied: d.applied,
+    }))
+  } catch {
+    decisionHistory = []
+  }
+
+  const attributedPct = metrics.current.replies != null && metrics.current.sends > 0 ? 100 : 0
+  const cohortNote = metrics.current.replies == null
+    ? `${100 - attributedPct}% of sends lack reply tracking in this range — breakdowns show attributed slice only`
+    : 'Breakdowns reflect attributed sends in selected period'
 
   return {
     ok: true,
@@ -670,31 +729,61 @@ export async function fetchTemplateDossier(templateId, params = {}) {
         canonical_body: row.identity.canonical_body,
         english_translation: row.identity.english_translation,
         variable_contract: row.identity.variable_contract,
+        stage_code: identity.stage_code,
+        stage_label: identity.stage_label,
+        touch_number: identity.touch_number,
+        follow_up_number: identity.follow_up_number,
+        use_case: identity.use_case,
+        language: identity.language,
+        asset_scope: identity.asset_scope,
+        active_state: identity.active_state,
+        last_used: execBucket?.last_used ?? null,
+        sends: metrics.current.sends,
+        replies: metrics.current.replies,
+        latest_campaign: execBucket?.campaigns ? [...execBucket.campaigns][0] : null,
+        latest_sender: senderDiv.dominant_sender,
         recent_rendered_executions: executions.slice(0, 5).map((e) => ({
           queue_id: e.queue_id,
           preview: String(e.rendered_body ?? '').slice(0, 160),
           status: e.status,
         })),
       },
-      performance: { ...row.metrics, all_windows: kpiByWindow },
+      performance: {
+        range: kpiWindow,
+        prior_range: priorWindow,
+        all_windows: kpiByWindow,
+        current: metrics.current,
+        comparison: metrics.comparison,
+        confidence: metrics.confidence,
+      },
       funnel: {
         stage_code: identity.stage_code,
         stages: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent }),
       },
       cohorts: {
         market: [...(execBucket?.markets ?? [])].map((m) => ({ key: m, sends: metrics.current.sends })),
+        language: identity.language ? [{ key: identity.language, sends: metrics.current.sends }] : [],
         asset: identity.asset_scope ? [{ key: identity.asset_scope, sends: metrics.current.sends }] : [],
         sender: senderDiv.distinct > 0 ? [{ key: senderDiv.dominant_sender, sends: metrics.current.sends, concentration_pct: senderDiv.concentration_pct }] : [],
-        campaign: [...(execBucket?.campaigns ?? [])].map((c) => ({ key: c, sends: metrics.current.sends })),
-        missing_fields: metrics.current.replies <= 0 ? ['reply_attribution'] : [],
-        backfill_note: metrics.current.replies <= 0
-          ? 'Future attributable replies will populate cohort breakdowns when message_events link inbound responses.'
-          : 'Cohort slices derive from send_queue execution attribution.',
+        campaign: [...(execBucket?.campaigns ?? [])].map((c) => ({ key: String(c), sends: metrics.current.sends })),
+        attributed_pct: attributedPct,
+        missing_fields: metrics.current.replies == null ? ['reply_tracking'] : [],
+        backfill_note: cohortNote,
       },
       executions,
       resolver,
-      autopilot: row.autopilot,
-      decision_history: [],
+      optimization: row.autopilot,
+      decision_history: decisionHistory,
+      tabs_available: {
+        overview: true,
+        performance: true,
+        funnel: (metrics.current.delivered ?? 0) > 0,
+        cohorts: (metrics.current.sends ?? 0) > 0,
+        executions: executions.length > 0,
+        selection_logic: Boolean(selectionReason) || (metrics.current.sends ?? 0) > 0,
+        optimization: Boolean(row.autopilot),
+        change_history: decisionHistory.length > 0,
+      },
     },
   }
 }

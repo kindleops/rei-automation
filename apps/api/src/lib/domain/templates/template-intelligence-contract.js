@@ -109,6 +109,7 @@ export function kpiRowToMetrics(row = {}) {
       failure: buildRate(failed, sends),
       reply: buildRate(replies, delivered),
       positive_reply: buildRate(positive, replies),
+      negative_reply: buildRate(negative, replies),
       ownership_confirmation: buildRate(ownership, replies),
       selling_interest: buildRate(selling, replies),
       price_capture: buildRate(price, replies),
