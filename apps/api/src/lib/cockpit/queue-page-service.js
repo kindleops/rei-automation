@@ -82,7 +82,12 @@ export async function fetchQueuePage(opts = {}) {
 
   if (queueResult.error) throw queueResult.error
 
-  const rows = Array.isArray(queueResult.data) ? queueResult.data : []
+  const rows = (Array.isArray(queueResult.data) ? queueResult.data : []).map((row) => {
+    const body = clean(row.message_body || row.message_text)
+    if (!body || body.length <= 240) return row
+    const preview = `${body.slice(0, 239)}…`
+    return { ...row, message_body: preview, message_text: preview }
+  })
   const totalCount = Number(queueResult.count ?? rows.length)
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 

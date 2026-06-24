@@ -99,7 +99,7 @@ const DATE_PRESET_LABELS: Record<DatePreset, string> = {
   '90d': 'Last 90d', all: 'All time', custom: 'Custom',
 }
 
-const PAGE_SIZE_OPTIONS = [50, 100, 250, 500] as const
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const
 
 function getPresetRange(preset: Exclude<DatePreset, 'custom' | 'all'>): { from: string; to: string } {
   const now = new Date()
@@ -1615,7 +1615,7 @@ interface QueuePageProps {
   onSelectItem?: (item: QueueItem) => void
 }
 
-const PAGE_SIZE = 500 // default; overridable via the page-size selector
+const PAGE_SIZE = 25 // default; overridable via the page-size selector
 
 export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: QueuePageProps = {}) => {
   const { rootRef, layoutMode, paneWidth } = useQueueLayout()

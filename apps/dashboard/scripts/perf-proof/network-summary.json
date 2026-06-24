@@ -1,0 +1,54 @@
+{
+  "violations": [],
+  "summary": [
+    {
+      "route": "inbox-cold",
+      "key": "runtime_identity",
+      "ms": 309.604,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/dev/runtime-identity"
+    },
+    {
+      "route": "inbox-cold",
+      "key": "inbox_live",
+      "ms": 760.395,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/live?filter=all&direction=all&cursor=0&limit=25&map=0&timeout_mode=initial_boot&refresh_reason=initial_boot"
+    },
+    {
+      "route": "inbox-cold",
+      "key": "ops_metrics",
+      "ms": 1088.865,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/ops/metrics?window=24h"
+    },
+    {
+      "route": "queue-warm",
+      "key": "runtime_identity",
+      "ms": 142.864,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/dev/runtime-identity"
+    },
+    {
+      "route": "templates-warm",
+      "key": "runtime_identity",
+      "ms": 213.201,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/dev/runtime-identity"
+    },
+    {
+      "route": "templates-warm",
+      "key": "inbox_live",
+      "ms": 559.4,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/live?filter=all&direction=all&cursor=0&limit=25&map=0&timeout_mode=initial_boot&refresh_reason=initial_boot"
+    },
+    {
+      "route": "templates-warm",
+      "key": "ops_metrics",
+      "ms": 654.205,
+      "size": "?",
+      "url": "http://127.0.0.1:5173/api/cockpit/ops/metrics?window=24h"
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { fetchQueuePage, getBackendBaseUrl } from '../api/backendClient'
 
 // ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
 
-const DEFAULT_PAGE_SIZE = 500
+const DEFAULT_PAGE_SIZE = 25
 
 const VALID_DATE_BASIS: QueueDateBasis[] = ['created_at', 'scheduled_for', 'updated_at']
 

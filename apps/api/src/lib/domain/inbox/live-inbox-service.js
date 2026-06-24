@@ -29,9 +29,106 @@ const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
+const BOOT_FAST_THREAD_SOURCE = "inbox_thread_state";
+const BOOT_FAST_THREAD_FIELDS = [
+  "thread_key",
+  "seller_phone",
+  "canonical_e164",
+  "master_owner_id",
+  "property_id",
+  "prospect_id",
+  "market",
+  "inbox_bucket",
+  "latest_message_body",
+  "latest_message_at",
+  "latest_direction",
+  "latest_delivery_status",
+  "latest_message_event_id",
+  "message_count",
+  "inbound_count",
+  "outbound_count",
+  "last_inbound_at",
+  "last_outbound_at",
+  "is_read",
+  "is_suppressed",
+  "disposition",
+  "updated_at",
+].join(",");
 const DEFAULT_LIMIT = 100;
 const INITIAL_BOOT_DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 500;
+const BOOT_PREVIEW_MAX_CHARS = 140;
+
+function truncatePreview(value, max = BOOT_PREVIEW_MAX_CHARS) {
+  const text = clean(value);
+  if (!text) return null;
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+function compactBootThreadRow(row = {}) {
+  const body = truncatePreview(row.latest_message_body || row.message_body || row.preview);
+  const threadKey = row.thread_key || row.canonical_thread_key || null;
+  const conversationThreadId = row.conversation_thread_id || row.conversationThreadId || row.id || threadKey;
+  return {
+    id: conversationThreadId,
+    conversation_thread_id: conversationThreadId,
+    conversationThreadId,
+    thread_key: threadKey,
+    canonical_thread_key: row.canonical_thread_key || threadKey,
+    canonical_e164: row.canonical_e164 || row.normalized_phone || null,
+    normalized_phone: row.normalized_phone || row.canonical_e164 || null,
+    seller_phone: row.seller_phone || row.display_phone || row.best_phone || null,
+    display_phone: row.display_phone || row.seller_phone || null,
+    best_phone: row.best_phone || row.seller_phone || null,
+    direction: row.direction || row.latest_message_direction || null,
+    latest_message_direction: row.latest_message_direction || row.direction || null,
+    latest_message_at: row.latest_message_at || row.latest_activity_at || null,
+    latest_activity_at: row.latest_activity_at || row.latest_message_at || null,
+    latest_message_body: body,
+    preview: body,
+    message_body: body,
+    inbox_bucket: row.inbox_bucket || row.inbox_category || null,
+    inbox_category: row.inbox_category || row.inbox_bucket || null,
+    inbox_status: row.inbox_status || row.inbox_bucket || null,
+    owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || null,
+    owner_display_name: row.owner_display_name || row.owner_name || null,
+    seller_display_name: row.seller_display_name || row.owner_name || null,
+    property_address_full: row.property_address_full || row.property_address || null,
+    property_address: row.property_address || row.property_address_full || null,
+    property_address_city: row.property_address_city || row.city || null,
+    property_address_state: row.property_address_state || row.state || null,
+    property_address_zip: row.property_address_zip || row.zip || null,
+    market: row.market || null,
+    property_type: row.property_type || null,
+    property_id: row.property_id || null,
+    prospect_id: row.prospect_id || null,
+    master_owner_id: row.master_owner_id || null,
+    delivery_status: row.delivery_status || row.latest_delivery_status || null,
+    latest_delivery_status: row.latest_delivery_status || row.delivery_status || null,
+    queue_status: row.queue_status || null,
+    unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : 0,
+    message_count: row.message_count ?? null,
+    inbound_count: row.inbound_count ?? null,
+    outbound_count: row.outbound_count ?? null,
+    latest_message_event_id: row.latest_message_event_id || row.latestMessageId || null,
+    conversation_stage: row.conversation_stage || row.current_stage || null,
+    detected_intent: row.detected_intent || row.reply_intent || null,
+    reply_intent: row.reply_intent || row.detected_intent || null,
+    wrong_number: row.wrong_number ?? false,
+    not_interested: row.not_interested ?? false,
+    opt_out: row.opt_out ?? false,
+    needs_review: row.needs_review ?? false,
+    suppression_status: row.suppression_status || null,
+    lead_temperature: row.lead_temperature || null,
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+  };
+}
+
+function normalizeThreadRowForBoot(row = {}, query = {}) {
+  return compactBootThreadRow(normalizeThreadRow(row, { ...query, skip_keyword_analysis: true }));
+}
 const LIVE_THREAD_INITIAL_BOOT_FIELDS = [
   "thread_key",
   "canonical_thread_key",
@@ -1418,6 +1515,19 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
 }
 
 export function applyInboxRowComputedFields(row = {}, query = {}) {
+  if (bool(query.skip_keyword_analysis)) {
+    const messageBody = row.latest_message_body || row.message_body || "";
+    return {
+      ...row,
+      latest_activity_at: latestAt(row),
+      seller_display_name: displayName(row),
+      property_address: row.property_address || row.property_address_full || row.display_address || row.event_property_address || null,
+      market: row.market || row.display_market || row.market_region || null,
+      latest_message_body: truncatePreview(messageBody),
+      message_body: truncatePreview(messageBody),
+      preview: truncatePreview(messageBody),
+    };
+  }
   const messageBody = row.latest_message_body || row.message_body || "";
   const keywordGroups = [];
   if (query.keyword_group && KEYWORD_GROUPS[lower(query.keyword_group)]) keywordGroups.push(lower(query.keyword_group));
@@ -1571,9 +1681,81 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   };
 }
 
+async function queryInitialBootThreadRows(params = {}, {
+  supabase = defaultSupabase,
+  limit,
+  filter,
+  cursorKeyset,
+  offset,
+} = {}) {
+  const normalizedFilter = normalizeLiveFilter(filter);
+  if (normalizedFilter !== "all" && normalizedFilter !== "all_messages") return null;
+  if (clean(params.q) || clean(params.keyword_group || params.keywordGroup)) return null;
+
+  let query = supabase
+    .from(BOOT_FAST_THREAD_SOURCE)
+    .select(BOOT_FAST_THREAD_FIELDS)
+    .not("thread_key", "is", null)
+    .neq("thread_key", "");
+
+  if (params.direction && params.direction !== "all") {
+    query = query.eq("latest_direction", normalizeDirection(params.direction));
+  }
+
+  if (typeof query.order === "function") {
+    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
+    query = query.order("thread_key", { ascending: false });
+  }
+
+  if (cursorKeyset && typeof query.or === "function") {
+    query = query.or(
+      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`,
+    );
+    if (typeof query.limit === "function") query = query.limit(limit + 1);
+  } else if (offset > 0 && typeof query.range === "function") {
+    query = query.range(offset, offset + limit);
+  } else if (typeof query.limit === "function") {
+    query = query.limit(limit + 1);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn("[INBOX_BOOT_FAST_SOURCE_FAILED]", error?.message || error);
+    return null;
+  }
+
+  return {
+    data: data || [],
+    count: null,
+    error: null,
+    sourceConfig: {
+      key: "boot_fast",
+      name: BOOT_FAST_THREAD_SOURCE,
+      directionColumn: "latest_direction",
+      countSource: PRIMARY_COUNT_SOURCE,
+      countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
+      getSelectColumns() {
+        return BOOT_FAST_THREAD_FIELDS;
+      },
+      searchColumns: ["thread_key", "seller_phone", "latest_message_body"],
+    },
+  };
+}
+
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
   const advancedFilters = parseAdvancedFiltersParam(params);
   const advancedActive = hasActiveAdvancedFilters(advancedFilters);
+
+  if (selectMode === "initial_boot_safe" && !advancedActive) {
+    const bootFast = await queryInitialBootThreadRows(params, {
+      supabase,
+      limit,
+      filter,
+      cursorKeyset,
+      offset,
+    });
+    if (bootFast) return bootFast;
+  }
 
   if (advancedActive) {
     const hydrated = await queryHydratedInboxThreads(
@@ -1952,7 +2134,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
     );
   const rows = (rawRows || []).map((row) => {
-    const normalized = normalizeThreadRow(row, params);
+    const normalized = initialBootMode
+      ? normalizeThreadRowForBoot(row, params)
+      : normalizeThreadRow(row, params);
     if (initialBootMode) return normalized;
     const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
     const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
@@ -2037,13 +2221,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
-  try {
-    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
-    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
-    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-  } catch (error) {
-    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-    console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
+  if (!initialBootMode) {
+    try {
+      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+      finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+    } catch (error) {
+      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+      console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
+    }
   }
 
   const deliveryHydrationStartedAt = nowMs();
