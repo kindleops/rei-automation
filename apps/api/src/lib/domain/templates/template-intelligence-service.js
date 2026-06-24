@@ -24,9 +24,10 @@ import {
 import {
   buildIntelligenceRail,
   buildStageFunnel,
-  fetchAttributedReplyAggregates,
   fetchQueueExecutionAggregates,
+  fetchReplyIntentAggregates,
   mergeAggregateIntoMetrics,
+  mergeKpiAndIntentAggregates,
   priorWindowLabel,
   senderDiversityFromBucket,
 } from './template-intelligence-aggregates.js'
@@ -234,7 +235,9 @@ function buildDataQuality(row, metrics) {
   if (!clean(row.property_type_scope)) issues.push({ code: 'asset_scope_broad', message: 'Asset scope unset — may be too broad' })
   if (!body) issues.push({ code: 'body_malformed', message: 'Template body empty or malformed' })
   if (metrics.sends <= 0) issues.push({ code: 'no_sends', message: 'No sends in selected range — attribution unavailable' })
-  else if (metrics.replies <= 0) issues.push({ code: 'no_attribution', message: 'No attributable replies in selected range' })
+  else if (metrics.attribution_partial) issues.push({ code: 'partial_attribution', message: 'Reply attribution partially unavailable for this range' })
+  else if (metrics.replies == null) issues.push({ code: 'no_attribution', message: 'Reply attribution unavailable — KPI source missing for range' })
+  else if (Number(metrics.replies) <= 0) issues.push({ code: 'no_replies', message: 'No attributable replies in selected range' })
   const recommended = issues[0]?.message ?? (unresolved ? 'Validate merge variables against declared contract' : 'No issues detected')
   return {
     variable_contract_valid: vars.length > 0,
@@ -242,12 +245,14 @@ function buildDataQuality(row, metrics) {
     asset_scope_match: Boolean(clean(row.property_type_scope)),
     asset_scope_detail: clean(row.property_type_scope) ? 'ok' : 'asset scope too broad or unset',
     language_quality: clean(row.language) ? 'ok' : 'translation metadata absent',
-    attribution_status: metrics.sends > 0 ? (metrics.replies > 0 ? 'attributed' : 'no_replies') : 'no_sends',
+    attribution_status: metrics.sends > 0
+      ? (metrics.attribution_partial ? 'partial' : metrics.replies == null ? 'unavailable' : Number(metrics.replies) > 0 ? 'attributed' : 'no_replies')
+      : 'no_sends',
     render_failures: unresolved ? 1 : 0,
     render_failure_detail: unresolved ? 'Unsupported or unresolved merge variable in body' : 'none',
     metadata_issues: issues,
     recommended_fix: recommended,
-    attribution_healthy: metrics.sends > 0 && metrics.replies > 0,
+    attribution_healthy: metrics.sends > 0 && metrics.attribution_available && Number(metrics.replies) > 0,
     variable_rendering_healthy: !unresolved,
     unresolved_merge_variable: unresolved,
     wrong_language: false,
@@ -319,10 +324,10 @@ export async function fetchTemplateIntelligence({
   if (error) throw error
 
   const keys = (templates ?? []).map(templateKey).filter(Boolean)
-  const [kpiMaps, attrCurrent, attrPrior, execCurrent] = await Promise.all([
+  const [kpiMaps, intentCurrent, intentPrior, execCurrent] = await Promise.all([
     fetchKpiMapsForWindows(keys, kpiWindow, priorWindow),
-    fetchAttributedReplyAggregates(keys, kpiWindow),
-    fetchAttributedReplyAggregates(keys, priorWindow),
+    fetchReplyIntentAggregates(keys, kpiWindow),
+    fetchReplyIntentAggregates(keys, priorWindow),
     fetchQueueExecutionAggregates(keys, kpiWindow),
   ])
   const { currentMap, priorMap, baselineMap } = kpiMaps
@@ -330,14 +335,33 @@ export async function fetchTemplateIntelligence({
   let rows = (templates ?? []).map((row) => {
     const key = templateKey(row)
     const identity = buildIdentity(row)
+    const attrCurrent = mergeKpiAndIntentAggregates(currentMap.get(key), intentCurrent.get(key))
+    const attrPrior = mergeKpiAndIntentAggregates(priorMap.get(key), intentPrior.get(key))
     const baseCurrent = kpiRowToMetrics(currentMap.get(key))
     const basePrior = kpiRowToMetrics(priorMap.get(key))
-    const baseBaseline = kpiRowToMetrics(baselineMap.get(key))
-    const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent.get(key), execCurrent.get(key), identity.stage_code)
-    const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior.get(key), null, identity.stage_code)
+    const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent, execCurrent.get(key))
+    const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior, null)
     const metrics = buildMetricsBlock(
-      { ...currentMap.get(key), ...enrichedCurrent, inbound_replies: enrichedCurrent.replies, positive_replies: enrichedCurrent.positive_replies, ownership_confirmed_replies: enrichedCurrent.ownership_confirmed, stage_advanced_count: enrichedCurrent.stage_advanced, opt_outs: enrichedCurrent.opt_outs },
-      { ...priorMap.get(key), ...enrichedPrior, inbound_replies: enrichedPrior.replies, positive_replies: enrichedPrior.positive_replies, ownership_confirmed_replies: enrichedPrior.ownership_confirmed, stage_advanced_count: enrichedPrior.stage_advanced, opt_outs: enrichedPrior.opt_outs },
+      {
+        ...currentMap.get(key),
+        inbound_replies: enrichedCurrent.replies,
+        positive_inbound_count: enrichedCurrent.positive_replies,
+        positive_replies: enrichedCurrent.positive_replies,
+        ownership_confirmed_replies: enrichedCurrent.ownership_confirmed,
+        stage_advanced_count: enrichedCurrent.stage_advanced,
+        opt_out_count: enrichedCurrent.opt_outs,
+        opt_outs: enrichedCurrent.opt_outs,
+      },
+      {
+        ...priorMap.get(key),
+        inbound_replies: enrichedPrior.replies,
+        positive_inbound_count: enrichedPrior.positive_replies,
+        positive_replies: enrichedPrior.positive_replies,
+        ownership_confirmed_replies: enrichedPrior.ownership_confirmed,
+        stage_advanced_count: enrichedPrior.stage_advanced,
+        opt_out_count: enrichedPrior.opt_outs,
+        opt_outs: enrichedPrior.opt_outs,
+      },
       baselineMap.get(key),
     )
     metrics.current = enrichedCurrent
@@ -365,12 +389,12 @@ export async function fetchTemplateIntelligence({
         cost_available: metrics.current.cost_available ?? false,
         sender_diversity: senderDiv,
         sender_mix: senderDiv.label,
-        markets: [...(execBucket?.markets ?? attrCurrent.get(key)?.markets ?? [])],
+        markets: [...(execBucket?.markets ?? attrCurrent?.markets ?? [])],
         campaigns: [...(execBucket?.campaigns ?? [])],
         last_used: execBucket?.last_used ?? null,
       },
       data_quality: dataQuality,
-      funnel: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent.get(key) }),
+      funnel: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent }),
       autopilot: null,
       control,
     }
@@ -417,7 +441,7 @@ export async function fetchTemplateIntelligence({
       prior_range: priorWindow,
       prior_label: priorWindowLabel(kpiWindow),
       baseline_range: 'all_time',
-      kpi_source: 'template_performance_kpis_v+attributed_replies_v+send_queue',
+      kpi_source: 'template_performance_kpis_v+performance_message_events_v+send_queue',
       autopilot_mode: autopilotMode,
       shadow_mode: autopilotMode === 'shadow',
       production_mutations_enabled: false,
@@ -521,7 +545,7 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
       prior_range: priorWindow,
       prior_label: priorWindowLabel(kpiWindow),
       baseline_range: 'all_time',
-      kpi_source: 'template_performance_kpis_v+attributed_replies_v+send_queue',
+      kpi_source: 'template_performance_kpis_v+performance_message_events_v+send_queue',
       autopilot_mode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
       shadow_mode: (params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE) === 'shadow',
       production_mutations_enabled: false,
@@ -549,18 +573,29 @@ export async function fetchTemplateDossier(templateId, params = {}) {
   const { currentMap, priorMap, baselineMap } = kpiMapsFromRows(allKpiRows, kpiWindow, priorWindow)
 
   const identity = buildIdentity(templateRow)
-  const [attrCurrent, attrPrior, execCurrent] = await Promise.all([
-    fetchAttributedReplyAggregates([key], kpiWindow),
-    fetchAttributedReplyAggregates([key], priorWindow),
+  const [intentCurrent, intentPrior, execCurrent] = await Promise.all([
+    fetchReplyIntentAggregates([key], kpiWindow),
+    fetchReplyIntentAggregates([key], priorWindow),
     fetchQueueExecutionAggregates([key], kpiWindow),
   ])
+  const attrCurrent = mergeKpiAndIntentAggregates(currentMap.get(key), intentCurrent.get(key))
+  const attrPrior = mergeKpiAndIntentAggregates(priorMap.get(key), intentPrior.get(key))
   const baseCurrent = kpiRowToMetrics(currentMap.get(key))
   const basePrior = kpiRowToMetrics(priorMap.get(key))
-  const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent.get(key), execCurrent.get(key), identity.stage_code)
-  const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior.get(key), null, identity.stage_code)
+  const enrichedCurrent = mergeAggregateIntoMetrics(baseCurrent, attrCurrent, execCurrent.get(key))
+  const enrichedPrior = mergeAggregateIntoMetrics(basePrior, attrPrior, null)
   const metrics = buildMetricsBlock(
-    { ...currentMap.get(key), ...enrichedCurrent, inbound_replies: enrichedCurrent.replies, positive_replies: enrichedCurrent.positive_replies, ownership_confirmed_replies: enrichedCurrent.ownership_confirmed, stage_advanced_count: enrichedCurrent.stage_advanced },
-    { ...priorMap.get(key), ...enrichedPrior, inbound_replies: enrichedPrior.replies },
+    {
+      ...currentMap.get(key),
+      inbound_replies: enrichedCurrent.replies,
+      positive_replies: enrichedCurrent.positive_replies,
+      ownership_confirmed_replies: enrichedCurrent.ownership_confirmed,
+      stage_advanced_count: enrichedCurrent.stage_advanced,
+    },
+    {
+      ...priorMap.get(key),
+      inbound_replies: enrichedPrior.replies,
+    },
     baselineMap.get(key),
   )
   metrics.current = enrichedCurrent
@@ -644,7 +679,7 @@ export async function fetchTemplateDossier(templateId, params = {}) {
       performance: { ...row.metrics, all_windows: kpiByWindow },
       funnel: {
         stage_code: identity.stage_code,
-        stages: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent.get(key) }),
+        stages: buildStageFunnel(identity.stage_code, { ...metrics.current, ...attrCurrent }),
       },
       cohorts: {
         market: [...(execBucket?.markets ?? [])].map((m) => ({ key: m, sends: metrics.current.sends })),
