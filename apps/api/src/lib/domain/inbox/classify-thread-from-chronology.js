@@ -43,11 +43,17 @@ export function findPrecedingOutbound(sortedDesc = [], anchorEvent = null) {
 }
 
 export function resolveDeliveryStatus(event = {}) {
+  // Delivery status ONLY applies to outbound messages (provider ack for sends).
+  // Inbound events have no "delivery" concept here; do not fabricate "delivered".
+  const dir = lower(event.direction);
+  if (dir === "inbound") {
+    return null;
+  }
   return clean(
     event.delivery_status ||
     event.provider_delivery_status ||
     event.raw_carrier_status ||
-    (lower(event.direction) === "inbound" ? "delivered" : "")
+    ""
   ) || null;
 }
 
@@ -223,7 +229,7 @@ export function patchToInboxThreadState(patch = {}, overrides = {}) {
     latest_message_body: patch.latest_message_body,
     latest_message_at: patch.latest_message_at,
     latest_direction: patch.latest_direction || patch.latest_message_direction,
-    latest_delivery_status: patch.latest_delivery_status,
+    latest_delivery_status: (patch.latest_direction || patch.latest_message_direction || "").toLowerCase() === "inbound" ? null : patch.latest_delivery_status,
     last_inbound_at: patch.last_inbound_at,
     last_outbound_at: patch.last_outbound_at,
     inbox_bucket: patch.inbox_bucket ?? null,

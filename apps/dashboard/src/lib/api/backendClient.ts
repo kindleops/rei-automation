@@ -194,8 +194,8 @@ const GET_CACHE_TTL_MS: Record<string, number> = {
   '/api/cockpit/queue/status': 8_000,
   '/api/cockpit/queue/page': 6_000,
   '/api/cockpit/queue/processor-health': 10_000,
-  '/api/cockpit/inbox/counts': 5_000,
-  '/api/cockpit/inbox/live': 4_000,
+  '/api/cockpit/inbox/counts': 250,
+  '/api/cockpit/inbox/live': 250,
   '/api/cockpit/templates/list': 60_000,
   '/api/cockpit/dev/runtime-identity': 300_000,
 }

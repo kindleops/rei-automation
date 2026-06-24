@@ -1,6 +1,7 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabaseClient } from '../supabaseClient'
 import { shouldUseSupabase } from './shared'
+import { invalidateRequestCache } from '../api/requestCache'
 
 export interface RealtimeSubscription {
   channel: RealtimeChannel | null
@@ -41,4 +42,29 @@ export const subscribeToTableChanges = (
 export const subscribeToCoreData = (onChange: () => void): RealtimeSubscription[] => {
   const tables = ['send_queue', 'message_events', 'owners', 'properties', 'markets']
   return tables.map((table) => subscribeToTableChanges(table, onChange))
+}
+
+export const subscribeToInboxRealtime = (onChange?: () => void): RealtimeSubscription[] => {
+  if (!shouldUseSupabase()) {
+    return []
+  }
+  const supabase = getSupabaseClient()
+  const relevantTables = ['message_events', 'inbox_thread_state', 'send_queue']
+  const subs: RealtimeSubscription[] = []
+
+  for (const table of relevantTables) {
+    const channel = supabase
+      .channel(`nexus:inbox:${table}:live`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+        // Invalidate operational caches so next fetch is fresh (no stale counts/threads)
+        invalidateRequestCache('/api/cockpit/inbox')
+        if (onChange) onChange()
+      })
+      .subscribe()
+    subs.push({
+      channel,
+      unsubscribe: () => { supabase.removeChannel(channel) },
+    })
+  }
+  return subs
 }

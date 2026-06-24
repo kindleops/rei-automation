@@ -3,6 +3,8 @@ import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib
 import {
   WAITING_REPLY_WINDOW_MS,
   buildColdTransitionPatch,
+  isOutboundLastWithoutReply,
+  parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
@@ -718,7 +720,20 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "priority":
       return bucket === "priority";
     case "new_replies":
-      return bucket === "new_replies";
+      // Canonical: inbound latest + (explicit bucket or within recent window), unread/not actioned, not terminal
+      if (["dead", "suppressed"].includes(bucket)) return false;
+      if (bucket === "new_replies") return true; // explicit stored classification wins for visibility until actioned
+      {
+        const dir = normalizeDirection(thread.latest_message_direction || thread.direction);
+        if (dir !== "inbound") return false;
+        const inAt = thread.last_inbound_at || thread.latest_message_at;
+        const inMs = parseTimestampMs(inAt);
+        if (!inMs) return false;
+        const within = (Date.now() - inMs) <= WAITING_REPLY_WINDOW_MS;
+        const notReadOrActioned = thread.is_read !== true && !thread.is_actioned;
+        const notTerminal = !thread.opt_out && !thread.wrong_number && !thread.not_interested;
+        return within && notReadOrActioned && notTerminal;
+      }
     case "needs_review":
       return bucket === "needs_review" || thread.needs_review === true;
     case "follow_up":
@@ -732,10 +747,20 @@ function threadMatchesFilter(thread = {}, filter = "all") {
     case "active":
       return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
     case "waiting":
-      return (
-        bucket === "waiting" ||
-        (direction === "outbound" && !["dead", "suppressed"].includes(bucket))
-      );
+      // Canonical Waiting predicate:
+      // explicit bucket or (outbound last + <24h + no newer inbound + active)
+      if (["dead", "suppressed"].includes(bucket)) return false;
+      if (bucket === "waiting") return true;
+      {
+        const lastOut = thread.last_outbound_at || thread.lastOutboundAt || thread.latest_message_at;
+        const lastIn = thread.last_inbound_at || thread.lastInboundAt;
+        const outMs = parseTimestampMs(lastOut);
+        if (!outMs) return false;
+        const ageOk = (Date.now() - outMs) <= WAITING_REPLY_WINDOW_MS;
+        const noNewerInbound = isOutboundLastWithoutReply({ lastOutboundAt: lastOut, lastInboundAt: lastIn });
+        const isOutboundLatest = (direction === "outbound") || noNewerInbound;
+        return isOutboundLatest && ageOk;
+      }
     case "unlinked":
       return !thread.property_id;
     default:

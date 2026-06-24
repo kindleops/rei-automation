@@ -1580,6 +1580,44 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
         console.error("FAILED TO SYNC CLASSIFIED THREAD STATE ON OUTBOUND SUCCESS", syncErr);
       }
 
+      // Hard guarantee: even if full classify/sync is slow or partial, ensure the canonical latest
+      // conversational message fields are set from this successful outbound event immediately.
+      // This fixes "recent outbound messages missing" and Waiting eligibility.
+      try {
+        const evt = savedPayload;
+        const ts = evt.sent_at || evt.event_timestamp || evt.created_at || new Date().toISOString();
+        // Use the canonical waiting resolver to decide "waiting" vs follow-up/cold for this outbound
+        const { resolveOutboundReplyState } = await import("@/lib/domain/inbox/resolve-waiting-cold-state.js");
+        const outboundState = resolveOutboundReplyState({
+          lastOutboundAt: ts,
+          lastInboundAt: null, // fresh; will be corrected on next inbound
+          latestDeliveryStatus: evt.delivery_status || "sent",
+          workflowRow: {},
+          now: Date.now(),
+        });
+        const directPatch = {
+          latest_message_event_id: evt.id || evt.provider_message_sid || evt.message_id || null,
+          latest_message_body: evt.message_body || null,
+          latest_message_at: ts,
+          latest_direction: "outbound",
+          latest_delivery_status: evt.delivery_status || "sent",
+          last_outbound_at: ts,
+          inbox_bucket: outboundState.inbox_bucket || "waiting", // default recent outbound to waiting per contract
+          updated_at: new Date().toISOString(),
+        };
+        await supabase
+          .from("inbox_thread_state")
+          .upsert(
+            {
+              thread_key: evt.thread_key,
+              ...directPatch,
+            },
+            { onConflict: "thread_key" }
+          );
+      } catch (ensureErr) {
+        console.error("OUTBOUND ENSURE LATEST PATCH FAILED", ensureErr?.message || ensureErr);
+      }
+
       return savedPayload;
     }
   } catch (db_error) {
@@ -2829,6 +2867,34 @@ export async function logInboundMessageEvent(payload, options = {}) {
     console.error("FAILED TO SYNC CLASSIFIED THREAD STATE ON INBOUND", syncErr);
   }
 
+  // Hard guarantee for inbound: ensure latest conversational points to this inbound immediately.
+  // Critical: inbound must overwrite any prior delivery status as thread latest.
+  try {
+    const evt = savedEvent;
+    const ts = evt.received_at || evt.event_timestamp || evt.created_at || new Date().toISOString();
+    const directPatch = {
+      latest_message_event_id: evt.id || evt.provider_message_sid || evt.message_id || null,
+      latest_message_body: evt.message_body || null,
+      latest_message_at: ts,
+      latest_direction: "inbound",
+      // Do not set delivery_status here; inbound has none. Delivery stays on prior outbound events.
+      latest_delivery_status: null,
+      last_inbound_at: ts,
+      updated_at: new Date().toISOString(),
+    };
+    await supabase
+      .from("inbox_thread_state")
+      .upsert(
+        {
+          thread_key: evt.thread_key,
+          ...directPatch,
+        },
+        { onConflict: "thread_key" }
+      );
+  } catch (ensureErr) {
+    console.error("INBOUND ENSURE LATEST PATCH FAILED", ensureErr?.message || ensureErr);
+  }
+
   return savedEvent;
 }
 
@@ -2871,6 +2937,21 @@ export async function syncClassifiedInboxThreadState({
       latest_message_event_id: messageEvent.id || messageEvent.provider_message_sid || null,
       detected_intent: patch.detected_intent || patch.primary_intent || null,
     };
+
+    // Preserve authoritative last outbound/inbound timestamps from prior state or recent events
+    // (inbound classification path does not re-scan full chronology by default)
+    const priorLastOutbound = existingState?.last_outbound_at || existingState?.lastOutboundAt || null;
+    const priorLastInbound = existingState?.last_inbound_at || existingState?.lastInboundAt || null;
+    if (!patch.last_outbound_at && priorLastOutbound) {
+      patch.last_outbound_at = priorLastOutbound;
+    }
+    if (!patch.last_inbound_at) {
+      patch.last_inbound_at = messageEvent.received_at || messageEvent.event_timestamp || messageEvent.created_at || new Date().toISOString();
+    }
+    // If we have prior outbound but no explicit last_outbound yet, keep it
+    if (priorLastOutbound && (!patch.last_outbound_at || new Date(priorLastOutbound) > new Date(patch.last_outbound_at || 0))) {
+      patch.last_outbound_at = priorLastOutbound;
+    }
   } else {
     const { data: messages, error: messagesError } = await supabase
       .from(MESSAGE_EVENTS_TABLE)
@@ -3089,10 +3170,28 @@ export async function syncDeliveryEvent(payload, options = {}) {
 
     if (thread_key) {
       try {
-        await supabase
+        // Only promote delivery status to thread latest when the latest message on the thread
+        // is (still) an outbound. Inbound-last threads must not display Delivered.
+        const { data: current } = await supabase
           .from("inbox_thread_state")
-          .update({ latest_delivery_status: final_delivery_status })
-          .eq("thread_key", thread_key);
+          .select("latest_message_direction, latest_message_at, last_outbound_at")
+          .eq("thread_key", thread_key)
+          .maybeSingle();
+
+        const latestDir = (current?.latest_message_direction || "").toLowerCase();
+        const canPromoteDelivery =
+          !current ||
+          latestDir === "outbound" ||
+          (current.last_outbound_at && (!current.latest_message_at || new Date(current.last_outbound_at) >= new Date(current.latest_message_at)));
+
+        if (canPromoteDelivery) {
+          await supabase
+            .from("inbox_thread_state")
+            .update({ latest_delivery_status: final_delivery_status })
+            .eq("thread_key", thread_key);
+        }
+        // Always track the last known outbound delivery separately in metadata if needed;
+        // thread latest_delivery_status only reflects when latest conversational msg is outbound.
       } catch (err) {
         console.error("FAILED TO UPDATE THREAD STATE DELIVERY STATUS", err);
       }
@@ -3759,7 +3858,11 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   if (payload.latest_message_body !== undefined) insert_payload.latest_message_body = clean(payload.latest_message_body);
   if (payload.latest_message_at !== undefined) insert_payload.latest_message_at = payload.latest_message_at;
   if (payload.latest_direction !== undefined) insert_payload.latest_direction = clean(payload.latest_direction);
-  if (payload.latest_delivery_status !== undefined) insert_payload.latest_delivery_status = clean(payload.latest_delivery_status);
+  if (payload.latest_delivery_status !== undefined) {
+    // Enforce: if latest direction is (becoming) inbound, delivery status must not be promoted to thread.
+    const willBeInbound = (insert_payload.latest_direction || payload.latest_direction || "").toLowerCase() === "inbound";
+    insert_payload.latest_delivery_status = willBeInbound ? null : clean(payload.latest_delivery_status);
+  }
   if (payload.latest_message_event_id !== undefined) {
     insert_payload.latest_message_event_id = clean(payload.latest_message_event_id);
   }

@@ -53,6 +53,8 @@ import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
+import { subscribeToInboxRealtime } from '../../lib/data/realtime'
+import { invalidateRequestCache } from '../../lib/api/requestCache'
 import { getQueueControlSettings, updateQueueControlSettings, callBackend } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
@@ -2029,6 +2031,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       })
       .subscribe()
 
+    // Inbox-wide realtime for list movement + counts (invalidates short TTL cache on message/state changes)
+    const inboxSubs = subscribeToInboxRealtime(() => {
+      // Trigger any local schedule if in scope, otherwise rely on cache-bust + next render/fetch cycle
+      try { if (typeof scheduleRefreshInbox === 'function') scheduleRefreshInbox() } catch {}
+    })
+
     const pollSelectedMessages = () => {
       if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
       pollInFlight = true
@@ -2062,6 +2070,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       window.clearInterval(selectedMessagePollInterval)
       pollController?.abort()
       void supabase.removeChannel(channel)
+      inboxSubs.forEach((s) => { try { s.unsubscribe() } catch {} })
     }
   }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect])
 
