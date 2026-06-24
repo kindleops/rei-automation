@@ -31,6 +31,7 @@ INSERT INTO outbound_feeder_candidates (
   prospect_first_name,
   matching_flags,
   likely_owner,
+  likely_renting,
   linked_to_company,
   likely_linked_to_company,
   person_flags_text,
@@ -78,6 +79,7 @@ SELECT
   c.prospect_first_name,
   pr.matching_flags,
   pr.likely_owner,
+  pr.likely_renting,
   -- linked_to_company: flag present and not a "likely" or "potentially" variant
   (
     pr.matching_flags IS NOT NULL
@@ -191,6 +193,8 @@ SELECT
   COUNT(DISTINCT market)                                              AS market_count,
   COUNT(*) FILTER (WHERE matching_flags IS NOT NULL AND matching_flags <> '') AS with_matching_flags,
   COUNT(*) FILTER (WHERE likely_owner = true)                         AS likely_owner_count,
+  COUNT(*) FILTER (WHERE likely_renting = true)                       AS likely_renting_count,
+  COUNT(*) FILTER (WHERE likely_renting = true AND likely_owner IS DISTINCT FROM true) AS renter_not_owner_count,
   COUNT(*) FILTER (WHERE property_type IS NOT NULL)                   AS with_property_type
 FROM outbound_feeder_candidates;
 

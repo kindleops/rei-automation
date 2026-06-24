@@ -19,6 +19,11 @@ import {
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
+import {
+  evaluatePreSendEligibility,
+  selectNextBestOwnerContact,
+  BLOCK_REASONS,
+} from "@/lib/domain/outbound/presend-eligibility-engine.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
@@ -85,6 +90,8 @@ const REASON_CODES = Object.freeze({
   TEMPLATE_RENDER_LINT_FAILURE: "TEMPLATE_RENDER_LINT_FAILURE",
   IDENTITY_MISMATCH: "IDENTITY_MISMATCH",
   IDENTITY_NOT_VERIFIED: "IDENTITY_NOT_VERIFIED",
+  RENTER_NOT_OWNER: "RENTER_NOT_OWNER",
+  OWNERSHIP_NOT_CONFIRMED: "OWNERSHIP_NOT_CONFIRMED",
   MARKET_IDENTITY_QUARANTINE: "MARKET_IDENTITY_QUARANTINE",
   ACTIVE_QUEUE_ITEM: "ACTIVE_QUEUE_ITEM",
   PRIOR_TOUCH_COOLDOWN: "PRIOR_TOUCH_COOLDOWN",
@@ -812,6 +819,12 @@ function mapReasonToDiagnosticCounter(reason) {
   }
   if (reason === REASON_CODES.SCHEDULE_OVERFLOW_BLOCKED) {
     return "schedule_overflow_blocked_count";
+  }
+  if (reason === REASON_CODES.RENTER_NOT_OWNER) {
+    return "renter_not_owner_block_count";
+  }
+  if (reason === REASON_CODES.OWNERSHIP_NOT_CONFIRMED) {
+    return "ownership_not_confirmed_block_count";
   }
   return null;
 }
@@ -2548,11 +2561,43 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
     return { ok: false, reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, reason: "pending_prior_touch" };
   }
 
-  // ── Identity Alignment Gate ─────────────────────────────────────────────
-  const identity_policy = isIdentityEligibleForLiveOutbound(candidate.identity_alignment, options);
-  
-  if (!identity_policy.eligible) {
-    if (identity_policy.reason === "identity_mismatch") {
+  // ── Pre-Send Eligibility Engine ─────────────────────────────────────────
+  // Single deterministic gate: renter-not-owner hard block (headline rule),
+  // then identity alignment policy, plus ownership-confidence scoring. Reuses
+  // the candidate's pre-computed identity_alignment so the work is not redone.
+  const presend = evaluatePreSendEligibility(
+    { ...candidate, identity_alignment: candidate.identity_alignment },
+    options
+  );
+  // Stamp ownership confidence onto the candidate for telemetry / queue rows.
+  candidate.ownership_confidence = presend.ownership_confidence;
+  candidate.ownership_band = presend.ownership_band;
+
+  if (!presend.eligible) {
+    // Renter-not-owner: deterministic wrong-party block.
+    if (presend.block_reason === BLOCK_REASONS.RENTER_NOT_OWNER) {
+      logger.info("outbound_renter_not_owner_blocked", {
+        property_address: candidate.property_address_full,
+        master_owner_id: candidate.master_owner_id,
+        master_owner_name: candidate.owner_display_name,
+        prospect_full_name: candidate.prospect_full_name,
+        phone_id: candidate.phone_id,
+        phone: candidate.canonical_e164,
+        likely_renting: presend.likely_renting,
+        likely_owner: presend.likely_owner,
+        ownership_confidence: presend.ownership_confidence,
+      });
+      return {
+        ok: false,
+        reason_code: REASON_CODES.RENTER_NOT_OWNER,
+        reason: presend.reason,
+        ownership_confidence: presend.ownership_confidence,
+        identity_alignment: candidate.identity_alignment,
+      };
+    }
+
+    // Identity mismatch → quarantine (existing behavior, now engine-routed).
+    if (presend.block_reason === BLOCK_REASONS.IDENTITY_MISMATCH) {
       logger.info("outbound_identity_guard_blocked", {
         property_address: candidate.property_address_full,
         master_owner_id: candidate.master_owner_id,
@@ -2585,10 +2630,12 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       };
     }
 
+    // Ownership not confirmed / not verified (held for review).
     return {
       ok: false,
       reason_code: REASON_CODES.IDENTITY_NOT_VERIFIED,
-      reason: identity_policy.reason,
+      reason: presend.reason,
+      ownership_confidence: presend.ownership_confidence,
       identity_alignment: candidate.identity_alignment
     };
   }
@@ -2706,6 +2753,123 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
       ? options.now || new Date().toISOString()
       : computeNextSchedulableTime(candidate, options.now || new Date().toISOString()),
   };
+}
+
+// Contact / identity fields swapped in when the feeder falls back from a
+// renter (or mismatched) best-phone to the owner's next-best contact point.
+// Property / financial / outreach-state fields stay on the original candidate.
+const OWNER_CONTACT_SWAP_FIELDS = Object.freeze([
+  "phone_id",
+  "canonical_e164",
+  "phone",
+  "best_phone_id",
+  "best_phone_score",
+  "phone_type",
+  "contact_window",
+  "timezone",
+  "sms_eligible",
+  "primary_prospect_id",
+  "canonical_prospect_id",
+  "prospect_full_name",
+  "prospect_first_name",
+  "prospect_display_name",
+  "prospect_cnam",
+  "matching_flags",
+  "prospect_matching_flags",
+  "person_flags_text",
+  "person_flags_json",
+  "likely_owner",
+  "likely_renting",
+  "phone_first_name",
+  "phone_full_name",
+  "phone_owner",
+  "seller_first_name",
+  "seller_full_name",
+  "seller_name",
+  "seller_name_missing",
+  "identity_alignment",
+  "ownership_confidence",
+  "ownership_band",
+]);
+
+/**
+ * Resolves the owner's next-best owner-aligned contact point when the selected
+ * best phone is a renter / wrong party. Queries the owner's other SMS-reachable
+ * phones from `v_sms_ready_contacts_expanded` (one row per phone, carrying the
+ * phone's own prospect flags), normalizes each, and runs the deterministic
+ * pre-send engine to pick the strongest owner contact.
+ *
+ * Returns the normalized alternate candidate, or null when none qualifies.
+ * Degrades to null (no behavior change) on any data-layer error.
+ */
+async function resolveNextBestOwnerContact(candidate = {}, options = {}, deps = {}) {
+  if (options.enable_owner_contact_fallback === false) return null;
+  if (!candidate.master_owner_id) return null;
+
+  let supabase;
+  try {
+    supabase = getSupabase(deps);
+  } catch {
+    return null;
+  }
+  if (!supabase) return null;
+
+  try {
+    let query = supabase
+      .from("v_sms_ready_contacts_expanded")
+      .select("*")
+      .eq("master_owner_id", candidate.master_owner_id)
+      .limit(50);
+    if (candidate.property_id) query = query.eq("property_id", candidate.property_id);
+
+    const { data, error } = await query;
+    if (error || !Array.isArray(data) || data.length === 0) return null;
+
+    const alternates = data.map((row) =>
+      normalizeCandidateRow(row, {
+        template_use_case: options.template_use_case,
+        touch_number: candidate.touch_number,
+        campaign_session_id: options.campaign_session_id,
+        market: candidate.market,
+        state: candidate.state,
+      })
+    );
+
+    // Require a genuine owner-confidence floor so we never "fall back" to a
+    // weak / unsignaled contact (e.g. before the expanded view is migrated to
+    // expose ownership columns, alternates score low and none qualify).
+    const min_confidence =
+      Number(options.owner_contact_fallback_min_confidence) > 0
+        ? Number(options.owner_contact_fallback_min_confidence)
+        : 60;
+
+    const { selected } = selectNextBestOwnerContact(alternates, {
+      ...options,
+      min_ownership_confidence: min_confidence,
+      exclude_phone_ids: [candidate.phone_id, candidate.best_phone_id].filter(Boolean),
+    });
+    return selected || null;
+  } catch (e) {
+    logger.warn("owner_contact_fallback_query_failed", {
+      master_owner_id: candidate.master_owner_id,
+      error: e?.message,
+    });
+    return null;
+  }
+}
+
+/**
+ * Mutates `candidate` in place, swapping in the alternate owner contact point's
+ * contact / identity fields while preserving property and outreach-state data.
+ */
+function applyOwnerContactSwap(candidate, alternate) {
+  for (const field of OWNER_CONTACT_SWAP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(alternate, field)) {
+      candidate[field] = alternate[field];
+    }
+  }
+  candidate.owner_contact_fallback_applied = true;
+  return candidate;
 }
 
 function isRoutingConfigEnabled(value) {
@@ -4133,6 +4297,10 @@ export function buildFeederDiagnostics(summary = {}) {
     property_hydration_failed_count: Number(summary.property_hydration_failed_count || 0),
     missing_property_id_after_hydration_count: Number(summary.missing_property_id_after_hydration_count || 0),
     identity_mismatch_count: Number(summary.identity_mismatch_count || 0),
+    renter_not_owner_block_count: Number(summary.renter_not_owner_block_count || 0),
+    ownership_not_confirmed_block_count: Number(summary.ownership_not_confirmed_block_count || 0),
+    owner_contact_fallback_attempt_count: Number(summary.owner_contact_fallback_attempt_count || 0),
+    owner_contact_fallback_recovered_count: Number(summary.owner_contact_fallback_recovered_count || 0),
     identity_verified_count: Number(summary.identity_verified_count || 0),
     identity_probable_count: Number(summary.identity_probable_count || 0),
     identity_household_associated_count: Number(summary.identity_household_associated_count || 0),
@@ -4470,6 +4638,10 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
     identity_probable_allowed_count: 0,
     identity_verified_allowed_count: 0,
     identity_household_associated_allowed_count: 0,
+    renter_not_owner_block_count: 0,
+    ownership_not_confirmed_block_count: 0,
+    owner_contact_fallback_attempt_count: 0,
+    owner_contact_fallback_recovered_count: 0,
     fresh_candidate_count: 0,
     exhausted_candidate_count: 0,
     schedule_spread_enabled: use_spread,
@@ -4581,7 +4753,34 @@ export async function runSupabaseCandidateFeeder(input = {}, deps = {}) {
 
     const _preview = getSkipDiagnostics(candidate, options);
 
-    const eligibility = await evaluateCandidateEligibility(candidate, options, deps);
+    let eligibility = await evaluateCandidateEligibility(candidate, options, deps);
+
+    // ── Next-Best Owner Contact Fallback ──────────────────────────────────────
+    // If the selected best phone is a renter / wrong party, try the owner's
+    // next-best owner-aligned contact point before skipping the owner entirely.
+    if (
+      !eligibility.ok &&
+      (eligibility.reason_code === REASON_CODES.RENTER_NOT_OWNER ||
+        eligibility.reason_code === REASON_CODES.IDENTITY_MISMATCH) &&
+      options.enable_owner_contact_fallback !== false
+    ) {
+      summary.owner_contact_fallback_attempt_count += 1;
+      const alternate = await resolveNextBestOwnerContact(candidate, options, deps);
+      if (alternate) {
+        applyOwnerContactSwap(candidate, alternate);
+        eligibility = await evaluateCandidateEligibility(candidate, options, deps);
+        if (eligibility.ok) {
+          summary.owner_contact_fallback_recovered_count += 1;
+          logger.info("owner_contact_fallback_recovered", {
+            master_owner_id: candidate.master_owner_id,
+            property_id: candidate.property_id,
+            phone_id: candidate.phone_id,
+            ownership_confidence: candidate.ownership_confidence,
+          });
+        }
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     // ── Identity Alignment Telemetry ──────────────────────────────────────────
     const id_status = candidate.identity_alignment?.status;
