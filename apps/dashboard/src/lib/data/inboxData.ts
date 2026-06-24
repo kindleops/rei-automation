@@ -336,7 +336,7 @@ export interface QueueProcessorHealth {
   processingLockConflictCount?: number
 }
 
-const QUEUE_PROCESSOR_LAG_MINUTES = 10
+
 
 const DEV = Boolean(import.meta.env?.DEV)
 let _loggedPhoneSampleKeys = false
@@ -599,301 +599,71 @@ const getHydratedCategoriesForView = (view: string | undefined): HydratedInboxCa
 }
 
 export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> => {
-  const supabase = getSupabaseClient()
   const checkedAt = new Date().toISOString()
-  const lagCutoffIso = new Date(Date.now() - QUEUE_PROCESSOR_LAG_MINUTES * 60 * 1000).toISOString()
-  const startOfDay = new Date()
-  startOfDay.setHours(0, 0, 0, 0)
-  const startOfDayIso = startOfDay.toISOString()
   const webhookStaleCutoffIso = new Date(Date.now() - 90 * 60 * 1000).toISOString()
 
-  const ACTIVE_CANONICAL_STATUSES = ['queued', 'pending', 'approval', 'scheduled', 'processing'] as const
-
   try {
-    const [
-      queuedProbe,
-      pendingProbe,
-      approvalProbe,
-      scheduledProbe,
-      processingProbe,
-      lagProbe,
-      oldestQueuedProbe,
-      latestSentProbe,
-      sentTodayProbe,
-      deliveredTodayProbe,
-      failedTodayProbe,
-      issueRowsProbe,
-      latestWebhookProbe,
-      staleActiveProbe,
-      orphanedProbe,
-      retriedGtOneProbe,
-      processingLockConflictProbe,
-    ] = await Promise.all([
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'queued'),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'pending'),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'approval'),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'scheduled'),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'processing'),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .in('queue_status', ['queued', 'pending', 'processing'])
-        .lt('created_at', lagCutoffIso),
-      supabase
-        .from('send_queue')
-        .select('created_at')
-        .eq('queue_status', 'queued')
-        .order('created_at', { ascending: true })
-        .limit(1),
-      supabase
-        .from('send_queue')
-        .select('sent_at,updated_at,created_at')
-        .in('queue_status', ['sent', 'delivered'])
-        .order('sent_at', { ascending: false, nullsFirst: false })
-        .order('updated_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(1),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .gte('sent_at', startOfDayIso),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'delivered')
-        .gte('delivered_at', startOfDayIso),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'failed')
-        .gte('updated_at', startOfDayIso),
-      supabase
-        .from('send_queue')
-        .select('id,queue_status,created_at,updated_at,scheduled_for_utc,sent_at,delivered_at,guard_reason,blocked_reason,failed_reason,paused_reason,dedupe_key,market,property_address,message_body,message_text,to_phone_number,master_owner_id,property_id,metadata')
-        .order('updated_at', { ascending: false })
-        .limit(4000),
-      supabase
-        .from('webhook_log')
-        .select('created_at')
-        .order('created_at', { ascending: false })
-        .limit(1),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
-        .lt('updated_at', lagCutoffIso),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
-        .is('to_phone_number', null),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .in('queue_status', ['queued', 'pending', 'approval', 'scheduled', 'processing'])
-        .gt('retry_count', 1),
-      supabase
-        .from('send_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('queue_status', 'processing')
-        .or('is_locked.is.false,lock_token.is.null'),
-    ])
-
-    if (
-      queuedProbe.error ||
-      scheduledProbe.error ||
-      pendingProbe.error ||
-      approvalProbe.error ||
-      processingProbe.error ||
-      lagProbe.error ||
-      oldestQueuedProbe.error ||
-      latestSentProbe.error ||
-      sentTodayProbe.error ||
-      deliveredTodayProbe.error ||
-      failedTodayProbe.error ||
-      issueRowsProbe.error
-      || staleActiveProbe.error
-      || orphanedProbe.error
-      || retriedGtOneProbe.error
-      || processingLockConflictProbe.error
-    ) {
-      const err =
-        queuedProbe.error ??
-        pendingProbe.error ??
-        approvalProbe.error ??
-        scheduledProbe.error ??
-        processingProbe.error ??
-        lagProbe.error ??
-        oldestQueuedProbe.error ??
-        latestSentProbe.error ??
-        sentTodayProbe.error ??
-        deliveredTodayProbe.error ??
-        failedTodayProbe.error ??
-        issueRowsProbe.error
-        ?? staleActiveProbe.error
-        ?? orphanedProbe.error
-        ?? retriedGtOneProbe.error
-        ?? processingLockConflictProbe.error
-      return {
-        checkedAt,
-        queuedCount: queuedProbe.count ?? 0,
-        scheduledCount: (scheduledProbe.count ?? 0) + (approvalProbe.count ?? 0),
-        sendingCount: processingProbe.count ?? 0,
-        sentTodayCount: sentTodayProbe.count ?? 0,
-        deliveredTodayCount: deliveredTodayProbe.count ?? 0,
-        failedTodayCount: failedTodayProbe.count ?? 0,
-        blockedCount: 0,
-        pausedInvalidCount: 0,
-        duplicateSkippedCount: 0,
-        suppressionBlockedCount: 0,
-        blankBodyBlockedCount: 0,
-        routingBlockedCount: 0,
-        repliedBeforeSendCount: 0,
-        queuedOlderThanLagWindow: lagProbe.count ?? 0,
-        oldestQueuedAt: null,
-        latestSentAt: null,
-        latestWebhookAt: null,
-        webhookHealthy: false,
-        processorHealthy: false,
-        status: 'unknown',
-        failedRate: null,
-        duplicateActiveCount: 0,
-        activeBlankRowCount: 0,
-        routingBlockedSpike: false,
-        liveAutopilotAllowed: false,
-        routingBlockedRows: [],
-        summary: mapErrorMessage(err) || 'Unable to read queue processor status',
-      }
+    const apiResult = await backendClient.fetchQueueProcessorHealth()
+    if (!apiResult.ok) {
+      const err = apiResult as { message?: string; error?: string }
+      throw new Error(err.message || err.error || 'queue_processor_health_unavailable')
     }
-
-    const queuedCount = queuedProbe.count ?? 0
-    const pendingCount = pendingProbe.count ?? 0
-    const approvalCount = approvalProbe.count ?? 0
-    const scheduledBaseCount = scheduledProbe.count ?? 0
+    if (!apiResult.data) {
+      throw new Error('queue_processor_health_unavailable')
+    }
+    const payload = apiResult.data as AnyRecord
+    const counts = (payload.counts && typeof payload.counts === 'object' ? payload.counts : {}) as AnyRecord
+    const issueRows = safeArray(payload.issueSample as AnyRecord[])
+    const queuedCount = asNumber(counts.queued, 0)
+    const pendingCount = asNumber(counts.pending, 0)
+    const approvalCount = asNumber(counts.approval, 0)
+    const scheduledBaseCount = asNumber(counts.scheduled, 0)
     const scheduledCount = scheduledBaseCount + approvalCount
-    const sendingCount = processingProbe.count ?? 0
-    const sentTodayCount = sentTodayProbe.count ?? 0
-    const deliveredTodayCount = deliveredTodayProbe.count ?? 0
-    const failedTodayCount = failedTodayProbe.count ?? 0
-    const queuedOlderThanLagWindow = lagProbe.count ?? 0
-    const oldestQueuedRow = safeArray(oldestQueuedProbe.data as AnyRecord[])[0] ?? null
-    const latestSentRow = safeArray(latestSentProbe.data as AnyRecord[])[0] ?? null
-    const latestWebhookRow = safeArray(latestWebhookProbe.data as AnyRecord[])[0] ?? null
-    const issueRows = safeArray(issueRowsProbe.data as AnyRecord[])
+    const sendingCount = asNumber(counts.processing, 0)
+    const sentTodayCount = asNumber(counts.sentToday, 0)
+    const deliveredTodayCount = asNumber(counts.deliveredToday, 0)
+    const failedTodayCount = asNumber(counts.failedToday, 0)
+    const queuedOlderThanLagWindow = asNumber(counts.lagActive, 0)
+    const oldestQueuedAt = asIso(payload.oldestQueuedAt) ?? null
+    const latestSentAt = asIso(payload.latestSentAt) ?? null
+    const latestWebhookAt = asIso(payload.latestWebhookAt) ?? null
+    const staleRowsCount = asNumber(counts.staleActive, 0)
+    const orphanedRowsCount = asNumber(counts.orphanedActive, 0)
+    const retriedGtOneCount = asNumber(counts.retriedGtOne, 0)
+    const processingLockConflictCount = asNumber(counts.processingLockConflicts, 0)
 
-    const oldestQueuedAt = asIso(getFirst(oldestQueuedRow ?? {}, ['created_at'])) ?? null
-    const latestSentAt = asIso(getFirst(latestSentRow ?? {}, ['sent_at', 'updated_at', 'created_at'])) ?? null
-    const latestWebhookAt = asIso(getFirst(latestWebhookRow ?? {}, ['created_at'])) ?? null
-
-    const activeRows = issueRows.filter((row) => ACTIVE_CANONICAL_STATUSES.includes(normalizeStatus(row.queue_status) as any))
     const blockedRows = issueRows.filter((row) => normalizeStatus(row.queue_status) === 'blocked')
     const pausedRows = issueRows.filter((row) => normalizeStatus(row.queue_status) === 'paused_invalid_queue_row')
-    const duplicateSkippedCount = issueRows.filter((row) => {
-      const reason = `${asString(row.blocked_reason)} ${asString(row.failed_reason)}`.toLowerCase()
-      return reason.includes('duplicate')
-    }).length
-    const suppressionBlockedCount = issueRows.filter((row) => {
-      const reason = `${asString(row.blocked_reason)} ${asString(row.failed_reason)} ${asString(row.guard_reason)}`.toLowerCase()
-      return ['suppressed', 'opt_out', 'dnc', 'wrong_number', 'hostile', 'legal'].some((token) => reason.includes(token))
-    }).length
-    const blankBodyBlockedCount = issueRows.filter((row) => {
-      const reason = `${asString(row.blocked_reason)} ${asString(row.failed_reason)} ${asString(row.guard_reason)}`.toLowerCase()
-      const body = asString(row.message_body || row.message_text).trim()
-      return !body || reason.includes('blank_message_body') || reason.includes('missing_message_body')
-    }).length
     const routingBlockedRows = issueRows.filter((row) => {
       const reason = `${asString(row.guard_reason)} ${asString(row.failed_reason)}`.toLowerCase()
       return reason.includes('no_valid_local_textgrid_number') || reason.includes('routing blocked')
     })
     const routingBlockedCount = routingBlockedRows.length
-    const repliedBeforeSendCount = issueRows.filter((row) => {
-      const reason = `${asString(row.paused_reason)} ${asString(row.failed_reason)}`.toLowerCase()
-      return reason.includes('replied_before_send')
-    }).length
-    const blockedCount = blockedRows.length
-    const pausedInvalidCount = pausedRows.length
-    const dedupeCounts = new Map<string, number>()
-    activeRows.forEach((row) => {
-      const key = asString(row.dedupe_key)
-      if (!key) return
-      dedupeCounts.set(key, (dedupeCounts.get(key) ?? 0) + 1)
-    })
-    const duplicateActiveCount = Array.from(dedupeCounts.values()).filter((count) => count > 1).length
-    const staleRowsCount = staleActiveProbe.count ?? 0
-    const orphanedRowsCount = orphanedProbe.count ?? 0
-    const retriedGtOneCount = retriedGtOneProbe.count ?? 0
-    const processingLockConflictCount = processingLockConflictProbe.count ?? 0
-    const activeBlankRowCount = activeRows.filter((row) => !asString(row.message_body || row.message_text).trim()).length
+    const failedRate = sentTodayCount > 0 ? (failedTodayCount / sentTodayCount) * 100 : null
+    const routingBlockedSpike = routingBlockedCount >= 5
     const latestSentTs = latestSentAt ? new Date(latestSentAt).getTime() : NaN
     const latestWebhookTs = latestWebhookAt ? new Date(latestWebhookAt).getTime() : NaN
     const webhookHealthy = !Number.isFinite(latestSentTs) || latestSentTs < new Date(webhookStaleCutoffIso).getTime()
       ? true
       : Number.isFinite(latestWebhookTs) && latestWebhookTs >= new Date(webhookStaleCutoffIso).getTime()
-    const failedRate = sentTodayCount > 0 ? (failedTodayCount / sentTodayCount) * 100 : null
-    const routingBlockedSpike = routingBlockedCount >= 5
-    const critical =
-      activeBlankRowCount > 0 ||
-      duplicateActiveCount > 0 ||
-      routingBlockedSpike ||
-      (failedRate !== null && failedRate > 12)
-    const warning =
-      !critical &&
-      (!webhookHealthy ||
-        queuedOlderThanLagWindow > 0 ||
-        pausedInvalidCount > 0 ||
-        routingBlockedCount > 0 ||
-        (failedRate !== null && failedRate > 5) ||
-        blockedCount > 0)
-    const status: QueueProcessorHealth['status'] = critical ? 'critical' : warning ? 'warning' : 'healthy'
+    const status = (payload.status as QueueProcessorHealth['status']) || 'healthy'
     const processorHealthy = status === 'healthy'
-    const summary = critical
-      ? activeBlankRowCount > 0
-        ? `${activeBlankRowCount} active blank queue rows require intervention`
-        : duplicateActiveCount > 0
-          ? `${duplicateActiveCount} active duplicate dedupe collisions detected`
-          : routingBlockedSpike
-            ? `${routingBlockedCount} routing blocked rows need sender coverage`
-            : `${failedTodayCount} failed today exceeded threshold`
-      : warning
-        ? !webhookHealthy
-          ? 'Delivery webhook appears stale'
-          : queuedOlderThanLagWindow > 0
-            ? `${queuedOlderThanLagWindow} queued older than ${QUEUE_PROCESSOR_LAG_MINUTES}m`
-            : `${pausedInvalidCount + routingBlockedCount} queue rows need review`
-        : (queuedCount + pendingCount + approvalCount + scheduledBaseCount + sendingCount) > 0
-          ? `${queuedCount + pendingCount + approvalCount + scheduledBaseCount + sendingCount} queue rows active and inside guardrails`
-          : 'Queue clear'
 
     return {
-      checkedAt,
+      checkedAt: asIso(payload.checkedAt) ?? checkedAt,
       queuedCount,
       scheduledCount,
       sendingCount,
       sentTodayCount,
       deliveredTodayCount,
       failedTodayCount,
-      blockedCount,
-      pausedInvalidCount,
-      duplicateSkippedCount,
-      suppressionBlockedCount,
-      blankBodyBlockedCount,
+      blockedCount: blockedRows.length,
+      pausedInvalidCount: pausedRows.length,
+      duplicateSkippedCount: 0,
+      suppressionBlockedCount: 0,
+      blankBodyBlockedCount: 0,
       routingBlockedCount,
-      repliedBeforeSendCount,
+      repliedBeforeSendCount: 0,
       queuedOlderThanLagWindow,
       oldestQueuedAt,
       latestSentAt,
@@ -902,24 +672,25 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       processorHealthy,
       status,
       failedRate,
-      duplicateActiveCount,
-      activeBlankRowCount,
+      duplicateActiveCount: 0,
+      activeBlankRowCount: 0,
       staleRowsCount,
       orphanedRowsCount,
-      duplicateFingerprintCount: duplicateActiveCount,
       retriedGtOneCount,
       processingLockConflictCount,
       routingBlockedSpike,
-      liveAutopilotAllowed: true,
+      liveAutopilotAllowed: processorHealthy,
       routingBlockedRows: routingBlockedRows.slice(0, 8).map((row) => ({
         id: asString(row.id, ''),
-        sellerName: asString(((row.metadata as AnyRecord | null)?.seller_name) || ((row.metadata as AnyRecord | null)?.owner_name) || row.master_owner_id, 'Unknown Seller'),
+        sellerName: asString(row.master_owner_id, 'Unknown Seller'),
         propertyAddress: asString(row.property_address, 'Property Unknown'),
         market: asString(row.market, 'Unknown'),
         reason: asString(row.failed_reason || row.guard_reason || row.blocked_reason, 'Routing blocked'),
         queueStatus: asString(row.queue_status, 'paused_invalid_queue_row'),
       })),
-      summary,
+      summary: processorHealthy
+        ? `${queuedCount + pendingCount + approvalCount + scheduledBaseCount + sendingCount} queue rows active`
+        : 'Queue processor needs attention',
     }
   } catch (error) {
     return {

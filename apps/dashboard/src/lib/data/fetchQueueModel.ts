@@ -3,7 +3,7 @@ import { asBoolean, asIso, asNumber, asString, getFirst, safeArray, type AnyReco
 import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason, QueueFetchOptions, QueueDateBasis, StageCode } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
-import { getBackendBaseUrl } from '../api/backendClient'
+import { fetchQueuePage, getBackendBaseUrl } from '../api/backendClient'
 
 // ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
 
@@ -21,21 +21,6 @@ const VALID_DATE_BASIS: QueueDateBasis[] = ['created_at', 'scheduled_for', 'upda
 //   Failed    = provider/carrier failure after a send attempt (subset of sent).
 //   Blocked   = stopped BEFORE provider send (pauses, guards, duplicates).
 //   Opt-outs  = opt-out / 21610 suppression events.
-const SENT_STATUS_VALUES = ['sent', 'delivered', 'failed', 'retry', 'retrying']
-const STATUS_BUCKET_VALUES: Record<string, string[]> = {
-  scheduled: ['scheduled'],
-  queued: ['queued', 'ready', 'pending'],
-  sending: ['sending'],
-  sent: SENT_STATUS_VALUES,
-  delivered: ['delivered'],
-  failed: ['failed', 'retry', 'retrying'],
-  blocked: [
-    'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
-    'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
-  ],
-  approval: ['approval', 'awaiting_approval'],
-}
-
 // Normalizes ownership / reply stage from the columns the spec allows. Falls
 // back gracefully — never invents a stage that the row does not support.
 function deriveStage(
@@ -161,93 +146,42 @@ const asRecord = (value: unknown): AnyRecord => (
 export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<QueueModel> => {
   const supabase = getSupabaseClient()
 
-  // ── Resolve server-side filter inputs ──────────────────────────────────────
   const dateBasis: QueueDateBasis = VALID_DATE_BASIS.includes(opts.dateBasis as QueueDateBasis)
     ? (opts.dateBasis as QueueDateBasis)
     : 'created_at'
   const page = Math.max(0, Math.floor(opts.page ?? 0))
-  const pageSize = Math.max(1, Math.min(1000, Math.floor(opts.pageSize ?? DEFAULT_PAGE_SIZE)))
-  const statusBucket = opts.status && opts.status !== 'all' ? opts.status : null
-  const statusValues = statusBucket ? STATUS_BUCKET_VALUES[statusBucket] ?? null : null
+  const pageSize = Math.max(1, Math.min(200, Math.floor(opts.pageSize ?? DEFAULT_PAGE_SIZE)))
 
-  // Applies the range filters (date / market / sender) shared by the table,
-  // count and KPI queries. Typed loosely on purpose — the Postgrest builder
-  // generics recurse otherwise.
-  const applyRangeFilters = (q: any): any => {
-    let out = q
-    if (opts.dateFrom) out = out.gte(dateBasis, opts.dateFrom)
-    if (opts.dateTo) out = out.lte(dateBasis, opts.dateTo)
-    if (opts.market && opts.market !== 'all') out = out.eq('market', opts.market)
-    if (opts.sender && opts.sender !== 'all') out = out.eq('from_phone_number', opts.sender)
-    return out
+  const apiResult = await fetchQueuePage({
+    page,
+    pageSize,
+    status: opts.status || 'all',
+    dateBasis,
+    dateFrom: opts.dateFrom,
+    dateTo: opts.dateTo,
+    market: opts.market,
+    sender: opts.sender,
+  })
+  if (!apiResult.ok) {
+    const err = apiResult as { message?: string; error?: string }
+    throw new Error(err.message || err.error || 'queue_page_unavailable')
+  }
+  if (!apiResult.data) {
+    throw new Error('queue_page_unavailable')
   }
 
-  // Table/count query also narrows by the selected status bucket. The KPI
-  // aggregation deliberately omits status so every bucket stays countable.
-  const applyFilters = (q: any): any => {
-    const out = applyRangeFilters(q)
-    return statusValues ? out.in('queue_status', statusValues) : out
-  }
-
-  // Step 1: Fetch one page of the queue with an exact total count for the range.
-  const queueResult = await applyFilters(
-    supabase.from('send_queue').select('*', { count: 'exact' }),
-  )
-    .order(dateBasis, { ascending: false, nullsFirst: false })
-    .range(page * pageSize, page * pageSize + pageSize - 1)
-
-  if (queueResult.error) throw new Error(queueResult.error.message)
-  const queueRows = safeArray(queueResult.data as AnyRecord[])
-  const totalCount = Number(queueResult.count ?? queueRows.length)
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
-
-  // Step 1b: Range-accurate KPI aggregation (independent of the visible page).
-  // Pulls only the small columns needed to bucket statuses across the whole
-  // filtered date range so the KPI strip reflects the range, not just the page.
-  const rangeKpis = {
-    scheduled: 0, queued: 0, sending: 0, sent: 0,
-    delivered: 0, failed: 0, blocked: 0, approval: 0, optOuts: 0, total: totalCount,
-  }
-  let rangeOk = false
-  try {
-    // Range-accurate counts via parallel head-only COUNT queries (not row-capped
-    // by PostgREST's max-rows, unlike a select+client-side tally).
-    const bucketCount = async (values: string[]): Promise<number> => {
-      const res = await applyRangeFilters(
-        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
-      ).in('queue_status', values)
-      if (res.error) throw new Error(res.error.message)
-      return Number(res.count ?? 0)
-    }
-    const optOutCount = async (): Promise<number> => {
-      const res = await applyRangeFilters(
-        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
-      ).or('failed_reason.ilike.%opt%,blocked_reason.ilike.%opt%,failed_reason.ilike.%21610%,blocked_reason.ilike.%21610%')
-      return Number(res.count ?? 0)
-    }
-    const [scheduled, queued, sending, sent, delivered, failed, blocked, approval, optOuts] = await Promise.all([
-      bucketCount(STATUS_BUCKET_VALUES.scheduled),
-      bucketCount(STATUS_BUCKET_VALUES.queued),
-      bucketCount(STATUS_BUCKET_VALUES.sending),
-      bucketCount(STATUS_BUCKET_VALUES.sent),
-      bucketCount(STATUS_BUCKET_VALUES.delivered),
-      bucketCount(STATUS_BUCKET_VALUES.failed),
-      bucketCount(STATUS_BUCKET_VALUES.blocked),
-      bucketCount(STATUS_BUCKET_VALUES.approval),
-      optOutCount(),
-    ])
-    Object.assign(rangeKpis, { scheduled, queued, sending, sent, delivered, failed, blocked, approval, optOuts })
-    // When no status filter is active, totalCount already reflects the range.
-    if (statusValues) {
-      const tot = await applyRangeFilters(
-        supabase.from('send_queue').select('id', { count: 'exact', head: true }),
-      )
-      rangeKpis.total = Number(tot.count ?? totalCount)
-    }
-    rangeOk = true
-  } catch {
-    // Non-fatal — page still renders with page-scoped counts as a fallback.
-  }
+  const payload = apiResult.data as AnyRecord
+  const queueRows = safeArray(payload.items as AnyRecord[])
+  const totalCount = Number(payload.totalCount ?? queueRows.length)
+  const totalPages = Math.max(1, Number(payload.totalPages ?? Math.ceil(totalCount / pageSize)))
+  const rangeKpis = (payload.rangeCounts && typeof payload.rangeCounts === 'object'
+    ? payload.rangeCounts
+    : {
+      scheduled: 0, queued: 0, sending: 0, sent: 0,
+      delivered: 0, failed: 0, blocked: 0, approval: 0, optOuts: 0, total: totalCount,
+    }) as QueueModel['rangeCounts'] extends infer T ? NonNullable<T> : never
+  const rangeOk = Boolean(payload.rangeCounts)
+  const apiProperties = safeArray(payload.properties as AnyRecord[])
 
   // Step 2: Extract IDs
   const propertyIds = new Set<string>()
@@ -311,8 +245,11 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     return { data: [] }
   }
 
-  const [propRes, evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
-    fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100),
+  const propRes = apiProperties.length
+    ? { data: apiProperties }
+    : await fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100)
+
+  const [evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
     fetchChunked(qArr, async _chunk => ({ data: [] }), 30), // Disabled message_events
     (async () => {
       if (qArr.length === 0 && tArr.length === 0) return { data: [] }

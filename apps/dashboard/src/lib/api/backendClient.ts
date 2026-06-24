@@ -12,6 +12,7 @@
 import type { AnyRecord } from '../data/shared'
 import { logDataLayerQueryDone, logDataLayerQueryStart } from '../data/dashboardDataLayer'
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
+import { buildRequestCacheKey, cachedGetRequest, readCachedRequest } from './requestCache'
 
 export const getBackendBaseUrl = (): string => {
   const isBrowser = typeof window !== 'undefined'
@@ -187,9 +188,30 @@ const getBodyCount = (body: unknown): { bodyCount: number | null; bodyCountPath:
   return { bodyCount: null, bodyCountPath: null }
 }
 
-export async function callBackend<T = unknown>(
+const GET_CACHE_TTL_MS: Record<string, number> = {
+  '/api/cockpit/ops/metrics': 12_000,
+  '/api/cockpit/queue/control': 8_000,
+  '/api/cockpit/queue/status': 8_000,
+  '/api/cockpit/queue/page': 6_000,
+  '/api/cockpit/queue/processor-health': 10_000,
+  '/api/cockpit/inbox/counts': 5_000,
+  '/api/cockpit/inbox/live': 4_000,
+  '/api/cockpit/templates/list': 60_000,
+  '/api/cockpit/dev/runtime-identity': 300_000,
+}
+
+function getCacheTtlForPath(path: string): number | null {
+  const normalized = path.split('?')[0]
+  if (GET_CACHE_TTL_MS[normalized] != null) return GET_CACHE_TTL_MS[normalized]
+  for (const [prefix, ttl] of Object.entries(GET_CACHE_TTL_MS)) {
+    if (normalized.startsWith(prefix)) return ttl
+  }
+  return null
+}
+
+async function executeBackendRequest<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<BackendResult<T>> {
   const base = getBackendBaseUrl()
   const isBrowser = typeof window !== 'undefined'
@@ -352,6 +374,27 @@ export async function callBackend<T = unknown>(
   return { ok: true, status: response.status, data: body as T }
 }
 
+export async function callBackend<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<BackendResult<T>> {
+  const method = (options.method || 'GET').toUpperCase()
+  const bodyKey = typeof options.body === 'string' ? options.body : ''
+  const cacheKey = buildRequestCacheKey(path, method, bodyKey)
+  const ttl = method === 'GET' ? getCacheTtlForPath(path) : null
+
+  if (ttl != null) {
+    const cached = readCachedRequest<BackendResult<T>>(cacheKey)
+    if (cached) return cached
+    return cachedGetRequest(cacheKey, ttl, (signal) => executeBackendRequest<T>(path, {
+      ...options,
+      signal: options.signal ?? signal,
+    }))
+  }
+
+  return executeBackendRequest<T>(path, options)
+}
+
 // ---------------------------------------------------------------------------
 // Health & readiness
 // ---------------------------------------------------------------------------
@@ -509,6 +552,27 @@ export interface CockpitOpsMetrics {
 export function getCockpitOpsMetrics(window: 'today' | '24h' | '7d' | '30d' = 'today'): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: CockpitOpsMetrics }>> {
   const qs = new URLSearchParams({ window }).toString()
   return callBackend(`/api/cockpit/ops/metrics?${qs}`)
+}
+
+export function fetchQueuePage(params: Record<string, string | number | undefined> = {}): Promise<BackendResult<Record<string, unknown>>> {
+  const qs = new URLSearchParams(
+    Object.entries(params)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => [key, String(value)]),
+  ).toString()
+  return callBackend(`/api/cockpit/queue/page${qs ? `?${qs}` : ''}`)
+}
+
+export function fetchQueueProcessorHealth(): Promise<BackendResult<Record<string, unknown>>> {
+  return callBackend('/api/cockpit/queue/processor-health')
+}
+
+export function fetchSmsTemplatesFromApi(params?: { limit?: number; includeInactive?: boolean }): Promise<BackendResult<{ templates: unknown[] }>> {
+  const qs = new URLSearchParams()
+  if (params?.limit) qs.set('limit', String(params.limit))
+  if (params?.includeInactive) qs.set('includeInactive', 'true')
+  const suffix = qs.toString()
+  return callBackend(`/api/cockpit/templates/list${suffix ? `?${suffix}` : ''}`)
 }
 
 // ---------------------------------------------------------------------------

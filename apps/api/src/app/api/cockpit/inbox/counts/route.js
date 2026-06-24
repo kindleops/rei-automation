@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { getLiveCounts } from '@/lib/domain/inbox/live-inbox-service.js'
+import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,10 +16,20 @@ export async function GET(request) {
   if (!auth.ok) return auth.response
 
   try {
+    const timer = createRequestTimer('inbox-counts')
     const { searchParams } = new URL(request.url)
+    timer.mark('auth_config')
     const counts = await getLiveCounts(Object.fromEntries(searchParams.entries()))
-    
-    return NextResponse.json({ ok: true, counts, data: { counts } }, { status: 200, headers: cors })
+    timer.mark('supabase_query')
+    const timing = timer.summary()
+    return NextResponse.json({
+      ok: true,
+      counts,
+      data: { counts },
+      queryMs: timing.totalMs,
+      sourceUsed: 'inbox-counts',
+      timing,
+    }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error.message },

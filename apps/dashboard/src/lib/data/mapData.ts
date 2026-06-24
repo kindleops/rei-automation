@@ -159,36 +159,18 @@ export const hydrateLiveDashboardFromSupabase = async (
     }
   }
 
+  // Avoid multi-thousand-row client-side scans; use bounded market registry only.
   const supabase = getSupabaseClient()
+  const { data: marketData, error: marketError } = await supabase
+    .from('markets')
+    .select('market_id,slug,name,label,city,state,state_code,latitude,lat,longitude,lng,status')
+    .limit(200)
+  if (marketError) throw new Error(mapErrorMessage(marketError))
 
-  const [marketResult, propertyResult, queueResult, eventResult] = await Promise.all([
-    supabase
-      .from('markets')
-      .select('market_id,slug,name,label,city,state,state_code,latitude,lat,longitude,lng,status')
-      .limit(500),
-    supabase
-      .from('properties')
-      .select('property_id,market_id,market,motivation_score,priority_score,status')
-      .limit(4000),
-    supabase
-      .from('send_queue')
-      .select('queue_id,market_id,market,status')
-      .limit(4000),
-    supabase
-      .from('message_events')
-      .select('event_id,market_id,market,direction,sentiment')
-      .limit(6000),
-  ])
-
-  if (marketResult.error) throw new Error(mapErrorMessage(marketResult.error))
-  if (propertyResult.error) throw new Error(mapErrorMessage(propertyResult.error))
-  if (queueResult.error) throw new Error(mapErrorMessage(queueResult.error))
-  if (eventResult.error) throw new Error(mapErrorMessage(eventResult.error))
-
-  const marketRows = safeArray(marketResult.data as AnyRecord[])
-  const propertyRows = safeArray(propertyResult.data as AnyRecord[])
-  const queueRows = safeArray(queueResult.data as AnyRecord[])
-  const eventRows = safeArray(eventResult.data as AnyRecord[])
+  const marketRows = safeArray(marketData as AnyRecord[])
+  const propertyRows: AnyRecord[] = []
+  const queueRows: AnyRecord[] = []
+  const eventRows: AnyRecord[] = []
 
   const propertiesByMarket = new Map<string, number>()
   const hotByMarket = new Map<string, number>()

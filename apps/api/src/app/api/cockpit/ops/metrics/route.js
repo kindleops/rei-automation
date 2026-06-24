@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../_shared.js'
-import { supabase, hasSupabaseConfig } from '@/lib/supabase/client.js'
-import { getSystemFlags } from '@/lib/system-control.js'
-import { normalizeTextGridFailure } from '@/lib/domain/messaging/textgrid-failure-normalization.js'
-import { buildTextGridSenderHealth } from '@/lib/domain/messaging/textgrid-sender-health.js'
+import { hasSupabaseConfig } from '@/lib/supabase/client.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
+import { fetchOpsMetricsAggregate } from '@/lib/cockpit/ops-metrics-aggregate-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -442,225 +441,38 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url)
   const window = clean(searchParams.get('window') || 'today') || 'today'
-  const { start, end } = startOfWindow(window)
-  const startIso = start.toISOString()
-  const endIso = end.toISOString()
 
-  let flags, messageRes, queueRes, activeQueueRes
   try {
-  ;[flags, messageRes, queueRes, activeQueueRes] = await Promise.all([
-    getSystemFlags(['queue_runner_enabled']),
-    supabase
-      .from('message_events')
-      .select('id, queue_id, direction, delivery_status, provider_delivery_status, raw_carrier_status, failure_bucket, failure_reason, error_message, detected_intent, is_opt_out, is_final_failure, from_phone_number, to_phone_number, message_body, market, metadata, created_at, updated_at, delivered_at, failed_at, thread_key')
-      .gte('created_at', startIso)
-      .lte('created_at', endIso),
-    supabase
-      .from('send_queue')
-      .select('id, queue_status, failed_reason, blocked_reason, blocked_reasons, guard_reason, metadata, updated_at, created_at, queue_key, message_type, use_case_template, touch_number, current_stage, thread_key, to_phone_number, from_phone_number, textgrid_number, textgrid_number_id, message_body, message_text, rendered_message, market, template_id, scheduled_for')
-      .gte('created_at', startIso)
-      .lte('created_at', endIso),
-    supabase
-      .from('send_queue')
-      .select('queue_status, updated_at, created_at')
-      .in('queue_status', ['queued', 'pending', 'scheduled', 'processing', 'sending', 'approval']),
-  ])
+    const response = await readThroughCache(
+      `cockpit:ops-metrics:${window}`,
+      12_000,
+      () => fetchOpsMetricsAggregate(window),
+    )
 
+    return NextResponse.json(
+      {
+        ok: true,
+        degraded: false,
+        action: 'ops-metrics',
+        diagnostics: response,
+        queryMs: response.queryMs ?? Date.now() - startedAt,
+        sourceUsed: response.sourceUsed || 'rpc:cockpit_ops_metrics_snapshot',
+      },
+      { status: 200, headers: cors },
+    )
   } catch (fetchErr) {
-    console.error('[ops-metrics] query failure', fetchErr)
+    console.error('[ops-metrics] aggregate failure', fetchErr)
     return NextResponse.json(
       degradedMetricsResponse({
         errorCode: 'METRICS_QUERY_FAILED',
         message: String(fetchErr?.message ?? fetchErr),
         window,
         startedAt,
-        sourceUsed: 'message_events/send_queue',
+        sourceUsed: 'rpc:cockpit_ops_metrics_snapshot',
       }),
       { status: 200, headers: cors },
     )
   }
-
-  if (messageRes.error) {
-    console.error('[ops-metrics] message_events error', messageRes.error)
-    return NextResponse.json(
-      degradedMetricsResponse({
-        errorCode: 'MESSAGE_EVENTS_ERROR',
-        message: String(messageRes.error.message),
-        window,
-        startedAt,
-        sourceUsed: 'message_events',
-      }),
-      { status: 200, headers: cors },
-    )
-  }
-  if (queueRes.error) {
-    console.error('[ops-metrics] send_queue error', queueRes.error)
-    return NextResponse.json(
-      degradedMetricsResponse({
-        errorCode: 'QUEUE_ERROR',
-        message: String(queueRes.error.message),
-        window,
-        startedAt,
-        sourceUsed: 'send_queue',
-      }),
-      { status: 200, headers: cors },
-    )
-  }
-  if (activeQueueRes.error) {
-    console.error('[ops-metrics] active_queue error', activeQueueRes.error)
-    return NextResponse.json(
-      degradedMetricsResponse({
-        errorCode: 'ACTIVE_QUEUE_ERROR',
-        message: String(activeQueueRes.error.message),
-        window,
-        startedAt,
-        sourceUsed: 'send_queue:active',
-      }),
-      { status: 200, headers: cors },
-    )
-  }
-
-  const messageRows = messageRes.data || []
-  const queueRows = queueRes.data || []
-  const activeQueueRows = activeQueueRes.data || []
-
-  const outboundRows = messageRows.filter((r) => lower(r.direction) === 'outbound')
-  const inboundRows = messageRows.filter((r) => lower(r.direction) === 'inbound')
-
-  // Build thread_key → classified type map from send_queue (primary classification source)
-  const threadToType = new Map()
-  for (const row of queueRows) {
-    const thread = clean(row.thread_key || row.to_phone_number || '')
-    if (!thread) continue
-    const type = classifyQueueRow(row)
-    // Last-write-wins; prefer more specific types over 'unknown'
-    if (!threadToType.has(thread) || threadToType.get(thread) === 'unknown') {
-      threadToType.set(thread, type)
-    }
-  }
-
-  // ── Existing top-level metrics ─────────────────────────────────────────
-  const sentCount = outboundRows.filter((r) => isAcceptedOutbound(r)).length
-  const deliveredCount = outboundRows.filter(
-    (r) => isDeliveredStatus(r.provider_delivery_status) || isDeliveredStatus(r.delivery_status)
-  ).length
-  const failedCount = outboundRows.filter(
-    (r) => isFailedStatus(r.provider_delivery_status) || isFailedStatus(r.delivery_status) || r.is_final_failure === true
-  ).length
-  const inboundReplyCount = inboundRows.length
-  const optOutCount = inboundRows.filter(
-    (r) => r.is_opt_out === true || lower(r.detected_intent) === 'opt_out'
-  ).length
-  const positiveCount = inboundRows.filter((r) =>
-    ['seller_interested', 'asking_price_provided', 'asks_offer', 'ownership_confirmed', 'price_anchor'].includes(lower(r.detected_intent))
-  ).length
-  const negativeCount = inboundRows.filter((r) =>
-    ['negative', 'not_interested', 'opt_out', 'wrong_number', 'hostile', 'hostile_or_legal'].includes(lower(r.detected_intent))
-  ).length
-
-  const waitingStatuses = new Set(['queued', 'pending', 'scheduled'])
-  const pendingCount = queueRows.filter((r) => lower(r.queue_status) === 'pending').length
-  const queuedCount = queueRows.filter((r) => lower(r.queue_status) === 'queued').length
-  const queueWaitingCount = queueRows.filter((r) => waitingStatuses.has(lower(r.queue_status))).length
-  const queueFailedTodayCount = queueRows.filter((r) => lower(r.queue_status) === 'failed').length
-  const automationHardFailureCount = queueRows.filter((r) => {
-    if (lower(r.queue_status) !== 'failed') return false
-    const reason = lower(r.failed_reason || r.blocked_reason || r.metadata?.failure_category || '')
-    return !reason.includes('carrier') && !reason.includes('delivery')
-  }).length
-
-  const lastRunCandidate = [...queueRows].sort(
-    (a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime()
-  )[0] || null
-  const queueLastRunAt = lastRunCandidate ? clean(lastRunCandidate.updated_at || lastRunCandidate.created_at) : null
-  const hasRecentSuccess = queueRows.some((r) => {
-    const s = lower(r.queue_status)
-    const ts = new Date(r.updated_at || r.created_at || 0).getTime()
-    return ['sent', 'delivered'].includes(s) && Date.now() - ts <= 5 * 60 * 1000
-  })
-  const hasRecentError = queueRows.some((r) => {
-    const s = lower(r.queue_status)
-    const ts = new Date(r.updated_at || r.created_at || 0).getTime()
-    return s === 'failed' && Date.now() - ts <= 5 * 60 * 1000
-  })
-
-  const queueProcessorStatus = deriveQueueProcessorStatus({
-    queueRunnerEnabled: flags.queue_runner_enabled !== false,
-    queueWaitingCount,
-    queueLastRunAt,
-    hasRecentSuccess,
-    hasRecentError,
-  })
-
-  const senderPerformance = buildSenderPerformance(messageRows, queueRows)
-
-  // ── Sections ────────────────────────────────────────────────────────────
-  const sectionArgs = [queueRows, outboundRows, inboundRows, threadToType]
-
-  const sections = {
-    first_touch: buildMessageTypeSection('first_touch', ...sectionArgs),
-    auto_replies: {
-      stage_1: buildMessageTypeSection('auto_reply_stage_1', ...sectionArgs),
-      stage_2: buildMessageTypeSection('auto_reply_stage_2', ...sectionArgs),
-      stage_3: buildMessageTypeSection('auto_reply_stage_3', ...sectionArgs),
-    },
-    manual_replies: buildMessageTypeSection('manual_reply', ...sectionArgs),
-    follow_up: buildMessageTypeSection('follow_up', ...sectionArgs),
-    unknown: buildMessageTypeSection('unknown', ...sectionArgs),
-    queue_health: buildQueueHealthSection(queueRows, activeQueueRows),
-    failure_reasons: buildFailureReasons(queueRows),
-    template_outliers: { top: buildTemplateOutliers(queueRows) },
-    number_outliers: { top: buildNumberOutliers(senderPerformance) },
-  }
-
-  const response = {
-    window,
-    generated_at: new Date().toISOString(),
-    sent_count: sentCount,
-    delivered_count: deliveredCount,
-    failed_count: failedCount,
-    pending_count: pendingCount,
-    queued_count: queuedCount,
-    received_count: inboundReplyCount,
-    reply_rate: safeRate(inboundReplyCount, deliveredCount),
-    positive_rate: safeRate(positiveCount, inboundReplyCount),
-    negative_rate: safeRate(negativeCount, inboundReplyCount),
-    delivery_rate: safeRate(deliveredCount, sentCount),
-    failure_rate: safeRate(failedCount, sentCount),
-    opt_out_rate: safeRate(optOutCount, deliveredCount),
-    queue_processor_status: queueProcessorStatus,
-    queue_last_run_at: queueLastRunAt,
-    queue_waiting_count: queueWaitingCount,
-    queue_failed_today_count: queueFailedTodayCount,
-    automation_hard_failure_count: automationHardFailureCount,
-    sender_performance: senderPerformance,
-    sections,
-    metric_source_debug: {
-      transport_source: 'message_events',
-      queue_source: 'send_queue',
-      window_start: startIso,
-      window_end: endIso,
-      message_rows: messageRows.length,
-      queue_rows: queueRows.length,
-      active_queue_rows: activeQueueRows.length,
-      thread_to_type_entries: threadToType.size,
-      queue_runner_enabled: flags.queue_runner_enabled !== false,
-    },
-    queryMs: Date.now() - startedAt,
-    sourceUsed: 'message_events/send_queue',
-  }
-
-  return NextResponse.json(
-    {
-      ok: true,
-      degraded: false,
-      action: 'ops-metrics',
-      diagnostics: response,
-      queryMs: Date.now() - startedAt,
-      sourceUsed: 'message_events/send_queue',
-    },
-    { status: 200, headers: cors },
-  )
 }
 
 export async function OPTIONS(request) {

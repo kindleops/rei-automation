@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getSupabaseClient } from '../supabaseClient'
 import { fetchOperationalKpis, type OperationalKpis, type OperationalKpi } from './inboxKpis'
 
-const KPI_INITIAL_LOAD_DELAY_MS = 30_000
-
 export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '24h') => {
   const [kpis, setKpis] = useState<OperationalKpis | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -12,7 +10,7 @@ export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '2
   
   const lastFetchRef = useRef<number>(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const initialLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
 
   const load = useCallback(async (isInitial = false) => {
     if (isInitial) setIsLoading(true)
@@ -46,20 +44,7 @@ export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '2
   }, [load])
 
   useEffect(() => {
-    const runInitialLoad = () => {
-      initialLoadTimerRef.current = null
-      void load(true)
-    }
-
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const idleHandle = window.requestIdleCallback(runInitialLoad, { timeout: KPI_INITIAL_LOAD_DELAY_MS })
-      initialLoadTimerRef.current = setTimeout(() => {
-        window.cancelIdleCallback(idleHandle)
-        runInitialLoad()
-      }, KPI_INITIAL_LOAD_DELAY_MS)
-    } else {
-      initialLoadTimerRef.current = setTimeout(runInitialLoad, KPI_INITIAL_LOAD_DELAY_MS)
-    }
+    void load(true)
     
     const supabase = getSupabaseClient()
     
@@ -87,7 +72,7 @@ export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '2
       supabase.removeChannel(messageSub)
       supabase.removeChannel(queueSub)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-      if (initialLoadTimerRef.current) clearTimeout(initialLoadTimerRef.current)
+
     }
   }, [timeWindow, debouncedLoad, load])
 

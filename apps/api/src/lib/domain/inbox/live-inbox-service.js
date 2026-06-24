@@ -1820,19 +1820,7 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
 
-  try {
-    const authoritativeCounts = await fetchAuthoritativeInboxCounts(supabase);
-    console.log("[INBOX_COUNTS_UPDATED]", authoritativeCounts);
-    return {
-      counts: authoritativeCounts,
-      source: "inbox_thread_state:authoritative",
-      approximate: false,
-      degraded: false,
-    };
-  } catch (error) {
-    console.warn("[INBOX_COUNTS_AUTHORITATIVE_FALLBACK]", error?.message || error);
-  }
-
+  // Fast path: pre-aggregated view (sub-second) before any full-table scan.
   for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
     if (sourceConfig.countSource) {
       try {
@@ -1856,9 +1844,28 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
         }
       } catch (error) {
         if (!isMissingSourceError(error)) {
-          console.warn("[INBOX_COUNTS_FALLBACK]", error?.message || error);
+          console.warn("[INBOX_COUNTS_VIEW_FALLBACK]", error?.message || error);
         }
       }
+    }
+  }
+
+  try {
+    const authoritativeCounts = await fetchAuthoritativeInboxCounts(supabase);
+    console.log("[INBOX_COUNTS_UPDATED]", authoritativeCounts);
+    return {
+      counts: authoritativeCounts,
+      source: "inbox_thread_state:authoritative",
+      approximate: false,
+      degraded: false,
+    };
+  } catch (error) {
+    console.warn("[INBOX_COUNTS_AUTHORITATIVE_FALLBACK]", error?.message || error);
+  }
+
+  for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
+    if (sourceConfig.countSource) {
+      continue;
     }
 
     if (disableCountFullScan) {
@@ -1918,10 +1925,12 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
-  try {
-    await transitionStaleWaitingThreads(supabase);
-  } catch (error) {
-    console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
+  if (!initialBootMode) {
+    try {
+      await transitionStaleWaitingThreads(supabase);
+    } catch (error) {
+      console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
+    }
   }
 
   const threadQueryStartedAt = nowMs();
@@ -1936,12 +1945,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   });
   const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
-  const bucketByThreadKey = await fetchInboxBucketsByThreadKeys(
-    supabase,
-    (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
-  );
+  const bucketByThreadKey = initialBootMode
+    ? new Map()
+    : await fetchInboxBucketsByThreadKeys(
+      supabase,
+      (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
+    );
   const rows = (rawRows || []).map((row) => {
     const normalized = normalizeThreadRow(row, params);
+    if (initialBootMode) return normalized;
     const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
     const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
     if (!authoritativeBucket) return normalized;
@@ -2823,12 +2835,20 @@ async function queryMessageEventsByStrictStrategy({
   limit,
   diagnostics,
 }) {
-  // NOTE: no `{ count: "exact" }` — an exact count over message_events (multi-million rows)
-  // ran per-strategy and was the root cause of 27s–108s thread-messages responses. We derive
-  // `total` from the returned rows instead, which keeps each lookup an indexed, sub-second query.
+  const MESSAGE_EVENT_COLUMNS = [
+    "id", "message_event_id", "message_id", "thread_key", "conversation_thread_id",
+    "direction", "message_body", "body", "event_timestamp", "created_at", "updated_at",
+    "sent_at", "delivered_at", "failed_at", "delivery_status", "provider_delivery_status",
+    "provider_status", "failure_reason", "error_message", "from_phone_number", "to_phone_number",
+    "normalized_phone", "canonical_e164", "phone_e164", "seller_phone", "property_id",
+    "prospect_id", "master_owner_id", "owner_id", "detected_intent", "metadata", "queue_id",
+    "source_app", "latest_message_source",
+  ].join(",");
+
+  // NOTE: no `{ count: "exact" }` and no `select('*')` — both caused multi-second scans.
   let query = supabase
     .from("message_events")
-    .select("*");
+    .select(MESSAGE_EVENT_COLUMNS);
 
   query = strategy.apply(query);
   const filterAudit = {
@@ -2982,6 +3002,11 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
 
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
+  const canonicalStrategyNames = new Set([
+    "latest_message_id_exact",
+    "conversation_thread_id",
+    "thread_key=canonical_e164",
+  ]);
   for (const strategy of strategies) {
     const result = await queryMessageEventsByStrictStrategy({
       supabase,
@@ -2996,9 +3021,12 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
       continue;
     }
     strategyResults.push({ ...result, strategy });
-    // Short-circuit: once we have enough rows from a reliable strategy, stop.
+    if (result.rows.length > 0 && canonicalStrategyNames.has(strategy.name)) {
+      diagnostics.lookup_strategy_used = strategy.name;
+      break;
+    }
     const totalFound = strategyResults.reduce((sum, r) => sum + r.rows.length, 0);
-    if (totalFound >= fetchLimit && strategy.name !== "conversation_thread_id") break;
+    if (totalFound >= fetchLimit) break;
   }
 
   if (strategyResults.flatMap((r) => r.rows).length === 0 && deps.latestPreviewRow) {

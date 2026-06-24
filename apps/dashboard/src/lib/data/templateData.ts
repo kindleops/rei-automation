@@ -1,6 +1,6 @@
 import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import type { ThreadContext } from './inboxData'
-import { getSupabaseClient } from '../supabaseClient'
+import { fetchSmsTemplatesFromApi } from '../api/backendClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'
 
 export interface SmsTemplate {
@@ -55,6 +55,7 @@ export interface TemplateRenderResult {
 
 const DEV = Boolean(import.meta.env?.DEV)
 let _loggedSchemaKeys = false
+let _templatesCache: { key: string; expiresAt: number; templates: SmsTemplate[] } | null = null
 
 const USE_CASE_LABELS: Record<string, string> = {
   ownership_check: 'Ownership Check',
@@ -126,7 +127,8 @@ const textForSearch = (template: SmsTemplate): string =>
 
 const getTemplateText = (row: AnyRecord): string =>
   asString(
-    row['template_text'] ??
+    row['template_body'] ??
+      row['template_text'] ??
       row['message_text'] ??
       row['text'] ??
       row['body'] ??
@@ -192,27 +194,37 @@ const applyFilters = (templates: SmsTemplate[], filters: SmsTemplateFilters): Sm
 }
 
 export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Promise<SmsTemplate[]> => {
-  const supabase = getSupabaseClient()
-  const limit = Math.max(1, params.limit ?? 1200)
-
-  const { data, error } = await supabase
-    .from('sms_templates')
-    .select('*')
-    .order('updated_at', { ascending: false })
-    .limit(limit)
-
-  if (error) {
-    if (DEV) console.warn('[templateData] sms_templates query failed', error.message)
-    throw new Error(error.message)
+  const limit = Math.max(1, params.limit ?? 200)
+  const cacheKey = `${limit}:${params.includeInactive ? 'all' : 'active'}`
+  const now = Date.now()
+  if (_templatesCache && _templatesCache.key === cacheKey && _templatesCache.expiresAt > now) {
+    return applyFilters(_templatesCache.templates, params)
   }
 
-  const rows = safeArray(data as AnyRecord[])
+  const apiResult = await fetchSmsTemplatesFromApi({
+    limit,
+    includeInactive: params.includeInactive,
+  })
+  if (!apiResult.ok) {
+    const err = apiResult as { message?: string; error?: string }
+    throw new Error(err.message || err.error || 'sms_templates_unavailable')
+  }
+  if (!apiResult.data) {
+    throw new Error('sms_templates_unavailable')
+  }
+
+  const rows = safeArray((apiResult.data as AnyRecord).templates as AnyRecord[])
   if (DEV && rows[0] && !_loggedSchemaKeys) {
     _loggedSchemaKeys = true
     console.log('[templateData] sms_templates schema sample keys', Object.keys(rows[0]))
   }
 
   const normalized = rows.map(normalizeSmsTemplate)
+  _templatesCache = {
+    key: cacheKey,
+    expiresAt: now + 60_000,
+    templates: normalized,
+  }
   return applyFilters(normalized, params)
 }
 

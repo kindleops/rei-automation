@@ -17,7 +17,8 @@ import {
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from '@/lib/domain/queue/queue-control-safety.js'
-import { getCampaignAwareQueueDiagnostics } from '@/lib/domain/campaigns/campaign-automation-service.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
+import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -450,18 +451,13 @@ async function loadCampaignDiagnostics(values) {
     diagnostics: parseDiagnostics(values.queue_last_run_diagnostics),
   }
 
-  let campaignAware = {
+  const campaignAware = {
     active_campaign: null,
     campaign_queue_depth: 0,
     queue_depth_by_campaign: {},
     next_send_window: null,
     blocked_reason_counts: {},
     campaigns: [],
-  }
-  try {
-    campaignAware = await getCampaignAwareQueueDiagnostics()
-  } catch (error) {
-    errors.push({ label: 'campaign_aware_queue', message: error?.message || String(error) })
   }
 
   const exactBlockers = []
@@ -572,17 +568,26 @@ async function computeQueueLimitedCap(safety = {}) {
 }
 
 function responseWithDiagnostics(payload, values, status = 200) {
-  return loadCampaignDiagnostics(values).then((campaign) => NextResponse.json({
-    ...payload,
-    diagnostics: {
-      ...values,
-      ...campaign,
-    },
-    control: {
-      settings: values,
-      campaign,
-    },
-  }, { status }))
+  const timer = createRequestTimer('queue-control:get')
+  return readThroughCache('cockpit:queue-control:diagnostics', 8_000, () => loadCampaignDiagnostics(values))
+    .then((campaign) => {
+      timer.mark('diagnostics_loaded')
+      const timing = timer.summary()
+      return NextResponse.json({
+        ...payload,
+        diagnostics: {
+          ...values,
+          ...campaign,
+        },
+        control: {
+          settings: values,
+          campaign,
+        },
+        queryMs: timing.totalMs,
+        sourceUsed: 'queue-control:cached-diagnostics',
+        timing,
+      }, { status })
+    })
 }
 
 function queueRowIsProof(row = {}) {

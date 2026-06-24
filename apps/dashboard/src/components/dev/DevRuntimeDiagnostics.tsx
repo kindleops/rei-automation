@@ -32,6 +32,20 @@ export const DevRuntimeDiagnostics = () => {
     if (!import.meta.env.DEV) return
     let cancelled = false
 
+    const cacheKey = 'dev.runtime-identity.v1'
+    const cached = window.sessionStorage.getItem(cacheKey)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as RuntimeIdentity
+        if (parsed?.commit_sha) {
+          setApiIdentity(parsed)
+          return
+        }
+      } catch {
+        window.sessionStorage.removeItem(cacheKey)
+      }
+    }
+
     const load = async () => {
       try {
         const response = await fetch('/api/cockpit/dev/runtime-identity', {
@@ -45,6 +59,7 @@ export const DevRuntimeDiagnostics = () => {
         if (!cancelled) {
           setApiIdentity(json)
           setFetchError(null)
+          window.sessionStorage.setItem(cacheKey, JSON.stringify(json))
         }
       } catch (error) {
         if (!cancelled) setFetchError(error instanceof Error ? error.message : String(error))
@@ -52,10 +67,8 @@ export const DevRuntimeDiagnostics = () => {
     }
 
     void load()
-    const timer = window.setInterval(load, 30000)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
     }
   }, [])
 

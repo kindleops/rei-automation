@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { degradedLiveResponse } from '@/lib/domain/inbox/degraded-read-responses.js'
 import { getLiveInbox } from '@/lib/domain/inbox/live-inbox-service.js'
+import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,8 +21,10 @@ export async function GET(request) {
   if (!auth.ok) return auth.response
 
   try {
+    const timer = createRequestTimer('inbox-live')
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
+    timer.mark('auth_config')
 
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
       ? params.timeout_mode
@@ -82,16 +85,19 @@ export async function GET(request) {
       throw innerErr
     }
 
+    timer.mark('transformation')
+    const timing = timer.summary({ sourceUsed: data?.source || data?.diagnostics?.source || null })
     return NextResponse.json(
       {
         ok: true,
         degraded: false,
         ...data,
         sourceUsed: data?.source || data?.diagnostics?.source || null,
-        queryMs: data?.diagnostics?.queryMs ?? null,
+        queryMs: data?.diagnostics?.queryMs ?? timing.totalMs,
         diagnostics: {
           ...(data?.diagnostics || {}),
           sourceUsed: data?.source || data?.diagnostics?.source || null,
+          timing,
         },
       },
       { status: 200, headers: cors },

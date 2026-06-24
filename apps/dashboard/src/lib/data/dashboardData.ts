@@ -1,11 +1,10 @@
 import type { HomeActivityItem, HomeBriefingInsight } from '../../shared/home/home.types'
-import { getSupabaseClient } from '../supabaseClient'
+import { fetchInboxCounts, getQueueStatus } from '../api/backendClient'
 import {
   asNumber,
   asString,
   getFirst,
   normalizeStatus,
-  safeArray,
   type AnyRecord,
 } from './shared'
 
@@ -34,48 +33,30 @@ const pushActivity = (
 }
 
 export const fetchHomeDashboardSnapshot = async (): Promise<HomeDashboardSnapshot> => {
-  const supabase = getSupabaseClient()
+  const [queueStatusRes, inboxCountsRes] = await Promise.all([
+    getQueueStatus().catch((err) => {
+      console.error('[DashboardData] queue status failed:', err)
+      return null
+    }),
+    fetchInboxCounts().catch((err) => {
+      console.error('[DashboardData] inbox counts failed:', err)
+      return null
+    }),
+  ])
 
-  const [queueResult, eventResult, ownerResult, propertyResult, webhookResult] = await Promise.all([
-    supabase
-      .from('send_queue')
-      .select('id,queue_id,queue_status,priority,market,market_id,retry_count,created_at,scheduled_at,sent_at')
-      .order('created_at', { ascending: false })
-      .limit(800),
-    supabase
-      .from('message_events')
-      .select('id,market,market_id,direction,requires_response,unread,sentiment,created_at,message_body')
-      .order('created_at', { ascending: false })
-      .limit(800),
-    supabase
-      .from('master_owners')
-      .select('master_owner_id,market,motivation_score,priority_score,updated_at')
-      .limit(1000),
-    supabase
-      .from('properties')
-      .select('property_id,market,structured_motivation_score,estimated_value,updated_at')
-      .limit(1000),
-    supabase
-      .from('webhook_logs')
-      .select('webhook_id,source,status,error,message,created_at')
-      .order('created_at', { ascending: false })
-      .limit(120),
-  ]).catch(err => {
-    console.error('[DashboardData] Promise.all failed:', err)
-    return [ {error: err}, {error: null}, {error: null}, {error: null}, {error: null} ] as any[]
-  })
+  const queueCounts = (queueStatusRes?.ok
+    ? (((queueStatusRes.data as AnyRecord)?.diagnostics as AnyRecord)?.counts as AnyRecord)
+    : null) ?? {}
+  const inboxCounts = (inboxCountsRes?.ok
+    ? (((inboxCountsRes.data as AnyRecord)?.counts as AnyRecord)
+      ?? ((inboxCountsRes.data as AnyRecord)?.data as AnyRecord)?.counts as AnyRecord)
+    : null) ?? {}
 
-  if (queueResult?.error) console.warn('[DashboardData] send_queue error:', queueResult.error.message)
-  if (eventResult?.error) console.warn('[DashboardData] message_events error:', eventResult.error.message)
-  if (ownerResult?.error) console.warn('[DashboardData] master_owners error:', ownerResult.error.message)
-  if (propertyResult?.error) console.warn('[DashboardData] properties error:', propertyResult.error.message)
-  if (webhookResult?.error) console.warn('[DashboardData] webhook_logs error:', webhookResult.error.message)
-
-  const queueRows = safeArray(queueResult?.data as AnyRecord[])
-  const eventRows = safeArray(eventResult?.data as AnyRecord[])
-  const ownerRows = safeArray(ownerResult?.data as AnyRecord[])
-  const propertyRows = safeArray(propertyResult?.data as AnyRecord[])
-  const webhookRows = safeArray(webhookResult?.data as AnyRecord[])
+  const queueRows: AnyRecord[] = []
+  const eventRows: AnyRecord[] = []
+  const ownerRows: AnyRecord[] = []
+  const propertyRows: AnyRecord[] = []
+  const webhookRows: AnyRecord[] = []
 
   const markets = new Map<string, { queue: number; inbound: number; pressure: number }>()
   for (const row of queueRows) {
@@ -102,22 +83,16 @@ export const fetchHomeDashboardSnapshot = async (): Promise<HomeDashboardSnapsho
     return scoreB - scoreA
   })
 
-  const failedSends = queueRows.filter((row) => {
-    const status = normalizeStatus(getFirst(row, ['status', 'queue_status', 'delivery_status']))
-    return status === 'failed' || status === 'retry'
-  }).length
-  const awaitingApproval = queueRows.filter((row) => normalizeStatus(getFirst(row, ['status', 'queue_status'])) === 'approval').length
-  const readyNow = queueRows.filter((row) => normalizeStatus(getFirst(row, ['status', 'queue_status'])) === 'ready').length
+  const failedSends = Number(queueCounts.failed || 0) + Number(queueCounts.retry || 0)
+  const awaitingApproval = Number(queueCounts.approval || 0) + Number(queueCounts.awaiting_approval || 0)
+  const readyNow = Number(queueCounts.ready || 0) + Number(queueCounts.queued || 0)
   const highPriorityOwners = ownerRows.filter((row) => {
     const score = asNumber(getFirst(row, ['motivation_score', 'priority_score']), 0)
     return score >= 70
   }).length
   const highPressureZones = sortedMarkets.filter(([, stat]) => stat.pressure >= 4).length
 
-  const unreadEvents = eventRows.filter((row) => {
-    const unread = getFirst(row, ['unread'])
-    return unread === true || unread === 1
-  }).length
+  const unreadEvents = Number(inboxCounts.new_replies || inboxCounts.needs_reply || 0)
 
   const activities: HomeActivityItem[] = []
 
