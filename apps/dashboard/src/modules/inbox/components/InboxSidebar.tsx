@@ -540,12 +540,20 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   const finalAcquisitionScore = readNumber(thread, 'finalAcquisitionScore', 'final_acquisition_score')
   const propertyTags = readStringList(thread, 'propertyTags', 'podio_tags')
   const sellerTags = readStringList(thread, 'sellerTags', 'seller_tags_text')
+  const contactIdentity = readString(
+    thread,
+    'contactIdentityLabel',
+    'contact_identity_label',
+    'contactIdentityClass',
+    'contact_identity_class',
+  )
   const contactFlags = [
     readBoolean(thread, 'optOut', 'isOptOut') && 'Opt Out',
     readBoolean(thread, 'wrongNumber', 'wrong_number') && 'Wrong Number',
     readBoolean(thread, 'notInterested', 'not_interested') && 'Not Interested',
   ].filter(Boolean) as string[]
-  const contactStatus = contactFlags[0]
+  const contactStatus = contactIdentity
+    || contactFlags[0]
     || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : 'Active')
 
   const timestamp = formatInboxThreadTimestamp(thread.lastMessageAt || (thread as any).lastMessageIso || thread.updatedAt)

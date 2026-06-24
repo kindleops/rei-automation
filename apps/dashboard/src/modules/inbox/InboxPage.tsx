@@ -423,6 +423,8 @@ const getInitialWorkspaceWidths = (
 }
 const DEFAULT_WORKSPACE_KEY: NexusWorkspaceKey = 'deal_desk'
 const WORKSPACE_VIEWS_STORAGE_KEY = 'nx.inbox.workspace-views-by-key'
+const DEAL_DESK_LAYOUT_VERSION = 'v2'
+const DEAL_DESK_LAYOUT_VERSION_KEY = 'nx.inbox.deal-desk-layout-version'
 const isDefaultWorkspaceSet = (views: InboxWorkspaceView[]) =>
   views.length === DEFAULT_WORKSPACE_VIEWS.length &&
   DEFAULT_WORKSPACE_VIEWS.every((view) => views.includes(view))
@@ -479,9 +481,12 @@ const computeWorkspaceWidths = (
     if (overrideValues.length === 3 && sumWidths(overrideValues) === 100) {
       return Object.fromEntries(views.map((view) => [view, overrides[view]!])) as Record<InboxWorkspaceView, ViewWidthPercent>
     }
+    if (isDefaultWorkspaceSet(views)) {
+      return cloneDefaultWorkspaceWidths() as Record<InboxWorkspaceView, ViewWidthPercent>
+    }
     return {
-      [views[0]]: '50',
-      [views[1]]: '25',
+      [views[0]]: '25',
+      [views[1]]: '50',
       [views[2]]: '25',
     } as Record<InboxWorkspaceView, ViewWidthPercent>
   }
@@ -587,7 +592,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [dossierFull, setDossierFull] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
   const hasLoadedInitialInboxRef = useRef(false)
-  const hasLoggedThemeRef = useRef(false)
+
   // Tracks whether the live inbox has resolved at least once — gates heavy background queries.
   const heavyQueriesStartedRef = useRef(false)
   const autonomyQueriesStartedRef = useRef(false)
@@ -2166,13 +2171,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   useEffect(() => {
     try {
+      const layoutVersion = window.localStorage.getItem(DEAL_DESK_LAYOUT_VERSION_KEY)
+      const shouldForceDealDesk = layoutVersion !== DEAL_DESK_LAYOUT_VERSION
+
       setSelectedWorkspaceKey(DEFAULT_WORKSPACE_KEY)
       let initialViews = getInitialWorkspaceViews(initialWorkspaceView, routeMode)
       let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView, routeMode)
+      if (shouldForceDealDesk && !isRouteFullscreen && initialWorkspaceView === undefined) {
+        initialViews = cloneDefaultWorkspaceViews()
+        initialWidths = cloneDefaultWorkspaceWidths()
+        window.localStorage.setItem(DEAL_DESK_LAYOUT_VERSION_KEY, DEAL_DESK_LAYOUT_VERSION)
+      }
       setSelectedWorkspaceViews(initialViews)
       setWorkspaceWidthOverrides(initialWidths)
 
-      if (!isRouteFullscreen && initialWorkspaceView === undefined) {
+      if (!shouldForceDealDesk && !isRouteFullscreen && initialWorkspaceView === undefined) {
         const savedWorkspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
         let savedViewsByWorkspace: Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>> = {}
         try {
@@ -2184,12 +2197,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           if (preset) {
             setSelectedWorkspaceKey(preset.key)
             const savedViews = savedViewsByWorkspace[preset.key]
-            const nextViews = Array.isArray(savedViews) && savedViews.length > 0
+            const restoredViews = Array.isArray(savedViews) && savedViews.length > 0
               ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
               : [...preset.views]
+            const nextViews = preset.key === DEFAULT_WORKSPACE_KEY && !isDefaultWorkspaceSet(restoredViews)
+              ? cloneDefaultWorkspaceViews()
+              : restoredViews
             setSelectedWorkspaceViews(nextViews)
             initialViews = nextViews
-            initialWidths = sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
+            initialWidths = preset.key === DEFAULT_WORKSPACE_KEY && isDefaultWorkspaceSet(nextViews)
+              ? cloneDefaultWorkspaceWidths()
+              : sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
             setWorkspaceWidthOverrides(initialWidths)
           }
         }
@@ -2263,18 +2281,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setLayoutState((current) => {
         const nextTheme = resolvedThemeId === 'light' ? 'light' : 'dark'
         
-        if (!hasLoggedThemeRef.current) {
-          hasLoggedThemeRef.current = true
-          console.log('[InboxTheme] active theme + accent palette + root classes:', {
-            theme: resolvedThemeId,
-            accent: settings.accentPalette,
-            classes: getLayoutClassNames({
-              ...current,
-              theme: nextTheme
-            })
-          })
-        }
-
         return current.theme === nextTheme ? current : { ...current, theme: nextTheme }
       })
     }
@@ -3831,8 +3837,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const workspaceBlocked = selectedWorkspacePreset.status !== 'ready'
 
   const isMultiView = renderViews.length > 1
-  const isDefaultWorkspaceShell = isDefaultWorkspaceSet(renderViews)
-  const isCustomMultiView = isMultiView && !isDefaultWorkspaceShell
+  const isDealDeskLayout = isDefaultWorkspaceSet(renderViews)
+  const isCustomMultiView = isMultiView && isDealDeskLayout
+  const isDefaultWorkspaceShell = isMultiView && !isDealDeskLayout && isDefaultWorkspaceSet(renderViews)
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
   const isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'

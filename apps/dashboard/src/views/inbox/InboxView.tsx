@@ -10,7 +10,7 @@ interface InboxViewProps {
 
 export function InboxView({
   initialWorkspaceView,
-  routeMode = 'fullscreen',
+  routeMode = 'workspace',
 }: InboxViewProps = {}) {
   return (
     <InboxPage

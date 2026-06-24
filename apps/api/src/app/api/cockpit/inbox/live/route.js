@@ -7,11 +7,11 @@ import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const BACKEND_GRACE_PERIOD = 1500;
+const BACKEND_GRACE_PERIOD = 500;
 const TIMEOUT_MS_BY_MODE = {
-  initial_boot: 30_000 - BACKEND_GRACE_PERIOD,
-  manual_bucket_switch: 15_000 - BACKEND_GRACE_PERIOD,
-  auto_refresh: 10_000 - BACKEND_GRACE_PERIOD,
+  initial_boot: 5_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 5_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 5_000 - BACKEND_GRACE_PERIOD,
 }
 const INITIAL_BOOT_DEFAULT_LIMIT = 25
 
@@ -29,38 +29,25 @@ export async function GET(request) {
     const timeoutMode = ['initial_boot', 'manual_bucket_switch', 'auto_refresh'].includes(params.timeout_mode)
       ? params.timeout_mode
       : 'manual_bucket_switch'
-    // Initial boot: rows first for speed. Bucket switch / refresh / load-more include counts + delivery.
-    if (timeoutMode === 'initial_boot') {
-      params.skip_counts = 'true'
-      params.skip_delivery = 'true'
-    }
     const timeoutMs = TIMEOUT_MS_BY_MODE[timeoutMode]
     const requestedFilter = params.filter || params.bucket || 'all'
     const requestedLimit = Number(params.limit || (timeoutMode === 'initial_boot' ? INITIAL_BOOT_DEFAULT_LIMIT : 100))
     if (!params.limit && timeoutMode === 'initial_boot') {
       params.limit = String(INITIAL_BOOT_DEFAULT_LIMIT)
     }
-    const useInitialBootSafeSelect =
-      timeoutMode === 'initial_boot' &&
-      (requestedFilter === 'all' || requestedFilter === 'all_messages') &&
-      Number.isFinite(requestedLimit) &&
-      requestedLimit <= 100
 
     console.log('[INBOX_LIVE_TIMEOUT_MODE]', {
       timeoutMode,
       timeoutMs,
       filter: requestedFilter,
       limit: requestedLimit,
-      selectMode: useInitialBootSafeSelect ? 'initial_boot_safe' : 'default',
+      selectMode: 'canonical_row_contract',
     })
 
     let data
     try {
       data = await Promise.race([
-        getLiveInbox(
-          params,
-          useInitialBootSafeSelect ? { selectMode: 'initial_boot_safe' } : undefined,
-        ),
+        getLiveInbox(params),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(Object.assign(new Error('live_inbox_timeout'), { isTimeout: true })),
@@ -70,7 +57,6 @@ export async function GET(request) {
       ])
     } catch (innerErr) {
       if (innerErr.isTimeout) {
-        // Return 200 with degraded flag so frontend can skip cache invalidation
         return NextResponse.json(
           degradedLiveResponse({
             timeoutMode,

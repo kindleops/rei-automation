@@ -24,6 +24,15 @@ import {
   countHydratedInboxFilters,
   HYDRATED_INBOX_SOURCE,
 } from "@/lib/domain/inbox/inbox-hydrated-filter-service.js";
+import {
+  resolveContactIdentityClass,
+  contactIdentityLabel,
+} from "@/lib/domain/inbox/contact-identity.js";
+import {
+  CANONICAL_INBOX_ROW_SELECT_FIELDS,
+  CANONICAL_INBOX_COUNT_KEYS,
+  buildEnrichmentCoverageDiagnostics,
+} from "@/lib/domain/inbox/canonical-inbox-row-contract.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -238,29 +247,7 @@ const ENRICHED_COUNT_FALLBACK_FIELDS = [
   "stage",
   "detected_intent",
 ].join(",");
-const CANONICAL_COUNT_KEYS = [
-  "priority",
-  "new_replies",
-  "needs_review",
-  "follow_up",
-  "cold",
-  "dead",
-  "suppressed",
-  "active",
-  "waiting",
-  "unlinked",
-  "all",
-  "all_messages",
-  "hot_leads",
-  "new_inbound",
-  "needs_reply",
-  "manual_review",
-  "outbound_active",
-  "cold_no_response",
-  "dnc_opt_out",
-  "waiting_on_seller",
-  "automated",
-];
+const CANONICAL_COUNT_KEYS = CANONICAL_INBOX_COUNT_KEYS;
 const THREAD_SOURCE_CONFIGS = [
   {
     key: "primary",
@@ -268,8 +255,8 @@ const THREAD_SOURCE_CONFIGS = [
     countSource: PRIMARY_COUNT_SOURCE,
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
-    getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+    getSelectColumns() {
+      return CANONICAL_INBOX_ROW_SELECT_FIELDS;
     },
     searchColumns: [
       "thread_key",
@@ -286,8 +273,8 @@ const THREAD_SOURCE_CONFIGS = [
     countSource: PRIMARY_COUNT_SOURCE,
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
-    getSelectColumns(selectMode) {
-      return selectMode === "initial_boot_safe" ? LIVE_THREAD_INITIAL_BOOT_FIELDS : "*";
+    getSelectColumns() {
+      return CANONICAL_INBOX_ROW_SELECT_FIELDS;
     },
     searchColumns: [
       "thread_key",
@@ -613,29 +600,7 @@ function splitOptionsAndDeps(optionsOrDeps = {}, maybeDeps = {}) {
 }
 
 function buildEmptyCounts() {
-  return {
-    priority: 0,
-    new_replies: 0,
-    needs_review: 0,
-    follow_up: 0,
-    cold: 0,
-    dead: 0,
-    suppressed: 0,
-    active: 0,
-    waiting: 0,
-    unlinked: 0,
-    all: 0,
-    all_messages: 0,
-    hot_leads: 0,
-    new_inbound: 0,
-    needs_reply: 0,
-    manual_review: 0,
-    outbound_active: 0,
-    cold_no_response: 0,
-    dnc_opt_out: 0,
-    waiting_on_seller: 0,
-    automated: 0,
-  };
+  return Object.fromEntries(CANONICAL_COUNT_KEYS.map((key) => [key, 0]));
 }
 
 function buildNullCounts() {
@@ -666,27 +631,20 @@ function hasConcreteCountRow(row = {}) {
 
 function countFromRow(row = {}) {
   const counts = buildEmptyCounts();
-  counts.priority = Number(row.priority ?? 0);
-  counts.new_replies = Number(row.new_replies ?? 0);
-  counts.needs_review = Number(row.needs_review ?? 0);
-  counts.follow_up = Number(row.follow_up ?? 0);
-  counts.cold = Number(row.cold ?? 0);
-  counts.dead = Number(row.dead ?? 0);
-  counts.suppressed = Number(row.suppressed ?? 0);
-  counts.active = Number(row.active ?? 0);
-  counts.waiting = Number(row.waiting ?? 0);
-  counts.unlinked = Number(row.unlinked ?? 0);
-  counts.all = Number(row.all ?? 0);
-  counts.all_messages = counts.all;
-  counts.hot_leads = counts.priority;
-  counts.new_inbound = counts.new_replies;
-  counts.needs_reply = counts.new_replies;
-  counts.manual_review = counts.needs_review;
-  counts.automated = Number(row.automated ?? counts.needs_review);
-  counts.outbound_active = counts.follow_up;
-  counts.cold_no_response = counts.cold;
-  counts.dnc_opt_out = counts.suppressed;
-  counts.waiting_on_seller = counts.waiting;
+  for (const key of CANONICAL_COUNT_KEYS) {
+    if (row[key] != null) counts[key] = Number(row[key] ?? 0);
+  }
+  counts.all_messages = Number(row.all_messages ?? counts.all_messages ?? counts.all ?? 0);
+  counts.all = Number(row.all ?? counts.all ?? counts.all_messages ?? 0);
+  counts.hot_leads = Number(row.hot_leads ?? counts.priority ?? 0);
+  counts.new_inbound = Number(row.new_inbound ?? counts.new_replies ?? 0);
+  counts.needs_reply = Number(row.needs_reply ?? counts.new_replies ?? 0);
+  counts.manual_review = Number(row.manual_review ?? counts.needs_review ?? 0);
+  counts.automated = Number(row.automated ?? counts.needs_review ?? 0);
+  counts.outbound_active = Number(row.outbound_active ?? counts.follow_up ?? 0);
+  counts.cold_no_response = Number(row.cold_no_response ?? counts.cold ?? 0);
+  counts.dnc_opt_out = Number(row.dnc_opt_out ?? counts.suppressed ?? 0);
+  counts.waiting_on_seller = Number(row.waiting_on_seller ?? counts.waiting ?? 0);
   return counts;
 }
 
@@ -985,6 +943,26 @@ function normalizeThreadRow(row = {}, query = {}) {
     property_id: row.property_id || row.final_property_id || null,
     latitude: row.latitude,
     longitude: row.longitude,
+    beds: row.beds ?? null,
+    baths: row.baths ?? null,
+    sqft: row.sqft ?? null,
+    year_built: row.year_built ?? null,
+    estimated_value: row.estimated_value ?? null,
+    equity_amount: row.equity_amount ?? null,
+    equity_percent: row.equity_percent ?? null,
+    final_acquisition_score: row.final_acquisition_score ?? null,
+    priority_score: row.priority_score ?? null,
+    acquisition_stage: row.acquisition_stage || row.seller_stage || row.conversation_stage || null,
+    classification_confidence: row.classification_confidence ?? null,
+    priority: row.priority || row.lead_temperature || null,
+    risk: row.risk || null,
+    flags: row.flags || null,
+    campaign_id: row.campaign_id || null,
+    template_id: row.template_id || null,
+    sender_number: row.sender_number || row.our_number || null,
+    likely_renter: row.likely_renter ?? false,
+    contact_identity_class: row.contact_identity_class || resolveContactIdentityClass(row),
+    contact_identity_label: row.contact_identity_label || contactIdentityLabel(row.contact_identity_class || resolveContactIdentityClass(row)),
   };
   return applyInboxRowComputedFields(normalized, query);
 }
@@ -1099,6 +1077,89 @@ function applyDeliverySnapshot(row = {}, delivery = null, queue = null) {
       latest_failure_reason: latestFailureReason,
     },
   };
+}
+
+async function hydrateMissingLatestMessageEventIds(rows = [], supabase = defaultSupabase) {
+  if (!Array.isArray(rows) || rows.length === 0 || !supabase?.from) return rows;
+
+  const targets = rows.filter(
+    (row) => !firstClean(row.latest_message_event_id, row.latest_message_id, row.latestMessageId) && latestAt(row),
+  );
+  if (!targets.length) return rows;
+
+  const phones = [...new Set(
+    targets
+      .map((row) => normalizedPhoneForIdentity(row) || clean(row.canonical_e164 || row.seller_phone || row.best_phone))
+      .filter(Boolean),
+  )];
+  if (!phones.length) return rows;
+
+  const orClause = phones
+    .flatMap((phone) => [
+      `from_phone_number.eq.${quoteSupabaseValue(phone)}`,
+      `to_phone_number.eq.${quoteSupabaseValue(phone)}`,
+      `thread_key.eq.${quoteSupabaseValue(phone)}`,
+    ])
+    .join(",");
+
+  let query = supabase
+    .from("message_events")
+    .select("id,thread_key,from_phone_number,to_phone_number,event_timestamp,message_body,direction")
+    .or(orClause);
+  if (typeof query.order === "function") {
+    query = query.order("event_timestamp", { ascending: false, nullsFirst: false });
+  }
+  if (typeof query.limit === "function") {
+    query = query.limit(Math.min(Math.max(phones.length * 6, 30), 300));
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn("[INBOX_LATEST_MESSAGE_POINTER_HYDRATION_SKIPPED]", error.message);
+    return rows;
+  }
+
+  const messagesByPhone = new Map();
+  for (const message of data || []) {
+    for (const key of [
+      normalizedPhoneForIdentity({ from_phone_number: message.from_phone_number, to_phone_number: message.to_phone_number, direction: message.direction }),
+      clean(message.thread_key),
+      normalizedPhoneForIdentity({ canonical_e164: message.from_phone_number }),
+      normalizedPhoneForIdentity({ canonical_e164: message.to_phone_number }),
+    ]) {
+      if (!key) continue;
+      if (!messagesByPhone.has(key)) messagesByPhone.set(key, []);
+      messagesByPhone.get(key).push(message);
+    }
+  }
+
+  return rows.map((row) => {
+    if (firstClean(row.latest_message_event_id, row.latest_message_id, row.latestMessageId)) return row;
+    const phone = normalizedPhoneForIdentity(row) || clean(row.canonical_e164 || row.seller_phone || row.best_phone);
+    const candidates = messagesByPhone.get(phone) || [];
+    if (!candidates.length) return row;
+
+    const targetAt = asTime(latestAt(row));
+    const targetBody = normalizeBody(row.latest_message_body || row.message_body || "");
+    const timestampToleranceMs = 2_000;
+    let match = candidates.find((message) => Math.abs(asTime(message.event_timestamp) - targetAt) <= timestampToleranceMs)
+      || (targetBody ? candidates.find((message) => normalizeBody(message.message_body) === targetBody) : null)
+      || candidates.reduce((closest, message) => {
+        if (!closest) return message;
+        const currentDelta = Math.abs(asTime(message.event_timestamp) - targetAt);
+        const closestDelta = Math.abs(asTime(closest.event_timestamp) - targetAt);
+        return currentDelta < closestDelta ? message : closest;
+      }, null);
+
+    if (!match?.id) return row;
+    return {
+      ...row,
+      latest_message_event_id: match.id,
+      latest_message_id: match.id,
+      latestMessageId: match.id,
+      latestMessageEventId: match.id,
+    };
+  });
 }
 
 async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabase) {
@@ -1506,7 +1567,12 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or("inbox_bucket.eq.priority,inbox_bucket.eq.new_replies,inbox_bucket.eq.needs_review,inbox_bucket.eq.follow_up")
         : query;
     case "waiting":
-      return query.eq("inbox_bucket", "waiting");
+      return typeof query.or === "function"
+        ? query.or(
+          "inbox_bucket.eq.waiting,"
+          + `and(latest_message_direction.eq.outbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed)`,
+        )
+        : query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     default:
@@ -1746,17 +1812,6 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
   const advancedFilters = parseAdvancedFiltersParam(params);
   const advancedActive = hasActiveAdvancedFilters(advancedFilters);
 
-  if (selectMode === "initial_boot_safe" && !advancedActive) {
-    const bootFast = await queryInitialBootThreadRows(params, {
-      supabase,
-      limit,
-      filter,
-      cursorKeyset,
-      offset,
-    });
-    if (bootFast) return bootFast;
-  }
-
   if (advancedActive) {
     const hydrated = await queryHydratedInboxThreads(
       { ...params, limit, offset, filter },
@@ -1801,17 +1856,7 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
       query = query.eq(sourceConfig.directionColumn, normalizeDirection(params.direction));
     }
 
-    const authoritativeThreadKeys = await fetchAuthoritativeThreadKeysForFilter(supabase, filter);
-    if (authoritativeThreadKeys !== null) {
-      if (authoritativeThreadKeys.length === 0) {
-        return { data: [], count: 0, error: null, sourceConfig };
-      }
-      if (typeof query.in === "function") {
-        query = query.in("thread_key", authoritativeThreadKeys);
-      }
-    } else {
-      query = applyQueryFilter(query, filter, sourceConfig);
-    }
+    query = applyQueryFilter(query, filter, sourceConfig);
 
     if (params.q && typeof query.or === "function") {
       const qStr = `%${clean(params.q)}%`;
@@ -2086,7 +2131,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
-  const skipDelivery = bool(params.skip_delivery) || options.skipDelivery === true || timeoutMode === "initial_boot";
+  const skipDelivery = bool(params.skip_delivery) || options.skipDelivery === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2134,9 +2179,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
     );
   const rows = (rawRows || []).map((row) => {
-    const normalized = initialBootMode
-      ? normalizeThreadRowForBoot(row, params)
-      : normalizeThreadRow(row, params);
+    const normalized = normalizeThreadRow(row, params);
     if (initialBootMode) return normalized;
     const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
     const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
@@ -2221,15 +2264,14 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
-  if (!initialBootMode) {
-    try {
-      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
-      finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
-      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-    } catch (error) {
-      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-      console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
-    }
+  try {
+    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+    finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
+    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+  } catch (error) {
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+    console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
   }
 
   const deliveryHydrationStartedAt = nowMs();
@@ -2270,6 +2312,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     countQueryMs,
     deliveryHydrationMs,
     linkedContextHydrationMs,
+    ...(process.env.NODE_ENV === "development" && finalRows[0]
+      ? { enrichment_coverage: buildEnrichmentCoverageDiagnostics(finalRows[0]) }
+      : {}),
   };
 
   const mapPins = wantsMap
@@ -2837,6 +2882,57 @@ function buildStrictMessageStrategies(lookup = {}) {
     });
   }
 
+  if (conversationThreadId) {
+    strategies.push({
+      name: "conversation_thread_id",
+      filter: { table: "message_events", eq: { thread_key: conversationThreadId } },
+      apply(query) { return query.eq("thread_key", conversationThreadId); },
+    });
+  }
+
+  if (normalizedPhone) {
+    strategies.push({
+      name: "thread_key=canonical_e164",
+      filter: { table: "message_events", eq: { thread_key: normalizedPhone } },
+      apply(query) { return query.eq("thread_key", normalizedPhone); },
+    });
+    strategies.push({
+      name: "to_phone_number=canonical_e164",
+      filter: { table: "message_events", eq: { to_phone_number: normalizedPhone } },
+      apply(query) { return query.eq("to_phone_number", normalizedPhone); },
+    });
+    strategies.push({
+      name: "from_phone_number=canonical_e164",
+      filter: { table: "message_events", eq: { from_phone_number: normalizedPhone } },
+      apply(query) { return query.eq("from_phone_number", normalizedPhone); },
+    });
+  }
+
+  if (lookup.propertyId) {
+    strategies.push({
+      name: "property_id",
+      filter: { table: "message_events", eq: { property_id: lookup.propertyId } },
+      apply(query) { return query.eq("property_id", lookup.propertyId); },
+    });
+  }
+
+  if (lookup.masterOwnerId || lookup.ownerId) {
+    const ownerId = clean(lookup.masterOwnerId || lookup.ownerId);
+    strategies.push({
+      name: "master_owner_id",
+      filter: { table: "message_events", eq: { master_owner_id: ownerId } },
+      apply(query) { return query.eq("master_owner_id", ownerId); },
+    });
+  }
+
+  if (lookup.prospectId) {
+    strategies.push({
+      name: "prospect_id",
+      filter: { table: "message_events", eq: { prospect_id: lookup.prospectId } },
+      apply(query) { return query.eq("prospect_id", lookup.prospectId); },
+    });
+  }
+
   if (lookup.propertyId && normalizedPhone) {
     strategies.push({
       name: "property_id+to_phone",
@@ -2884,24 +2980,6 @@ function buildStrictMessageStrategies(lookup = {}) {
     });
   }
 
-  if (normalizedPhone) {
-    strategies.push({
-      name: "thread_key=canonical_e164",
-      filter: { table: "message_events", eq: { thread_key: normalizedPhone } },
-      apply(query) { return query.eq("thread_key", normalizedPhone); }
-    });
-    strategies.push({
-      name: "to_phone_number=canonical_e164",
-      filter: { table: "message_events", eq: { to_phone_number: normalizedPhone } },
-      apply(query) { return query.eq("to_phone_number", normalizedPhone); }
-    });
-    strategies.push({
-      name: "from_phone_number=canonical_e164",
-      filter: { table: "message_events", eq: { from_phone_number: normalizedPhone } },
-      apply(query) { return query.eq("from_phone_number", normalizedPhone); }
-    });
-  }
-
   if (lookup.legacyThreadKey) {
     strategies.push({
       name: "legacy_thread_key",
@@ -2915,14 +2993,6 @@ function buildStrictMessageStrategies(lookup = {}) {
       name: "original_thread_key",
       filter: { table: "message_events", eq: { thread_key: lookup.selectedThreadKey } },
       apply(query) { return query.eq("thread_key", lookup.selectedThreadKey); }
-    });
-  }
-
-  if (conversationThreadId && conversationThreadId !== lookup.selectedThreadKey) {
-    strategies.push({
-      name: "conversation_thread_id",
-      filter: { table: "message_events", eq: { thread_key: conversationThreadId } },
-      apply(query) { return query.eq("thread_key", conversationThreadId); }
     });
   }
 
@@ -2941,6 +3011,16 @@ function messageMatchesStrictLookup(row = {}, lookup = {}, strategyName = "") {
   }
 
   const normalizedPhone = getLookupNormalizedPhone(lookup);
+  if (strategyName === "property_id") {
+    return clean(row.property_id) === clean(lookup.propertyId) && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "master_owner_id") {
+    return clean(row.master_owner_id) === clean(lookup.masterOwnerId || lookup.ownerId)
+      && !rowConflictsWithLookup(row, lookup);
+  }
+  if (strategyName === "prospect_id") {
+    return clean(row.prospect_id) === clean(lookup.prospectId) && !rowConflictsWithLookup(row, lookup);
+  }
   if (strategyName === "property_id+to_phone") {
     return clean(row.property_id) === clean(lookup.propertyId)
       && clean(row.to_phone_number) === normalizedPhone
@@ -3249,16 +3329,19 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     strategies_tried: strategies.map((strategy) => strategy.name),
     fallback_order: [
       "latest_message_id_exact",
+      "conversation_thread_id",
+      "thread_key=canonical_e164",
+      "to_phone_number=canonical_e164",
+      "from_phone_number=canonical_e164",
+      "property_id",
+      "master_owner_id",
+      "prospect_id",
       "property_id+to_phone",
       "property_id+from_phone",
       "master_owner_id+to_phone",
       "master_owner_id+from_phone",
-      "thread_key=canonical_e164",
-      "to_phone_number=canonical_e164",
-      "from_phone_number=canonical_e164",
       "legacy_thread_key",
       "original_thread_key",
-      "conversation_thread_id",
       "latest_preview_source_row",
     ],
     sourceResults: [],

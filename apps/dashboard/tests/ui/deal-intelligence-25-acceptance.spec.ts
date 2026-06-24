@@ -8,11 +8,38 @@ fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
 const TULSA_SEARCH = '4693 N Boston'
 const THEMES = ['light', 'dark', 'red_ops'] as const
 
-async function activateDealDeskWorkspace(page: Page) {
-  await page.getByTitle(/Workspace: Deal Desk/i).click()
-  await page.getByRole('button', { name: 'Pinned Workspaces' }).click()
-  await page.getByRole('button', { name: 'Deal Desk Inbox ·' }).click()
+async function waitForInboxLive(page: Page) {
+  await page.waitForResponse(
+    (response) => response.url().includes('/api/cockpit/inbox/live') && response.status() === 200,
+    { timeout: 60000 },
+  )
+  await expect(page.getByRole('button', { name: /Inbox could not load/i })).toHaveCount(0, { timeout: 30000 })
+  await expect(page.locator('.nx-workspace-split-grid')).toBeVisible({ timeout: 30000 })
+}
+
+async function assertDealDeskWorkspace(page: Page) {
+  await expect(page.getByTitle(/Workspace: Deal Desk/i)).toBeVisible({ timeout: 30000 })
   await expect(page.locator('.nx-intelligence-panel')).toBeVisible({ timeout: 30000 })
+  const widths = await page.evaluate(() => {
+    const grid = document.querySelector('.nx-workspace-split-grid') as HTMLElement | null
+    const list = document.querySelector('.nx-workspace-pane.is-view-thread') as HTMLElement | null
+    const conversation = document.querySelector('.nx-workspace-pane.is-view-sms_thread') as HTMLElement | null
+    const intelligence = document.querySelector('.nx-workspace-pane.is-view-deal_intelligence') as HTMLElement | null
+    if (!grid || !list || !conversation || !intelligence) return null
+    const total = grid.getBoundingClientRect().width
+    return {
+      list: list.getBoundingClientRect().width / total,
+      conversation: conversation.getBoundingClientRect().width / total,
+      intelligence: intelligence.getBoundingClientRect().width / total,
+    }
+  })
+  expect(widths).not.toBeNull()
+  expect(widths!.list).toBeGreaterThan(0.18)
+  expect(widths!.list).toBeLessThan(0.32)
+  expect(widths!.conversation).toBeGreaterThan(0.42)
+  expect(widths!.conversation).toBeLessThan(0.58)
+  expect(widths!.intelligence).toBeGreaterThan(0.18)
+  expect(widths!.intelligence).toBeLessThan(0.32)
 }
 
 async function selectTulsaThread(page: Page) {
@@ -76,10 +103,15 @@ async function verifyTulsa25Panel(page: Page) {
 
 test.describe('Deal Intelligence 25% acceptance', () => {
   test('Tulsa SFR + themes', async ({ page }) => {
-    await page.goto('/inbox', { waitUntil: 'networkidle' })
+    await page.addInitScript(() => {
+      localStorage.setItem('nx.inbox.deal-desk-layout-version', 'v2')
+      localStorage.removeItem('nx.inbox.workspace-views-by-key')
+      localStorage.removeItem('nx.inbox.workspace-width-overrides')
+    })
+    await page.goto('/inbox', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('#nx-inbox-root')).toBeVisible({ timeout: 30000 })
-
-    await activateDealDeskWorkspace(page)
+    await waitForInboxLive(page)
+    await assertDealDeskWorkspace(page)
     await selectTulsaThread(page)
     await verifyTulsa25Panel(page)
     await screenshot(page, 'tulsa-sfr-dark-default')

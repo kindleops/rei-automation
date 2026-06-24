@@ -156,6 +156,28 @@ export function buildInboxCountRowFromThreads(threadRows = []) {
  * Chainable supabase stub for live inbox tests that query inbox_thread_state
  * for authoritative bucket filters and counts.
  */
+function rowMatchesOrClause(row = {}, clause = "") {
+  const text = String(clause || "").trim();
+  if (!text) return true;
+
+  const matchesEntry = (entry) => {
+    const trimmed = String(entry || "").trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith("and(") && trimmed.endsWith(")")) {
+      const inner = trimmed.slice(4, -1);
+      return inner.split(",").every((part) => matchesEntry(part));
+    }
+    const [column, operator, ...rest] = trimmed.split(".");
+    const value = rest.join(".");
+    if (operator === "eq") return cleanInboxValue(row?.[column]) === cleanInboxValue(value);
+    if (operator === "neq") return cleanInboxValue(row?.[column]) !== cleanInboxValue(value);
+    if (operator === "lt") return asInboxTime(row?.[column]) < asInboxTime(value);
+    return false;
+  };
+
+  return text.split(",").some((entry) => matchesEntry(entry));
+}
+
 export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
   const stateRows = options.stateRows || deriveInboxThreadStateRows(threadRows);
   const countRows = options.countRows || [buildInboxCountRowFromThreads(threadRows)];
@@ -259,6 +281,9 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
             let data = rowsForTable(queryState.table);
             for (const filter of queryState.filters) {
               data = data.filter((row) => filter(row));
+            }
+            if (queryState.orClause) {
+              data = data.filter((row) => rowMatchesOrClause(row, queryState.orClause));
             }
 
             data.sort((left, right) => {

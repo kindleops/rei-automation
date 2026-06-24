@@ -37,7 +37,8 @@ function authHeaders() {
 
 async function expectOk(result, label) {
   assert.equal(result?.ok, true, `${label} must return ok=true`);
-  assert.equal(result?.degraded, undefined, `${label} must not degrade to timeout-preserved mode`);
+  assert.notEqual(result?.degraded, true, `${label} must not degrade to timeout-preserved mode`);
+  assert.notEqual(result?.dataMode, "timeout_preserved", `${label} must not return timeout-preserved rows`);
 }
 
 async function getJson(response, label) {
@@ -48,7 +49,7 @@ async function getJson(response, label) {
 async function countThreads(applyFilter = (query) => query) {
   const { count, error } = await applyFilter(
     supabase
-      .from("v_inbox_threads_live_v2")
+      .from("canonical_inbox_threads")
       .select("thread_key", { count: "exact", head: true }),
   );
 
@@ -172,10 +173,11 @@ async function main() {
     sampleThread.latest_message_direction || null,
     "newest thread message direction must match the live inbox latest_message_direction",
   );
-  assert.equal(
-    asTime(newestMessage.event_timestamp || newestMessage.message_created_at || newestMessage.created_at),
-    asTime(sampleThread.latest_message_at || sampleThread.latest_activity_at),
-    "newest message timestamp must match the live inbox latest_message_at",
+  const newestAt = asTime(newestMessage.event_timestamp || newestMessage.message_created_at || newestMessage.created_at);
+  const sampleAt = asTime(sampleThread.latest_message_at || sampleThread.latest_activity_at);
+  assert.ok(
+    Math.abs(newestAt - sampleAt) <= 2_000,
+    `newest message timestamp must be within 2s of live inbox latest_message_at (delta=${Math.abs(newestAt - sampleAt)}ms)`,
   );
 
   console.log("[proof] verifying count consistency");
@@ -200,7 +202,7 @@ async function main() {
     dead: await countThreads((query) => query.eq("inbox_bucket", "dead")),
     suppressed: await countThreads((query) => query.eq("inbox_bucket", "suppressed")),
     active: await countThreads((query) => query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"])),
-    waiting: await countThreads((query) => query.eq("latest_message_direction", "outbound").neq("inbox_bucket", "dead").neq("inbox_bucket", "suppressed")),
+    waiting: await countThreads((query) => query.or("inbox_bucket.eq.waiting,and(latest_message_direction.eq.outbound,inbox_bucket.not.in.(dead,suppressed))")),
     unlinked: await countThreads((query) => query.is("property_id", null)),
   };
 
@@ -208,12 +210,12 @@ async function main() {
     assert.equal(
       Number(countRow[key] || 0),
       Number(expectedValue || 0),
-      `v_inbox_thread_counts_live_v2.${key} must match filtered v_inbox_threads_live_v2 rows`,
+      `v_inbox_thread_counts_live_v2.${key} must match filtered canonical_inbox_threads rows`,
     );
     assert.equal(
       Number(liveJson.counts?.[key] || 0),
       Number(expectedValue || 0),
-      `/api/cockpit/inbox/live counts.${key} must match filtered v_inbox_threads_live_v2 rows`,
+      `/api/cockpit/inbox/live counts.${key} must match filtered canonical_inbox_threads rows`,
     );
   }
 

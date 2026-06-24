@@ -61,7 +61,7 @@ const inboxRoute = defineRoute<null>({
   path: '/inbox',
   title: 'NEXUS | Inbox',
   loader: async () => null,
-  render: () => <InboxView initialWorkspaceView="thread" routeMode="fullscreen" />,
+  render: () => <InboxView routeMode="workspace" />,
 })
 
 const conversationRoute = defineRoute<null>({

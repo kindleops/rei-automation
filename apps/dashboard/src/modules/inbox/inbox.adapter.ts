@@ -31,9 +31,9 @@ const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConne
 }
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
-  initial_boot: 30_000,
-  manual_bucket_switch: 15_000,
-  auto_refresh: 10_000,
+  initial_boot: 5_000,
+  manual_bucket_switch: 5_000,
+  auto_refresh: 5_000,
 }
 
 const DEFAULT_LIVE_INBOX_TIMEOUT_MODE: InboxTimeoutMode = 'manual_bucket_switch'
@@ -1115,28 +1115,6 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   useEffect(() => {
     let cancelled = false
-    void backendClient.fetchInboxCounts().then((res) => {
-      if (cancelled || !res?.ok) return
-      const payload = (res.data ?? {}) as Record<string, unknown>
-      const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, number> | undefined
-      if (!rawCounts || Object.keys(rawCounts).length === 0) return
-      dispatch({
-        type: 'SET_VIEW_COUNTS',
-        counts: {
-          priority: Number(rawCounts.priority ?? 0),
-          new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
-          needs_review: Number(rawCounts.needs_review ?? 0),
-          waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? 0),
-          follow_up: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? 0),
-          cold: Number(rawCounts.cold ?? 0),
-          dead: Number(rawCounts.dead ?? 0),
-          suppressed: Number(rawCounts.suppressed ?? 0),
-          all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
-          all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
-          active: Number(rawCounts.active ?? 0),
-        },
-      })
-    }).catch(() => {})
 
     void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot' })
 
