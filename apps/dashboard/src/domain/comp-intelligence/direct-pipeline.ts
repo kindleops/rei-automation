@@ -3,10 +3,7 @@ import { resolveCanonicalProperty } from '../canonical-property/resolver'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { CompCandidateEvidence, CompIntelligencePayload, CanonicalSubjectProperty } from './types'
-
-const INCLUSION_THRESHOLD = 45
-const AUTO_INCLUDE_MIN = 2
-const AUTO_INCLUDE_MAX = 6
+import type { CompIntelligenceDecisionProjection } from './v3-types'
 
 function evidenceNumber(value: number | null, source: string) {
   return {
@@ -58,34 +55,19 @@ function toCanonicalSubject(
     bathrooms: evidenceNumber(canonical.bathrooms, 'properties.total_baths'),
     square_feet: evidenceNumber(canonical.square_feet, 'properties.building_square_feet'),
     year_built: evidenceNumber(canonical.year_built, 'properties.year_built'),
+    lot_square_feet: evidenceNumber(canonical.lot_square_feet, 'properties.lot_square_feet'),
     condition: evidenceString(null, 'properties.building_condition'),
     estimated_value: evidenceNumber(null, 'properties.estimated_value'),
     contract_version: 'comp_intelligence_subject_v1',
   }
 }
 
-function scoreComp(comp: Record<string, unknown>, subject: ReturnType<typeof resolveCanonicalProperty>) {
-  let score = Number(comp.similarity_score) || 0
-  if (!score) {
-    const dist = Number(comp.distance_miles) || 99
-    if (dist <= 1) score += 20
-    else if (dist <= 3) score += 12
-    else score += 6
-    if (comp.sale_price || comp.mls_sold_price) score += 20
-    if (comp.building_square_feet && subject?.square_feet) score += 10
-  }
-  return Math.min(100, Math.round(score))
-}
-
-function mapRpcRow(row: Record<string, unknown>, index: number, subject: NonNullable<ReturnType<typeof resolveCanonicalProperty>>): CompCandidateEvidence {
+function mapRpcRow(
+  row: Record<string, unknown>,
+  index: number,
+): CompCandidateEvidence {
   const soldPrice = Number(row.mls_sold_price || row.sale_price || 0) || null
   const soldDate = String(row.mls_sold_date || row.sale_date || '') || null
-  const score = scoreComp(row, subject)
-  const hasPrice = soldPrice !== null && soldPrice > 0
-  const autoIncluded = hasPrice && score >= INCLUSION_THRESHOLD
-  const exclusionReasons: string[] = []
-  if (!hasPrice) exclusionReasons.push('Missing sale price')
-  if (score < INCLUSION_THRESHOLD) exclusionReasons.push('Similarity below inclusion threshold')
 
   return {
     comp_property_id: String(row.property_id || row.comp_id || `comp-${index}`),
@@ -110,76 +92,55 @@ function mapRpcRow(row: Record<string, unknown>, index: number, subject: NonNull
     city: String(row.property_address_city || row.city || ''),
     state: String(row.property_address_state || row.state || ''),
     zip: String(row.property_address_zip || row.zip || ''),
-    similarity_score: score,
-    comp_match_label: score >= 80 ? 'Strong Match' : score >= 55 ? 'Usable Match' : 'Review',
-    selected: autoIncluded,
-    excluded: !autoIncluded,
-    exclusion_reasons: exclusionReasons,
+    similarity_score: Number(row.similarity_score) || null,
+    comp_match_label: 'Evidence only',
+    selected: false,
+    excluded: true,
+    exclusion_reasons: ['V3 decision evidence unavailable — evidence-only degraded mode'],
     scoring: {
-      score,
-      label: score >= 80 ? 'Strong Match' : 'Usable Match',
+      score: Number(row.similarity_score) || 0,
+      label: 'Evidence only',
       reasoning: {},
-      auto_included: autoIncluded,
-      auto_excluded: !autoIncluded,
-      exclusion_reasons: exclusionReasons,
+      auto_included: false,
+      auto_excluded: true,
+      exclusion_reasons: ['EVIDENCE_ONLY_DEGRADED'],
     },
   }
 }
 
-function autoIncludeStrongest(candidates: CompCandidateEvidence[]): CompCandidateEvidence[] {
-  const ranked = [...candidates]
-    .filter(c => (c.sale_list_price ?? c.sold_price) && (c.latitude || c.longitude))
-    .sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0))
-
-  const target = Math.min(AUTO_INCLUDE_MAX, Math.max(AUTO_INCLUDE_MIN, Math.ceil(ranked.length * 0.4)))
-  const includeIds = new Set(ranked.slice(0, target).map(c => c.comp_property_id))
-
-  return candidates.map(c => {
-    const forceInclude = includeIds.has(c.comp_property_id)
-    if (!forceInclude) return c
-    return {
-      ...c,
-      selected: true,
-      excluded: false,
-      exclusion_reasons: (c.exclusion_reasons ?? []).filter(r => r !== 'Similarity below inclusion threshold'),
-      scoring: c.scoring
-        ? { ...c.scoring, auto_included: true, auto_excluded: false }
-        : c.scoring,
-    }
-  })
-}
-
-function computeValuation(subject: CanonicalSubjectProperty, included: CompCandidateEvidence[]) {
-  const sqft = subject.square_feet?.value ?? null
-  const prices = included.map(c => c.sale_list_price ?? c.sold_price ?? 0).filter(p => p > 0)
-  const ppsfValues = included.map(c => c.ppsf ?? 0).filter(p => p > 0)
-  const medianPpsf = ppsfValues.length
-    ? ppsfValues.sort((a, b) => a - b)[Math.floor(ppsfValues.length / 2)]
-    : null
-
-  let arv: number | null = null
-  if (sqft && medianPpsf) arv = Math.round((medianPpsf * sqft) / 1000) * 1000
-  else if (prices.length) arv = Math.round(prices.reduce((s, p) => s + p, 0) / prices.length / 1000) * 1000
-
-  const confidence = included.length >= 3 ? 72 : included.length >= 1 ? 55 : 0
-  const repairEstimate = sqft ? sqft * 20 : null
-
+function buildDegradedProjection(): CompIntelligenceDecisionProjection {
   return {
-    model_version: 'comp_intelligence_direct_v1',
-    arv,
-    as_is_value: arv ? Math.round(arv * 0.82) : null,
-    repair_estimate: repairEstimate,
-    confidence,
-    data_gaps: sqft ? [] : ['subject_square_feet_missing'],
-    warnings: included.length ? [] : ['No included comps for ARV'],
-    outputs: {
-      retail_ceiling: { value: prices.length ? Math.max(...prices) : null },
-      investor_reality: { value: arv ? Math.round(arv * 0.85) : null },
-      target_offer: { value: arv && repairEstimate ? Math.round(arv * 0.7 - repairEstimate) : null },
-      max_allowable_offer: { value: arv && repairEstimate ? Math.round(arv * 0.75 - repairEstimate) : null },
-      weighted_ppsf: { value: medianPpsf },
+    engine_version: 'acquisition_decision_engine_v3',
+    formula_version: 'degraded',
+    v3_enabled: true,
+    canonical_asset_lane: null,
+    asset_lane_confidence: null,
+    execution_state: 'EVIDENCE_ONLY_DEGRADED',
+    value_classification: 'UNAVAILABLE',
+    final_confidence: 0,
+    dominant_model_universe: null,
+    dominant_model_ess: null,
+    dominant_model_depth_score: null,
+    dominant_model_confidence_cap: null,
+    execution_state_basis: null,
+    value_contract: {
+      qualified_market_value: null,
+      scenario_market_value: null,
+      qualified_buyer_exit: null,
+      scenario_buyer_exit: null,
     },
-    supporting_comp_ids: included.map(c => c.comp_property_id),
+    offer_authorization: {
+      authorized_opening_offer: null,
+      authorized_recommended_offer: null,
+      authorized_maximum_offer: null,
+      authorized_walkaway_price: null,
+      scenario_opening_offer: null,
+      scenario_recommended_offer: null,
+      scenario_maximum_offer: null,
+      scenario_walkaway_price: null,
+    },
+    strategy_ranking: null,
+    projection_mode: 'evidence_only_degraded',
   }
 }
 
@@ -203,6 +164,9 @@ export async function runDirectCompIntelligence({
   if (!canonical.is_subject_resolved || canonical.latitude === null || canonical.longitude === null) {
     return {
       subject,
+      data_source_mode: 'EVIDENCE_ONLY_DEGRADED',
+      decision_projection: buildDegradedProjection(),
+      transaction_evidence: [],
       discovery: {
         search_mode: 'blocked_unresolved_subject',
         is_market_fallback: false,
@@ -211,6 +175,18 @@ export async function runDirectCompIntelligence({
         included: [],
         excluded: [],
         counts: { total: 0, included: 0, excluded: 0 },
+      },
+      legacy_valuation: {
+        model_version: 'comp_intelligence_direct_v1',
+        arv: null,
+        as_is_value: null,
+        repair_estimate: null,
+        confidence: 0,
+        data_gaps: ['subject_coordinates_unresolved'],
+        warnings: [canonical.coordinate_failure_reason || 'Subject coordinates unresolved'],
+        outputs: {},
+        authoritative: false,
+        label: 'Legacy direct valuation — not authoritative',
       },
       valuation: {
         model_version: 'comp_intelligence_direct_v1',
@@ -231,35 +207,104 @@ export async function runDirectCompIntelligence({
   }
 
   const rows = await loadSubjectComps(canonical.property_id, radius, monthsBack, 100)
-  let candidates = rows.map((row, index) =>
-    mapRpcRow(row as unknown as Record<string, unknown>, index, canonical),
+  const candidates = rows.map((row, index) =>
+    mapRpcRow(row as unknown as Record<string, unknown>, index),
   )
-  candidates = autoIncludeStrongest(candidates)
-
-  const included = candidates.filter(c => c.selected && !c.excluded)
-  const excluded = candidates.filter(c => c.excluded)
-  const valuation = computeValuation(subject, included)
 
   return {
     subject,
+    data_source_mode: 'EVIDENCE_ONLY_DEGRADED',
+    decision_projection: buildDegradedProjection(),
+    transaction_evidence: candidates.map((c) => ({
+      candidate_id: c.comp_property_id,
+      source_record_id: c.comp_property_id,
+      transaction_cluster_id: null,
+      property_id: c.property_id ?? null,
+      address: c.address ?? null,
+      canonical_asset_lane: c.asset_type ?? null,
+      sale_price: c.sale_list_price ?? null,
+      sale_date: c.sale_list_date ?? null,
+      buyer: null,
+      buyer_archetype: null,
+      transaction_channel: c.source ?? null,
+      evidence_role: 'CONTEXT_ONLY',
+      routed_universe: null,
+      pricing_eligibility: false,
+      demand_eligibility: false,
+      package_probability: null,
+      parcel_count: null,
+      raw_row_count: 1,
+      peer_classification: null,
+      qualification_score: c.similarity_score ?? null,
+      similarity: c.similarity_score ?? null,
+      recency: c.sale_list_date ?? null,
+      geography: {
+        distance_miles: c.distance_miles ?? null,
+        zip: c.zip ?? null,
+        city: c.city ?? null,
+        state: c.state ?? null,
+        latitude: c.latitude ?? null,
+        longitude: c.longitude ?? null,
+      },
+      independence_weight: null,
+      ess_contribution: null,
+      rejection_review_reasons: c.exclusion_reasons ?? [],
+      source_lineage: {
+        source_table: 'direct_rpc',
+        source_record_id: c.comp_property_id,
+        identity_unresolved: true,
+        source_completeness: null,
+        channel_reasons: ['EVIDENCE_ONLY_DEGRADED'],
+      },
+      evidence_list_role: 'rejected',
+      qualification_status: 'EVIDENCE_ONLY',
+    })),
     discovery: {
-      search_mode: 'subject_radius',
+      search_mode: 'direct_rpc_evidence_only',
       is_market_fallback: false,
-      relaxations: [{ step: 'direct_rpc', radius_miles: radius, months_back: monthsBack, result_count: candidates.length }],
+      relaxations: [{ step: 'direct_rpc_degraded', radius_miles: radius, months_back: monthsBack, result_count: candidates.length }],
       candidates,
-      included,
-      excluded,
+      included: [],
+      excluded: candidates,
       counts: {
         total: candidates.length,
-        included: included.length,
-        excluded: excluded.length,
+        included: 0,
+        excluded: candidates.length,
       },
     },
-    valuation,
+    legacy_valuation: {
+      model_version: 'comp_intelligence_direct_v1',
+      arv: null,
+      as_is_value: null,
+      repair_estimate: null,
+      confidence: 0,
+      data_gaps: ['v3_decision_unavailable'],
+      warnings: ['Direct RPC fallback cannot produce authoritative valuation'],
+      outputs: {},
+      authoritative: false,
+      label: 'Legacy direct valuation — not authoritative',
+    },
+    valuation: {
+      model_version: 'comp_intelligence_direct_v1',
+      arv: null,
+      as_is_value: null,
+      repair_estimate: null,
+      confidence: 0,
+      data_gaps: ['v3_decision_unavailable'],
+      warnings: ['Direct RPC fallback cannot produce authoritative valuation'],
+      outputs: {},
+    },
     valuation_state: {
-      state: valuation.arv ? (valuation.data_gaps.length ? 'ready_with_limitations' : 'ready') : 'blocked_insufficient_evidence',
-      label: valuation.arv ? 'Ready' : 'Blocked: insufficient evidence',
-      detail: valuation.arv ? undefined : 'No qualifying comps after automated selection',
+      state: 'blocked_insufficient_evidence',
+      label: 'V3 decision evidence unavailable',
+      detail: 'Direct RPC recovered subject and candidate evidence only — no authoritative valuation or offer',
+    },
+    projection_meta: {
+      read_only: true,
+      persisted: false,
+      snapshot_write: false,
+      event_publication: false,
+      outbound_execution: false,
     },
   }
 }

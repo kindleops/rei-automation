@@ -87,8 +87,14 @@ export function useCompIntelligence({
 
       if (signal?.aborted) return
 
-      if (data?.subject?.is_subject_resolved && (data.discovery?.counts?.total ?? 0) > 0) {
-        setPayload(data)
+      if (data?.decision_projection?.projection_mode === 'authoritative_v3') {
+        setPayload({ ...data, data_source_mode: 'api' })
+        setDataSource('api')
+        return
+      }
+
+      if (data?.subject?.is_subject_resolved && (data.discovery?.counts?.total ?? 0) > 0 && data.decision_projection) {
+        setPayload({ ...data, data_source_mode: 'api' })
         setDataSource('api')
         return
       }
@@ -103,9 +109,9 @@ export function useCompIntelligence({
       if (signal?.aborted) return
 
       if (direct) {
-        setPayload(direct)
+        setPayload({ ...direct, data_source_mode: 'EVIDENCE_ONLY_DEGRADED' })
         setDataSource('direct_rpc')
-        if (!data) setError('API pipeline unavailable — loaded via direct property RPC')
+        if (!data) setError('V3 decision evidence unavailable — evidence-only degraded recovery')
         return
       }
 

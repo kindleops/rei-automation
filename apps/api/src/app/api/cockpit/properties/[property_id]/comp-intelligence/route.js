@@ -27,13 +27,11 @@ export async function GET(request, { params }) {
   const threadKey = searchParams.get('thread_key');
   const opportunityId = searchParams.get('opportunity_id');
   const masterOwnerId = searchParams.get('master_owner_id');
-  const persist = searchParams.get('persist') !== 'false';
-
   try {
     const result = await runCompIntelligencePipeline(
       property_id,
       { threadKey, opportunityId, masterOwnerId },
-      { radius, monthsBack, assetClass, persist },
+      { radius, monthsBack, assetClass, persist: false },
     );
 
     return NextResponse.json(
@@ -43,7 +41,12 @@ export async function GET(request, { params }) {
           ? {
               subject: result.subject,
               discovery: result.discovery,
-              valuation: result.valuation,
+              decision_projection: result.decision_projection,
+              transaction_evidence: result.transaction_evidence,
+              qualification_summary: result.qualification_summary,
+              projection_meta: result.projection_meta,
+              legacy_valuation: result.legacy_valuation,
+              valuation: result.legacy_valuation,
               valuation_state: result.valuation_state,
               snapshot: result.snapshot,
               input_hash: result.input_hash,

@@ -5,12 +5,18 @@ import {
   buildValuationInputHash,
   computeValuationOutputs,
   deriveValuationState,
-  persistValuationSnapshotIfChanged,
 } from './valuation-pipeline.js';
-import { publishValuationReadyEvent } from './valuation-events.js';
+import { projectCompIntelligenceV3Decision } from './comp-intelligence-v3-projection.js';
 
+/**
+ * Comp Intelligence pipeline — authoritative V3 decision projection + legacy V1 evidence.
+ *
+ * V3 projection is read-only (no score writes, no snapshot writes, no events).
+ * Legacy V1 valuation is retained for compatibility only under legacy_valuation.
+ */
 export async function runCompIntelligencePipeline(propertyId, context = {}, options = {}, deps = {}) {
   const startedAt = Date.now();
+  const persistSnapshots = options.persist === true && options.allowLegacyPersistence === true;
 
   const subjectResult = await loadCanonicalSubjectProperty(propertyId, context, deps);
   if (!subjectResult.ok) {
@@ -22,59 +28,51 @@ export async function runCompIntelligencePipeline(propertyId, context = {}, opti
     };
   }
 
+  const v3Projection = await projectCompIntelligenceV3Decision(
+    propertyId,
+    context,
+    options,
+    deps,
+  );
+
   const discovery = await discoverCompsForSubject(subjectResult.subject, options, deps);
-  const valuation = computeValuationOutputs(subjectResult.subject, discovery);
-  const valuationState = deriveValuationState({
-    subject: subjectResult.subject,
-    discovery,
-    valuation,
-  });
+  const legacyValuation = computeValuationOutputs(subjectResult.subject, discovery);
 
-  let snapshotResult = { persisted: false, reason: 'not_ready' };
-  let inputHash = null;
-
-  if (
-    valuation.arv &&
-    (valuationState.state === 'ready' || valuationState.state === 'ready_with_limitations')
-  ) {
-    inputHash = buildValuationInputHash(subjectResult.subject, discovery, valuation);
-    const snapshot = buildSnapshotPayload({
-      subjectContract: subjectResult.subject,
-      discovery,
-      valuation,
-      masterOwnerId: context.masterOwnerId ?? context.master_owner_id ?? null,
-      valuationType: options.valuationType ?? 'residential_arv',
-    });
-    snapshotResult = await persistValuationSnapshotIfChanged(snapshot, inputHash, deps);
-
-    if (snapshotResult.persisted || snapshotResult.snapshot_id) {
-      publishValuationReadyEvent({
-        property_id: propertyId,
-        opportunity_id: subjectResult.subject.opportunity_id?.value ?? null,
-        valuation_snapshot_id: snapshotResult.snapshot_id ?? null,
-        model_version: valuation.model_version,
-        input_hash: inputHash,
-        arv: valuation.arv,
-        as_is_value: valuation.as_is_value,
-        repair_estimate: valuation.repair_estimate,
-        recommended_offer: valuation.outputs?.target_offer?.value ?? null,
-        maximum_offer: valuation.outputs?.max_allowable_offer?.value ?? null,
-        confidence: valuation.confidence,
-        data_gaps: valuation.data_gaps,
-        included_comp_ids: valuation.supporting_comp_ids,
-        coordinate_source: subjectResult.subject.coordinate_source,
+  const valuationState = v3Projection.ok && v3Projection.valuation_state
+    ? v3Projection.valuation_state
+    : deriveValuationState({
+        subject: subjectResult.subject,
+        discovery,
+        valuation: legacyValuation,
       });
-    }
-  }
 
   return {
     ok: true,
     subject: subjectResult.subject,
     discovery,
-    valuation,
+    decision_projection: v3Projection.ok ? v3Projection.decision_projection : null,
+    transaction_evidence: v3Projection.ok ? v3Projection.transaction_evidence : [],
+    qualification_summary: v3Projection.ok ? v3Projection.qualification_summary : null,
+    projection_meta: v3Projection.ok
+      ? v3Projection.projection_meta
+      : { read_only: true, persisted: false, snapshot_write: false, event_publication: false },
+    legacy_valuation: {
+      model_version: legacyValuation.model_version,
+      arv: legacyValuation.arv,
+      as_is_value: legacyValuation.as_is_value,
+      repair_estimate: legacyValuation.repair_estimate,
+      confidence: legacyValuation.confidence,
+      data_gaps: legacyValuation.data_gaps,
+      warnings: legacyValuation.warnings,
+      outputs: legacyValuation.outputs,
+      supporting_comp_ids: legacyValuation.supporting_comp_ids,
+      authoritative: false,
+      label: 'Legacy V1 comp intelligence valuation — not authoritative',
+    },
+    valuation: legacyValuation,
     valuation_state: valuationState,
-    snapshot: snapshotResult,
-    input_hash: inputHash,
+    snapshot: { persisted: false, reason: persistSnapshots ? 'legacy_persistence_disabled' : 'read_only_v3_projection' },
+    input_hash: buildValuationInputHash(subjectResult.subject, discovery, legacyValuation),
     queryMs: Date.now() - startedAt,
   };
 }
