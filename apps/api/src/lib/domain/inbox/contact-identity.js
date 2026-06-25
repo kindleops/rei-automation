@@ -10,11 +10,15 @@ export const CONTACT_IDENTITY_CLASSES = [
   "confirmed_owner",
   "probable_owner",
   "owner_related_contact",
+  "authorized_spouse",
+  "co_owner",
   "respondent_non_owner",
   "referral_source",
   "referred_possible_owner",
   "former_owner",
   "agent_representative",
+  "executor_or_heir",
+  "entity_representative",
   "property_manager",
   "renter_occupant",
   "wrong_person",
@@ -26,11 +30,15 @@ const CONTACT_IDENTITY_LABELS = {
   confirmed_owner: "Confirmed Owner",
   probable_owner: "Probable Owner",
   owner_related_contact: "Owner-Related Contact",
+  authorized_spouse: "Authorized Spouse / Co-Owner",
+  co_owner: "Co-Owner",
   respondent_non_owner: "Respondent (Non-Owner)",
   referral_source: "Referral Source",
   referred_possible_owner: "Referred Possible Owner",
   former_owner: "Former Owner",
   agent_representative: "Agent / Representative",
+  executor_or_heir: "Executor / Heir",
+  entity_representative: "Entity Representative",
   property_manager: "Property Manager",
   renter_occupant: "Renter / Occupant",
   wrong_person: "Wrong Person",
@@ -83,9 +91,29 @@ export function resolveContactIdentityClass(row = {}) {
     return "renter_occupant";
   }
   if (
+    metadata.contact_identity === "authorized_spouse" ||
+    metadata.relationship_outcome === "co_owner" ||
+    intent === "co_owner_respondent"
+  ) {
+    return "authorized_spouse";
+  }
+  if (
+    metadata.contact_identity === "executor_or_heir" ||
+    intent === "executor_heir_respondent"
+  ) {
+    return "executor_or_heir";
+  }
+  if (
+    metadata.contact_identity === "entity_representative" ||
+    intent === "entity_representative_respondent"
+  ) {
+    return "entity_representative";
+  }
+  if (
     intent === "ownership_confirmed"
     || row.owner_confirmed === true
     || metadata.owner_confirmed === true
+    || metadata.relationship_outcome === "confirmed_owner"
     || lower(row.seller_stage || row.conversation_stage || "") === "ownership_confirmed"
   ) {
     return "confirmed_owner";

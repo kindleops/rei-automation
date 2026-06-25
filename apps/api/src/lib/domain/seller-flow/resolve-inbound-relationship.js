@@ -1,11 +1,12 @@
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import {
-  extractReferredName,
-  extractReferredPhone,
+  extractReferralCandidates,
   buildReferralDedupeKey,
+  buildReferralProposedOperations,
 } from "@/lib/domain/seller-flow/extract-seller-referral.js";
 
 export const RELATIONSHIP_CLAIMS = Object.freeze([
+  "ownership_confirmed",
   "actual_wrong_number",
   "never_been_owner",
   "not_owner",
@@ -32,6 +33,21 @@ export const PROPERTY_SCOPED_CLAIMS = new Set([
   "referral_source",
 ]);
 
+const OWNERSHIP_CONFIRM_PHRASES = [
+  "yes i own",
+  "yes, i own",
+  "i own it",
+  "i'm the owner",
+  "im the owner",
+  "i am the owner",
+  "that's my property",
+  "yes that's my property",
+  "yes, that's my property",
+  "yes that is my property",
+  "i own the property",
+  "i own this property",
+];
+
 const ACTUAL_WRONG_NUMBER_PHRASES = [
   "wrong number",
   "you have the wrong number",
@@ -52,9 +68,11 @@ const FORMER_OWNER_PHRASES = [
 const TENANT_PHRASES = ["tenant", "renter", "lease", "leasing", "occupied by tenant"];
 const PROPERTY_MANAGER_PHRASES = ["property manager", "manages the property", "management company"];
 const AGENT_PHRASES = ["realtor", "real estate agent", "listing agent", "my agent"];
-const SPOUSE_PHRASES = ["my wife", "my husband", "spouse", "co-owner", "co owner"];
+const SPOUSE_PHRASES = ["my wife owns", "my husband owns", "spouse owns", "co-owner", "co owner"];
 const EXECUTOR_PHRASES = ["executor", "heir", "estate", "probate", "trustee"];
 const LLC_PHRASES = ["llc", "representative for", "on behalf of the company"];
+
+const SAFETY_PRIORITY_INTENTS = new Set(["opt_out", "hostile_or_legal"]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -67,6 +85,12 @@ function lower(value) {
 function includesAny(text, phrases = []) {
   const normalized = lower(text);
   return phrases.some((phrase) => normalized.includes(lower(phrase)));
+}
+
+function detectOwnershipConfirmation(message = "", classifier_intent = null) {
+  const text = lower(message);
+  if (classifier_intent === "ownership_confirmed") return true;
+  return includesAny(text, OWNERSHIP_CONFIRM_PHRASES);
 }
 
 function detectRelationshipClaim(message = "") {
@@ -103,13 +127,15 @@ function detectRelationshipClaim(message = "") {
   return null;
 }
 
-const SAFETY_PRIORITY_INTENTS = new Set(["opt_out", "hostile_or_legal"]);
-
 function deriveCanonicalIntent({
   relationship_claim = null,
   referral_detected = false,
   classifier_intent = null,
+  ownership_confirmed = false,
 } = {}) {
+  if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
+    return "ownership_confirmed";
+  }
   if (classifier_intent === "hostile_or_legal") return "hostile_or_legal";
   if (relationship_claim === "actual_wrong_number" || classifier_intent === "opt_out") {
     return classifier_intent === "opt_out" ? "opt_out" : "wrong_number";
@@ -129,15 +155,20 @@ function deriveCanonicalIntent({
 function deriveIdentityClass({
   relationship_claim = null,
   referral_detected = false,
-  referred_role = null,
+  ownership_confirmed = false,
 } = {}) {
+  if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
+    return "confirmed_owner";
+  }
   if (relationship_claim === "actual_wrong_number") return "wrong_number";
-  if (referred_role === "referred_possible_owner") return "referred_possible_owner";
   if (referral_detected || relationship_claim === "referral_source") return "respondent_non_owner";
   if (relationship_claim === "tenant") return "renter_occupant";
   if (relationship_claim === "agent") return "agent_representative";
   if (relationship_claim === "property_manager") return "property_manager";
   if (relationship_claim === "former_owner") return "former_owner";
+  if (relationship_claim === "spouse_co_owner") return "authorized_spouse";
+  if (relationship_claim === "executor_heir") return "executor_or_heir";
+  if (relationship_claim === "llc_representative") return "entity_representative";
   if (PROPERTY_SCOPED_CLAIMS.has(relationship_claim)) return "respondent_non_owner";
   return "unknown";
 }
@@ -145,9 +176,16 @@ function deriveIdentityClass({
 function deriveRelationshipOutcome({
   relationship_claim = null,
   referral_detected = false,
+  ownership_confirmed = false,
 } = {}) {
+  if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
+    return "confirmed_owner";
+  }
   if (relationship_claim === "actual_wrong_number") return "actual_wrong_number";
   if (referral_detected) return "property_specific_non_owner_with_referral";
+  if (relationship_claim === "spouse_co_owner") return "co_owner";
+  if (relationship_claim === "executor_heir") return "executor_or_heir";
+  if (relationship_claim === "llc_representative") return "entity_representative";
   if (PROPERTY_SCOPED_CLAIMS.has(relationship_claim)) return "property_specific_non_owner";
   return null;
 }
@@ -156,7 +194,19 @@ function deriveSuppression({
   relationship_claim = null,
   property_id = null,
   classifier_intent = null,
+  ownership_confirmed = false,
 } = {}) {
+  if (ownership_confirmed) {
+    return {
+      suppression_scope: "none",
+      suppression_property_id: null,
+      invalidate_phone_globally: false,
+      invalidate_person_globally: false,
+      should_suppress_contact: false,
+      safety_status: "allowed",
+    };
+  }
+
   if (classifier_intent === "opt_out" || classifier_intent === "hostile_or_legal") {
     return {
       suppression_scope: classifier_intent === "opt_out" ? "global" : "incident",
@@ -213,41 +263,56 @@ export function resolveInboundRelationship({
   property_id = null,
   master_owner_id = null,
   prospect_id = null,
+  known_phones = [],
 } = {}) {
   const text = clean(message);
   const classifier_intent = clean(
     classification?.primary_intent || classification?.detected_intent
   );
-  const relationship_claim = detectRelationshipClaim(text);
 
-  const referred_name = extractReferredName(text);
-  const referred_phone_e164 = extractReferredPhone(text);
+  const ownership_confirmed = detectOwnershipConfirmation(text, classifier_intent);
+  let relationship_claim = ownership_confirmed
+    ? "ownership_confirmed"
+    : detectRelationshipClaim(text);
+
+  const referral_candidates = extractReferralCandidates(text, known_phones);
   const referral_detected =
     !SAFETY_PRIORITY_INTENTS.has(classifier_intent) &&
-    Boolean(referred_name || referred_phone_e164);
+    !ownership_confirmed &&
+    referral_candidates.referral_detected;
+
+  const referrals = referral_candidates.referrals;
+  const primary_referral = referrals.find((r) => r.name || r.phone_e164) || null;
 
   const canonical_intent = deriveCanonicalIntent({
     relationship_claim,
     referral_detected,
     classifier_intent,
+    ownership_confirmed,
   });
   const identity_class = deriveIdentityClass({
     relationship_claim,
     referral_detected,
+    ownership_confirmed,
   });
   const relationship_outcome = deriveRelationshipOutcome({
     relationship_claim,
     referral_detected,
+    ownership_confirmed,
   });
   const suppression = deriveSuppression({
     relationship_claim,
     property_id,
     classifier_intent,
+    ownership_confirmed,
   });
 
   const human_review_required =
     referral_detected ||
-    PROPERTY_SCOPED_CLAIMS.has(relationship_claim) ||
+    referral_candidates.ambiguous ||
+    referrals.length > 1 ||
+    relationship_claim === "spouse_co_owner" ||
+    (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) && relationship_claim !== "ownership_confirmed") ||
     canonical_intent === "unclear";
 
   const automatic_send_allowed = false;
@@ -256,32 +321,32 @@ export function resolveInboundRelationship({
     ? "ownership_confirmation"
     : null;
 
-  const proposed_operations = [];
-  if (source_contact_phone && property_id && PROPERTY_SCOPED_CLAIMS.has(relationship_claim)) {
-    proposed_operations.push({
+  const proposed_operations =
+    referral_detected || PROPERTY_SCOPED_CLAIMS.has(relationship_claim)
+      ? buildReferralProposedOperations({
+          referrals,
+          source_contact_phone:
+            normalizeUsPhoneToE164(source_contact_phone) || clean(source_contact_phone),
+          property_id,
+          master_owner_id,
+          prospect_id,
+          relationship_outcome,
+          ambiguous: referral_candidates.ambiguous,
+        })
+      : [];
+
+  if (
+    source_contact_phone &&
+    property_id &&
+    PROPERTY_SCOPED_CLAIMS.has(relationship_claim) &&
+    !proposed_operations.some((op) => op.op === "mark_contact_property_non_owner")
+  ) {
+    proposed_operations.unshift({
       op: "mark_contact_property_non_owner",
       phone_e164: normalizeUsPhoneToE164(source_contact_phone) || source_contact_phone,
       property_id,
       scope: "property_specific",
       invalidate_globally: false,
-    });
-  }
-  if (referred_phone_e164 || referred_name) {
-    proposed_operations.push({
-      op: "propose_child_thread",
-      parent_thread_key: source_contact_phone,
-      child_phone_e164: referred_phone_e164,
-      child_display_name: referred_name,
-      property_id,
-      route_to_stage: "ownership_check",
-      send_message: false,
-      merge_with_parent_timeline: false,
-    });
-    proposed_operations.push({
-      op: "route_referred_contact_stage_1",
-      stage: "ownership_check",
-      universal_stage: "ownership_confirmation",
-      granular_stage: "ownership_check",
     });
   }
 
@@ -291,8 +356,10 @@ export function resolveInboundRelationship({
     identity_class,
     relationship_outcome,
     referral_detected,
-    referred_name,
-    referred_phone_e164,
+    referrals,
+    ambiguous_pairing: referral_candidates.ambiguous,
+    referred_name: primary_referral?.name || null,
+    referred_phone_e164: primary_referral?.phone_e164 || null,
     referred_contact_proposed_stage,
     referred_role: referral_detected ? "referred_possible_owner" : null,
     suppression_scope: suppression.suppression_scope,
@@ -303,22 +370,26 @@ export function resolveInboundRelationship({
     safety_status: suppression.safety_status,
     human_review_required,
     automatic_send_allowed,
+    ownership_confirmed,
+    universal_stage: ownership_confirmed ? "offer_interest" : null,
     is_property_scoped: PROPERTY_SCOPED_CLAIMS.has(relationship_claim),
     is_global_suppression: suppression.invalidate_phone_globally,
     source_event_id: clean(source_event_id) || null,
     source_thread_key: clean(source_thread_key) || null,
-    source_contact_phone: normalizeUsPhoneToE164(source_contact_phone) || clean(source_contact_phone) || null,
+    source_contact_phone:
+      normalizeUsPhoneToE164(source_contact_phone) || clean(source_contact_phone) || null,
     property_id: clean(property_id) || null,
     master_owner_id: clean(master_owner_id) || null,
     prospect_id: clean(prospect_id) || null,
     dedupe_key: buildReferralDedupeKey({
       source_event_id,
-      referred_phone_e164,
+      referred_phone_e164: primary_referral?.phone_e164,
+      referred_name: primary_referral?.name,
       property_id,
     }),
     proposed_operations,
     review_status: referral_detected ? "pending_review" : null,
-    extraction_method: "relationship_resolver_v1",
+    extraction_method: "relationship_resolver_v2",
   };
 }
 

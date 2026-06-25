@@ -63,10 +63,79 @@ function buildFollowupQueueKey(dedupe_key) {
 }
 
 /**
+ * Referral-specific follow-up policy (shadow recommendations only).
+ */
+export function resolveReferralFollowUpPolicy({
+  intent = null,
+  thread_key = null,
+  property_id = null,
+  referrals = [],
+} = {}) {
+  if (intent !== "non_owner_referral") return null;
+
+  return {
+    source_respondent: {
+      suppressed: false,
+      followup_created: false,
+      reason: "referral_source_no_property_nurture",
+      property_scoped_only: true,
+      global_suppression: false,
+      acknowledgment_allowed: false,
+      nurture_allowed: false,
+      thread_key: thread_key || null,
+      property_id: property_id || null,
+    },
+    referred_contacts: (referrals || []).map((referral) => ({
+      name: referral.name || null,
+      phone_e164: referral.phone_e164 || null,
+      proposed_stage: "ownership_confirmation",
+      automatic_send_allowed: false,
+      review_required: true,
+      shadow_only: true,
+      dispatchable: false,
+      dedupe_status: referral.dedupe_status || "new_or_unknown",
+      provenance: {
+        source_thread_key: thread_key || null,
+        property_id: property_id || null,
+      },
+    })),
+    shadow_only: true,
+    dispatchable: false,
+  };
+}
+
+/**
  * Decide whether and when to schedule a follow-up for a thread.
  */
 export function resolveFollowUpPlan(intent, opts = {}) {
-  const { thread_key, is_suppressed = false } = opts;
+  const { thread_key, is_suppressed = false, property_scoped_only = false } = opts;
+
+  if (intent === "non_owner_referral") {
+    const referral_policy = resolveReferralFollowUpPolicy({
+      intent,
+      thread_key,
+      property_id: opts.property_id,
+      referrals: opts.referrals || [],
+    });
+    return {
+      suppressed: false,
+      followup_created: false,
+      reason: referral_policy?.source_respondent?.reason || "referral_source_no_property_nurture",
+      shadow_only: true,
+      dispatchable: false,
+      property_scoped_only: true,
+      referral_policy,
+    };
+  }
+
+  if (property_scoped_only && intent === "property_specific_non_owner") {
+    return {
+      suppressed: false,
+      followup_created: false,
+      reason: "property_scoped_non_owner_no_nurture",
+      property_scoped_only: true,
+    };
+  }
 
   if (is_suppressed) {
     return { suppressed: true, followup_created: false, reason: "thread_already_suppressed" };
