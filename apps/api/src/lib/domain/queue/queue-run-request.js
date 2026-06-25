@@ -73,54 +73,99 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
   route_logger?.info?.("queue_run.route_enter", { method });
 
   try {
-    const cron_auth = require_cron_auth(request, route_logger);
-    let auth = cron_auth;
-
-    if (!cron_auth.authorized) {
-      const queue_secret = String(
-        deps.queueEngineSecret ??
-        process.env.QUEUE_ENGINE_SHARED_SECRET ??
-        (await get_system_value("queue_engine_shared_secret")) ??
-        ""
-      ).trim();
-      if (!queue_secret) {
-        route_logger?.warn?.("queue_engine_secret.not_configured", {
-          hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
-        });
-      } else {
-        const get_secret_auth = deps.getSharedSecretAuthResult ||
-          (await import("@/lib/security/shared-secret.js")).getSharedSecretAuthResult;
-        const engine_result = get_secret_auth(request, {
-          env_name: "QUEUE_ENGINE_SHARED_SECRET",
-          header_names: ["x-queue-engine-secret"],
-          expected_token: queue_secret,
-        });
-        if (!engine_result.ok) {
-          route_logger?.warn?.("queue_engine_secret.rejected", {
-            reason: engine_result.reason,
-            via: engine_result.via || null,
-          });
-          return json_response({ ok: false, error: "unauthorized" }, { status: 401 });
-        }
-        auth = {
-          authorized: true,
-          auth: {
-            authenticated: true,
-            is_vercel_cron: false,
-            via: engine_result.via || "x-queue-engine-secret",
-          },
-          response: null,
-        };
-      }
-    }
-
-    if (!auth.authorized) return auth.response;
-
     const body =
       method === "POST"
         ? await request.json().catch(() => ({}))
         : {};
     const search_params = new URL(request.url).searchParams;
+    const { parseScopedCanaryRequest } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
+    const raw_queue_row_ids_early =
+      method === "POST"
+        ? body?.queue_row_ids || body?.queueRowIds
+        : search_params.getAll("queue_row_id");
+    const scoped_canary_early = parseScopedCanaryRequest({
+      ...body,
+      scoped_canary:
+        body?.scoped_canary ??
+        body?.scopedCanary ??
+        asBoolean(search_params.get("scoped_canary"), false),
+      validate_only:
+        body?.validate_only ??
+        body?.validateOnly ??
+        asBoolean(search_params.get("validate_only"), false),
+      campaign_id:
+        body?.campaign_id ??
+        body?.campaignId ??
+        search_params.get("campaign_id"),
+      canary_run_id:
+        body?.canary_run_id ??
+        body?.canaryRunId ??
+        search_params.get("canary_run_id"),
+      queue_row_ids: raw_queue_row_ids_early,
+      max_rows:
+        body?.max_rows ??
+        body?.maxRows ??
+        search_params.get("max_rows"),
+    });
+
+    let auth;
+    if (scoped_canary_early.scoped) {
+      const { requireScopedCanaryExecutionAuth } = await import("@/lib/security/scoped-canary-auth.js");
+      const scoped_route_auth = await requireScopedCanaryExecutionAuth(request, route_logger);
+      if (!scoped_route_auth.authorized) return scoped_route_auth.response;
+      auth = {
+        authorized: true,
+        auth: {
+          authenticated: true,
+          is_vercel_cron: false,
+          via: scoped_route_auth.via || "x-scoped-canary-secret",
+        },
+        response: null,
+      };
+    } else {
+      const cron_auth = require_cron_auth(request, route_logger);
+      auth = cron_auth;
+
+      if (!cron_auth.authorized) {
+        const queue_secret = String(
+          deps.queueEngineSecret ??
+          process.env.QUEUE_ENGINE_SHARED_SECRET ??
+          (await get_system_value("queue_engine_shared_secret")) ??
+          ""
+        ).trim();
+        if (!queue_secret) {
+          route_logger?.warn?.("queue_engine_secret.not_configured", {
+            hint: "Set QUEUE_ENGINE_SHARED_SECRET or system_control['queue_engine_shared_secret'] to protect this endpoint from non-cron callers",
+          });
+        } else {
+          const get_secret_auth = deps.getSharedSecretAuthResult ||
+            (await import("@/lib/security/shared-secret.js")).getSharedSecretAuthResult;
+          const engine_result = get_secret_auth(request, {
+            env_name: "QUEUE_ENGINE_SHARED_SECRET",
+            header_names: ["x-queue-engine-secret"],
+            expected_token: queue_secret,
+          });
+          if (!engine_result.ok) {
+            route_logger?.warn?.("queue_engine_secret.rejected", {
+              reason: engine_result.reason,
+              via: engine_result.via || null,
+            });
+            return json_response({ ok: false, error: "unauthorized" }, { status: 401 });
+          }
+          auth = {
+            authorized: true,
+            auth: {
+              authenticated: true,
+              is_vercel_cron: false,
+              via: engine_result.via || "x-queue-engine-secret",
+            },
+            response: null,
+          };
+        }
+      }
+
+      if (!auth.authorized) return auth.response;
+    }
 
     const limit = Math.max(
       1,
@@ -179,52 +224,16 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
     };
     const safety = normalizeSafetyInput({ ...body, limit }, safety_settings);
-    const scoped_canary_request = await (async () => {
-      const { parseScopedCanaryRequest } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
-      const raw_queue_row_ids =
-        method === "POST"
-          ? body?.queue_row_ids || body?.queueRowIds
-          : search_params.getAll("queue_row_id");
-      return parseScopedCanaryRequest({
-        ...body,
-        scoped_canary:
-          body?.scoped_canary ??
-          body?.scopedCanary ??
-          asBoolean(search_params.get("scoped_canary"), false),
-        validate_only:
-          body?.validate_only ??
-          body?.validateOnly ??
-          asBoolean(search_params.get("validate_only"), false),
-        campaign_id:
-          body?.campaign_id ??
-          body?.campaignId ??
-          search_params.get("campaign_id"),
-        canary_run_id:
-          body?.canary_run_id ??
-          body?.canaryRunId ??
-          search_params.get("canary_run_id"),
-        queue_row_ids: raw_queue_row_ids,
-        max_rows:
-          body?.max_rows ??
-          body?.maxRows ??
-          search_params.get("max_rows"),
-      });
-    })();
+    const scoped_canary_request = scoped_canary_early;
 
     if (scoped_canary_request.scoped) {
       const { runScopedCampaignCanary } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
-      const {
-        requireScopedCanaryExecutionAuth,
-        readCanaryAuthorizationToken,
-      } = await import("@/lib/security/scoped-canary-auth.js");
+      const { readCanaryAuthorizationToken } = await import("@/lib/security/scoped-canary-auth.js");
       const {
         consumeCanaryAuthorization,
         validateCanaryAuthorizationToken,
       } = await import("@/lib/domain/queue/queue-canary-authorization.js");
       const { supabase: default_supabase } = await import("@/lib/supabase/client.js");
-
-      const scoped_auth = await requireScopedCanaryExecutionAuth(request, route_logger);
-      if (!scoped_auth.authorized) return scoped_auth.response;
 
       const supabase_client = deps.supabase || deps.supabaseClient || default_supabase;
       const auth_token = readCanaryAuthorizationToken(request, body);

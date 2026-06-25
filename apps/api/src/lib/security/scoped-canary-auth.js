@@ -19,11 +19,11 @@ export async function requireScopedCanaryExecutionAuth(request, logger = null) {
   if (!secret) {
     return {
       authorized: false,
-      status: 500,
+      status: 401,
       reason: "scoped_canary_secret_not_configured",
       response: NextResponse.json(
-        { ok: false, error: "scoped_canary_secret_not_configured" },
-        { status: 500 }
+        { ok: false, error: "unauthorized", reason: "scoped_canary_secret_not_configured" },
+        { status: 401 }
       ),
     };
   }
