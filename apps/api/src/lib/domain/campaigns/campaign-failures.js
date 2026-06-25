@@ -115,7 +115,7 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
       .limit(1000),
     supabase
       .from('send_queue')
-      .select('id,campaign_id,campaign_target_id,queue_status,scheduled_for,updated_at,failed_reason,failure_category,template_id,from_phone_number,to_phone_number,metadata')
+      .select('id,campaign_id,campaign_target_id,queue_status,scheduled_for,updated_at,failed_reason,template_id,from_phone_number,to_phone_number,metadata')
       .eq('campaign_id', campaignId)
       .in('queue_status', EXECUTION_FAILURE_STATUSES)
       .order('updated_at', { ascending: false })

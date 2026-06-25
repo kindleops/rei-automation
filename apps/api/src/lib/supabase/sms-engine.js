@@ -29,6 +29,13 @@ import {
   mergeQueueDeliveryState,
   shouldPromoteThreadDelivery,
 } from "@/lib/domain/delivery/delivery-receipt-reconcile.js";
+import { getSystemValue } from "@/lib/system-control.js";
+import {
+  evaluateGlobalSendBrakeState,
+  rowCampaignId,
+  shouldHoldRowFromStaleExpiration,
+} from "@/lib/domain/queue/queue-send-brake-state.js";
+import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-machine.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -612,6 +619,18 @@ function hasSelectedTemplateReference(row = null) {
 
 export function resolveQueueSellerFirstName(row = null) {
   return resolveQueueSellerFirstNameFromSources(row);
+}
+
+export function validateSendQueueRowPreclaim(row = null, now = nowIso()) {
+  const decision = shouldRunSendQueueRow(row, now);
+  if (!decision.ok) {
+    return { ok: false, reason: decision.reason, row: decision.row || normalizeSendQueueRow(row) };
+  }
+  const invalid_reason = preclaimInvalidQueueRowReason(decision.row);
+  if (invalid_reason) {
+    return { ok: false, reason: invalid_reason, row: decision.row };
+  }
+  return { ok: true, row: decision.row };
 }
 
 function preclaimInvalidQueueRowReason(row = null) {
@@ -2035,6 +2054,25 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   if (active_error) throw active_error;
 
   const rows = Array.isArray(active_rows) ? active_rows : [];
+  const [emergencyStop, processorMode] = await Promise.all([
+    options.queue_emergency_stop_at ?? getSystemValue("queue_emergency_stop_at", { supabase }),
+    options.queue_processor_mode ?? getSystemValue("queue_processor_mode", { supabase }),
+  ]);
+  const brakeState = evaluateGlobalSendBrakeState({
+    queue_emergency_stop_at: emergencyStop,
+    queue_processor_mode: processorMode,
+  });
+  const campaignIds = [...new Set(rows.map((row) => rowCampaignId(row)).filter(Boolean))];
+  const campaignStatusById = new Map();
+  if (campaignIds.length) {
+    const { data: campaigns } = await supabase
+      .from("campaigns")
+      .select("id,status")
+      .in("id", campaignIds);
+    for (const campaign of campaigns || []) {
+      campaignStatusById.set(campaign.id, normalizeCampaignStatus(campaign.status));
+    }
+  }
   const active_with_send_evidence = rows.filter((row) =>
     Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at)
   );
@@ -2075,9 +2113,35 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     });
   }
 
+  let brake_held_rows = 0;
   for (const row of stale_rows) {
     const status = lower(row.queue_status);
     const has_send_evidence = Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at);
+    const campaignStatus = campaignStatusById.get(rowCampaignId(row)) || null;
+    if (
+      shouldHoldRowFromStaleExpiration(row, {
+        brakeState,
+        campaignStatus,
+      })
+    ) {
+      brake_held_rows += 1;
+      updates.push({
+        id: row.id,
+        patch: {
+          metadata: {
+            ...(row.metadata || {}),
+            send_brake_hold: true,
+            send_brake_reasons: brakeState.reasons,
+            send_brake_held_at: now,
+            processing_started_at: null,
+            processing_worker_id: null,
+            processing_timeout_at: null,
+          },
+          updated_at: now,
+        },
+      });
+      continue;
+    }
     let next_status = status;
     let failed_reason = null;
     if (has_send_evidence) {
@@ -2102,6 +2166,8 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
           locked_at: null,
           metadata: {
             ...(row.metadata || {}),
+            send_brake_hold: false,
+            expired_due_to_send_brake: false,
             processing_started_at: null,
             processing_worker_id: null,
             processing_timeout_at: null,
@@ -2112,9 +2178,63 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     }
   }
 
+  if (!brakeState.send_blocked) {
+    const { data: expired_brake_rows } = await supabase
+      .from(SEND_QUEUE_TABLE)
+      .select("id,queue_status,scheduled_for,scheduled_for_utc,metadata,failed_reason")
+      .eq("queue_status", "expired")
+      .in("failed_reason", ["stale_runnable_row_expired"])
+      .order("updated_at", { ascending: true })
+      .limit(max_rows);
+    for (const row of expired_brake_rows || []) {
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+      if (metadata.expired_due_to_send_brake !== true && metadata.send_brake_hold !== true) continue;
+      const schedule_at = row.scheduled_for_utc || row.scheduled_for;
+      if (!schedule_at) continue;
+      updates.push({
+        id: row.id,
+        patch: {
+          queue_status: "scheduled",
+          failed_reason: null,
+          metadata: {
+            ...metadata,
+            send_brake_hold: false,
+            expired_due_to_send_brake: false,
+            send_brake_recovered_at: now,
+          },
+          updated_at: now,
+        },
+      });
+    }
+  }
+
+  for (const row of rows) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    if (!metadata.send_brake_hold || brakeState.send_blocked) continue;
+    updates.push({
+      id: row.id,
+      patch: {
+        metadata: {
+          ...metadata,
+          send_brake_hold: false,
+          send_brake_cleared_at: now,
+        },
+        updated_at: now,
+      },
+    });
+  }
+
   for (const row of past_due_scheduled) {
     const status = lower(row.queue_status);
     if (status !== "scheduled") continue;
+    if (
+      shouldHoldRowFromStaleExpiration(row, {
+        brakeState,
+        campaignStatus: campaignStatusById.get(rowCampaignId(row)) || null,
+      })
+    ) {
+      continue;
+    }
     updates.push({
       id: row.id,
       patch: {
@@ -2171,6 +2291,8 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     retried_gt_one_count: retried_gt_one.length,
     reconciled_rows: deduped_updates.length,
     lock_conflicts: 0,
+    send_brake_state: brakeState,
+    brake_held_rows,
   };
 }
 

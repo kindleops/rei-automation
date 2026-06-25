@@ -49,6 +49,8 @@ export type ActivationResult = {
   idempotent?: boolean
   from?: string | null
   to?: string | null
+  proof_hydration?: boolean
+  activation_mode?: 'live' | 'test'
 }
 
 // ── Supabase loaders ────────────────────────────────────────────────────────────
@@ -882,6 +884,8 @@ export const activateCampaignWithReview = async (
     idempotent: data.idempotent,
     from: data.from ?? null,
     to: data.to ?? 'active',
+    proof_hydration: Boolean(data.proof_hydration ?? data.activation_mode === 'test'),
+    activation_mode: (data.activation_mode as 'live' | 'test' | undefined) ?? (data.proof_hydration ? 'test' : 'live'),
   }
 }
 

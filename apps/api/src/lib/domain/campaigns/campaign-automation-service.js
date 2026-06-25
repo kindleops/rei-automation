@@ -6152,6 +6152,34 @@ function targetSnapshotForMetadata(target = {}, candidate = {}) {
   }
 }
 
+export function candidateSnapshotForMetadata(candidate = {}) {
+  return {
+    master_owner_id: candidate.master_owner_id || null,
+    prospect_id: candidate.prospect_id || null,
+    canonical_prospect_id: candidate.canonical_prospect_id || null,
+    property_id: candidate.property_id || null,
+    phone_id: candidate.phone_id || candidate.best_phone_id || null,
+    best_phone_id: candidate.best_phone_id || candidate.phone_id || null,
+    to_phone_number: candidate.canonical_e164 || candidate.to_phone_number || null,
+    market: candidate.market || null,
+    state: candidate.state || null,
+    language: candidate.language || candidate.best_language || null,
+    timezone: candidate.timezone || null,
+    contact_window: candidate.contact_window || null,
+    seller_first_name: candidate.seller_first_name || candidate.owner_first_name || null,
+    seller_full_name: candidate.seller_full_name || candidate.owner_display_name || null,
+    owner_display_name: candidate.owner_display_name || null,
+    property_address_full: candidate.property_address_full || candidate.property_address || null,
+    property_city: candidate.property_city || null,
+    property_zip: candidate.property_zip || null,
+    property_type: candidate.property_type || null,
+    property_class: candidate.property_class || null,
+    canonical_property_group: candidate.canonical_property_group || null,
+    touch_number: candidate.touch_number || 1,
+    acquisition_score: candidate.acquisition_score ?? candidate.final_acquisition_score ?? null,
+  }
+}
+
 function renderedTemplateId(rendered = {}) {
   return clean(
     rendered.selected_template_id ||
@@ -6239,7 +6267,7 @@ function groupLaunchItemsByWindow(items = []) {
   return [...groups.values()]
 }
 
-function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input, noSend = false }) {
+export function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input, noSend = false }) {
   const scheduledDate = new Date(scheduledFor)
   const scheduledIso = scheduledDate.toISOString()
   const local = localScheduleSnapshot(scheduledDate, candidate.timezone || window.timezone)
@@ -6274,6 +6302,7 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
     no_send: noSend,
     confirm_live: !noSend,
     proof_hydration: noSend,
+    candidate_snapshot: candidateSnapshotForMetadata(candidate),
     target_snapshot: targetSnapshotForMetadata(target, candidate),
     campaign_target_metadata: metadataObject(target.metadata),
     routing_snapshot: {
@@ -6376,12 +6405,31 @@ function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered
   }
 }
 
-export async function createCampaignQueuePlan(campaignId, input = {}, deps = {}) {
-  const supabase = deps.supabase || defaultSupabase
+export function resolveCampaignQueueWriteMode(input = {}) {
   const dryRun = input.dry_run !== false
   const noSend = asBoolean(input.no_send ?? input.noSend, true)
   const confirmLive = asBoolean(input.confirm_live ?? input.confirmLive, false)
   const createRows = input.create_send_queue_rows === false ? false : true
+  const hydrateNoSend = !dryRun && noSend && createRows && asBoolean(input.hydrate_canonical_queue ?? input.hydrateCanonicalQueue, true)
+  const isLiveSendWrite = !dryRun && !noSend && confirmLive && createRows
+  return {
+    dryRun,
+    noSend,
+    confirmLive,
+    createRows,
+    hydrateNoSend,
+    isLiveSendWrite,
+    isProofHydrationWrite: hydrateNoSend,
+  }
+}
+
+export async function createCampaignQueuePlan(campaignId, input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const writeMode = resolveCampaignQueueWriteMode(input)
+  const dryRun = writeMode.dryRun
+  const noSend = writeMode.noSend
+  const confirmLive = writeMode.confirmLive
+  const createRows = writeMode.createRows
   const explicitOperatorAction = asBoolean(input.explicit_operator_action || input.operator_action, false)
   const suppressPreviouslyContacted = asBoolean(
     input.suppress_previously_contacted ??
@@ -6418,8 +6466,8 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
 
   const readyTargets = targets || []
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
-  const hydrateNoSend = !dryRun && noSend && createRows && asBoolean(input.hydrate_canonical_queue ?? input.hydrateCanonicalQueue, true)
-  const isLiveSendWrite = !dryRun && !noSend && confirmLive && createRows
+  const hydrateNoSend = writeMode.hydrateNoSend
+  const isLiveSendWrite = writeMode.isLiveSendWrite
   for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
   if (!isQueueableStatus(campaign.status)) blockers.push(`campaign_status_not_queueable:${campaign.status}`)
   if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
@@ -7347,6 +7395,8 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       blockers: result.blockers || [],
       idempotent: Boolean(result.idempotent),
       degraded: Boolean(result.lifecycle_result?.degraded),
+      proof_hydration: Boolean(result.proof_hydration),
+      activation_mode: result.activation_mode || (result.proof_hydration ? 'test' : 'live'),
     }
   }
 
@@ -7595,3 +7645,5 @@ export async function getCampaignAwareQueueDiagnostics(deps = {}) {
     })),
   }
 }
+
+export { computeWindowForTimezone }

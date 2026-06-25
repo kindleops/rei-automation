@@ -179,6 +179,77 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
     };
     const safety = normalizeSafetyInput({ ...body, limit }, safety_settings);
+    const scoped_canary_request = await (async () => {
+      const { parseScopedCanaryRequest } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
+      const raw_queue_row_ids =
+        method === "POST"
+          ? body?.queue_row_ids || body?.queueRowIds
+          : search_params.getAll("queue_row_id");
+      return parseScopedCanaryRequest({
+        ...body,
+        scoped_canary:
+          body?.scoped_canary ??
+          body?.scopedCanary ??
+          asBoolean(search_params.get("scoped_canary"), false),
+        validate_only:
+          body?.validate_only ??
+          body?.validateOnly ??
+          asBoolean(search_params.get("validate_only"), false),
+        campaign_id:
+          body?.campaign_id ??
+          body?.campaignId ??
+          search_params.get("campaign_id"),
+        canary_run_id:
+          body?.canary_run_id ??
+          body?.canaryRunId ??
+          search_params.get("canary_run_id"),
+        queue_row_ids: raw_queue_row_ids,
+        max_rows:
+          body?.max_rows ??
+          body?.maxRows ??
+          search_params.get("max_rows"),
+      });
+    })();
+
+    if (scoped_canary_request.scoped) {
+      const { runScopedCampaignCanary } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
+      scoped_canary_request.dry_run =
+        scoped_canary_request.validate_only || dry_run;
+      if (!scoped_canary_request.validate_only && !dry_run) {
+        const runtime_brake = evaluateQueueSendRuntimeBrakes(safety_settings, {
+          action: "run_scoped_campaign_canary",
+          failClosed: true,
+        });
+        if (!runtime_brake.ok) {
+          return json_response(blockedRuntimeBrakeResult(runtime_brake, "run_scoped_campaign_canary"), {
+            status: runtime_brake.status,
+          });
+        }
+        const validation = validateLiveLimitedRails(safety, {
+          require_scope: false,
+          require_send_caps: true,
+        });
+        if (!validation.ok) {
+          return json_response(blockedSafetyResult(validation, "run_scoped_campaign_canary"), {
+            status: validation.status,
+          });
+        }
+      }
+      const result = await runScopedCampaignCanary(scoped_canary_request, deps);
+      return json_response(
+        {
+          ok: result?.ok !== false,
+          dry_run: Boolean(scoped_canary_request.dry_run),
+          route: "internal/queue/run",
+          action: "run_scoped_campaign_canary",
+          scoped_canary: true,
+          validate_only: scoped_canary_request.validate_only,
+          ...result,
+        },
+        { status: result?.status || (result?.ok === false ? 423 : 200) }
+      );
+    }
+
     if (!dry_run) {
       const runtime_brake = evaluateQueueSendRuntimeBrakes(safety_settings, {
         action: "queue_run",

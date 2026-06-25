@@ -13,6 +13,9 @@ import {
 import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 import { isLiveCampaignStatus, LIVE_CAMPAIGN_STATES } from "@/lib/domain/campaigns/campaign-state-machine.js";
+import { filterRowsByLiveCampaigns } from "@/lib/domain/queue/queue-send-brake-state.js";
+
+export { filterRowsByLiveCampaigns };
 function normalizeRows(data) {
   return Array.isArray(data) ? data : [];
 }
@@ -236,11 +239,7 @@ export async function runSendQueue(
   // 2b. Campaign-gated dispatch. Rows belonging to a campaign only send while
   // that campaign is live (ACTIVE/activating). Unlinked rows flow as today.
   const liveCampaignIds = await fetchLiveCampaignIds(supabase);
-  const campaign_filtered = candidateRows.filter((row) => {
-    const campaignId = row.campaign_id || row.metadata?.campaign_id || null;
-    if (!campaignId) return true;
-    return liveCampaignIds ? liveCampaignIds.has(campaignId) : false;
-  });
+  const campaign_filtered = filterRowsByLiveCampaigns(candidateRows, liveCampaignIds);
   const campaign_gated_held_back = candidateRows.length - campaign_filtered.length;
   const deduped = dedupeRunnableRows(campaign_filtered, log_warn);
   const rows = deduped.rows;

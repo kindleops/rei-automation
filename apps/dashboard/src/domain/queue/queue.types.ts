@@ -137,6 +137,10 @@ export interface QueueItem {
   diagnosticFlags: string[]
   rowSource: 'campaign' | 'feeder' | 'manual' | 'auto_reply' | 'unknown'
   guardReason: string | null
+  dispatchCategory?: 'runnable' | 'proof' | 'future_window' | 'paused_campaign' | 'globally_blocked' | 'expired' | 'non_runnable'
+  dispatchLabel?: string
+  dispatchBlocker?: string | null
+  nextEligibleSendAt?: string | null
 
   // Origin / routing identifiers surfaced in the inspector
   automationSource: string | null

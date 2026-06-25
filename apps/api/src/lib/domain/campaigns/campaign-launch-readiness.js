@@ -11,6 +11,7 @@ import {
   isEmergencyStopActive,
   normalizeQueueProcessorMode,
 } from '@/lib/domain/queue/queue-control-safety.js'
+import { evaluateGlobalSendBrakeState } from '@/lib/domain/queue/queue-send-brake-state.js'
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 
 async function launchCandidateFromTarget(target, campaign) {
@@ -37,6 +38,7 @@ const BLOCKER_LABELS = {
   global_auto_enqueue_disabled: 'Global campaign enqueue is disabled',
   campaign_auto_queue_disabled: 'Campaign auto-queue is disabled',
   transmission_disabled: 'Campaign transmission is disabled (test mode / auto-send off)',
+  unrestricted_auto_send: 'Unrestricted auto-send must remain disabled for guarded launch',
   missing_daily_cap: 'Daily send cap is missing',
   missing_total_cap: 'Total send cap is missing',
   missing_batch_max: 'Batch maximum is missing',
@@ -57,16 +59,39 @@ const BLOCKER_LABELS = {
   provider_disabled: 'Outbound SMS provider is disabled',
 }
 
-export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}) {
+export function resolveLaunchReadinessContext(options = {}) {
+  const proof_hydration = options.proof_hydration === true || options.no_send === true || options.noSend === true
+  const guarded_live_launch = !proof_hydration && (
+    options.guarded_live_launch === true ||
+    options.confirm_live === true ||
+    options.confirmLive === true
+  )
+  const explicit_operator_action = options.explicit_operator_action === true || options.explicitOperatorAction === true
+  const scheduled_activation = options.scheduled_activation === true || options.scheduledActivation === true
+  const controlled_hydration = proof_hydration || guarded_live_launch || explicit_operator_action || scheduled_activation
+  return {
+    proof_hydration,
+    guarded_live_launch,
+    explicit_operator_action,
+    scheduled_activation,
+    controlled_hydration,
+  }
+}
+
+export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, options = {}) {
   const supabase = deps.supabase || defaultSupabase
   const blockers = []
   const blockerCodes = []
   const warnings = []
+  const context = resolveLaunchReadinessContext(options)
 
   const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
   if (!campaign) return { ok: false, error: 'campaign_not_found' }
 
   const status = normalizeCampaignStatus(campaign.status)
+  const loadSystemValue = deps.getSystemValue
+    ? (key) => deps.getSystemValue(key, { supabase })
+    : (key) => getSystemValue(key, { supabase })
 
   const [
     emergencyStop,
@@ -78,40 +103,56 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}) {
     languageTargetsRes,
     routableCountRes,
   ] = await Promise.all([
-    getSystemValue('queue_emergency_stop_at', { supabase }),
-    getSystemValue('queue_processor_mode', { supabase }),
-    getSystemValue('queue_auto_enqueue_enabled', { supabase }),
-    getSystemValue('outbound_sms_enabled', { supabase }),
+    loadSystemValue('queue_emergency_stop_at'),
+    loadSystemValue('queue_processor_mode'),
+    loadSystemValue('queue_auto_enqueue_enabled'),
+    loadSystemValue('outbound_sms_enabled'),
     supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('target_status', 'ready'),
     supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).eq('target_status', 'ready').order('priority_score', { ascending: false, nullsFirst: false }).limit(20),
     supabase.from('campaign_targets').select('language,template_status').eq('campaign_id', campaignId).limit(50000),
     supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('target_status', 'ready').eq('routing_status', 'ready').eq('template_status', 'ready'),
   ])
 
-  if (isEmergencyStopActive(emergencyStop)) {
-    blockers.push(BLOCKER_LABELS.emergency_stop)
-    blockerCodes.push('emergency_stop')
+  const brakeState = evaluateGlobalSendBrakeState({
+    queue_emergency_stop_at: emergencyStop,
+    queue_processor_mode: processorModeRaw,
+  })
+
+  if (context.controlled_hydration) {
+    if (brakeState.emergency_stop_active) {
+      warnings.push('Emergency stop is active — queue hydration allowed, live sends remain blocked until cleared')
+    }
+    if (brakeState.processor_paused) {
+      warnings.push('Queue processor is paused — rows will hydrate but will not transmit until processor resumes')
+    }
+  } else {
+    if (isEmergencyStopActive(emergencyStop)) {
+      blockers.push(BLOCKER_LABELS.emergency_stop)
+      blockerCodes.push('emergency_stop')
+    }
+    const processorMode = normalizeQueueProcessorMode(processorModeRaw, 'off')
+    if (processorMode === 'off') {
+      blockers.push(BLOCKER_LABELS.queue_processor_disabled)
+      blockerCodes.push('queue_processor_disabled')
+    }
   }
 
-  const processorMode = normalizeQueueProcessorMode(processorModeRaw, 'off')
-  if (processorMode === 'off') {
-    blockers.push(BLOCKER_LABELS.queue_processor_disabled)
-    blockerCodes.push('queue_processor_disabled')
-  }
-
-  if (!asBoolean(globalAutoEnqueue, false)) {
-    blockers.push(BLOCKER_LABELS.global_auto_enqueue_disabled)
-    blockerCodes.push('global_auto_enqueue_disabled')
-  }
-
-  if (!campaign.auto_queue_enabled) {
-    blockers.push(BLOCKER_LABELS.campaign_auto_queue_disabled)
-    blockerCodes.push('campaign_auto_queue_disabled')
-  }
-
-  if (!campaign.auto_send_enabled) {
-    blockers.push(BLOCKER_LABELS.transmission_disabled)
-    blockerCodes.push('transmission_disabled')
+  if (!context.controlled_hydration) {
+    if (!asBoolean(globalAutoEnqueue, false)) {
+      blockers.push(BLOCKER_LABELS.global_auto_enqueue_disabled)
+      blockerCodes.push('global_auto_enqueue_disabled')
+    }
+    if (!campaign.auto_queue_enabled) {
+      blockers.push(BLOCKER_LABELS.campaign_auto_queue_disabled)
+      blockerCodes.push('campaign_auto_queue_disabled')
+    }
+    if (!campaign.auto_send_enabled) {
+      blockers.push(BLOCKER_LABELS.transmission_disabled)
+      blockerCodes.push('transmission_disabled')
+    }
+  } else if (asBoolean(campaign.auto_send_enabled, false)) {
+    blockers.push(BLOCKER_LABELS.unrestricted_auto_send)
+    blockerCodes.push('unrestricted_auto_send')
   }
 
   if (!asBoolean(outboundSms, false)) {
@@ -221,5 +262,7 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}) {
     ready_recipient_count: readyTotal,
     routable_recipient_count: routableTotal,
     remediation: uniqueBlockers,
+    readiness_context: context,
+    send_brake_state: brakeState,
   }
 }

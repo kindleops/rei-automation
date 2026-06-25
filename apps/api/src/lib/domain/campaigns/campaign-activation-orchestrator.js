@@ -4,13 +4,21 @@
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { activateCampaignWithHydration } from '@/lib/domain/campaigns/campaign-automation-service.js'
-import { evaluateCampaignLaunchReadiness } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
+import { evaluateCampaignLaunchReadiness, resolveLaunchReadinessContext } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 
 import { isQueueableStatus, normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 
 function clean(value) {
   return String(value ?? '').trim()
+}
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value
+  const normalized = clean(value).toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  return fallback
 }
 
 const ACTIVATION_STEPS = [
@@ -54,7 +62,7 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending'])
 
     if (status === 'active' && (campaign.activated_at || Number(activeQueueCount || 0) > 0 || Number(campaign.queued_count || 0) > 0)) {
-      await recomputeCampaignProgress(campaignId, deps)
+      await (deps.recomputeCampaignProgress || recomputeCampaignProgress)(campaignId, deps)
       recordStep('complete', { idempotent: true, queue_rows: activeQueueCount })
       return {
         ok: true,
@@ -86,7 +94,15 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     }
 
     recordStep('resolving_templates')
-    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps)
+    const proofNoSend = input.no_send === true || input.noSend === true
+    const scheduledActivation = input.scheduled_activation === true || clean(input.lock_owner) === 'scheduled_worker'
+    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps, {
+      ...input,
+      proof_hydration: proofNoSend,
+      guarded_live_launch: !proofNoSend && input.confirm_live !== false,
+      explicit_operator_action: asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, !scheduledActivation),
+      scheduled_activation: scheduledActivation,
+    })
     if (readiness.launch_readiness === 'blocked') {
       return failResult('launch_blocked', steps, {
         blockers: readiness.blockers,
@@ -101,18 +117,23 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     const batchMax = input.batch_max ?? input.batchMax ?? input.limit ?? 5
     recordStep('hydrating_queue', { batch_max: batchMax })
 
-    const proofNoSend = input.no_send === true || input.noSend === true
+    const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || campaign.scheduled_for || null
     const result = await activateCampaignWithHydration(campaignId, {
       ...input,
       activation_idempotency_key: idempotencyKey,
       confirm_live: proofNoSend ? true : input.confirm_live !== false,
       no_send: proofNoSend,
       hydrate_canonical_queue: proofNoSend,
+      explicit_operator_action: asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, !scheduledActivation),
+      scheduled_activation: scheduledActivation,
+      scheduled_for: scheduledFor,
+      first_scheduled_at: input.first_scheduled_at || input.first_scheduled_at_utc || scheduledFor,
+      first_scheduled_at_utc: input.first_scheduled_at_utc || input.first_scheduled_at || scheduledFor,
       batch_max: batchMax,
       limit: batchMax,
       lock_owner: owner,
       reason: clean(input.reason) || `operator:${owner}`,
-      block_on_global_emergency_stop: proofNoSend ? false : input.block_on_global_emergency_stop,
+      block_on_global_emergency_stop: false,
     }, deps)
 
     if (!result.ok) {
@@ -135,6 +156,8 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       campaign_id: campaignId,
       campaign: refreshedCampaign || result.campaign || null,
       idempotent: Boolean(result.idempotent),
+      proof_hydration: proofNoSend,
+      activation_mode: proofNoSend ? 'test' : 'live',
       steps,
       inserted: result.inserted ?? 0,
       skipped: result.skipped ?? 0,
@@ -144,6 +167,11 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       lifecycle_result: result.lifecycle_result || null,
       queue_result: result.queue_result || null,
       readiness,
+      readiness_context: resolveLaunchReadinessContext({
+        ...input,
+        proof_hydration: proofNoSend,
+        scheduled_activation: scheduledActivation,
+      }),
     }
   } catch (error) {
     return failResult(error?.message || 'activation_exception', steps)
@@ -176,18 +204,31 @@ export async function findDueScheduledCampaigns(deps = {}) {
   return data || []
 }
 
+export function buildScheduledActivationRequest(campaign = {}) {
+  const scheduledFor = campaign.scheduled_for || null
+  return {
+    activation_idempotency_key: `scheduled:${campaign.id}:${scheduledFor}`,
+    lock_owner: 'scheduled_worker',
+    reason: 'scheduled_worker:due_activation',
+    scheduled_activation: true,
+    scheduled_for: scheduledFor,
+    first_scheduled_at: scheduledFor,
+    first_scheduled_at_utc: scheduledFor,
+    batch_max: campaign.batch_max ?? 5,
+    confirm_live: true,
+    no_send: false,
+  }
+}
+
 export async function runDueScheduledCampaignActivations(deps = {}) {
   const due = await findDueScheduledCampaigns(deps)
   const results = []
   for (const campaign of due) {
-    const idempotencyKey = `scheduled:${campaign.id}:${campaign.scheduled_for}`
-    const result = await runCanonicalCampaignActivation(campaign.id, {
-      activation_idempotency_key: idempotencyKey,
-      lock_owner: 'scheduled_worker',
-      reason: 'scheduled_worker:due_activation',
-      batch_max: 5,
-      confirm_live: true,
-    }, deps)
+    const result = await runCanonicalCampaignActivation(
+      campaign.id,
+      buildScheduledActivationRequest(campaign),
+      deps,
+    )
     results.push({ campaign_id: campaign.id, name: campaign.name, ...result })
   }
   return { ok: true, processed: results.length, results }

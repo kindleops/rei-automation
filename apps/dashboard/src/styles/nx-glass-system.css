@@ -1493,14 +1493,15 @@
 .nx-accent-dot[data-accent="rose"]    { background: #f43f5e; }
 .nx-accent-dot[data-accent="ice"]     { background: #a5f3fc; }
 
-/* Active view chips (views strip) */
+/* Active view chips (views strip) — launcher panel overrides in shell-primitives.css */
 .nx-workspace-active-view-strip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 10px 4px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--nx-glass-divider);
+  gap: 6px;
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .nx-active-view-chip {

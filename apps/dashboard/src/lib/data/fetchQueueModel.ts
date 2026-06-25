@@ -3,6 +3,7 @@ import { asBoolean, asIso, asNumber, asString, getFirst, safeArray, type AnyReco
 import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, RiskLevel, DeliveryStatus, FailureReason, QueueFetchOptions, QueueDateBasis, StageCode } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
+import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 import { fetchQueuePage, getBackendBaseUrl } from '../api/backendClient'
 
 // ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
@@ -280,7 +281,7 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       }
       return { data: results.flatMap(r => r.data || []) }
     })(),
-    fetchChunked(cArr, async chunk => await supabase.from('sms_campaigns').select('id,campaign_name').in('id', chunk).limit(500), 100),
+    fetchChunked(cArr, async chunk => await supabase.from('campaigns').select('id,name,status').in('id', chunk).limit(500), 100),
     apiOwners.length
       ? { data: apiOwners }
       : fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100),
@@ -360,9 +361,10 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     const sellerName = resolveFullName(row, md, target, owner, toPhoneEarly)
     const nameIsFallbackPhone = Boolean(toPhoneEarly) && sellerName === toPhoneEarly
     const activeProspectFullName = asString(
-      getFirst(target || {}, ['full_name', 'prospect_full_name']),
-      getFirst(targetSnapshot, ['prospect_full_name', 'active_prospect_full_name']),
-      getFirst(candidateSnapshot, ['prospect_full_name']),
+      getFirst(target || {}, ['full_name', 'prospect_full_name'])
+        || getFirst(targetSnapshot, ['prospect_full_name', 'active_prospect_full_name'])
+        || getFirst(candidateSnapshot, ['prospect_full_name']),
+      '',
     ) || null
     const masterOwnerDisplayName = asString(
       getFirst(owner || {}, ['display_name']),
@@ -425,6 +427,17 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     if (status === 'sent' && !providerMessageId && !textgridMessageId) flags.push('MISSING_PROVIDER_ID')
     if (status === 'sent' && deliveryStatus === 'pending' && !deliveredAt && failureCategory !== 'carrier_failure') flags.push('MISSING_DELIVERY_STATUS')
 
+    const campaignStatus = campaign ? asString(campaign.status, '') : asString(md.campaign_status, '') || null
+    const dispatchTruth = resolveQueueDispatchTruth({
+      status,
+      scheduledForUtc: scheduledIso,
+      smsEligible: asBoolean(getFirst(row, ['sms_eligible']), asBoolean(md.sms_eligible, false)),
+      metadata: md,
+      campaignId: baseCmpId || null,
+      campaignStatus,
+      globalBrakes: md.global_send_brakes as Record<string, unknown> | undefined,
+    })
+
     const failureGroupMap: Record<string, string> = {
       'textgrid_content_filter': 'Carrier', 'blacklist_pair_21610': 'Compliance', 'recipient_opted_out': 'Compliance',
       'invalid_number': 'Carrier', 'suppression_blocked': 'Compliance', 'no_valid_sender': 'Routing',
@@ -467,7 +480,11 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       timezone: asString(getFirst(row, ['timezone']), 'America/Chicago'),
       contactWindow: 'flexible',
       status,
-      statusLabel: statusLabelFor(status),
+      statusLabel: dispatchTruth.label || statusLabelFor(status),
+      dispatchCategory: dispatchTruth.category,
+      dispatchLabel: dispatchTruth.label,
+      dispatchBlocker: dispatchTruth.blocker,
+      nextEligibleSendAt: dispatchTruth.nextEligibleSendAt,
       priority: toPriority(getFirst(row, ['priority'])),
       touchNumber,
       language: asString(getFirst(row, ['language']), 'en') === 'es' ? 'es' : 'en',
@@ -518,7 +535,7 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
 
       campaignId: baseCmpId || (campaign ? asString(campaign.id, '') : '') || null,
       campaignName: campaign
-        ? asString(campaign.campaign_name, '') || asString(campaign.name, '') || null
+        ? asString(campaign.name, '') || asString(campaign.campaign_name, '') || null
         : asString(getFirst(md, ['campaign_name']), '') || null,
       campaignTargetId: metadataCampaignTargetId || (target ? asString(target.id, '') : '') || null,
       campaignTargetStatus: target

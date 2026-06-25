@@ -124,7 +124,7 @@ export const WorkspaceLauncher = ({
     const panel = popoverRef.current
     if (!anchor) return
 
-    const panelWidth = panel?.offsetWidth || Math.min(640, window.innerWidth - 24)
+    const panelWidth = panel?.offsetWidth || Math.min(680, window.innerWidth - 24)
     const gap = 8
     let left = anchor.left
     if (left + panelWidth > window.innerWidth - 12) {
@@ -222,13 +222,12 @@ export const WorkspaceLauncher = ({
             <strong>{workspace.label}</strong>
             {workspace.description ? <small>{workspace.description}</small> : null}
           </span>
-          <span className="nx-wsl-row__state">
+          <span className="nx-wsl-row__state" aria-hidden>
             {disabled ? (
               <em className="nx-wsl-row__availability">{availabilityLabel(workspace.availability)}</em>
-            ) : (
-              <em className="nx-wsl-row__availability is-ready">Ready</em>
-            )}
-            {isActive ? <Icon name="check" /> : null}
+            ) : isActive ? (
+              <Icon name="check" />
+            ) : null}
           </span>
         </button>
         {modes && modes.length > 0 ? (
@@ -245,12 +244,15 @@ export const WorkspaceLauncher = ({
   const renderViewRow = (view: WorkspaceLauncherItem, disabled = false) => {
     const isActiveView = activeViewKeys.includes(view.key)
     const widthKey = view.key === 'analytics' ? 'metrics' : view.key
+    const tooltip = disabled
+      ? (availabilityLabel(view.availability) ?? 'Unavailable')
+      : (view.description ?? undefined)
     return (
       <div
         key={view.key}
         className={cls('nx-wsv-row', isActiveView && 'is-active', disabled && 'is-disabled')}
         role="group"
-        title={disabled ? availabilityLabel(view.availability) ?? 'Unavailable' : undefined}
+        title={tooltip}
       >
         <button
           type="button"
@@ -261,16 +263,7 @@ export const WorkspaceLauncher = ({
           <span className="nx-wsv-row__icon" aria-hidden>
             <Icon name={workspaceIcon(view.key)} />
           </span>
-          <span className="nx-wsv-row__label">
-            <strong>{view.label}</strong>
-            {view.description ? <small>{view.description}</small> : null}
-          </span>
-          <span className="nx-wsv-row__meta">
-            {disabled ? (
-              <em className="nx-wsv-row__availability">{availabilityLabel(view.availability)}</em>
-            ) : null}
-            {isActiveView ? <Icon name="check" /> : null}
-          </span>
+          <span className="nx-wsv-row__label">{view.label}</span>
         </button>
         {!disabled ? (
           <div className="nx-wsv-row__pills" aria-label={`${view.label} width`}>
@@ -290,6 +283,13 @@ export const WorkspaceLauncher = ({
             ))}
           </div>
         ) : null}
+        <span className="nx-wsv-row__meta" aria-hidden>
+          {disabled ? (
+            <em className="nx-wsv-row__availability">{availabilityLabel(view.availability)}</em>
+          ) : isActiveView ? (
+            <Icon name="check" />
+          ) : null}
+        </span>
       </div>
     )
   }
@@ -342,7 +342,7 @@ export const WorkspaceLauncher = ({
               ))}
             </div>
           ) : null}
-          <div className="nx-wsl-panel__section">
+          <div className="nx-wsl-panel__section nx-wsl-panel__section--views">
             <h4>Views</h4>
             {readyViews.map((view) => renderViewRow(view))}
           </div>
@@ -374,7 +374,7 @@ export const WorkspaceLauncher = ({
               </button>
             ))}
           </div>
-          <div className="nx-wsl-panel__section">
+          <div className="nx-wsl-panel__section nx-wsl-panel__section--accents">
             <h4>Accent Palette</h4>
             {ACCENT_OPTIONS.map((accent) => (
               <button
@@ -457,7 +457,7 @@ export const WorkspaceLauncher = ({
   const popover = (
     <div
       ref={popoverRef}
-      className="nx-wsl-popover nx-liquid-popover nx-shell-popover-portal"
+      className="nx-wsl-popover nx-shell-popover-portal"
       style={{
         position: 'fixed',
         top: popoverPosition.top,

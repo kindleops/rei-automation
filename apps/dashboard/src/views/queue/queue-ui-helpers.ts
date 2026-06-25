@@ -1,5 +1,6 @@
 import type { QueueItem } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
+import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 
 export type QueueDensity = 'comfortable' | 'compact' | 'command'
 export type QueueSection = 'queue' | 'templates' | 'senders' | 'market' | 'failures' | 'events'
@@ -135,6 +136,8 @@ export interface StatusPresentation {
   blocking: string | null
   historicalWarnings: string[]
   hasCurrentException: boolean
+  dispatchLabel?: string
+  nextEligibleSendAt?: string | null
 }
 
 const FLAG_LABELS: Record<string, string> = {
@@ -146,6 +149,16 @@ const FLAG_LABELS: Record<string, string> = {
 }
 
 export const resolveStatusPresentation = (item: QueueItem): StatusPresentation => {
+  const dispatchTruth = resolveQueueDispatchTruth({
+    status: item.status,
+    scheduledForUtc: item.scheduledForUtc,
+    smsEligible: item.smsEligible,
+    metadata: item.metadata,
+    campaignId: item.campaignId,
+    campaignStatus: (item.metadata?.campaign_status as string | undefined) ?? null,
+    globalBrakes: item.metadata?.global_send_brakes as QueueItem['metadata'],
+  })
+
   const toneMap: Record<string, string> = {
     scheduled: 'blue', queued: 'blue', sending: 'cyan', sent: 'green',
     delivered: 'green', failed: 'red', retry: 'red', blocked: 'amber',
@@ -177,9 +190,9 @@ export const resolveStatusPresentation = (item: QueueItem): StatusPresentation =
     historicalWarnings.push(`Provider failure (historical): ${item.failedReason}`)
   }
 
-  let blocking: string | null = null
+  let blocking: string | null = dispatchTruth.blocker
   if (BLOCKED_STATUSES.has(item.status)) {
-    blocking = item.blockedReason || item.pausedReason || item.guardReason || 'Blocked by queue guard'
+    blocking = item.blockedReason || item.pausedReason || item.guardReason || blocking || 'Blocked by queue guard'
   } else if (isFailed(item.status) && item.failureCategory) {
     if (!(manual && item.failureCategory === 'missing_template')) {
       blocking = FAILURE_LABEL[item.failureCategory] ?? item.failureCategory.replace(/_/g, ' ')
@@ -196,12 +209,19 @@ export const resolveStatusPresentation = (item: QueueItem): StatusPresentation =
   if (delivered) tone = 'green'
   else if (item.status === 'sent' && item.deliveryStatus === 'pending') tone = 'green'
 
+  const primary = item.dispatchLabel || dispatchTruth.label || formatDisplayStatus(item.status)
+
   return {
-    primary: formatDisplayStatus(item.status),
-    tone,
-    blocking: hasCurrentException ? blocking : null,
+    primary,
+    tone: dispatchTruth.category === 'proof' ? 'amber'
+      : dispatchTruth.category === 'globally_blocked' ? 'red'
+        : dispatchTruth.category === 'future_window' ? 'blue'
+          : tone,
+    blocking: hasCurrentException || dispatchTruth.blocker ? blocking : null,
     historicalWarnings,
-    hasCurrentException,
+    hasCurrentException: hasCurrentException || Boolean(dispatchTruth.blocker),
+    dispatchLabel: dispatchTruth.label,
+    nextEligibleSendAt: item.nextEligibleSendAt || dispatchTruth.nextEligibleSendAt,
   }
 }
 

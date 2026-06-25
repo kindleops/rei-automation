@@ -1621,6 +1621,8 @@ export interface CampaignLifecycleResponse {
   inserted?: number
   skipped?: number
   idempotent?: boolean
+  proof_hydration?: boolean
+  activation_mode?: 'live' | 'test'
   queue_result?: Record<string, unknown>
 }
 

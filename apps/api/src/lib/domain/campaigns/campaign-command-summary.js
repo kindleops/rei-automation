@@ -56,7 +56,7 @@ async function loadCurrentRun(supabase, campaignId) {
 async function aggregateQueueExecution(supabase, campaignId, runId = null, campaign = {}) {
   const { data: rows, error } = await supabase
     .from('send_queue')
-    .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata,failed_reason,failure_category,updated_at,delivered_at,sent_at')
+    .select('id,queue_status,sms_eligible,routing_allowed,scheduled_for,metadata,failed_reason,updated_at,delivered_at,sent_at')
     .eq('campaign_id', campaignId)
     .limit(5000)
   if (error) throw error

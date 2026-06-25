@@ -16,6 +16,8 @@ type ActivationStep =
   | 'complete'
   | 'failed'
 
+type ActivationMode = 'live' | 'test'
+
 const ACTIVATION_TIMEOUT_MS = 120_000
 
 interface CampaignActivationModalProps {
@@ -26,6 +28,8 @@ interface CampaignActivationModalProps {
     skipped: number
     blockers: string[]
     idempotent?: boolean
+    activationMode: ActivationMode
+    proofHydration: boolean
   }) => void
 }
 
@@ -53,17 +57,26 @@ export const CampaignActivationModal = ({
   const [error, setError] = useState<string | null>(null)
   const [blockers, setBlockers] = useState<string[]>([])
   const [pending, setPending] = useState(false)
+  const [completionMode, setCompletionMode] = useState<ActivationMode | null>(null)
   const idempotencyKeyRef = useRef(`activate-${campaign.id}-${Date.now()}`)
   const abortRef = useRef<AbortController | null>(null)
   const busy = pending
 
   const readiness = useMemo(() => computeCampaignReadiness(campaign), [campaign])
 
-  const runActivation = useCallback(async () => {
+  const runActivation = useCallback(async (activationMode: ActivationMode) => {
     if (pending) return
+    const isTest = activationMode === 'test'
+    if (!isTest) {
+      const confirmed = window.confirm(
+        'Activate LIVE queue rows? This hydrates executable send_queue rows subject to global brakes and campaign gates. No SMS sends until brakes are cleared and rows are due.',
+      )
+      if (!confirmed) return
+    }
     setError(null)
     setBlockers([])
     setPending(true)
+    setCompletionMode(activationMode)
     setStep('validating_recipients')
     abortRef.current?.abort()
     abortRef.current = new AbortController()
@@ -73,7 +86,8 @@ export const CampaignActivationModal = ({
       const result = await activateCampaignWithReview(campaign.id, {
         activation_idempotency_key: idempotencyKeyRef.current,
         confirm_live: true,
-        no_send: true,
+        no_send: isTest,
+        explicit_operator_action: true,
         batch_max: Math.min(campaign.ready_targets || 5, 5),
       })
 
@@ -84,6 +98,7 @@ export const CampaignActivationModal = ({
         setBlockers(msgs)
         setError(msgs.join(' · '))
         setStep('failed')
+        setCompletionMode(null)
         return
       }
 
@@ -93,12 +108,15 @@ export const CampaignActivationModal = ({
         skipped: result.skipped ?? 0,
         blockers: result.blockers ?? [],
         idempotent: result.idempotent,
+        activationMode,
+        proofHydration: Boolean(result.proof_hydration ?? isTest),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const isAbort = err instanceof Error && err.name === 'AbortError'
       setError(isAbort ? 'Activation timed out — check campaign run status and retry.' : msg)
       setStep('failed')
+      setCompletionMode(null)
     } finally {
       window.clearTimeout(timeout)
       setPending(false)
@@ -114,7 +132,14 @@ export const CampaignActivationModal = ({
   }, [busy, onClose])
 
   const reviewBlockers = [...readiness.blockers, ...blockers]
-  const canConfirm = readiness.level !== 'blocked' && campaign.ready_targets > 0 && campaign.launch_readiness !== 'blocked'
+  const canTestActivate = campaign.ready_targets > 0
+  const canLiveActivate = readiness.level !== 'blocked' && campaign.ready_targets > 0 && campaign.launch_readiness !== 'blocked'
+
+  const completionCopy = completionMode === 'test'
+    ? 'Test hydration complete — proof rows created, no SMS will transmit'
+    : completionMode === 'live'
+      ? 'Live activation complete — executable rows hydrated; sends wait for brakes + schedule'
+      : null
 
   const modal = (
     <div className="ccm-glass-overlay" onClick={onClose}>
@@ -141,7 +166,7 @@ export const CampaignActivationModal = ({
               </div>
               <div className="ccm-activation-stat">
                 <span>Initial batch</span>
-                <strong>{Math.min(campaign.ready_targets || 0, 500).toLocaleString()}</strong>
+                <strong>{Math.min(campaign.ready_targets || 0, 5).toLocaleString()}</strong>
               </div>
               <div className="ccm-activation-stat">
                 <span>Total snapshot</span>
@@ -160,6 +185,17 @@ export const CampaignActivationModal = ({
               <div className="ccm-activation-stat">
                 <span>First execution</span>
                 <strong>{campaign.next_send_at ? new Date(campaign.next_send_at).toLocaleString() : 'On activation'}</strong>
+              </div>
+            </div>
+
+            <div className="ccm-activation-warnings">
+              <div className="ccm-activation-warn-item">
+                <Icon name="alert-circle" size={12} />
+                Test Activation hydrates proof rows (`no_send`) for pipeline validation only.
+              </div>
+              <div className="ccm-activation-warn-item">
+                <Icon name="zap" size={12} />
+                Live Activation hydrates executable rows (`no_send: false`) but global brakes still block transmission until cleared.
               </div>
             </div>
 
@@ -203,7 +239,7 @@ export const CampaignActivationModal = ({
           </div>
         )}
 
-        {step === 'complete' && (
+        {step === 'complete' && completionCopy && (
           <div className="ccm-activation-progress">
             <ul className="ccm-activation-steps">
               {PROGRESS_STEPS.map((s) => {
@@ -218,12 +254,10 @@ export const CampaignActivationModal = ({
                 )
               })}
             </ul>
-            {step === 'complete' && (
-              <div className="ccm-activation-success">
-                <Icon name="check" size={20} />
-                Campaign activated successfully
-              </div>
-            )}
+            <div className={`ccm-activation-success${completionMode === 'test' ? ' is-warn' : ''}`}>
+              <Icon name={completionMode === 'test' ? 'alert-circle' : 'check'} size={20} />
+              {completionCopy}
+            </div>
           </div>
         )}
 
@@ -243,11 +277,19 @@ export const CampaignActivationModal = ({
               <button type="button" className="ccc-btn" onClick={onClose}>Cancel</button>
               <button
                 type="button"
-                className="ccc-btn is-primary"
-                disabled={!canConfirm}
-                onClick={() => void runActivation()}
+                className="ccc-btn is-warn"
+                disabled={!canTestActivate || busy}
+                onClick={() => void runActivation('test')}
               >
-                Confirm Activation
+                Test Activation
+              </button>
+              <button
+                type="button"
+                className="ccc-btn is-primary"
+                disabled={!canLiveActivate || busy}
+                onClick={() => void runActivation('live')}
+              >
+                Live Activation
               </button>
             </>
           )}

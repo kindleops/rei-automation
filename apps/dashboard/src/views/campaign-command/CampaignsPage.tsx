@@ -1585,12 +1585,17 @@ export const CampaignsPage = () => {
           campaign={activationCampaign}
           onClose={() => setActivationCampaign(null)}
           onSuccess={(result) => {
+            const isProof = result.proofHydration || result.activationMode === 'test'
             emitNotification({
-              title: result.idempotent ? 'Already activated' : 'Campaign activated',
+              title: result.idempotent
+                ? (isProof ? 'Test hydration replay' : 'Already activated')
+                : (isProof ? 'Test hydration complete' : 'Live activation complete'),
               detail: result.idempotent
                 ? 'Idempotent replay — no duplicate queue rows.'
-                : `${result.inserted} inserted · ${result.skipped} skipped`,
-              severity: 'success',
+                : isProof
+                  ? `${result.inserted} proof rows inserted · no SMS will transmit`
+                  : `${result.inserted} live rows inserted · ${result.skipped} skipped · sends wait for brakes + schedule`,
+              severity: isProof ? 'warning' : 'success',
             })
             setActivationCampaign(null)
             void load({ silent: true })
