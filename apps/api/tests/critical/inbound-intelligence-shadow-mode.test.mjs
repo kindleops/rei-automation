@@ -548,7 +548,11 @@ test("condition disclosure resolves condition_disclosed at condition stage", asy
     execution_allowed: false,
   });
   assert.equal(result.intelligence_snapshot.canonical_intent, "condition_disclosed");
-  assert.equal(result.intelligence_snapshot.universal_stage, "condition_justification");
+  assert.equal(result.intelligence_snapshot.canonical_intent, "condition_disclosed");
+  assert.equal(
+    result.intelligence_snapshot.decision_layers.recommendation.recommended_use_case,
+    "price_high_condition_probe"
+  );
 });
 
 test("non_owner_referral follow-up policy suppresses source nurture but proposes referred stage 1", () => {
@@ -581,13 +585,13 @@ test("shadow comparison produces per-field agreement metadata", async () => {
     auto_reply_mode: "disabled",
     execution_allowed: false,
   });
-  const comparison = result.intelligence_snapshot.shadow_comparison;
+  const comparison = result.intelligence_snapshot.three_layer_comparison;
   assert.ok(comparison);
-  assert.ok(comparison.agreement);
-  assert.ok("canonical_intent" in comparison.agreement);
-  assert.ok("identity_class" in comparison.agreement);
+  assert.ok(comparison.layers?.semantic);
+  assert.ok(comparison.layers?.recommendation);
+  assert.ok(comparison.layers?.execution);
   assert.ok(comparison.comparison_class);
-  assert.equal(result.intelligence_snapshot.shadow_stage_engine.execution_authority, false);
+  assert.equal(result.intelligence_snapshot.decision_layers.execution.shadow_only, true);
 });
 
 test("stage 1 shadow uses relationship override not raw wrong_number classifier", () => {
@@ -609,9 +613,13 @@ test("stage 1 shadow uses relationship override not raw wrong_number classifier"
     granular_stage: "referral_review",
     human_review_required: true,
   });
-  assert.notEqual(shadow.shadow_stage_engine.granular_stage, "wrong_person");
-  assert.equal(shadow.shadow_stage_engine.proposed_decision.inbound_intent, "non_owner_referral");
-  assert.equal(shadow.comparison.comparison_class, "full_agreement");
+  assert.notEqual(shadow.stage_domain_recommendation.recommended_use_case, "consider_selling");
+  assert.equal(shadow.stage_domain_recommendation.recommended_action, "referral_review");
+  assert.ok(
+    ["full_agreement", "expected_execution_block_difference"].includes(
+      shadow.three_layer_comparison.comparison_class
+    )
+  );
 });
 
 test("transition-aware ownership confirmation agrees on offer_interest advance", () => {
@@ -767,6 +775,61 @@ test("safety disposition disagreement is always material", () => {
   assert.ok(ALWAYS_MATERIAL_FIELDS.includes("safety_disposition"));
   assert.ok(comparison.material_disagreement_fields.includes("safety_disposition"));
   assert.equal(comparison.comparison_class, "material_disagreement");
+});
+
+test("three-layer contract separates recommendation from execution", async () => {
+  const result = await runInboundIntelligencePhase({
+    message: "Yes I own it",
+    threadKey: "+15550000001",
+    propertyId: "1001",
+    prospectId: "31",
+    ownerId: "21",
+    phoneId: "51",
+    classification: baseClassification(),
+    latestThreadContext: baseContext(),
+    context: baseContext(),
+    route: { stage: "Ownership Confirmation", use_case: "ownership_check" },
+    inboundFrom: "+15550000001",
+    inboundEventId: "own-yes-01",
+    auto_reply_mode: "disabled",
+    execution_allowed: false,
+  });
+
+  const layers = result.intelligence_snapshot.decision_layers;
+  assert.equal(layers.semantic.canonical_intent, "ownership_confirmed");
+  assert.equal(layers.recommendation.recommended_action, "ask_offer_interest");
+  assert.equal(layers.recommendation.recommended_human_review, false);
+  assert.equal(layers.execution.effective_action, "shadow_only");
+  assert.equal(layers.execution.queue_row_created, false);
+  assert.notEqual(layers.recommendation.recommended_action, layers.execution.effective_action);
+});
+
+test("persistInboundIntelligenceSnapshot classifies missing schema errors", async () => {
+  const { persistInboundIntelligenceSnapshot } = await import(
+    "@/lib/domain/seller-flow/persist-inbound-intelligence.js"
+  );
+  const result = await persistInboundIntelligenceSnapshot({
+    supabaseClient: {
+      from: () => ({
+        upsert: () => ({
+          select: () => ({
+            maybeSingle: async () => {
+              throw new Error('relation "public.inbound_intelligence_audit" does not exist');
+            },
+          }),
+        }),
+      }),
+    },
+    intelligence_snapshot: {
+      source_event_id: "schema-test-01",
+      canonical_intent: "ownership_confirmed",
+      decision_version: "test",
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "schema_missing");
+  assert.equal(result.schema_missing, true);
+  assert.equal(result.deployment_order, "apply_schema_before_code_deploy");
 });
 
 test("unapproved follow-up policy returns explicit review_required_no_schedule", () => {

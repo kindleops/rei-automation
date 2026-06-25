@@ -11,6 +11,22 @@ function canUseSupabase(explicitClient = null) {
   return Boolean(explicitClient) || hasSupabaseConfig();
 }
 
+function isSchemaMissingError(error = null) {
+  const message = clean(error?.message).toLowerCase();
+  return (
+    message.includes("does not exist") ||
+    message.includes("could not find the table") ||
+    message.includes("schema cache") ||
+    (message.includes("relation") && message.includes("not found"))
+  );
+}
+
+export const REQUIRED_INTELLIGENCE_SCHEMA = Object.freeze([
+  "inbound_intelligence_audit",
+  "seller_contact_referrals",
+  "property_participant_graph",
+]);
+
 export async function persistInboundIntelligenceSnapshot({
   supabaseClient = null,
   intelligence_snapshot = null,
@@ -67,11 +83,22 @@ export async function persistInboundIntelligenceSnapshot({
 
     return { ok: true, audit_id: data?.id || null };
   } catch (error) {
+    const schema_missing = isSchemaMissingError(error);
     warn("[INBOUND_INTELLIGENCE_PERSIST_FAILED]", {
       source_event_id: row.source_event_id,
       error: error?.message || "persist_failed",
+      schema_missing,
+      required_tables: REQUIRED_INTELLIGENCE_SCHEMA,
     });
-    return { ok: false, reason: "persist_failed", error: error?.message || "persist_failed" };
+    return {
+      ok: false,
+      reason: schema_missing ? "schema_missing" : "persist_failed",
+      schema_missing,
+      required_tables: REQUIRED_INTELLIGENCE_SCHEMA,
+      deployment_order: schema_missing ? "apply_schema_before_code_deploy" : null,
+      observable: true,
+      error: error?.message || "persist_failed",
+    };
   }
 }
 
@@ -138,11 +165,22 @@ export async function persistSellerContactReferral({
 
     return { ok: true, referral_id: data?.id || null, idempotent: false };
   } catch (error) {
+    const schema_missing = isSchemaMissingError(error);
     warn("[SELLER_REFERRAL_PERSIST_FAILED]", {
       source_event_id: row.source_event_id,
       error: error?.message || "referral_persist_failed",
+      schema_missing,
+      required_tables: REQUIRED_INTELLIGENCE_SCHEMA,
     });
-    return { ok: false, reason: "referral_persist_failed", error: error?.message || "referral_persist_failed" };
+    return {
+      ok: false,
+      reason: schema_missing ? "schema_missing" : "referral_persist_failed",
+      schema_missing,
+      required_tables: REQUIRED_INTELLIGENCE_SCHEMA,
+      deployment_order: schema_missing ? "apply_schema_before_code_deploy" : null,
+      observable: true,
+      error: error?.message || "referral_persist_failed",
+    };
   }
 }
 

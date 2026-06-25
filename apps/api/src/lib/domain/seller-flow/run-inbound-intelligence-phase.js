@@ -11,12 +11,23 @@ import {
 } from "@/lib/domain/seller-flow/resolve-inbound-relationship.js";
 import { runShadowStageEngine } from "@/lib/domain/seller-flow/shadow-stage-engine-runner.js";
 import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
+import { resolveStageDomainRecommendation } from "@/lib/domain/seller-flow/stage-domain-recommendation.js";
+import {
+  mapEffectiveExecutionLayer,
+  mapRecommendationLayer,
+  mapSemanticLayer,
+} from "@/lib/domain/seller-flow/three-layer-decision-contract.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { detectInboundConditionOrMotivationIntent } from "@/lib/domain/seller-flow/detect-inbound-condition-intent.js";
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { info } from "@/lib/logging/logger.js";
 
-const INTELLIGENCE_DECISION_VERSION = "inbound_intelligence_v3_shadow";
+const INTELLIGENCE_DECISION_VERSION = "inbound_intelligence_v4_three_layer";
+const REQUIRED_SCHEMA_TABLES = Object.freeze([
+  "inbound_intelligence_audit",
+  "seller_contact_referrals",
+  "property_participant_graph",
+]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -112,10 +123,12 @@ function applyRelationshipOverride(canonical_decision = {}, relationship = null)
   if (relationship.ownership_confirmed) {
     overridden.should_suppress_contact = false;
     overridden.suppression_reason = null;
-    overridden.reply_mode = "manual_review";
+    overridden.reply_mode = "recommended";
     overridden.safety_status = relationship.safety_status || "allowed";
-    overridden.next_action = "queue_auto_reply";
+    overridden.next_action = "ask_offer_interest";
     overridden.route_hint = "consider_selling";
+    overridden.should_mark_human_review = false;
+    overridden.human_review_required = false;
   } else if (relationship.is_property_scoped || relationship.referral_detected) {
     overridden.should_suppress_contact = false;
     overridden.suppression_reason = null;
@@ -281,7 +294,7 @@ export async function runInboundIntelligencePhase({
       clean(template_result?.template?.use_case) || canonical_decision.route_hint || null,
   });
 
-  const recommended_use_case = relationship_template.blocked
+  let recommended_use_case = relationship_template.blocked
     ? relationship_template.use_case
     : clean(template_result?.template?.use_case) || canonical_decision.route_hint || null;
 
@@ -312,6 +325,57 @@ export async function runInboundIntelligencePhase({
     }
   );
 
+  const semantic_intent = canonical_decision.canonical_intent || "unclear";
+
+  const stage_domain = resolveStageDomainRecommendation({
+    message,
+    classification,
+    context: context || latestThreadContext,
+    relationship,
+    semantic_intent,
+    follow_up_recommendation,
+    route,
+  });
+
+  const domain_recommendation = stage_domain.recommendation;
+  recommended_use_case = domain_recommendation.recommended_use_case || recommended_use_case;
+  const authoritative_universal_stage =
+    domain_recommendation.proposed_next_stage || universal_stage;
+  const authoritative_granular_stage =
+    stage_domain.engine_result?.stage_decision?.next_stage || granular_stage;
+
+  const execution_blocked_reason = deriveExecutionBlockedReason({
+    auto_reply_mode,
+    execution_allowed,
+    decision: canonical_decision,
+    relationship,
+  });
+
+  const recommendation_layer = mapRecommendationLayer({
+    recommendation: domain_recommendation,
+    follow_up_recommendation,
+  });
+
+  const semantic_layer = mapSemanticLayer({
+    relationship,
+    classification,
+    canonical_intent: semantic_intent,
+    context: context || latestThreadContext,
+    route,
+    extracted_facts: {
+      referrals: referral.referrals || [],
+      asking_price: stage_domain.engine_result?.stage_decision?.seller_asking_price ?? null,
+      offer_band: stage_domain.engine_result?.stage_decision?.offer_band ?? null,
+    },
+  });
+
+  const effective_execution_layer = mapEffectiveExecutionLayer({
+    execution_allowed,
+    execution_blocked_reason,
+    recommendation: recommendation_layer,
+    relationship,
+  });
+
   const shadow_stage = runShadowStageEngine({
     message,
     classification,
@@ -322,26 +386,20 @@ export async function runInboundIntelligencePhase({
     identity_class,
     relationship_outcome: relationship.relationship_outcome,
     suppression_scope: relationship.suppression_scope,
-    universal_stage,
-    granular_stage,
+    universal_stage: authoritative_universal_stage,
+    granular_stage: authoritative_granular_stage,
     follow_up_recommendation,
     recommended_use_case,
-    human_review_required: Boolean(
-      relationship.human_review_required || canonical_decision.should_mark_human_review
-    ),
+    human_review_required: recommendation_layer.recommended_human_review,
     route,
-  });
-
-  const execution_blocked_reason = deriveExecutionBlockedReason({
-    auto_reply_mode,
+    referral,
+    orchestrator_recommendation: domain_recommendation,
     execution_allowed,
-    decision: canonical_decision,
-    relationship,
+    execution_blocked_reason,
+    extracted_facts: semantic_layer.extracted_facts,
   });
 
-  const human_review_required = Boolean(
-    relationship.human_review_required || canonical_decision.should_mark_human_review
-  );
+  const human_review_required = Boolean(recommendation_layer.recommended_human_review);
 
   const intelligence_snapshot = {
     decision_version: INTELLIGENCE_DECISION_VERSION,
@@ -358,14 +416,20 @@ export async function runInboundIntelligencePhase({
     invalidate_person_globally: Boolean(relationship.invalidate_person_globally),
     referred_contact_proposed_stage: relationship.referred_contact_proposed_stage || null,
     automatic_send_allowed: Boolean(relationship.automatic_send_allowed),
-    universal_stage,
-    granular_stage,
-    safety_status: canonical_decision.safety_status || "review",
+    universal_stage: authoritative_universal_stage,
+    granular_stage: authoritative_granular_stage,
+    safety_status: recommendation_layer.recommended_safety_disposition || "review",
+    decision_layers: {
+      semantic: semantic_layer,
+      recommendation: recommendation_layer,
+      execution: effective_execution_layer,
+    },
+    stage_authority: stage_domain.authority,
     reply_recommendation: {
       should_queue_reply: false,
-      reply_mode: canonical_decision.reply_mode || "manual_review",
-      route_hint: canonical_decision.route_hint || null,
-      next_action: canonical_decision.next_action || null,
+      reply_mode: "shadow_only",
+      route_hint: recommendation_layer.recommended_use_case || null,
+      next_action: recommendation_layer.recommended_action || null,
       scheduled_next_action: canonical_decision.scheduled_next_action || null,
     },
     selected_template: template_result?.ok
@@ -397,7 +461,13 @@ export async function runInboundIntelligencePhase({
     canonical_decision,
     legacy_decision: legacy_plan || null,
     shadow_stage_engine: shadow_stage,
-    shadow_comparison: shadow_stage.comparison || null,
+    shadow_comparison: shadow_stage.three_layer_comparison || shadow_stage.comparison || null,
+    three_layer_comparison: shadow_stage.three_layer_comparison || null,
+    schema_dependency: {
+      required_tables: REQUIRED_SCHEMA_TABLES,
+      status: "unverified_until_persist",
+      deployment_order: "schema_before_code_or_explicit_degraded_diagnostics",
+    },
     source_event_id: clean(inboundEventId) || null,
     source_thread_key: clean(threadKey) || clean(inboundFrom) || null,
     created_at: new Date().toISOString(),

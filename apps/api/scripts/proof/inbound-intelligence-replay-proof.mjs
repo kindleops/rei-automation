@@ -131,7 +131,7 @@ async function replayFixture(fixture) {
   });
 
   const snap = intelligence.intelligence_snapshot;
-  const comparison = snap.shadow_comparison || {};
+  const comparison = snap.three_layer_comparison || snap.shadow_comparison || {};
 
   return {
     event_id: fixture.id,
@@ -161,17 +161,19 @@ async function replayFixture(fixture) {
     follow_up_recommendation: snap.follow_up_recommendation,
     human_review_required: snap.human_review_required,
     automatic_send_allowed: snap.automatic_send_allowed,
+    decision_layers: snap.decision_layers || null,
     shadow_comparison: {
-      agreement: comparison.agreement || {},
-      agreement_score: comparison.agreement_score ?? null,
       comparison_class: comparison.comparison_class || null,
-      material_disagreement: comparison.material_disagreement ?? null,
-      material_disagreement_fields: comparison.material_disagreement_fields || [],
-      non_material_disagreement_fields: comparison.non_material_disagreement_fields || [],
-      materiality_model: comparison.materiality_model || null,
-      transition_comparison: comparison.transition_comparison || null,
-      canonical_shape: comparison.canonical_shape || null,
-      shadow_shape: comparison.shadow_shape || null,
+      semantic_full_agreement: comparison.semantic_full_agreement ?? null,
+      recommendation_full_agreement: comparison.recommendation_full_agreement ?? null,
+      effective_execution_full_agreement: comparison.effective_execution_full_agreement ?? null,
+      layers: comparison.layers || null,
+      material_semantic_disagreement_fields:
+        comparison.material_semantic_disagreement_fields || [],
+      material_recommendation_disagreement_fields:
+        comparison.material_recommendation_disagreement_fields || [],
+      material_execution_disagreement_fields:
+        comparison.material_execution_disagreement_fields || [],
     },
     dispatchable_queue_rows: 0,
     provider_calls: 0,
@@ -197,12 +199,22 @@ for (const fixture of FIXTURES) {
   if (!result.shadow_comparison.comparison_class) {
     violations.push(`${result.event_id}:missing_normalized_comparison`);
   }
+  const rec_layers = result.shadow_comparison.layers?.recommendation;
   if (
-    result.shadow_comparison.non_material_disagreement_fields?.includes("safety_disposition") ||
-    (result.shadow_comparison.agreement?.safety_disposition === false &&
-      result.shadow_comparison.comparison_class === "non_material_disagreement")
+    rec_layers &&
+    rec_layers.agreement?.recommended_safety_disposition === false &&
+    result.shadow_comparison.comparison_class === "full_agreement"
   ) {
     violations.push(`${result.event_id}:safety_disagreement_classified_non_material`);
+  }
+  if (
+    rec_layers &&
+    result.decision_layers?.recommendation?.recommended_action !==
+      result.decision_layers?.execution?.effective_action &&
+    result.decision_layers?.execution?.effective_action !== "shadow_only" &&
+    result.shadow_comparison.comparison_class === "full_agreement"
+  ) {
+    violations.push(`${result.event_id}:layer_b_compared_to_layer_c`);
   }
   if (
     result.canonical_intent === "non_owner_referral" &&
@@ -213,15 +225,22 @@ for (const fixture of FIXTURES) {
 }
 
 const comparison_summary = {
+  semantic_full_agreement: results.filter((r) => r.shadow_comparison.semantic_full_agreement === true).length,
+  recommended_decision_full_agreement: results.filter(
+    (r) => r.shadow_comparison.recommendation_full_agreement === true
+  ).length,
+  effective_execution_full_agreement: results.filter(
+    (r) => r.shadow_comparison.effective_execution_full_agreement === true
+  ).length,
   full_agreement: results.filter((r) => r.shadow_comparison.comparison_class === "full_agreement").length,
-  expected_transition_context_difference: results.filter(
-    (r) => r.shadow_comparison.comparison_class === "expected_transition_context_difference"
+  material_semantic_disagreement: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "material_semantic_disagreement"
   ).length,
-  non_material_disagreement: results.filter(
-    (r) => r.shadow_comparison.comparison_class === "non_material_disagreement"
+  material_recommendation_disagreement: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "material_recommendation_disagreement"
   ).length,
-  material_disagreement: results.filter(
-    (r) => r.shadow_comparison.comparison_class === "material_disagreement"
+  expected_execution_block_difference: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "expected_execution_block_difference"
   ).length,
   insufficient_context: results.filter(
     (r) => r.shadow_comparison.comparison_class === "insufficient_context"
