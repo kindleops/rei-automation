@@ -862,7 +862,9 @@ const deriveProfileRoleTags = (profile: BuyerProfileSummary): string[] => {
 export const useBuyerCommandData = (
   selectedThread: InboxWorkflowThread | null,
   filters: BuyerMapFilters,
+  options: { enabled?: boolean } = {},
 ): BuyerCommandData => {
+  const enabled = options.enabled !== false
   const [state, setState] = useState<BuyerCommandData>({
     profiles: [],
     matches: [],
@@ -878,7 +880,7 @@ export const useBuyerCommandData = (
   const context = useMemo(() => propertyContextFromThread(selectedThread), [selectedThread])
 
   useEffect(() => {
-    if (!context) {
+    if (!enabled || !context) {
       setState((current) => ({
         ...current,
         profiles: [],
@@ -893,6 +895,7 @@ export const useBuyerCommandData = (
     }
 
     let active = true
+    let cancelIdle: (() => void) | null = null
     setState((current) => ({ ...current, loading: true, error: null }))
 
     const load = async () => {
@@ -1054,19 +1057,27 @@ export const useBuyerCommandData = (
       })
     }
 
-    load().catch((error: unknown) => {
+    const run = () => {
+      load().catch((error: unknown) => {
+        if (!active) return
+        setState((current) => ({
+          ...current,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+      })
+    }
+
+    import('../../shared/idleDefer').then(({ runWhenBrowserIdle }) => {
       if (!active) return
-      setState((current) => ({
-        ...current,
-        loading: false,
-        error: error instanceof Error ? error.message : String(error),
-      }))
-    })
+      cancelIdle = runWhenBrowserIdle(run, 3000)
+    }).catch(() => run())
 
     return () => {
       active = false
+      cancelIdle?.()
     }
-  }, [context, filters])
+  }, [context, filters, enabled])
 
   return state
 }

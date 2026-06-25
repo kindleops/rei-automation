@@ -1,0 +1,97 @@
+{
+  "capturedAt": "2026-06-25T01:45:00Z",
+  "url": "http://localhost:5173/inbox",
+  "coldLoadFirstNavigation": {
+    "timeToInitialHtmlMs": 6,
+    "timeToFirstVisibleCachedCountsMs": null,
+    "timeToAuthoritativeCountsMs": 2465,
+    "timeToFirstThreadRowsMs": null,
+    "timeToInboxInteractiveMs": null,
+    "bucketCountsAtFirstPaint": "all zeros (PRIORITY 0, NEW REPLIES 0, ALL THREADS 0)",
+    "inboxLiveStatus": "net::ERR_ABORTED at 12s timeout",
+    "countsApiQueryMs": 2465
+  },
+  "coldReloadTrace": {
+    "lcpMs": 2781,
+    "ttfbMs": 6,
+    "renderDelayMs": 2775,
+    "fcpMs": 4172,
+    "domContentLoadedMs": 3827,
+    "loadEventEndMs": 4128,
+    "memoryBeforeBytes": null,
+    "memoryAfterBytes": { "usedJSHeapSize": 53532090, "totalJSHeapSize": 56218670 }
+  },
+  "afterReloadAuthoritativeCounts": {
+    "priority": 49,
+    "new_replies": 32,
+    "needs_review": 111,
+    "waiting": 1,
+    "all": 7896
+  },
+  "unrelatedCriticalPathRequests": [
+    {
+      "url": "v_buyer_entity_leaderboard",
+      "initiator": "buyerCommandData.ts useBuyerCommandData",
+      "onInboxCriticalPath": false,
+      "reason": "Buyer Match data loads on thread selection via InboxPage line 941"
+    },
+    {
+      "url": "v_buyer_entity_purchases",
+      "initiator": "buyerCommandData.ts useBuyerCommandData",
+      "onInboxCriticalPath": false,
+      "reason": "Buyer purchases load on thread selection, not /buyer-match route"
+    },
+    {
+      "url": "template_performance_kpis_v",
+      "initiator": "performanceIntelligence.ts via InboxKpiOrb in NexusTopBar",
+      "onInboxCriticalPath": false,
+      "reason": "Leaderboard/KPI data on inbox boot"
+    },
+    {
+      "url": "number_performance_kpis_v",
+      "initiator": "performanceIntelligence.ts via InboxKpiOrb",
+      "onInboxCriticalPath": false
+    },
+    {
+      "url": "performance_message_events_v",
+      "initiator": "performanceIntelligence.ts fetchAttributionCoverage",
+      "onInboxCriticalPath": false
+    },
+    {
+      "url": "api/cockpit/ops/metrics",
+      "initiator": "operationalKpis.ts via InboxKpiOrb useOperationalKpis",
+      "onInboxCriticalPath": false
+    },
+    {
+      "url": "maplibre-gl.js",
+      "initiator": "InboxPage static import InboxCommandMap",
+      "onInboxCriticalPath": false,
+      "reason": "Map module in Vite module graph on inbox boot"
+    },
+    {
+      "url": "campaign-command/* modules",
+      "initiator": "InboxPage static import InboxCampaignView",
+      "onInboxCriticalPath": false
+    }
+  ],
+  "slowRequestsOver500ms": [
+    {
+      "url": "/api/cockpit/inbox/counts",
+      "durationMs": 2465,
+      "transferSize": "chunked JSON",
+      "initiator": "inbox.adapter.ts fetchAuthoritativeCounts",
+      "blocksRendering": true,
+      "onCriticalPath": true,
+      "backendPhase": "supabase_query 2465ms"
+    }
+  ],
+  "directionStatusProof": {
+    "inboundLast": { "row": "Donald & Linda Williams", "badge": "Inbound", "apiDirection": "inbound" },
+    "outboundDelivered": { "row": "Rafael Romo", "badge": "Delivered" },
+    "outboundFailed": { "row": "Kim E Ingraham", "badge": "Failed" }
+  },
+  "threadState400": {
+    "observed": false,
+    "note": "No /thread-state requests in boot network waterfall"
+  }
+}

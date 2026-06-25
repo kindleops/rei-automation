@@ -2,7 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getSupabaseClient } from '../supabaseClient'
 import { fetchOperationalKpis, type OperationalKpis, type OperationalKpi } from './inboxKpis'
 
-export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '24h') => {
+export const useOperationalKpis = (
+  timeWindow: OperationalKpi['timeWindow'] = '24h',
+  options: { enabled?: boolean } = {},
+) => {
+  const enabled = options.enabled !== false
   const [kpis, setKpis] = useState<OperationalKpis | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -44,8 +48,21 @@ export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '2
   }, [load])
 
   useEffect(() => {
-    void load(true)
-    
+    if (!enabled) {
+      setIsLoading(false)
+      return undefined
+    }
+    let cancelled = false
+    let cancelIdle: (() => void) | null = null
+    const start = () => {
+      if (cancelled) return
+      void load(true)
+    }
+    import('../../shared/idleDefer').then(({ runWhenBrowserIdle }) => {
+      if (cancelled) return
+      cancelIdle = runWhenBrowserIdle(start, 5000)
+    }).catch(() => start())
+
     const supabase = getSupabaseClient()
     
     // Subscribe to message events for real-time messaging updates
@@ -69,12 +86,13 @@ export const useOperationalKpis = (timeWindow: OperationalKpi['timeWindow'] = '2
       .subscribe()
 
     return () => {
+      cancelled = true
+      cancelIdle?.()
       supabase.removeChannel(messageSub)
       supabase.removeChannel(queueSub)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-
     }
-  }, [timeWindow, debouncedLoad, load])
+  }, [enabled, timeWindow, debouncedLoad, load])
 
   // Rule-based recommendations
   const recommendations = useCallback(() => {

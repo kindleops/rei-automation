@@ -15,6 +15,16 @@ const toCanonicalE164 = (value: unknown): string | null => {
   return null
 }
 
+const extractPhoneFromCompositeKey = (value: unknown): string | null => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const phoneSegment = raw.match(/(?:^|\|)phone:(\+1\d{10})\b/i)?.[1]
+  if (phoneSegment) return phoneSegment
+  const legacyPhonePrefix = raw.match(/^phone:(\+1\d{10})$/i)?.[1]
+  if (legacyPhonePrefix) return legacyPhonePrefix
+  return null
+}
+
 export const resolveCanonicalThreadStateKey = (thread: Record<string, unknown>): string | null => {
   const candidates = [
     thread.canonicalE164,
@@ -30,10 +40,15 @@ export const resolveCanonicalThreadStateKey = (thread: Record<string, unknown>):
     thread.display_phone,
     thread.normalizedPhone,
     thread.normalized_phone,
+    thread.conversationThreadId,
+    thread.conversation_thread_id,
     thread.threadKey,
     thread.thread_key,
+    thread.id,
   ]
   for (const candidate of candidates) {
+    const compositePhone = extractPhoneFromCompositeKey(candidate)
+    if (compositePhone) return compositePhone
     const resolved = toCanonicalE164(candidate)
     if (resolved) return resolved
   }

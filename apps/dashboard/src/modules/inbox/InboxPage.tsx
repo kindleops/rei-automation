@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
@@ -69,22 +69,18 @@ import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
-import { CompIntelligenceWorkspace } from '../../views/comp-intelligence/CompIntelligenceWorkspace'
-import { BuyerMatchWorkspace } from './components/BuyerMatchWorkspace'
 import { QueuePage } from '../../views/queue/QueuePage'
-import { PipelineWorkspace } from '../../views/pipeline/PipelineWorkspace'
 import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
-import { MetricsWarRoom } from './components/MetricsWarRoom'
 import type { TemplateActionPayload } from './components/TemplatePopover'
 import { InboxActivityPanel } from './components/InboxActivityPanel'
-import { InboxCommandMap, type MapStyleMode } from '../../views/map/InboxCommandMap'
+import type { MapStyleMode } from '../../views/map/InboxCommandMap'
 import { InboxUtilityDrawer, MapDossierDrawer } from './components/InboxUtilityDrawer'
 import { LiveCopilotChat } from '../copilot/components/LiveCopilotChat'
 import { AdvancedFiltersModal } from './components/AdvancedFiltersModal'
 import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
-import { InboxCampaignView } from '../../views/campaign-command/InboxCampaignView'
+
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
 import {
@@ -192,6 +188,19 @@ import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
+
+const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.CompIntelligenceWorkspace })))
+const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
+const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
+const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
+const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
+const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
+
+const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
+  <Suspense fallback={<div className="nx-workspace-surface__loading">Loading workspace…</div>}>
+    {children}
+  </Suspense>
+)
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -620,7 +629,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const inFlightSendMapRef = useRef<Set<string>>(new Set()) // clientSendIds currently in-flight
   const prevThreadsRef = useRef<InboxWorkflowThread[]>([])
   useEffect(() => {
-    console.log('[InboxPage] mounted')
+
   }, [initialWorkspaceView])
 
   const rawThreads = useMemo(() => (data.threads ?? []).map(toWorkflowThread), [data.threads])
@@ -761,23 +770,26 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         if (aliasValue !== undefined) return aliasValue
       }
       if (storeHasAnyCounts) return undefined
-      return fallback
+      if (threads.length > 0 && fallback !== undefined) return fallback
+      return undefined
     }
 
-    const num = (value: number | undefined, fallback = 0) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback)
+    const num = (value: number | undefined): number | null => (
+      typeof value === 'number' && Number.isFinite(value) ? value : null
+    )
 
     const allCount = num(sv('all', ['all_messages'], data.allInboxCount ?? local.all))
     const newReplies = num(sv('new_replies', ['new_inbound', 'needs_reply'], local.new_replies))
     const priorityCount = num(sv('priority', ['hot_leads'], local.priority ?? local.hot_leads))
     const needsReview = num(sv('needs_review', ['manual_review'], local.needs_review))
-    const followUpCount = num(sv('follow_up', ['follow_up_due', 'outbound_active'], local.follow_up ?? local.follow_up_due ?? 0))
+    const followUpCount = num(sv('follow_up', ['follow_up_due', 'outbound_active'], local.follow_up ?? local.follow_up_due))
     const suppressed = num(sv('suppressed', ['dnc_opt_out'], local.suppressed))
     const coldNoResp = num(sv('cold', ['cold_no_response'], local.cold ?? local.cold_no_response))
-    const deadCount = num(sv('dead', [], local.dead ?? local.wrong_number ?? 0))
+    const deadCount = num(sv('dead', [], local.dead ?? local.wrong_number))
     const automated = num(sv('automated', ['auto_replied'], local.automated))
     const hotLeads = num(sv('hot_leads', [], local.hot_leads))
     const activeCount = num(sv('active', [], local.active))
-    const waitingCount = num(sv('waiting', ['waiting_on_seller'], local.waiting ?? local.waiting_on_seller ?? 0))
+    const waitingCount = num(sv('waiting', ['waiting_on_seller'], local.waiting ?? local.waiting_on_seller))
 
     return {
       ...local,
@@ -922,11 +934,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [threads, selected, effectiveActiveContext],
   )
 
-  // Phase 1 trace — fires ONLY when the actual thread identity changes (string key, not object ref)
-  useEffect(() => {
-    console.log('[SELECTED_KEY_CHANGED]', selectedKeyForEffect)
-  }, [selectedKeyForEffect])
-
   useEffect(() => {
     if (!selected) return
     const selectedConversationId = getConversationThreadIdForThread(selected) || selected.threadKey || selected.id
@@ -938,7 +945,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       selectedThreadFallbackRef.current = selected
     }
   }, [selected, threads])
-  const buyerCommandData = useBuyerCommandData(workspaceThread, buyerFilters)
+  const buyerDataEnabled = selectedWorkspaceViews.includes('buyer_match') || selectedWorkspaceViews.includes('command_map')
+  const buyerCommandData = useBuyerCommandData(workspaceThread, buyerFilters, { enabled: buyerDataEnabled })
 
   useEffect(() => {
     if (selectedBuyerKey && buyerCommandData.matches.some((match) => match.buyerKey === selectedBuyerKey)) return
@@ -4128,6 +4136,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
           <div className="nx-map-right-body nx-map-right-body--workspace">
+            <WorkspaceSuspense>
             <InboxCommandMap
               threads={mapThreads}
               visibleThreads={filtered}
@@ -4160,6 +4169,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               layoutMode={layoutMode}
               paused={heavyLoadPaused}
             />
+            </WorkspaceSuspense>
           </div>
         </section>
       )
@@ -4188,6 +4198,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'pipeline') {
       return (
+        <WorkspaceSuspense>
         <PipelineWorkspace
           selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
           externalContext={effectiveActiveContext}
@@ -4204,6 +4215,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           onOpenDealIntelligence={handleOpenDealIntelligence}
           onAction={handleOperatorAction}
         />
+        </WorkspaceSuspense>
       )
     }
 
@@ -4239,7 +4251,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'metrics') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--metrics">
-          <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
+          <WorkspaceSuspense>
+            <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
+          </WorkspaceSuspense>
         </section>
       )
     }
@@ -4247,6 +4261,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'comp_intelligence') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
+          <WorkspaceSuspense>
           <CompIntelligenceWorkspace
             thread={workspaceThread}
             dealContext={canonicalSelectedContext}
@@ -4254,6 +4269,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             paneWidth={paneWidth}
             layoutMode={layoutMode}
           />
+          </WorkspaceSuspense>
         </section>
       )
     }
@@ -4261,6 +4277,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'buyer_match') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--map">
+          <WorkspaceSuspense>
           <BuyerMatchWorkspace
             paused={heavyLoadPaused}
             dealContext={canonicalSelectedContext}
@@ -4284,6 +4301,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             paneWidth={paneWidth}
             apiBase="/api/cockpit"
           />
+          </WorkspaceSuspense>
         </section>
       )
     }
@@ -4291,11 +4309,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (view === 'campaigns') {
       return (
         <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <WorkspaceSuspense>
           <InboxCampaignView
             selectedThread={workspaceThread}
             paneWidth={paneWidth}
             layoutMode={layoutMode}
           />
+          </WorkspaceSuspense>
         </section>
       )
     }

@@ -1,0 +1,151 @@
+{
+  "bootMs": 13491,
+  "sidebarCounts": [
+    "🔥Priority49",
+    "📥New Replies32",
+    "🧠Needs Review111",
+    "⏳Waiting1",
+    "📦All Threads7896"
+  ],
+  "countsResponses": [
+    {
+      "ms": 4660,
+      "status": 200,
+      "counts": {
+        "all": 7896,
+        "all_messages": 7896,
+        "priority": 49,
+        "needs_attention": 0,
+        "qualified": 0,
+        "offers": 0,
+        "contracts": 0,
+        "closing": 0,
+        "new_replies": 32,
+        "needs_review": 111,
+        "follow_up": 1,
+        "cold": 7134,
+        "dead": 297,
+        "not_interested": 297,
+        "wrong_person": 0,
+        "wrong_number": 46,
+        "renter_occupant": 121,
+        "suppressed": 272,
+        "opt_out": 272,
+        "unclassified": 0,
+        "unread": 5974,
+        "active": 193,
+        "waiting": 1,
+        "unlinked": 10,
+        "hot_leads": 49,
+        "new_inbound": 32,
+        "needs_reply": 32,
+        "manual_review": 111,
+        "outbound_active": 1,
+        "cold_no_response": 7134,
+        "dnc_opt_out": 272,
+        "waiting_on_seller": 1,
+        "automated": 111
+      }
+    }
+  ],
+  "threadLatencies": [
+    {
+      "thread": 1,
+      "selectionMs": 829,
+      "shellMs": 613,
+      "messagesVisible": true,
+      "label": "Donald & Linda Williams 4381 Sterling Forest Dr, Decatur, Ga 30034 Yes Inbound ·"
+    },
+    {
+      "thread": 2,
+      "selectionMs": 537,
+      "shellMs": 327,
+      "messagesVisible": true,
+      "label": "Moses F Martinez 1944 S 109th Ave E, Tulsa, Ok 74128 Fuck off Inbound · 7:57 PM "
+    },
+    {
+      "thread": 3,
+      "selectionMs": 813,
+      "shellMs": 601,
+      "messagesVisible": true,
+      "label": "+1 (555) 555-0202 No Address No latest message Pending · 6:00 PM Unknown VALUE —"
+    },
+    {
+      "thread": 4,
+      "selectionMs": 607,
+      "shellMs": 396,
+      "messagesVisible": true,
+      "label": "Hector And Patricia Salazar Revocable Living 8101 W Catalina Dr, Phoenix, Az 850"
+    },
+    {
+      "thread": 5,
+      "selectionMs": 912,
+      "shellMs": 702,
+      "messagesVisible": true,
+      "label": "(612) 743-3952 No Address Deployed verification inbound deployed-dzdevzuroh Inbo"
+    },
+    {
+      "thread": 6,
+      "selectionMs": 478,
+      "shellMs": 268,
+      "messagesVisible": true,
+      "label": "Rigoberto Medina & Catalina Guerra 203 N 15th St, Kansas City, Ks 66102 Hi Carlo"
+    },
+    {
+      "thread": 7,
+      "selectionMs": 524,
+      "shellMs": 310,
+      "messagesVisible": true,
+      "label": "Jonathan H Buck 4342 N Frankfort Ave, Tulsa, Ok 74106 No Inbound · 12:14 PM Tuls"
+    },
+    {
+      "thread": 8,
+      "selectionMs": 576,
+      "shellMs": 366,
+      "messagesVisible": true,
+      "label": "Daisy M Cameron 3245 Amhurst Dr Nw, Atlanta, Ga 30318 Please DO NOT contact me a"
+    },
+    {
+      "thread": 9,
+      "selectionMs": 548,
+      "shellMs": 342,
+      "messagesVisible": true,
+      "label": "Anita Williams 750 E 34th St N, Tulsa, Ok 74106 Sold Inbound · Yesterday Tulsa, "
+    },
+    {
+      "thread": 10,
+      "selectionMs": 527,
+      "shellMs": 318,
+      "messagesVisible": true,
+      "label": "Erika L Griffin 3408 Prospect Ave, Kansas City, Mo 64128 I'm not Erika Inbound ·"
+    }
+  ],
+  "networkTimings": [
+    {
+      "endpoint": "inbox/thread-state",
+      "status": 200,
+      "atMs": 7875,
+      "durationMs": null
+    },
+    {
+      "endpoint": "inbox/thread-state",
+      "status": 200,
+      "atMs": 9120,
+      "durationMs": null
+    },
+    {
+      "endpoint": "inbox/thread-state",
+      "status": 200,
+      "atMs": 9742,
+      "durationMs": null
+    },
+    {
+      "endpoint": "inbox/thread-state",
+      "status": 200,
+      "atMs": 10910,
+      "durationMs": null
+    }
+  ],
+  "threadState400Count": 0,
+  "status": "PASS"
+}

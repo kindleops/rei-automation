@@ -553,8 +553,9 @@ export const InboxKpiOrb = () => {
   )
   const [autoStage, setAutoStage] = useState<AutoStage>('s1')
 
-  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow)
-  const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow)
+  const kpiPanelActive = isOpen || isPinned
+  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
+  const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
 
   const allKpisList = useMemo(() => {
     if (!kpis) return []

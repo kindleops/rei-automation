@@ -316,7 +316,11 @@ export const fetchPerformanceOverview = async (filters: PerformanceFilters) => {
   }
 }
 
-export const usePerformanceIntelligence = (window: TimeWindow = '7d') => {
+export const usePerformanceIntelligence = (
+  window: TimeWindow = '7d',
+  options: { enabled?: boolean } = {},
+) => {
+  const enabled = options.enabled !== false
   const [outliers, setOutliers] = useState<{
     bestTemplate: TemplatePerformance | undefined
     riskiestTemplate: TemplatePerformance | undefined
@@ -365,8 +369,25 @@ export const usePerformanceIntelligence = (window: TimeWindow = '7d') => {
   }, [window])
 
   useEffect(() => {
-    load()
-  }, [load])
+    if (!enabled) {
+      setIsLoading(false)
+      return undefined
+    }
+    let cancelled = false
+    let cancelIdle: (() => void) | null = null
+    const start = () => {
+      if (cancelled) return
+      void load()
+    }
+    import('../../shared/idleDefer').then(({ runWhenBrowserIdle }) => {
+      if (cancelled) return
+      cancelIdle = runWhenBrowserIdle(start, 5000)
+    }).catch(() => start())
+    return () => {
+      cancelled = true
+      cancelIdle?.()
+    }
+  }, [enabled, load])
 
   return { outliers, coverage, isLoading, refresh: load }
 }

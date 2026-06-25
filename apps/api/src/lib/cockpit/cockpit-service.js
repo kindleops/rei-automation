@@ -590,7 +590,7 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
   const rowPatch = {
     thread_key: threadKey,
     updated_at: now,
-    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), read_at: asBoolean(allowedPatch.is_read, false) ? now : null } : {}),
+    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), last_read_at: asBoolean(allowedPatch.is_read, false) ? now : null } : {}),
     ...('is_pinned' in allowedPatch ? { is_pinned: asBoolean(allowedPatch.is_pinned, false) } : {}),
     ...('is_archived' in allowedPatch ? { is_archived: asBoolean(allowedPatch.is_archived, false), archived_at: asBoolean(allowedPatch.is_archived, false) ? now : null } : {}),
     ...('assigned_user' in allowedPatch ? { assigned_user: clean(allowedPatch.assigned_user) || null } : {}),
@@ -609,13 +609,13 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
   const { data, error } = await supabase
     .from('inbox_thread_state')
     .upsert(rowPatch, { onConflict: 'thread_key' })
-    .select('thread_key,is_read,is_pinned,is_archived,assigned_user,manual_review,conversation_status,seller_stage,temperature,autopilot_mode,updated_at')
+    .select('thread_key,is_read,is_pinned,is_archived,last_read_at,archived_at,updated_at')
     .maybeSingle()
 
   if (error) {
     // Column may not exist yet — degrade gracefully and retry without state fields
-    if (error.code === '42703' || error.message?.includes('column')) {
-      const coreFields = ['thread_key','updated_at','is_read','read_at','is_pinned','is_archived','archived_at','assigned_user','manual_review']
+    if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('column')) {
+      const coreFields = ['thread_key','updated_at','is_read','last_read_at','is_pinned','is_archived','archived_at','assigned_user','manual_review']
       const coreRowPatch = Object.fromEntries(Object.entries(rowPatch).filter(([k]) => coreFields.includes(k)))
       const { data: fallbackData, error: fallbackError } = await supabase
         .from('inbox_thread_state')

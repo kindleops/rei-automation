@@ -55,6 +55,49 @@ const writeCachedViewCounts = (counts: Record<string, number>) => {
   }
 }
 
+const DEFAULT_BOOT_BUCKET_KEY = 'all_messages'
+
+const readCachedBootRows = (bucketKey: string = DEFAULT_BOOT_BUCKET_KEY): InboxThread[] => {
+  if (typeof localStorage === 'undefined') return []
+  const scopedCacheKey = `${CACHE_KEY}:${bucketKey}`
+  try {
+    const raw = localStorage.getItem(scopedCacheKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as { threads?: InboxThread[] }
+    return Array.isArray(parsed?.threads) ? parsed.threads : []
+  } catch {
+    localStorage.removeItem(scopedCacheKey)
+    return []
+  }
+}
+
+const buildBootStoreState = (): typeof EMPTY_INBOX_STORE_STATE => {
+  const cachedCounts = readCachedViewCounts()
+  const cachedRows = readCachedBootRows(DEFAULT_BOOT_BUCKET_KEY)
+  const hasCachedCounts = Object.keys(cachedCounts).length > 0
+  const hasCachedRows = cachedRows.length > 0
+  if (!hasCachedCounts && !hasCachedRows) return EMPTY_INBOX_STORE_STATE
+
+  return {
+    ...EMPTY_INBOX_STORE_STATE,
+    viewCounts: hasCachedCounts ? cachedCounts : EMPTY_INBOX_STORE_STATE.viewCounts,
+    buckets: hasCachedRows
+      ? {
+          [DEFAULT_BOOT_BUCKET_KEY]: {
+            rows: cachedRows,
+            loading: false,
+            error: null,
+            lastRequestId: 'boot-cache',
+            lastLoadedAt: new Date().toISOString(),
+            scrollTop: 0,
+            cursor: null,
+            hasMore: true,
+          },
+        }
+      : EMPTY_INBOX_STORE_STATE.buckets,
+  }
+}
+
 const mapAuthoritativeCounts = (rawCounts: Record<string, unknown>): Record<string, number> => ({
   priority: Number(rawCounts.priority ?? rawCounts.hot_leads ?? 0),
   new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
@@ -87,7 +130,7 @@ const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConne
 }
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
-  initial_boot: 12_000,
+  initial_boot: 20_000,
   manual_bucket_switch: 8_000,
   auto_refresh: 8_000,
 }
@@ -752,11 +795,7 @@ const rowIdentityMatches = (row: Record<string, unknown>, threadKey: string): bo
 export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; paused?: boolean } = {}) => {
   const { initialSourceMode = 'conversations', paused = false } = options
   const [sourceMode, setSourceMode] = useState<InboxSourceMode>(initialSourceMode)
-  const [storeState, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STORE_STATE, (initial) => {
-    const cachedCounts = readCachedViewCounts()
-    if (Object.keys(cachedCounts).length === 0) return initial
-    return { ...initial, viewCounts: cachedCounts }
-  })
+  const [storeState, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STORE_STATE, () => buildBootStoreState())
 
   // Sync ref so async callbacks can read latest state without stale closures.
   const stateRef = useRef(storeState)
@@ -1445,7 +1484,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   const activeBucketKey = storeState.activeBucketKey
   const activeBucket = storeState.buckets[activeBucketKey]
-  const loading = activeBucket?.loading ?? true
+  const loading = activeBucket?.loading ?? ((activeBucket?.rows?.length ?? 0) === 0)
   const realtimeStatus = storeState.realtimeStatus
   const realtimeDegraded = realtimeStatus === 'error' || realtimeStatus === 'disconnected'
   const connectionState = toDashboardConnectionState(realtimeStatus)

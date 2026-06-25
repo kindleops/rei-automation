@@ -1,0 +1,149 @@
+{
+  "bootMs": 24579,
+  "countsSnapshots": [
+    {
+      "atMs": 9311,
+      "counts": {
+        "all": 7897,
+        "all_messages": 7897,
+        "priority": 49,
+        "needs_attention": 0,
+        "qualified": 0,
+        "offers": 0,
+        "contracts": 0,
+        "closing": 0,
+        "new_replies": 32,
+        "needs_review": 111,
+        "follow_up": 1,
+        "cold": 7135,
+        "dead": 297,
+        "not_interested": 297,
+        "wrong_person": 0,
+        "wrong_number": 46,
+        "renter_occupant": 121,
+        "suppressed": 272,
+        "opt_out": 272,
+        "unclassified": 0,
+        "unread": 5972,
+        "active": 193,
+        "waiting": 1,
+        "unlinked": 11,
+        "hot_leads": 49,
+        "new_inbound": 32,
+        "needs_reply": 32,
+        "manual_review": 111,
+        "outbound_active": 1,
+        "cold_no_response": 7135,
+        "dnc_opt_out": 272,
+        "waiting_on_seller": 1,
+        "automated": 111
+      }
+    }
+  ],
+  "threadLatencies": [
+    {
+      "thread": 1,
+      "shellMs": 725,
+      "messagesMs": 798,
+      "totalMs": 798
+    },
+    {
+      "thread": 2,
+      "shellMs": 1634,
+      "messagesMs": 1839,
+      "totalMs": 1840
+    },
+    {
+      "thread": 3,
+      "shellMs": 830,
+      "messagesMs": 1338,
+      "totalMs": 1338
+    },
+    {
+      "thread": 4,
+      "shellMs": 824,
+      "messagesMs": 914,
+      "totalMs": 914
+    },
+    {
+      "thread": 5,
+      "shellMs": 1583,
+      "messagesMs": 1631,
+      "totalMs": 1631
+    },
+    {
+      "thread": 6,
+      "shellMs": 1355,
+      "messagesMs": 1401,
+      "totalMs": 1401
+    },
+    {
+      "thread": 7,
+      "shellMs": 1284,
+      "messagesMs": 1665,
+      "totalMs": 1665
+    },
+    {
+      "thread": 8,
+      "shellMs": 739,
+      "messagesMs": 797,
+      "totalMs": 797
+    },
+    {
+      "thread": 9,
+      "shellMs": 750,
+      "messagesMs": 843,
+      "totalMs": 843
+    },
+    {
+      "thread": 10,
+      "shellMs": 948,
+      "messagesMs": 1078,
+      "totalMs": 1078
+    }
+  ],
+  "networkLog": [
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/counts",
+      "status": 200,
+      "atMs": 9311
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/live",
+      "status": 200,
+      "atMs": 10862
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/thread-state",
+      "status": 200,
+      "atMs": 12555
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/thread-state",
+      "status": 200,
+      "atMs": 14964
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/thread-messages",
+      "status": 200,
+      "atMs": 15904
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/thread-state",
+      "status": 200,
+      "atMs": 16959
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/live",
+      "status": 200,
+      "atMs": 18451
+    },
+    {
+      "url": "http://127.0.0.1:5173/api/cockpit/inbox/thread-state",
+      "status": 200,
+      "atMs": 20487
+    }
+  ],
+  "threadState400Count": 0,
+  "status": "INBOX_STABILIZATION_ACCEPTANCE_PASS"
+}
