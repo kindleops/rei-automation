@@ -100,6 +100,9 @@ test("runInboundIntelligencePhase blocks execution but preserves intelligence", 
   assert.equal(result.intelligence_snapshot.automation_execution_status, "shadow_only");
   assert.equal(result.intelligence_snapshot.execution_blocked_reason, "auto_reply_mode_disabled");
   assert.equal(result.intelligence_snapshot.canonical_intent, "ownership_confirmed");
+  assert.equal(result.intelligence_snapshot.identity_class, "confirmed_owner");
+  assert.equal(result.intelligence_snapshot.relationship_outcome, "confirmed_owner");
+  assert.equal(result.intelligence_snapshot.universal_stage, "offer_interest");
   assert.equal(result.seller_stage_reply.queued, false);
 });
 
@@ -222,12 +225,14 @@ test("actual wrong number remains globally suppressible", () => {
 });
 
 test("referred child thread proposal never merges parent and child timelines", () => {
-  const referral = extractSellerReferral({
-    message: "Not the owner. His name is Sharon Schwartz Tel 561-706-4622",
+  const message = "Not the owner. His name is Sharon Schwartz Tel 561-706-4622";
+  const relationship = resolveInboundRelationship({
+    message,
     classification: { primary_intent: "wrong_number" },
     source_contact_phone: "+16318047551",
     property_id: "234334277",
   });
+  const referral = extractSellerReferral({ message, relationship });
   const child = referral.proposed_operations.find((op) => op.op === "propose_child_thread");
   assert.equal(child.merge_with_parent_timeline, false);
   assert.notEqual(child.child_phone_e164, child.parent_thread_key);
@@ -411,10 +416,190 @@ test("Sharon referral inbound enriches intelligence without queue or SMS", async
   assert.equal(result.ok, true);
   assert.equal(queue_inserts.length, 0);
 
-  const referral = extractSellerReferral({
-    message: "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+  const message = "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622";
+  const relationship = resolveInboundRelationship({
+    message,
     classification: { primary_intent: "wrong_number", objection: "wrong_number" },
     property_id: "234334277",
   });
+  const referral = extractSellerReferral({ message, relationship });
   assert.equal(referral.referred_name, "Sharon Schwartz");
+  assert.equal(referral.referrals.length, 1);
+});
+
+test("confirmed owner messages resolve confirmed_owner identity and offer_interest stage", async () => {
+  for (const message of ["Yes I own it", "I'm the owner", "Yes, that's my property"]) {
+    const relationship = resolveInboundRelationship({
+      message,
+      classification: { primary_intent: "ownership_confirmed", confidence: 0.9 },
+      property_id: "1001",
+    });
+    assert.equal(relationship.canonical_intent, "ownership_confirmed", message);
+    assert.equal(relationship.identity_class, "confirmed_owner", message);
+    assert.equal(relationship.relationship_outcome, "confirmed_owner", message);
+    assert.equal(relationship.suppression_scope, "none", message);
+    assert.equal(relationship.universal_stage, "offer_interest", message);
+  }
+});
+
+test("co-owner spouse is authorized_spouse not respondent_non_owner", () => {
+  const relationship = resolveInboundRelationship({
+    message: "My wife owns it but I can answer questions",
+    classification: { primary_intent: "unclear", confidence: 0.6 },
+    property_id: "1008",
+  });
+  assert.equal(relationship.identity_class, "authorized_spouse");
+  assert.equal(relationship.canonical_intent, "co_owner_respondent");
+  assert.equal(relationship.relationship_outcome, "co_owner");
+  assert.equal(relationship.human_review_required, true);
+  assert.notEqual(relationship.identity_class, "respondent_non_owner");
+});
+
+test("specialist identities remain distinct from wrong_number", () => {
+  const cases = [
+    { message: "I am the executor of the estate", identity: "executor_or_heir", intent: "executor_heir_respondent" },
+    { message: "I am the LLC representative for the owner", identity: "entity_representative", intent: "entity_representative_respondent" },
+    { message: "I am the listing agent for this home", identity: "agent_representative", intent: "agent_representative_respondent" },
+    { message: "I am the property manager for this building", identity: "property_manager", intent: "property_manager_respondent" },
+  ];
+  for (const row of cases) {
+    const relationship = resolveInboundRelationship({
+      message: row.message,
+      classification: { primary_intent: "unclear" },
+      property_id: "1000",
+    });
+    assert.equal(relationship.identity_class, row.identity, row.message);
+    assert.equal(relationship.canonical_intent, row.intent, row.message);
+    assert.equal(relationship.suppression_scope, "property", row.message);
+    assert.equal(relationship.invalidate_phone_globally, false, row.message);
+  }
+});
+
+test("property-scoped non-owner never becomes global wrong-number suppression", () => {
+  const cases = [
+    "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+    "No, I do not own it",
+    "I never owned that property",
+  ];
+  for (const message of cases) {
+    const relationship = resolveInboundRelationship({
+      message,
+      classification: { primary_intent: "wrong_number", objection: "wrong_number" },
+      property_id: "234334277",
+    });
+    assert.equal(relationship.invalidate_phone_globally, false, message);
+    assert.notEqual(relationship.identity_class, "wrong_number", message);
+    assert.equal(isGlobalSuppressionRelationship(relationship), false, message);
+  }
+});
+
+test("multi-name referral extracts all candidates", () => {
+  const message = "Not the owner. His name is Tom Wilson or His name is Jerry Lee";
+  const relationship = resolveInboundRelationship({ message, classification: { primary_intent: "wrong_number" }, property_id: "1017" });
+  const referral = extractSellerReferral({ message, relationship });
+  assert.equal(referral.referrals.length, 2);
+  assert.deepEqual(
+    referral.referrals.map((r) => r.name).sort(),
+    ["Jerry Lee", "Tom Wilson"]
+  );
+  assert.equal(referral.ambiguous_pairing, true);
+  assert.equal(referral.human_review_required, true);
+});
+
+test("multi-phone referral extracts all phone candidates", () => {
+  const message = "Not mine. Call 561-555-1111 or 561-555-2222";
+  const relationship = resolveInboundRelationship({ message, classification: { primary_intent: "wrong_number" }, property_id: "1018" });
+  const referral = extractSellerReferral({ message, relationship });
+  const phones = referral.referrals.map((r) => r.phone_e164).filter(Boolean).sort();
+  assert.deepEqual(phones, ["+15615551111", "+15615552222"]);
+});
+
+test("condition disclosure resolves condition_disclosed at condition stage", async () => {
+  const result = await runInboundIntelligencePhase({
+    message: "Needs a new roof and plumbing work",
+    threadKey: "+15550000022",
+    propertyId: "1022",
+    prospectId: "31",
+    ownerId: "21",
+    phoneId: "51",
+    classification: { primary_intent: "unclear", confidence: 0.4 },
+    latestThreadContext: {
+      ...baseContext(),
+      summary: { ...baseContext().summary, conversation_stage: "Condition Probe" },
+    },
+    context: {
+      ...baseContext(),
+      summary: { ...baseContext().summary, conversation_stage: "Condition Probe" },
+    },
+    route: { stage: "Condition Probe", use_case: null },
+    inboundFrom: "+15550000022",
+    inboundEventId: "condition-01",
+    auto_reply_mode: "disabled",
+    execution_allowed: false,
+  });
+  assert.equal(result.intelligence_snapshot.canonical_intent, "condition_disclosed");
+  assert.equal(result.intelligence_snapshot.universal_stage, "condition_justification");
+});
+
+test("non_owner_referral follow-up policy suppresses source nurture but proposes referred stage 1", () => {
+  const plan = resolveFollowUpPlan("non_owner_referral", {
+    thread_key: "+16318047551",
+    property_id: "234334277",
+    referrals: [{ name: "Sharon Schwartz", phone_e164: "+15617064622" }],
+  });
+  assert.equal(plan.followup_created, false);
+  assert.equal(plan.dispatchable, false);
+  assert.match(plan.reason, /referral_source_no_property_nurture/);
+  assert.equal(plan.referral_policy.referred_contacts[0].automatic_send_allowed, false);
+  assert.equal(plan.referral_policy.referred_contacts[0].review_required, true);
+});
+
+test("shadow comparison produces per-field agreement metadata", async () => {
+  const result = await runInboundIntelligencePhase({
+    message: "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+    threadKey: "+16318047551",
+    propertyId: "234334277",
+    prospectId: "31",
+    ownerId: "21",
+    phoneId: "51",
+    classification: { primary_intent: "wrong_number", objection: "wrong_number", confidence: 0.9 },
+    latestThreadContext: baseContext(),
+    context: baseContext(),
+    route: { stage: "Ownership Confirmation", use_case: "ownership_check" },
+    inboundFrom: "+16318047551",
+    inboundEventId: "e8bcfa53-5eba-41f6-b0f7-84b8cba80b3e",
+    auto_reply_mode: "disabled",
+    execution_allowed: false,
+  });
+  const comparison = result.intelligence_snapshot.shadow_comparison;
+  assert.ok(comparison);
+  assert.ok(comparison.agreement);
+  assert.ok("canonical_intent" in comparison.agreement);
+  assert.ok("identity_class" in comparison.agreement);
+  assert.ok(comparison.comparison_class);
+  assert.equal(result.intelligence_snapshot.shadow_stage_engine.execution_authority, false);
+});
+
+test("stage 1 shadow uses relationship override not raw wrong_number classifier", () => {
+  const relationship = resolveInboundRelationship({
+    message: "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+    classification: { primary_intent: "wrong_number" },
+    property_id: "234334277",
+  });
+  const shadow = runShadowStageEngine({
+    message: "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+    classification: { primary_intent: "wrong_number" },
+    context: baseContext(),
+    canonical_decision: { canonical_intent: "non_owner_referral", next_action: "mark_human_review" },
+    relationship,
+    identity_class: relationship.identity_class,
+    relationship_outcome: relationship.relationship_outcome,
+    suppression_scope: relationship.suppression_scope,
+    universal_stage: "ownership_confirmation",
+    granular_stage: "referral_review",
+    human_review_required: true,
+  });
+  assert.notEqual(shadow.shadow_stage_engine.granular_stage, "wrong_person");
+  assert.equal(shadow.shadow_stage_engine.proposed_decision.inbound_intent, "non_owner_referral");
+  assert.equal(shadow.comparison.comparison_class, "full_agreement");
 });

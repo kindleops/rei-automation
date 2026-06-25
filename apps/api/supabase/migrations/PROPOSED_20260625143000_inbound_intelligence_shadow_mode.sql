@@ -1,6 +1,7 @@
 -- PROPOSED (NOT AUTO-EXECUTABLE): inbound intelligence shadow audit schema
 -- Requires explicit schema approval before rename/remove of PROPOSED_ prefix.
 
+-- ── inbound_intelligence_audit (immutable decision log) ─────────────────────
 CREATE TABLE IF NOT EXISTS public.inbound_intelligence_audit (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_event_id text NOT NULL,
@@ -24,18 +25,28 @@ CREATE TABLE IF NOT EXISTS public.inbound_intelligence_audit (
   referral_detected boolean NOT NULL DEFAULT false,
   automatic_send_allowed boolean NOT NULL DEFAULT false,
   decision_version text NOT NULL,
+  replay_version text NOT NULL DEFAULT 'shadow_v3',
   canonical_decision jsonb NOT NULL DEFAULT '{}'::jsonb,
   legacy_decision jsonb,
   shadow_stage_engine jsonb,
+  shadow_comparison jsonb,
   follow_up_recommendation jsonb,
   selected_template jsonb,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT inbound_intelligence_audit_source_event_unique UNIQUE (source_event_id)
+  CONSTRAINT inbound_intelligence_audit_source_event_unique UNIQUE (source_event_id),
+  CONSTRAINT inbound_intelligence_audit_suppression_scope_check
+    CHECK (suppression_scope IN ('none', 'property', 'phone', 'global', 'incident')),
+  CONSTRAINT inbound_intelligence_audit_e164_thread_check
+    CHECK (source_thread_key IS NULL OR source_thread_key ~ '^\+[1-9]\d{6,14}$')
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_intelligence_audit_provider_sid
   ON public.inbound_intelligence_audit (provider_message_sid)
+  WHERE provider_message_sid IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_intelligence_audit_provider_event
+  ON public.inbound_intelligence_audit (provider_message_sid, source_event_id)
   WHERE provider_message_sid IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_thread
@@ -45,9 +56,20 @@ CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_property
   ON public.inbound_intelligence_audit (property_id, created_at DESC)
   WHERE property_id IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_created_at
+  ON public.inbound_intelligence_audit (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_intent
+  ON public.inbound_intelligence_audit (canonical_intent, created_at DESC);
+
+COMMENT ON TABLE public.inbound_intelligence_audit IS
+  'Immutable inbound intelligence audit log. Rows are append-only; updates limited to service-role replay metadata.';
+
+-- ── seller_contact_referrals (mutable review workflow) ────────────────────
 CREATE TABLE IF NOT EXISTS public.seller_contact_referrals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_event_id text NOT NULL,
+  provider_message_sid text,
   source_thread_key text NOT NULL,
   source_contact_phone text NOT NULL,
   property_id text NOT NULL,
@@ -61,24 +83,46 @@ CREATE TABLE IF NOT EXISTS public.seller_contact_referrals (
   proposed_prospect_id text,
   proposed_phone_id text,
   review_status text NOT NULL DEFAULT 'pending_review',
+  review_notes text,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   reviewed_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT seller_contact_referrals_review_status_check
-    CHECK (review_status IN ('pending_review', 'approved', 'rejected', 'applied'))
+    CHECK (review_status IN ('pending_review', 'approved', 'rejected', 'applied')),
+  CONSTRAINT seller_contact_referrals_dedupe_status_check
+    CHECK (dedupe_status IN ('pending_review', 'new_or_unknown', 'already_known', 'malformed_phone', 'duplicate')),
+  CONSTRAINT seller_contact_referrals_e164_phone_check
+    CHECK (referred_phone_e164 IS NULL OR referred_phone_e164 ~ '^\+[1-9]\d{6,14}$'),
+  CONSTRAINT seller_contact_referrals_e164_source_check
+    CHECK (source_contact_phone ~ '^\+[1-9]\d{6,14}$')
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_contact_referrals_event_phone_property
   ON public.seller_contact_referrals (source_event_id, referred_phone_e164, property_id)
   WHERE referred_phone_e164 IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_contact_referrals_event_name_property
+  ON public.seller_contact_referrals (source_event_id, referred_name, property_id)
+  WHERE referred_phone_e164 IS NULL AND referred_name IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_property
   ON public.seller_contact_referrals (property_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_phone
+  ON public.seller_contact_referrals (referred_phone_e164, created_at DESC)
+  WHERE referred_phone_e164 IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_source_event
+  ON public.seller_contact_referrals (source_event_id);
 
 CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_review_status
   ON public.seller_contact_referrals (review_status, created_at DESC);
 
--- Read-only projection. Not an identity source of truth.
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_created_at
+  ON public.seller_contact_referrals (created_at DESC);
+
+-- ── Read-only participant projection (not identity source of truth) ───────
 CREATE OR REPLACE VIEW public.property_participant_graph AS
 SELECT
   md5(
@@ -105,6 +149,7 @@ SELECT
     WHEN scr.id IS NOT NULL THEN 'referred_possible_owner'
     WHEN me.metadata->>'identity_class' = 'referral_source' THEN 'referral_source'
     WHEN me.metadata->>'identity_class' = 'respondent_non_owner' THEN 'respondent_non_owner'
+    WHEN me.metadata->>'identity_class' = 'authorized_spouse' THEN 'authorized_spouse'
     WHEN me.metadata->>'identity_class' = 'confirmed_owner' THEN 'master_owner'
     WHEN me.metadata->>'identity_class' = 'probable_owner' THEN 'probable_owner'
     WHEN me.metadata->>'identity_class' = 'wrong_number'
@@ -160,18 +205,16 @@ LEFT JOIN public.seller_contact_referrals scr
   ON scr.referred_phone_e164 = COALESCE(ph.canonical_e164, me.from_phone_number, me.thread_key)
  AND scr.property_id = me.property_id
  AND scr.review_status = 'pending_review'
-LEFT JOIN public.prospects p
-  ON p.id::text = me.prospect_id
 WHERE me.direction = 'inbound'
   AND me.property_id IS NOT NULL;
 
 COMMENT ON VIEW public.property_participant_graph IS
   'Read-only participant projection for inbox UI. Projects message_events + reviewed referrals; not an identity source of truth.';
 
+-- ── RLS ───────────────────────────────────────────────────────────────────
 ALTER TABLE public.inbound_intelligence_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.seller_contact_referrals ENABLE ROW LEVEL SECURITY;
 
--- Service-role only until user-facing policies are defined.
 CREATE POLICY "service_role_all_inbound_intelligence_audit"
   ON public.inbound_intelligence_audit
   FOR ALL
@@ -179,9 +222,59 @@ CREATE POLICY "service_role_all_inbound_intelligence_audit"
   USING (true)
   WITH CHECK (true);
 
+CREATE POLICY "deny_authenticated_write_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (false);
+
+CREATE POLICY "deny_authenticated_update_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR UPDATE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_authenticated_delete_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR DELETE
+  TO authenticated
+  USING (false);
+
 CREATE POLICY "service_role_all_seller_contact_referrals"
   ON public.seller_contact_referrals
   FOR ALL
   TO service_role
   USING (true)
   WITH CHECK (true);
+
+CREATE POLICY "authenticated_read_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE POLICY "deny_authenticated_insert_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (false);
+
+CREATE POLICY "deny_authenticated_delete_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR DELETE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_anon_all_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR ALL
+  TO anon
+  USING (false)
+  WITH CHECK (false);
+
+CREATE POLICY "deny_anon_all_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR ALL
+  TO anon
+  USING (false)
+  WITH CHECK (false);

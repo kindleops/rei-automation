@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import "../../tests/register-aliases.mjs";
+
+process.env.INBOUND_INTELLIGENCE_PROOF_MODE = "1";
+
 import { classify } from "@/lib/domain/classification/classify.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import { resolveInboundRelationship } from "@/lib/domain/seller-flow/resolve-inbound-relationship.js";
@@ -34,6 +37,33 @@ const FIXTURES = [
   { id: "interest-01", thread: "+15550000026", property_id: "1026", message: "Maybe, depends on the price", stage: "Consider Selling" },
 ];
 
+const FIXTURE_ASSERTIONS = {
+  "e8bcfa53-5eba-41f6-b0f7-84b8cba80b3e": {
+    canonical_intent: "non_owner_referral",
+    identity_class: "respondent_non_owner",
+    suppression_scope: "property",
+    invalidate_phone_globally: false,
+  },
+  "own-yes-01": {
+    canonical_intent: "ownership_confirmed",
+    identity_class: "confirmed_owner",
+    universal_stage: "offer_interest",
+    suppression_scope: "none",
+  },
+  "wrong-num-01": {
+    canonical_intent: "wrong_number",
+    suppression_scope: "phone",
+    invalidate_phone_globally: true,
+  },
+  "condition-01": {
+    canonical_intent: "condition_disclosed",
+  },
+  "spouse-01": {
+    identity_class: "authorized_spouse",
+    canonical_intent: "co_owner_respondent",
+  },
+};
+
 function buildContext(fixture) {
   return {
     found: true,
@@ -50,6 +80,18 @@ function buildContext(fixture) {
       property_type: "Single Family",
     },
   };
+}
+
+function assertFixtureExpectations(result) {
+  const expected = FIXTURE_ASSERTIONS[result.event_id];
+  if (!expected) return [];
+  const violations = [];
+  for (const [key, value] of Object.entries(expected)) {
+    if (result[key] !== value) {
+      violations.push(`${result.event_id}:${key} expected ${value} got ${result[key]}`);
+    }
+  }
+  return violations;
 }
 
 async function replayFixture(fixture) {
@@ -89,7 +131,7 @@ async function replayFixture(fixture) {
   });
 
   const snap = intelligence.intelligence_snapshot;
-  const shadow = intelligence.shadow_stage;
+  const comparison = snap.shadow_comparison || {};
 
   return {
     event_id: fixture.id,
@@ -109,26 +151,24 @@ async function replayFixture(fixture) {
     granular_stage: snap.granular_stage,
     referral_extraction: snap.referral_detected
       ? {
+          referrals: snap.referral?.referrals || [],
           referred_name: snap.referral?.referred_name || null,
           referred_phone_e164: snap.referral?.referred_phone_e164 || null,
-          referred_contact_proposed_stage: snap.referred_contact_proposed_stage,
+          ambiguous_pairing: snap.referral?.ambiguous_pairing || false,
         }
       : null,
     recommended_template: snap.recommended_use_case,
     follow_up_recommendation: snap.follow_up_recommendation,
     human_review_required: snap.human_review_required,
     automatic_send_allowed: snap.automatic_send_allowed,
-    shadow_agreement: shadow?.canonical_agreement,
-    shadow_disagreement_reason: shadow?.canonical_disagreement_reason || null,
-    canonical_decision_summary: {
-      should_suppress_contact: snap.canonical_decision?.should_suppress_contact,
-      should_mark_human_review: snap.canonical_decision?.should_mark_human_review,
-      next_action: snap.canonical_decision?.next_action,
-    },
-    stage_engine_summary: {
-      engine: shadow?.shadow_stage_engine?.engine || null,
-      granular_stage: shadow?.shadow_stage_engine?.granular_stage || null,
-      proposed_outcome: shadow?.shadow_stage_engine?.proposed_decision?.outcome || null,
+    shadow_comparison: {
+      agreement: comparison.agreement || {},
+      agreement_score: comparison.agreement_score ?? null,
+      comparison_class: comparison.comparison_class || null,
+      material_disagreement: comparison.material_disagreement ?? null,
+      material_disagreement_fields: comparison.material_disagreement_fields || [],
+      canonical_shape: comparison.canonical_shape || null,
+      shadow_shape: comparison.shadow_shape || null,
     },
     dispatchable_queue_rows: 0,
     provider_calls: 0,
@@ -141,24 +181,51 @@ async function replayFixture(fixture) {
 }
 
 const results = [];
+const violations = [];
+
 for (const fixture of FIXTURES) {
-  results.push(await replayFixture(fixture));
+  const result = await replayFixture(fixture);
+  results.push(result);
+  violations.push(...assertFixtureExpectations(result));
+
+  if (result.invalidate_phone_globally && result.suppression_scope === "property") {
+    violations.push(`${result.event_id}:property_scoped_became_global_suppression`);
+  }
+  if (!result.shadow_comparison.comparison_class) {
+    violations.push(`${result.event_id}:missing_normalized_comparison`);
+  }
 }
 
-const disagreements = results.filter((row) => row.shadow_agreement === false);
+const comparison_summary = {
+  full_agreement: results.filter((r) => r.shadow_comparison.comparison_class === "full_agreement").length,
+  non_material_disagreement: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "non_material_disagreement"
+  ).length,
+  material_disagreement: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "material_disagreement"
+  ).length,
+  insufficient_context: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "insufficient_context"
+  ).length,
+  intentionally_review_required: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "intentionally_review_required"
+  ).length,
+};
 
 const output = {
   replay_count: results.length,
   dispatchable_queue_rows: 0,
   provider_calls: 0,
   production_writes: 0,
+  comparison_summary,
+  violations,
   sharon_event: results.find((r) => r.event_id === "e8bcfa53-5eba-41f6-b0f7-84b8cba80b3e"),
-  shadow_disagreements: disagreements,
   results,
 };
 
-// INFO logs from runInboundIntelligencePhase go to stderr so stdout stays pure JSON.
 process.stderr.write(
-  `[replay-proof] cases=${results.length} disagreements=${disagreements.length}\n`
+  `[replay-proof] cases=${results.length} material=${comparison_summary.material_disagreement} violations=${violations.length}\n`
 );
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+
+process.exit(violations.length > 0 ? 1 : 0);
