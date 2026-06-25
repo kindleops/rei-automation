@@ -1,0 +1,58 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Comping
+              - generic [ref=e15]: Comps · Map · Offer Stack
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Comping" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - main [ref=e60]:
+        - generic [ref=e61]:
+          - generic [ref=e64]: Loading workspace…
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - generic [ref=e71]: Live Map
+                - strong [ref=e72]: "0"
+              - button "Map Controls" [ref=e74] [cursor=pointer]
+            - generic [ref=e75]:
+              - region "Map" [ref=e77]
+              - group [ref=e78]:
+                - generic "Toggle attribution" [ref=e79] [cursor=pointer]
+                - generic [ref=e80]: CARTO
+            - generic [ref=e82]:
+              - generic [ref=e83]: No visible pins
+              - generic [ref=e84]: No mapped pins found. 25 conversations are missing coordinates.
+            - generic:
+              - generic [ref=e85]: Selected Conversation Is Unmapped
+              - paragraph [ref=e86]: No coordinates are available for Unknown Seller.
+          - complementary [ref=e88]:
+            - generic [ref=e90]: Loading deal intelligence…
+  - button "NEXUS Copilot" [ref=e91] [cursor=pointer]:
+    - generic: Standing by

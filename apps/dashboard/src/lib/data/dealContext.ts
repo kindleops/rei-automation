@@ -570,7 +570,11 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
 
   const latestMessageBody = firstString(
     row.latest_message_body,
+    row.latestMessageBody,
     row.last_message_body,
+    row.lastMessageBody,
+    row.preview,
+    row.message_body,
     threadState.latest_message_body,
     threadState.last_message_body,
     latestMessageEvent.message_body,

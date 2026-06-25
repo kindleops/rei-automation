@@ -147,9 +147,8 @@
   pointer-events: auto !important;
 }
 
-.nx-liquid-popover,
+/* Clear glass — map + lightweight search surfaces */
 .nx-liquid-surface,
-.nx-workspace-drawer,
 .nx-glass-menu,
 .nx-command-menu,
 .nx-quick-menu-popover,
@@ -159,15 +158,52 @@
 .nx-glass-dropdown,
 .nx-glass-popover {
   background: var(--nx-glass-bg-strong) !important;
-  -webkit-backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
-  backdrop-filter: blur(var(--nx-blur-md)) saturate(1.7) !important;
-  border: 1px solid var(--nx-glass-border-strong, var(--nx-glass-border)) !important;
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+  backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+  border: 1px solid var(--nx-glass-border) !important;
   border-radius: 16px !important;
   box-shadow:
-    var(--nx-glass-shadow, 0 24px 80px rgba(0, 0, 0, 0.45)),
-    var(--nx-glass-inner-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.08)) !important;
+    var(--nx-glass-shadow),
+    var(--nx-glass-inner-highlight) !important;
   color: var(--nx-glass-text) !important;
   z-index: var(--nx-shell-z-popover) !important;
+}
+
+/* Tinted shell glass — one recipe for every topbar panel/dropdown */
+.nx-liquid-popover,
+.nx-command-popover,
+.nx-workspace-drawer,
+.nx-topbar-workspace-menu,
+.nx-wsl-popover,
+.nx-action-center-popover,
+.nx-liquid-popover--processor,
+.nxhud-panel.nx-notification-center,
+.nx-notification-center.nx-liquid-panel,
+.nx-orb-dashboard,
+.nx-activity-panel,
+.nx-liquid-panel,
+.nx-liquid-surface--panel,
+.nx-shell-popover-portal {
+  background: var(--nx-glass-bg-tinted) !important;
+  -webkit-backdrop-filter: blur(var(--nx-shell-glass-blur, var(--nx-glass-blur))) saturate(var(--nx-shell-glass-saturate, var(--nx-glass-saturate))) !important;
+  backdrop-filter: blur(var(--nx-shell-glass-blur, var(--nx-glass-blur))) saturate(var(--nx-shell-glass-saturate, var(--nx-glass-saturate))) !important;
+  border: 1px solid var(--nx-glass-border-shell, var(--nx-glass-border)) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--nx-shell-glass-shadow, var(--nx-glass-shadow)), var(--nx-glass-inner-highlight) !important;
+  color: var(--nx-glass-text) !important;
+  z-index: var(--nx-shell-z-popover) !important;
+}
+
+/* Inner queue/workspace bodies must not paint opaque layers over the shell glass */
+.qcc-root,
+.nx-queue-status,
+.nx-wsl-root,
+.nx-wsl-body,
+.nx-wsl-nav,
+.nx-wsl-panel,
+.nx-orb-dashboard__content,
+.nx-orb-dashboard__scroll-area {
+  background: transparent !important;
 }
 
 /* Inner panel glass fallback for the COMPACT DRAWER variant only.
@@ -189,21 +225,43 @@
  * `[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-popover` rule, which
  * was otherwise overriding the menu border down to rgba(15,23,42,0.12).
  * A lower-specificity fallback covers any popover rendered outside the inbox. */
-[data-nexus-theme="light"] .nx-liquid-popover,
 [data-nexus-theme="light"] .nx-liquid-surface,
-[data-nexus-theme="light"] .nx-workspace-drawer,
 [data-nexus-theme="light"] .nx-glass-menu,
 [data-nexus-theme="light"] .nx-command-menu,
 [data-nexus-theme="light"] .nx-quick-menu-popover,
 [data-nexus-theme="light"] .nx-avatar-popover,
-[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-popover,
 [data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-surface,
-[data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-drawer,
 [data-nexus-theme="light"] .nx-premium-inbox .nx-glass-menu,
 [data-nexus-theme="light"] .nx-premium-inbox .nx-command-menu,
 [data-nexus-theme="light"] .nx-premium-inbox .nx-quick-menu-popover,
-[data-nexus-theme="light"] .nx-premium-inbox .nx-avatar-popover {
+[data-nexus-theme="light"] .nx-premium-inbox .nx-avatar-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-search-results-popover,
+[data-nexus-theme="light"] .nx-search-results-popover {
   background: var(--nx-glass-bg-strong) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  box-shadow:
+    0 24px 80px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  color: #020617 !important;
+}
+
+[data-nexus-theme="light"] .nx-liquid-popover,
+[data-nexus-theme="light"] .nx-command-popover,
+[data-nexus-theme="light"] .nx-workspace-drawer,
+[data-nexus-theme="light"] .nx-topbar-workspace-menu,
+[data-nexus-theme="light"] .nx-wsl-popover,
+[data-nexus-theme="light"] .nx-action-center-popover,
+[data-nexus-theme="light"] .nx-liquid-popover--processor,
+[data-nexus-theme="light"] .nxhud-panel.nx-notification-center,
+[data-nexus-theme="light"] .nx-orb-dashboard,
+[data-nexus-theme="light"] .nx-activity-panel,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-liquid-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-command-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-drawer,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-wsl-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-action-center-popover,
+[data-nexus-theme="light"] .nx-premium-inbox .nx-orb-dashboard {
+  background: var(--nx-glass-bg-tinted) !important;
   border: 1px solid var(--nx-glass-border) !important;
   box-shadow:
     0 24px 80px rgba(15, 23, 42, 0.14),
@@ -459,4 +517,100 @@
   min-width: 14px !important;
   max-width: 14px !important;
   flex: none !important;
+}
+
+/* ----------------------------------------------------------------------------
+ * 6. MAP + SHELL GLASS — clear liquid glass final authority
+ *    Dark-mode blueprint from map controls, applied to all map overlays +
+ *    beats nexus-theme/index.css opaque overrides.
+ * -------------------------------------------------------------------------- */
+.nx-icm__controls-popover,
+.nx-icm__legend-panel,
+.nx-icm .nx-seller-card,
+.nx-icm .nx-icm-buyer-card,
+.nx-icm .nx-icm__census-panel,
+.nx-icm .nx-icm__buyer-demand-dock,
+.nx-icm .nx-icm__census-dock {
+  background: var(--nx-glass-bg-strong) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  box-shadow:
+    var(--nx-glass-shadow),
+    var(--nx-glass-inner-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+  backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+}
+
+.nx-icm__controls-drawer-header {
+  background: var(--nx-glass-fill-header) !important;
+}
+
+.nxhud-header,
+.lac-header,
+.nx-orb-dashboard__header {
+  background: var(--nx-glass-tinted-header) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.6) !important;
+  backdrop-filter: blur(24px) saturate(1.6) !important;
+}
+
+.nx-icm__controls-footer {
+  background: var(--nx-glass-fill-footer) !important;
+}
+
+[data-nexus-theme="light"] .nx-icm__controls-popover,
+[data-nexus-theme="light"] .nx-icm__legend-panel,
+[data-nexus-theme="light"] .nx-icm .nx-seller-card,
+[data-nexus-theme="light"] .nx-icm .nx-icm-buyer-card,
+[data-nexus-theme="light"] .nx-icm .nx-icm__census-panel,
+[data-nexus-theme="light"] .nx-icm .nx-icm__buyer-demand-dock,
+[data-nexus-theme="light"] .nx-icm .nx-icm__census-dock {
+  background: var(--nx-glass-bg-strong) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+  color: #020617 !important;
+}
+
+[data-nexus-theme="light"] .nx-icm__controls-drawer-header,
+[data-nexus-theme="light"] .nx-icm__controls-footer {
+  background: var(--nx-glass-fill-header) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+[data-nexus-theme="light"] .nxhud-header,
+[data-nexus-theme="light"] .lac-header,
+[data-nexus-theme="light"] .nx-orb-dashboard__header {
+  background: var(--nx-glass-tinted-header) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.nx-kpi-orb {
+  background: var(--nx-glass-bg-tinted) !important;
+  border: 1px solid var(--nx-glass-border) !important;
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+  backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
+  box-shadow:
+    var(--nx-glass-shadow),
+    var(--nx-glass-inner-highlight) !important;
+}
+
+.nx-kpi-orb:hover {
+  background: var(--nx-glass-bg-tinted) !important;
+  border-color: color-mix(in srgb, var(--nx-accent) 34%, rgba(255, 255, 255, 0.14)) !important;
+}
+
+/* Map stat chips — same shell glass as notifications (not flat opaque cards) */
+.nx-icm__kpi-chip,
+.nx-icm__overlay-kpi {
+  background: var(--nx-glass-bg-tinted) !important;
+  border: 1px solid var(--nx-glass-border-shell, var(--nx-glass-border)) !important;
+  -webkit-backdrop-filter: blur(var(--nx-shell-glass-blur, var(--nx-glass-blur))) saturate(var(--nx-shell-glass-saturate, var(--nx-glass-saturate))) !important;
+  backdrop-filter: blur(var(--nx-shell-glass-blur, var(--nx-glass-blur))) saturate(var(--nx-shell-glass-saturate, var(--nx-glass-saturate))) !important;
+  box-shadow: var(--nx-shell-glass-shadow, var(--nx-glass-shadow)), var(--nx-glass-inner-highlight) !important;
+}
+
+.nx-icm__kpi-chip.is-active,
+.nx-icm__overlay-kpi.is-active {
+  background: var(--nx-glass-bg-tinted) !important;
+  border-color: color-mix(in srgb, var(--icm-kpi-tone, var(--nx-accent)) 42%, var(--nx-glass-border-shell, var(--nx-glass-border))) !important;
 }

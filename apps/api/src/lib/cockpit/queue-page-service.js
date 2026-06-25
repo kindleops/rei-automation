@@ -5,11 +5,14 @@ import { createRequestTimer } from './server-timing.js'
 const QUEUE_PAGE_COLUMNS = [
   'id', 'queue_status', 'priority', 'market', 'retry_count', 'max_retries',
   'created_at', 'updated_at', 'scheduled_for', 'scheduled_for_utc', 'sent_at', 'delivered_at',
-  'to_phone_number', 'from_phone_number', 'property_id', 'owner_id', 'master_owner_id',
-  'thread_key', 'template_id', 'use_case_template', 'message_type',
+  'to_phone_number', 'from_phone_number', 'property_id', 'owner_id', 'master_owner_id', 'prospect_id',
+  'thread_key', 'template_id', 'use_case_template', 'message_type', 'metadata',
   'message_body', 'message_text', 'touch_number', 'current_stage', 'queue_key',
   'failed_reason', 'blocked_reason', 'paused_reason', 'guard_reason', 'property_address',
 ].join(',')
+
+const OWNER_SELECT = 'master_owner_id,display_name,owner_type_guess,priority_score'
+const PROSPECT_SELECT = 'prospect_id,master_owner_id,full_name,first_name'
 
 const STATUS_BUCKET_VALUES = {
   scheduled: ['scheduled'],
@@ -107,19 +110,50 @@ async function loadQueuePage(opts = {}) {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   const propertyIds = [...new Set(rows.map((row) => clean(row.property_id)).filter(Boolean))]
-  let properties = []
-  if (propertyIds.length) {
-    const { data, error } = await supabase
-      .from('properties')
-      .select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market')
-      .in('property_id', propertyIds.slice(0, 100))
-    if (!error) properties = data || []
-  }
+  const ownerIds = [...new Set(rows.flatMap((row) => {
+    const ids = [clean(row.master_owner_id), clean(row.owner_id)]
+    const md = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    if (clean(md.master_owner_id)) ids.push(clean(md.master_owner_id))
+    return ids.filter(Boolean)
+  }))]
+  const prospectIds = [...new Set(rows.flatMap((row) => {
+    const ids = [clean(row.prospect_id)]
+    const md = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    if (clean(md.prospect_id)) ids.push(clean(md.prospect_id))
+    return ids.filter(Boolean)
+  }))]
+
+  const [propertiesResult, ownersResult, prospectsResult] = await Promise.all([
+    propertyIds.length
+      ? supabase
+        .from('properties')
+        .select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market')
+        .in('property_id', propertyIds.slice(0, 100))
+      : Promise.resolve({ data: [], error: null }),
+    ownerIds.length
+      ? supabase
+        .from('master_owners')
+        .select(OWNER_SELECT)
+        .in('master_owner_id', ownerIds.slice(0, 100))
+      : Promise.resolve({ data: [], error: null }),
+    prospectIds.length
+      ? supabase
+        .from('prospects')
+        .select(PROSPECT_SELECT)
+        .in('prospect_id', prospectIds.slice(0, 100))
+      : Promise.resolve({ data: [], error: null }),
+  ])
+
+  const properties = propertiesResult.error ? [] : (propertiesResult.data || [])
+  const owners = ownersResult.error ? [] : (ownersResult.data || [])
+  const prospects = prospectsResult.error ? [] : (prospectsResult.data || [])
   timer.mark('enrichment')
 
   const response = {
     items: rows,
     properties,
+    owners,
+    prospects,
     totalCount,
     currentPage: page,
     pageSize,

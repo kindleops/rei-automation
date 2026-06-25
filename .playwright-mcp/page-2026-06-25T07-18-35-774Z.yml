@@ -1,0 +1,5 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - text: NEXUS
+    - heading "Initializing command center" [level=1] [ref=e5]
+    - paragraph [ref=e6]: "Loading live route intelligence for `/queue`."

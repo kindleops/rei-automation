@@ -167,7 +167,13 @@ import {
   hasActiveAdvancedFilters,
   serializeAdvancedFiltersForServer,
 } from '../../domain/inbox/inbox-advanced-filter-engine'
-import { getViewLayoutMode, type ViewWidthPercent } from '../../domain/inbox/view-layout'
+import {
+  getViewLayoutMode,
+  resolveLayoutModeForPane,
+  resolveWorkspaceFlexBases,
+  resolveWorkspaceWidthLabels,
+  type ViewWidthPercent,
+} from '../../domain/inbox/view-layout'
 import './inbox-premium.css'
 // inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
 import './inbox-polish.css'
@@ -180,9 +186,9 @@ import '../copilot/copilot-v2.css' // canonical copilot sheet (merged copilot/co
 import './conversation-redesign.css'
 import './conversation-composer-premium.css'
 import './conversation-header-timeline.css'
+import './conversation-live.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
 import '../../styles/nx-ui-foundation-final.css'
-import './conversation-live.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
@@ -424,21 +430,62 @@ const getInitialWorkspaceViews = (
   return cloneDefaultWorkspaceViews()
 }
 
-const getInitialWorkspaceWidths = (
-  initialWorkspaceView?: InboxWorkspaceView,
-  routeMode: InboxRouteMode = 'workspace',
-): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
-  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
-  if (entryView) return {}
-  return cloneDefaultWorkspaceWidths()
-}
 const DEFAULT_WORKSPACE_KEY: NexusWorkspaceKey = 'deal_desk'
 const WORKSPACE_VIEWS_STORAGE_KEY = 'nx.inbox.workspace-views-by-key'
-const DEAL_DESK_LAYOUT_VERSION = 'v2'
+const DEAL_DESK_LAYOUT_VERSION = 'v3'
 const DEAL_DESK_LAYOUT_VERSION_KEY = 'nx.inbox.deal-desk-layout-version'
 const isDefaultWorkspaceSet = (views: InboxWorkspaceView[]) =>
   views.length === DEFAULT_WORKSPACE_VIEWS.length &&
   DEFAULT_WORKSPACE_VIEWS.every((view) => views.includes(view))
+
+/** Full (100%) is session-only — never restore a lone view that hides the inbox rail. */
+const normalizePersistedWorkspaceViews = (
+  workspaceKey: NexusWorkspaceKey,
+  views: InboxWorkspaceView[],
+): InboxWorkspaceView[] => {
+  if (workspaceKey === DEFAULT_WORKSPACE_KEY && views.length === 1) {
+    return cloneDefaultWorkspaceViews()
+  }
+  if (workspaceKey === DEFAULT_WORKSPACE_KEY && isDefaultWorkspaceSet(views)) {
+    return cloneDefaultWorkspaceViews()
+  }
+  return views
+}
+
+const loadPersistedWorkspaceViews = (
+  initialWorkspaceView?: InboxWorkspaceView,
+  routeMode: InboxRouteMode = 'workspace',
+): InboxWorkspaceView[] => {
+  const entryView = resolveRouteEntryView(routeMode, initialWorkspaceView)
+  if (entryView) return [entryView]
+
+  try {
+    const workspaceKey = window.localStorage.getItem('nx.inbox.selected-workspace') as NexusWorkspaceKey | null
+    const raw = window.localStorage.getItem(WORKSPACE_VIEWS_STORAGE_KEY)
+    if (workspaceKey && raw) {
+      const parsed = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
+      const saved = parsed[workspaceKey]
+      if (Array.isArray(saved) && saved.length > 0) {
+        const restored = saved.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view)) as InboxWorkspaceView[]
+        if (restored.length > 0) {
+          return normalizePersistedWorkspaceViews(workspaceKey, restored)
+        }
+      }
+    }
+  } catch {}
+
+  return getInitialWorkspaceViews(initialWorkspaceView, routeMode)
+}
+
+const stripDefaultDealDeskWidthOverrides = (
+  overrides: Partial<Record<InboxWorkspaceView, ViewWidthPercent>>,
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> =>
+  Object.fromEntries(
+    Object.entries(overrides).filter(([view, value]) => {
+      const workspaceView = view as InboxWorkspaceView
+      return DEFAULT_WORKSPACE_WIDTHS[workspaceView] !== value
+    }),
+  ) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
 
 const sanitizeWorkspaceWidthOverrides = (
   views: InboxWorkspaceView[],
@@ -450,7 +497,7 @@ const sanitizeWorkspaceWidthOverrides = (
     Object.entries(overrides).filter(([view, value]) => views.includes(view as InboxWorkspaceView) && value),
   ) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
 
-  if (isDefaultWorkspaceSet(views)) return { ...cloneDefaultWorkspaceWidths(), ...next }
+  if (isDefaultWorkspaceSet(views)) return stripDefaultDealDeskWidthOverrides(next)
 
   const values = views.map((view) => next[view]).filter(Boolean) as ViewWidthPercent[]
   if (views.length === 2) {
@@ -466,52 +513,40 @@ const sanitizeWorkspaceWidthOverrides = (
   return {}
 }
 
+const resolvePresetWidthOverrides = (
+  views: InboxWorkspaceView[],
+  presetWidths: Partial<Record<InboxWorkspaceView, ViewWidthPercent>>,
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
+  if (isDefaultWorkspaceSet(views)) return {}
+  return sanitizeWorkspaceWidthOverrides(views, { ...presetWidths })
+}
+
+const loadPersistedWorkspaceWidthOverrides = (
+  views: InboxWorkspaceView[],
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
+  try {
+    const raw = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
+    return sanitizeWorkspaceWidthOverrides(views, parsed)
+  } catch {
+    return {}
+  }
+}
+
+const computeWorkspaceFlexBases = (
+  views: InboxWorkspaceView[],
+  overrides: Partial<Record<InboxWorkspaceView, ViewWidthPercent>>,
+) => resolveWorkspaceFlexBases(views, overrides, {
+  isDefaultSet: isDefaultWorkspaceSet,
+  defaultWidths: cloneDefaultWorkspaceWidths(),
+})
+
 const computeWorkspaceWidths = (
   views: InboxWorkspaceView[],
   overrides: Partial<Record<InboxWorkspaceView, ViewWidthPercent>>,
-): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> => {
-  if (views.length === 0) return {}
-  if (views.length === 1) return { [views[0]]: '100' } as Record<InboxWorkspaceView, ViewWidthPercent>
-  if (views.length === 2) {
-    const [first, second] = views
-    const firstOverride = overrides[first]
-    const secondOverride = overrides[second]
-    if (firstOverride && secondOverride && sumWidths([firstOverride, secondOverride]) === 100) {
-      return { [first]: firstOverride, [second]: secondOverride } as Record<InboxWorkspaceView, ViewWidthPercent>
-    }
-    if (firstOverride === '75') return { [first]: '75', [second]: '25' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    if (firstOverride === '25') return { [first]: '25', [second]: '75' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    if (firstOverride === '50') return { [first]: '50', [second]: '50' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    if (secondOverride === '75') return { [first]: '25', [second]: '75' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    if (secondOverride === '25') return { [first]: '75', [second]: '25' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    if (secondOverride === '50') return { [first]: '50', [second]: '50' } as Record<InboxWorkspaceView, ViewWidthPercent>
-    return { [first]: '50', [second]: '50' } as Record<InboxWorkspaceView, ViewWidthPercent>
-  }
-  if (views.length === 3) {
-    const overrideValues = views.map((view) => overrides[view]).filter(Boolean) as ViewWidthPercent[]
-    if (overrideValues.length === 3 && sumWidths(overrideValues) === 100) {
-      return Object.fromEntries(views.map((view) => [view, overrides[view]!])) as Record<InboxWorkspaceView, ViewWidthPercent>
-    }
-    if (isDefaultWorkspaceSet(views)) {
-      return cloneDefaultWorkspaceWidths() as Record<InboxWorkspaceView, ViewWidthPercent>
-    }
-    return {
-      [views[0]]: '25',
-      [views[1]]: '50',
-      [views[2]]: '25',
-    } as Record<InboxWorkspaceView, ViewWidthPercent>
-  }
-  const overrideValues = views.slice(0, 4).map((view) => overrides[view]).filter(Boolean) as ViewWidthPercent[]
-  if (overrideValues.length === 4 && sumWidths(overrideValues) === 100) {
-    return Object.fromEntries(views.slice(0, 4).map((view) => [view, overrides[view]!])) as Record<InboxWorkspaceView, ViewWidthPercent>
-  }
-  return {
-    [views[0]]: '25',
-    [views[1]]: '25',
-    [views[2]]: '25',
-    [views[3]]: '25',
-  } as Record<InboxWorkspaceView, ViewWidthPercent>
-}
+): Partial<Record<InboxWorkspaceView, ViewWidthPercent>> =>
+  resolveWorkspaceWidthLabels(views, overrides, computeWorkspaceFlexBases(views, overrides))
 
 const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): QueueCommandMode => {
   const campaignMode = String(diagnostics?.campaign_mode || '').toLowerCase()
@@ -553,8 +588,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [rightViewFilter, setRightViewFilter] = useState<InboxViewSelectValue>('new_replies')
   const [rightSavedPreset, setRightSavedPreset] = useState<InboxSavedFilterPreset>('new_inbounds')
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<NexusWorkspaceKey>(DEFAULT_WORKSPACE_KEY)
-  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() => getInitialWorkspaceViews(initialWorkspaceView, routeMode))
-  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() => getInitialWorkspaceWidths(initialWorkspaceView, routeMode))
+  const [selectedWorkspaceViews, setSelectedWorkspaceViews] = useState<InboxWorkspaceView[]>(() =>
+    loadPersistedWorkspaceViews(initialWorkspaceView, routeMode),
+  )
+  const [workspaceWidthOverrides, setWorkspaceWidthOverrides] = useState<Partial<Record<InboxWorkspaceView, ViewWidthPercent>>>(() =>
+    loadPersistedWorkspaceWidthOverrides(loadPersistedWorkspaceViews(initialWorkspaceView, routeMode)),
+  )
+  const workspaceWidthsPersistReadyRef = useRef(false)
   const [tableSort, setTableSort] = useState<ConversationTableSort>('last_activity_desc')
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
@@ -1020,6 +1060,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
   }, [effectiveActiveContext, selected, threads])
 
+  // After bucket/category switch, always surface the first lead in the new bucket.
+  useEffect(() => {
+    if (filtered.length === 0) return
+    const selectedInBucket = selectedId
+      ? filtered.some((thread) => thread.id === selectedId || (thread.threadKey || thread.id) === selectedThreadKey)
+      : false
+    if (selectedInBucket) return
+    const first = filtered[0]
+    if (!first) return
+    setSelectedId(first.id)
+    setSelectedThreadKey(getConversationThreadIdForThread(first) || first.threadKey || first.id)
+    setLayoutState((current) => ({ ...current, selectedThreadId: first.id }))
+  }, [filtered, selectedId, selectedThreadKey, viewFilter])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
 
@@ -1108,6 +1161,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const selectedWorkspacePreset = useMemo(
     () => NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === selectedWorkspaceKey) ?? NEXUS_WORKSPACE_PRESETS[0],
     [selectedWorkspaceKey],
+  )
+  const workspaceFlexBases = useMemo(
+    () => computeWorkspaceFlexBases(selectedWorkspaceViews, workspaceWidthOverrides),
+    [selectedWorkspaceViews, workspaceWidthOverrides],
   )
   const workspaceWidths = useMemo(
     () => computeWorkspaceWidths(selectedWorkspaceViews, workspaceWidthOverrides),
@@ -1405,12 +1462,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<Record<NexusWorkspaceKey, InboxWorkspaceView[]>>
         const saved = parsed[workspaceKey as NexusWorkspaceKey]
-        if (Array.isArray(saved) && saved.length > 0) views = saved.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
+        if (Array.isArray(saved) && saved.length > 0) {
+          const restored = saved.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view)) as InboxWorkspaceView[]
+          if (restored.length > 0) views = normalizePersistedWorkspaceViews(preset.key, restored)
+        }
       }
     } catch {}
     setSelectedWorkspaceKey(preset.key)
     setSelectedWorkspaceViews(views)
-    setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(views, { ...preset.widths }))
+    setWorkspaceWidthOverrides(resolvePresetWidthOverrides(views, preset.widths))
   }, [])
 
   const persistWorkspaceViewOverride = useCallback((workspaceKey: NexusWorkspaceKey, views: InboxWorkspaceView[]) => {
@@ -1510,12 +1570,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         nextViews = [view, fallback]
       }
 
-      setWorkspaceWidthOverrides((existing) =>
-        sanitizeWorkspaceWidthOverrides(nextViews, { ...existing, [view]: width }),
+      setWorkspaceWidthOverrides(() =>
+        sanitizeWorkspaceWidthOverrides(nextViews, { [view]: width }),
       )
       return nextViews
     })
-  }, [])
+  }, [persistWorkspaceViewOverride, selectedWorkspaceKey])
 
   const handleToggleActiveViewChip = useCallback((viewKey: string) => {
     setSelectedWorkspaceViews((current) => {
@@ -2253,11 +2313,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const shouldForceDealDesk = layoutVersion !== DEAL_DESK_LAYOUT_VERSION
 
       setSelectedWorkspaceKey(DEFAULT_WORKSPACE_KEY)
-      let initialViews = getInitialWorkspaceViews(initialWorkspaceView, routeMode)
-      let initialWidths = getInitialWorkspaceWidths(initialWorkspaceView, routeMode)
+      let initialViews = loadPersistedWorkspaceViews(initialWorkspaceView, routeMode)
+      let initialWidths = loadPersistedWorkspaceWidthOverrides(initialViews)
       if (shouldForceDealDesk && !isRouteFullscreen && initialWorkspaceView === undefined) {
         initialViews = cloneDefaultWorkspaceViews()
-        initialWidths = cloneDefaultWorkspaceWidths()
+        initialWidths = {}
         window.localStorage.setItem(DEAL_DESK_LAYOUT_VERSION_KEY, DEAL_DESK_LAYOUT_VERSION)
       }
       setSelectedWorkspaceViews(initialViews)
@@ -2278,21 +2338,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             const restoredViews = Array.isArray(savedViews) && savedViews.length > 0
               ? savedViews.filter((view) => WORKSPACE_VIEW_OPTIONS.some((opt) => opt.key === view))
               : [...preset.views]
-            const nextViews = preset.key === DEFAULT_WORKSPACE_KEY && !isDefaultWorkspaceSet(restoredViews)
-              ? cloneDefaultWorkspaceViews()
-              : restoredViews
+            const nextViews = normalizePersistedWorkspaceViews(preset.key, restoredViews)
             setSelectedWorkspaceViews(nextViews)
             initialViews = nextViews
-            initialWidths = preset.key === DEFAULT_WORKSPACE_KEY && isDefaultWorkspaceSet(nextViews)
-              ? cloneDefaultWorkspaceWidths()
-              : sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths })
+            initialWidths = resolvePresetWidthOverrides(nextViews, preset.widths)
             setWorkspaceWidthOverrides(initialWidths)
           }
         }
         const savedOverrides = window.localStorage.getItem('nx.inbox.workspace-width-overrides')
         if (savedOverrides) {
           const parsed = JSON.parse(savedOverrides) as Partial<Record<InboxWorkspaceView, ViewWidthPercent>>
-          setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(initialViews, { ...initialWidths, ...parsed }))
+          setWorkspaceWidthOverrides(
+            sanitizeWorkspaceWidthOverrides(
+              initialViews,
+              Object.keys(parsed).length > 0 ? parsed : initialWidths,
+            ),
+          )
         }
       }
       const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
@@ -2322,14 +2383,24 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [])
 
   useEffect(() => {
+    if (_dataLoading) return
     let active = true
-    const loadQueueControl = async () => {
-      const diagnostics = await refreshQueueControl()
-      if (!active || !diagnostics) return
+    const deferTimer = window.setTimeout(() => {
+      const loadQueueControl = async () => {
+        const diagnostics = await refreshQueueControl()
+        if (!active || !diagnostics) return
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => { void loadQueueControl() }, { timeout: 10_000 })
+      } else {
+        void loadQueueControl()
+      }
+    }, 4_000)
+    return () => {
+      active = false
+      window.clearTimeout(deferTimer)
     }
-    void loadQueueControl()
-    return () => { active = false }
-  }, [refreshQueueControl])
+  }, [_dataLoading, refreshQueueControl])
 
   useEffect(() => {
     try {
@@ -2339,6 +2410,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [queueCommandCaps, queueCommandMode])
 
   useEffect(() => {
+    if (!workspaceWidthsPersistReadyRef.current) {
+      workspaceWidthsPersistReadyRef.current = true
+      return
+    }
     try {
       window.localStorage.setItem('nx.inbox.workspace-width-overrides', JSON.stringify(workspaceWidthOverrides))
     } catch {}
@@ -2417,23 +2492,42 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [refreshQueueControl, refreshQueueHealth])
 
-  // Queue health polls send_queue (heavy). Only start once after live inbox has resolved.
-  // Cleanup does NOT clear the interval — a separate mount-only effect handles unmount cleanup.
+  // Queue health polls send_queue (heavy). Defer until inbox shell is painted so thread
+  // messages and sidebar are not competing with queue/control on cold load.
   useEffect(() => {
     if (data.liveFetchStatus !== 'active') return
+    if (_dataLoading) return
     if (heavyQueriesStartedRef.current) return
-    heavyQueriesStartedRef.current = true
 
     let active = true
-    const refreshHealth = async () => {
-      const snapshot = await refreshQueueHealth()
-      if (!active) return
-      setQueueProcessorHealth(snapshot)
+    let idleHandle: number | null = null
+    const deferTimer = window.setTimeout(() => {
+      const startHeavyQueries = () => {
+        if (!active || heavyQueriesStartedRef.current) return
+        heavyQueriesStartedRef.current = true
+        const refreshHealth = async () => {
+          const snapshot = await refreshQueueHealth()
+          if (!active) return
+          setQueueProcessorHealth(snapshot)
+        }
+        void refreshHealth()
+        healthIntervalRef.current = window.setInterval(() => { void refreshHealth() }, 30000)
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(() => startHeavyQueries(), { timeout: 12_000 })
+      } else {
+        startHeavyQueries()
+      }
+    }, 4_000)
+
+    return () => {
+      active = false
+      window.clearTimeout(deferTimer)
+      if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle)
+      }
     }
-    void refreshHealth()
-    healthIntervalRef.current = window.setInterval(() => { void refreshHealth() }, 30000)
-    return () => { active = false }  // cancel in-flight only; interval runs until unmount
-  }, [data.liveFetchStatus, refreshQueueHealth])
+  }, [_dataLoading, data.liveFetchStatus, refreshQueueHealth])
 
   useEffect(() => {
     return () => { if (healthIntervalRef.current !== null) window.clearInterval(healthIntervalRef.current) }
@@ -2594,33 +2688,52 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   ), [runQueueCommand])
 
-  // Templates, queue model, and activity are heavy Supabase queries. Only start once after live inbox resolves.
-  // Cleanup does NOT clear the interval — a separate mount-only effect handles unmount cleanup.
+  // Templates, queue model, and activity are heavy Supabase queries. Defer until inbox is
+  // interactive so cold load prioritizes thread list + selected thread messages.
   useEffect(() => {
     if (data.liveFetchStatus !== 'active') return
+    if (_dataLoading) return
     if (autonomyQueriesStartedRef.current) return
-    autonomyQueriesStartedRef.current = true
 
     let active = true
-    const refreshAutonomyInputs = async () => {
-      try {
-        const [nextQueue, nextTemplates, nextActivity] = await Promise.all([
-          fetchQueueModel().catch(() => null),
-          fetchSmsTemplates({ includeInactive: true, limit: 800 }).catch(() => []),
-          fetchInboxActivity().catch(() => []),
-        ])
-        if (!active) return
-        setQueueModel(nextQueue)
-        setTemplateInventory(nextTemplates)
-        setActivityFeed(nextActivity)
-      } catch (error) {
-        if (DEV) console.warn('[InboxPage autonomy inputs] refresh failed', error)
+    let idleHandle: number | null = null
+    const deferTimer = window.setTimeout(() => {
+      const startAutonomyQueries = () => {
+        if (!active || autonomyQueriesStartedRef.current) return
+        autonomyQueriesStartedRef.current = true
+        const refreshAutonomyInputs = async () => {
+          try {
+            const [nextQueue, nextTemplates, nextActivity] = await Promise.all([
+              fetchQueueModel().catch(() => null),
+              fetchSmsTemplates({ includeInactive: true, limit: 800 }).catch(() => []),
+              fetchInboxActivity().catch(() => []),
+            ])
+            if (!active) return
+            setQueueModel(nextQueue)
+            setTemplateInventory(nextTemplates)
+            setActivityFeed(nextActivity)
+          } catch (error) {
+            if (DEV) console.warn('[InboxPage autonomy inputs] refresh failed', error)
+          }
+        }
+        void refreshAutonomyInputs()
+        autonomyIntervalRef.current = window.setInterval(() => { void refreshAutonomyInputs() }, 45000)
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(() => startAutonomyQueries(), { timeout: 15_000 })
+      } else {
+        startAutonomyQueries()
+      }
+    }, 6_000)
+
+    return () => {
+      active = false
+      window.clearTimeout(deferTimer)
+      if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle)
       }
     }
-    void refreshAutonomyInputs()
-    autonomyIntervalRef.current = window.setInterval(() => { void refreshAutonomyInputs() }, 45000)
-    return () => { active = false }  // cancel in-flight only; interval runs until unmount
-  }, [DEV, data.liveFetchStatus])
+  }, [DEV, _dataLoading, data.liveFetchStatus])
 
   useEffect(() => {
     return () => { if (autonomyIntervalRef.current !== null) window.clearInterval(autonomyIntervalRef.current) }
@@ -3928,16 +4041,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const workspaceBlocked = selectedWorkspacePreset.status !== 'ready'
 
   const isMultiView = renderViews.length > 1
-  const isDealDeskLayout = isDefaultWorkspaceSet(renderViews)
-  const isCustomMultiView = isMultiView && isDealDeskLayout
-  const isDefaultWorkspaceShell = isMultiView && !isDealDeskLayout && isDefaultWorkspaceSet(renderViews)
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
   const isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
-  const useFullscreenShell = !workspaceBlocked && !isMultiView && (isRouteFullscreen || isDealIntelligenceView || isEntityGraphView)
-  const showLeftPanel = isDefaultWorkspaceShell
+  const useFullscreenShell = !workspaceBlocked && !isMultiView
   const isDoubleSided = inboxMode === 'full_double'
-  const showRightCommandPanel = isDefaultWorkspaceShell
 
   const renderWorkspaceStatusShell = () => {
     const statusLabel = selectedWorkspacePreset.status === 'backend_not_ready' ? 'Backend Not Ready' : 'Coming Soon'
@@ -3972,7 +4080,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     clearWorkspaceViewOverride(selectedWorkspaceKey)
     const nextViews = [...preset.views]
     setSelectedWorkspaceViews(nextViews)
-    setWorkspaceWidthOverrides(sanitizeWorkspaceWidthOverrides(nextViews, { ...preset.widths }))
+    setWorkspaceWidthOverrides(resolvePresetWidthOverrides(nextViews, preset.widths))
     setLayoutState(resetLayoutMode)
     emitNotification({
       title: 'Layout Reset',
@@ -3981,8 +4089,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   }
 
-  const renderSmsThreadPane = (layoutMode: ReturnType<typeof getViewLayoutMode> = 'full') => (
-    <section className={cls('nx-workspace-pane-surface', 'nx-workspace-pane-surface--sms-thread', `is-layout-${layoutMode}`)}>
+  const renderSmsThreadPane = (
+    paneWidth: ViewWidthPercent = '100',
+    layoutMode: ReturnType<typeof getViewLayoutMode> = getViewLayoutMode(paneWidth),
+  ) => (
+    <section
+      className={cls(
+        'nx-workspace-pane-surface',
+        'nx-workspace-pane-surface--sms-thread',
+        `is-width-${paneWidth}`,
+        `is-layout-${layoutMode}`,
+      )}
+    >
       <ChatThread
         thread={selected}
         messages={displayedMessagesWithTranslation}
@@ -4079,23 +4197,51 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     </section>
   )
 
+  const wrapWorkspaceSurface = (
+    view: InboxWorkspaceView,
+    paneWidth: ViewWidthPercent,
+    layoutMode: ReturnType<typeof resolveLayoutModeForPane>,
+    surfaceClass: string,
+    children: ReactNode,
+  ) => (
+    <section
+      className={cls(
+        'nx-workspace-surface',
+        surfaceClass,
+        `is-view-${view}`,
+        `is-width-${paneWidth}`,
+        `is-layout-${layoutMode}`,
+      )}
+      style={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+    >
+      {children}
+    </section>
+  )
+
   const renderWorkspacePane = (
     view: InboxWorkspaceView,
     paneMode: 'single' | 'multi' = 'single',
     paneWidth: ViewWidthPercent = '100',
   ) => {
-    const layoutMode = getViewLayoutMode(paneWidth)
+    const layoutMode = resolveLayoutModeForPane(
+      workspaceFlexBases[view] ?? Number(paneWidth),
+      workspaceWidthOverrides[view] ?? paneWidth,
+    )
 
     if (view === 'thread') {
       return renderInboxRailPane(paneMode, paneWidth)
     }
 
     if (view === 'sms_thread') {
-      return renderSmsThreadPane(layoutMode)
+      return renderSmsThreadPane(paneWidth, layoutMode)
     }
 
     if (view === 'list') {
-      return (
+      return wrapWorkspaceSurface(
+        view,
+        paneWidth,
+        layoutMode,
+        'nx-workspace-surface--list-compact',
         <InboxConversationTable
           threads={filtered}
           selectedId={inboxHighlightId}
@@ -4106,14 +4252,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           onSortChange={setTableSort}
           onDensityChange={setTableDensity}
           onSelect={handleSelect}
-        />
+        />,
       )
     }
 
     if (view === 'entity_graph') {
       return (
         <section
-          className="nx-workspace-surface nx-workspace-surface--entity-graph"
+          className={cls(
+            'nx-workspace-surface',
+            'nx-workspace-surface--entity-graph',
+            `is-view-${view}`,
+            `is-width-${paneWidth}`,
+            `is-layout-${layoutMode}`,
+          )}
           style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}
         >
           <EntityGraphWorkspace
@@ -4134,7 +4286,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'command_map') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--map">
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <div className="nx-map-right-body nx-map-right-body--workspace">
             <WorkspaceSuspense>
             <InboxCommandMap
@@ -4189,7 +4341,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
           messages={displayedMessages}
-          panelMode={paneMode === 'single' ? 'full' : paneWidth === '25' || paneWidth === '50' ? 'half' : 'default'}
+          panelMode={
+            paneMode === 'single' || paneWidth === '75' || paneWidth === '100'
+              ? 'full'
+              : paneWidth === '25' || paneWidth === '50'
+                ? 'half'
+                : 'default'
+          }
           layoutMode={layoutMode}
         />
 
@@ -4197,44 +4355,52 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     if (view === 'pipeline') {
-      return (
+      return wrapWorkspaceSurface(
+        view,
+        paneWidth,
+        layoutMode,
+        'nx-workspace-surface--kanban',
         <WorkspaceSuspense>
-        <PipelineWorkspace
-          selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
-          externalContext={effectiveActiveContext}
-          layoutMode={layoutMode}
-          onSelect={handleSelect}
-          onAnchorThread={anchorThreadSelection}
-          onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
-          onSyncOpportunity={syncOpportunityContext}
-          onClearOpportunityPreview={clearOpportunityPreview}
-          onOpenCommandView={(threadId) => {
-            if (threadId) handleSelect(threadId)
-            handleFocusWorkspaceView('sms_thread')
-          }}
-          onOpenDealIntelligence={handleOpenDealIntelligence}
-          onAction={handleOperatorAction}
-        />
-        </WorkspaceSuspense>
+          <PipelineWorkspace
+            selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
+            externalContext={effectiveActiveContext}
+            layoutMode={layoutMode}
+            onSelect={handleSelect}
+            onAnchorThread={anchorThreadSelection}
+            onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
+            onSyncOpportunity={syncOpportunityContext}
+            onClearOpportunityPreview={clearOpportunityPreview}
+            onOpenCommandView={(threadId) => {
+              if (threadId) handleSelect(threadId)
+              handleFocusWorkspaceView('sms_thread')
+            }}
+            onOpenDealIntelligence={handleOpenDealIntelligence}
+            onAction={handleOperatorAction}
+          />
+        </WorkspaceSuspense>,
       )
     }
 
     if (view === 'queue') {
-      return (
-        <section className="nx-workspace-surface nx-workspace-surface--queue">
-          <QueuePage
-            externalContext={effectiveActiveContext}
-            onSelectItem={queueItem =>
-              setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
-            }
-          />
-        </section>
+      return wrapWorkspaceSurface(
+        view,
+        paneWidth,
+        layoutMode,
+        'nx-workspace-surface--queue',
+        <QueuePage
+          externalContext={effectiveActiveContext}
+          layoutMode={layoutMode}
+          paneWidth={paneWidth}
+          onSelectItem={queueItem =>
+            setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
+          }
+        />,
       )
     }
 
     if (view === 'calendar') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--calendar">
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--calendar', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <InboxCalendarView
             threads={filtered}
             selectedThread={workspaceThread}
@@ -4250,7 +4416,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'metrics') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--metrics">
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--metrics', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
             <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
           </WorkspaceSuspense>
@@ -4260,7 +4426,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'comp_intelligence') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--map">
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
           <CompIntelligenceWorkspace
             thread={workspaceThread}
@@ -4276,7 +4442,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'buyer_match') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--map">
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
           <BuyerMatchWorkspace
             paused={heavyLoadPaused}
@@ -4308,7 +4474,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'campaigns') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--campaigns', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)} style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
           <WorkspaceSuspense>
           <InboxCampaignView
             selectedThread={workspaceThread}
@@ -4322,7 +4488,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'email') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--campaigns" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--campaigns', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)} style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
           <EmailCommandCenter
             paneWidth={paneWidth}
           />
@@ -4332,7 +4498,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'workflow_studio') {
       return (
-        <section className="nx-workspace-surface nx-workspace-surface--workflow-studio wfs2-isolation-root" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--workflow-studio', 'wfs2-isolation-root', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)} style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
           <WorkflowStudioV2
             paneWidth={paneWidth}
             layoutMode={layoutMode}
@@ -4381,9 +4547,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         'nx-premium-inbox nx-inbox',
         ...layoutClasses,
         isRouteFullscreen && 'is-route-fullscreen',
+        useFullscreenShell && 'is-workspace-fullscreen',
         isCommandMapView && 'is-command-view-active',
         `is-workspace-${activeWorkspaceView}`,
-        isCustomMultiView && 'is-multi-view-active',
+        isMultiView && 'is-multi-view-active',
       )}
     >
       <NexusTopBar
@@ -4426,6 +4593,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           applyThemeToDOM()
         }}
         onSelectAccent={(accent) => {
+          setActiveAccentPalette(accent)
           updateSetting('accentPalette', accent)
           applyThemeToDOM()
         }}
@@ -4511,48 +4679,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           >
             ☰ Threads
           </button>
-          {showRightCommandPanel && (
-            <button
-              type="button"
-              className="nx-mobile-panel-toggle"
-              onClick={() => { setMobileIntelOpen(v => !v); setMobileSidebarOpen(false) }}
-            >
-              ◧ Intel
-            </button>
-          )}
         </div>
-        {showLeftPanel && !isDealIntelligenceView && (
-          <InboxSidebar
-            threads={threads}
-            selectedId={selected?.id ?? null}
-            activeViewFilter={viewFilter}
-            onSelect={handleSelect}
-            onThreadAction={handleThreadAction}
-            savedPreset={savedPreset}
-            onApplySavedPreset={applySavedPreset}
-            viewCounts={viewCounts}
-            onOpenAdvancedFilters={() => setActiveOverlay('filters')}
-            activeFilterChips={activeAdvancedFilterChips}
-            activeFilterCount={activeAdvancedFilterCount}
-            onRemoveFilterChip={handleRemoveAdvancedFilterChip}
-            onClearFilters={handleResetFilters}
-            onRetryLoad={handleRetryInboxLoad}
-            onLoadMore={handleLoadMore}
-            canLoadMore={Boolean(data.pagination?.hasMore)}
-            recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            sourceMode={sourceMode}
-            onSourceModeChange={setSourceMode}
-            visibleThreadCount={visibleThreadCount}
-            loading={_dataLoading}
-            loadingError={data.liveFetchError}
-            realtimeStatus={data.realtimeStatus}
-            refreshMode={data.refreshMode}
-            densityMode={leftPanelMode === 'full' ? 'full' : 'compact'}
-            inboxMode="rail25"
-          />
-        )}
 
         {isDoubleSided && (
           <InboxSidebar
@@ -4616,11 +4743,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             />
           )}
 
-          {isCustomMultiView ? (
+          {isMultiView ? (
             <section className="nx-workspace-split-grid">
               {renderViews.map((view) => {
                 const paneWidth = workspaceWidths[view] ?? '25'
-                const layoutMode = getViewLayoutMode(paneWidth)
+                const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
+                const layoutMode = resolveLayoutModeForPane(
+                  flexBasis,
+                  workspaceWidthOverrides[view] ?? paneWidth,
+                )
                 return (
                   <div
                     key={view}
@@ -4631,17 +4762,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                       `is-layout-${layoutMode}`,
                       view === activeWorkspaceView && 'is-primary',
                     )}
-                    style={{ flex: `0 0 ${paneWidth}%` }}
+                    style={{ flex: `1 1 ${flexBasis}%`, maxWidth: `${flexBasis}%`, minWidth: 0 }}
                   >
                     {renderWorkspacePane(view, 'multi', paneWidth)}
                   </div>
                 )
               })}
             </section>
-          ) : isDefaultWorkspaceShell ? (
-            renderWorkspacePane('sms_thread', 'single')
           ) : (
-            renderWorkspacePane(activeWorkspaceView, 'single')
+            renderWorkspacePane(activeWorkspaceView, 'single', '100')
           )}
         </main>
 
@@ -4703,22 +4832,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             />
           </div>
         </aside>
-        ) : showRightCommandPanel ? (
-          <IntelligencePanel
-            thread={workspaceThread}
-            threadContext={threadContext}
-            intelligence={threadIntelligence}
-            dealContext={canonicalSelectedContext}
-            onStatusChange={handleStatusChange}
-            onStageChange={handleStageChange}
-            onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-            onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
-            onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
-            onOpenAi={() => setActiveOverlay('ai')}
-            messages={displayedMessages}
-            panelMode={rightPanelMode === 'hidden' ? 'default' : rightPanelMode}
-            layoutMode={getViewLayoutMode(workspaceWidths['deal_intelligence'] ?? '25')}
-          />
         ) : null}
       </div>
       )}

@@ -154,20 +154,28 @@ function buildLinkedContextMaps({ properties = [], masterOwners = [], prospects 
 }
 
 export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
-  const propertyId = clean(row.property_id || row.final_property_id);
-  const masterOwnerId = clean(row.master_owner_id || row.final_master_owner_id || row.owner_id);
-  const prospectId = clean(row.prospect_id || row.final_prospect_id);
   const threadKey = clean(row.thread_key || row.canonical_thread_key);
+  const dealContext = threadKey ? maps.contextByThreadKey?.get(threadKey) : null;
+
+  const propertyId = clean(
+    row.property_id || row.final_property_id || dealContext?.property_id,
+  );
+  const masterOwnerId = clean(
+    row.master_owner_id || row.final_master_owner_id || row.owner_id || dealContext?.master_owner_id,
+  );
+  const prospectId = clean(row.prospect_id || row.final_prospect_id || dealContext?.prospect_id);
 
   const property = propertyId ? maps.propertyById?.get(propertyId) : null;
   const masterOwner = masterOwnerId ? maps.ownerById?.get(masterOwnerId) : null;
   const prospect = prospectId ? maps.prospectById?.get(prospectId) : null;
-  const dealContext = threadKey ? maps.contextByThreadKey?.get(threadKey) : null;
 
   if (!property && !masterOwner && !prospect && !dealContext) return row;
 
-  const ownerName = resolveOwnerName({ row, masterOwner, prospect });
-  const propertyAddress = property ? resolvePropertyAddress(property) : null;
+  const ownerName = resolveOwnerName({ row, masterOwner, prospect })
+    || (dealContext ? firstReal(dealContext.owner_name) : null);
+  const propertyAddress = property
+    ? resolvePropertyAddress(property)
+    : (dealContext ? firstReal(dealContext.property_address_full) : null);
   const market = firstReal(property?.market, property?.market_region, row.market, dealContext?.market);
   const propertyType = firstReal(property?.property_type, property?.property_class, row.property_type);
   const unitsCount = parseNumber(property?.units_count ?? property?.number_of_units);
@@ -185,6 +193,9 @@ export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
   );
 
   const patch = {
+    property_id: propertyId || row.property_id || null,
+    master_owner_id: masterOwnerId || row.master_owner_id || null,
+    prospect_id: prospectId || row.prospect_id || null,
     owner_name: firstReal(row.owner_name, ownerName),
     owner_display_name: firstReal(row.owner_display_name, ownerName),
     seller_display_name: firstReal(row.seller_display_name, ownerName),
@@ -257,6 +268,9 @@ const DEAL_CONTEXT_SELECT = [
   "market",
   "owner_name",
   "property_address_full",
+  "property_id",
+  "master_owner_id",
+  "prospect_id",
 ].join(",");
 
 async function safeInQuery(supabase, table, select, column, values = []) {
@@ -276,33 +290,132 @@ async function safeInQuery(supabase, table, select, column, values = []) {
   return rows;
 }
 
+async function hydrateThreadIdentityFromMessageEvents(rows = [], supabase) {
+  if (!rows.length || !supabase?.from) return rows;
+
+  const targets = rows.filter((row) => {
+    const propertyId = clean(row.property_id || row.final_property_id);
+    const masterOwnerId = clean(row.master_owner_id || row.final_master_owner_id || row.owner_id);
+    return !propertyId && !masterOwnerId;
+  });
+  if (!targets.length) return rows;
+
+  const phones = [...new Set(
+    targets
+      .map((row) => normalizePhone(
+        row.canonical_e164 || row.seller_phone || row.best_phone || row.display_phone || row.thread_key,
+      ))
+      .filter(Boolean),
+  )];
+  if (!phones.length) return rows;
+
+  const orClause = phones
+    .flatMap((phone) => [
+      `from_phone_number.eq.${phone}`,
+      `to_phone_number.eq.${phone}`,
+      `thread_key.eq.${phone}`,
+    ])
+    .join(",");
+
+  let query = supabase
+    .from("message_events")
+    .select("thread_key,from_phone_number,to_phone_number,property_id,master_owner_id,prospect_id,event_timestamp")
+    .or(orClause)
+    .not("property_id", "is", null);
+  if (typeof query.order === "function") {
+    query = query.order("event_timestamp", { ascending: false, nullsFirst: false });
+  }
+  if (typeof query.limit === "function") {
+    query = query.limit(Math.min(Math.max(phones.length * 4, 20), 200));
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn("[INBOX_IDENTITY_FROM_MESSAGES_SKIPPED]", error.message);
+    return rows;
+  }
+
+  const identityByPhone = new Map();
+  for (const message of data || []) {
+    const keys = [
+      normalizePhone(message.thread_key),
+      normalizePhone(message.from_phone_number),
+      normalizePhone(message.to_phone_number),
+    ].filter(Boolean);
+    for (const key of keys) {
+      if (!identityByPhone.has(key)) {
+        identityByPhone.set(key, message);
+      }
+    }
+  }
+
+  return rows.map((row) => {
+    const propertyId = clean(row.property_id || row.final_property_id);
+    const masterOwnerId = clean(row.master_owner_id || row.final_master_owner_id || row.owner_id);
+    if (propertyId || masterOwnerId) return row;
+
+    const phone = normalizePhone(
+      row.canonical_e164 || row.seller_phone || row.best_phone || row.display_phone || row.thread_key,
+    );
+    const match = phone ? identityByPhone.get(phone) : null;
+    if (!match) return row;
+
+    return {
+      ...row,
+      property_id: clean(match.property_id) || row.property_id || null,
+      master_owner_id: clean(match.master_owner_id) || row.master_owner_id || null,
+      prospect_id: clean(match.prospect_id) || row.prospect_id || null,
+    };
+  });
+}
+
 export async function bulkHydrateInboxThreadLinkedContext(rows = [], supabase) {
   if (!rows.length || !supabase) return rows;
+
+  const threadKeys = [];
+  for (const row of rows) {
+    const threadKey = clean(row.thread_key || row.canonical_thread_key);
+    if (threadKey) threadKeys.push(threadKey);
+  }
+
+  const dealContexts = await safeInQuery(
+    supabase,
+    "deal_context_index",
+    DEAL_CONTEXT_SELECT,
+    "thread_key",
+    threadKeys,
+  );
 
   const propertyIds = [];
   const masterOwnerIds = [];
   const prospectIds = [];
-  const threadKeys = [];
 
   for (const row of rows) {
     const propertyId = clean(row.property_id || row.final_property_id);
     const masterOwnerId = clean(row.master_owner_id || row.final_master_owner_id || row.owner_id);
     const prospectId = clean(row.prospect_id || row.final_prospect_id);
-    const threadKey = clean(row.thread_key || row.canonical_thread_key);
     if (propertyId) propertyIds.push(propertyId);
     if (masterOwnerId) masterOwnerIds.push(masterOwnerId);
     if (prospectId) prospectIds.push(prospectId);
-    if (threadKey) threadKeys.push(threadKey);
+  }
+  for (const ctx of dealContexts) {
+    const propertyId = clean(ctx.property_id);
+    const masterOwnerId = clean(ctx.master_owner_id);
+    const prospectId = clean(ctx.prospect_id);
+    if (propertyId) propertyIds.push(propertyId);
+    if (masterOwnerId) masterOwnerIds.push(masterOwnerId);
+    if (prospectId) prospectIds.push(prospectId);
   }
 
-  const [properties, masterOwners, prospects, dealContexts] = await Promise.all([
+  const [properties, masterOwners, prospects] = await Promise.all([
     safeInQuery(supabase, "properties", PROPERTY_SELECT, "property_id", propertyIds),
     safeInQuery(supabase, "master_owners", MASTER_OWNER_SELECT, "master_owner_id", masterOwnerIds),
     safeInQuery(supabase, "prospects", PROSPECT_SELECT, "prospect_id", prospectIds),
-    safeInQuery(supabase, "deal_context_index", DEAL_CONTEXT_SELECT, "thread_key", threadKeys),
   ]);
 
   const maps = buildLinkedContextMaps({ properties, masterOwners, prospects, dealContexts });
 
   return rows.map((row) => mergeLinkedContextIntoThreadRow(row, maps));
 }
+
+export { hydrateThreadIdentityFromMessageEvents };

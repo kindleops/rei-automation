@@ -23,11 +23,11 @@
   --nx-live-accent-glow: var(--nx-accent-glow, rgba(59, 130, 246, 0.22));
   --nx-live-accent-border: color-mix(in srgb, var(--nx-live-accent) 42%, transparent);
   --nx-live-accent-contrast: var(--nx-accent-contrast, #ffffff);
-  --nx-live-gradient-start: color-mix(in srgb, var(--nx-live-accent) 58%, rgba(8, 16, 36, 0.98));
-  --nx-live-gradient-mid: color-mix(in srgb, var(--nx-live-accent) 38%, rgba(6, 14, 28, 0.96));
-  --nx-live-gradient-end: color-mix(in srgb, var(--nx-live-accent) 22%, rgba(4, 10, 22, 1));
-  --nx-live-out-solid: color-mix(in srgb, var(--nx-live-accent) 40%, rgba(6, 14, 30, 0.96));
-  --nx-live-out-bg: linear-gradient(155deg, var(--nx-live-gradient-start) 0%, var(--nx-live-gradient-mid) 52%, var(--nx-live-gradient-end) 100%);
+  --nx-live-gradient-start: color-mix(in srgb, var(--nx-live-accent) 92%, #fff 8%);
+  --nx-live-gradient-mid: var(--nx-live-accent);
+  --nx-live-gradient-end: color-mix(in srgb, var(--nx-live-accent) 72%, #000 28%);
+  --nx-live-out-solid: color-mix(in srgb, var(--nx-live-accent) 78%, #000 22%);
+  --nx-live-out-bg: var(--nx-bubble-outbound, linear-gradient(155deg, var(--nx-live-gradient-start) 0%, var(--nx-live-gradient-mid) 48%, var(--nx-live-gradient-end) 100%));
   --nx-live-temp-tint: transparent;
 
   /* Appearance defaults (dark) */
@@ -68,6 +68,11 @@
   --nx-live-shadow: 0 10px 28px rgba(15, 23, 42, 0.09), 0 2px 6px rgba(15, 23, 42, 0.04);
   --nx-live-atmosphere-primary: color-mix(in srgb, var(--nx-live-accent) 14%, transparent);
   --nx-live-atmosphere-secondary: color-mix(in srgb, var(--nx-live-accent) 6%, transparent);
+  --nx-live-gradient-start: color-mix(in srgb, var(--nx-live-accent) 92%, #fff 8%);
+  --nx-live-gradient-mid: color-mix(in srgb, var(--nx-live-accent) 78%, #000 22%);
+  --nx-live-gradient-end: color-mix(in srgb, var(--nx-live-accent) 68%, #000 32%);
+  --nx-live-out-solid: color-mix(in srgb, var(--nx-live-accent) 74%, #000 26%);
+  --nx-live-accent-contrast: #ffffff;
 }
 
 /* ── Red Ops appearance — full tactical environment tint ─────────────────── */
@@ -485,6 +490,11 @@
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.1) !important;
 }
 
+.nx-conv-dropdown-option:hover {
+  background: color-mix(in srgb, var(--nx-accent) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx-accent) 18%, transparent) !important;
+}
+
 .nx-conv-dropdown-option.is-selected {
   background: color-mix(in srgb, var(--nx-accent) 14%, transparent) !important;
   border-color: color-mix(in srgb, var(--nx-accent) 24%, transparent) !important;
@@ -523,12 +533,27 @@
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble {
   color: var(--nx-live-accent-contrast) !important;
-  background: var(--nx-live-out-bg) !important;
-  border: 1px solid var(--nx-live-accent-border) !important;
+  background: var(--nx-live-out-bg, linear-gradient(155deg, color-mix(in srgb, var(--nx-accent) 92%, #fff 8%), var(--nx-accent), color-mix(in srgb, var(--nx-accent) 72%, #000 28%))) !important;
+  border: 1px solid color-mix(in srgb, var(--nx-accent) 55%, transparent) !important;
   border-radius: 20px 20px 6px 20px !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.14),
     0 12px 32px var(--nx-live-accent-glow) !important;
+  transition: border-color 0.16s, box-shadow 0.16s !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble:hover {
+  border-color: color-mix(in srgb, var(--nx-live-accent) 62%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 16px 40px color-mix(in srgb, var(--nx-live-accent) 34%, transparent) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__bubble:hover {
+  border-color: color-mix(in srgb, var(--nx-live-accent) 22%, var(--nx-live-glass-border)) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight),
+    0 8px 20px color-mix(in srgb, var(--nx-live-accent) 8%, transparent) !important;
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__tail {
@@ -550,9 +575,9 @@
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__tail {
   right: -3px !important;
-  background: var(--nx-live-out-solid) !important;
-  border-right: 1px solid var(--nx-live-accent-border) !important;
-  border-bottom: 1px solid var(--nx-live-accent-border) !important;
+  background: color-mix(in srgb, var(--nx-accent) 78%, #000 22%) !important;
+  border-right: 1px solid color-mix(in srgb, var(--nx-accent) 55%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--nx-accent) 55%, transparent) !important;
   border-radius: 0 0 8px 0 !important;
   clip-path: polygon(0 0, 0 100%, 100% 100%) !important;
 }
@@ -659,6 +684,19 @@
 }
 
 /* Composer + operating layer accent wiring (no layout changes) */
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock {
+  box-shadow:
+    inset 0 1px 0 var(--nx-live-glass-highlight, rgba(255,255,255,0.06)),
+    0 -6px 28px color-mix(in srgb, var(--nx-accent) 10%, transparent) !important;
+}
+
+.nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-tool-btn:hover:not(:disabled) {
+  color: var(--nx-accent) !important;
+  background: var(--nx-live-accent-soft) !important;
+  border-color: color-mix(in srgb, var(--nx-live-accent) 26%, var(--nx-live-glass-border, rgba(255,255,255,0.12))) !important;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--nx-live-accent) 14%, transparent) !important;
+}
+
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock__input-wrap:focus-within {
   border-color: var(--nx-live-accent-border) !important;
   box-shadow:
@@ -712,7 +750,9 @@
 
 [data-nexus-theme="light"] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock {
   background: rgba(255, 255, 255, 0.94) !important;
-  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 -8px 28px color-mix(in srgb, var(--nx-accent) 12%, rgba(15, 23, 42, 0.06)) !important;
 }
 
 /* Width modes */

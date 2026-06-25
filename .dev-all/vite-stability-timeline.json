@@ -1,0 +1,34 @@
+{
+  "initialVite": 14958,
+  "finalVite": 14958,
+  "timeline": [
+    {
+      "at": "2026-06-24T23:24:00.004Z",
+      "event": "start",
+      "vitePid": 14958,
+      "apiPid": 26036,
+      "minutes": 2,
+      "initialVite": 14958
+    },
+    {
+      "at": "2026-06-24T23:24:31.758Z",
+      "event": "api_build_begin",
+      "vitePid": 14958,
+      "apiPid": 26036
+    },
+    {
+      "at": "2026-06-24T23:27:50.323Z",
+      "event": "api_build_complete",
+      "vitePid": 14958,
+      "apiPid": 31085
+    },
+    {
+      "at": "2026-06-24T23:27:50.912Z",
+      "event": "force_api_restart",
+      "vitePid": 14958,
+      "apiPid": 31085,
+      "targetPid": 31085
+    }
+  ],
+  "failures": 0
+}

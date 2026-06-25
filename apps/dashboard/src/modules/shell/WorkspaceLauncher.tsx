@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
@@ -27,11 +28,17 @@ const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
 
 const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
   { id: 'cyan', label: 'Cyan' },
-  { id: 'emerald', label: 'Emerald' },
-  { id: 'amber', label: 'Amber' },
-  { id: 'violet', label: 'Violet' },
-  { id: 'rose', label: 'Rose' },
+  { id: 'blue', label: 'Blue' },
   { id: 'ice', label: 'Ice' },
+  { id: 'teal', label: 'Teal' },
+  { id: 'emerald', label: 'Emerald' },
+  { id: 'lime', label: 'Lime' },
+  { id: 'amber', label: 'Amber' },
+  { id: 'gold', label: 'Gold' },
+  { id: 'orange', label: 'Orange' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'pink', label: 'Pink' },
+  { id: 'violet', label: 'Violet' },
 ]
 
 const WIDTH_OPTIONS: ViewWidthPercent[] = ['25', '50', '75', '100']
@@ -61,6 +68,7 @@ const workspaceIcon = (key: string): Parameters<typeof Icon>[0]['name'] => {
 export interface WorkspaceLauncherProps {
   open: boolean
   compact: boolean
+  anchorRef: React.RefObject<HTMLElement | null>
   onClose: () => void
   activeWorkspaceKey?: string
   workspaceOptions: WorkspaceLauncherItem[]
@@ -85,6 +93,7 @@ export interface WorkspaceLauncherProps {
 export const WorkspaceLauncher = ({
   open,
   compact,
+  anchorRef,
   onClose,
   activeWorkspaceKey,
   workspaceOptions,
@@ -105,8 +114,59 @@ export const WorkspaceLauncher = ({
   onResetLayout,
   onWorkspaceSettings,
 }: WorkspaceLauncherProps) => {
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const [category, setCategory] = useState<LauncherCategory>('workspaces')
   const [query, setQuery] = useState('')
+
+  const updatePopoverPosition = useCallback(() => {
+    const anchor = anchorRef.current?.getBoundingClientRect()
+    const panel = popoverRef.current
+    if (!anchor) return
+
+    const panelWidth = panel?.offsetWidth || Math.min(640, window.innerWidth - 24)
+    const gap = 8
+    let left = anchor.left
+    if (left + panelWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - panelWidth - 12)
+    }
+
+    setPopoverPosition({
+      top: anchor.bottom + gap,
+      left,
+    })
+  }, [anchorRef])
+
+  useLayoutEffect(() => {
+    if (!open || compact) {
+      setPopoverPosition(null)
+      return
+    }
+    updatePopoverPosition()
+  }, [open, compact, updatePopoverPosition, category, query])
+
+  useEffect(() => {
+    if (!open || compact) return
+    const handleViewportChange = () => updatePopoverPosition()
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, true)
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, true)
+    }
+  }, [open, compact, updatePopoverPosition])
+
+  useEffect(() => {
+    if (!open || compact) return
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (popoverRef.current?.contains(target)) return
+      if (anchorRef.current?.contains(target)) return
+      onClose()
+    }
+    window.addEventListener('mousedown', handlePointer)
+    return () => window.removeEventListener('mousedown', handlePointer)
+  }, [open, compact, onClose, anchorRef])
 
   const pinnedWorkspaces = useMemo(
     () => workspaceOptions.filter((item) => item.pinned || item.key === activeWorkspaceKey).slice(0, 4),
@@ -392,9 +452,26 @@ export const WorkspaceLauncher = ({
 
   if (!open) return null
 
-  return (
-    <div className="nx-wsl-popover nx-liquid-popover" role="dialog" aria-label="Workspace launcher" onClick={(e) => e.stopPropagation()}>
+  if (!popoverPosition) return null
+
+  const popover = (
+    <div
+      ref={popoverRef}
+      className="nx-wsl-popover nx-liquid-popover nx-shell-popover-portal"
+      style={{
+        position: 'fixed',
+        top: popoverPosition.top,
+        left: popoverPosition.left,
+        zIndex: 13000,
+      }}
+      role="dialog"
+      aria-label="Workspace launcher"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {launcherBody}
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(popover, document.body) : null
 }

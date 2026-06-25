@@ -44,10 +44,14 @@ export async function GET(request) {
       selectMode: 'canonical_row_contract',
     })
 
+    const liveOptions = timeoutMode === 'initial_boot'
+      ? { selectMode: 'initial_boot_safe' }
+      : {}
+
     let data
     try {
       data = await Promise.race([
-        getLiveInbox(params),
+        getLiveInbox(params, liveOptions),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(Object.assign(new Error('live_inbox_timeout'), { isTimeout: true })),

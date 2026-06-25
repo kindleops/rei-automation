@@ -1,0 +1,103 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "Action Center" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+          - button "Live Activity" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+          - button "Notifications" [ref=e51] [cursor=pointer]:
+            - img [ref=e52]
+          - button "RK" [ref=e56] [cursor=pointer]:
+            - generic [ref=e57]: RK
+      - main [ref=e59]:
+        - generic [ref=e60]:
+          - complementary [ref=e63]:
+            - generic [ref=e65]:
+              - generic [ref=e66]:
+                - generic [ref=e67]:
+                  - img [ref=e68]
+                  - textbox "Search inbox threads" [ref=e71]:
+                    - /placeholder: Search operator inbox...
+                - generic [ref=e72]:
+                  - button "Advanced filters" [ref=e73] [cursor=pointer]:
+                    - img [ref=e74]
+                  - button "Clear filters" [ref=e76] [cursor=pointer]:
+                    - img [ref=e77]
+              - tablist "Inbox categories" [ref=e79]:
+                - tab "Priority 0" [ref=e80] [cursor=pointer]:
+                  - generic [ref=e81]: 🔥
+                  - generic "Priority" [ref=e82]
+                  - generic [ref=e83]: "0"
+                - tab "New Replies 0" [ref=e84] [cursor=pointer]:
+                  - generic [ref=e85]: 📥
+                  - generic "New Replies" [ref=e86]
+                  - generic [ref=e87]: "0"
+                - tab "Needs Review 0" [ref=e88] [cursor=pointer]:
+                  - generic [ref=e89]: 🧠
+                  - generic "Needs Review" [ref=e90]
+                  - generic [ref=e91]: "0"
+                - tab "Waiting 0" [ref=e92] [cursor=pointer]:
+                  - generic [ref=e93]: ⏳
+                  - generic "Waiting" [ref=e94]
+                  - generic [ref=e95]: "0"
+                - tab "All Threads 0" [selected] [ref=e96] [cursor=pointer]:
+                  - generic [ref=e97]: 📦
+                  - generic "All Threads" [ref=e98]
+                  - generic [ref=e99]: "0"
+            - generic [ref=e101]:
+              - button "+ Save Current Filter" [ref=e102] [cursor=pointer]
+              - button "Manage Lists" [ref=e103] [cursor=pointer]
+          - generic [ref=e107]:
+            - generic [ref=e109]:
+              - img [ref=e110]
+              - paragraph [ref=e113]: Select a thread to open the conversation.
+            - generic [ref=e115]:
+              - button "Open quick actions" [disabled] [ref=e117]:
+                - img [ref=e118]
+              - generic [ref=e122]:
+                - textbox "Select a thread to compose" [disabled] [ref=e123]
+                - generic [ref=e124]:
+                  - button "Operator polish" [disabled] [ref=e125]:
+                    - img [ref=e126]
+                  - button "Translate draft" [disabled] [ref=e128]:
+                    - img [ref=e129]
+                  - button "Schedule message" [disabled] [ref=e133]:
+                    - img [ref=e134]
+                  - button "Voice input" [disabled] [ref=e137]:
+                    - img [ref=e138]
+              - button "Send message" [disabled] [ref=e142]:
+                - img [ref=e143]
+          - complementary [ref=e146]:
+            - generic [ref=e147]:
+              - img [ref=e148]
+              - paragraph [ref=e151]: Select a thread to view intelligence
+  - button "NEXUS Copilot" [ref=e152] [cursor=pointer]:
+    - generic: Standing by
+  - alert [ref=e153]:
+    - strong [ref=e154]: Could not verify which API build is running
+    - generic [ref=e155]: Dashboard 0838d932bbc1 (main)
+    - generic [ref=e156]: API unreachable (n/a)
+    - generic [ref=e157]: Connection same-origin proxy
+    - generic [ref=e158]: "Fix: stop both servers, then run npm run dev:all from the repo root."

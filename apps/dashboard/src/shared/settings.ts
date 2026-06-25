@@ -23,7 +23,24 @@ export type NexusTheme =
   | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
-export type AccentPalette = 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'ice'
+export type AccentPalette =
+  | 'cyan'
+  | 'emerald'
+  | 'amber'
+  | 'violet'
+  | 'rose'
+  | 'ice'
+  | 'blue'
+  | 'teal'
+  | 'lime'
+  | 'orange'
+  | 'pink'
+  | 'gold'
+
+export const ACCENT_PALETTE_IDS: AccentPalette[] = [
+  'cyan', 'emerald', 'amber', 'violet', 'rose', 'ice',
+  'blue', 'teal', 'lime', 'orange', 'pink', 'gold',
+]
 
 export interface NexusSettings {
   // Map
@@ -234,6 +251,9 @@ export function loadSettings(): NexusSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<NexusSettings>
+      if (parsed.accentPalette && !ACCENT_PALETTE_IDS.includes(parsed.accentPalette)) {
+        parsed.accentPalette = DEFAULT_SETTINGS.accentPalette
+      }
       _cache = { ...DEFAULT_SETTINGS, ...parsed }
     } else {
       _cache = { ...DEFAULT_SETTINGS }
@@ -416,23 +436,36 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
   },
 }
 
+/** Canonical dark-mode accent values — mirrored in nexus-theme.css [data-nexus-accent] */
 export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
-  cyan:    { primary: '#38d0f0', glow: 'rgba(56,208,240,0.25)', soft: 'rgba(56,208,240,0.14)' },
-  emerald: { primary: '#2cb87a', glow: 'rgba(44,184,122,0.25)', soft: 'rgba(44,184,122,0.14)' },
-  amber:   { primary: '#d89530', glow: 'rgba(216,149,48,0.25)', soft: 'rgba(216,149,48,0.14)' },
-  violet:  { primary: '#9966ff', glow: 'rgba(153,102,255,0.25)', soft: 'rgba(153,102,255,0.14)' },
-  rose:    { primary: '#e85080', glow: 'rgba(232,80,128,0.25)', soft: 'rgba(232,80,128,0.14)' },
-  ice:     { primary: '#a0d8f0', glow: 'rgba(160,216,240,0.22)', soft: 'rgba(160,216,240,0.12)' },
+  cyan:    { primary: '#06b6d4', glow: 'rgba(6, 182, 212, 0.26)',   soft: 'rgba(6, 182, 212, 0.14)'   },
+  emerald: { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.26)',  soft: 'rgba(16, 185, 129, 0.14)'  },
+  amber:   { primary: '#f59e0b', glow: 'rgba(245, 158, 11, 0.26)',  soft: 'rgba(245, 158, 11, 0.14)'  },
+  violet:  { primary: '#7c3aed', glow: 'rgba(124, 58, 237, 0.26)', soft: 'rgba(124, 58, 237, 0.14)'  },
+  rose:    { primary: '#e11d48', glow: 'rgba(225, 29, 72, 0.26)',  soft: 'rgba(225, 29, 72, 0.14)'   },
+  ice:     { primary: '#38bdf8', glow: 'rgba(56, 189, 248, 0.24)',  soft: 'rgba(56, 189, 248, 0.13)'  },
+  blue:    { primary: '#2563eb', glow: 'rgba(37, 99, 235, 0.24)',   soft: 'rgba(37, 99, 235, 0.13)'   },
+  teal:    { primary: '#14b8a6', glow: 'rgba(20, 184, 166, 0.26)', soft: 'rgba(20, 184, 166, 0.14)'  },
+  lime:    { primary: '#84cc16', glow: 'rgba(132, 204, 22, 0.26)', soft: 'rgba(132, 204, 22, 0.14)'  },
+  orange:  { primary: '#f97316', glow: 'rgba(249, 115, 22, 0.26)', soft: 'rgba(249, 115, 22, 0.14)'  },
+  pink:    { primary: '#ec4899', glow: 'rgba(236, 72, 153, 0.26)', soft: 'rgba(236, 72, 153, 0.14)'  },
+  gold:    { primary: '#eab308', glow: 'rgba(234, 179, 8, 0.26)',  soft: 'rgba(234, 179, 8, 0.14)'   },
 }
 
-// Higher-contrast accent values for white/light-mode backgrounds
+/** Higher-contrast accent values for light-mode backgrounds */
 export const LIGHT_ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
-  cyan:    { primary: '#00b8ff', glow: 'rgba(0,184,255,0.20)',   soft: 'rgba(0,184,255,0.10)'   },
-  emerald: { primary: '#14b86a', glow: 'rgba(20,184,106,0.20)',  soft: 'rgba(20,184,106,0.10)'  },
-  amber:   { primary: '#ffb020', glow: 'rgba(255,176,32,0.20)',  soft: 'rgba(255,176,32,0.12)'  },
-  violet:  { primary: '#7c3cff', glow: 'rgba(124,60,255,0.20)',  soft: 'rgba(124,60,255,0.10)'  },
-  rose:    { primary: '#ff2d75', glow: 'rgba(255,45,117,0.20)',  soft: 'rgba(255,45,117,0.10)'  },
-  ice:     { primary: '#0ea5e9', glow: 'rgba(14,165,233,0.20)',  soft: 'rgba(14,165,233,0.10)'  },
+  cyan:    { primary: '#06b6d4', glow: 'rgba(6, 182, 212, 0.22)',   soft: 'rgba(6, 182, 212, 0.13)'   },
+  emerald: { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.22)',  soft: 'rgba(16, 185, 129, 0.13)'  },
+  amber:   { primary: '#f59e0b', glow: 'rgba(245, 158, 11, 0.24)',  soft: 'rgba(245, 158, 11, 0.15)'  },
+  violet:  { primary: '#8b5cf6', glow: 'rgba(139, 92, 246, 0.22)',  soft: 'rgba(139, 92, 246, 0.13)'  },
+  rose:    { primary: '#f43f5e', glow: 'rgba(244, 63, 94, 0.22)',   soft: 'rgba(244, 63, 94, 0.13)'   },
+  ice:     { primary: '#2563eb', glow: 'rgba(37, 99, 235, 0.22)',   soft: 'rgba(37, 99, 235, 0.12)'   },
+  blue:    { primary: '#2563eb', glow: 'rgba(37, 99, 235, 0.22)',   soft: 'rgba(37, 99, 235, 0.12)'   },
+  teal:    { primary: '#0d9488', glow: 'rgba(13, 148, 136, 0.22)',  soft: 'rgba(13, 148, 136, 0.13)'  },
+  lime:    { primary: '#65a30d', glow: 'rgba(101, 163, 13, 0.22)', soft: 'rgba(101, 163, 13, 0.13)'  },
+  orange:  { primary: '#ea580c', glow: 'rgba(234, 88, 12, 0.22)',   soft: 'rgba(234, 88, 12, 0.13)'   },
+  pink:    { primary: '#db2777', glow: 'rgba(219, 39, 119, 0.22)', soft: 'rgba(219, 39, 119, 0.13)'  },
+  gold:    { primary: '#ca8a04', glow: 'rgba(202, 138, 4, 0.22)',  soft: 'rgba(202, 138, 4, 0.13)'   },
 }
 
 export function getActiveTheme(): ThemeTokens {
@@ -456,46 +489,41 @@ export function resolveDataThemeAttr(nexusTheme: NexusTheme): string {
   return LEGACY_THEME_MAP[nexusTheme] ?? nexusTheme
 }
 
-function hexToRgb(hex: string): string {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '10, 132, 255';
-}
+const INLINE_ACCENT_PROPS = [
+  '--nx-accent',
+  '--nx-accent-rgb',
+  '--nx-accent-soft',
+  '--nx-accent-muted',
+  '--nx-accent-strong',
+  '--nx-accent-contrast',
+  '--nx-accent-glow',
+  '--nx-accent-border',
+  '--nx-accent-gradient-start',
+  '--nx-accent-gradient-mid',
+  '--nx-accent-gradient-end',
+  '--nx-badge-border',
+  '--nexus-accent',
+  '--nexus-accent-rgb',
+  '--nexus-accent-soft',
+  '--nexus-accent-glow',
+  '--nexus-accent-border',
+  '--tone-primary',
+  '--accent-cyan',
+] as const
 
 export function applyThemeToDOM(): void {
   const settings = loadSettings()
-  const isLight = resolveDataThemeAttr(settings.nexusTheme) === 'light'
-  const paletteMap = isLight ? LIGHT_ACCENT_PALETTES : ACCENT_PALETTES
-  const accent = paletteMap[settings.accentPalette] ?? paletteMap.cyan
   const root = document.documentElement
+  const accentId = ACCENT_PALETTE_IDS.includes(settings.accentPalette)
+    ? settings.accentPalette
+    : DEFAULT_SETTINGS.accentPalette
 
-  // Set the theme attribute — nexus-theme.css variables cascade from here
+  // Theme + accent attributes drive nexus-theme.css — single source of truth.
   root.setAttribute('data-nexus-theme', resolveDataThemeAttr(settings.nexusTheme))
-  root.setAttribute('data-nexus-accent', settings.accentPalette)
+  root.setAttribute('data-nexus-accent', accentId)
 
-  const rgb = hexToRgb(accent.primary);
-
-  // Set ONLY accent variables inline. Light/Dark full themes are managed by CSS classes/selectors.
-  // DO NOT inject --nx-bg / --nx-surface / text tokens inline as it corrupts CSS variable cascades.
-  root.style.setProperty('--nx-accent', accent.primary)
-  root.style.setProperty('--nx-accent-rgb', rgb)
-  root.style.setProperty('--nx-accent-soft', accent.soft)
-  root.style.setProperty('--nx-accent-muted', accent.soft)
-  root.style.setProperty('--nx-accent-strong', accent.primary)
-  root.style.setProperty('--nx-accent-contrast', '#ffffff')
-  root.style.setProperty('--nx-accent-glow', accent.glow)
-  root.style.setProperty('--nx-accent-border', accent.primary)
-  root.style.setProperty('--nx-accent-gradient-start', accent.primary)
-  root.style.setProperty('--nx-accent-gradient-mid', accent.primary)
-  root.style.setProperty('--nx-accent-gradient-end', accent.primary)
-  root.style.setProperty('--nx-badge-border', accent.primary)
-
-  root.style.setProperty('--nexus-accent', accent.primary)
-  root.style.setProperty('--nexus-accent-rgb', rgb)
-  root.style.setProperty('--nexus-accent-soft', accent.soft)
-  root.style.setProperty('--nexus-accent-glow', accent.glow)
-  root.style.setProperty('--nexus-accent-border', accent.primary)
-  
-  root.style.setProperty('--tone-primary', accent.primary)
-  root.style.setProperty('--accent-cyan', accent.primary) // legacy fallback
-
+  // Clear stale inline accent overrides so palette picker updates cascade everywhere.
+  for (const prop of INLINE_ACCENT_PROPS) {
+    root.style.removeProperty(prop)
+  }
 }

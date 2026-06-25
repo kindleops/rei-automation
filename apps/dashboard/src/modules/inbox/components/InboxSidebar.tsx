@@ -387,27 +387,14 @@ const resolveDeliveryReceipt = (
   }
 
   const hasDelivered = Boolean(deliveredAt)
-    || statusEvidence.some((status) => status.includes('deliver') && !status.includes('undeliv'))
-  if (hasDelivered) {
+    || statusEvidence.some((status) => (
+      (status.includes('deliver') && !status.includes('undeliv'))
+      || status === 'sent'
+      || status === 'success'
+      || status === 'accepted'
+    ))
+  if (hasDelivered || Boolean(sentAt) || latestDirection === 'outbound') {
     return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
-  }
-
-  const hasSent = Boolean(sentAt)
-    || statusEvidence.some((status) => status === 'sent' || status === 'success' || status === 'accepted')
-  if (hasSent) {
-    return { type: 'sent', label: 'Sent', icon: 'check' }
-  }
-
-  const hasPending = statusEvidence.some((status) => (
-    status.includes('pending')
-    || status.includes('queue')
-    || status.includes('schedul')
-    || status.includes('process')
-    || status === 'queued'
-    || status === 'sending'
-  ))
-  if (hasPending || latestDirection === 'outbound') {
-    return { type: 'pending', label: 'Pending', icon: 'clock' }
   }
 
   return null

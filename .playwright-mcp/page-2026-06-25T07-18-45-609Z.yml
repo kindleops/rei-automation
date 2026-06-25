@@ -1,0 +1,1044 @@
+- generic [ref=e7]:
+  - generic: Outbound Command Center
+  - main [ref=e8]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - generic [ref=e14]:
+              - heading "Outbound Command Center" [level=1] [ref=e15]
+              - generic [ref=e16]: Last 7d · Created basis
+            - generic [ref=e18]:
+              - button "Today" [ref=e19] [cursor=pointer]
+              - button "Last 24h" [ref=e20] [cursor=pointer]
+              - button "Last 7d" [ref=e21] [cursor=pointer]
+              - button "Last 30d" [ref=e22] [cursor=pointer]
+              - button "Last 90d" [ref=e23] [cursor=pointer]
+              - button "All time" [ref=e24] [cursor=pointer]
+              - button "Custom" [ref=e25] [cursor=pointer]
+          - generic [ref=e26]:
+            - generic [ref=e27]: 1–25 of 14,784
+            - button "Retry Failed" [ref=e28] [cursor=pointer]:
+              - img [ref=e29]
+              - text: Retry Failed
+            - button "Run Queue" [ref=e31] [cursor=pointer]:
+              - img [ref=e32]
+              - text: Run Queue
+            - generic "Runtime health" [ref=e34]: runtime dry-run only
+            - button "Reload current filtered data and metrics" [ref=e35] [cursor=pointer]:
+              - img [ref=e36]
+        - generic [ref=e38]:
+          - button "0 Scheduled" [ref=e39] [cursor=pointer]:
+            - generic [ref=e40]: "0"
+            - generic [ref=e41]: Scheduled
+          - button "0 Queued" [ref=e42] [cursor=pointer]:
+            - generic [ref=e43]: "0"
+            - generic [ref=e44]: Queued
+          - button "0 Sending" [ref=e45] [cursor=pointer]:
+            - generic [ref=e46]: "0"
+            - generic [ref=e47]: Sending
+          - button "7013 Delivered" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: "7013"
+            - generic [ref=e50]: Delivered
+          - button "9344 Sent" [ref=e51] [cursor=pointer]:
+            - generic [ref=e52]: "9344"
+            - generic [ref=e53]: Sent
+          - button "689 Failed" [ref=e54] [cursor=pointer]:
+            - generic [ref=e55]: "689"
+            - generic [ref=e56]: Failed
+          - button "753 Blocked" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: "753"
+            - generic [ref=e59]: Blocked
+          - button "0 Opt-Outs" [disabled] [ref=e60]:
+            - generic [ref=e61]: "0"
+            - generic [ref=e62]: Opt-Outs
+          - button "0 Approval" [ref=e63] [cursor=pointer]:
+            - generic [ref=e64]: "0"
+            - generic [ref=e65]: Approval
+          - generic "Counts reflect the entire selected date range" [ref=e66]: Last 7d range
+        - generic "Queue flow" [ref=e67]:
+          - button "0 Scheduled" [ref=e69] [cursor=pointer]:
+            - generic [ref=e70]: "0"
+            - generic [ref=e71]: Scheduled
+          - generic [ref=e72]:
+            - generic [ref=e73]: →
+            - button "0 Queued" [ref=e74] [cursor=pointer]:
+              - generic [ref=e75]: "0"
+              - generic [ref=e76]: Queued
+          - generic [ref=e77]:
+            - generic [ref=e78]: →
+            - button "0 Sending" [ref=e79] [cursor=pointer]:
+              - generic [ref=e80]: "0"
+              - generic [ref=e81]: Sending
+          - generic [ref=e82]:
+            - generic [ref=e83]: →
+            - button "9344 Sent" [ref=e84] [cursor=pointer]:
+              - generic [ref=e85]: "9344"
+              - generic [ref=e86]: Sent
+          - generic [ref=e87]:
+            - generic [ref=e88]: →
+            - button "7013 Delivered" [ref=e89] [cursor=pointer]:
+              - generic [ref=e90]: "7013"
+              - generic [ref=e91]: Delivered
+          - generic [ref=e92]: "|"
+          - button "Failed 689" [ref=e93] [cursor=pointer]
+          - button "Blocked 753" [ref=e94] [cursor=pointer]
+          - button "Approval 0" [ref=e95] [cursor=pointer]
+          - button "Opt-Out 0" [ref=e96] [cursor=pointer]
+      - generic [ref=e97]:
+        - tablist "Queue command views" [ref=e98]:
+          - tab "Queue Rows" [selected] [ref=e99] [cursor=pointer]:
+            - img [ref=e100]
+            - generic [ref=e102]: Queue Rows
+          - tab "Templates 20" [ref=e103] [cursor=pointer]:
+            - img [ref=e104]
+            - generic [ref=e107]: Templates
+            - generic [ref=e108]: "20"
+          - tab "Sender Fleet 7" [ref=e109] [cursor=pointer]:
+            - img [ref=e110]
+            - generic [ref=e112]: Sender Fleet
+            - generic [ref=e113]: "7"
+          - tab "Market Health 18" [ref=e114] [cursor=pointer]:
+            - generic [ref=e115]: Market Health
+            - generic [ref=e116]: "18"
+          - tab "Failure Taxonomy 689" [ref=e117] [cursor=pointer]:
+            - img [ref=e118]
+            - generic [ref=e121]: Failure Taxonomy
+            - generic [ref=e122]: "689"
+          - tab "Event Timeline" [ref=e123] [cursor=pointer]:
+            - img [ref=e124]
+            - generic [ref=e126]: Event Timeline
+        - generic [ref=e127]:
+          - generic [ref=e128]: Date basis
+          - combobox "Date basis" [ref=e129] [cursor=pointer]:
+            - option "Created" [selected]
+            - option "Scheduled"
+            - option "Updated"
+      - generic [ref=e130]:
+        - generic [ref=e131]:
+          - generic [ref=e132]:
+            - group "Table density" [ref=e133]:
+              - button "Comfortable" [ref=e134] [cursor=pointer]
+              - button "Compact" [ref=e135] [cursor=pointer]
+              - button "Command" [ref=e136] [cursor=pointer]
+            - generic [ref=e137]:
+              - button "All 14,784" [ref=e138] [cursor=pointer]:
+                - text: All
+                - generic [ref=e139]: 14,784
+              - button "Scheduled" [ref=e140] [cursor=pointer]
+              - button "Queued" [ref=e141] [cursor=pointer]
+              - button "Sending" [ref=e142] [cursor=pointer]
+              - button "Approval" [ref=e143] [cursor=pointer]
+              - button "Failed 689" [ref=e144] [cursor=pointer]:
+                - text: Failed
+                - generic [ref=e145]: "689"
+              - button "Blocked 753" [ref=e146] [cursor=pointer]:
+                - text: Blocked
+                - generic [ref=e147]: "753"
+              - button "Delivered 7,013" [ref=e148] [cursor=pointer]:
+                - text: Delivered
+                - generic [ref=e149]: 7,013
+              - button "Sent 9,344" [ref=e150] [cursor=pointer]:
+                - text: Sent
+                - generic [ref=e151]: 9,344
+            - generic [ref=e152]:
+              - combobox [ref=e153] [cursor=pointer]:
+                - option "All Markets" [selected]
+                - option "Atlanta, GA"
+                - option "Austin, TX"
+                - option "Charlotte, NC"
+                - option "Chicago, IL"
+                - option "Cleveland, OH"
+                - option "Houston, TX"
+                - option "Kansas City, MO"
+                - option "Market unknown"
+                - option "Memphis, TN"
+                - option "Minneapolis, MN"
+                - option "Phoenix, AZ"
+                - option "Providence, RI"
+                - option "Spokane, WA"
+                - option "Tulsa, OK"
+              - combobox [ref=e154] [cursor=pointer]:
+                - option "All Templates" [selected]
+                - option "manual_reply"
+                - option "ownership_check"
+              - combobox [ref=e155] [cursor=pointer]:
+                - option "All Senders" [selected]
+                - option "…8577"
+                - option "…9881"
+                - option "…1600"
+                - option "…0588"
+                - option "…0495"
+                - option "…2999"
+                - option "…9889"
+            - searchbox "Search seller, property, campaign…" [ref=e156]
+          - button "Exceptions · 2▸" [ref=e158] [cursor=pointer]
+          - generic [ref=e159]:
+            - generic "Select all on page" [ref=e160] [cursor=pointer]:
+              - checkbox "Select all visible rows" [ref=e161]
+            - generic [ref=e162]: Seller / Property
+            - generic [ref=e163]: Stage / Touch
+            - generic [ref=e164]: Campaign / Market
+            - generic [ref=e165]: Template
+            - generic [ref=e166]: From
+            - generic [ref=e167]: Scheduled
+            - generic [ref=e168]: Status
+            - generic [ref=e169]: Failure Cause
+            - generic [ref=e170]: Last Event
+          - generic [ref=e171]:
+            - generic [ref=e173] [cursor=pointer]:
+              - checkbox "Select +17702033651" [ref=e175]
+              - button "+17702033651 …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_inbox manual_inbox Market unknown Manual Reply EN …0588 Market unkno… 5h ago Chicago Delivered — —" [ref=e176]:
+                - generic "+17702033651" [ref=e177]:
+                  - generic [ref=e178]:
+                    - img [ref=e180]
+                    - strong [ref=e183]: "+17702033651"
+                    - generic [ref=e184]: …3651
+                    - generic "Contact blocked" [ref=e185]
+                  - generic [ref=e186]: No property linked
+                - generic [ref=e187]:
+                  - generic [ref=e188]: Ownership Confirmation
+                  - generic [ref=e189]: Touch 1 · manual_inbox
+                - generic [ref=e190]:
+                  - generic [ref=e191]: manual_inbox
+                  - generic [ref=e192]: Market unknown
+                - generic "Manual Reply" [ref=e193]:
+                  - generic [ref=e194]: Manual Reply
+                  - generic [ref=e195]: EN
+                - generic [ref=e196]:
+                  - generic [ref=e197]: …0588
+                  - generic [ref=e198]: Market unkno…
+                - generic "6/24/2026, 9:18:00 PM" [ref=e199]:
+                  - generic [ref=e200]: 5h ago
+                  - generic [ref=e201]: Chicago
+                - generic [ref=e203]: Delivered
+                - generic [ref=e205]: —
+                - generic [ref=e206]: —
+              - button "Expand row" [ref=e207]:
+                - img [ref=e208]
+            - generic [ref=e211] [cursor=pointer]:
+              - checkbox "Select +17702033651" [ref=e213]
+              - button "+17702033651 …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_inbox manual_inbox Market unknown Manual Reply EN …0588 Market unkno… 5h ago Chicago Delivered — —" [ref=e214]:
+                - generic "+17702033651" [ref=e215]:
+                  - generic [ref=e216]:
+                    - img [ref=e218]
+                    - strong [ref=e221]: "+17702033651"
+                    - generic [ref=e222]: …3651
+                    - generic "Contact blocked" [ref=e223]
+                  - generic [ref=e224]: No property linked
+                - generic [ref=e225]:
+                  - generic [ref=e226]: Ownership Confirmation
+                  - generic [ref=e227]: Touch 1 · manual_inbox
+                - generic [ref=e228]:
+                  - generic [ref=e229]: manual_inbox
+                  - generic [ref=e230]: Market unknown
+                - generic "Manual Reply" [ref=e231]:
+                  - generic [ref=e232]: Manual Reply
+                  - generic [ref=e233]: EN
+                - generic [ref=e234]:
+                  - generic [ref=e235]: …0588
+                  - generic [ref=e236]: Market unkno…
+                - generic "6/24/2026, 9:06:56 PM" [ref=e237]:
+                  - generic [ref=e238]: 5h ago
+                  - generic [ref=e239]: Chicago
+                - generic [ref=e241]: Delivered
+                - generic [ref=e243]: —
+                - generic [ref=e244]: —
+              - button "Expand row" [ref=e245]:
+                - img [ref=e246]
+            - generic [ref=e249] [cursor=pointer]:
+              - checkbox "Select +17702033651" [ref=e251]
+              - button "+17702033651 …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_inbox manual_inbox Market unknown Manual Reply EN …0588 Market unkno… 5h ago Chicago Delivered — —" [ref=e252]:
+                - generic "+17702033651" [ref=e253]:
+                  - generic [ref=e254]:
+                    - img [ref=e256]
+                    - strong [ref=e259]: "+17702033651"
+                    - generic [ref=e260]: …3651
+                    - generic "Contact blocked" [ref=e261]
+                  - generic [ref=e262]: No property linked
+                - generic [ref=e263]:
+                  - generic [ref=e264]: Ownership Confirmation
+                  - generic [ref=e265]: Touch 1 · manual_inbox
+                - generic [ref=e266]:
+                  - generic [ref=e267]: manual_inbox
+                  - generic [ref=e268]: Market unknown
+                - generic "Manual Reply" [ref=e269]:
+                  - generic [ref=e270]: Manual Reply
+                  - generic [ref=e271]: EN
+                - generic [ref=e272]:
+                  - generic [ref=e273]: …0588
+                  - generic [ref=e274]: Market unkno…
+                - generic "6/24/2026, 9:06:33 PM" [ref=e275]:
+                  - generic [ref=e276]: 5h ago
+                  - generic [ref=e277]: Chicago
+                - generic [ref=e279]: Delivered
+                - generic [ref=e281]: —
+                - generic [ref=e282]: —
+              - button "Expand row" [ref=e283]:
+                - img [ref=e284]
+            - generic [ref=e287] [cursor=pointer]:
+              - checkbox "Select James" [ref=e289]
+              - button "James …4559 Contact blocked Briley Bolser Everett Cr… 5227 N Crestline St Spokane, WA · listing Ownership Confirmation Touch 1 · listing listing Spokane, WA ownership_check 840901 EN …9881 Spokane, WA 6h ago Chicago Delivered — —" [ref=e290]:
+                - generic "James" [ref=e291]:
+                  - generic [ref=e292]:
+                    - img [ref=e294]
+                    - strong [ref=e297]: James
+                    - generic [ref=e298]: …4559
+                    - generic "Contact blocked" [ref=e299]
+                  - generic [ref=e300]: Briley Bolser Everett Cr…
+                  - generic [ref=e301]: 5227 N Crestline St
+                  - generic [ref=e302]: Spokane, WA · listing
+                - generic [ref=e303]:
+                  - generic [ref=e304]: Ownership Confirmation
+                  - generic [ref=e305]: Touch 1 · listing
+                - generic [ref=e306]:
+                  - generic [ref=e307]: listing
+                  - generic [ref=e308]: Spokane, WA
+                - generic "ownership_check" [ref=e309]:
+                  - generic [ref=e310]: ownership_check
+                  - generic [ref=e311]: "840901"
+                  - generic [ref=e312]: EN
+                - generic [ref=e313]:
+                  - generic [ref=e314]: …9881
+                  - generic [ref=e315]: Spokane, WA
+                - generic "6/24/2026, 8:10:31 PM" [ref=e316]:
+                  - generic [ref=e317]: 6h ago
+                  - generic [ref=e318]: Chicago
+                - generic [ref=e320]: Delivered
+                - generic [ref=e322]: —
+                - generic [ref=e323]: —
+              - button "Expand row" [ref=e324]:
+                - img [ref=e325]
+            - generic [ref=e328] [cursor=pointer]:
+              - checkbox "Select Robert" [ref=e330]
+              - button "Robert …2083 Contact blocked Sondra Dockery 1248 Salem St Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN ownership_check 207985 EN …0588 Memphis, TN 6h ago Chicago · overdue Scheduled — —" [ref=e331]:
+                - generic "Robert" [ref=e332]:
+                  - generic [ref=e333]:
+                    - img [ref=e335]
+                    - strong [ref=e338]: Robert
+                    - generic [ref=e339]: …2083
+                    - generic "Contact blocked" [ref=e340]
+                  - generic [ref=e341]: Sondra Dockery
+                  - generic [ref=e342]: 1248 Salem St
+                  - generic [ref=e343]: Memphis, TN · listing
+                - generic [ref=e344]:
+                  - generic [ref=e345]: Ownership Confirmation
+                  - generic [ref=e346]: Touch 1 · listing
+                - generic [ref=e347]:
+                  - generic [ref=e348]: listing
+                  - generic [ref=e349]: Memphis, TN
+                - generic "ownership_check" [ref=e350]:
+                  - generic [ref=e351]: ownership_check
+                  - generic [ref=e352]: "207985"
+                  - generic [ref=e353]: EN
+                - generic [ref=e354]:
+                  - generic [ref=e355]: …0588
+                  - generic [ref=e356]: Memphis, TN
+                - generic "6/24/2026, 8:00:31 PM" [ref=e357]:
+                  - generic [ref=e358]: 6h ago
+                  - generic [ref=e359]: Chicago · overdue
+                - generic [ref=e361]: Scheduled
+                - generic [ref=e363]: —
+                - generic [ref=e364]: —
+              - button "Expand row" [ref=e365]:
+                - img [ref=e366]
+            - generic [ref=e369] [cursor=pointer]:
+              - checkbox "Select Moses" [ref=e371]
+              - button "Moses …8537 Contact blocked Moses F Martinez 1944 S 109th Ave E Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK ownership_check 200514 EN …1600 Tulsa, OK 6h ago Chicago Delivered — —" [ref=e372]:
+                - generic "Moses" [ref=e373]:
+                  - generic [ref=e374]:
+                    - img [ref=e376]
+                    - strong [ref=e379]: Moses
+                    - generic [ref=e380]: …8537
+                    - generic "Contact blocked" [ref=e381]
+                  - generic [ref=e382]: Moses F Martinez
+                  - generic [ref=e383]: 1944 S 109th Ave E
+                  - generic [ref=e384]: Tulsa, OK · listing
+                - generic [ref=e385]:
+                  - generic [ref=e386]: Ownership Confirmation
+                  - generic [ref=e387]: Touch 1 · listing
+                - generic [ref=e388]:
+                  - generic [ref=e389]: listing
+                  - generic [ref=e390]: Tulsa, OK
+                - generic "ownership_check" [ref=e391]:
+                  - generic [ref=e392]: ownership_check
+                  - generic [ref=e393]: "200514"
+                  - generic [ref=e394]: EN
+                - generic [ref=e395]:
+                  - generic [ref=e396]: …1600
+                  - generic [ref=e397]: Tulsa, OK
+                - generic "6/24/2026, 7:50:31 PM" [ref=e398]:
+                  - generic [ref=e399]: 6h ago
+                  - generic [ref=e400]: Chicago
+                - generic [ref=e402]: Delivered
+                - generic [ref=e404]: —
+                - generic [ref=e405]: —
+              - button "Expand row" [ref=e406]:
+                - img [ref=e407]
+            - generic [ref=e410] [cursor=pointer]:
+              - checkbox "Select Linda" [ref=e412]
+              - button "Linda …3651 Contact blocked Donald & Linda Williams 4381 Sterling Forest Dr Decatur, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA ownership_check 204705 EN …0588 Atlanta, GA 6h ago Chicago Delivered — —" [ref=e413]:
+                - generic "Linda" [ref=e414]:
+                  - generic [ref=e415]:
+                    - img [ref=e417]
+                    - strong [ref=e420]: Linda
+                    - generic [ref=e421]: …3651
+                    - generic "Contact blocked" [ref=e422]
+                  - generic [ref=e423]: Donald & Linda Williams
+                  - generic [ref=e424]: 4381 Sterling Forest Dr
+                  - generic [ref=e425]: Decatur, GA · listing
+                - generic [ref=e426]:
+                  - generic [ref=e427]: Ownership Confirmation
+                  - generic [ref=e428]: Touch 1 · listing
+                - generic [ref=e429]:
+                  - generic [ref=e430]: listing
+                  - generic [ref=e431]: Atlanta, GA
+                - generic "ownership_check" [ref=e432]:
+                  - generic [ref=e433]: ownership_check
+                  - generic [ref=e434]: "204705"
+                  - generic [ref=e435]: EN
+                - generic [ref=e436]:
+                  - generic [ref=e437]: …0588
+                  - generic [ref=e438]: Atlanta, GA
+                - generic "6/24/2026, 7:40:31 PM" [ref=e439]:
+                  - generic [ref=e440]: 6h ago
+                  - generic [ref=e441]: Chicago
+                - generic [ref=e443]: Delivered
+                - generic [ref=e445]: —
+                - generic [ref=e446]: —
+              - button "Expand row" [ref=e447]:
+                - img [ref=e448]
+            - generic [ref=e451] [cursor=pointer]:
+              - checkbox "Select Huiming" [ref=e453]
+              - button "Huiming …9710 Contact blocked Hui M Chen 131 13th Ave N South Saint Paul, MN · listing Ownership Confirmation Touch 1 · listing listing Cleveland, OH ownership_check 211409 EN …0495 Cleveland, O… 6h ago Chicago Delivered — —" [ref=e454]:
+                - generic "Huiming" [ref=e455]:
+                  - generic [ref=e456]:
+                    - img [ref=e458]
+                    - strong [ref=e461]: Huiming
+                    - generic [ref=e462]: …9710
+                    - generic "Contact blocked" [ref=e463]
+                  - generic [ref=e464]: Hui M Chen
+                  - generic [ref=e465]: 131 13th Ave N
+                  - generic [ref=e466]: South Saint Paul, MN · listing
+                - generic [ref=e467]:
+                  - generic [ref=e468]: Ownership Confirmation
+                  - generic [ref=e469]: Touch 1 · listing
+                - generic [ref=e470]:
+                  - generic [ref=e471]: listing
+                  - generic [ref=e472]: Cleveland, OH
+                - generic "ownership_check" [ref=e473]:
+                  - generic [ref=e474]: ownership_check
+                  - generic [ref=e475]: "211409"
+                  - generic [ref=e476]: EN
+                - generic [ref=e477]:
+                  - generic [ref=e478]: …0495
+                  - generic [ref=e479]: Cleveland, O…
+                - generic "6/24/2026, 7:20:31 PM" [ref=e480]:
+                  - generic [ref=e481]: 6h ago
+                  - generic [ref=e482]: Chicago
+                - generic [ref=e484]: Delivered
+                - generic [ref=e486]: —
+                - generic [ref=e487]: —
+              - button "Expand row" [ref=e488]:
+                - img [ref=e489]
+            - generic [ref=e492] [cursor=pointer]:
+              - checkbox "Select Margaret" [ref=e494]
+              - button "Margaret …2289 Contact blocked Margaret R Jackson 871 Dill Ave Sw Atlanta, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA ownership_check 840901 EN …0588 Atlanta, GA 7h ago Chicago Delivered — —" [ref=e495]:
+                - generic "Margaret" [ref=e496]:
+                  - generic [ref=e497]:
+                    - img [ref=e499]
+                    - strong [ref=e502]: Margaret
+                    - generic [ref=e503]: …2289
+                    - generic "Contact blocked" [ref=e504]
+                  - generic [ref=e505]: Margaret R Jackson
+                  - generic [ref=e506]: 871 Dill Ave Sw
+                  - generic [ref=e507]: Atlanta, GA · listing
+                - generic [ref=e508]:
+                  - generic [ref=e509]: Ownership Confirmation
+                  - generic [ref=e510]: Touch 1 · listing
+                - generic [ref=e511]:
+                  - generic [ref=e512]: listing
+                  - generic [ref=e513]: Atlanta, GA
+                - generic "ownership_check" [ref=e514]:
+                  - generic [ref=e515]: ownership_check
+                  - generic [ref=e516]: "840901"
+                  - generic [ref=e517]: EN
+                - generic [ref=e518]:
+                  - generic [ref=e519]: …0588
+                  - generic [ref=e520]: Atlanta, GA
+                - generic "6/24/2026, 7:10:31 PM" [ref=e521]:
+                  - generic [ref=e522]: 7h ago
+                  - generic [ref=e523]: Chicago
+                - generic [ref=e525]: Delivered
+                - generic [ref=e527]: —
+                - generic [ref=e528]: —
+              - button "Expand row" [ref=e529]:
+                - img [ref=e530]
+            - generic [ref=e533] [cursor=pointer]:
+              - checkbox "Select Olusola" [ref=e535]
+              - button "Olusola …5085 Contact blocked Olusola Akanbi 93 Whitman St Pawtucket, RI · listing Ownership Confirmation Touch 1 · listing listing Providence, RI ownership_check 840900 EN …2999 Providence, … 7h ago Chicago Paused Name Missing blank_greeting_textgri… blank_greeting_tex… —" [ref=e536]:
+                - generic "Olusola" [ref=e537]:
+                  - generic [ref=e538]:
+                    - img [ref=e540]
+                    - strong [ref=e543]: Olusola
+                    - generic [ref=e544]: …5085
+                    - generic "Contact blocked" [ref=e545]
+                  - generic [ref=e546]: Olusola Akanbi
+                  - generic [ref=e547]: 93 Whitman St
+                  - generic [ref=e548]: Pawtucket, RI · listing
+                - generic [ref=e549]:
+                  - generic [ref=e550]: Ownership Confirmation
+                  - generic [ref=e551]: Touch 1 · listing
+                - generic [ref=e552]:
+                  - generic [ref=e553]: listing
+                  - generic [ref=e554]: Providence, RI
+                - generic "ownership_check" [ref=e555]:
+                  - generic [ref=e556]: ownership_check
+                  - generic [ref=e557]: "840900"
+                  - generic [ref=e558]: EN
+                - generic [ref=e559]:
+                  - generic [ref=e560]: …2999
+                  - generic [ref=e561]: Providence, …
+                - generic "6/24/2026, 7:01:22 PM" [ref=e562]:
+                  - generic [ref=e563]: 7h ago
+                  - generic [ref=e564]: Chicago
+                - generic [ref=e565]:
+                  - generic [ref=e566]: Paused Name Missing
+                  - generic [ref=e567]: blank_greeting_textgri…
+                - generic [ref=e569]: blank_greeting_tex…
+                - generic [ref=e570]: —
+              - button "Expand row" [ref=e571]:
+                - img [ref=e572]
+            - generic [ref=e575] [cursor=pointer]:
+              - checkbox "Select Gloria" [ref=e577]
+              - button "Gloria …9431 Contact blocked Manuel & Gloria Tavira 775 Pickering St Houston, TX · listing Ownership Confirmation Touch 1 · listing listing Houston, TX ownership_check 208481 EN …8577 Houston, TX 8h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e578]:
+                - generic "Gloria" [ref=e579]:
+                  - generic [ref=e580]:
+                    - img [ref=e582]
+                    - strong [ref=e585]: Gloria
+                    - generic [ref=e586]: …9431
+                    - generic "Contact blocked" [ref=e587]
+                  - generic [ref=e588]: Manuel & Gloria Tavira
+                  - generic [ref=e589]: 775 Pickering St
+                  - generic [ref=e590]: Houston, TX · listing
+                - generic [ref=e591]:
+                  - generic [ref=e592]: Ownership Confirmation
+                  - generic [ref=e593]: Touch 1 · listing
+                - generic [ref=e594]:
+                  - generic [ref=e595]: listing
+                  - generic [ref=e596]: Houston, TX
+                - generic "ownership_check" [ref=e597]:
+                  - generic [ref=e598]: ownership_check
+                  - generic [ref=e599]: "208481"
+                  - generic [ref=e600]: EN
+                - generic [ref=e601]:
+                  - generic [ref=e602]: …8577
+                  - generic [ref=e603]: Houston, TX
+                - generic "6/24/2026, 5:40:31 PM" [ref=e604]:
+                  - generic [ref=e605]: 8h ago
+                  - generic [ref=e606]: Chicago
+                - generic [ref=e607]:
+                  - generic [ref=e608]: Failed
+                  - generic [ref=e609]: Blacklist Rule (21610)
+                - generic [ref=e611]: Blacklist Rule (21…
+                - generic [ref=e612]: —
+              - button "Expand row" [ref=e613]:
+                - img [ref=e614]
+            - generic [ref=e617] [cursor=pointer]:
+              - checkbox "Select Shawn" [ref=e619]
+              - button "Shawn …0451 Contact blocked Shawn L Smith 662 Troy St Durham, NC · listing Ownership Confirmation Touch 1 · listing listing Charlotte, NC ownership_check 200017 EN …9889 Charlotte, N… 8h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e620]:
+                - generic "Shawn" [ref=e621]:
+                  - generic [ref=e622]:
+                    - img [ref=e624]
+                    - strong [ref=e627]: Shawn
+                    - generic [ref=e628]: …0451
+                    - generic "Contact blocked" [ref=e629]
+                  - generic [ref=e630]: Shawn L Smith
+                  - generic [ref=e631]: 662 Troy St
+                  - generic [ref=e632]: Durham, NC · listing
+                - generic [ref=e633]:
+                  - generic [ref=e634]: Ownership Confirmation
+                  - generic [ref=e635]: Touch 1 · listing
+                - generic [ref=e636]:
+                  - generic [ref=e637]: listing
+                  - generic [ref=e638]: Charlotte, NC
+                - generic "ownership_check" [ref=e639]:
+                  - generic [ref=e640]: ownership_check
+                  - generic [ref=e641]: "200017"
+                  - generic [ref=e642]: EN
+                - generic [ref=e643]:
+                  - generic [ref=e644]: …9889
+                  - generic [ref=e645]: Charlotte, N…
+                - generic "6/24/2026, 5:30:31 PM" [ref=e646]:
+                  - generic [ref=e647]: 8h ago
+                  - generic [ref=e648]: Chicago
+                - generic [ref=e649]:
+                  - generic [ref=e650]: Failed
+                  - generic [ref=e651]: Blacklist Rule (21610)
+                - generic [ref=e653]: Blacklist Rule (21…
+                - generic [ref=e654]: —
+              - button "Expand row" [ref=e655]:
+                - img [ref=e656]
+            - generic [ref=e659] [cursor=pointer]:
+              - checkbox "Select Hector" [ref=e661]
+              - button "Hector …9735 Contact blocked Hector And Patricia Sala… 8101 W Catalina Dr Phoenix, AZ · listing Ownership Confirmation Touch 1 · listing listing Phoenix, AZ ownership_check 200049 EN …9881 Phoenix, AZ 11h ago Chicago Delivered — —" [ref=e662]:
+                - generic "Hector" [ref=e663]:
+                  - generic [ref=e664]:
+                    - img [ref=e666]
+                    - strong [ref=e669]: Hector
+                    - generic [ref=e670]: …9735
+                    - generic "Contact blocked" [ref=e671]
+                  - generic [ref=e672]: Hector And Patricia Sala…
+                  - generic [ref=e673]: 8101 W Catalina Dr
+                  - generic [ref=e674]: Phoenix, AZ · listing
+                - generic [ref=e675]:
+                  - generic [ref=e676]: Ownership Confirmation
+                  - generic [ref=e677]: Touch 1 · listing
+                - generic [ref=e678]:
+                  - generic [ref=e679]: listing
+                  - generic [ref=e680]: Phoenix, AZ
+                - generic "ownership_check" [ref=e681]:
+                  - generic [ref=e682]: ownership_check
+                  - generic [ref=e683]: "200049"
+                  - generic [ref=e684]: EN
+                - generic [ref=e685]:
+                  - generic [ref=e686]: …9881
+                  - generic [ref=e687]: Phoenix, AZ
+                - generic "6/24/2026, 2:40:31 PM" [ref=e688]:
+                  - generic [ref=e689]: 11h ago
+                  - generic [ref=e690]: Chicago
+                - generic [ref=e692]: Delivered
+                - generic [ref=e694]: —
+                - generic [ref=e695]: —
+              - button "Expand row" [ref=e696]:
+                - img [ref=e697]
+            - generic [ref=e700] [cursor=pointer]:
+              - checkbox "Select Craig" [ref=e702]
+              - button "Craig …4066 Contact blocked Craig Wilson 3237 Sweet Springs Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN ownership_check 204561 EN …0588 Memphis, TN 12h ago Chicago Delivered — —" [ref=e703]:
+                - generic "Craig" [ref=e704]:
+                  - generic [ref=e705]:
+                    - img [ref=e707]
+                    - strong [ref=e710]: Craig
+                    - generic [ref=e711]: …4066
+                    - generic "Contact blocked" [ref=e712]
+                  - generic [ref=e713]: Craig Wilson
+                  - generic [ref=e714]: 3237 Sweet Springs Dr
+                  - generic [ref=e715]: Memphis, TN · listing
+                - generic [ref=e716]:
+                  - generic [ref=e717]: Ownership Confirmation
+                  - generic [ref=e718]: Touch 1 · listing
+                - generic [ref=e719]:
+                  - generic [ref=e720]: listing
+                  - generic [ref=e721]: Memphis, TN
+                - generic "ownership_check" [ref=e722]:
+                  - generic [ref=e723]: ownership_check
+                  - generic [ref=e724]: "204561"
+                  - generic [ref=e725]: EN
+                - generic [ref=e726]:
+                  - generic [ref=e727]: …0588
+                  - generic [ref=e728]: Memphis, TN
+                - generic "6/24/2026, 1:50:31 PM" [ref=e729]:
+                  - generic [ref=e730]: 12h ago
+                  - generic [ref=e731]: Chicago
+                - generic [ref=e733]: Delivered
+                - generic [ref=e735]: —
+                - generic [ref=e736]: —
+              - button "Expand row" [ref=e737]:
+                - img [ref=e738]
+            - generic [ref=e741] [cursor=pointer]:
+              - checkbox "Select Olga" [ref=e743]
+              - button "Olga …7342 Contact blocked Olga G Garcia & Michael … 1304 Crewler Cv Austin, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX ownership_check 200034 EN …1600 Austin, TX 12h ago Chicago Delivered — —" [ref=e744]:
+                - generic "Olga" [ref=e745]:
+                  - generic [ref=e746]:
+                    - img [ref=e748]
+                    - strong [ref=e751]: Olga
+                    - generic [ref=e752]: …7342
+                    - generic "Contact blocked" [ref=e753]
+                  - generic [ref=e754]: Olga G Garcia & Michael …
+                  - generic [ref=e755]: 1304 Crewler Cv
+                  - generic [ref=e756]: Austin, TX · listing
+                - generic [ref=e757]:
+                  - generic [ref=e758]: Ownership Confirmation
+                  - generic [ref=e759]: Touch 1 · listing
+                - generic [ref=e760]:
+                  - generic [ref=e761]: listing
+                  - generic [ref=e762]: Austin, TX
+                - generic "ownership_check" [ref=e763]:
+                  - generic [ref=e764]: ownership_check
+                  - generic [ref=e765]: "200034"
+                  - generic [ref=e766]: EN
+                - generic [ref=e767]:
+                  - generic [ref=e768]: …1600
+                  - generic [ref=e769]: Austin, TX
+                - generic "6/24/2026, 1:40:31 PM" [ref=e770]:
+                  - generic [ref=e771]: 12h ago
+                  - generic [ref=e772]: Chicago
+                - generic [ref=e774]: Delivered
+                - generic [ref=e776]: —
+                - generic [ref=e777]: —
+              - button "Expand row" [ref=e778]:
+                - img [ref=e779]
+            - generic [ref=e782] [cursor=pointer]:
+              - checkbox "Select Franklin" [ref=e784]
+              - button "Franklin …8370 Contact blocked Franklin Bryant 1140 Lafayette Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… ownership_check 204273 EN …1600 Kansas City,… 12h ago Chicago Delivered — —" [ref=e785]:
+                - generic "Franklin" [ref=e786]:
+                  - generic [ref=e787]:
+                    - img [ref=e789]
+                    - strong [ref=e792]: Franklin
+                    - generic [ref=e793]: …8370
+                    - generic "Contact blocked" [ref=e794]
+                  - generic [ref=e795]: Franklin Bryant
+                  - generic [ref=e796]: 1140 Lafayette Ave
+                  - generic [ref=e797]: Kansas City, KS · listing
+                - generic [ref=e798]:
+                  - generic [ref=e799]: Ownership Confirmation
+                  - generic [ref=e800]: Touch 1 · listing
+                - generic [ref=e801]:
+                  - generic [ref=e802]: listing
+                  - generic [ref=e803]: Kansas City, M…
+                - generic "ownership_check" [ref=e804]:
+                  - generic [ref=e805]: ownership_check
+                  - generic [ref=e806]: "204273"
+                  - generic [ref=e807]: EN
+                - generic [ref=e808]:
+                  - generic [ref=e809]: …1600
+                  - generic [ref=e810]: Kansas City,…
+                - generic "6/24/2026, 1:30:31 PM" [ref=e811]:
+                  - generic [ref=e812]: 12h ago
+                  - generic [ref=e813]: Chicago
+                - generic [ref=e815]: Delivered
+                - generic [ref=e817]: —
+                - generic [ref=e818]: —
+              - button "Expand row" [ref=e819]:
+                - img [ref=e820]
+            - generic [ref=e823] [cursor=pointer]:
+              - checkbox "Select Antonio" [ref=e825]
+              - button "Antonio …4744 Contact blocked Laura Moreno & Antonio T… 1041 Ella Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… ownership_check 207713 EN …1600 Kansas City,… 12h ago Chicago Delivered — —" [ref=e826]:
+                - generic "Antonio" [ref=e827]:
+                  - generic [ref=e828]:
+                    - img [ref=e830]
+                    - strong [ref=e833]: Antonio
+                    - generic [ref=e834]: …4744
+                    - generic "Contact blocked" [ref=e835]
+                  - generic [ref=e836]: Laura Moreno & Antonio T…
+                  - generic [ref=e837]: 1041 Ella Ave
+                  - generic [ref=e838]: Kansas City, KS · listing
+                - generic [ref=e839]:
+                  - generic [ref=e840]: Ownership Confirmation
+                  - generic [ref=e841]: Touch 1 · listing
+                - generic [ref=e842]:
+                  - generic [ref=e843]: listing
+                  - generic [ref=e844]: Kansas City, M…
+                - generic "ownership_check" [ref=e845]:
+                  - generic [ref=e846]: ownership_check
+                  - generic [ref=e847]: "207713"
+                  - generic [ref=e848]: EN
+                - generic [ref=e849]:
+                  - generic [ref=e850]: …1600
+                  - generic [ref=e851]: Kansas City,…
+                - generic "6/24/2026, 1:20:31 PM" [ref=e852]:
+                  - generic [ref=e853]: 12h ago
+                  - generic [ref=e854]: Chicago
+                - generic [ref=e856]: Delivered
+                - generic [ref=e858]: —
+                - generic [ref=e859]: —
+              - button "Expand row" [ref=e860]:
+                - img [ref=e861]
+            - generic [ref=e864] [cursor=pointer]:
+              - checkbox "Select Rigoberto" [ref=e866]
+              - button "Rigoberto …3462 Contact blocked Rigoberto Medina & Catal… 203 N 15th St Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… ownership_check 215106 EN …1600 Kansas City,… 13h ago Chicago Delivered — —" [ref=e867]:
+                - generic "Rigoberto" [ref=e868]:
+                  - generic [ref=e869]:
+                    - img [ref=e871]
+                    - strong [ref=e874]: Rigoberto
+                    - generic [ref=e875]: …3462
+                    - generic "Contact blocked" [ref=e876]
+                  - generic [ref=e877]: Rigoberto Medina & Catal…
+                  - generic [ref=e878]: 203 N 15th St
+                  - generic [ref=e879]: Kansas City, KS · listing
+                - generic [ref=e880]:
+                  - generic [ref=e881]: Ownership Confirmation
+                  - generic [ref=e882]: Touch 1 · listing
+                - generic [ref=e883]:
+                  - generic [ref=e884]: listing
+                  - generic [ref=e885]: Kansas City, M…
+                - generic "ownership_check" [ref=e886]:
+                  - generic [ref=e887]: ownership_check
+                  - generic [ref=e888]: "215106"
+                  - generic [ref=e889]: EN
+                - generic [ref=e890]:
+                  - generic [ref=e891]: …1600
+                  - generic [ref=e892]: Kansas City,…
+                - generic "6/24/2026, 1:10:31 PM" [ref=e893]:
+                  - generic [ref=e894]: 13h ago
+                  - generic [ref=e895]: Chicago
+                - generic [ref=e897]: Delivered
+                - generic [ref=e899]: —
+                - generic [ref=e900]: —
+              - button "Expand row" [ref=e901]:
+                - img [ref=e902]
+            - generic [ref=e905] [cursor=pointer]:
+              - checkbox "Select Daniel" [ref=e907]
+              - button "Daniel …7790 Contact blocked Daniel Nolan 2107 Willow Way Round Rock, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX ownership_check 207681 EN …1600 Austin, TX 13h ago Chicago · overdue Scheduled — —" [ref=e908]:
+                - generic "Daniel" [ref=e909]:
+                  - generic [ref=e910]:
+                    - img [ref=e912]
+                    - strong [ref=e915]: Daniel
+                    - generic [ref=e916]: …7790
+                    - generic "Contact blocked" [ref=e917]
+                  - generic [ref=e918]: Daniel Nolan
+                  - generic [ref=e919]: 2107 Willow Way
+                  - generic [ref=e920]: Round Rock, TX · listing
+                - generic [ref=e921]:
+                  - generic [ref=e922]: Ownership Confirmation
+                  - generic [ref=e923]: Touch 1 · listing
+                - generic [ref=e924]:
+                  - generic [ref=e925]: listing
+                  - generic [ref=e926]: Austin, TX
+                - generic "ownership_check" [ref=e927]:
+                  - generic [ref=e928]: ownership_check
+                  - generic [ref=e929]: "207681"
+                  - generic [ref=e930]: EN
+                - generic [ref=e931]:
+                  - generic [ref=e932]: …1600
+                  - generic [ref=e933]: Austin, TX
+                - generic "6/24/2026, 1:00:31 PM" [ref=e934]:
+                  - generic [ref=e935]: 13h ago
+                  - generic [ref=e936]: Chicago · overdue
+                - generic [ref=e938]: Scheduled
+                - generic [ref=e940]: —
+                - generic [ref=e941]: —
+              - button "Expand row" [ref=e942]:
+                - img [ref=e943]
+            - generic [ref=e946] [cursor=pointer]:
+              - checkbox "Select Kristina" [ref=e948]
+              - button "Kristina …5959 Contact blocked Kristina Patterson 442 E 90th St Chicago, IL · listing Ownership Confirmation Touch 1 · listing listing Chicago, IL ownership_check 207985 EN …0495 Chicago, IL 13h ago Chicago Delivered — —" [ref=e949]:
+                - generic "Kristina" [ref=e950]:
+                  - generic [ref=e951]:
+                    - img [ref=e953]
+                    - strong [ref=e956]: Kristina
+                    - generic [ref=e957]: …5959
+                    - generic "Contact blocked" [ref=e958]
+                  - generic [ref=e959]: Kristina Patterson
+                  - generic [ref=e960]: 442 E 90th St
+                  - generic [ref=e961]: Chicago, IL · listing
+                - generic [ref=e962]:
+                  - generic [ref=e963]: Ownership Confirmation
+                  - generic [ref=e964]: Touch 1 · listing
+                - generic [ref=e965]:
+                  - generic [ref=e966]: listing
+                  - generic [ref=e967]: Chicago, IL
+                - generic "ownership_check" [ref=e968]:
+                  - generic [ref=e969]: ownership_check
+                  - generic [ref=e970]: "207985"
+                  - generic [ref=e971]: EN
+                - generic [ref=e972]:
+                  - generic [ref=e973]: …0495
+                  - generic [ref=e974]: Chicago, IL
+                - generic "6/24/2026, 12:50:31 PM" [ref=e975]:
+                  - generic [ref=e976]: 13h ago
+                  - generic [ref=e977]: Chicago
+                - generic [ref=e979]: Delivered
+                - generic [ref=e981]: —
+                - generic [ref=e982]: —
+              - button "Expand row" [ref=e983]:
+                - img [ref=e984]
+            - generic [ref=e987] [cursor=pointer]:
+              - checkbox "Select Martha" [ref=e989]
+              - button "Martha …0122 Contact blocked Martha W Jackson 1826 Baldwin Ave Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN ownership_check 204257 EN …0588 Memphis, TN 13h ago Chicago Delivered — —" [ref=e990]:
+                - generic "Martha" [ref=e991]:
+                  - generic [ref=e992]:
+                    - img [ref=e994]
+                    - strong [ref=e997]: Martha
+                    - generic [ref=e998]: …0122
+                    - generic "Contact blocked" [ref=e999]
+                  - generic [ref=e1000]: Martha W Jackson
+                  - generic [ref=e1001]: 1826 Baldwin Ave
+                  - generic [ref=e1002]: Memphis, TN · listing
+                - generic [ref=e1003]:
+                  - generic [ref=e1004]: Ownership Confirmation
+                  - generic [ref=e1005]: Touch 1 · listing
+                - generic [ref=e1006]:
+                  - generic [ref=e1007]: listing
+                  - generic [ref=e1008]: Memphis, TN
+                - generic "ownership_check" [ref=e1009]:
+                  - generic [ref=e1010]: ownership_check
+                  - generic [ref=e1011]: "204257"
+                  - generic [ref=e1012]: EN
+                - generic [ref=e1013]:
+                  - generic [ref=e1014]: …0588
+                  - generic [ref=e1015]: Memphis, TN
+                - generic "6/24/2026, 12:40:31 PM" [ref=e1016]:
+                  - generic [ref=e1017]: 13h ago
+                  - generic [ref=e1018]: Chicago
+                - generic [ref=e1020]: Delivered
+                - generic [ref=e1022]: —
+                - generic [ref=e1023]: —
+              - button "Expand row" [ref=e1024]:
+                - img [ref=e1025]
+            - generic [ref=e1028] [cursor=pointer]:
+              - checkbox "Select Quinton" [ref=e1030]
+              - button "Quinton …5725 Contact blocked Quinton E Harper 4242 Coventry Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN ownership_check 200049 EN …0588 Memphis, TN 13h ago Chicago Delivered — —" [ref=e1031]:
+                - generic "Quinton" [ref=e1032]:
+                  - generic [ref=e1033]:
+                    - img [ref=e1035]
+                    - strong [ref=e1038]: Quinton
+                    - generic [ref=e1039]: …5725
+                    - generic "Contact blocked" [ref=e1040]
+                  - generic [ref=e1041]: Quinton E Harper
+                  - generic [ref=e1042]: 4242 Coventry Dr
+                  - generic [ref=e1043]: Memphis, TN · listing
+                - generic [ref=e1044]:
+                  - generic [ref=e1045]: Ownership Confirmation
+                  - generic [ref=e1046]: Touch 1 · listing
+                - generic [ref=e1047]:
+                  - generic [ref=e1048]: listing
+                  - generic [ref=e1049]: Memphis, TN
+                - generic "ownership_check" [ref=e1050]:
+                  - generic [ref=e1051]: ownership_check
+                  - generic [ref=e1052]: "200049"
+                  - generic [ref=e1053]: EN
+                - generic [ref=e1054]:
+                  - generic [ref=e1055]: …0588
+                  - generic [ref=e1056]: Memphis, TN
+                - generic "6/24/2026, 12:30:31 PM" [ref=e1057]:
+                  - generic [ref=e1058]: 13h ago
+                  - generic [ref=e1059]: Chicago
+                - generic [ref=e1061]: Delivered
+                - generic [ref=e1063]: —
+                - generic [ref=e1064]: —
+              - button "Expand row" [ref=e1065]:
+                - img [ref=e1066]
+            - generic [ref=e1069] [cursor=pointer]:
+              - checkbox "Select Luis" [ref=e1071]
+              - button "Luis …1329 Contact blocked Luis A Puma 2312 5th St Ne Minneapolis, MN · listing Ownership Confirmation Touch 1 · listing listing Minneapolis, M… ownership_check 840902 EN …0495 Minneapolis,… 13h ago Chicago Delivered — —" [ref=e1072]:
+                - generic "Luis" [ref=e1073]:
+                  - generic [ref=e1074]:
+                    - img [ref=e1076]
+                    - strong [ref=e1079]: Luis
+                    - generic [ref=e1080]: …1329
+                    - generic "Contact blocked" [ref=e1081]
+                  - generic [ref=e1082]: Luis A Puma
+                  - generic [ref=e1083]: 2312 5th St Ne
+                  - generic [ref=e1084]: Minneapolis, MN · listing
+                - generic [ref=e1085]:
+                  - generic [ref=e1086]: Ownership Confirmation
+                  - generic [ref=e1087]: Touch 1 · listing
+                - generic [ref=e1088]:
+                  - generic [ref=e1089]: listing
+                  - generic [ref=e1090]: Minneapolis, M…
+                - generic "ownership_check" [ref=e1091]:
+                  - generic [ref=e1092]: ownership_check
+                  - generic [ref=e1093]: "840902"
+                  - generic [ref=e1094]: EN
+                - generic [ref=e1095]:
+                  - generic [ref=e1096]: …0495
+                  - generic [ref=e1097]: Minneapolis,…
+                - generic "6/24/2026, 12:20:31 PM" [ref=e1098]:
+                  - generic [ref=e1099]: 13h ago
+                  - generic [ref=e1100]: Chicago
+                - generic [ref=e1102]: Delivered
+                - generic [ref=e1104]: —
+                - generic [ref=e1105]: —
+              - button "Expand row" [ref=e1106]:
+                - img [ref=e1107]
+            - generic [ref=e1110] [cursor=pointer]:
+              - checkbox "Select Jonathan" [ref=e1112]
+              - button "Jonathan …8080 Contact blocked Jonathan H Buck 4342 N Frankfort Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK ownership_check 207729 EN …1600 Tulsa, OK 14h ago Chicago Delivered — —" [ref=e1113]:
+                - generic "Jonathan" [ref=e1114]:
+                  - generic [ref=e1115]:
+                    - img [ref=e1117]
+                    - strong [ref=e1120]: Jonathan
+                    - generic [ref=e1121]: …8080
+                    - generic "Contact blocked" [ref=e1122]
+                  - generic [ref=e1123]: Jonathan H Buck
+                  - generic [ref=e1124]: 4342 N Frankfort Ave
+                  - generic [ref=e1125]: Tulsa, OK · listing
+                - generic [ref=e1126]:
+                  - generic [ref=e1127]: Ownership Confirmation
+                  - generic [ref=e1128]: Touch 1 · listing
+                - generic [ref=e1129]:
+                  - generic [ref=e1130]: listing
+                  - generic [ref=e1131]: Tulsa, OK
+                - generic "ownership_check" [ref=e1132]:
+                  - generic [ref=e1133]: ownership_check
+                  - generic [ref=e1134]: "207729"
+                  - generic [ref=e1135]: EN
+                - generic [ref=e1136]:
+                  - generic [ref=e1137]: …1600
+                  - generic [ref=e1138]: Tulsa, OK
+                - generic "6/24/2026, 12:10:31 PM" [ref=e1139]:
+                  - generic [ref=e1140]: 14h ago
+                  - generic [ref=e1141]: Chicago
+                - generic [ref=e1143]: Delivered
+                - generic [ref=e1145]: —
+                - generic [ref=e1146]: —
+              - button "Expand row" [ref=e1147]:
+                - img [ref=e1148]
+            - generic [ref=e1151] [cursor=pointer]:
+              - checkbox "Select Maria" [ref=e1153]
+              - button "Maria …7660 Contact blocked Maria Aguirre 819 N Birmingham Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK ownership_check 211377 EN …1600 Tulsa, OK 14h ago Chicago Delivered — —" [ref=e1154]:
+                - generic "Maria" [ref=e1155]:
+                  - generic [ref=e1156]:
+                    - img [ref=e1158]
+                    - strong [ref=e1161]: Maria
+                    - generic [ref=e1162]: …7660
+                    - generic "Contact blocked" [ref=e1163]
+                  - generic [ref=e1164]: Maria Aguirre
+                  - generic [ref=e1165]: 819 N Birmingham Ave
+                  - generic [ref=e1166]: Tulsa, OK · listing
+                - generic [ref=e1167]:
+                  - generic [ref=e1168]: Ownership Confirmation
+                  - generic [ref=e1169]: Touch 1 · listing
+                - generic [ref=e1170]:
+                  - generic [ref=e1171]: listing
+                  - generic [ref=e1172]: Tulsa, OK
+                - generic "ownership_check" [ref=e1173]:
+                  - generic [ref=e1174]: ownership_check
+                  - generic [ref=e1175]: "211377"
+                  - generic [ref=e1176]: EN
+                - generic [ref=e1177]:
+                  - generic [ref=e1178]: …1600
+                  - generic [ref=e1179]: Tulsa, OK
+                - generic "6/24/2026, 12:00:31 PM" [ref=e1180]:
+                  - generic [ref=e1181]: 14h ago
+                  - generic [ref=e1182]: Chicago
+                - generic [ref=e1184]: Delivered
+                - generic [ref=e1186]: —
+                - generic [ref=e1187]: —
+              - button "Expand row" [ref=e1188]:
+                - img [ref=e1189]
+          - generic [ref=e1191]:
+            - generic [ref=e1192]:
+              - text: Showing
+              - strong [ref=e1193]: 1–25
+              - text: of
+              - strong [ref=e1194]: 14,784
+            - generic [ref=e1195]:
+              - generic [ref=e1196]:
+                - text: Rows
+                - combobox "Rows" [ref=e1197] [cursor=pointer]:
+                  - option "25" [selected]
+                  - option "50"
+                  - option "100"
+                  - option "250"
+              - button "« First" [disabled] [ref=e1198]
+              - button "‹ Prev" [disabled] [ref=e1199]
+              - generic [ref=e1200]: Page 1 of 592
+              - button "Next ›" [ref=e1201] [cursor=pointer]
+              - button "Last »" [ref=e1202] [cursor=pointer]
+        - complementary [ref=e1203]:
+          - generic [ref=e1204]:
+            - generic [ref=e1205]: Command Intelligence
+            - button "Collapse" [ref=e1206] [cursor=pointer]:
+              - img [ref=e1207]
+          - generic [ref=e1210]:
+            - generic [ref=e1211]: Blocked
+            - generic [ref=e1213]:
+              - generic [ref=e1214]: 2 runnable
+              - generic [ref=e1215]: 753 blocked
+              - generic [ref=e1216]: 2 retryable
+              - generic [ref=e1217]: 2 senders
+            - generic [ref=e1218]: "Next: 6/24/2026, 1:00:31 PM"
+  - button "NEXUS Copilot" [ref=e1219] [cursor=pointer]:
+    - generic: Standing by

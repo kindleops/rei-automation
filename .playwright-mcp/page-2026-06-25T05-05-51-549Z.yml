@@ -1,0 +1,1258 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - generic [ref=e24]:
+              - 'button "Workspace: Deal Desk" [expanded] [active] [ref=e25] [cursor=pointer]':
+                - strong [ref=e26]:
+                  - img [ref=e27]
+              - dialog "Workspace launcher" [ref=e29]:
+                - generic [ref=e30]:
+                  - generic [ref=e31]:
+                    - img [ref=e32]
+                    - searchbox "Search workspaces and views" [ref=e35]
+                  - generic [ref=e36]:
+                    - navigation "Workspace launcher categories" [ref=e37]:
+                      - button "Pinned" [ref=e38] [cursor=pointer]
+                      - button "Workspaces" [ref=e39] [cursor=pointer]
+                      - button "Views" [ref=e40] [cursor=pointer]
+                      - button "Appearance" [ref=e41] [cursor=pointer]
+                      - button "Administration" [ref=e42] [cursor=pointer]
+                    - generic [ref=e43]:
+                      - generic [ref=e44]:
+                        - heading "Workspaces" [level=4] [ref=e45]
+                        - button "Deal Desk Inbox · Conversation · Deal Intelligence Ready" [ref=e47] [cursor=pointer]:
+                          - img [ref=e49]
+                          - generic [ref=e52]:
+                            - strong [ref=e53]: Deal Desk
+                            - generic [ref=e54]: Inbox · Conversation · Deal Intelligence
+                          - generic [ref=e55]:
+                            - emphasis [ref=e56]: Ready
+                            - img [ref=e57]
+                        - button "Comping Comps · Map · Offer Stack Ready" [ref=e60] [cursor=pointer]:
+                          - img [ref=e62]
+                          - generic [ref=e64]:
+                            - strong [ref=e65]: Comping
+                            - generic [ref=e66]: Comps · Map · Offer Stack
+                          - emphasis [ref=e68]: Ready
+                        - button "Buyer Match Desk Buyers · Deal Intelligence · Conversation Ready" [ref=e70] [cursor=pointer]:
+                          - img [ref=e72]
+                          - generic [ref=e77]:
+                            - strong [ref=e78]: Buyer Match Desk
+                            - generic [ref=e79]: Buyers · Deal Intelligence · Conversation
+                          - emphasis [ref=e81]: Ready
+                        - button "Pipeline Flow Stages · Calendar · Tasks Ready" [ref=e83] [cursor=pointer]:
+                          - img [ref=e85]
+                          - generic [ref=e88]:
+                            - strong [ref=e89]: Pipeline Flow
+                            - generic [ref=e90]: Stages · Calendar · Tasks
+                          - emphasis [ref=e92]: Ready
+                        - button "Queue Control Scheduled · Failed · Blocked Ready" [ref=e94] [cursor=pointer]:
+                          - img [ref=e96]
+                          - generic [ref=e98]:
+                            - strong [ref=e99]: Queue Control
+                            - generic [ref=e100]: Scheduled · Failed · Blocked
+                          - emphasis [ref=e102]: Ready
+                        - button "Market Command Map · Markets · Routing Ready" [ref=e104] [cursor=pointer]:
+                          - img [ref=e106]
+                          - generic [ref=e108]:
+                            - strong [ref=e109]: Market Command
+                            - generic [ref=e110]: Map · Markets · Routing
+                          - emphasis [ref=e112]: Ready
+                      - generic [ref=e113]:
+                        - heading "Unavailable" [level=4] [ref=e114]
+                        - generic "Unavailable" [ref=e115]:
+                          - button "Command Center Status · Queue · Inbox · Incidents Unavailable" [disabled] [ref=e116]:
+                            - img [ref=e118]
+                            - generic:
+                              - strong: Command Center
+                              - generic: Status · Queue · Inbox · Incidents
+                            - emphasis [ref=e121]: Unavailable
+                        - generic "Unavailable" [ref=e122]:
+                          - button "Closing Desk Offers · Contracts · Title Unavailable" [disabled] [ref=e123]:
+                            - img [ref=e125]
+                            - generic:
+                              - strong: Closing Desk
+                              - generic: Offers · Contracts · Title
+                            - emphasis [ref=e128]: Unavailable
+                        - generic "Unavailable" [ref=e129]:
+                          - button "Ops Monitor Analytics · Activity · Alerts Unavailable" [disabled] [ref=e130]:
+                            - img [ref=e132]
+                            - generic:
+                              - strong: Ops Monitor
+                              - generic: Analytics · Activity · Alerts
+                            - emphasis [ref=e135]: Unavailable
+            - button "Queue & System Status · Unknown" [ref=e137] [cursor=pointer]:
+              - img [ref=e139]
+        - generic [ref=e142]:
+          - img [ref=e143]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e146]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e147]: CMD+K
+        - generic [ref=e148]:
+          - button "99+" [ref=e150] [cursor=pointer]:
+            - img [ref=e151]
+            - generic [ref=e153]: 99+
+          - button "Live Activity" [ref=e155] [cursor=pointer]:
+            - img [ref=e156]
+          - button "Notifications" [ref=e159] [cursor=pointer]:
+            - img [ref=e160]
+          - button "RK" [ref=e164] [cursor=pointer]:
+            - generic [ref=e165]: RK
+      - main [ref=e167]:
+        - generic [ref=e168]:
+          - complementary [ref=e171]:
+            - generic [ref=e173]:
+              - generic [ref=e174]:
+                - generic [ref=e175]:
+                  - img [ref=e176]
+                  - textbox "Search inbox threads" [ref=e179]:
+                    - /placeholder: Search operator inbox...
+                - generic [ref=e180]:
+                  - button "Advanced filters" [ref=e181] [cursor=pointer]:
+                    - img [ref=e182]
+                  - button "Clear filters" [ref=e184] [cursor=pointer]:
+                    - img [ref=e185]
+              - tablist "Inbox categories" [ref=e187]:
+                - tab "Priority 49" [ref=e188] [cursor=pointer]:
+                  - generic [ref=e189]: 🔥
+                  - generic "Priority" [ref=e190]
+                  - generic [ref=e191]: "49"
+                - tab "New Replies 31 Unread replies" [ref=e192] [cursor=pointer]:
+                  - generic [ref=e193]: 📥
+                  - generic "New Replies" [ref=e194]
+                  - generic [ref=e195]: "31"
+                  - generic "Unread replies" [ref=e196]
+                - tab "Needs Review 111" [ref=e197] [cursor=pointer]:
+                  - generic [ref=e198]: 🧠
+                  - generic "Needs Review" [ref=e199]
+                  - generic [ref=e200]: "111"
+                - tab "Waiting 1" [ref=e201] [cursor=pointer]:
+                  - generic [ref=e202]: ⏳
+                  - generic "Waiting" [ref=e203]
+                  - generic [ref=e204]: "1"
+                - tab "All Threads 7897" [selected] [ref=e205] [cursor=pointer]:
+                  - generic [ref=e206]: 📦
+                  - generic "All Threads" [ref=e207]
+                  - generic [ref=e208]: "7897"
+            - generic [ref=e209]:
+              - generic [ref=e210]:
+                - button "+ Save Current Filter" [ref=e211] [cursor=pointer]
+                - button "Manage Lists" [ref=e212] [cursor=pointer]
+              - generic [ref=e214]:
+                - button "+1 (770) 203-3651 No Address Sorry about that, my system had an error. Are you open to a proposal on the property? Delivered Yesterday Unknown Value, priority, equity, and condition" [ref=e215] [cursor=pointer]:
+                  - generic [ref=e216]:
+                    - generic [ref=e219]: +1 (770) 203-3651
+                    - generic [ref=e220]: No Address
+                    - generic [ref=e221]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+                    - generic "Delivered Yesterday" [ref=e223]:
+                      - img [ref=e224]
+                      - generic [ref=e227]: Delivered
+                      - generic [ref=e228]: ·
+                      - time [ref=e229]: Yesterday
+                    - generic [ref=e231]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e232]:
+                      - generic [ref=e233]:
+                        - generic [ref=e234]: Value
+                        - generic [ref=e235]: —
+                      - generic [ref=e236]:
+                        - generic [ref=e237]: Priority
+                        - generic [ref=e238]: "0"
+                      - generic [ref=e239]:
+                        - generic [ref=e240]: Equity
+                        - generic [ref=e241]: —
+                      - generic [ref=e242]:
+                        - generic [ref=e243]: Condition
+                        - generic [ref=e244]: —
+                - button "+1 (918) 200-8537 No Address Fuck off Inbound Yesterday Unknown Value, priority, equity, and condition" [ref=e245] [cursor=pointer]:
+                  - generic [ref=e246]:
+                    - generic [ref=e250]: +1 (918) 200-8537
+                    - generic [ref=e251]: No Address
+                    - generic [ref=e252]: Fuck off
+                    - generic "Inbound Yesterday" [ref=e254]:
+                      - img [ref=e255]
+                      - generic [ref=e257]: Inbound
+                      - generic [ref=e258]: ·
+                      - time [ref=e259]: Yesterday
+                    - generic [ref=e261]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e262]:
+                      - generic [ref=e263]:
+                        - generic [ref=e264]: Value
+                        - generic [ref=e265]: —
+                      - generic [ref=e266]:
+                        - generic [ref=e267]: Priority
+                        - generic [ref=e268]: "0"
+                      - generic [ref=e269]:
+                        - generic [ref=e270]: Equity
+                        - generic [ref=e271]: —
+                      - generic [ref=e272]:
+                        - generic [ref=e273]: Condition
+                        - generic [ref=e274]: —
+                - button "+1 (555) 555-0202 No Address No latest message Delivered Yesterday Unknown Value, priority, equity, and condition" [ref=e275] [cursor=pointer]:
+                  - generic [ref=e276]:
+                    - generic [ref=e280]: +1 (555) 555-0202
+                    - generic [ref=e281]: No Address
+                    - generic [ref=e282]: No latest message
+                    - generic "Delivered Yesterday" [ref=e284]:
+                      - img [ref=e285]
+                      - generic [ref=e288]: Delivered
+                      - generic [ref=e289]: ·
+                      - time [ref=e290]: Yesterday
+                    - generic [ref=e292]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e293]:
+                      - generic [ref=e294]:
+                        - generic [ref=e295]: Value
+                        - generic [ref=e296]: —
+                      - generic [ref=e297]:
+                        - generic [ref=e298]: Priority
+                        - generic [ref=e299]: "0"
+                      - generic [ref=e300]:
+                        - generic [ref=e301]: Equity
+                        - generic [ref=e302]: —
+                      - generic [ref=e303]:
+                        - generic [ref=e304]: Condition
+                        - generic [ref=e305]: —
+                - button "+1 (847) 867-9735 No Address Yes not looking to sell Inbound Yesterday Unknown Value, priority, equity, and condition" [ref=e306] [cursor=pointer]:
+                  - generic [ref=e307]:
+                    - generic [ref=e311]: +1 (847) 867-9735
+                    - generic [ref=e312]: No Address
+                    - generic [ref=e313]: Yes not looking to sell
+                    - generic "Inbound Yesterday" [ref=e315]:
+                      - img [ref=e316]
+                      - generic [ref=e318]: Inbound
+                      - generic [ref=e319]: ·
+                      - time [ref=e320]: Yesterday
+                    - generic [ref=e322]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e323]:
+                      - generic [ref=e324]:
+                        - generic [ref=e325]: Value
+                        - generic [ref=e326]: —
+                      - generic [ref=e327]:
+                        - generic [ref=e328]: Priority
+                        - generic [ref=e329]: "0"
+                      - generic [ref=e330]:
+                        - generic [ref=e331]: Equity
+                        - generic [ref=e332]: —
+                      - generic [ref=e333]:
+                        - generic [ref=e334]: Condition
+                        - generic [ref=e335]: —
+                - button "+1 (612) 743-3952 No Address Deployed verification inbound deployed-dzdevzuroh Inbound Yesterday Minneapolis, MN Value, priority, equity, and condition" [ref=e336] [cursor=pointer]:
+                  - generic [ref=e337]:
+                    - generic [ref=e341]: +1 (612) 743-3952
+                    - generic [ref=e342]: No Address
+                    - generic [ref=e343]: Deployed verification inbound deployed-dzdevzuroh
+                    - generic "Inbound Yesterday" [ref=e345]:
+                      - img [ref=e346]
+                      - generic [ref=e348]: Inbound
+                      - generic [ref=e349]: ·
+                      - time [ref=e350]: Yesterday
+                    - generic [ref=e352]: Minneapolis, MN
+                    - generic "Value, priority, equity, and condition" [ref=e353]:
+                      - generic [ref=e354]:
+                        - generic [ref=e355]: Value
+                        - generic [ref=e356]: —
+                      - generic [ref=e357]:
+                        - generic [ref=e358]: Priority
+                        - generic [ref=e359]: "0"
+                      - generic [ref=e360]:
+                        - generic [ref=e361]: Equity
+                        - generic [ref=e362]: —
+                      - generic [ref=e363]:
+                        - generic [ref=e364]: Condition
+                        - generic [ref=e365]: —
+                - button "+1 (913) 636-3462 No Address Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people. Inbound Yesterday Unknown Value, priority, equity, and condition" [ref=e366] [cursor=pointer]:
+                  - generic [ref=e367]:
+                    - generic [ref=e371]: +1 (913) 636-3462
+                    - generic [ref=e372]: No Address
+                    - generic [ref=e373]: Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people.
+                    - generic "Inbound Yesterday" [ref=e375]:
+                      - img [ref=e376]
+                      - generic [ref=e378]: Inbound
+                      - generic [ref=e379]: ·
+                      - time [ref=e380]: Yesterday
+                    - generic [ref=e382]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e383]:
+                      - generic [ref=e384]:
+                        - generic [ref=e385]: Value
+                        - generic [ref=e386]: —
+                      - generic [ref=e387]:
+                        - generic [ref=e388]: Priority
+                        - generic [ref=e389]: "0"
+                      - generic [ref=e390]:
+                        - generic [ref=e391]: Equity
+                        - generic [ref=e392]: —
+                      - generic [ref=e393]:
+                        - generic [ref=e394]: Condition
+                        - generic [ref=e395]: —
+                - button "+1 (918) 282-8080 No Address No Inbound Yesterday Unknown Value, priority, equity, and condition" [ref=e396] [cursor=pointer]:
+                  - generic [ref=e397]:
+                    - generic [ref=e401]: +1 (918) 282-8080
+                    - generic [ref=e402]: No Address
+                    - generic [ref=e403]: "No"
+                    - generic "Inbound Yesterday" [ref=e405]:
+                      - img [ref=e406]
+                      - generic [ref=e408]: Inbound
+                      - generic [ref=e409]: ·
+                      - time [ref=e410]: Yesterday
+                    - generic [ref=e412]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e413]:
+                      - generic [ref=e414]:
+                        - generic [ref=e415]: Value
+                        - generic [ref=e416]: —
+                      - generic [ref=e417]:
+                        - generic [ref=e418]: Priority
+                        - generic [ref=e419]: "0"
+                      - generic [ref=e420]:
+                        - generic [ref=e421]: Equity
+                        - generic [ref=e422]: —
+                      - generic [ref=e423]:
+                        - generic [ref=e424]: Condition
+                        - generic [ref=e425]: —
+                - button "+1 (248) 227-4246 No Address Please DO NOT contact me again! Inbound Jun 23 Unknown Value, priority, equity, and condition" [ref=e426] [cursor=pointer]:
+                  - generic [ref=e427]:
+                    - generic [ref=e431]: +1 (248) 227-4246
+                    - generic [ref=e432]: No Address
+                    - generic [ref=e433]: Please DO NOT contact me again!
+                    - generic "Inbound Jun 23" [ref=e435]:
+                      - img [ref=e436]
+                      - generic [ref=e438]: Inbound
+                      - generic [ref=e439]: ·
+                      - time [ref=e440]: Jun 23
+                    - generic [ref=e442]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e443]:
+                      - generic [ref=e444]:
+                        - generic [ref=e445]: Value
+                        - generic [ref=e446]: —
+                      - generic [ref=e447]:
+                        - generic [ref=e448]: Priority
+                        - generic [ref=e449]: "0"
+                      - generic [ref=e450]:
+                        - generic [ref=e451]: Equity
+                        - generic [ref=e452]: —
+                      - generic [ref=e453]:
+                        - generic [ref=e454]: Condition
+                        - generic [ref=e455]: —
+                - button "+1 (918) 606-6313 No Address Sold Inbound Jun 23 Unknown Value, priority, equity, and condition" [ref=e456] [cursor=pointer]:
+                  - generic [ref=e457]:
+                    - generic [ref=e461]: +1 (918) 606-6313
+                    - generic [ref=e462]: No Address
+                    - generic [ref=e463]: Sold
+                    - generic "Inbound Jun 23" [ref=e465]:
+                      - img [ref=e466]
+                      - generic [ref=e468]: Inbound
+                      - generic [ref=e469]: ·
+                      - time [ref=e470]: Jun 23
+                    - generic [ref=e472]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e473]:
+                      - generic [ref=e474]:
+                        - generic [ref=e475]: Value
+                        - generic [ref=e476]: —
+                      - generic [ref=e477]:
+                        - generic [ref=e478]: Priority
+                        - generic [ref=e479]: "0"
+                      - generic [ref=e480]:
+                        - generic [ref=e481]: Equity
+                        - generic [ref=e482]: —
+                      - generic [ref=e483]:
+                        - generic [ref=e484]: Condition
+                        - generic [ref=e485]: —
+                - button "+1 (816) 665-3415 No Address I'm not Erika Inbound Jun 23 Unknown Value, priority, equity, and condition" [ref=e486] [cursor=pointer]:
+                  - generic [ref=e487]:
+                    - generic [ref=e491]: +1 (816) 665-3415
+                    - generic [ref=e492]: No Address
+                    - generic [ref=e493]: I'm not Erika
+                    - generic "Inbound Jun 23" [ref=e495]:
+                      - img [ref=e496]
+                      - generic [ref=e498]: Inbound
+                      - generic [ref=e499]: ·
+                      - time [ref=e500]: Jun 23
+                    - generic [ref=e502]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e503]:
+                      - generic [ref=e504]:
+                        - generic [ref=e505]: Value
+                        - generic [ref=e506]: —
+                      - generic [ref=e507]:
+                        - generic [ref=e508]: Priority
+                        - generic [ref=e509]: "0"
+                      - generic [ref=e510]:
+                        - generic [ref=e511]: Equity
+                        - generic [ref=e512]: —
+                      - generic [ref=e513]:
+                        - generic [ref=e514]: Condition
+                        - generic [ref=e515]: —
+                - button "+1 (612) 386-2761 No Address Not for sale. Inbound Jun 22 Unknown Value, priority, equity, and condition" [ref=e516] [cursor=pointer]:
+                  - generic [ref=e517]:
+                    - generic [ref=e521]: +1 (612) 386-2761
+                    - generic [ref=e522]: No Address
+                    - generic [ref=e523]: Not for sale.
+                    - generic "Inbound Jun 22" [ref=e525]:
+                      - img [ref=e526]
+                      - generic [ref=e528]: Inbound
+                      - generic [ref=e529]: ·
+                      - time [ref=e530]: Jun 22
+                    - generic [ref=e532]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e533]:
+                      - generic [ref=e534]:
+                        - generic [ref=e535]: Value
+                        - generic [ref=e536]: —
+                      - generic [ref=e537]:
+                        - generic [ref=e538]: Priority
+                        - generic [ref=e539]: "0"
+                      - generic [ref=e540]:
+                        - generic [ref=e541]: Equity
+                        - generic [ref=e542]: —
+                      - generic [ref=e543]:
+                        - generic [ref=e544]: Condition
+                        - generic [ref=e545]: —
+                - button "+1 (918) 814-8960 No Address ¿En qué condiciones se encuentra la propiedad? Delivered Jun 21 Unknown Value, priority, equity, and condition" [ref=e546] [cursor=pointer]:
+                  - generic [ref=e547]:
+                    - generic [ref=e550]: +1 (918) 814-8960
+                    - generic [ref=e551]: No Address
+                    - generic [ref=e552]: ¿En qué condiciones se encuentra la propiedad?
+                    - generic "Delivered Jun 21" [ref=e554]:
+                      - img [ref=e555]
+                      - generic [ref=e558]: Delivered
+                      - generic [ref=e559]: ·
+                      - time [ref=e560]: Jun 21
+                    - generic [ref=e562]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e563]:
+                      - generic [ref=e564]:
+                        - generic [ref=e565]: Value
+                        - generic [ref=e566]: —
+                      - generic [ref=e567]:
+                        - generic [ref=e568]: Priority
+                        - generic [ref=e569]: "0"
+                      - generic [ref=e570]:
+                        - generic [ref=e571]: Equity
+                        - generic [ref=e572]: —
+                      - generic [ref=e573]:
+                        - generic [ref=e574]: Condition
+                        - generic [ref=e575]: —
+                - button "+1 (970) 282-9594 No Address No Inbound Jun 21 Unknown Value, priority, equity, and condition" [ref=e576] [cursor=pointer]:
+                  - generic [ref=e577]:
+                    - generic [ref=e581]: +1 (970) 282-9594
+                    - generic [ref=e582]: No Address
+                    - generic [ref=e583]: "No"
+                    - generic "Inbound Jun 21" [ref=e585]:
+                      - img [ref=e586]
+                      - generic [ref=e588]: Inbound
+                      - generic [ref=e589]: ·
+                      - time [ref=e590]: Jun 21
+                    - generic [ref=e592]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e593]:
+                      - generic [ref=e594]:
+                        - generic [ref=e595]: Value
+                        - generic [ref=e596]: —
+                      - generic [ref=e597]:
+                        - generic [ref=e598]: Priority
+                        - generic [ref=e599]: "0"
+                      - generic [ref=e600]:
+                        - generic [ref=e601]: Equity
+                        - generic [ref=e602]: —
+                      - generic [ref=e603]:
+                        - generic [ref=e604]: Condition
+                        - generic [ref=e605]: —
+                - button "+1 (480) 244-7520 No Address Not for sale!!!! Inbound Jun 20 Unknown Value, priority, equity, and condition" [ref=e606] [cursor=pointer]:
+                  - generic [ref=e607]:
+                    - generic [ref=e611]: +1 (480) 244-7520
+                    - generic [ref=e612]: No Address
+                    - generic [ref=e613]: Not for sale!!!!
+                    - generic "Inbound Jun 20" [ref=e615]:
+                      - img [ref=e616]
+                      - generic [ref=e618]: Inbound
+                      - generic [ref=e619]: ·
+                      - time [ref=e620]: Jun 20
+                    - generic [ref=e622]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e623]:
+                      - generic [ref=e624]:
+                        - generic [ref=e625]: Value
+                        - generic [ref=e626]: —
+                      - generic [ref=e627]:
+                        - generic [ref=e628]: Priority
+                        - generic [ref=e629]: "0"
+                      - generic [ref=e630]:
+                        - generic [ref=e631]: Equity
+                        - generic [ref=e632]: —
+                      - generic [ref=e633]:
+                        - generic [ref=e634]: Condition
+                        - generic [ref=e635]: —
+                - button "+1 (805) 403-1157 No Address And we are Not interested in selling Inbound Jun 19 Unknown Value, priority, equity, and condition" [ref=e636] [cursor=pointer]:
+                  - generic [ref=e637]:
+                    - generic [ref=e641]: +1 (805) 403-1157
+                    - generic [ref=e642]: No Address
+                    - generic [ref=e643]: And we are Not interested in selling
+                    - generic "Inbound Jun 19" [ref=e645]:
+                      - img [ref=e646]
+                      - generic [ref=e648]: Inbound
+                      - generic [ref=e649]: ·
+                      - time [ref=e650]: Jun 19
+                    - generic [ref=e652]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e653]:
+                      - generic [ref=e654]:
+                        - generic [ref=e655]: Value
+                        - generic [ref=e656]: —
+                      - generic [ref=e657]:
+                        - generic [ref=e658]: Priority
+                        - generic [ref=e659]: "0"
+                      - generic [ref=e660]:
+                        - generic [ref=e661]: Equity
+                        - generic [ref=e662]: —
+                      - generic [ref=e663]:
+                        - generic [ref=e664]: Condition
+                        - generic [ref=e665]: —
+                - button "+1 (539) 235-3903 No Address What condition is the property in? Delivered Jun 19 Unknown Value, priority, equity, and condition" [ref=e666] [cursor=pointer]:
+                  - generic [ref=e667]:
+                    - generic [ref=e670]: +1 (539) 235-3903
+                    - generic [ref=e671]: No Address
+                    - generic [ref=e672]: What condition is the property in?
+                    - generic "Delivered Jun 19" [ref=e674]:
+                      - img [ref=e675]
+                      - generic [ref=e678]: Delivered
+                      - generic [ref=e679]: ·
+                      - time [ref=e680]: Jun 19
+                    - generic [ref=e682]: Unknown
+                    - generic "Value, priority, equity, and condition" [ref=e683]:
+                      - generic [ref=e684]:
+                        - generic [ref=e685]: Value
+                        - generic [ref=e686]: —
+                      - generic [ref=e687]:
+                        - generic [ref=e688]: Priority
+                        - generic [ref=e689]: "0"
+                      - generic [ref=e690]:
+                        - generic [ref=e691]: Equity
+                        - generic [ref=e692]: —
+                      - generic [ref=e693]:
+                        - generic [ref=e694]: Condition
+                        - generic [ref=e695]: —
+                - button "+1 (901) 425-8564 No Address Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St? Delivered Jun 19 Memphis, TN Value, priority, equity, and condition" [ref=e696] [cursor=pointer]:
+                  - generic [ref=e697]:
+                    - generic [ref=e700]: +1 (901) 425-8564
+                    - generic [ref=e701]: No Address
+                    - generic [ref=e702]: Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St?
+                    - generic "Delivered Jun 19" [ref=e704]:
+                      - img [ref=e705]
+                      - generic [ref=e708]: Delivered
+                      - generic [ref=e709]: ·
+                      - time [ref=e710]: Jun 19
+                    - generic [ref=e712]: Memphis, TN
+                    - generic "Value, priority, equity, and condition" [ref=e713]:
+                      - generic [ref=e714]:
+                        - generic [ref=e715]: Value
+                        - generic [ref=e716]: —
+                      - generic [ref=e717]:
+                        - generic [ref=e718]: Priority
+                        - generic [ref=e719]: "0"
+                      - generic [ref=e720]:
+                        - generic [ref=e721]: Equity
+                        - generic [ref=e722]: —
+                      - generic [ref=e723]:
+                        - generic [ref=e724]: Condition
+                        - generic [ref=e725]: —
+                - button "+1 (509) 993-9397 No Address Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave? Delivered Jun 19 Spokane, WA Value, priority, equity, and condition" [ref=e726] [cursor=pointer]:
+                  - generic [ref=e727]:
+                    - generic [ref=e731]: +1 (509) 993-9397
+                    - generic [ref=e732]: No Address
+                    - generic [ref=e733]: Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave?
+                    - generic "Delivered Jun 19" [ref=e735]:
+                      - img [ref=e736]
+                      - generic [ref=e739]: Delivered
+                      - generic [ref=e740]: ·
+                      - time [ref=e741]: Jun 19
+                    - generic [ref=e743]: Spokane, WA
+                    - generic "Value, priority, equity, and condition" [ref=e744]:
+                      - generic [ref=e745]:
+                        - generic [ref=e746]: Value
+                        - generic [ref=e747]: —
+                      - generic [ref=e748]:
+                        - generic [ref=e749]: Priority
+                        - generic [ref=e750]: "0"
+                      - generic [ref=e751]:
+                        - generic [ref=e752]: Equity
+                        - generic [ref=e753]: —
+                      - generic [ref=e754]:
+                        - generic [ref=e755]: Condition
+                        - generic [ref=e756]: —
+                - button "+1 (913) 313-1111 No Address Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours? Delivered Jun 19 Kansas City, MO Value, priority, equity, and condition" [ref=e757] [cursor=pointer]:
+                  - generic [ref=e758]:
+                    - generic [ref=e761]: +1 (913) 313-1111
+                    - generic [ref=e762]: No Address
+                    - generic [ref=e763]: Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours?
+                    - generic "Delivered Jun 19" [ref=e765]:
+                      - img [ref=e766]
+                      - generic [ref=e769]: Delivered
+                      - generic [ref=e770]: ·
+                      - time [ref=e771]: Jun 19
+                    - generic [ref=e773]: Kansas City, MO
+                    - generic "Value, priority, equity, and condition" [ref=e774]:
+                      - generic [ref=e775]:
+                        - generic [ref=e776]: Value
+                        - generic [ref=e777]: —
+                      - generic [ref=e778]:
+                        - generic [ref=e779]: Priority
+                        - generic [ref=e780]: "0"
+                      - generic [ref=e781]:
+                        - generic [ref=e782]: Equity
+                        - generic [ref=e783]: —
+                      - generic [ref=e784]:
+                        - generic [ref=e785]: Condition
+                        - generic [ref=e786]: —
+                - button "+1 (918) 859-2228 No Address Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave? Delivered Jun 19 Tulsa, OK Value, priority, equity, and condition" [ref=e787] [cursor=pointer]:
+                  - generic [ref=e788]:
+                    - generic [ref=e791]: +1 (918) 859-2228
+                    - generic [ref=e792]: No Address
+                    - generic [ref=e793]: Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave?
+                    - generic "Delivered Jun 19" [ref=e795]:
+                      - img [ref=e796]
+                      - generic [ref=e799]: Delivered
+                      - generic [ref=e800]: ·
+                      - time [ref=e801]: Jun 19
+                    - generic [ref=e803]: Tulsa, OK
+                    - generic "Value, priority, equity, and condition" [ref=e804]:
+                      - generic [ref=e805]:
+                        - generic [ref=e806]: Value
+                        - generic [ref=e807]: —
+                      - generic [ref=e808]:
+                        - generic [ref=e809]: Priority
+                        - generic [ref=e810]: "0"
+                      - generic [ref=e811]:
+                        - generic [ref=e812]: Equity
+                        - generic [ref=e813]: —
+                      - generic [ref=e814]:
+                        - generic [ref=e815]: Condition
+                        - generic [ref=e816]: —
+                - button "+1 (901) 598-8824 No Address Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave? Delivered Jun 19 Memphis, TN Value, priority, equity, and condition" [ref=e817] [cursor=pointer]:
+                  - generic [ref=e818]:
+                    - generic [ref=e821]: +1 (901) 598-8824
+                    - generic [ref=e822]: No Address
+                    - generic [ref=e823]: Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave?
+                    - generic "Delivered Jun 19" [ref=e825]:
+                      - img [ref=e826]
+                      - generic [ref=e829]: Delivered
+                      - generic [ref=e830]: ·
+                      - time [ref=e831]: Jun 19
+                    - generic [ref=e833]: Memphis, TN
+                    - generic "Value, priority, equity, and condition" [ref=e834]:
+                      - generic [ref=e835]:
+                        - generic [ref=e836]: Value
+                        - generic [ref=e837]: —
+                      - generic [ref=e838]:
+                        - generic [ref=e839]: Priority
+                        - generic [ref=e840]: "0"
+                      - generic [ref=e841]:
+                        - generic [ref=e842]: Equity
+                        - generic [ref=e843]: —
+                      - generic [ref=e844]:
+                        - generic [ref=e845]: Condition
+                        - generic [ref=e846]: —
+                - button "+1 (913) 244-6677 No Address Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad? Delivered Jun 19 Kansas City, MO Value, priority, equity, and condition" [ref=e847] [cursor=pointer]:
+                  - generic [ref=e848]:
+                    - generic [ref=e851]: +1 (913) 244-6677
+                    - generic [ref=e852]: No Address
+                    - generic [ref=e853]: Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad?
+                    - generic "Delivered Jun 19" [ref=e855]:
+                      - img [ref=e856]
+                      - generic [ref=e859]: Delivered
+                      - generic [ref=e860]: ·
+                      - time [ref=e861]: Jun 19
+                    - generic [ref=e863]: Kansas City, MO
+                    - generic "Value, priority, equity, and condition" [ref=e864]:
+                      - generic [ref=e865]:
+                        - generic [ref=e866]: Value
+                        - generic [ref=e867]: —
+                      - generic [ref=e868]:
+                        - generic [ref=e869]: Priority
+                        - generic [ref=e870]: "0"
+                      - generic [ref=e871]:
+                        - generic [ref=e872]: Equity
+                        - generic [ref=e873]: —
+                      - generic [ref=e874]:
+                        - generic [ref=e875]: Condition
+                        - generic [ref=e876]: —
+                - button "+1 (612) 670-7973 No Address Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours? Delivered Jun 19 Minneapolis, MN Value, priority, equity, and condition" [ref=e877] [cursor=pointer]:
+                  - generic [ref=e878]:
+                    - generic [ref=e881]: +1 (612) 670-7973
+                    - generic [ref=e882]: No Address
+                    - generic [ref=e883]: Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours?
+                    - generic "Delivered Jun 19" [ref=e885]:
+                      - img [ref=e886]
+                      - generic [ref=e889]: Delivered
+                      - generic [ref=e890]: ·
+                      - time [ref=e891]: Jun 19
+                    - generic [ref=e893]: Minneapolis, MN
+                    - generic "Value, priority, equity, and condition" [ref=e894]:
+                      - generic [ref=e895]:
+                        - generic [ref=e896]: Value
+                        - generic [ref=e897]: —
+                      - generic [ref=e898]:
+                        - generic [ref=e899]: Priority
+                        - generic [ref=e900]: "0"
+                      - generic [ref=e901]:
+                        - generic [ref=e902]: Equity
+                        - generic [ref=e903]: —
+                      - generic [ref=e904]:
+                        - generic [ref=e905]: Condition
+                        - generic [ref=e906]: —
+                - button "+1 (612) 770-5458 No Address Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours? Delivered Jun 19 Minneapolis, MN Value, priority, equity, and condition" [ref=e907] [cursor=pointer]:
+                  - generic [ref=e908]:
+                    - generic [ref=e911]: +1 (612) 770-5458
+                    - generic [ref=e912]: No Address
+                    - generic [ref=e913]: Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours?
+                    - generic "Delivered Jun 19" [ref=e915]:
+                      - img [ref=e916]
+                      - generic [ref=e919]: Delivered
+                      - generic [ref=e920]: ·
+                      - time [ref=e921]: Jun 19
+                    - generic [ref=e923]: Minneapolis, MN
+                    - generic "Value, priority, equity, and condition" [ref=e924]:
+                      - generic [ref=e925]:
+                        - generic [ref=e926]: Value
+                        - generic [ref=e927]: —
+                      - generic [ref=e928]:
+                        - generic [ref=e929]: Priority
+                        - generic [ref=e930]: "0"
+                      - generic [ref=e931]:
+                        - generic [ref=e932]: Equity
+                        - generic [ref=e933]: —
+                      - generic [ref=e934]:
+                        - generic [ref=e935]: Condition
+                        - generic [ref=e936]: —
+                - button "+1 (901) 277-7262 No Address Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours? Delivered Jun 19 Memphis, TN Value, priority, equity, and condition" [ref=e937] [cursor=pointer]:
+                  - generic [ref=e938]:
+                    - generic [ref=e941]: +1 (901) 277-7262
+                    - generic [ref=e942]: No Address
+                    - generic [ref=e943]: Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours?
+                    - generic "Delivered Jun 19" [ref=e945]:
+                      - img [ref=e946]
+                      - generic [ref=e949]: Delivered
+                      - generic [ref=e950]: ·
+                      - time [ref=e951]: Jun 19
+                    - generic [ref=e953]: Memphis, TN
+                    - generic "Value, priority, equity, and condition" [ref=e954]:
+                      - generic [ref=e955]:
+                        - generic [ref=e956]: Value
+                        - generic [ref=e957]: —
+                      - generic [ref=e958]:
+                        - generic [ref=e959]: Priority
+                        - generic [ref=e960]: "0"
+                      - generic [ref=e961]:
+                        - generic [ref=e962]: Equity
+                        - generic [ref=e963]: —
+                      - generic [ref=e964]:
+                        - generic [ref=e965]: Condition
+                        - generic [ref=e966]: —
+              - button "Load More" [ref=e968] [cursor=pointer]
+          - generic [ref=e970]:
+            - generic [ref=e971]:
+              - generic [ref=e973]:
+                - generic [ref=e974]:
+                  - heading "+1 (770) 203-3651" [level=2] [ref=e975]
+                  - generic [ref=e976]:
+                    - generic [ref=e977]:
+                      - img [ref=e978]
+                      - text: "+17702033651"
+                    - button "Debug thread" [ref=e980] [cursor=pointer]:
+                      - img [ref=e981]
+                  - generic [ref=e984]: No Address
+                - generic [ref=e985]:
+                  - button "Star thread" [ref=e986] [cursor=pointer]:
+                    - img [ref=e987]
+                  - button "Pin thread" [ref=e989] [cursor=pointer]:
+                    - img [ref=e990]
+                  - button "Thread notes and details" [ref=e992] [cursor=pointer]:
+                    - img [ref=e993]
+                  - button "Archive thread (stays in All Messages)" [ref=e996] [cursor=pointer]:
+                    - img [ref=e997]
+              - generic "Universal thread controls" [ref=e999]:
+                - generic [ref=e1000]:
+                  - 'button "Conversation status: Waiting" [ref=e1002] [cursor=pointer]':
+                    - generic [ref=e1004]: Waiting
+                    - generic [ref=e1005]: ▾
+                  - 'button "Acquisition stage: S1 Ownership Check" [ref=e1007] [cursor=pointer]':
+                    - generic [ref=e1009]: S1 Ownership Check
+                    - generic [ref=e1010]: ▾
+                  - 'button "Lead temperature: Cold" [ref=e1012] [cursor=pointer]':
+                    - generic [ref=e1014]: Cold
+                    - generic [ref=e1015]: ▾
+                - 'button "Automation state: Autopilot" [ref=e1017] [cursor=pointer]':
+                  - img [ref=e1018]
+                  - generic [ref=e1020]: Autopilot
+                  - generic [ref=e1021]: ▾
+              - generic [ref=e1022]:
+                - generic [ref=e1023]:
+                  - separator "Yesterday" [ref=e1024]:
+                    - generic [ref=e1025]: Yesterday
+                  - generic [ref=e1026]:
+                    - generic [ref=e1027]: Hey Linda, this is Andre. I have been investing in Decatur. Do you still own 4381 Sterling Forest Dr?
+                    - generic [ref=e1028]:
+                      - time [ref=e1029]: Jun 24 · 7:41 PM
+                      - generic [ref=e1030]:
+                        - generic [ref=e1031]: ✓✓
+                        - generic [ref=e1032]: Delivered
+                    - generic:
+                      - button "Add note":
+                        - img
+                - generic [ref=e1034]:
+                  - generic [ref=e1035]: "Yes"
+                  - time [ref=e1037]: Jun 24 · 8:29 PM
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1039]:
+                  - generic [ref=e1040]: Schema proof 53186945
+                  - generic [ref=e1041]:
+                    - time [ref=e1042]: Jun 24 · 9:06 PM
+                    - generic [ref=e1043]:
+                      - generic [ref=e1044]: ✓✓
+                      - generic [ref=e1045]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1047]:
+                  - generic [ref=e1048]: Schema proof 53211250
+                  - generic [ref=e1049]:
+                    - time [ref=e1050]: Jun 24 · 9:06 PM
+                    - generic [ref=e1051]:
+                      - generic [ref=e1052]: ✓✓
+                      - generic [ref=e1053]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1055]:
+                  - generic [ref=e1056]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+                  - generic [ref=e1057]:
+                    - time [ref=e1058]: Jun 24 · 9:18 PM
+                    - generic [ref=e1059]:
+                      - generic [ref=e1060]: ✓✓
+                      - generic [ref=e1061]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+            - generic [ref=e1063]:
+              - button "Open quick actions" [ref=e1065] [cursor=pointer]:
+                - img [ref=e1066]
+              - generic [ref=e1070]:
+                - textbox "Type a message…" [ref=e1071]
+                - generic [ref=e1072]:
+                  - button "Operator polish" [disabled] [ref=e1073]:
+                    - img [ref=e1074]
+                  - button "Translate draft" [disabled] [ref=e1076]:
+                    - img [ref=e1077]
+                  - button "Schedule message" [ref=e1081] [cursor=pointer]:
+                    - img [ref=e1082]
+                  - button "Voice input" [ref=e1085] [cursor=pointer]:
+                    - img [ref=e1086]
+              - button "Send message" [disabled] [ref=e1090]:
+                - img [ref=e1091]
+          - complementary [ref=e1094]:
+            - generic [ref=e1096]:
+              - generic [ref=e1097]:
+                - tablist [ref=e1098]:
+                  - tab "Street View" [selected] [ref=e1099] [cursor=pointer]
+                  - tab "Aerial" [ref=e1100] [cursor=pointer]
+                - generic [ref=e1102]:
+                  - iframe [ref=e1103]:
+                    - generic [ref=f25e3]:
+                      - generic:
+                        - button "Keyboard shortcuts"
+                      - region "Map" [ref=f25e4]:
+                        - generic [ref=f25e5]:
+                          - region "Street View" [ref=f25e8]
+                          - generic:
+                            - img:
+                              - button "Go East, Sterling Forest Dr" [ref=f25e12] [cursor=pointer]
+                              - button "Go West, Sterling Forest Dr" [ref=f25e15] [cursor=pointer]
+                      - iframe [ref=f25e17]:
+                        
+                      - generic [ref=f25e19]:
+                        - generic [ref=f25e20]:
+                          - generic [ref=f25e21]: 4381 Sterling Forest Dr
+                          - generic [ref=f25e22]: Decatur, Georgia
+                        - link "View on Google Maps" [ref=f25e24] [cursor=pointer]:
+                          - /url: https://www.google.com/maps/@33.6989066,-84.2107805,0a,47.7y,210h,92t/data=!3m4!1e1!3m2!1sQ8g6E6i4zxziyGJG2BVcNA!2e0?source=apiv3
+                        - link "Show location on map" [ref=f25e27] [cursor=pointer]:
+                          - /url: https://www.google.com/maps/@33.698906575390176,-84.21078047842045,13z?hl=en-US&gl=US
+                      - button "Toggle fullscreen view" [ref=f25e29] [cursor=pointer]
+                      - generic:
+                        - generic:
+                          - generic [ref=f25e31]:
+                            - button "Rotate counterclockwise" [ref=f25e32] [cursor=pointer]
+                            - button "Reset the view" [ref=f25e33] [cursor=pointer]
+                            - button "Rotate clockwise" [ref=f25e34] [cursor=pointer]
+                            - generic [ref=f25e35]: Rotate the view
+                          - generic [ref=f25e39] [cursor=pointer]:
+                            - button "Zoom in" [ref=f25e40]
+                            - button "Zoom out" [ref=f25e42]
+                      - img "Google" [ref=f25e44]
+                      - generic [ref=f25e45]:
+                        - button "Keyboard shortcuts" [ref=f25e51] [cursor=pointer]
+                        - button "Map Data" [ref=f25e57] [cursor=pointer]
+                        - link "Terms (opens in new tab)" [ref=f25e62] [cursor=pointer]:
+                          - /url: https://www.google.com/intl/en-US_US/help/terms_maps.html
+                          - text: Terms
+                        - link "Report a problem" [ref=f25e67] [cursor=pointer]:
+                          - /url: https://www.google.com/local/imagery/report/?cb_client=apiv3&image_key=!1e2!2sQ8g6E6i4zxziyGJG2BVcNA&cbp=1,210,,0.761,-2&hl=en-US
+                  - generic [ref=e1104]: Interactive Street View
+                - generic [ref=e1105]:
+                  - link "Zillow" [ref=e1106] [cursor=pointer]:
+                    - /url: https://www.zillow.com/homes/4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034_rb/
+                  - link "Realtor" [ref=e1107] [cursor=pointer]:
+                    - /url: https://www.realtor.com/realestateandhomes-search/4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034
+                  - link "Google" [ref=e1108] [cursor=pointer]:
+                    - /url: https://www.google.com/search?q=4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034
+                  - button "Copy Address" [ref=e1109] [cursor=pointer]
+              - generic [ref=e1110]:
+                - heading "4381 Sterling Forest Dr, Decatur, Ga 30034" [level=2] [ref=e1111]
+                - generic [ref=e1112]:
+                  - generic [ref=e1113]: Atlanta, GA
+                  - generic [ref=e1114]: SFR
+                  - generic [ref=e1115]: Residential
+                  - generic [ref=e1116]: Average
+                - generic [ref=e1117]:
+                  - generic [ref=e1118]: Tax Delinquent
+                  - generic [ref=e1119]: Absentee Owner
+                  - generic [ref=e1120]: High Equity
+                  - generic [ref=e1121]: Heavily Dated
+                  - generic [ref=e1122]: "+3"
+              - generic [ref=e1123]:
+                - generic [ref=e1125]: Property Snapshot
+                - generic [ref=e1126]:
+                  - generic [ref=e1127]:
+                    - generic [ref=e1128]: Value
+                    - strong [ref=e1129]: $248,000
+                  - generic [ref=e1130]:
+                    - generic [ref=e1131]: Equity
+                    - strong [ref=e1132]: $248,000
+                    - emphasis [ref=e1133]: 100%
+                  - generic [ref=e1134]:
+                    - generic [ref=e1135]: Debt
+                    - strong [ref=e1136]: $0
+                  - generic [ref=e1137]:
+                    - generic [ref=e1138]: Repairs
+                    - strong [ref=e1139]: $99,680
+                  - generic [ref=e1140]:
+                    - generic [ref=e1141]: Last Sale
+                    - strong [ref=e1142]: $125,000
+                    - emphasis [ref=e1143]: Jul 31, 2017
+                  - generic [ref=e1144]:
+                    - generic [ref=e1145]: Ownership
+                    - strong [ref=e1146]: 9 yrs
+                - generic [ref=e1147]:
+                  - generic [ref=e1148]: Last sale → current value
+                  - strong [ref=e1149]: $123,000 (98%)
+                  - emphasis [ref=e1150]: 8.9 yr hold
+                - generic [ref=e1151]:
+                  - generic "Equity $248,000" [ref=e1153]
+                  - generic [ref=e1155]:
+                    - generic [ref=e1156]: Equity $248,000 (100%)
+                    - generic [ref=e1157]: Debt $0 (0%)
+              - generic [ref=e1158]:
+                - generic [ref=e1160]: Baseline Property Intelligence
+                - generic [ref=e1161]:
+                  - generic [ref=e1162]:
+                    - img [ref=e1163]
+                    - generic [ref=e1166]:
+                      - strong [ref=e1167]: "69"
+                      - generic [ref=e1168]: Acquisition
+                  - generic [ref=e1169]:
+                    - generic [ref=e1170]:
+                      - generic [ref=e1171]: Strength
+                      - strong [ref=e1172]: "75"
+                    - generic [ref=e1173]:
+                      - generic [ref=e1174]: Motivation
+                      - strong [ref=e1175]: "70"
+                    - generic [ref=e1176]:
+                      - generic [ref=e1177]: Distress
+                      - strong [ref=e1178]: "48.8"
+              - generic [ref=e1179]:
+                - generic [ref=e1180]:
+                  - generic [ref=e1181]: Full Acquisition Decision Engine
+                  - emphasis [ref=e1182]: AOS 675
+                - generic [ref=e1184]:
+                  - generic [ref=e1185]:
+                    - heading "Decision" [level=4] [ref=e1186]
+                    - generic [ref=e1187]:
+                      - generic [ref=e1188]:
+                        - generic [ref=e1189]: AOS
+                        - strong [ref=e1190]: "675"
+                      - generic [ref=e1191]:
+                        - generic [ref=e1192]: Confidence
+                        - strong [ref=e1193]: 69%
+                      - generic [ref=e1194]:
+                        - generic [ref=e1195]: Tier
+                        - strong [ref=e1196]: Creative Terms
+                      - generic [ref=e1197]:
+                        - generic [ref=e1198]: Computed
+                        - strong [ref=e1199]: Jun 24, 2026
+                  - generic [ref=e1200]:
+                    - heading "Offer" [level=4] [ref=e1201]
+                    - generic [ref=e1202]:
+                      - generic [ref=e1203]:
+                        - generic [ref=e1204]: Cash Offer
+                        - strong [ref=e1205]: $68,500
+                      - generic [ref=e1206]:
+                        - generic [ref=e1207]: Minimum
+                        - strong [ref=e1208]: $61,600
+                      - generic [ref=e1209]:
+                        - generic [ref=e1210]: Assignment Fee
+                        - strong [ref=e1211]: $18,300
+                      - generic [ref=e1212]:
+                        - generic [ref=e1213]: Ceiling Mid
+                        - strong [ref=e1214]: $161,600
+                    - generic [ref=e1221]:
+                      - generic [ref=e1222]: $182,900
+                      - generic [ref=e1223]: $282,100
+                  - generic [ref=e1224]:
+                    - heading "Strategy" [level=4] [ref=e1225]
+                    - generic [ref=e1226]:
+                      - generic [ref=e1227]: Best Strategy
+                      - strong [ref=e1228]: Cash Assignment
+                    - generic [ref=e1229]:
+                      - generic [ref=e1230]:
+                        - generic [ref=e1231]: Subject-To
+                        - strong [ref=e1234]: "23"
+                      - generic [ref=e1235]:
+                        - generic [ref=e1236]: Seller Finance
+                        - strong [ref=e1239]: "69"
+                      - generic [ref=e1240]:
+                        - generic [ref=e1241]: Lease Option
+                        - strong [ref=e1244]: "70"
+                      - generic [ref=e1245]:
+                        - generic [ref=e1246]: Novation
+                        - strong [ref=e1249]: "82"
+                  - generic [ref=e1250]:
+                    - heading "Pressure & Probability" [level=4] [ref=e1251]
+                    - generic [ref=e1252]:
+                      - generic [ref=e1253]:
+                        - generic [ref=e1254]: Seller Pressure
+                        - strong [ref=e1255]: "60"
+                      - generic [ref=e1256]:
+                        - generic [ref=e1257]: Forced Sale
+                        - strong [ref=e1258]: "22"
+                      - generic [ref=e1259]:
+                        - generic [ref=e1260]: Foreclosure Risk
+                        - strong [ref=e1261]: "0"
+                      - generic [ref=e1262]:
+                        - generic [ref=e1263]: 90d Probability
+                        - strong [ref=e1264]: 39%
+                      - generic [ref=e1265]:
+                        - generic [ref=e1266]: 180d Probability
+                        - strong [ref=e1267]: 56%
+                      - generic [ref=e1268]:
+                        - generic [ref=e1269]: 365d Probability
+                        - strong [ref=e1270]: 72%
+                      - generic [ref=e1271]:
+                        - generic [ref=e1272]: Landlord Fatigue
+                        - strong [ref=e1273]: "43"
+                      - generic [ref=e1274]:
+                        - generic [ref=e1275]: Tax Pain
+                        - strong [ref=e1276]: "55"
+                      - generic [ref=e1277]:
+                        - generic [ref=e1278]: Equity Unlock
+                        - strong [ref=e1279]: "87"
+                      - generic [ref=e1280]:
+                        - generic [ref=e1281]: Debt Pressure
+                        - strong [ref=e1282]: "0"
+                      - generic [ref=e1283]:
+                        - generic [ref=e1284]: Repair Burden
+                        - strong [ref=e1285]: "85"
+                  - generic [ref=e1286]:
+                    - heading "Recommended Execution" [level=4] [ref=e1287]
+                    - generic [ref=e1288]:
+                      - generic [ref=e1289]:
+                        - generic [ref=e1290]: Owner Situation
+                        - strong [ref=e1291]: Creative Finance Candidate
+                      - generic [ref=e1292]:
+                        - generic [ref=e1293]: Conversation Angle
+                        - strong [ref=e1294]: Certainty Speed And As Is Exit
+                      - generic [ref=e1295]:
+                        - generic [ref=e1296]: Next Action
+                        - strong [ref=e1297]: Certainty Speed And As Is Exit
+                  - button "Re-run Decision Engine" [ref=e1298] [cursor=pointer]
+              - generic [ref=e1299]:
+                - generic [ref=e1300]:
+                  - generic [ref=e1301]: Buyer Market
+                  - strong [ref=e1302]: Thin
+                - generic [ref=e1303]:
+                  - generic [ref=e1304]: Confidence
+                  - strong [ref=e1305]: 69%
+                - generic [ref=e1306]:
+                  - generic [ref=e1307]: Comps
+                  - strong [ref=e1308]: 0 / 100
+                - generic [ref=e1309]:
+                  - generic [ref=e1310]: Strategy
+                  - strong [ref=e1311]: Cash Assignment
+              - generic [ref=e1312]:
+                - button "Comparable Sales" [ref=e1313] [cursor=pointer]:
+                  - generic [ref=e1314]: Comparable Sales
+                  - img [ref=e1315]
+                - generic [ref=e1317]:
+                  - paragraph [ref=e1318]: Insufficient qualified comps
+                  - generic [ref=e1319]:
+                    - generic [ref=e1320]: 100 candidates
+                    - generic [ref=e1321]: 0 asset match
+                    - generic [ref=e1322]: 100 location
+                    - generic [ref=e1323]: 0 similarity
+                    - strong [ref=e1324]: 0 weighted usable
+                  - generic [ref=e1326]:
+                    - generic [ref=e1327]: Confidence
+                    - strong [ref=e1328]: Low sample
+                  - generic [ref=e1329]:
+                    - article [ref=e1330]:
+                      - generic [ref=e1331]:
+                        - generic [ref=e1332]:
+                          - strong [ref=e1333]: 1414 Golf Link Dr, Stone Mountain, Ga 30088
+                          - generic [ref=e1334]: 3.78 mi
+                        - emphasis [ref=e1335]: Excluded
+                      - generic [ref=e1336]:
+                        - generic [ref=e1337]:
+                          - generic [ref=e1338]: Sale
+                          - strong [ref=e1339]: $229,000
+                        - generic [ref=e1340]:
+                          - generic [ref=e1341]: Date
+                          - strong [ref=e1342]: Jan 29, 2026
+                        - generic [ref=e1343]:
+                          - generic [ref=e1344]: Type
+                          - strong [ref=e1345]: Single Family
+                        - generic [ref=e1346]:
+                          - generic [ref=e1347]: Beds/Baths
+                          - strong [ref=e1348]: 4 / 2.5
+                        - generic [ref=e1349]:
+                          - generic [ref=e1350]: Sq Ft
+                          - strong [ref=e1351]: 2,892 sq ft
+                        - generic [ref=e1352]:
+                          - generic [ref=e1353]: Reason
+                          - strong [ref=e1354]: Asset Type Mismatch
+                      - link "View property" [ref=e1355] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=1414%20Golf%20Link%20Dr%2C%20Stone%20Mountain%2C%20Ga%2030088
+                    - article [ref=e1356]:
+                      - generic [ref=e1357]:
+                        - generic [ref=e1358]:
+                          - strong [ref=e1359]: 3980 Cheru Dr, Decatur, Ga 30034
+                          - generic [ref=e1360]: 1.05 mi
+                        - emphasis [ref=e1361]: Excluded
+                      - generic [ref=e1362]:
+                        - generic [ref=e1363]:
+                          - generic [ref=e1364]: Sale
+                          - strong [ref=e1365]: $10,116
+                        - generic [ref=e1366]:
+                          - generic [ref=e1367]: Date
+                          - strong [ref=e1368]: Mar 23, 2026
+                        - generic [ref=e1369]:
+                          - generic [ref=e1370]: Type
+                          - strong [ref=e1371]: Single Family
+                        - generic [ref=e1372]:
+                          - generic [ref=e1373]: Beds/Baths
+                          - strong [ref=e1374]: 4 / 2.5
+                        - generic [ref=e1375]:
+                          - generic [ref=e1376]: Sq Ft
+                          - strong [ref=e1377]: 2,496 sq ft
+                        - generic [ref=e1378]:
+                          - generic [ref=e1379]: Reason
+                          - strong [ref=e1380]: Asset Type Mismatch
+                      - link "View property" [ref=e1381] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=3980%20Cheru%20Dr%2C%20Decatur%2C%20Ga%2030034
+                    - article [ref=e1382]:
+                      - generic [ref=e1383]:
+                        - generic [ref=e1384]:
+                          - strong [ref=e1385]: 3412 Warbler Dr, Decatur, Ga 30034
+                          - generic [ref=e1386]: 2.22 mi
+                        - emphasis [ref=e1387]: Excluded
+                      - generic [ref=e1388]:
+                        - generic [ref=e1389]:
+                          - generic [ref=e1390]: Date
+                          - strong [ref=e1391]: Jan 28, 2026
+                        - generic [ref=e1392]:
+                          - generic [ref=e1393]: Type
+                          - strong [ref=e1394]: Single Family
+                        - generic [ref=e1395]:
+                          - generic [ref=e1396]: Beds/Baths
+                          - strong [ref=e1397]: 4 / 2.5
+                        - generic [ref=e1398]:
+                          - generic [ref=e1399]: Sq Ft
+                          - strong [ref=e1400]: 2,572 sq ft
+                        - generic [ref=e1401]:
+                          - generic [ref=e1402]: Reason
+                          - strong [ref=e1403]: Invalid Sale Price
+                      - link "View property" [ref=e1404] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=3412%20Warbler%20Dr%2C%20Decatur%2C%20Ga%2030034
+                    - article [ref=e1405]:
+                      - generic [ref=e1406]:
+                        - generic [ref=e1407]:
+                          - strong [ref=e1408]: 1727 Canberra Dr, Stone Mountain, Ga 30088
+                          - generic [ref=e1409]: 3.24 mi
+                        - emphasis [ref=e1410]: Excluded
+                      - generic [ref=e1411]:
+                        - generic [ref=e1412]:
+                          - generic [ref=e1413]: Date
+                          - strong [ref=e1414]: Dec 19, 2025
+                        - generic [ref=e1415]:
+                          - generic [ref=e1416]: Type
+                          - strong [ref=e1417]: Single Family
+                        - generic [ref=e1418]:
+                          - generic [ref=e1419]: Beds/Baths
+                          - strong [ref=e1420]: 4 / 2.5
+                        - generic [ref=e1421]:
+                          - generic [ref=e1422]: Sq Ft
+                          - strong [ref=e1423]: 2,462 sq ft
+                        - generic [ref=e1424]:
+                          - generic [ref=e1425]: Reason
+                          - strong [ref=e1426]: Invalid Sale Price
+                      - link "View property" [ref=e1427] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=1727%20Canberra%20Dr%2C%20Stone%20Mountain%2C%20Ga%2030088
+                  - button "View all 100 comps" [ref=e1428] [cursor=pointer]
+              - generic [ref=e1429]:
+                - button "Conversation Intelligence" [ref=e1430] [cursor=pointer]:
+                  - generic [ref=e1431]: Conversation Intelligence
+                  - img [ref=e1432]
+                - generic [ref=e1435]:
+                  - generic [ref=e1436]:
+                    - generic [ref=e1437]: Seller State
+                    - strong [ref=e1438]: Needs Response
+                  - generic [ref=e1439]:
+                    - generic [ref=e1440]: Language
+                    - strong [ref=e1441]: English
+                  - generic [ref=e1442]:
+                    - generic [ref=e1443]: Conversation Angle
+                    - strong [ref=e1444]: Certainty Speed And As Is Exit
+                  - generic [ref=e1445]:
+                    - generic [ref=e1446]: Latest Inbound
+                    - strong [ref=e1447]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+              - button "Master Owner" [ref=e1449] [cursor=pointer]:
+                - generic [ref=e1450]: Master Owner
+                - img [ref=e1451]
+              - button "Prospect Intelligence" [ref=e1454] [cursor=pointer]:
+                - generic [ref=e1455]: Prospect Intelligence
+                - img [ref=e1456]
+              - button "Phone Intelligence" [ref=e1459] [cursor=pointer]:
+                - generic [ref=e1460]: Phone Intelligence
+                - img [ref=e1461]
+              - button "Valuation Debt" [ref=e1464] [cursor=pointer]:
+                - generic [ref=e1465]: Valuation Debt
+                - img [ref=e1466]
+              - button "Sale Recording" [ref=e1469] [cursor=pointer]:
+                - generic [ref=e1470]: Sale Recording
+                - img [ref=e1471]
+              - button "Physical" [ref=e1474] [cursor=pointer]:
+                - generic [ref=e1475]: Physical
+                - img [ref=e1476]
+              - button "Distress Flags" [ref=e1479] [cursor=pointer]:
+                - generic [ref=e1480]: Distress Flags
+                - img [ref=e1481]
+              - button "Activity Timeline" [ref=e1484] [cursor=pointer]:
+                - generic [ref=e1485]: Activity Timeline
+                - img [ref=e1486]
+              - button "Census" [ref=e1489] [cursor=pointer]:
+                - generic [ref=e1490]: Census
+                - img [ref=e1491]
+  - button "NEXUS Copilot" [ref=e1493] [cursor=pointer]:
+    - generic: Standing by

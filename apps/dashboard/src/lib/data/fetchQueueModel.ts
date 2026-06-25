@@ -68,12 +68,13 @@ function resolveFullName(
   const targetSnapshot = (md.target_snapshot && typeof md.target_snapshot === 'object' ? md.target_snapshot : {}) as AnyRecord
   const ordered = [
     asString(getFirst(row, ['seller_display_name']), ''),
-    asString(getFirst(candidateSnapshot, ['seller_full_name']), ''),
+    asString(getFirst(candidateSnapshot, ['seller_full_name', 'prospect_full_name']), ''),
     asString(getFirst(candidateSnapshot, ['owner_display_name']), ''),
-    asString(getFirst(targetSnapshot, ['seller_full_name']), ''),
-    asString(getFirst(targetSnapshot, ['owner_display_name']), ''),
-    asString(getFirst(target || {}, ['seller_full_name', 'seller_name']), ''),
-    asString(getFirst(owner || {}, ['display_name']), ''),
+    asString(getFirst(targetSnapshot, ['seller_full_name', 'prospect_full_name', 'active_prospect_full_name']), ''),
+    asString(getFirst(targetSnapshot, ['owner_display_name', 'property_owner_name']), ''),
+    asString(getFirst(target || {}, ['seller_full_name', 'seller_name', 'prospect_full_name']), ''),
+    asString(getFirst(owner || {}, ['display_name', 'full_name']), ''),
+    asString(getFirst(md, ['seller_display_name', 'participant_name', 'thread_participant_name', 'property_owner_name']), ''),
     asString(getFirst(row, ['full_name', 'entity_name', 'seller_name']), ''),
     asString(getFirst(row, ['seller_first_name', 'first_name']), ''),
   ]
@@ -182,6 +183,8 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     }) as QueueModel['rangeCounts'] extends infer T ? NonNullable<T> : never
   const rangeOk = Boolean(payload.rangeCounts)
   const apiProperties = safeArray(payload.properties as AnyRecord[])
+  const apiOwners = safeArray(payload.owners as AnyRecord[])
+  const apiProspects = safeArray(payload.prospects as AnyRecord[])
 
   // Step 2: Extract IDs
   const propertyIds = new Set<string>()
@@ -197,8 +200,12 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     const pid = asString(getFirst(row, ['property_id']), '')
     if (pid) propertyIds.add(pid)
 
-    const oid = asString(getFirst(row, ['owner_id', 'master_owner_id']), '')
+    const rowMd = asRecord(row.metadata)
+    const oid = asString(getFirst(row, ['owner_id', 'master_owner_id']), asString(rowMd.master_owner_id, ''))
     if (oid) ownerIds.add(oid)
+
+    const prospectId = asString(getFirst(row, ['prospect_id']), asString(rowMd.prospect_id, ''))
+    if (prospectId) targetIds.add(prospectId)
 
     const md = asRecord(row.metadata)
     const targetSnapshot = asRecord(md.target_snapshot)
@@ -249,9 +256,16 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     ? { data: apiProperties }
     : await fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100)
 
+  const prospectRes = apiProspects.length
+    ? { data: apiProspects }
+    : { data: [] as AnyRecord[] }
+
   const [evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
     fetchChunked(qArr, async _chunk => ({ data: [] }), 30), // Disabled message_events
     (async () => {
+      if (prospectRes.data.length > 0) {
+        return { data: prospectRes.data }
+      }
       if (qArr.length === 0 && tArr.length === 0) return { data: [] }
       const qChunks = chunkArray(qArr, 30)
       const tChunks = chunkArray(tArr, 30)
@@ -267,14 +281,16 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       return { data: results.flatMap(r => r.data || []) }
     })(),
     fetchChunked(cArr, async chunk => await supabase.from('sms_campaigns').select('id,campaign_name').in('id', chunk).limit(500), 100),
-    fetchChunked(oArr, async _chunk => ({ data: [] }), 100), // Disabled master_owners
+    apiOwners.length
+      ? { data: apiOwners }
+      : fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100),
     supabase.from('textgrid_numbers').select('*')
   ])
 
   const propertyById = new Map(safeArray(propRes.data as AnyRecord[]).map(r => [r.property_id, r]))
   const eventByQid = new Map(safeArray(evtRes.data as AnyRecord[]).map(r => [r.queue_id, r]))
   const targetByQid = new Map(safeArray(tgtRes.data as AnyRecord[]).map(r => [r.queue_row_id, r]))
-  const targetById = new Map(safeArray(tgtRes.data as AnyRecord[]).map(r => [r.id, r]))
+  const targetById = new Map(safeArray(tgtRes.data as AnyRecord[]).map(r => [r.prospect_id || r.id, r]))
   const cmpById = new Map(safeArray(cmpRes.data as AnyRecord[]).map(r => [r.id, r]))
   const ownerById = new Map(safeArray(ownerRes.data as AnyRecord[]).map(r => [r.master_owner_id, r]))
   const textgridNumbers = safeArray(tgRes.data as AnyRecord[])
@@ -315,7 +331,11 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       getFirst(row, ['campaign_target_id']),
       asString(getFirst(md, ['campaign_target_id']), asString(getFirst(targetSnapshot, ['campaign_target_id']), '')),
     )
-    const target = targetByQid.get(queueId) || targetById.get(metadataCampaignTargetId) || null
+    const rowProspectId = asString(getFirst(row, ['prospect_id']), asString(md.prospect_id, ''))
+    const target = targetByQid.get(queueId)
+      || targetById.get(metadataCampaignTargetId)
+      || (rowProspectId ? targetById.get(rowProspectId) : null)
+      || null
     const event = eventByQid.get(queueId) || null
 
     const basePropId = asString(getFirst(target || {}, ['property_id']), asString(getFirst(row, ['property_id']), ''))
@@ -340,8 +360,9 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     const sellerName = resolveFullName(row, md, target, owner, toPhoneEarly)
     const nameIsFallbackPhone = Boolean(toPhoneEarly) && sellerName === toPhoneEarly
     const activeProspectFullName = asString(
+      getFirst(target || {}, ['full_name', 'prospect_full_name']),
       getFirst(targetSnapshot, ['prospect_full_name', 'active_prospect_full_name']),
-      asString(getFirst(candidateSnapshot, ['prospect_full_name']), ''),
+      getFirst(candidateSnapshot, ['prospect_full_name']),
     ) || null
     const masterOwnerDisplayName = asString(
       getFirst(owner || {}, ['display_name']),

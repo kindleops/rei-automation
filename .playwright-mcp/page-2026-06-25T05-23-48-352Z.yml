@@ -1,0 +1,1031 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - generic [ref=e63]:
+            - generic [ref=e64]:
+              - generic [ref=e65]:
+                - heading "Outbound Command Center" [level=1] [ref=e66]
+                - generic [ref=e67]: Last 7d · Created basis
+              - generic [ref=e69]:
+                - button "Today" [ref=e70] [cursor=pointer]
+                - button "Last 24h" [ref=e71] [cursor=pointer]
+                - button "Last 7d" [ref=e72] [cursor=pointer]
+                - button "Last 30d" [ref=e73] [cursor=pointer]
+                - button "Last 90d" [ref=e74] [cursor=pointer]
+                - button "All time" [ref=e75] [cursor=pointer]
+                - button "Custom" [ref=e76] [cursor=pointer]
+            - generic [ref=e77]:
+              - generic [ref=e78]: 1–25 of 1,791
+              - button "Retry Failed" [ref=e79] [cursor=pointer]:
+                - img [ref=e80]
+                - text: Retry Failed
+              - button "Run Queue" [ref=e82] [cursor=pointer]:
+                - img [ref=e83]
+                - text: Run Queue
+              - generic "Runtime health" [ref=e85]: runtime dry-run only
+              - button "Reload current filtered data and metrics" [ref=e86] [cursor=pointer]:
+                - img [ref=e87]
+          - generic [ref=e89]:
+            - button "0 Scheduled" [ref=e90] [cursor=pointer]:
+              - generic [ref=e91]: "0"
+              - generic [ref=e92]: Scheduled
+            - button "0 Queued" [ref=e93] [cursor=pointer]:
+              - generic [ref=e94]: "0"
+              - generic [ref=e95]: Queued
+            - button "0 Sending" [ref=e96] [cursor=pointer]:
+              - generic [ref=e97]: "0"
+              - generic [ref=e98]: Sending
+            - button "135 Delivered" [ref=e99] [cursor=pointer]:
+              - generic [ref=e100]: "135"
+              - generic [ref=e101]: Delivered
+            - button "189 Sent" [ref=e102] [cursor=pointer]:
+              - generic [ref=e103]: "189"
+              - generic [ref=e104]: Sent
+            - button "36 Failed" [ref=e105] [cursor=pointer]:
+              - generic [ref=e106]: "36"
+              - generic [ref=e107]: Failed
+            - button "37 Blocked" [ref=e108] [cursor=pointer]:
+              - generic [ref=e109]: "37"
+              - generic [ref=e110]: Blocked
+            - button "0 Opt-Outs" [disabled] [ref=e111]:
+              - generic [ref=e112]: "0"
+              - generic [ref=e113]: Opt-Outs
+            - button "0 Approval" [ref=e114] [cursor=pointer]:
+              - generic [ref=e115]: "0"
+              - generic [ref=e116]: Approval
+            - generic "Counts reflect the entire selected date range" [ref=e117]: Last 7d range
+          - generic "Queue flow" [ref=e118]:
+            - button "0 Scheduled" [ref=e120] [cursor=pointer]:
+              - generic [ref=e121]: "0"
+              - generic [ref=e122]: Scheduled
+            - generic [ref=e123]:
+              - generic [ref=e124]: →
+              - button "0 Queued" [ref=e125] [cursor=pointer]:
+                - generic [ref=e126]: "0"
+                - generic [ref=e127]: Queued
+            - generic [ref=e128]:
+              - generic [ref=e129]: →
+              - button "0 Sending" [ref=e130] [cursor=pointer]:
+                - generic [ref=e131]: "0"
+                - generic [ref=e132]: Sending
+            - generic [ref=e133]:
+              - generic [ref=e134]: →
+              - button "189 Sent" [ref=e135] [cursor=pointer]:
+                - generic [ref=e136]: "189"
+                - generic [ref=e137]: Sent
+            - generic [ref=e138]:
+              - generic [ref=e139]: →
+              - button "135 Delivered" [ref=e140] [cursor=pointer]:
+                - generic [ref=e141]: "135"
+                - generic [ref=e142]: Delivered
+            - generic [ref=e143]: "|"
+            - button "Failed 36" [ref=e144] [cursor=pointer]
+            - button "Blocked 37" [ref=e145] [cursor=pointer]
+            - button "Approval 0" [ref=e146] [cursor=pointer]
+            - button "Opt-Out 0" [ref=e147] [cursor=pointer]
+        - generic [ref=e148]:
+          - tablist "Queue command views" [ref=e149]:
+            - tab "Queue Rows" [selected] [ref=e150] [cursor=pointer]:
+              - img [ref=e151]
+              - generic [ref=e153]: Queue Rows
+            - tab "Templates 1" [ref=e154] [cursor=pointer]:
+              - img [ref=e155]
+              - generic [ref=e158]: Templates
+              - generic [ref=e159]: "1"
+            - tab "Sender Fleet 7" [ref=e160] [cursor=pointer]:
+              - img [ref=e161]
+              - generic [ref=e163]: Sender Fleet
+              - generic [ref=e164]: "7"
+            - tab "Market Health 18" [ref=e165] [cursor=pointer]:
+              - generic [ref=e166]: Market Health
+              - generic [ref=e167]: "18"
+            - tab "Failure Taxonomy 36" [ref=e168] [cursor=pointer]:
+              - img [ref=e169]
+              - generic [ref=e172]: Failure Taxonomy
+              - generic [ref=e173]: "36"
+            - tab "Event Timeline" [ref=e174] [cursor=pointer]:
+              - img [ref=e175]
+              - generic [ref=e177]: Event Timeline
+          - generic [ref=e178]:
+            - generic [ref=e179]: Date basis
+            - combobox "Date basis" [ref=e180] [cursor=pointer]:
+              - option "Created" [selected]
+              - option "Scheduled"
+              - option "Updated"
+        - generic [ref=e181]:
+          - generic [ref=e182]:
+            - generic [ref=e183]:
+              - group "Table density" [ref=e184]:
+                - button "Comfortable" [ref=e185] [cursor=pointer]
+                - button "Compact" [ref=e186] [cursor=pointer]
+                - button "Command" [ref=e187] [cursor=pointer]
+              - generic [ref=e188]:
+                - button "All 1,791" [ref=e189] [cursor=pointer]:
+                  - text: All
+                  - generic [ref=e190]: 1,791
+                - button "Scheduled" [ref=e191] [cursor=pointer]
+                - button "Queued" [ref=e192] [cursor=pointer]
+                - button "Sending" [ref=e193] [cursor=pointer]
+                - button "Approval" [ref=e194] [cursor=pointer]
+                - button "Failed 36" [ref=e195] [cursor=pointer]:
+                  - text: Failed
+                  - generic [ref=e196]: "36"
+                - button "Blocked 37" [ref=e197] [cursor=pointer]:
+                  - text: Blocked
+                  - generic [ref=e198]: "37"
+                - button "Delivered 135" [ref=e199] [cursor=pointer]:
+                  - text: Delivered
+                  - generic [ref=e200]: "135"
+                - button "Sent 189" [ref=e201] [cursor=pointer]:
+                  - text: Sent
+                  - generic [ref=e202]: "189"
+              - generic [ref=e203]:
+                - combobox [ref=e204] [cursor=pointer]:
+                  - option "All Markets" [selected]
+                  - option "Atlanta, GA"
+                  - option "Austin, TX"
+                  - option "Charlotte, NC"
+                  - option "Chicago, IL"
+                  - option "Cleveland, OH"
+                  - option "Houston, TX"
+                  - option "Kansas City, MO"
+                  - option "Market unknown"
+                  - option "Memphis, TN"
+                  - option "Minneapolis, MN"
+                  - option "Phoenix, AZ"
+                  - option "Providence, RI"
+                  - option "Spokane, WA"
+                  - option "Tulsa, OK"
+                - combobox [ref=e205] [cursor=pointer]:
+                  - option "All Templates" [selected]
+                  - option "manual_reply"
+                  - option "ownership_check"
+                - combobox [ref=e206] [cursor=pointer]:
+                  - option "All Senders" [selected]
+                  - option "…8577"
+                  - option "…9881"
+                  - option "…1600"
+                  - option "…0588"
+                  - option "…0495"
+                  - option "…2999"
+                  - option "…9889"
+              - searchbox "Search seller, property, campaign…" [ref=e207]
+            - button "Exceptions · 2▸" [ref=e209] [cursor=pointer]
+            - generic [ref=e210]:
+              - generic "Select all on page" [ref=e211] [cursor=pointer]:
+                - checkbox "Select all visible rows" [ref=e212]
+              - generic [ref=e213]: Seller / Property
+              - generic [ref=e214]: Stage / Touch
+              - generic [ref=e215]: Campaign / Market
+              - generic [ref=e216]: Template
+              - generic [ref=e217]: From
+              - generic [ref=e218]: Scheduled
+              - generic [ref=e219]: Status
+              - generic [ref=e220]: Failure Cause
+              - generic [ref=e221]: Last Event
+            - generic [ref=e222]:
+              - generic [ref=e224] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e226]
+                - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e227]:
+                  - generic "Unknown owner" [ref=e228]:
+                    - generic [ref=e229]:
+                      - img [ref=e231]
+                      - strong [ref=e234]: Unknown owner
+                      - generic [ref=e235]: …3651
+                      - generic "Contact blocked" [ref=e236]
+                    - generic [ref=e237]: No property linked
+                  - generic [ref=e238]:
+                    - generic [ref=e239]: Ownership Confirmation
+                    - generic [ref=e240]: Touch 1 · manual_reply
+                  - generic [ref=e241]:
+                    - generic [ref=e242]: manual_reply
+                    - generic [ref=e243]: Market unknown
+                  - generic "Manual Reply" [ref=e244]:
+                    - generic [ref=e245]: Manual Reply
+                    - generic [ref=e246]: EN
+                  - generic [ref=e247]:
+                    - generic [ref=e248]: …0588
+                    - generic [ref=e249]: Market unkno…
+                  - generic "6/24/2026, 9:18:00 PM" [ref=e250]:
+                    - generic [ref=e251]: 3h ago
+                    - generic [ref=e252]: Chicago
+                  - generic [ref=e254]: Delivered
+                  - generic [ref=e256]: —
+                  - generic [ref=e257]: —
+                - button "Expand row" [ref=e258]:
+                  - img [ref=e259]
+              - generic [ref=e262] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e264]
+                - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e265]:
+                  - generic "Unknown owner" [ref=e266]:
+                    - generic [ref=e267]:
+                      - img [ref=e269]
+                      - strong [ref=e272]: Unknown owner
+                      - generic [ref=e273]: …3651
+                      - generic "Contact blocked" [ref=e274]
+                    - generic [ref=e275]: No property linked
+                  - generic [ref=e276]:
+                    - generic [ref=e277]: Ownership Confirmation
+                    - generic [ref=e278]: Touch 1 · manual_reply
+                  - generic [ref=e279]:
+                    - generic [ref=e280]: manual_reply
+                    - generic [ref=e281]: Market unknown
+                  - generic "Manual Reply" [ref=e282]:
+                    - generic [ref=e283]: Manual Reply
+                    - generic [ref=e284]: EN
+                  - generic [ref=e285]:
+                    - generic [ref=e286]: …0588
+                    - generic [ref=e287]: Market unkno…
+                  - generic "6/24/2026, 9:06:56 PM" [ref=e288]:
+                    - generic [ref=e289]: 3h ago
+                    - generic [ref=e290]: Chicago
+                  - generic [ref=e292]: Delivered
+                  - generic [ref=e294]: —
+                  - generic [ref=e295]: —
+                - button "Expand row" [ref=e296]:
+                  - img [ref=e297]
+              - generic [ref=e300] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e302]
+                - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e303]:
+                  - generic "Unknown owner" [ref=e304]:
+                    - generic [ref=e305]:
+                      - img [ref=e307]
+                      - strong [ref=e310]: Unknown owner
+                      - generic [ref=e311]: …3651
+                      - generic "Contact blocked" [ref=e312]
+                    - generic [ref=e313]: No property linked
+                  - generic [ref=e314]:
+                    - generic [ref=e315]: Ownership Confirmation
+                    - generic [ref=e316]: Touch 1 · manual_reply
+                  - generic [ref=e317]:
+                    - generic [ref=e318]: manual_reply
+                    - generic [ref=e319]: Market unknown
+                  - generic "Manual Reply" [ref=e320]:
+                    - generic [ref=e321]: Manual Reply
+                    - generic [ref=e322]: EN
+                  - generic [ref=e323]:
+                    - generic [ref=e324]: …0588
+                    - generic [ref=e325]: Market unkno…
+                  - generic "6/24/2026, 9:06:33 PM" [ref=e326]:
+                    - generic [ref=e327]: 3h ago
+                    - generic [ref=e328]: Chicago
+                  - generic [ref=e330]: Delivered
+                  - generic [ref=e332]: —
+                  - generic [ref=e333]: —
+                - button "Expand row" [ref=e334]:
+                  - img [ref=e335]
+              - generic [ref=e338] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e340]
+                - button "Unknown owner …4559 Contact blocked 5227 N Crestline St Spokane, WA · listing Ownership Confirmation Touch 1 · listing listing Spokane, WA Manual Reply EN …9881 Spokane, WA 4h ago Chicago Delivered — —" [ref=e341]:
+                  - generic "Unknown owner" [ref=e342]:
+                    - generic [ref=e343]:
+                      - img [ref=e345]
+                      - strong [ref=e348]: Unknown owner
+                      - generic [ref=e349]: …4559
+                      - generic "Contact blocked" [ref=e350]
+                    - generic [ref=e351]: 5227 N Crestline St
+                    - generic [ref=e352]: Spokane, WA · listing
+                  - generic [ref=e353]:
+                    - generic [ref=e354]: Ownership Confirmation
+                    - generic [ref=e355]: Touch 1 · listing
+                  - generic [ref=e356]:
+                    - generic [ref=e357]: listing
+                    - generic [ref=e358]: Spokane, WA
+                  - generic "Manual Reply" [ref=e359]:
+                    - generic [ref=e360]: Manual Reply
+                    - generic [ref=e361]: EN
+                  - generic [ref=e362]:
+                    - generic [ref=e363]: …9881
+                    - generic [ref=e364]: Spokane, WA
+                  - generic "6/24/2026, 8:10:31 PM" [ref=e365]:
+                    - generic [ref=e366]: 4h ago
+                    - generic [ref=e367]: Chicago
+                  - generic [ref=e369]: Delivered
+                  - generic [ref=e371]: —
+                  - generic [ref=e372]: —
+                - button "Expand row" [ref=e373]:
+                  - img [ref=e374]
+              - generic [ref=e377] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e379]
+                - button "Unknown owner …2083 Contact blocked 1248 Salem St Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 4h ago Chicago · overdue Scheduled — —" [ref=e380]:
+                  - generic "Unknown owner" [ref=e381]:
+                    - generic [ref=e382]:
+                      - img [ref=e384]
+                      - strong [ref=e387]: Unknown owner
+                      - generic [ref=e388]: …2083
+                      - generic "Contact blocked" [ref=e389]
+                    - generic [ref=e390]: 1248 Salem St
+                    - generic [ref=e391]: Memphis, TN · listing
+                  - generic [ref=e392]:
+                    - generic [ref=e393]: Ownership Confirmation
+                    - generic [ref=e394]: Touch 1 · listing
+                  - generic [ref=e395]:
+                    - generic [ref=e396]: listing
+                    - generic [ref=e397]: Memphis, TN
+                  - generic "Manual Reply" [ref=e398]:
+                    - generic [ref=e399]: Manual Reply
+                    - generic [ref=e400]: EN
+                  - generic [ref=e401]:
+                    - generic [ref=e402]: …0588
+                    - generic [ref=e403]: Memphis, TN
+                  - generic "6/24/2026, 8:00:31 PM" [ref=e404]:
+                    - generic [ref=e405]: 4h ago
+                    - generic [ref=e406]: Chicago · overdue
+                  - generic [ref=e408]: Scheduled
+                  - generic [ref=e410]: —
+                  - generic [ref=e411]: —
+                - button "Expand row" [ref=e412]:
+                  - img [ref=e413]
+              - generic [ref=e416] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e418]
+                - button "Unknown owner …8537 Contact blocked 1944 S 109th Ave E Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 4h ago Chicago Delivered — —" [ref=e419]:
+                  - generic "Unknown owner" [ref=e420]:
+                    - generic [ref=e421]:
+                      - img [ref=e423]
+                      - strong [ref=e426]: Unknown owner
+                      - generic [ref=e427]: …8537
+                      - generic "Contact blocked" [ref=e428]
+                    - generic [ref=e429]: 1944 S 109th Ave E
+                    - generic [ref=e430]: Tulsa, OK · listing
+                  - generic [ref=e431]:
+                    - generic [ref=e432]: Ownership Confirmation
+                    - generic [ref=e433]: Touch 1 · listing
+                  - generic [ref=e434]:
+                    - generic [ref=e435]: listing
+                    - generic [ref=e436]: Tulsa, OK
+                  - generic "Manual Reply" [ref=e437]:
+                    - generic [ref=e438]: Manual Reply
+                    - generic [ref=e439]: EN
+                  - generic [ref=e440]:
+                    - generic [ref=e441]: …1600
+                    - generic [ref=e442]: Tulsa, OK
+                  - generic "6/24/2026, 7:50:31 PM" [ref=e443]:
+                    - generic [ref=e444]: 4h ago
+                    - generic [ref=e445]: Chicago
+                  - generic [ref=e447]: Delivered
+                  - generic [ref=e449]: —
+                  - generic [ref=e450]: —
+                - button "Expand row" [ref=e451]:
+                  - img [ref=e452]
+              - generic [ref=e455] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e457]
+                - button "Unknown owner …3651 Contact blocked 4381 Sterling Forest Dr Decatur, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA Manual Reply EN …0588 Atlanta, GA 4h ago Chicago Delivered — —" [ref=e458]:
+                  - generic "Unknown owner" [ref=e459]:
+                    - generic [ref=e460]:
+                      - img [ref=e462]
+                      - strong [ref=e465]: Unknown owner
+                      - generic [ref=e466]: …3651
+                      - generic "Contact blocked" [ref=e467]
+                    - generic [ref=e468]: 4381 Sterling Forest Dr
+                    - generic [ref=e469]: Decatur, GA · listing
+                  - generic [ref=e470]:
+                    - generic [ref=e471]: Ownership Confirmation
+                    - generic [ref=e472]: Touch 1 · listing
+                  - generic [ref=e473]:
+                    - generic [ref=e474]: listing
+                    - generic [ref=e475]: Atlanta, GA
+                  - generic "Manual Reply" [ref=e476]:
+                    - generic [ref=e477]: Manual Reply
+                    - generic [ref=e478]: EN
+                  - generic [ref=e479]:
+                    - generic [ref=e480]: …0588
+                    - generic [ref=e481]: Atlanta, GA
+                  - generic "6/24/2026, 7:40:31 PM" [ref=e482]:
+                    - generic [ref=e483]: 4h ago
+                    - generic [ref=e484]: Chicago
+                  - generic [ref=e486]: Delivered
+                  - generic [ref=e488]: —
+                  - generic [ref=e489]: —
+                - button "Expand row" [ref=e490]:
+                  - img [ref=e491]
+              - generic [ref=e494] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e496]
+                - button "Unknown owner …9710 Contact blocked 131 13th Ave N South Saint Paul, MN · listing Ownership Confirmation Touch 1 · listing listing Cleveland, OH Manual Reply EN …0495 Cleveland, O… 5h ago Chicago Delivered — —" [ref=e497]:
+                  - generic "Unknown owner" [ref=e498]:
+                    - generic [ref=e499]:
+                      - img [ref=e501]
+                      - strong [ref=e504]: Unknown owner
+                      - generic [ref=e505]: …9710
+                      - generic "Contact blocked" [ref=e506]
+                    - generic [ref=e507]: 131 13th Ave N
+                    - generic [ref=e508]: South Saint Paul, MN · listing
+                  - generic [ref=e509]:
+                    - generic [ref=e510]: Ownership Confirmation
+                    - generic [ref=e511]: Touch 1 · listing
+                  - generic [ref=e512]:
+                    - generic [ref=e513]: listing
+                    - generic [ref=e514]: Cleveland, OH
+                  - generic "Manual Reply" [ref=e515]:
+                    - generic [ref=e516]: Manual Reply
+                    - generic [ref=e517]: EN
+                  - generic [ref=e518]:
+                    - generic [ref=e519]: …0495
+                    - generic [ref=e520]: Cleveland, O…
+                  - generic "6/24/2026, 7:20:31 PM" [ref=e521]:
+                    - generic [ref=e522]: 5h ago
+                    - generic [ref=e523]: Chicago
+                  - generic [ref=e525]: Delivered
+                  - generic [ref=e527]: —
+                  - generic [ref=e528]: —
+                - button "Expand row" [ref=e529]:
+                  - img [ref=e530]
+              - generic [ref=e533] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e535]
+                - button "Unknown owner …2289 Contact blocked 871 Dill Ave Sw Atlanta, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA Manual Reply EN …0588 Atlanta, GA 5h ago Chicago Delivered — —" [ref=e536]:
+                  - generic "Unknown owner" [ref=e537]:
+                    - generic [ref=e538]:
+                      - img [ref=e540]
+                      - strong [ref=e543]: Unknown owner
+                      - generic [ref=e544]: …2289
+                      - generic "Contact blocked" [ref=e545]
+                    - generic [ref=e546]: 871 Dill Ave Sw
+                    - generic [ref=e547]: Atlanta, GA · listing
+                  - generic [ref=e548]:
+                    - generic [ref=e549]: Ownership Confirmation
+                    - generic [ref=e550]: Touch 1 · listing
+                  - generic [ref=e551]:
+                    - generic [ref=e552]: listing
+                    - generic [ref=e553]: Atlanta, GA
+                  - generic "Manual Reply" [ref=e554]:
+                    - generic [ref=e555]: Manual Reply
+                    - generic [ref=e556]: EN
+                  - generic [ref=e557]:
+                    - generic [ref=e558]: …0588
+                    - generic [ref=e559]: Atlanta, GA
+                  - generic "6/24/2026, 7:10:31 PM" [ref=e560]:
+                    - generic [ref=e561]: 5h ago
+                    - generic [ref=e562]: Chicago
+                  - generic [ref=e564]: Delivered
+                  - generic [ref=e566]: —
+                  - generic [ref=e567]: —
+                - button "Expand row" [ref=e568]:
+                  - img [ref=e569]
+              - generic [ref=e572] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e574]
+                - button "Unknown owner …5085 Contact blocked 93 Whitman St Pawtucket, RI · listing Ownership Confirmation Touch 1 · listing listing Providence, RI Manual Reply EN …2999 Providence, … 5h ago Chicago Paused Name Missing blank_greeting_textgri… blank_greeting_tex… —" [ref=e575]:
+                  - generic "Unknown owner" [ref=e576]:
+                    - generic [ref=e577]:
+                      - img [ref=e579]
+                      - strong [ref=e582]: Unknown owner
+                      - generic [ref=e583]: …5085
+                      - generic "Contact blocked" [ref=e584]
+                    - generic [ref=e585]: 93 Whitman St
+                    - generic [ref=e586]: Pawtucket, RI · listing
+                  - generic [ref=e587]:
+                    - generic [ref=e588]: Ownership Confirmation
+                    - generic [ref=e589]: Touch 1 · listing
+                  - generic [ref=e590]:
+                    - generic [ref=e591]: listing
+                    - generic [ref=e592]: Providence, RI
+                  - generic "Manual Reply" [ref=e593]:
+                    - generic [ref=e594]: Manual Reply
+                    - generic [ref=e595]: EN
+                  - generic [ref=e596]:
+                    - generic [ref=e597]: …2999
+                    - generic [ref=e598]: Providence, …
+                  - generic "6/24/2026, 7:01:22 PM" [ref=e599]:
+                    - generic [ref=e600]: 5h ago
+                    - generic [ref=e601]: Chicago
+                  - generic [ref=e602]:
+                    - generic [ref=e603]: Paused Name Missing
+                    - generic [ref=e604]: blank_greeting_textgri…
+                  - generic [ref=e606]: blank_greeting_tex…
+                  - generic [ref=e607]: —
+                - button "Expand row" [ref=e608]:
+                  - img [ref=e609]
+              - generic [ref=e612] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e614]
+                - button "Unknown owner …9431 Contact blocked 775 Pickering St Houston, TX · listing Ownership Confirmation Touch 1 · listing listing Houston, TX Manual Reply EN …8577 Houston, TX 6h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e615]:
+                  - generic "Unknown owner" [ref=e616]:
+                    - generic [ref=e617]:
+                      - img [ref=e619]
+                      - strong [ref=e622]: Unknown owner
+                      - generic [ref=e623]: …9431
+                      - generic "Contact blocked" [ref=e624]
+                    - generic [ref=e625]: 775 Pickering St
+                    - generic [ref=e626]: Houston, TX · listing
+                  - generic [ref=e627]:
+                    - generic [ref=e628]: Ownership Confirmation
+                    - generic [ref=e629]: Touch 1 · listing
+                  - generic [ref=e630]:
+                    - generic [ref=e631]: listing
+                    - generic [ref=e632]: Houston, TX
+                  - generic "Manual Reply" [ref=e633]:
+                    - generic [ref=e634]: Manual Reply
+                    - generic [ref=e635]: EN
+                  - generic [ref=e636]:
+                    - generic [ref=e637]: …8577
+                    - generic [ref=e638]: Houston, TX
+                  - generic "6/24/2026, 5:40:31 PM" [ref=e639]:
+                    - generic [ref=e640]: 6h ago
+                    - generic [ref=e641]: Chicago
+                  - generic [ref=e642]:
+                    - generic [ref=e643]: Failed
+                    - generic [ref=e644]: Blacklist Rule (21610)
+                  - generic [ref=e646]: Blacklist Rule (21…
+                  - generic [ref=e647]: —
+                - button "Expand row" [ref=e648]:
+                  - img [ref=e649]
+              - generic [ref=e652] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e654]
+                - button "Unknown owner …0451 Contact blocked 662 Troy St Durham, NC · listing Ownership Confirmation Touch 1 · listing listing Charlotte, NC Manual Reply EN …9889 Charlotte, N… 6h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e655]:
+                  - generic "Unknown owner" [ref=e656]:
+                    - generic [ref=e657]:
+                      - img [ref=e659]
+                      - strong [ref=e662]: Unknown owner
+                      - generic [ref=e663]: …0451
+                      - generic "Contact blocked" [ref=e664]
+                    - generic [ref=e665]: 662 Troy St
+                    - generic [ref=e666]: Durham, NC · listing
+                  - generic [ref=e667]:
+                    - generic [ref=e668]: Ownership Confirmation
+                    - generic [ref=e669]: Touch 1 · listing
+                  - generic [ref=e670]:
+                    - generic [ref=e671]: listing
+                    - generic [ref=e672]: Charlotte, NC
+                  - generic "Manual Reply" [ref=e673]:
+                    - generic [ref=e674]: Manual Reply
+                    - generic [ref=e675]: EN
+                  - generic [ref=e676]:
+                    - generic [ref=e677]: …9889
+                    - generic [ref=e678]: Charlotte, N…
+                  - generic "6/24/2026, 5:30:31 PM" [ref=e679]:
+                    - generic [ref=e680]: 6h ago
+                    - generic [ref=e681]: Chicago
+                  - generic [ref=e682]:
+                    - generic [ref=e683]: Failed
+                    - generic [ref=e684]: Blacklist Rule (21610)
+                  - generic [ref=e686]: Blacklist Rule (21…
+                  - generic [ref=e687]: —
+                - button "Expand row" [ref=e688]:
+                  - img [ref=e689]
+              - generic [ref=e692] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e694]
+                - button "Unknown owner …9735 Contact blocked 8101 W Catalina Dr Phoenix, AZ · listing Ownership Confirmation Touch 1 · listing listing Phoenix, AZ Manual Reply EN …9881 Phoenix, AZ 9h ago Chicago Delivered — —" [ref=e695]:
+                  - generic "Unknown owner" [ref=e696]:
+                    - generic [ref=e697]:
+                      - img [ref=e699]
+                      - strong [ref=e702]: Unknown owner
+                      - generic [ref=e703]: …9735
+                      - generic "Contact blocked" [ref=e704]
+                    - generic [ref=e705]: 8101 W Catalina Dr
+                    - generic [ref=e706]: Phoenix, AZ · listing
+                  - generic [ref=e707]:
+                    - generic [ref=e708]: Ownership Confirmation
+                    - generic [ref=e709]: Touch 1 · listing
+                  - generic [ref=e710]:
+                    - generic [ref=e711]: listing
+                    - generic [ref=e712]: Phoenix, AZ
+                  - generic "Manual Reply" [ref=e713]:
+                    - generic [ref=e714]: Manual Reply
+                    - generic [ref=e715]: EN
+                  - generic [ref=e716]:
+                    - generic [ref=e717]: …9881
+                    - generic [ref=e718]: Phoenix, AZ
+                  - generic "6/24/2026, 2:40:31 PM" [ref=e719]:
+                    - generic [ref=e720]: 9h ago
+                    - generic [ref=e721]: Chicago
+                  - generic [ref=e723]: Delivered
+                  - generic [ref=e725]: —
+                  - generic [ref=e726]: —
+                - button "Expand row" [ref=e727]:
+                  - img [ref=e728]
+              - generic [ref=e731] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e733]
+                - button "Unknown owner …4066 Contact blocked 3237 Sweet Springs Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 10h ago Chicago Delivered — —" [ref=e734]:
+                  - generic "Unknown owner" [ref=e735]:
+                    - generic [ref=e736]:
+                      - img [ref=e738]
+                      - strong [ref=e741]: Unknown owner
+                      - generic [ref=e742]: …4066
+                      - generic "Contact blocked" [ref=e743]
+                    - generic [ref=e744]: 3237 Sweet Springs Dr
+                    - generic [ref=e745]: Memphis, TN · listing
+                  - generic [ref=e746]:
+                    - generic [ref=e747]: Ownership Confirmation
+                    - generic [ref=e748]: Touch 1 · listing
+                  - generic [ref=e749]:
+                    - generic [ref=e750]: listing
+                    - generic [ref=e751]: Memphis, TN
+                  - generic "Manual Reply" [ref=e752]:
+                    - generic [ref=e753]: Manual Reply
+                    - generic [ref=e754]: EN
+                  - generic [ref=e755]:
+                    - generic [ref=e756]: …0588
+                    - generic [ref=e757]: Memphis, TN
+                  - generic "6/24/2026, 1:50:31 PM" [ref=e758]:
+                    - generic [ref=e759]: 10h ago
+                    - generic [ref=e760]: Chicago
+                  - generic [ref=e762]: Delivered
+                  - generic [ref=e764]: —
+                  - generic [ref=e765]: —
+                - button "Expand row" [ref=e766]:
+                  - img [ref=e767]
+              - generic [ref=e770] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e772]
+                - button "Unknown owner …7342 Contact blocked 1304 Crewler Cv Austin, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX Manual Reply EN …1600 Austin, TX 10h ago Chicago Delivered — —" [ref=e773]:
+                  - generic "Unknown owner" [ref=e774]:
+                    - generic [ref=e775]:
+                      - img [ref=e777]
+                      - strong [ref=e780]: Unknown owner
+                      - generic [ref=e781]: …7342
+                      - generic "Contact blocked" [ref=e782]
+                    - generic [ref=e783]: 1304 Crewler Cv
+                    - generic [ref=e784]: Austin, TX · listing
+                  - generic [ref=e785]:
+                    - generic [ref=e786]: Ownership Confirmation
+                    - generic [ref=e787]: Touch 1 · listing
+                  - generic [ref=e788]:
+                    - generic [ref=e789]: listing
+                    - generic [ref=e790]: Austin, TX
+                  - generic "Manual Reply" [ref=e791]:
+                    - generic [ref=e792]: Manual Reply
+                    - generic [ref=e793]: EN
+                  - generic [ref=e794]:
+                    - generic [ref=e795]: …1600
+                    - generic [ref=e796]: Austin, TX
+                  - generic "6/24/2026, 1:40:31 PM" [ref=e797]:
+                    - generic [ref=e798]: 10h ago
+                    - generic [ref=e799]: Chicago
+                  - generic [ref=e801]: Delivered
+                  - generic [ref=e803]: —
+                  - generic [ref=e804]: —
+                - button "Expand row" [ref=e805]:
+                  - img [ref=e806]
+              - generic [ref=e809] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e811]
+                - button "Unknown owner …8370 Contact blocked 1140 Lafayette Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 10h ago Chicago Delivered — —" [ref=e812]:
+                  - generic "Unknown owner" [ref=e813]:
+                    - generic [ref=e814]:
+                      - img [ref=e816]
+                      - strong [ref=e819]: Unknown owner
+                      - generic [ref=e820]: …8370
+                      - generic "Contact blocked" [ref=e821]
+                    - generic [ref=e822]: 1140 Lafayette Ave
+                    - generic [ref=e823]: Kansas City, KS · listing
+                  - generic [ref=e824]:
+                    - generic [ref=e825]: Ownership Confirmation
+                    - generic [ref=e826]: Touch 1 · listing
+                  - generic [ref=e827]:
+                    - generic [ref=e828]: listing
+                    - generic [ref=e829]: Kansas City, M…
+                  - generic "Manual Reply" [ref=e830]:
+                    - generic [ref=e831]: Manual Reply
+                    - generic [ref=e832]: EN
+                  - generic [ref=e833]:
+                    - generic [ref=e834]: …1600
+                    - generic [ref=e835]: Kansas City,…
+                  - generic "6/24/2026, 1:30:31 PM" [ref=e836]:
+                    - generic [ref=e837]: 10h ago
+                    - generic [ref=e838]: Chicago
+                  - generic [ref=e840]: Delivered
+                  - generic [ref=e842]: —
+                  - generic [ref=e843]: —
+                - button "Expand row" [ref=e844]:
+                  - img [ref=e845]
+              - generic [ref=e848] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e850]
+                - button "Unknown owner …4744 Contact blocked 1041 Ella Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 11h ago Chicago Delivered — —" [ref=e851]:
+                  - generic "Unknown owner" [ref=e852]:
+                    - generic [ref=e853]:
+                      - img [ref=e855]
+                      - strong [ref=e858]: Unknown owner
+                      - generic [ref=e859]: …4744
+                      - generic "Contact blocked" [ref=e860]
+                    - generic [ref=e861]: 1041 Ella Ave
+                    - generic [ref=e862]: Kansas City, KS · listing
+                  - generic [ref=e863]:
+                    - generic [ref=e864]: Ownership Confirmation
+                    - generic [ref=e865]: Touch 1 · listing
+                  - generic [ref=e866]:
+                    - generic [ref=e867]: listing
+                    - generic [ref=e868]: Kansas City, M…
+                  - generic "Manual Reply" [ref=e869]:
+                    - generic [ref=e870]: Manual Reply
+                    - generic [ref=e871]: EN
+                  - generic [ref=e872]:
+                    - generic [ref=e873]: …1600
+                    - generic [ref=e874]: Kansas City,…
+                  - generic "6/24/2026, 1:20:31 PM" [ref=e875]:
+                    - generic [ref=e876]: 11h ago
+                    - generic [ref=e877]: Chicago
+                  - generic [ref=e879]: Delivered
+                  - generic [ref=e881]: —
+                  - generic [ref=e882]: —
+                - button "Expand row" [ref=e883]:
+                  - img [ref=e884]
+              - generic [ref=e887] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e889]
+                - button "Unknown owner …3462 Contact blocked 203 N 15th St Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 11h ago Chicago Delivered — —" [ref=e890]:
+                  - generic "Unknown owner" [ref=e891]:
+                    - generic [ref=e892]:
+                      - img [ref=e894]
+                      - strong [ref=e897]: Unknown owner
+                      - generic [ref=e898]: …3462
+                      - generic "Contact blocked" [ref=e899]
+                    - generic [ref=e900]: 203 N 15th St
+                    - generic [ref=e901]: Kansas City, KS · listing
+                  - generic [ref=e902]:
+                    - generic [ref=e903]: Ownership Confirmation
+                    - generic [ref=e904]: Touch 1 · listing
+                  - generic [ref=e905]:
+                    - generic [ref=e906]: listing
+                    - generic [ref=e907]: Kansas City, M…
+                  - generic "Manual Reply" [ref=e908]:
+                    - generic [ref=e909]: Manual Reply
+                    - generic [ref=e910]: EN
+                  - generic [ref=e911]:
+                    - generic [ref=e912]: …1600
+                    - generic [ref=e913]: Kansas City,…
+                  - generic "6/24/2026, 1:10:31 PM" [ref=e914]:
+                    - generic [ref=e915]: 11h ago
+                    - generic [ref=e916]: Chicago
+                  - generic [ref=e918]: Delivered
+                  - generic [ref=e920]: —
+                  - generic [ref=e921]: —
+                - button "Expand row" [ref=e922]:
+                  - img [ref=e923]
+              - generic [ref=e926] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e928]
+                - button "Unknown owner …7790 Contact blocked 2107 Willow Way Round Rock, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX Manual Reply EN …1600 Austin, TX 11h ago Chicago · overdue Scheduled — —" [ref=e929]:
+                  - generic "Unknown owner" [ref=e930]:
+                    - generic [ref=e931]:
+                      - img [ref=e933]
+                      - strong [ref=e936]: Unknown owner
+                      - generic [ref=e937]: …7790
+                      - generic "Contact blocked" [ref=e938]
+                    - generic [ref=e939]: 2107 Willow Way
+                    - generic [ref=e940]: Round Rock, TX · listing
+                  - generic [ref=e941]:
+                    - generic [ref=e942]: Ownership Confirmation
+                    - generic [ref=e943]: Touch 1 · listing
+                  - generic [ref=e944]:
+                    - generic [ref=e945]: listing
+                    - generic [ref=e946]: Austin, TX
+                  - generic "Manual Reply" [ref=e947]:
+                    - generic [ref=e948]: Manual Reply
+                    - generic [ref=e949]: EN
+                  - generic [ref=e950]:
+                    - generic [ref=e951]: …1600
+                    - generic [ref=e952]: Austin, TX
+                  - generic "6/24/2026, 1:00:31 PM" [ref=e953]:
+                    - generic [ref=e954]: 11h ago
+                    - generic [ref=e955]: Chicago · overdue
+                  - generic [ref=e957]: Scheduled
+                  - generic [ref=e959]: —
+                  - generic [ref=e960]: —
+                - button "Expand row" [ref=e961]:
+                  - img [ref=e962]
+              - generic [ref=e965] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e967]
+                - button "Unknown owner …5959 Contact blocked 442 E 90th St Chicago, IL · listing Ownership Confirmation Touch 1 · listing listing Chicago, IL Manual Reply EN …0495 Chicago, IL 11h ago Chicago Delivered — —" [ref=e968]:
+                  - generic "Unknown owner" [ref=e969]:
+                    - generic [ref=e970]:
+                      - img [ref=e972]
+                      - strong [ref=e975]: Unknown owner
+                      - generic [ref=e976]: …5959
+                      - generic "Contact blocked" [ref=e977]
+                    - generic [ref=e978]: 442 E 90th St
+                    - generic [ref=e979]: Chicago, IL · listing
+                  - generic [ref=e980]:
+                    - generic [ref=e981]: Ownership Confirmation
+                    - generic [ref=e982]: Touch 1 · listing
+                  - generic [ref=e983]:
+                    - generic [ref=e984]: listing
+                    - generic [ref=e985]: Chicago, IL
+                  - generic "Manual Reply" [ref=e986]:
+                    - generic [ref=e987]: Manual Reply
+                    - generic [ref=e988]: EN
+                  - generic [ref=e989]:
+                    - generic [ref=e990]: …0495
+                    - generic [ref=e991]: Chicago, IL
+                  - generic "6/24/2026, 12:50:31 PM" [ref=e992]:
+                    - generic [ref=e993]: 11h ago
+                    - generic [ref=e994]: Chicago
+                  - generic [ref=e996]: Delivered
+                  - generic [ref=e998]: —
+                  - generic [ref=e999]: —
+                - button "Expand row" [ref=e1000]:
+                  - img [ref=e1001]
+              - generic [ref=e1004] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e1006]
+                - button "Unknown owner …0122 Contact blocked 1826 Baldwin Ave Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 11h ago Chicago Delivered — —" [ref=e1007]:
+                  - generic "Unknown owner" [ref=e1008]:
+                    - generic [ref=e1009]:
+                      - img [ref=e1011]
+                      - strong [ref=e1014]: Unknown owner
+                      - generic [ref=e1015]: …0122
+                      - generic "Contact blocked" [ref=e1016]
+                    - generic [ref=e1017]: 1826 Baldwin Ave
+                    - generic [ref=e1018]: Memphis, TN · listing
+                  - generic [ref=e1019]:
+                    - generic [ref=e1020]: Ownership Confirmation
+                    - generic [ref=e1021]: Touch 1 · listing
+                  - generic [ref=e1022]:
+                    - generic [ref=e1023]: listing
+                    - generic [ref=e1024]: Memphis, TN
+                  - generic "Manual Reply" [ref=e1025]:
+                    - generic [ref=e1026]: Manual Reply
+                    - generic [ref=e1027]: EN
+                  - generic [ref=e1028]:
+                    - generic [ref=e1029]: …0588
+                    - generic [ref=e1030]: Memphis, TN
+                  - generic "6/24/2026, 12:40:31 PM" [ref=e1031]:
+                    - generic [ref=e1032]: 11h ago
+                    - generic [ref=e1033]: Chicago
+                  - generic [ref=e1035]: Delivered
+                  - generic [ref=e1037]: —
+                  - generic [ref=e1038]: —
+                - button "Expand row" [ref=e1039]:
+                  - img [ref=e1040]
+              - generic [ref=e1043] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e1045]
+                - button "Unknown owner …5725 Contact blocked 4242 Coventry Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 11h ago Chicago Delivered — —" [ref=e1046]:
+                  - generic "Unknown owner" [ref=e1047]:
+                    - generic [ref=e1048]:
+                      - img [ref=e1050]
+                      - strong [ref=e1053]: Unknown owner
+                      - generic [ref=e1054]: …5725
+                      - generic "Contact blocked" [ref=e1055]
+                    - generic [ref=e1056]: 4242 Coventry Dr
+                    - generic [ref=e1057]: Memphis, TN · listing
+                  - generic [ref=e1058]:
+                    - generic [ref=e1059]: Ownership Confirmation
+                    - generic [ref=e1060]: Touch 1 · listing
+                  - generic [ref=e1061]:
+                    - generic [ref=e1062]: listing
+                    - generic [ref=e1063]: Memphis, TN
+                  - generic "Manual Reply" [ref=e1064]:
+                    - generic [ref=e1065]: Manual Reply
+                    - generic [ref=e1066]: EN
+                  - generic [ref=e1067]:
+                    - generic [ref=e1068]: …0588
+                    - generic [ref=e1069]: Memphis, TN
+                  - generic "6/24/2026, 12:30:31 PM" [ref=e1070]:
+                    - generic [ref=e1071]: 11h ago
+                    - generic [ref=e1072]: Chicago
+                  - generic [ref=e1074]: Delivered
+                  - generic [ref=e1076]: —
+                  - generic [ref=e1077]: —
+                - button "Expand row" [ref=e1078]:
+                  - img [ref=e1079]
+              - generic [ref=e1082] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e1084]
+                - button "Unknown owner …1329 Contact blocked 2312 5th St Ne Minneapolis, MN · listing Ownership Confirmation Touch 1 · listing listing Minneapolis, M… Manual Reply EN …0495 Minneapolis,… 12h ago Chicago Delivered — —" [ref=e1085]:
+                  - generic "Unknown owner" [ref=e1086]:
+                    - generic [ref=e1087]:
+                      - img [ref=e1089]
+                      - strong [ref=e1092]: Unknown owner
+                      - generic [ref=e1093]: …1329
+                      - generic "Contact blocked" [ref=e1094]
+                    - generic [ref=e1095]: 2312 5th St Ne
+                    - generic [ref=e1096]: Minneapolis, MN · listing
+                  - generic [ref=e1097]:
+                    - generic [ref=e1098]: Ownership Confirmation
+                    - generic [ref=e1099]: Touch 1 · listing
+                  - generic [ref=e1100]:
+                    - generic [ref=e1101]: listing
+                    - generic [ref=e1102]: Minneapolis, M…
+                  - generic "Manual Reply" [ref=e1103]:
+                    - generic [ref=e1104]: Manual Reply
+                    - generic [ref=e1105]: EN
+                  - generic [ref=e1106]:
+                    - generic [ref=e1107]: …0495
+                    - generic [ref=e1108]: Minneapolis,…
+                  - generic "6/24/2026, 12:20:31 PM" [ref=e1109]:
+                    - generic [ref=e1110]: 12h ago
+                    - generic [ref=e1111]: Chicago
+                  - generic [ref=e1113]: Delivered
+                  - generic [ref=e1115]: —
+                  - generic [ref=e1116]: —
+                - button "Expand row" [ref=e1117]:
+                  - img [ref=e1118]
+              - generic [ref=e1121] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e1123]
+                - button "Unknown owner …8080 Contact blocked 4342 N Frankfort Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 12h ago Chicago Delivered — —" [ref=e1124]:
+                  - generic "Unknown owner" [ref=e1125]:
+                    - generic [ref=e1126]:
+                      - img [ref=e1128]
+                      - strong [ref=e1131]: Unknown owner
+                      - generic [ref=e1132]: …8080
+                      - generic "Contact blocked" [ref=e1133]
+                    - generic [ref=e1134]: 4342 N Frankfort Ave
+                    - generic [ref=e1135]: Tulsa, OK · listing
+                  - generic [ref=e1136]:
+                    - generic [ref=e1137]: Ownership Confirmation
+                    - generic [ref=e1138]: Touch 1 · listing
+                  - generic [ref=e1139]:
+                    - generic [ref=e1140]: listing
+                    - generic [ref=e1141]: Tulsa, OK
+                  - generic "Manual Reply" [ref=e1142]:
+                    - generic [ref=e1143]: Manual Reply
+                    - generic [ref=e1144]: EN
+                  - generic [ref=e1145]:
+                    - generic [ref=e1146]: …1600
+                    - generic [ref=e1147]: Tulsa, OK
+                  - generic "6/24/2026, 12:10:31 PM" [ref=e1148]:
+                    - generic [ref=e1149]: 12h ago
+                    - generic [ref=e1150]: Chicago
+                  - generic [ref=e1152]: Delivered
+                  - generic [ref=e1154]: —
+                  - generic [ref=e1155]: —
+                - button "Expand row" [ref=e1156]:
+                  - img [ref=e1157]
+              - generic [ref=e1160] [cursor=pointer]:
+                - checkbox "Select Unknown owner" [ref=e1162]
+                - button "Unknown owner …7660 Contact blocked 819 N Birmingham Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 12h ago Chicago Delivered — —" [ref=e1163]:
+                  - generic "Unknown owner" [ref=e1164]:
+                    - generic [ref=e1165]:
+                      - img [ref=e1167]
+                      - strong [ref=e1170]: Unknown owner
+                      - generic [ref=e1171]: …7660
+                      - generic "Contact blocked" [ref=e1172]
+                    - generic [ref=e1173]: 819 N Birmingham Ave
+                    - generic [ref=e1174]: Tulsa, OK · listing
+                  - generic [ref=e1175]:
+                    - generic [ref=e1176]: Ownership Confirmation
+                    - generic [ref=e1177]: Touch 1 · listing
+                  - generic [ref=e1178]:
+                    - generic [ref=e1179]: listing
+                    - generic [ref=e1180]: Tulsa, OK
+                  - generic "Manual Reply" [ref=e1181]:
+                    - generic [ref=e1182]: Manual Reply
+                    - generic [ref=e1183]: EN
+                  - generic [ref=e1184]:
+                    - generic [ref=e1185]: …1600
+                    - generic [ref=e1186]: Tulsa, OK
+                  - generic "6/24/2026, 12:00:31 PM" [ref=e1187]:
+                    - generic [ref=e1188]: 12h ago
+                    - generic [ref=e1189]: Chicago
+                  - generic [ref=e1191]: Delivered
+                  - generic [ref=e1193]: —
+                  - generic [ref=e1194]: —
+                - button "Expand row" [ref=e1195]:
+                  - img [ref=e1196]
+            - generic [ref=e1198]:
+              - generic [ref=e1199]:
+                - text: Showing
+                - strong [ref=e1200]: 1–25
+                - text: of
+                - strong [ref=e1201]: 1,791
+              - generic [ref=e1202]:
+                - generic [ref=e1203]:
+                  - text: Rows
+                  - combobox "Rows" [ref=e1204] [cursor=pointer]:
+                    - option "25" [selected]
+                    - option "50"
+                    - option "100"
+                    - option "250"
+                - button "« First" [disabled] [ref=e1205]
+                - button "‹ Prev" [disabled] [ref=e1206]
+                - generic [ref=e1207]: Page 1 of 72
+                - button "Next ›" [ref=e1208] [cursor=pointer]
+                - button "Last »" [ref=e1209] [cursor=pointer]
+          - complementary [ref=e1210]:
+            - generic [ref=e1211]:
+              - generic [ref=e1212]: Command Intelligence
+              - button "Collapse" [ref=e1213] [cursor=pointer]:
+                - img [ref=e1214]
+            - generic [ref=e1217]:
+              - generic [ref=e1218]: Blocked
+              - generic [ref=e1220]:
+                - generic [ref=e1221]: 2 runnable
+                - generic [ref=e1222]: 37 blocked
+                - generic [ref=e1223]: 2 retryable
+                - generic [ref=e1224]: 2 senders
+              - generic [ref=e1225]: "Next: 6/24/2026, 1:00:31 PM"
+  - button "NEXUS Copilot" [ref=e1226] [cursor=pointer]:
+    - generic: Standing by

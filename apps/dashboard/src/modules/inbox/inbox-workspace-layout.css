@@ -25,6 +25,99 @@
   gap: 0;
 }
 
+.nx-premium-inbox.is-multi-view-active .nx-workspace-split-grid {
+  gap: 0 !important;
+  flex-wrap: nowrap;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Every workspace pane must fill its flex column at 25 / 50 / 75 / 100 */
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-sms_thread .nx-workspace-pane-surface--sms-thread,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-deal_intelligence .nx-intelligence-panel,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-thread .nx-workspace-pane-surface--thread-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-50 .nx-intelligence-panel .nx-intel-scroll-body,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-75 .nx-intelligence-panel .nx-intel-scroll-body,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-100 .nx-intelligence-panel .nx-intel-scroll-body {
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-50 .nx-chat-container,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-75 .nx-chat-container,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-100 .nx-chat-container {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* Every workspace module must fill its pane at 25 / 50 / 75 / 100 */
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .nx-workspace-surface,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .occ-root,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .plv,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .nx-inbox-table-view,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .ecc,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .eg-app,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .aic-workspace,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .wfs2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .nx-inbox-table-wrap,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .nx-thread-card-list,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .occ-root .occ-queue-scroll,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .occ-root .occ-table-body,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .occ-root .occ-body,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane .aic-workspace .aic-scroll-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-queue .occ-root,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-pipeline .plv,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-entity_graph .eg-app,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-email .ecc,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-view-workflow_studio .wfs2 {
+  display: flex;
+  flex-direction: column;
+}
+
 .nx-workspace-pane.is-view-thread {
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }

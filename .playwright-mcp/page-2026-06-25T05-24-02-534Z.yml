@@ -1,0 +1,200 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - generic [ref=e63]:
+            - generic [ref=e64]: Subject location unresolved
+            - paragraph [ref=e65]: Subject coordinates unresolved
+            - paragraph [ref=e66]: "Source attempted: unresolved"
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - generic [ref=e69]: Comp Intelligence
+              - generic [ref=e70]: 0%
+            - group "Map mode" [ref=e71]:
+              - button "Value" [ref=e72] [cursor=pointer]
+              - button "Market" [ref=e73] [cursor=pointer]
+              - button "Model" [ref=e74] [cursor=pointer]
+            - group "Radius" [ref=e75]:
+              - button "0.25mi" [ref=e76] [cursor=pointer]
+              - button "0.5mi" [ref=e77] [cursor=pointer]
+              - button "1mi" [ref=e78] [cursor=pointer]
+              - button "1.5mi" [ref=e79] [cursor=pointer]
+              - button "3mi" [ref=e80] [cursor=pointer]
+              - button "5mi" [ref=e81] [cursor=pointer]
+            - generic [ref=e82]:
+              - button "MLS" [ref=e83] [cursor=pointer]
+              - button "PR" [ref=e84] [cursor=pointer]
+              - button "Buyer" [ref=e85] [cursor=pointer]
+              - button "Inst." [ref=e86] [cursor=pointer]
+            - button "0/0 Included" [ref=e87] [cursor=pointer]: 0/0 Included
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - generic [ref=e91]:
+              - generic [ref=e94]: ☐
+              - generic [ref=e95]:
+                - generic [ref=e96]: Valuation Dossier
+                - generic [ref=e97]: Subject Property
+                - generic [ref=e98]:
+                  - generic [ref=e99]: Sqft unknown
+                  - text: "000"
+              - generic [ref=e100]:
+                - strong [ref=e101]: "0"
+                - generic [ref=e102]: Locked
+            - generic [ref=e103]:
+              - generic [ref=e104]: 1mi radius
+              - generic [ref=e105]: 6mo lookback
+              - generic [ref=e106]: 0 comps
+              - generic [ref=e107]: 0 included
+              - generic [ref=e108]: unresolved
+              - generic [ref=e109]: Incomplete Data
+              - generic [ref=e110]: Sqft Missing
+          - generic [ref=e111]:
+            - generic [ref=e113]: Model Inputs
+            - generic [ref=e114]:
+              - generic [ref=e115]:
+                - generic [ref=e116]: Mode
+                - combobox "Mode" [ref=e117] [cursor=pointer]:
+                  - option "Residential ARV" [selected]
+                  - option "Multifamily Comp"
+                  - option "Land Model"
+                  - option "Commercial Model"
+              - generic [ref=e118]:
+                - generic [ref=e119]: Sort
+                - combobox "Sort" [ref=e120] [cursor=pointer]:
+                  - option "Best Match" [selected]
+                  - option "Closest"
+                  - option "Newest Sale"
+                  - option "Highest Price"
+                  - option "PPSF"
+              - generic [ref=e121]:
+                - generic [ref=e122]: Lookback
+                - combobox "Lookback" [ref=e123] [cursor=pointer]:
+                  - option "3 Months"
+                  - option "6 Months" [selected]
+                  - option "12 Months"
+                  - option "24 Months"
+              - generic [ref=e124]:
+                - generic [ref=e125]: Asset
+                - combobox "Asset" [ref=e126] [cursor=pointer]:
+                  - option "All Types"
+                  - option "Single Family" [selected]
+                  - option "Multifamily"
+                  - option "Land"
+                  - option "Commercial"
+          - generic [ref=e127]:
+            - generic [ref=e128]:
+              - generic [ref=e129]:
+                - generic [ref=e130]: Estimated ARV
+                - generic [ref=e131]: "Blocked: missing subject"
+                - generic [ref=e132]: Needs subject sqft · 0 included comps
+              - generic [ref=e133]:
+                - img "Confidence 0" [ref=e134]
+                - generic [ref=e137]:
+                  - strong [ref=e138]: "0"
+                  - generic [ref=e139]: / 100
+                  - generic [ref=e140]: CONF
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - generic [ref=e143]: Included
+                - strong [ref=e144]: "0"
+              - generic [ref=e145]:
+                - generic [ref=e146]: Available
+                - strong [ref=e147]: "0"
+              - generic [ref=e148]:
+                - generic [ref=e149]: Retail Ceiling
+                - strong [ref=e150]: —
+              - generic [ref=e151]:
+                - generic [ref=e152]: Investor Reality
+                - strong [ref=e153]: —
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - generic [ref=e156]: MLS
+              - strong [ref=e157]: "0"
+            - generic [ref=e158]:
+              - generic [ref=e159]: Public
+              - strong [ref=e160]: "0"
+            - generic [ref=e161]:
+              - generic [ref=e162]: Elite
+              - strong [ref=e163]: "0"
+            - generic [ref=e164]:
+              - generic [ref=e165]: Strong
+              - strong [ref=e166]: "0"
+            - generic [ref=e167]:
+              - generic [ref=e168]: Weak
+              - strong [ref=e169]: "0"
+            - generic [ref=e170]:
+              - generic [ref=e171]: Median PPSF
+              - strong [ref=e172]: —
+            - generic [ref=e173]:
+              - generic [ref=e174]: MAO
+              - strong [ref=e175]: —
+          - generic [ref=e176]:
+            - generic [ref=e178]: Valuation Stack
+            - generic [ref=e181]:
+              - generic [ref=e182]: Subject Agent
+              - text: Sqft missing; confidence reduced
+            - generic [ref=e185]:
+              - generic [ref=e186]: Comp Agent
+              - text: 0 comps scanned
+            - generic [ref=e189]:
+              - generic [ref=e190]: Outlier Agent
+              - text: Waiting for comps
+            - generic [ref=e193]:
+              - generic [ref=e194]: ARV Agent
+              - text: Waiting for included comps
+            - generic [ref=e197]:
+              - generic [ref=e198]: Value Stack Agent
+              - text: Waiting for valuation stack
+            - generic [ref=e201]:
+              - generic [ref=e202]: Offer Input Agent
+              - text: Locked until ARV exists
+          - generic [ref=e203]:
+            - generic [ref=e204]:
+              - generic [ref=e205]: ⚠
+              - generic [ref=e206]: Subject Data Gap
+            - paragraph [ref=e207]: Subject sqft missing. Residential ARV confidence is reduced.
+            - paragraph [ref=e208]: Canonical property data reloads automatically when the subject resolves.
+          - generic [ref=e209]:
+            - generic [ref=e211]: "Blocked: missing subject"
+            - paragraph [ref=e212]: Valuation snapshots persist automatically for the Acquisition Decision Engine.
+          - generic [ref=e213]:
+            - generic [ref=e214]:
+              - generic [ref=e215]: Comp Evidence
+              - generic [ref=e216]: 0 shown · 0 in ARV
+            - generic [ref=e218]:
+              - strong [ref=e219]: No comps found
+              - paragraph [ref=e220]: Adjust radius, source filters, asset class, or lookback.
+  - button "NEXUS Copilot" [ref=e221] [cursor=pointer]:
+    - generic: Standing by

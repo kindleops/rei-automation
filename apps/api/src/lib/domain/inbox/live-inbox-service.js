@@ -15,7 +15,10 @@ import {
   resolveEffectiveInboxBucket,
   threadMatchesInboxTab,
 } from "@/lib/domain/inbox/inbox-thread-state-contract.js";
-import { bulkHydrateInboxThreadLinkedContext } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
+import {
+  bulkHydrateInboxThreadLinkedContext,
+  hydrateThreadIdentityFromMessageEvents,
+} from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 import {
   parseAdvancedFiltersParam,
   hasActiveAdvancedFilters,
@@ -1077,9 +1080,12 @@ function applyDeliverySnapshot(row = {}, delivery = null, queue = null) {
 async function hydrateMissingLatestMessageEventIds(rows = [], supabase = defaultSupabase) {
   if (!Array.isArray(rows) || rows.length === 0 || !supabase?.from) return rows;
 
-  const targets = rows.filter(
-    (row) => !firstClean(row.latest_message_event_id, row.latest_message_id, row.latestMessageId) && latestAt(row),
-  );
+  const targets = rows.filter((row) => {
+    if (!latestAt(row)) return false;
+    const missingBody = !firstClean(row.latest_message_body, row.message_body, row.preview);
+    const missingEventId = !firstClean(row.latest_message_event_id, row.latest_message_id, row.latestMessageId);
+    return missingBody || missingEventId;
+  });
   if (!targets.length) return rows;
 
   const phones = [...new Set(
@@ -1147,12 +1153,20 @@ async function hydrateMissingLatestMessageEventIds(rows = [], supabase = default
       }, null);
 
     if (!match?.id) return row;
+    const body = truncatePreview(firstClean(row.latest_message_body, row.message_body, row.preview, match.message_body));
     return {
       ...row,
       latest_message_event_id: match.id,
       latest_message_id: match.id,
       latestMessageId: match.id,
       latestMessageEventId: match.id,
+      ...(body
+        ? {
+            latest_message_body: body,
+            message_body: body,
+            preview: body,
+          }
+        : {}),
     };
   });
 }
@@ -1619,6 +1633,9 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
       ...searchMatches.map((match) => match.term),
     ])],
     highlight_ranges: [...groupMatches, ...searchMatches].map(({ start, end, term }) => ({ start, end, term })),
+    latest_message_body: truncatePreview(messageBody),
+    message_body: truncatePreview(messageBody),
+    preview: truncatePreview(messageBody),
   };
 }
 
@@ -1657,11 +1674,6 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   cursorKeyset,
   offset,
 } = {}) {
-  // Authoritative inbox_thread_state rows are bucket/count primitives only.
-  // Thread listing always comes from canonical live thread sources so message
-  // bodies, delivery fields, and keyword flags stay hydrated.
-  return null;
-
   const normalizedFilter = normalizeLiveFilter(filter);
   if (normalizedFilter === "all") return null;
 
@@ -1814,6 +1826,9 @@ async function queryInitialBootThreadRows(params = {}, {
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
   const advancedFilters = parseAdvancedFiltersParam(params);
   const advancedActive = hasActiveAdvancedFilters(advancedFilters);
+  const timeoutMode = lower(params.timeout_mode || params.timeoutMode);
+  const isInitialBoot = selectMode === "initial_boot_safe" || timeoutMode === "initial_boot";
+  const isFastBucket = timeoutMode === "manual_bucket_switch" || timeoutMode === "auto_refresh";
 
   if (advancedActive) {
     const hydrated = await queryHydratedInboxThreads(
@@ -1828,7 +1843,18 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     };
   }
 
-  if (!advancedActive) {
+  if (!advancedActive && isInitialBoot) {
+    const bootResult = await queryInitialBootThreadRows(params, {
+      supabase,
+      limit,
+      filter,
+      cursorKeyset,
+      offset,
+    });
+    if (bootResult) return bootResult;
+  }
+
+  if (!advancedActive && isFastBucket) {
     const authoritativeResult = await queryAuthoritativeInboxThreads(params, {
       supabase,
       limit,
@@ -2141,7 +2167,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || fastBucketMode || deps.skipCounts === true || options.skipCounts === true;
-  const skipDelivery = bool(params.skip_delivery) || fastBucketMode || options.skipDelivery === true;
+  const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootMode || options.skipDelivery === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2274,16 +2300,17 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
-  if (!fastBucketMode) {
-    try {
-      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+  try {
+    finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
+    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+    if (!initialBootMode) {
       finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
-      finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
-      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-    } catch (error) {
-      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-      console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
     }
+    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+  } catch (error) {
+    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+    console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
   }
 
   const deliveryHydrationStartedAt = nowMs();

@@ -1,0 +1,194 @@
+[    1416ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:17232
+[    1781ms] [LOG] [BUCKET_SWITCH_RESET_SCROLL] {bucket: all_messages} @ http://127.0.0.1:5173/src/modules/inbox/components/InboxSidebar.tsx:2175
+[    1782ms] [LOG] [INBOX_BUCKET_ROWS] {bucket: all_messages, count: 25, firstThreadKey: +17702033651, firstLatestAt: 2026-06-25T02:18:05.817Z} @ http://127.0.0.1:5173/src/modules/inbox/components/InboxSidebar.tsx:2194
+[    1787ms] [LOG] [BACKEND_API] Local dev detected. Will use relative paths via proxy. @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:17
+[    1789ms] [LOG] [dashboard boot] live inbox fetch started {options: Object, filterKey: all_messages, timeoutMode: initial_boot, timeoutMs: 20000} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:248
+[    1789ms] [LOG] [VIEW_MODEL_LOAD_START] {viewModel: inbox_threads_view, startedAt: 1784.800000000745, view: all_messages, filter: all, limit: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:26
+[    1790ms] [LOG] [INBOX_API_REQUEST] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, filter: all, timeoutMode: initial_boot, refreshReason: initial_boot} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1423
+[    1791ms] [LOG] [useInboxData] realtime subscriptions active @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1396
+[    1793ms] [LOG] [SMOOTH_THREAD_SELECT] {key: ct:phone:+17702033651, refetch: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1679
+[    1794ms] [LOG] [MESSAGES_FETCH_START] ct:phone:+17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1691
+[    1794ms] [LOG] [THREAD_CONTEXT_START] {threadKey: +17702033651, propertyId: null, prospectId: null, ownerId: undefined} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1767
+[    1800ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, startedAt: 1795.4000000003725, transport: backend, url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1800ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, path: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1801ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…st_phone=%2B17702033651&phone_e164=%2B17702033651, startedAt: 1796.5, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…st_phone=%2B17702033651&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1801ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…st_phone=%2B17702033651&phone_e164=%2B17702033651, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…st_phone=%2B17702033651&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1802ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/control, startedAt: 1797.0999999996275, transport: backend, url: /api/cockpit/queue/control, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1802ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/control, path: /api/cockpit/queue/control, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1802ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/processor-health, startedAt: 1797.800000000745, transport: backend, url: /api/cockpit/queue/processor-health, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1802ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/processor-health, path: /api/cockpit/queue/processor-health, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1803ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, startedAt: 1798.5, transport: backend, url: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1803ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, path: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1804ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/templates/list?limit=800&includeInactive=true, startedAt: 1799.0999999996275, transport: backend, url: /api/cockpit/templates/list?limit=800&includeInactive=true, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1804ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/templates/list?limit=800&includeInactive=true, path: /api/cockpit/templates/list?limit=800&includeInactive=true, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1807ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/counts, startedAt: 1802.800000000745, transport: backend, url: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[    1808ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/counts, path: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[    1880ms] [ERROR] Warning: Received NaN for the `%s` attribute. If this is expected, cast the value to a string.%s children 
+    at span
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at div
+    at MediumDealWorkspace (http://127.0.0.1:5173/src/modules/inbox/components/IntelligencePanel.tsx:10783:32)
+    at div
+    at aside
+    at IntelligencePanel (http://127.0.0.1:5173/src/modules/inbox/components/IntelligencePanel.tsx:17196:37)
+    at div
+    at section
+    at main
+    at div
+    at div
+    at WatchlistProvider (http://127.0.0.1:5173/src/lib/watchlistContext.tsx:15:37)
+    at InboxPage (http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:501:48)
+    at InboxView
+    at ErrorBoundary (http://127.0.0.1:5173/src/shared/ErrorBoundary.tsx:4:8)
+    at main
+    at div
+    at CommandCenterApp (http://127.0.0.1:5173/src/app/CommandCenterApp.tsx?t=1782363718024:184:15)
+    at RequireAuth (http://127.0.0.1:5173/src/components/auth/RequireAuth.tsx:7:31)
+    at AuthProvider (http://127.0.0.1:5173/src/components/auth/AuthProvider.tsx:16:32)
+    at App @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:442
+[    2414ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: live, reason: subscribe_status} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[    2414ms] [LOG] [INBOX_REALTIME_STATUS] {status: SUBSCRIBED, normalizedStatus: connected, connectionState: live, fallbackMode: realtime} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1376
+[    2634ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 25, bodyCountPath: threads, durationMs: 834} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    2634ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, durationMs: 834, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    2634ms] [LOG] [INBOX_API_RESPONSE] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, status: 200, ok: true, responseBodyCount: 25, responseBodyPath: threads} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1433
+[    2652ms] [LOG] [VIEW_MODEL_LOAD_DONE] {name: inbox_threads_view, durationMs: 863, viewModel: inbox_threads_view, ok: true, view: all_messages} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:33
+[    2658ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_threads, durationMs: 6, source: getInboxRowsForView, rows: 25, threads: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[    2658ms] [LOG] [HYDRATION_PHASE_DONE] {name: thread_shell, durationMs: 869, phase: thread_shell, view: all_messages, rows: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[    2658ms] [LOG] [Inbox] live inbox success {threads: 25, counts: Object} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1842
+[    2659ms] [LOG] [Inbox] source endpoint /api/cockpit/inbox/live @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1851
+[    2659ms] [LOG] [Inbox] raw sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1852
+[    2659ms] [LOG] [Inbox] normalized sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1853
+[    2659ms] [LOG] [Inbox] visible fields {ownerName: , propertyAddress: , latestMessageBody: Sorry about that, my system had an error. Are you open to a proposal on the property?, status: waiting, stage: unknown} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1855
+[    2659ms] [LOG] [InboxTiming] live_fetch_ms: 869ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2302
+[    2659ms] [LOG] [InboxTiming] lightweight_normalize_ms: 0ms (built-in) @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2303
+[    2659ms] [LOG] [fetchInboxModel] using counts embedded in live response @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2380
+[    2659ms] [LOG] [InboxTiming] total_fetch_model_ms: 870ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2397
+[    2660ms] [LOG] [dashboard boot] live inbox fetch success {filterKey: all_messages, count: 25} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:319
+[    2661ms] [LOG] [INBOX_COUNTS_APPROXIMATE_APPLIED] {bucketKey: all_messages, counts_source: visible_rows_approximate, count_preserved_reason: fallback_thread_source_visible_rows_approximate} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:926
+[    2662ms] [LOG] [useInboxData] refresh complete {bucketKey: all_messages, rowCount: 25, totalCount: 25, dataMode: live} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:986
+[    2890ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 1088} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    2890ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/processor-health, durationMs: 1088, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3054ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 1253} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    3054ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/control, durationMs: 1253, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3114ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 25, bodyCountPath: items, durationMs: 1311} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    3114ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, durationMs: 1311, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3164ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 500, bodyCountPath: total, durationMs: 1360} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    3164ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/templates/list?limit=800&includeInactive=true, durationMs: 1360, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3164ms] [LOG] [templateData] sms_templates schema sample keys [id, template_id, is_active, use_case, stage_code, language, template_body, updated_at] @ http://127.0.0.1:5173/src/lib/data/templateData.ts:138
+[    3525ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 1717} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    3525ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/counts, durationMs: 1718, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3656ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 5, bodyCountPath: messages, durationMs: 1855} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[    3656ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…st_phone=%2B17702033651&phone_e164=%2B17702033651, durationMs: 1855, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3657ms] [LOG] [THREAD_MESSAGE_LOOKUP] {selected_thread_key: ct:phone:+17702033651, conversation_thread_id: ct:phone:+17702033651, canonical_e164: +17702033651, lookup_strategy_used: thread_key=canonical_e164+to_phone_number=canonica…rom_phone_number=canonical_e164+legacy_thread_key, message_count: 5} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2886
+[    3657ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_messages, durationMs: 0, source: thread_messages, threadId: ct:phone:+17702033651, incoming: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[    3658ms] [LOG] [HYDRATION_PHASE_DONE] {name: messages, durationMs: 1864, phase: messages, threadKey: ct:phone:+17702033651, messages: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[    3659ms] [LOG] [MESSAGES_FETCH_DONE] ct:phone:+17702033651 5 1866ms @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1701
+[    3659ms] [LOG] [MESSAGES_FETCH_SLOW] ct:phone:+17702033651 {durationMs: 1866, endpoint: /api/cockpit/inbox/thread-messages, status: completed} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1703
+[    3660ms] [LOG] [MESSAGES_COMMIT] ct:phone:+17702033651 5 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1731
+[    3660ms] [LOG] [THREAD_CONTEXT_DONE] {threadKey: +17702033651, propertyId: null, prospectId: null, masterOwnerId: null, coordsResolved: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1788
+[    3661ms] [LOG] [THREAD_CONTEXT_COMMIT] +17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363718024:1797
+[   31799ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/processor-health, startedAt: 31794.300000000745, transport: backend, url: /api/cockpit/queue/processor-health, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   31799ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/processor-health, path: /api/cockpit/queue/processor-health, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   32153ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 354} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   32153ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/processor-health, durationMs: 354, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   42143ms] [LOG] [dashboard boot] live inbox fetch started {options: Object, filterKey: all_messages, timeoutMode: initial_boot, timeoutMs: 20000} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:248
+[   42144ms] [LOG] [VIEW_MODEL_LOAD_START] {viewModel: inbox_threads_view, startedAt: 42139.5, view: all_messages, filter: all, limit: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:26
+[   42144ms] [LOG] [INBOX_API_REQUEST] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, filter: all, timeoutMode: initial_boot, refreshReason: initial_boot} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1423
+[   42145ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: reconnecting, reason: subscribe_start} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   42146ms] [LOG] [useInboxData] realtime subscriptions active @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1396
+[   42148ms] [LOG] [SMOOTH_THREAD_SELECT] {key: ct:phone:+17702033651, refetch: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1687
+[   42149ms] [LOG] [MESSAGES_FETCH_START] ct:phone:+17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1699
+[   42149ms] [LOG] [THREAD_CONTEXT_START] {threadKey: +17702033651, propertyId: null, prospectId: null, ownerId: null} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1775
+[   42153ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, startedAt: 42149, transport: backend, url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   42154ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, path: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   42155ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, startedAt: 42150, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   42155ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   42156ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/control, startedAt: 42151.40000000037, transport: backend, url: /api/cockpit/queue/control, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   42156ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/control, path: /api/cockpit/queue/control, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   42158ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/counts, startedAt: 42153.90000000037, transport: backend, url: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   42159ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/counts, path: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   42364ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: live, reason: subscribe_status} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   42364ms] [LOG] [INBOX_REALTIME_STATUS] {status: SUBSCRIBED, normalizedStatus: connected, connectionState: live, fallbackMode: realtime} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1376
+[   42706ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 25, bodyCountPath: threads, durationMs: 552} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   42706ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, durationMs: 553, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   42706ms] [LOG] [INBOX_API_RESPONSE] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, status: 200, ok: true, responseBodyCount: 25, responseBodyPath: threads} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1433
+[   42713ms] [LOG] [VIEW_MODEL_LOAD_DONE] {name: inbox_threads_view, durationMs: 569, viewModel: inbox_threads_view, ok: true, view: all_messages} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:33
+[   42723ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_threads, durationMs: 9, source: getInboxRowsForView, rows: 25, threads: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   42723ms] [LOG] [HYDRATION_PHASE_DONE] {name: thread_shell, durationMs: 579, phase: thread_shell, view: all_messages, rows: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[   42723ms] [LOG] [Inbox] live inbox success {threads: 25, counts: Object} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1842
+[   42723ms] [LOG] [Inbox] source endpoint /api/cockpit/inbox/live @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1851
+[   42723ms] [LOG] [Inbox] raw sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1852
+[   42723ms] [LOG] [Inbox] normalized sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1853
+[   42723ms] [LOG] [Inbox] visible fields {ownerName: , propertyAddress: , latestMessageBody: Sorry about that, my system had an error. Are you open to a proposal on the property?, status: waiting, stage: unknown} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1855
+[   42724ms] [LOG] [InboxTiming] live_fetch_ms: 580ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2302
+[   42724ms] [LOG] [InboxTiming] lightweight_normalize_ms: 0ms (built-in) @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2303
+[   42724ms] [LOG] [fetchInboxModel] using counts embedded in live response @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2380
+[   42724ms] [LOG] [InboxTiming] total_fetch_model_ms: 580ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2397
+[   42724ms] [LOG] [dashboard boot] live inbox fetch success {filterKey: all_messages, count: 25} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:319
+[   42725ms] [LOG] [INBOX_COUNTS_APPROXIMATE_APPLIED] {bucketKey: all_messages, counts_source: visible_rows_approximate, count_preserved_reason: fallback_thread_source_visible_rows_approximate} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:926
+[   42725ms] [LOG] [useInboxData] refresh complete {bucketKey: all_messages, rowCount: 25, totalCount: 25, dataMode: live} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:986
+[   42946ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 790} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   42947ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/control, durationMs: 791, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   42977ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 819} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   42978ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/counts, durationMs: 819, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   43527ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 5, bodyCountPath: messages, durationMs: 1373} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   43528ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, durationMs: 1373, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   43528ms] [LOG] [THREAD_MESSAGE_LOOKUP] {selected_thread_key: ct:phone:+17702033651, conversation_thread_id: ct:phone:+17702033651, canonical_e164: +17702033651, lookup_strategy_used: latest_message_id_exact+thread_key=canonical_e164+…rom_phone_number=canonical_e164+legacy_thread_key, message_count: 5} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2886
+[   43528ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_messages, durationMs: 0, source: thread_messages, threadId: ct:phone:+17702033651, incoming: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   43529ms] [LOG] [HYDRATION_PHASE_DONE] {name: messages, durationMs: 1381, phase: messages, threadKey: ct:phone:+17702033651, messages: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[   43529ms] [LOG] [MESSAGES_FETCH_DONE] ct:phone:+17702033651 5 1382ms @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1709
+[   43530ms] [LOG] [MESSAGES_COMMIT] ct:phone:+17702033651 5 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1739
+[   43532ms] [LOG] [THREAD_CONTEXT_DONE] {threadKey: +17702033651, propertyId: null, prospectId: null, masterOwnerId: null, coordsResolved: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1796
+[   43532ms] [LOG] [THREAD_CONTEXT_COMMIT] +17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363804855:1805
+[   47254ms] [LOG] [dashboard boot] live inbox fetch started {options: Object, filterKey: all_messages, timeoutMode: initial_boot, timeoutMs: 20000} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:248
+[   47256ms] [LOG] [VIEW_MODEL_LOAD_START] {viewModel: inbox_threads_view, startedAt: 47251.20000000112, view: all_messages, filter: all, limit: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:26
+[   47257ms] [LOG] [INBOX_API_REQUEST] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, filter: all, timeoutMode: initial_boot, refreshReason: initial_boot} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1423
+[   47259ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: reconnecting, reason: subscribe_start} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   47261ms] [LOG] [useInboxData] realtime subscriptions active @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1396
+[   47268ms] [LOG] [SMOOTH_THREAD_SELECT] {key: ct:phone:+17702033651, refetch: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1683
+[   47271ms] [LOG] [MESSAGES_FETCH_START] ct:phone:+17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1695
+[   47271ms] [LOG] [THREAD_CONTEXT_START] {threadKey: +17702033651, propertyId: null, prospectId: null, ownerId: null} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1771
+[   47279ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, startedAt: 47274.59999999963, transport: backend, url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   47279ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, path: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   47280ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, startedAt: 47275.70000000112, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   47280ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   47281ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/counts, startedAt: 47276.800000000745, transport: backend, url: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:14
+[   47282ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/counts, path: /api/cockpit/inbox/counts, method: GET} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:190
+[   47506ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: live, reason: subscribe_status} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   47507ms] [LOG] [INBOX_REALTIME_STATUS] {status: SUBSCRIBED, normalizedStatus: connected, connectionState: live, fallbackMode: realtime} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:1376
+[   47605ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 5, bodyCountPath: messages, durationMs: 325} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   47605ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…-474f-b356-02948a11ce38&phone_e164=%2B17702033651, durationMs: 325, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   47606ms] [LOG] [THREAD_MESSAGE_LOOKUP] {selected_thread_key: ct:phone:+17702033651, conversation_thread_id: ct:phone:+17702033651, canonical_e164: +17702033651, lookup_strategy_used: latest_message_id_exact+thread_key=canonical_e164+…rom_phone_number=canonical_e164+legacy_thread_key, message_count: 5} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2886
+[   47606ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_messages, durationMs: 0, source: thread_messages, threadId: ct:phone:+17702033651, incoming: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   47606ms] [LOG] [HYDRATION_PHASE_DONE] {name: messages, durationMs: 337, phase: messages, threadKey: ct:phone:+17702033651, messages: 5} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[   47607ms] [LOG] [MESSAGES_FETCH_DONE] ct:phone:+17702033651 5 340ms @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1705
+[   47608ms] [LOG] [MESSAGES_COMMIT] ct:phone:+17702033651 5 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1735
+[   47655ms] [LOG] [THREAD_CONTEXT_DONE] {threadKey: +17702033651, propertyId: null, prospectId: null, masterOwnerId: null, coordsResolved: false} @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1792
+[   47656ms] [LOG] [THREAD_CONTEXT_COMMIT] +17702033651 @ http://127.0.0.1:5173/src/modules/inbox/InboxPage.tsx?t=1782363809929:1801
+[   47844ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 25, bodyCountPath: threads, durationMs: 565} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   47844ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, durationMs: 565, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   47845ms] [LOG] [INBOX_API_RESPONSE] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, status: 200, ok: true, responseBodyCount: 25, responseBodyPath: threads} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1433
+[   47852ms] [LOG] [VIEW_MODEL_LOAD_DONE] {name: inbox_threads_view, durationMs: 596, viewModel: inbox_threads_view, ok: true, view: all_messages} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:33
+[   47871ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_threads, durationMs: 18, source: getInboxRowsForView, rows: 25, threads: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:63
+[   47877ms] [LOG] [HYDRATION_PHASE_DONE] {name: thread_shell, durationMs: 621, phase: thread_shell, view: all_messages, rows: 25} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:50
+[   47878ms] [LOG] [Inbox] live inbox success {threads: 25, counts: Object} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1842
+[   47878ms] [LOG] [Inbox] source endpoint /api/cockpit/inbox/live @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1851
+[   47878ms] [LOG] [Inbox] raw sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1852
+[   47879ms] [LOG] [Inbox] normalized sample {thread_key: +17702033651, seller_phone: +17702033651, canonical_e164: +17702033651, master_owner_id: null, property_id: null} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1853
+[   47879ms] [LOG] [Inbox] visible fields {ownerName: , propertyAddress: , latestMessageBody: Sorry about that, my system had an error. Are you open to a proposal on the property?, status: waiting, stage: unknown} @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:1855
+[   47880ms] [LOG] [InboxTiming] live_fetch_ms: 624ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2302
+[   47883ms] [LOG] [InboxTiming] lightweight_normalize_ms: 0ms (built-in) @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2303
+[   47883ms] [LOG] [fetchInboxModel] using counts embedded in live response @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2380
+[   47884ms] [LOG] [InboxTiming] total_fetch_model_ms: 629ms @ http://127.0.0.1:5173/src/lib/data/inboxData.ts:2397
+[   47885ms] [LOG] [dashboard boot] live inbox fetch success {filterKey: all_messages, count: 25} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:319
+[   47885ms] [LOG] [INBOX_COUNTS_APPROXIMATE_APPLIED] {bucketKey: all_messages, counts_source: visible_rows_approximate, count_preserved_reason: fallback_thread_source_visible_rows_approximate} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:926
+[   47886ms] [LOG] [useInboxData] refresh complete {bucketKey: all_messages, rowCount: 25, totalCount: 25, dataMode: live} @ http://127.0.0.1:5173/src/modules/inbox/inbox.adapter.ts:986
+[   48090ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 808} @ http://127.0.0.1:5173/src/lib/api/backendClient.ts:245
+[   48090ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/counts, durationMs: 809, transport: backend, status: 200, ok: true} @ http://127.0.0.1:5173/src/lib/data/dashboardDataLayer.ts:22
+[   54011ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://maps.googleapis.com/maps-api-v3/api/js/65/5e/main.js:194
+[   54013ms] [WARNING] The deviceorientation events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://maps.googleapis.com/maps-api-v3/api/js/65/5e/main.js:194

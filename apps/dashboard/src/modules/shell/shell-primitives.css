@@ -31,6 +31,15 @@
   transform-origin: top right;
 }
 
+/* Portaled to document.body — coordinates set inline; must sit above map */
+.nx-shell-popover-portal {
+  position: fixed !important;
+  top: auto;
+  left: auto;
+  right: auto;
+  margin: 0;
+}
+
 .nx-command-drawer-backdrop {
   position: fixed;
   inset: 0;

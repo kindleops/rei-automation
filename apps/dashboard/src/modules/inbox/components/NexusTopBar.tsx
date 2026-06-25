@@ -391,6 +391,7 @@ export const NexusTopBar = ({
             <WorkspaceLauncher
               open={activeSurface === 'workspace'}
               compact={isCompactMenu}
+              anchorRef={workspaceTriggerRef}
               onClose={() => closeAndRestoreFocus('workspace')}
               activeWorkspaceKey={activeWorkspaceKey}
               workspaceOptions={launcherWorkspaces}
@@ -518,7 +519,7 @@ export const NexusTopBar = ({
           />
           <kbd>CMD+K</kbd>
           {showSearchPopover ? (
-            <div className="nx-search-results-popover" role="listbox" aria-label="Universal search suggestions">
+            <div className="nx-search-results-popover nx-liquid-surface" role="listbox" aria-label="Universal search suggestions">
               <div className="nx-search-results-popover__header">
                 <span>Universal Search</span>
                 <b>{topSearchLoading ? 'Searching…' : `${topSearchItems.length} matches`}</b>

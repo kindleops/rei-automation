@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { type OperationalKpi, type OpsMessageTypeSection, type OpsQueueHealthSection } from '../../../lib/data/inboxKpis'
 import { useOperationalKpis } from '../../../lib/data/operationalKpis'
@@ -544,7 +545,13 @@ function PipelineSection({ kpis }: { kpis: KpiData }) {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
+const HOVER_CLOSE_MS = 140
+
 export const InboxKpiOrb = () => {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const dashboardRef = useRef<HTMLDivElement | null>(null)
+  const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [dashboardPosition, setDashboardPosition] = useState<{ top: number; left: number } | null>(null)
   const [isOpen, setIsOpen]   = useState(false)
   const [isPinned, setIsPinned] = useState(false)
   const [timeWindow, setTimeWindow] = useState<OperationalKpi['timeWindow']>('24h')
@@ -579,37 +586,82 @@ export const InboxKpiOrb = () => {
     localStorage.setItem('nexus.kpiSection', s)
   }
 
-  return (
-    <div
-      className={cls('nx-kpi-orb-container', (isOpen || isPinned) && 'is-open')}
-      onMouseEnter={() => setIsOpen(true)}
-      onMouseLeave={() => !isPinned && setIsOpen(false)}
-    >
-      {/* ── Orb capsule ─────────────────────────────────────────────────── */}
-      <div
-        className={cls('nx-kpi-orb', isPinned && 'is-pinned-active', isLive && 'is-live-pulsing', `is-${orbTone}`)}
-        onClick={() => setIsPinned(p => !p)}
-      >
-        <div className="nx-kpi-orb__glow" />
-        <div className="nx-kpi-orb__inner">
-          <div className={cls('nx-kpi-orb__icon-box', isLive && 'is-active')}>
-            <Icon name={isLive ? 'zap' : 'activity'} />
-          </div>
-          {headlineKpi && (
-            <span className="nx-kpi-orb__mini-value">{headlineKpi.value}{headlineKpi.unit || '%'}</span>
-          )}
-          {isLive && <div className="nx-kpi-orb__live-tag">•</div>}
-        </div>
-      </div>
+  const openPanel = useCallback(() => {
+    if (hoverCloseRef.current) {
+      clearTimeout(hoverCloseRef.current)
+      hoverCloseRef.current = null
+    }
+    setIsOpen(true)
+  }, [])
 
-      {/* ── Intelligence panel ───────────────────────────────────────────── */}
-      {(isOpen || isPinned) && (
-        <div
-          className="nx-orb-dashboard nx-liquid-popover"
-          style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        >
+  const scheduleClose = useCallback(() => {
+    if (isPinned) return
+    if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current)
+    hoverCloseRef.current = setTimeout(() => setIsOpen(false), HOVER_CLOSE_MS)
+  }, [isPinned])
+
+  const updateDashboardPosition = useCallback(() => {
+    const anchor = containerRef.current?.getBoundingClientRect()
+    const panel = dashboardRef.current
+    if (!anchor) return
+
+    const panelWidth = panel?.offsetWidth || Math.min(380, window.innerWidth - 24)
+    const gap = 16
+    let left = anchor.right - panelWidth
+    if (left < 12) left = 12
+    if (left + panelWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - panelWidth - 12)
+    }
+
+    setDashboardPosition({
+      top: anchor.bottom + gap,
+      left,
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!kpiPanelActive) {
+      setDashboardPosition(null)
+      return
+    }
+    updateDashboardPosition()
+  }, [kpiPanelActive, updateDashboardPosition, section, timeWindow])
+
+  useEffect(() => {
+    if (!kpiPanelActive) return
+    const handleViewportChange = () => updateDashboardPosition()
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, true)
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, true)
+    }
+  }, [kpiPanelActive, updateDashboardPosition])
+
+  useEffect(() => () => {
+    if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current)
+  }, [])
+
+  const dashboardPanel = kpiPanelActive && dashboardPosition ? (
+    <div
+      ref={dashboardRef}
+      className="nx-orb-dashboard nx-liquid-popover nx-shell-popover-portal"
+      style={{
+        position: 'fixed',
+        top: dashboardPosition.top,
+        left: dashboardPosition.left,
+        zIndex: 13000,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={openPanel}
+      onMouseLeave={scheduleClose}
+    >
           {/* Header */}
-          <div style={{
+          <div
+            className="nx-orb-dashboard__header"
+            style={{
             padding: '11px 14px 10px',
             borderBottom: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
             display: 'flex',
@@ -784,8 +836,35 @@ export const InboxKpiOrb = () => {
               {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>
+    </div>
+  ) : null
+
+  return (
+    <div
+      ref={containerRef}
+      className={cls('nx-kpi-orb-container', kpiPanelActive && 'is-open')}
+      onMouseEnter={openPanel}
+      onMouseLeave={scheduleClose}
+    >
+      <div
+        className={cls('nx-kpi-orb', isPinned && 'is-pinned-active', isLive && 'is-live-pulsing', `is-${orbTone}`)}
+        onClick={() => setIsPinned(p => !p)}
+      >
+        <div className="nx-kpi-orb__glow" />
+        <div className="nx-kpi-orb__inner">
+          <div className={cls('nx-kpi-orb__icon-box', isLive && 'is-active')}>
+            <Icon name={isLive ? 'zap' : 'activity'} />
+          </div>
+          {headlineKpi && (
+            <span className="nx-kpi-orb__mini-value">{headlineKpi.value}{headlineKpi.unit || '%'}</span>
+          )}
+          {isLive && <div className="nx-kpi-orb__live-tag">•</div>}
         </div>
-      )}
+      </div>
+
+      {typeof document !== 'undefined' && dashboardPanel
+        ? createPortal(dashboardPanel, document.body)
+        : null}
     </div>
   )
 }

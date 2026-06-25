@@ -23,20 +23,47 @@
 [data-nexus-theme="executive"],
 [data-nexus-theme="night_vision"],
 [data-nexus-theme="monochrome"] {
-  --nx-glass-bg:               linear-gradient(145deg, rgba(6,10,18,0.96), rgba(10,16,28,0.92));
-  --nx-glass-bg-strong:        linear-gradient(145deg, rgba(6,10,18,0.98), rgba(10,16,28,0.95));
-  --nx-glass-bg-hover:         rgba(255, 255, 255, 0.04);
-  --nx-glass-border:           rgba(148, 163, 184, 0.16);
-  --nx-glass-border-strong:    rgba(148, 163, 184, 0.28);
+  /* Canonical clear liquid glass — map controls blueprint */
+  --nx-glass-fill-top:         rgba(12, 18, 30, 0.42);
+  --nx-glass-fill-bottom:      rgba(8, 14, 24, 0.34);
+  --nx-glass-fill-header:      rgba(12, 18, 30, 0.22);
+  --nx-glass-fill-footer:      rgba(12, 18, 30, 0.28);
+  /* Shell tier — notifications / live activity blueprint (all topbar panels) */
+  --nx-shell-glass-accent-radial: radial-gradient(circle at top right, color-mix(in srgb, var(--nx-accent, #38bdf8) 8%, transparent), transparent 40%);
+  --nx-shell-glass-fill-top:    rgba(9, 13, 22, 0.72);
+  --nx-shell-glass-fill-bottom: rgba(8, 11, 19, 0.68);
+  --nx-shell-glass-header:      rgba(9, 13, 22, 0.38);
+  --nx-shell-glass-footer:      rgba(9, 13, 22, 0.44);
+  --nx-shell-glass-border:      rgba(173, 190, 220, 0.15);
+  --nx-shell-glass-blur:        56px;
+  --nx-shell-glass-saturate:    2;
+  --nx-shell-glass-shadow:      0 32px 80px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+
+  --nx-glass-tinted-top:       var(--nx-shell-glass-fill-top);
+  --nx-glass-tinted-bottom:    var(--nx-shell-glass-fill-bottom);
+  --nx-glass-tinted-header:    var(--nx-shell-glass-header);
+  --nx-glass-tinted-footer:    var(--nx-shell-glass-footer);
+
+  --nx-glass-bg:               linear-gradient(180deg, var(--nx-glass-fill-top), var(--nx-glass-fill-bottom));
+  --nx-glass-bg-strong:
+    linear-gradient(180deg, var(--nx-glass-fill-top), var(--nx-glass-fill-bottom)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--nx-glass-accent) 10%, transparent), transparent 42%);
+  --nx-glass-bg-tinted:
+    var(--nx-shell-glass-accent-radial),
+    linear-gradient(180deg, var(--nx-shell-glass-fill-top), var(--nx-shell-glass-fill-bottom));
+  --nx-glass-bg-hover:         rgba(255, 255, 255, 0.06);
+  --nx-glass-border:           var(--nx-shell-glass-border);
+  --nx-glass-border-shell:     var(--nx-shell-glass-border);
+  --nx-glass-border-strong:    rgba(255, 255, 255, 0.14);
   --nx-glass-text:             #e5e7eb;
   --nx-glass-text-strong:      #f1f5f9;
   --nx-glass-muted:            #94a3b8;
   --nx-glass-faint:            rgba(148, 163, 184, 0.38);
-  --nx-glass-shadow:           0 24px 80px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08);
-  --nx-glass-shadow-sm:        0 8px 24px rgba(0,0,0,0.45);
-  --nx-glass-blur:             28px;
-  --nx-glass-saturate:         1.6;
-  --nx-glass-inner-highlight:  inset 0 1px 0 rgba(255,255,255,0.08);
+  --nx-glass-shadow:           0 32px 80px rgba(0, 0, 0, 0.45);
+  --nx-glass-shadow-sm:        0 32px 80px rgba(0, 0, 0, 0.45);
+  --nx-glass-blur:             48px;
+  --nx-glass-saturate:         1.85;
+  --nx-glass-inner-highlight:  inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --nx-glass-divider:          rgba(255, 255, 255, 0.06);
   --nx-glass-accent:           var(--nexus-accent);
   --nx-glass-accent-rgb:       var(--nexus-accent-rgb);
@@ -59,8 +86,22 @@
 }
 
 [data-nexus-theme="light"] {
-  --nx-glass-bg:               rgba(255, 255, 255, 0.96);
-  --nx-glass-bg-strong:        rgba(255, 255, 255, 0.98);
+  --nx-glass-fill-top:         rgba(255, 255, 255, 0.62);
+  --nx-glass-fill-bottom:      rgba(248, 250, 255, 0.52);
+  --nx-glass-fill-header:      rgba(255, 255, 255, 0.38);
+  --nx-glass-fill-footer:      rgba(255, 255, 255, 0.38);
+  --nx-glass-tinted-top:       rgba(255, 255, 255, 0.78);
+  --nx-glass-tinted-bottom:    rgba(248, 250, 255, 0.70);
+  --nx-glass-tinted-header:    rgba(255, 255, 255, 0.48);
+  --nx-glass-tinted-footer:    rgba(255, 255, 255, 0.48);
+
+  --nx-glass-bg:               linear-gradient(180deg, var(--nx-glass-fill-top), var(--nx-glass-fill-bottom));
+  --nx-glass-bg-strong:
+    linear-gradient(180deg, var(--nx-glass-fill-top), var(--nx-glass-fill-bottom)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--nx-glass-accent) 8%, transparent), transparent 42%);
+  --nx-glass-bg-tinted:
+    linear-gradient(180deg, var(--nx-glass-tinted-top), var(--nx-glass-tinted-bottom)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--nx-glass-accent) 8%, transparent), transparent 42%);
   --nx-glass-bg-hover:         rgba(15, 23, 42, 0.035);
   --nx-glass-border:           rgba(15, 23, 42, 0.12);
   --nx-glass-border-strong:    rgba(15, 23, 42, 0.18);
@@ -134,7 +175,7 @@
 /* Panel — large floating overlay (notification center, activity panel, etc.) */
 .nx-liquid-panel,
 .nx-liquid-surface--panel {
-  background: var(--nx-glass-bg-strong) !important;
+  background: var(--nx-glass-bg-tinted) !important;
   backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
   -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate)) !important;
   border: 1px solid var(--nx-glass-border-strong) !important;
@@ -942,7 +983,7 @@
   z-index: 12040;
   display: flex;
   flex-direction: column;
-  background: var(--nx-glass-bg-strong);
+  background: var(--nx-glass-bg-tinted);
   backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   border-left: 1px solid var(--nx-glass-border-strong);
@@ -1238,7 +1279,7 @@
 /* Base workspace menu/submenu — apply glass system */
 .nx-topbar-workspace-menu,
 .nx-workspace-drawer {
-  background: var(--nx-glass-bg-strong);
+  background: var(--nx-glass-bg-tinted);
   backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   border: 1px solid var(--nx-glass-border-strong);
@@ -1803,7 +1844,7 @@
   max-height: min(80vh, 640px);
   overflow-y: auto;
   z-index: 12040;
-  background: var(--nx-glass-bg-strong);
+  background: var(--nx-glass-bg-tinted);
   backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   border: 1px solid var(--nx-glass-border-strong);

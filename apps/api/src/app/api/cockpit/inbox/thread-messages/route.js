@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { degradedThreadMessagesPayload } from '@/lib/domain/inbox/degraded-read-responses.js'
 import { getThreadMessages } from '@/lib/domain/inbox/live-inbox-service.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,8 +66,9 @@ export async function GET(request) {
 
   try {
     const startedAt = Date.now()
-    const { rows, total, diagnostics, threadKey, conversationThreadId, integrityBlocked, identityUsed, sourceUsed, queryMs } = await getThreadMessages({
-      selected_thread_key: thread_key,
+    const cacheKey = [
+      'thread-messages',
+      thread_key,
       conversation_thread_id,
       legacy_thread_key,
       normalized_phone,
@@ -80,7 +82,30 @@ export async function GET(request) {
       owner_id,
       master_owner_id,
       latest_message_id,
-    }, { offset, limit, fetchAll })
+      offset,
+      limit,
+      fetchAll ? 'all' : 'page',
+    ].filter(Boolean).join(':')
+    const { rows, total, diagnostics, threadKey, conversationThreadId, integrityBlocked, identityUsed, sourceUsed, queryMs } = await readThroughCache(
+      cacheKey,
+      5_000,
+      () => getThreadMessages({
+        selected_thread_key: thread_key,
+        conversation_thread_id,
+        legacy_thread_key,
+        normalized_phone,
+        canonical_e164,
+        phone_e164,
+        phone,
+        best_phone,
+        seller_phone,
+        prospect_id,
+        property_id,
+        owner_id,
+        master_owner_id,
+        latest_message_id,
+      }, { offset, limit, fetchAll }),
+    )
     const nextOffset = offset + rows.length
     const hasMore = fetchAll ? false : nextOffset < total
 

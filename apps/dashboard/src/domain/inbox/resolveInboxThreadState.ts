@@ -163,6 +163,20 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     return null
   })()
 
+  if (bucketFromBackend && !isSuppressed && !isDead) {
+    return {
+      bucket: bucketFromBackend,
+      reasons: [`backend_status_bucket(${statusBucket})`],
+      flags: {
+        detected_intent: intent,
+        latest_direction: direction,
+        is_read: isRead,
+        is_suppressed: isSuppressed,
+        follow_up_at: followUpAt,
+      },
+    }
+  }
+
   let bucket: CanonicalBucket = 'all'
   if (isSuppressed) {
     bucket = 'suppressed'
@@ -170,9 +184,6 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   } else if (isDead) {
     bucket = 'dead'
     reasons.push('dead lead')
-  } else if (bucketFromBackend) {
-    bucket = bucketFromBackend
-    reasons.push(`backend_status_bucket(${statusBucket})`)
   } else if (!isPriorityExcluded && (showInPriority || isHotLead || isPriorityIntent)) {
     bucket = 'priority'
     reasons.push('opportunity/hot/priority flag')

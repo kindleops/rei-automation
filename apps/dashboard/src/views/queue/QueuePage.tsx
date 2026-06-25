@@ -36,6 +36,7 @@ import { SenderFleetOverview } from './components/SenderFleetOverview'
 import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
 import './components/templates/template-intelligence.css'
 import { useQueueLayout } from './hooks/useQueueLayout'
+import type { ViewLayoutMode, ViewWidthPercent } from '../../domain/inbox/view-layout'
 import {
   BLOCKED_STATUSES,
   buildBulkActionPreview,
@@ -1613,12 +1614,22 @@ interface QueuePageProps {
   data?: QueueModel
   externalContext?: ActiveInboxContext
   onSelectItem?: (item: QueueItem) => void
+  layoutMode?: ViewLayoutMode
+  paneWidth?: ViewWidthPercent
 }
 
 const PAGE_SIZE = 25 // default; overridable via the page-size selector
 
-export const QueuePage = ({ data: initialData, externalContext, onSelectItem }: QueuePageProps = {}) => {
-  const { rootRef, layoutMode, paneWidth } = useQueueLayout()
+export const QueuePage = ({
+  data: initialData,
+  externalContext,
+  onSelectItem,
+  layoutMode: layoutModeProp,
+  paneWidth: paneWidthProp,
+}: QueuePageProps = {}) => {
+  const { rootRef, layoutMode: observedLayoutMode, paneWidth: observedPaneWidth } = useQueueLayout()
+  const layoutMode = layoutModeProp ?? observedLayoutMode
+  const paneWidth = paneWidthProp ?? observedPaneWidth
   const [loading, setLoading] = useState(!initialData)
   const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
   const [selectedId, setSelectedId] = useState<string | null>(null)

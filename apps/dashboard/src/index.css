@@ -5552,7 +5552,7 @@ non‑Home surfaces only ──────────────────�
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(16px);
   pointer-events: auto;
-  position: relative;
+  position: absolute;
   z-index: 24;
 }
 .nx-icm__controls-group {

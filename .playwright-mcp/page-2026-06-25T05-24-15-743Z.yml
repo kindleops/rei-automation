@@ -1,0 +1,1690 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - main [ref=e60]:
+        - generic [ref=e61]:
+          - generic [ref=e64]:
+            - generic [ref=e65]:
+              - generic [ref=e66]:
+                - generic [ref=e67]:
+                  - generic [ref=e68]:
+                    - heading "Outbound Command Center" [level=1] [ref=e69]
+                    - generic [ref=e70]: Last 7d · Created basis
+                  - generic [ref=e72]:
+                    - button "Today" [ref=e73] [cursor=pointer]
+                    - button "Last 24h" [ref=e74] [cursor=pointer]
+                    - button "Last 7d" [ref=e75] [cursor=pointer]
+                    - button "Last 30d" [ref=e76] [cursor=pointer]
+                    - button "Last 90d" [ref=e77] [cursor=pointer]
+                    - button "All time" [ref=e78] [cursor=pointer]
+                    - button "Custom" [ref=e79] [cursor=pointer]
+                - generic [ref=e80]:
+                  - generic [ref=e81]: 1–25 of 1,791
+                  - generic "Runtime health" [ref=e82]: runtime dry-run only
+                  - button "Reload current filtered data and metrics" [ref=e83] [cursor=pointer]:
+                    - img [ref=e84]
+              - generic [ref=e86]:
+                - button "0 Scheduled" [ref=e87] [cursor=pointer]:
+                  - generic [ref=e88]: "0"
+                  - generic [ref=e89]: Scheduled
+                - button "0 Queued" [ref=e90] [cursor=pointer]:
+                  - generic [ref=e91]: "0"
+                  - generic [ref=e92]: Queued
+                - button "0 Sending" [ref=e93] [cursor=pointer]:
+                  - generic [ref=e94]: "0"
+                  - generic [ref=e95]: Sending
+                - button "135 Delivered" [ref=e96] [cursor=pointer]:
+                  - generic [ref=e97]: "135"
+                  - generic [ref=e98]: Delivered
+                - button "189 Sent" [ref=e99] [cursor=pointer]:
+                  - generic [ref=e100]: "189"
+                  - generic [ref=e101]: Sent
+                - button "36 Failed" [ref=e102] [cursor=pointer]:
+                  - generic [ref=e103]: "36"
+                  - generic [ref=e104]: Failed
+                - button "37 Blocked" [ref=e105] [cursor=pointer]:
+                  - generic [ref=e106]: "37"
+                  - generic [ref=e107]: Blocked
+                - generic "Counts reflect the entire selected date range" [ref=e108]: Last 7d range
+              - generic "Queue flow" [ref=e109]:
+                - button "0 Scheduled" [ref=e111] [cursor=pointer]:
+                  - generic [ref=e112]: "0"
+                  - generic [ref=e113]: Scheduled
+                - generic [ref=e114]:
+                  - generic [ref=e115]: →
+                  - button "0 Queued" [ref=e116] [cursor=pointer]:
+                    - generic [ref=e117]: "0"
+                    - generic [ref=e118]: Queued
+                - generic [ref=e119]:
+                  - generic [ref=e120]: →
+                  - button "0 Sending" [ref=e121] [cursor=pointer]:
+                    - generic [ref=e122]: "0"
+                    - generic [ref=e123]: Sending
+                - generic [ref=e124]:
+                  - generic [ref=e125]: →
+                  - button "189 Sent" [ref=e126] [cursor=pointer]:
+                    - generic [ref=e127]: "189"
+                    - generic [ref=e128]: Sent
+                - generic [ref=e129]:
+                  - generic [ref=e130]: →
+                  - button "135 Delivered" [ref=e131] [cursor=pointer]:
+                    - generic [ref=e132]: "135"
+                    - generic [ref=e133]: Delivered
+                - generic [ref=e134]: "|"
+                - button "Failed 36" [ref=e135] [cursor=pointer]
+                - button "Blocked 37" [ref=e136] [cursor=pointer]
+                - button "Approval 0" [ref=e137] [cursor=pointer]
+                - button "Opt-Out 0" [ref=e138] [cursor=pointer]
+            - generic [ref=e139]:
+              - tablist "Queue command views" [ref=e140]:
+                - tab "Queue Rows" [selected] [ref=e141] [cursor=pointer]:
+                  - img [ref=e142]
+                  - generic [ref=e144]: Queue Rows
+                - tab "Templates 1" [ref=e145] [cursor=pointer]:
+                  - img [ref=e146]
+                  - generic [ref=e149]: Templates
+                  - generic [ref=e150]: "1"
+                - tab "Sender Fleet 7" [ref=e151] [cursor=pointer]:
+                  - img [ref=e152]
+                  - generic [ref=e154]: Sender Fleet
+                  - generic [ref=e155]: "7"
+                - tab "Market Health 18" [ref=e156] [cursor=pointer]:
+                  - generic [ref=e157]: Market Health
+                  - generic [ref=e158]: "18"
+                - tab "Failure Taxonomy 36" [ref=e159] [cursor=pointer]:
+                  - img [ref=e160]
+                  - generic [ref=e163]: Failure Taxonomy
+                  - generic [ref=e164]: "36"
+                - tab "Event Timeline" [ref=e165] [cursor=pointer]:
+                  - img [ref=e166]
+                  - generic [ref=e168]: Event Timeline
+              - generic [ref=e169]:
+                - generic [ref=e170]: Date basis
+                - combobox "Date basis" [ref=e171] [cursor=pointer]:
+                  - option "Created" [selected]
+                  - option "Scheduled"
+                  - option "Updated"
+            - generic [ref=e172]:
+              - generic [ref=e173]:
+                - generic [ref=e174]:
+                  - group "Table density" [ref=e175]:
+                    - button "Comfortable" [ref=e176] [cursor=pointer]
+                    - button "Compact" [ref=e177] [cursor=pointer]
+                    - button "Command" [ref=e178] [cursor=pointer]
+                  - generic [ref=e179]:
+                    - button "All 1,791" [ref=e180] [cursor=pointer]:
+                      - text: All
+                      - generic [ref=e181]: 1,791
+                    - button "Scheduled" [ref=e182] [cursor=pointer]
+                    - button "Queued" [ref=e183] [cursor=pointer]
+                    - button "Sending" [ref=e184] [cursor=pointer]
+                    - button "Approval" [ref=e185] [cursor=pointer]
+                    - button "Failed 36" [ref=e186] [cursor=pointer]:
+                      - text: Failed
+                      - generic [ref=e187]: "36"
+                    - button "Blocked 37" [ref=e188] [cursor=pointer]:
+                      - text: Blocked
+                      - generic [ref=e189]: "37"
+                    - button "Delivered 135" [ref=e190] [cursor=pointer]:
+                      - text: Delivered
+                      - generic [ref=e191]: "135"
+                    - button "Sent 189" [ref=e192] [cursor=pointer]:
+                      - text: Sent
+                      - generic [ref=e193]: "189"
+                  - generic [ref=e194]:
+                    - combobox [ref=e195] [cursor=pointer]:
+                      - option "All Markets" [selected]
+                      - option "Atlanta, GA"
+                      - option "Austin, TX"
+                      - option "Charlotte, NC"
+                      - option "Chicago, IL"
+                      - option "Cleveland, OH"
+                      - option "Houston, TX"
+                      - option "Kansas City, MO"
+                      - option "Market unknown"
+                      - option "Memphis, TN"
+                      - option "Minneapolis, MN"
+                      - option "Phoenix, AZ"
+                      - option "Providence, RI"
+                      - option "Spokane, WA"
+                      - option "Tulsa, OK"
+                    - combobox [ref=e196] [cursor=pointer]:
+                      - option "All Templates" [selected]
+                      - option "manual_reply"
+                      - option "ownership_check"
+                    - combobox [ref=e197] [cursor=pointer]:
+                      - option "All Senders" [selected]
+                      - option "…8577"
+                      - option "…9881"
+                      - option "…1600"
+                      - option "…0588"
+                      - option "…0495"
+                      - option "…2999"
+                      - option "…9889"
+                  - searchbox "Search seller, property, campaign…" [ref=e198]
+                - button "Exceptions · 2▸" [ref=e200] [cursor=pointer]
+                - generic [ref=e201]:
+                  - generic "Select all on page" [ref=e202] [cursor=pointer]:
+                    - checkbox "Select all visible rows" [ref=e203]
+                  - generic [ref=e204]: Seller / Property
+                  - generic [ref=e205]: Stage / Touch
+                  - generic [ref=e206]: Campaign / Market
+                  - generic [ref=e207]: Template
+                  - generic [ref=e208]: From
+                  - generic [ref=e209]: Scheduled
+                  - generic [ref=e210]: Status
+                  - generic [ref=e211]: Failure Cause
+                  - generic [ref=e212]: Last Event
+                - generic [ref=e213]:
+                  - generic [ref=e215] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e217]
+                    - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e218]:
+                      - generic "Unknown owner" [ref=e219]:
+                        - generic [ref=e220]:
+                          - img [ref=e222]
+                          - strong [ref=e225]: Unknown owner
+                          - generic [ref=e226]: …3651
+                          - generic "Contact blocked" [ref=e227]
+                        - generic [ref=e228]: No property linked
+                      - generic [ref=e229]:
+                        - generic [ref=e230]: Ownership Confirmation
+                        - generic [ref=e231]: Touch 1 · manual_reply
+                      - generic [ref=e232]:
+                        - generic [ref=e233]: manual_reply
+                        - generic [ref=e234]: Market unknown
+                      - generic "Manual Reply" [ref=e235]:
+                        - generic [ref=e236]: Manual Reply
+                        - generic [ref=e237]: EN
+                      - generic [ref=e238]:
+                        - generic [ref=e239]: …0588
+                        - generic [ref=e240]: Market unkno…
+                      - generic "6/24/2026, 9:18:00 PM" [ref=e241]:
+                        - generic [ref=e242]: 3h ago
+                        - generic [ref=e243]: Chicago
+                      - generic [ref=e245]: Delivered
+                      - generic [ref=e247]: —
+                      - generic [ref=e248]: —
+                    - button "Expand row" [ref=e249]:
+                      - img [ref=e250]
+                  - generic [ref=e253] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e255]
+                    - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e256]:
+                      - generic "Unknown owner" [ref=e257]:
+                        - generic [ref=e258]:
+                          - img [ref=e260]
+                          - strong [ref=e263]: Unknown owner
+                          - generic [ref=e264]: …3651
+                          - generic "Contact blocked" [ref=e265]
+                        - generic [ref=e266]: No property linked
+                      - generic [ref=e267]:
+                        - generic [ref=e268]: Ownership Confirmation
+                        - generic [ref=e269]: Touch 1 · manual_reply
+                      - generic [ref=e270]:
+                        - generic [ref=e271]: manual_reply
+                        - generic [ref=e272]: Market unknown
+                      - generic "Manual Reply" [ref=e273]:
+                        - generic [ref=e274]: Manual Reply
+                        - generic [ref=e275]: EN
+                      - generic [ref=e276]:
+                        - generic [ref=e277]: …0588
+                        - generic [ref=e278]: Market unkno…
+                      - generic "6/24/2026, 9:06:56 PM" [ref=e279]:
+                        - generic [ref=e280]: 3h ago
+                        - generic [ref=e281]: Chicago
+                      - generic [ref=e283]: Delivered
+                      - generic [ref=e285]: —
+                      - generic [ref=e286]: —
+                    - button "Expand row" [ref=e287]:
+                      - img [ref=e288]
+                  - generic [ref=e291] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e293]
+                    - button "Unknown owner …3651 Contact blocked No property linked Ownership Confirmation Touch 1 · manual_reply manual_reply Market unknown Manual Reply EN …0588 Market unkno… 3h ago Chicago Delivered — —" [ref=e294]:
+                      - generic "Unknown owner" [ref=e295]:
+                        - generic [ref=e296]:
+                          - img [ref=e298]
+                          - strong [ref=e301]: Unknown owner
+                          - generic [ref=e302]: …3651
+                          - generic "Contact blocked" [ref=e303]
+                        - generic [ref=e304]: No property linked
+                      - generic [ref=e305]:
+                        - generic [ref=e306]: Ownership Confirmation
+                        - generic [ref=e307]: Touch 1 · manual_reply
+                      - generic [ref=e308]:
+                        - generic [ref=e309]: manual_reply
+                        - generic [ref=e310]: Market unknown
+                      - generic "Manual Reply" [ref=e311]:
+                        - generic [ref=e312]: Manual Reply
+                        - generic [ref=e313]: EN
+                      - generic [ref=e314]:
+                        - generic [ref=e315]: …0588
+                        - generic [ref=e316]: Market unkno…
+                      - generic "6/24/2026, 9:06:33 PM" [ref=e317]:
+                        - generic [ref=e318]: 3h ago
+                        - generic [ref=e319]: Chicago
+                      - generic [ref=e321]: Delivered
+                      - generic [ref=e323]: —
+                      - generic [ref=e324]: —
+                    - button "Expand row" [ref=e325]:
+                      - img [ref=e326]
+                  - generic [ref=e329] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e331]
+                    - button "Unknown owner …4559 Contact blocked 5227 N Crestline St Spokane, WA · listing Ownership Confirmation Touch 1 · listing listing Spokane, WA Manual Reply EN …9881 Spokane, WA 4h ago Chicago Delivered — —" [ref=e332]:
+                      - generic "Unknown owner" [ref=e333]:
+                        - generic [ref=e334]:
+                          - img [ref=e336]
+                          - strong [ref=e339]: Unknown owner
+                          - generic [ref=e340]: …4559
+                          - generic "Contact blocked" [ref=e341]
+                        - generic [ref=e342]: 5227 N Crestline St
+                        - generic [ref=e343]: Spokane, WA · listing
+                      - generic [ref=e344]:
+                        - generic [ref=e345]: Ownership Confirmation
+                        - generic [ref=e346]: Touch 1 · listing
+                      - generic [ref=e347]:
+                        - generic [ref=e348]: listing
+                        - generic [ref=e349]: Spokane, WA
+                      - generic "Manual Reply" [ref=e350]:
+                        - generic [ref=e351]: Manual Reply
+                        - generic [ref=e352]: EN
+                      - generic [ref=e353]:
+                        - generic [ref=e354]: …9881
+                        - generic [ref=e355]: Spokane, WA
+                      - generic "6/24/2026, 8:10:31 PM" [ref=e356]:
+                        - generic [ref=e357]: 4h ago
+                        - generic [ref=e358]: Chicago
+                      - generic [ref=e360]: Delivered
+                      - generic [ref=e362]: —
+                      - generic [ref=e363]: —
+                    - button "Expand row" [ref=e364]:
+                      - img [ref=e365]
+                  - generic [ref=e368] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e370]
+                    - button "Unknown owner …2083 Contact blocked 1248 Salem St Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 4h ago Chicago · overdue Scheduled — —" [ref=e371]:
+                      - generic "Unknown owner" [ref=e372]:
+                        - generic [ref=e373]:
+                          - img [ref=e375]
+                          - strong [ref=e378]: Unknown owner
+                          - generic [ref=e379]: …2083
+                          - generic "Contact blocked" [ref=e380]
+                        - generic [ref=e381]: 1248 Salem St
+                        - generic [ref=e382]: Memphis, TN · listing
+                      - generic [ref=e383]:
+                        - generic [ref=e384]: Ownership Confirmation
+                        - generic [ref=e385]: Touch 1 · listing
+                      - generic [ref=e386]:
+                        - generic [ref=e387]: listing
+                        - generic [ref=e388]: Memphis, TN
+                      - generic "Manual Reply" [ref=e389]:
+                        - generic [ref=e390]: Manual Reply
+                        - generic [ref=e391]: EN
+                      - generic [ref=e392]:
+                        - generic [ref=e393]: …0588
+                        - generic [ref=e394]: Memphis, TN
+                      - generic "6/24/2026, 8:00:31 PM" [ref=e395]:
+                        - generic [ref=e396]: 4h ago
+                        - generic [ref=e397]: Chicago · overdue
+                      - generic [ref=e399]: Scheduled
+                      - generic [ref=e401]: —
+                      - generic [ref=e402]: —
+                    - button "Expand row" [ref=e403]:
+                      - img [ref=e404]
+                  - generic [ref=e407] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e409]
+                    - button "Unknown owner …8537 Contact blocked 1944 S 109th Ave E Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 4h ago Chicago Delivered — —" [ref=e410]:
+                      - generic "Unknown owner" [ref=e411]:
+                        - generic [ref=e412]:
+                          - img [ref=e414]
+                          - strong [ref=e417]: Unknown owner
+                          - generic [ref=e418]: …8537
+                          - generic "Contact blocked" [ref=e419]
+                        - generic [ref=e420]: 1944 S 109th Ave E
+                        - generic [ref=e421]: Tulsa, OK · listing
+                      - generic [ref=e422]:
+                        - generic [ref=e423]: Ownership Confirmation
+                        - generic [ref=e424]: Touch 1 · listing
+                      - generic [ref=e425]:
+                        - generic [ref=e426]: listing
+                        - generic [ref=e427]: Tulsa, OK
+                      - generic "Manual Reply" [ref=e428]:
+                        - generic [ref=e429]: Manual Reply
+                        - generic [ref=e430]: EN
+                      - generic [ref=e431]:
+                        - generic [ref=e432]: …1600
+                        - generic [ref=e433]: Tulsa, OK
+                      - generic "6/24/2026, 7:50:31 PM" [ref=e434]:
+                        - generic [ref=e435]: 4h ago
+                        - generic [ref=e436]: Chicago
+                      - generic [ref=e438]: Delivered
+                      - generic [ref=e440]: —
+                      - generic [ref=e441]: —
+                    - button "Expand row" [ref=e442]:
+                      - img [ref=e443]
+                  - generic [ref=e446] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e448]
+                    - button "Unknown owner …3651 Contact blocked 4381 Sterling Forest Dr Decatur, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA Manual Reply EN …0588 Atlanta, GA 4h ago Chicago Delivered — —" [ref=e449]:
+                      - generic "Unknown owner" [ref=e450]:
+                        - generic [ref=e451]:
+                          - img [ref=e453]
+                          - strong [ref=e456]: Unknown owner
+                          - generic [ref=e457]: …3651
+                          - generic "Contact blocked" [ref=e458]
+                        - generic [ref=e459]: 4381 Sterling Forest Dr
+                        - generic [ref=e460]: Decatur, GA · listing
+                      - generic [ref=e461]:
+                        - generic [ref=e462]: Ownership Confirmation
+                        - generic [ref=e463]: Touch 1 · listing
+                      - generic [ref=e464]:
+                        - generic [ref=e465]: listing
+                        - generic [ref=e466]: Atlanta, GA
+                      - generic "Manual Reply" [ref=e467]:
+                        - generic [ref=e468]: Manual Reply
+                        - generic [ref=e469]: EN
+                      - generic [ref=e470]:
+                        - generic [ref=e471]: …0588
+                        - generic [ref=e472]: Atlanta, GA
+                      - generic "6/24/2026, 7:40:31 PM" [ref=e473]:
+                        - generic [ref=e474]: 4h ago
+                        - generic [ref=e475]: Chicago
+                      - generic [ref=e477]: Delivered
+                      - generic [ref=e479]: —
+                      - generic [ref=e480]: —
+                    - button "Expand row" [ref=e481]:
+                      - img [ref=e482]
+                  - generic [ref=e485] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e487]
+                    - button "Unknown owner …9710 Contact blocked 131 13th Ave N South Saint Paul, MN · listing Ownership Confirmation Touch 1 · listing listing Cleveland, OH Manual Reply EN …0495 Cleveland, O… 5h ago Chicago Delivered — —" [ref=e488]:
+                      - generic "Unknown owner" [ref=e489]:
+                        - generic [ref=e490]:
+                          - img [ref=e492]
+                          - strong [ref=e495]: Unknown owner
+                          - generic [ref=e496]: …9710
+                          - generic "Contact blocked" [ref=e497]
+                        - generic [ref=e498]: 131 13th Ave N
+                        - generic [ref=e499]: South Saint Paul, MN · listing
+                      - generic [ref=e500]:
+                        - generic [ref=e501]: Ownership Confirmation
+                        - generic [ref=e502]: Touch 1 · listing
+                      - generic [ref=e503]:
+                        - generic [ref=e504]: listing
+                        - generic [ref=e505]: Cleveland, OH
+                      - generic "Manual Reply" [ref=e506]:
+                        - generic [ref=e507]: Manual Reply
+                        - generic [ref=e508]: EN
+                      - generic [ref=e509]:
+                        - generic [ref=e510]: …0495
+                        - generic [ref=e511]: Cleveland, O…
+                      - generic "6/24/2026, 7:20:31 PM" [ref=e512]:
+                        - generic [ref=e513]: 5h ago
+                        - generic [ref=e514]: Chicago
+                      - generic [ref=e516]: Delivered
+                      - generic [ref=e518]: —
+                      - generic [ref=e519]: —
+                    - button "Expand row" [ref=e520]:
+                      - img [ref=e521]
+                  - generic [ref=e524] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e526]
+                    - button "Unknown owner …2289 Contact blocked 871 Dill Ave Sw Atlanta, GA · listing Ownership Confirmation Touch 1 · listing listing Atlanta, GA Manual Reply EN …0588 Atlanta, GA 5h ago Chicago Delivered — —" [ref=e527]:
+                      - generic "Unknown owner" [ref=e528]:
+                        - generic [ref=e529]:
+                          - img [ref=e531]
+                          - strong [ref=e534]: Unknown owner
+                          - generic [ref=e535]: …2289
+                          - generic "Contact blocked" [ref=e536]
+                        - generic [ref=e537]: 871 Dill Ave Sw
+                        - generic [ref=e538]: Atlanta, GA · listing
+                      - generic [ref=e539]:
+                        - generic [ref=e540]: Ownership Confirmation
+                        - generic [ref=e541]: Touch 1 · listing
+                      - generic [ref=e542]:
+                        - generic [ref=e543]: listing
+                        - generic [ref=e544]: Atlanta, GA
+                      - generic "Manual Reply" [ref=e545]:
+                        - generic [ref=e546]: Manual Reply
+                        - generic [ref=e547]: EN
+                      - generic [ref=e548]:
+                        - generic [ref=e549]: …0588
+                        - generic [ref=e550]: Atlanta, GA
+                      - generic "6/24/2026, 7:10:31 PM" [ref=e551]:
+                        - generic [ref=e552]: 5h ago
+                        - generic [ref=e553]: Chicago
+                      - generic [ref=e555]: Delivered
+                      - generic [ref=e557]: —
+                      - generic [ref=e558]: —
+                    - button "Expand row" [ref=e559]:
+                      - img [ref=e560]
+                  - generic [ref=e563] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e565]
+                    - button "Unknown owner …5085 Contact blocked 93 Whitman St Pawtucket, RI · listing Ownership Confirmation Touch 1 · listing listing Providence, RI Manual Reply EN …2999 Providence, … 5h ago Chicago Paused Name Missing blank_greeting_textgri… blank_greeting_tex… —" [ref=e566]:
+                      - generic "Unknown owner" [ref=e567]:
+                        - generic [ref=e568]:
+                          - img [ref=e570]
+                          - strong [ref=e573]: Unknown owner
+                          - generic [ref=e574]: …5085
+                          - generic "Contact blocked" [ref=e575]
+                        - generic [ref=e576]: 93 Whitman St
+                        - generic [ref=e577]: Pawtucket, RI · listing
+                      - generic [ref=e578]:
+                        - generic [ref=e579]: Ownership Confirmation
+                        - generic [ref=e580]: Touch 1 · listing
+                      - generic [ref=e581]:
+                        - generic [ref=e582]: listing
+                        - generic [ref=e583]: Providence, RI
+                      - generic "Manual Reply" [ref=e584]:
+                        - generic [ref=e585]: Manual Reply
+                        - generic [ref=e586]: EN
+                      - generic [ref=e587]:
+                        - generic [ref=e588]: …2999
+                        - generic [ref=e589]: Providence, …
+                      - generic "6/24/2026, 7:01:22 PM" [ref=e590]:
+                        - generic [ref=e591]: 5h ago
+                        - generic [ref=e592]: Chicago
+                      - generic [ref=e593]:
+                        - generic [ref=e594]: Paused Name Missing
+                        - generic [ref=e595]: blank_greeting_textgri…
+                      - generic [ref=e597]: blank_greeting_tex…
+                      - generic [ref=e598]: —
+                    - button "Expand row" [ref=e599]:
+                      - img [ref=e600]
+                  - generic [ref=e603] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e605]
+                    - button "Unknown owner …9431 Contact blocked 775 Pickering St Houston, TX · listing Ownership Confirmation Touch 1 · listing listing Houston, TX Manual Reply EN …8577 Houston, TX 6h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e606]:
+                      - generic "Unknown owner" [ref=e607]:
+                        - generic [ref=e608]:
+                          - img [ref=e610]
+                          - strong [ref=e613]: Unknown owner
+                          - generic [ref=e614]: …9431
+                          - generic "Contact blocked" [ref=e615]
+                        - generic [ref=e616]: 775 Pickering St
+                        - generic [ref=e617]: Houston, TX · listing
+                      - generic [ref=e618]:
+                        - generic [ref=e619]: Ownership Confirmation
+                        - generic [ref=e620]: Touch 1 · listing
+                      - generic [ref=e621]:
+                        - generic [ref=e622]: listing
+                        - generic [ref=e623]: Houston, TX
+                      - generic "Manual Reply" [ref=e624]:
+                        - generic [ref=e625]: Manual Reply
+                        - generic [ref=e626]: EN
+                      - generic [ref=e627]:
+                        - generic [ref=e628]: …8577
+                        - generic [ref=e629]: Houston, TX
+                      - generic "6/24/2026, 5:40:31 PM" [ref=e630]:
+                        - generic [ref=e631]: 6h ago
+                        - generic [ref=e632]: Chicago
+                      - generic [ref=e633]:
+                        - generic [ref=e634]: Failed
+                        - generic [ref=e635]: Blacklist Rule (21610)
+                      - generic [ref=e637]: Blacklist Rule (21…
+                      - generic [ref=e638]: —
+                    - button "Expand row" [ref=e639]:
+                      - img [ref=e640]
+                  - generic [ref=e643] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e645]
+                    - button "Unknown owner …0451 Contact blocked 662 Troy St Durham, NC · listing Ownership Confirmation Touch 1 · listing listing Charlotte, NC Manual Reply EN …9889 Charlotte, N… 6h ago Chicago Failed Blacklist Rule (21610) Blacklist Rule (21… —" [ref=e646]:
+                      - generic "Unknown owner" [ref=e647]:
+                        - generic [ref=e648]:
+                          - img [ref=e650]
+                          - strong [ref=e653]: Unknown owner
+                          - generic [ref=e654]: …0451
+                          - generic "Contact blocked" [ref=e655]
+                        - generic [ref=e656]: 662 Troy St
+                        - generic [ref=e657]: Durham, NC · listing
+                      - generic [ref=e658]:
+                        - generic [ref=e659]: Ownership Confirmation
+                        - generic [ref=e660]: Touch 1 · listing
+                      - generic [ref=e661]:
+                        - generic [ref=e662]: listing
+                        - generic [ref=e663]: Charlotte, NC
+                      - generic "Manual Reply" [ref=e664]:
+                        - generic [ref=e665]: Manual Reply
+                        - generic [ref=e666]: EN
+                      - generic [ref=e667]:
+                        - generic [ref=e668]: …9889
+                        - generic [ref=e669]: Charlotte, N…
+                      - generic "6/24/2026, 5:30:31 PM" [ref=e670]:
+                        - generic [ref=e671]: 6h ago
+                        - generic [ref=e672]: Chicago
+                      - generic [ref=e673]:
+                        - generic [ref=e674]: Failed
+                        - generic [ref=e675]: Blacklist Rule (21610)
+                      - generic [ref=e677]: Blacklist Rule (21…
+                      - generic [ref=e678]: —
+                    - button "Expand row" [ref=e679]:
+                      - img [ref=e680]
+                  - generic [ref=e683] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e685]
+                    - button "Unknown owner …9735 Contact blocked 8101 W Catalina Dr Phoenix, AZ · listing Ownership Confirmation Touch 1 · listing listing Phoenix, AZ Manual Reply EN …9881 Phoenix, AZ 9h ago Chicago Delivered — —" [ref=e686]:
+                      - generic "Unknown owner" [ref=e687]:
+                        - generic [ref=e688]:
+                          - img [ref=e690]
+                          - strong [ref=e693]: Unknown owner
+                          - generic [ref=e694]: …9735
+                          - generic "Contact blocked" [ref=e695]
+                        - generic [ref=e696]: 8101 W Catalina Dr
+                        - generic [ref=e697]: Phoenix, AZ · listing
+                      - generic [ref=e698]:
+                        - generic [ref=e699]: Ownership Confirmation
+                        - generic [ref=e700]: Touch 1 · listing
+                      - generic [ref=e701]:
+                        - generic [ref=e702]: listing
+                        - generic [ref=e703]: Phoenix, AZ
+                      - generic "Manual Reply" [ref=e704]:
+                        - generic [ref=e705]: Manual Reply
+                        - generic [ref=e706]: EN
+                      - generic [ref=e707]:
+                        - generic [ref=e708]: …9881
+                        - generic [ref=e709]: Phoenix, AZ
+                      - generic "6/24/2026, 2:40:31 PM" [ref=e710]:
+                        - generic [ref=e711]: 9h ago
+                        - generic [ref=e712]: Chicago
+                      - generic [ref=e714]: Delivered
+                      - generic [ref=e716]: —
+                      - generic [ref=e717]: —
+                    - button "Expand row" [ref=e718]:
+                      - img [ref=e719]
+                  - generic [ref=e722] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e724]
+                    - button "Unknown owner …4066 Contact blocked 3237 Sweet Springs Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 10h ago Chicago Delivered — —" [ref=e725]:
+                      - generic "Unknown owner" [ref=e726]:
+                        - generic [ref=e727]:
+                          - img [ref=e729]
+                          - strong [ref=e732]: Unknown owner
+                          - generic [ref=e733]: …4066
+                          - generic "Contact blocked" [ref=e734]
+                        - generic [ref=e735]: 3237 Sweet Springs Dr
+                        - generic [ref=e736]: Memphis, TN · listing
+                      - generic [ref=e737]:
+                        - generic [ref=e738]: Ownership Confirmation
+                        - generic [ref=e739]: Touch 1 · listing
+                      - generic [ref=e740]:
+                        - generic [ref=e741]: listing
+                        - generic [ref=e742]: Memphis, TN
+                      - generic "Manual Reply" [ref=e743]:
+                        - generic [ref=e744]: Manual Reply
+                        - generic [ref=e745]: EN
+                      - generic [ref=e746]:
+                        - generic [ref=e747]: …0588
+                        - generic [ref=e748]: Memphis, TN
+                      - generic "6/24/2026, 1:50:31 PM" [ref=e749]:
+                        - generic [ref=e750]: 10h ago
+                        - generic [ref=e751]: Chicago
+                      - generic [ref=e753]: Delivered
+                      - generic [ref=e755]: —
+                      - generic [ref=e756]: —
+                    - button "Expand row" [ref=e757]:
+                      - img [ref=e758]
+                  - generic [ref=e761] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e763]
+                    - button "Unknown owner …7342 Contact blocked 1304 Crewler Cv Austin, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX Manual Reply EN …1600 Austin, TX 10h ago Chicago Delivered — —" [ref=e764]:
+                      - generic "Unknown owner" [ref=e765]:
+                        - generic [ref=e766]:
+                          - img [ref=e768]
+                          - strong [ref=e771]: Unknown owner
+                          - generic [ref=e772]: …7342
+                          - generic "Contact blocked" [ref=e773]
+                        - generic [ref=e774]: 1304 Crewler Cv
+                        - generic [ref=e775]: Austin, TX · listing
+                      - generic [ref=e776]:
+                        - generic [ref=e777]: Ownership Confirmation
+                        - generic [ref=e778]: Touch 1 · listing
+                      - generic [ref=e779]:
+                        - generic [ref=e780]: listing
+                        - generic [ref=e781]: Austin, TX
+                      - generic "Manual Reply" [ref=e782]:
+                        - generic [ref=e783]: Manual Reply
+                        - generic [ref=e784]: EN
+                      - generic [ref=e785]:
+                        - generic [ref=e786]: …1600
+                        - generic [ref=e787]: Austin, TX
+                      - generic "6/24/2026, 1:40:31 PM" [ref=e788]:
+                        - generic [ref=e789]: 10h ago
+                        - generic [ref=e790]: Chicago
+                      - generic [ref=e792]: Delivered
+                      - generic [ref=e794]: —
+                      - generic [ref=e795]: —
+                    - button "Expand row" [ref=e796]:
+                      - img [ref=e797]
+                  - generic [ref=e800] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e802]
+                    - button "Unknown owner …8370 Contact blocked 1140 Lafayette Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 10h ago Chicago Delivered — —" [ref=e803]:
+                      - generic "Unknown owner" [ref=e804]:
+                        - generic [ref=e805]:
+                          - img [ref=e807]
+                          - strong [ref=e810]: Unknown owner
+                          - generic [ref=e811]: …8370
+                          - generic "Contact blocked" [ref=e812]
+                        - generic [ref=e813]: 1140 Lafayette Ave
+                        - generic [ref=e814]: Kansas City, KS · listing
+                      - generic [ref=e815]:
+                        - generic [ref=e816]: Ownership Confirmation
+                        - generic [ref=e817]: Touch 1 · listing
+                      - generic [ref=e818]:
+                        - generic [ref=e819]: listing
+                        - generic [ref=e820]: Kansas City, M…
+                      - generic "Manual Reply" [ref=e821]:
+                        - generic [ref=e822]: Manual Reply
+                        - generic [ref=e823]: EN
+                      - generic [ref=e824]:
+                        - generic [ref=e825]: …1600
+                        - generic [ref=e826]: Kansas City,…
+                      - generic "6/24/2026, 1:30:31 PM" [ref=e827]:
+                        - generic [ref=e828]: 10h ago
+                        - generic [ref=e829]: Chicago
+                      - generic [ref=e831]: Delivered
+                      - generic [ref=e833]: —
+                      - generic [ref=e834]: —
+                    - button "Expand row" [ref=e835]:
+                      - img [ref=e836]
+                  - generic [ref=e839] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e841]
+                    - button "Unknown owner …4744 Contact blocked 1041 Ella Ave Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 11h ago Chicago Delivered — —" [ref=e842]:
+                      - generic "Unknown owner" [ref=e843]:
+                        - generic [ref=e844]:
+                          - img [ref=e846]
+                          - strong [ref=e849]: Unknown owner
+                          - generic [ref=e850]: …4744
+                          - generic "Contact blocked" [ref=e851]
+                        - generic [ref=e852]: 1041 Ella Ave
+                        - generic [ref=e853]: Kansas City, KS · listing
+                      - generic [ref=e854]:
+                        - generic [ref=e855]: Ownership Confirmation
+                        - generic [ref=e856]: Touch 1 · listing
+                      - generic [ref=e857]:
+                        - generic [ref=e858]: listing
+                        - generic [ref=e859]: Kansas City, M…
+                      - generic "Manual Reply" [ref=e860]:
+                        - generic [ref=e861]: Manual Reply
+                        - generic [ref=e862]: EN
+                      - generic [ref=e863]:
+                        - generic [ref=e864]: …1600
+                        - generic [ref=e865]: Kansas City,…
+                      - generic "6/24/2026, 1:20:31 PM" [ref=e866]:
+                        - generic [ref=e867]: 11h ago
+                        - generic [ref=e868]: Chicago
+                      - generic [ref=e870]: Delivered
+                      - generic [ref=e872]: —
+                      - generic [ref=e873]: —
+                    - button "Expand row" [ref=e874]:
+                      - img [ref=e875]
+                  - generic [ref=e878] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e880]
+                    - button "Unknown owner …3462 Contact blocked 203 N 15th St Kansas City, KS · listing Ownership Confirmation Touch 1 · listing listing Kansas City, M… Manual Reply EN …1600 Kansas City,… 11h ago Chicago Delivered — —" [ref=e881]:
+                      - generic "Unknown owner" [ref=e882]:
+                        - generic [ref=e883]:
+                          - img [ref=e885]
+                          - strong [ref=e888]: Unknown owner
+                          - generic [ref=e889]: …3462
+                          - generic "Contact blocked" [ref=e890]
+                        - generic [ref=e891]: 203 N 15th St
+                        - generic [ref=e892]: Kansas City, KS · listing
+                      - generic [ref=e893]:
+                        - generic [ref=e894]: Ownership Confirmation
+                        - generic [ref=e895]: Touch 1 · listing
+                      - generic [ref=e896]:
+                        - generic [ref=e897]: listing
+                        - generic [ref=e898]: Kansas City, M…
+                      - generic "Manual Reply" [ref=e899]:
+                        - generic [ref=e900]: Manual Reply
+                        - generic [ref=e901]: EN
+                      - generic [ref=e902]:
+                        - generic [ref=e903]: …1600
+                        - generic [ref=e904]: Kansas City,…
+                      - generic "6/24/2026, 1:10:31 PM" [ref=e905]:
+                        - generic [ref=e906]: 11h ago
+                        - generic [ref=e907]: Chicago
+                      - generic [ref=e909]: Delivered
+                      - generic [ref=e911]: —
+                      - generic [ref=e912]: —
+                    - button "Expand row" [ref=e913]:
+                      - img [ref=e914]
+                  - generic [ref=e917] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e919]
+                    - button "Unknown owner …7790 Contact blocked 2107 Willow Way Round Rock, TX · listing Ownership Confirmation Touch 1 · listing listing Austin, TX Manual Reply EN …1600 Austin, TX 11h ago Chicago · overdue Scheduled — —" [ref=e920]:
+                      - generic "Unknown owner" [ref=e921]:
+                        - generic [ref=e922]:
+                          - img [ref=e924]
+                          - strong [ref=e927]: Unknown owner
+                          - generic [ref=e928]: …7790
+                          - generic "Contact blocked" [ref=e929]
+                        - generic [ref=e930]: 2107 Willow Way
+                        - generic [ref=e931]: Round Rock, TX · listing
+                      - generic [ref=e932]:
+                        - generic [ref=e933]: Ownership Confirmation
+                        - generic [ref=e934]: Touch 1 · listing
+                      - generic [ref=e935]:
+                        - generic [ref=e936]: listing
+                        - generic [ref=e937]: Austin, TX
+                      - generic "Manual Reply" [ref=e938]:
+                        - generic [ref=e939]: Manual Reply
+                        - generic [ref=e940]: EN
+                      - generic [ref=e941]:
+                        - generic [ref=e942]: …1600
+                        - generic [ref=e943]: Austin, TX
+                      - generic "6/24/2026, 1:00:31 PM" [ref=e944]:
+                        - generic [ref=e945]: 11h ago
+                        - generic [ref=e946]: Chicago · overdue
+                      - generic [ref=e948]: Scheduled
+                      - generic [ref=e950]: —
+                      - generic [ref=e951]: —
+                    - button "Expand row" [ref=e952]:
+                      - img [ref=e953]
+                  - generic [ref=e956] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e958]
+                    - button "Unknown owner …5959 Contact blocked 442 E 90th St Chicago, IL · listing Ownership Confirmation Touch 1 · listing listing Chicago, IL Manual Reply EN …0495 Chicago, IL 11h ago Chicago Delivered — —" [ref=e959]:
+                      - generic "Unknown owner" [ref=e960]:
+                        - generic [ref=e961]:
+                          - img [ref=e963]
+                          - strong [ref=e966]: Unknown owner
+                          - generic [ref=e967]: …5959
+                          - generic "Contact blocked" [ref=e968]
+                        - generic [ref=e969]: 442 E 90th St
+                        - generic [ref=e970]: Chicago, IL · listing
+                      - generic [ref=e971]:
+                        - generic [ref=e972]: Ownership Confirmation
+                        - generic [ref=e973]: Touch 1 · listing
+                      - generic [ref=e974]:
+                        - generic [ref=e975]: listing
+                        - generic [ref=e976]: Chicago, IL
+                      - generic "Manual Reply" [ref=e977]:
+                        - generic [ref=e978]: Manual Reply
+                        - generic [ref=e979]: EN
+                      - generic [ref=e980]:
+                        - generic [ref=e981]: …0495
+                        - generic [ref=e982]: Chicago, IL
+                      - generic "6/24/2026, 12:50:31 PM" [ref=e983]:
+                        - generic [ref=e984]: 11h ago
+                        - generic [ref=e985]: Chicago
+                      - generic [ref=e987]: Delivered
+                      - generic [ref=e989]: —
+                      - generic [ref=e990]: —
+                    - button "Expand row" [ref=e991]:
+                      - img [ref=e992]
+                  - generic [ref=e995] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e997]
+                    - button "Unknown owner …0122 Contact blocked 1826 Baldwin Ave Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 11h ago Chicago Delivered — —" [ref=e998]:
+                      - generic "Unknown owner" [ref=e999]:
+                        - generic [ref=e1000]:
+                          - img [ref=e1002]
+                          - strong [ref=e1005]: Unknown owner
+                          - generic [ref=e1006]: …0122
+                          - generic "Contact blocked" [ref=e1007]
+                        - generic [ref=e1008]: 1826 Baldwin Ave
+                        - generic [ref=e1009]: Memphis, TN · listing
+                      - generic [ref=e1010]:
+                        - generic [ref=e1011]: Ownership Confirmation
+                        - generic [ref=e1012]: Touch 1 · listing
+                      - generic [ref=e1013]:
+                        - generic [ref=e1014]: listing
+                        - generic [ref=e1015]: Memphis, TN
+                      - generic "Manual Reply" [ref=e1016]:
+                        - generic [ref=e1017]: Manual Reply
+                        - generic [ref=e1018]: EN
+                      - generic [ref=e1019]:
+                        - generic [ref=e1020]: …0588
+                        - generic [ref=e1021]: Memphis, TN
+                      - generic "6/24/2026, 12:40:31 PM" [ref=e1022]:
+                        - generic [ref=e1023]: 11h ago
+                        - generic [ref=e1024]: Chicago
+                      - generic [ref=e1026]: Delivered
+                      - generic [ref=e1028]: —
+                      - generic [ref=e1029]: —
+                    - button "Expand row" [ref=e1030]:
+                      - img [ref=e1031]
+                  - generic [ref=e1034] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e1036]
+                    - button "Unknown owner …5725 Contact blocked 4242 Coventry Dr Memphis, TN · listing Ownership Confirmation Touch 1 · listing listing Memphis, TN Manual Reply EN …0588 Memphis, TN 11h ago Chicago Delivered — —" [ref=e1037]:
+                      - generic "Unknown owner" [ref=e1038]:
+                        - generic [ref=e1039]:
+                          - img [ref=e1041]
+                          - strong [ref=e1044]: Unknown owner
+                          - generic [ref=e1045]: …5725
+                          - generic "Contact blocked" [ref=e1046]
+                        - generic [ref=e1047]: 4242 Coventry Dr
+                        - generic [ref=e1048]: Memphis, TN · listing
+                      - generic [ref=e1049]:
+                        - generic [ref=e1050]: Ownership Confirmation
+                        - generic [ref=e1051]: Touch 1 · listing
+                      - generic [ref=e1052]:
+                        - generic [ref=e1053]: listing
+                        - generic [ref=e1054]: Memphis, TN
+                      - generic "Manual Reply" [ref=e1055]:
+                        - generic [ref=e1056]: Manual Reply
+                        - generic [ref=e1057]: EN
+                      - generic [ref=e1058]:
+                        - generic [ref=e1059]: …0588
+                        - generic [ref=e1060]: Memphis, TN
+                      - generic "6/24/2026, 12:30:31 PM" [ref=e1061]:
+                        - generic [ref=e1062]: 11h ago
+                        - generic [ref=e1063]: Chicago
+                      - generic [ref=e1065]: Delivered
+                      - generic [ref=e1067]: —
+                      - generic [ref=e1068]: —
+                    - button "Expand row" [ref=e1069]:
+                      - img [ref=e1070]
+                  - generic [ref=e1073] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e1075]
+                    - button "Unknown owner …1329 Contact blocked 2312 5th St Ne Minneapolis, MN · listing Ownership Confirmation Touch 1 · listing listing Minneapolis, M… Manual Reply EN …0495 Minneapolis,… 12h ago Chicago Delivered — —" [ref=e1076]:
+                      - generic "Unknown owner" [ref=e1077]:
+                        - generic [ref=e1078]:
+                          - img [ref=e1080]
+                          - strong [ref=e1083]: Unknown owner
+                          - generic [ref=e1084]: …1329
+                          - generic "Contact blocked" [ref=e1085]
+                        - generic [ref=e1086]: 2312 5th St Ne
+                        - generic [ref=e1087]: Minneapolis, MN · listing
+                      - generic [ref=e1088]:
+                        - generic [ref=e1089]: Ownership Confirmation
+                        - generic [ref=e1090]: Touch 1 · listing
+                      - generic [ref=e1091]:
+                        - generic [ref=e1092]: listing
+                        - generic [ref=e1093]: Minneapolis, M…
+                      - generic "Manual Reply" [ref=e1094]:
+                        - generic [ref=e1095]: Manual Reply
+                        - generic [ref=e1096]: EN
+                      - generic [ref=e1097]:
+                        - generic [ref=e1098]: …0495
+                        - generic [ref=e1099]: Minneapolis,…
+                      - generic "6/24/2026, 12:20:31 PM" [ref=e1100]:
+                        - generic [ref=e1101]: 12h ago
+                        - generic [ref=e1102]: Chicago
+                      - generic [ref=e1104]: Delivered
+                      - generic [ref=e1106]: —
+                      - generic [ref=e1107]: —
+                    - button "Expand row" [ref=e1108]:
+                      - img [ref=e1109]
+                  - generic [ref=e1112] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e1114]
+                    - button "Unknown owner …8080 Contact blocked 4342 N Frankfort Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 12h ago Chicago Delivered — —" [ref=e1115]:
+                      - generic "Unknown owner" [ref=e1116]:
+                        - generic [ref=e1117]:
+                          - img [ref=e1119]
+                          - strong [ref=e1122]: Unknown owner
+                          - generic [ref=e1123]: …8080
+                          - generic "Contact blocked" [ref=e1124]
+                        - generic [ref=e1125]: 4342 N Frankfort Ave
+                        - generic [ref=e1126]: Tulsa, OK · listing
+                      - generic [ref=e1127]:
+                        - generic [ref=e1128]: Ownership Confirmation
+                        - generic [ref=e1129]: Touch 1 · listing
+                      - generic [ref=e1130]:
+                        - generic [ref=e1131]: listing
+                        - generic [ref=e1132]: Tulsa, OK
+                      - generic "Manual Reply" [ref=e1133]:
+                        - generic [ref=e1134]: Manual Reply
+                        - generic [ref=e1135]: EN
+                      - generic [ref=e1136]:
+                        - generic [ref=e1137]: …1600
+                        - generic [ref=e1138]: Tulsa, OK
+                      - generic "6/24/2026, 12:10:31 PM" [ref=e1139]:
+                        - generic [ref=e1140]: 12h ago
+                        - generic [ref=e1141]: Chicago
+                      - generic [ref=e1143]: Delivered
+                      - generic [ref=e1145]: —
+                      - generic [ref=e1146]: —
+                    - button "Expand row" [ref=e1147]:
+                      - img [ref=e1148]
+                  - generic [ref=e1151] [cursor=pointer]:
+                    - checkbox "Select Unknown owner" [ref=e1153]
+                    - button "Unknown owner …7660 Contact blocked 819 N Birmingham Ave Tulsa, OK · listing Ownership Confirmation Touch 1 · listing listing Tulsa, OK Manual Reply EN …1600 Tulsa, OK 12h ago Chicago Delivered — —" [ref=e1154]:
+                      - generic "Unknown owner" [ref=e1155]:
+                        - generic [ref=e1156]:
+                          - img [ref=e1158]
+                          - strong [ref=e1161]: Unknown owner
+                          - generic [ref=e1162]: …7660
+                          - generic "Contact blocked" [ref=e1163]
+                        - generic [ref=e1164]: 819 N Birmingham Ave
+                        - generic [ref=e1165]: Tulsa, OK · listing
+                      - generic [ref=e1166]:
+                        - generic [ref=e1167]: Ownership Confirmation
+                        - generic [ref=e1168]: Touch 1 · listing
+                      - generic [ref=e1169]:
+                        - generic [ref=e1170]: listing
+                        - generic [ref=e1171]: Tulsa, OK
+                      - generic "Manual Reply" [ref=e1172]:
+                        - generic [ref=e1173]: Manual Reply
+                        - generic [ref=e1174]: EN
+                      - generic [ref=e1175]:
+                        - generic [ref=e1176]: …1600
+                        - generic [ref=e1177]: Tulsa, OK
+                      - generic "6/24/2026, 12:00:31 PM" [ref=e1178]:
+                        - generic [ref=e1179]: 12h ago
+                        - generic [ref=e1180]: Chicago
+                      - generic [ref=e1182]: Delivered
+                      - generic [ref=e1184]: —
+                      - generic [ref=e1185]: —
+                    - button "Expand row" [ref=e1186]:
+                      - img [ref=e1187]
+                - generic [ref=e1189]:
+                  - generic [ref=e1190]:
+                    - text: Showing
+                    - strong [ref=e1191]: 1–25
+                    - text: of
+                    - strong [ref=e1192]: 1,791
+                  - generic [ref=e1193]:
+                    - generic [ref=e1194]:
+                      - text: Rows
+                      - combobox "Rows" [ref=e1195] [cursor=pointer]:
+                        - option "25" [selected]
+                        - option "50"
+                        - option "100"
+                        - option "250"
+                    - button "« First" [disabled] [ref=e1196]
+                    - button "‹ Prev" [disabled] [ref=e1197]
+                    - generic [ref=e1198]: Page 1 of 72
+                    - button "Next ›" [ref=e1199] [cursor=pointer]
+                    - button "Last »" [ref=e1200] [cursor=pointer]
+              - complementary [ref=e1201]:
+                - generic [ref=e1202]:
+                  - generic [ref=e1203]: Command Intelligence
+                  - button "Collapse" [ref=e1204] [cursor=pointer]:
+                    - img [ref=e1205]
+                - generic [ref=e1208]:
+                  - generic [ref=e1209]: Blocked
+                  - generic [ref=e1211]:
+                    - generic [ref=e1212]: 2 runnable
+                    - generic [ref=e1213]: 37 blocked
+                    - generic [ref=e1214]: 2 retryable
+                    - generic [ref=e1215]: 2 senders
+                  - generic [ref=e1216]: "Next: 6/24/2026, 1:00:31 PM"
+          - generic [ref=e1219]:
+            - generic [ref=e1221]:
+              - generic [ref=e1222]: LIST VIEW
+              - heading "Operational Conversations" [level=2] [ref=e1223]
+            - generic [ref=e1224]:
+              - searchbox "Search seller, phone, address, message, market…" [ref=e1225]
+              - combobox [ref=e1226]:
+                - option "Contact Level" [selected]
+                - option "Uncontacted Only"
+                - option "Contacted Only"
+                - option "Has Conversation"
+                - option "In Queue"
+                - option "Has Events"
+              - combobox [ref=e1227]:
+                - option "All Status" [selected]
+                - option "Unread"
+                - option "Hot"
+                - option "Suppressed"
+              - combobox [ref=e1228]:
+                - option "All Reply States" [selected]
+                - option "Needs Reply"
+                - option "Awaiting Response"
+                - option "Follow-Up Due"
+              - combobox [ref=e1229]:
+                - option "All Markets" [selected]
+                - option "Kansas City, MO"
+                - option "Memphis, TN"
+                - option "Minneapolis, MN"
+                - option "Spokane, WA"
+                - option "Tulsa, OK"
+                - option "Unknown"
+              - combobox [ref=e1230]:
+                - option "Latest Activity" [selected]
+                - option "Priority"
+                - option "Seller"
+                - option "Temperature"
+                - option "Follow-Up"
+            - generic "List view stats" [ref=e1231]:
+              - generic [ref=e1232]:
+                - generic [ref=e1233]: New Replies
+                - strong [ref=e1234]: "31"
+              - generic [ref=e1235]:
+                - generic [ref=e1236]: Priority
+                - strong [ref=e1237]: "49"
+              - generic [ref=e1238]:
+                - generic [ref=e1239]: Needs Review
+                - strong [ref=e1240]: "111"
+              - generic [ref=e1241]:
+                - generic [ref=e1242]: Follow-Up Due
+                - strong [ref=e1243]: "1"
+              - generic [ref=e1244]:
+                - generic [ref=e1245]: Auto-Eligible
+                - strong [ref=e1246]: "111"
+            - generic [ref=e1247]:
+              - button "+1 (770) 203-3651 No Address Yesterday 9:18 PM ownership confirmed waiting normal Market Unknown Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Sorry about that, my system had an error. Are you open to a proposal on the property?" [ref=e1248] [cursor=pointer]:
+                - generic [ref=e1249]:
+                  - generic [ref=e1250]:
+                    - strong [ref=e1251]: +1 (770) 203-3651
+                    - generic [ref=e1252]: No Address
+                  - time [ref=e1253]: Yesterday 9:18 PM
+                - generic [ref=e1254]:
+                  - generic [ref=e1255]: ownership confirmed
+                  - generic [ref=e1256]: waiting
+                  - generic [ref=e1257]: normal
+                - generic [ref=e1258]:
+                  - generic [ref=e1259]:
+                    - generic [ref=e1260]: Market
+                    - strong [ref=e1261]: Unknown
+                  - generic [ref=e1262]:
+                    - generic [ref=e1263]: Intent
+                    - strong [ref=e1264]: Seller Confirmed
+                  - generic [ref=e1265]:
+                    - generic [ref=e1266]: Next Action
+                    - strong [ref=e1267]: Wait for seller response.
+                  - generic [ref=e1268]:
+                    - generic [ref=e1269]: Automation
+                    - strong [ref=e1270]: WAITING
+                - paragraph: Sorry about that, my system had an error. Are you open to a proposal on the property?
+              - button "+1 (918) 200-8537 No Address Yesterday 7:57 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Operator review required. Automation REVIEW REQUIRED Fuck off" [ref=e1271] [cursor=pointer]:
+                - generic [ref=e1272]:
+                  - generic [ref=e1273]:
+                    - strong [ref=e1274]: +1 (918) 200-8537
+                    - generic [ref=e1275]: No Address
+                  - time [ref=e1276]: Yesterday 7:57 PM
+                - generic [ref=e1277]:
+                  - generic [ref=e1278]: ownership confirmed
+                  - generic [ref=e1279]: new reply
+                  - generic [ref=e1280]: normal
+                  - generic [ref=e1281]: Unread
+                - generic [ref=e1282]:
+                  - generic [ref=e1283]:
+                    - generic [ref=e1284]: Market
+                    - strong [ref=e1285]: Unknown
+                  - generic [ref=e1286]:
+                    - generic [ref=e1287]: Intent
+                    - strong [ref=e1288]: Seller Confirmed
+                  - generic [ref=e1289]:
+                    - generic [ref=e1290]: Next Action
+                    - strong [ref=e1291]: Operator review required.
+                  - generic [ref=e1292]:
+                    - generic [ref=e1293]: Automation
+                    - strong [ref=e1294]: REVIEW REQUIRED
+                - paragraph: Fuck off
+              - button "+1 (555) 555-0202 No Address Yesterday 6:00 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING No recent message" [ref=e1295] [cursor=pointer]:
+                - generic [ref=e1296]:
+                  - generic [ref=e1297]:
+                    - strong [ref=e1298]: +1 (555) 555-0202
+                    - generic [ref=e1299]: No Address
+                  - time [ref=e1300]: Yesterday 6:00 PM
+                - generic [ref=e1301]:
+                  - generic [ref=e1302]: ownership confirmed
+                  - generic [ref=e1303]: new reply
+                  - generic [ref=e1304]: normal
+                  - generic [ref=e1305]: Unread
+                - generic [ref=e1306]:
+                  - generic [ref=e1307]:
+                    - generic [ref=e1308]: Market
+                    - strong [ref=e1309]: Unknown
+                  - generic [ref=e1310]:
+                    - generic [ref=e1311]: Intent
+                    - strong [ref=e1312]: Seller Confirmed
+                  - generic [ref=e1313]:
+                    - generic [ref=e1314]: Next Action
+                    - strong [ref=e1315]: Wait for seller response.
+                  - generic [ref=e1316]:
+                    - generic [ref=e1317]: Automation
+                    - strong [ref=e1318]: WAITING
+                - paragraph: No recent message
+              - button "+1 (847) 867-9735 No Address Yesterday 4:05 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation REVIEW REQUIRED Yes not looking to sell" [ref=e1319] [cursor=pointer]:
+                - generic [ref=e1320]:
+                  - generic [ref=e1321]:
+                    - strong [ref=e1322]: +1 (847) 867-9735
+                    - generic [ref=e1323]: No Address
+                  - time [ref=e1324]: Yesterday 4:05 PM
+                - generic [ref=e1325]:
+                  - generic [ref=e1326]: ownership confirmed
+                  - generic [ref=e1327]: new reply
+                  - generic [ref=e1328]: normal
+                  - generic [ref=e1329]: Unread
+                - generic [ref=e1330]:
+                  - generic [ref=e1331]:
+                    - generic [ref=e1332]: Market
+                    - strong [ref=e1333]: Unknown
+                  - generic [ref=e1334]:
+                    - generic [ref=e1335]: Intent
+                    - strong [ref=e1336]: Seller Confirmed
+                  - generic [ref=e1337]:
+                    - generic [ref=e1338]: Next Action
+                    - strong [ref=e1339]: Review inbound and reply.
+                  - generic [ref=e1340]:
+                    - generic [ref=e1341]: Automation
+                    - strong [ref=e1342]: REVIEW REQUIRED
+                - paragraph: Yes not looking to sell
+              - button "+1 (612) 743-3952 No Address Yesterday 3:45 PM ownership confirmed new reply normal Unread Market Minneapolis, MN Intent Seller Confirmed Next Action Review inbound and reply. Automation REVIEW REQUIRED Deployed verification inbound deployed-dzdevzuroh" [ref=e1343] [cursor=pointer]:
+                - generic [ref=e1344]:
+                  - generic [ref=e1345]:
+                    - strong [ref=e1346]: +1 (612) 743-3952
+                    - generic [ref=e1347]: No Address
+                  - time [ref=e1348]: Yesterday 3:45 PM
+                - generic [ref=e1349]:
+                  - generic [ref=e1350]: ownership confirmed
+                  - generic [ref=e1351]: new reply
+                  - generic [ref=e1352]: normal
+                  - generic [ref=e1353]: Unread
+                - generic [ref=e1354]:
+                  - generic [ref=e1355]:
+                    - generic [ref=e1356]: Market
+                    - strong [ref=e1357]: Minneapolis, MN
+                  - generic [ref=e1358]:
+                    - generic [ref=e1359]: Intent
+                    - strong [ref=e1360]: Seller Confirmed
+                  - generic [ref=e1361]:
+                    - generic [ref=e1362]: Next Action
+                    - strong [ref=e1363]: Review inbound and reply.
+                  - generic [ref=e1364]:
+                    - generic [ref=e1365]: Automation
+                    - strong [ref=e1366]: REVIEW REQUIRED
+                - paragraph: Deployed verification inbound deployed-dzdevzuroh
+              - button "+1 (913) 636-3462 No Address Yesterday 1:14 PM ownership confirmed new reply normal Suppressed Unread Market Unknown Intent Seller Confirmed Next Action No contact. Respect suppression. Automation SUPPRESSED Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people." [ref=e1367] [cursor=pointer]:
+                - generic [ref=e1368]:
+                  - generic [ref=e1369]:
+                    - strong [ref=e1370]: +1 (913) 636-3462
+                    - generic [ref=e1371]: No Address
+                  - time [ref=e1372]: Yesterday 1:14 PM
+                - generic [ref=e1373]:
+                  - generic [ref=e1374]: ownership confirmed
+                  - generic [ref=e1375]: new reply
+                  - generic [ref=e1376]: normal
+                  - generic [ref=e1377]: Suppressed
+                  - generic [ref=e1378]: Unread
+                - generic [ref=e1379]:
+                  - generic [ref=e1380]:
+                    - generic [ref=e1381]: Market
+                    - strong [ref=e1382]: Unknown
+                  - generic [ref=e1383]:
+                    - generic [ref=e1384]: Intent
+                    - strong [ref=e1385]: Seller Confirmed
+                  - generic [ref=e1386]:
+                    - generic [ref=e1387]: Next Action
+                    - strong [ref=e1388]: No contact. Respect suppression.
+                  - generic [ref=e1389]:
+                    - generic [ref=e1390]: Automation
+                    - strong [ref=e1391]: SUPPRESSED
+                - paragraph: Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people.
+              - button "+1 (918) 282-8080 No Address Yesterday 12:14 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation AUTO-BLOCKED No" [ref=e1392] [cursor=pointer]:
+                - generic [ref=e1393]:
+                  - generic [ref=e1394]:
+                    - strong [ref=e1395]: +1 (918) 282-8080
+                    - generic [ref=e1396]: No Address
+                  - time [ref=e1397]: Yesterday 12:14 PM
+                - generic [ref=e1398]:
+                  - generic [ref=e1399]: ownership confirmed
+                  - generic [ref=e1400]: new reply
+                  - generic [ref=e1401]: normal
+                  - generic [ref=e1402]: Unread
+                - generic [ref=e1403]:
+                  - generic [ref=e1404]:
+                    - generic [ref=e1405]: Market
+                    - strong [ref=e1406]: Unknown
+                  - generic [ref=e1407]:
+                    - generic [ref=e1408]: Intent
+                    - strong [ref=e1409]: Seller Confirmed
+                  - generic [ref=e1410]:
+                    - generic [ref=e1411]: Next Action
+                    - strong [ref=e1412]: Review inbound and reply.
+                  - generic [ref=e1413]:
+                    - generic [ref=e1414]: Automation
+                    - strong [ref=e1415]: AUTO-BLOCKED
+                - paragraph: "No"
+              - button "+1 (248) 227-4246 No Address Jun 23 6:44 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation REVIEW REQUIRED Please DO NOT contact me again!" [ref=e1416] [cursor=pointer]:
+                - generic [ref=e1417]:
+                  - generic [ref=e1418]:
+                    - strong [ref=e1419]: +1 (248) 227-4246
+                    - generic [ref=e1420]: No Address
+                  - time [ref=e1421]: Jun 23 6:44 PM
+                - generic [ref=e1422]:
+                  - generic [ref=e1423]: ownership confirmed
+                  - generic [ref=e1424]: new reply
+                  - generic [ref=e1425]: normal
+                  - generic [ref=e1426]: Unread
+                - generic [ref=e1427]:
+                  - generic [ref=e1428]:
+                    - generic [ref=e1429]: Market
+                    - strong [ref=e1430]: Unknown
+                  - generic [ref=e1431]:
+                    - generic [ref=e1432]: Intent
+                    - strong [ref=e1433]: Seller Confirmed
+                  - generic [ref=e1434]:
+                    - generic [ref=e1435]: Next Action
+                    - strong [ref=e1436]: Review inbound and reply.
+                  - generic [ref=e1437]:
+                    - generic [ref=e1438]: Automation
+                    - strong [ref=e1439]: REVIEW REQUIRED
+                - paragraph: Please DO NOT contact me again!
+              - button "+1 (918) 606-6313 No Address Jun 23 5:58 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation REVIEW REQUIRED Sold" [ref=e1440] [cursor=pointer]:
+                - generic [ref=e1441]:
+                  - generic [ref=e1442]:
+                    - strong [ref=e1443]: +1 (918) 606-6313
+                    - generic [ref=e1444]: No Address
+                  - time [ref=e1445]: Jun 23 5:58 PM
+                - generic [ref=e1446]:
+                  - generic [ref=e1447]: ownership confirmed
+                  - generic [ref=e1448]: new reply
+                  - generic [ref=e1449]: normal
+                  - generic [ref=e1450]: Unread
+                - generic [ref=e1451]:
+                  - generic [ref=e1452]:
+                    - generic [ref=e1453]: Market
+                    - strong [ref=e1454]: Unknown
+                  - generic [ref=e1455]:
+                    - generic [ref=e1456]: Intent
+                    - strong [ref=e1457]: Seller Confirmed
+                  - generic [ref=e1458]:
+                    - generic [ref=e1459]: Next Action
+                    - strong [ref=e1460]: Review inbound and reply.
+                  - generic [ref=e1461]:
+                    - generic [ref=e1462]: Automation
+                    - strong [ref=e1463]: REVIEW REQUIRED
+                - paragraph: Sold
+              - button "+1 (816) 665-3415 No Address Jun 23 12:02 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation REVIEW REQUIRED I'm not Erika" [ref=e1464] [cursor=pointer]:
+                - generic [ref=e1465]:
+                  - generic [ref=e1466]:
+                    - strong [ref=e1467]: +1 (816) 665-3415
+                    - generic [ref=e1468]: No Address
+                  - time [ref=e1469]: Jun 23 12:02 PM
+                - generic [ref=e1470]:
+                  - generic [ref=e1471]: ownership confirmed
+                  - generic [ref=e1472]: new reply
+                  - generic [ref=e1473]: normal
+                  - generic [ref=e1474]: Unread
+                - generic [ref=e1475]:
+                  - generic [ref=e1476]:
+                    - generic [ref=e1477]: Market
+                    - strong [ref=e1478]: Unknown
+                  - generic [ref=e1479]:
+                    - generic [ref=e1480]: Intent
+                    - strong [ref=e1481]: Seller Confirmed
+                  - generic [ref=e1482]:
+                    - generic [ref=e1483]: Next Action
+                    - strong [ref=e1484]: Review inbound and reply.
+                  - generic [ref=e1485]:
+                    - generic [ref=e1486]: Automation
+                    - strong [ref=e1487]: REVIEW REQUIRED
+                - paragraph: I'm not Erika
+              - button "+1 (612) 386-2761 No Address Jun 22 12:36 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation AUTO-BLOCKED Not for sale." [ref=e1488] [cursor=pointer]:
+                - generic [ref=e1489]:
+                  - generic [ref=e1490]:
+                    - strong [ref=e1491]: +1 (612) 386-2761
+                    - generic [ref=e1492]: No Address
+                  - time [ref=e1493]: Jun 22 12:36 PM
+                - generic [ref=e1494]:
+                  - generic [ref=e1495]: ownership confirmed
+                  - generic [ref=e1496]: new reply
+                  - generic [ref=e1497]: normal
+                  - generic [ref=e1498]: Unread
+                - generic [ref=e1499]:
+                  - generic [ref=e1500]:
+                    - generic [ref=e1501]: Market
+                    - strong [ref=e1502]: Unknown
+                  - generic [ref=e1503]:
+                    - generic [ref=e1504]: Intent
+                    - strong [ref=e1505]: Seller Confirmed
+                  - generic [ref=e1506]:
+                    - generic [ref=e1507]: Next Action
+                    - strong [ref=e1508]: Review inbound and reply.
+                  - generic [ref=e1509]:
+                    - generic [ref=e1510]: Automation
+                    - strong [ref=e1511]: AUTO-BLOCKED
+                - paragraph: Not for sale.
+              - button "+1 (918) 814-8960 No Address Jun 21 12:41 AM ownership confirmed waiting normal Market Unknown Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING ¿En qué condiciones se encuentra la propiedad?" [ref=e1512] [cursor=pointer]:
+                - generic [ref=e1513]:
+                  - generic [ref=e1514]:
+                    - strong [ref=e1515]: +1 (918) 814-8960
+                    - generic [ref=e1516]: No Address
+                  - time [ref=e1517]: Jun 21 12:41 AM
+                - generic [ref=e1518]:
+                  - generic [ref=e1519]: ownership confirmed
+                  - generic [ref=e1520]: waiting
+                  - generic [ref=e1521]: normal
+                - generic [ref=e1522]:
+                  - generic [ref=e1523]:
+                    - generic [ref=e1524]: Market
+                    - strong [ref=e1525]: Unknown
+                  - generic [ref=e1526]:
+                    - generic [ref=e1527]: Intent
+                    - strong [ref=e1528]: Seller Confirmed
+                  - generic [ref=e1529]:
+                    - generic [ref=e1530]: Next Action
+                    - strong [ref=e1531]: Wait for seller response.
+                  - generic [ref=e1532]:
+                    - generic [ref=e1533]: Automation
+                    - strong [ref=e1534]: WAITING
+                - paragraph: ¿En qué condiciones se encuentra la propiedad?
+              - button "+1 (970) 282-9594 No Address Jun 21 12:41 AM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation AUTO-BLOCKED No" [ref=e1535] [cursor=pointer]:
+                - generic [ref=e1536]:
+                  - generic [ref=e1537]:
+                    - strong [ref=e1538]: +1 (970) 282-9594
+                    - generic [ref=e1539]: No Address
+                  - time [ref=e1540]: Jun 21 12:41 AM
+                - generic [ref=e1541]:
+                  - generic [ref=e1542]: ownership confirmed
+                  - generic [ref=e1543]: new reply
+                  - generic [ref=e1544]: normal
+                  - generic [ref=e1545]: Unread
+                - generic [ref=e1546]:
+                  - generic [ref=e1547]:
+                    - generic [ref=e1548]: Market
+                    - strong [ref=e1549]: Unknown
+                  - generic [ref=e1550]:
+                    - generic [ref=e1551]: Intent
+                    - strong [ref=e1552]: Seller Confirmed
+                  - generic [ref=e1553]:
+                    - generic [ref=e1554]: Next Action
+                    - strong [ref=e1555]: Review inbound and reply.
+                  - generic [ref=e1556]:
+                    - generic [ref=e1557]: Automation
+                    - strong [ref=e1558]: AUTO-BLOCKED
+                - paragraph: "No"
+              - button "+1 (480) 244-7520 No Address Jun 20 9:13 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation AUTO-BLOCKED Not for sale!!!!" [ref=e1559] [cursor=pointer]:
+                - generic [ref=e1560]:
+                  - generic [ref=e1561]:
+                    - strong [ref=e1562]: +1 (480) 244-7520
+                    - generic [ref=e1563]: No Address
+                  - time [ref=e1564]: Jun 20 9:13 PM
+                - generic [ref=e1565]:
+                  - generic [ref=e1566]: ownership confirmed
+                  - generic [ref=e1567]: new reply
+                  - generic [ref=e1568]: normal
+                  - generic [ref=e1569]: Unread
+                - generic [ref=e1570]:
+                  - generic [ref=e1571]:
+                    - generic [ref=e1572]: Market
+                    - strong [ref=e1573]: Unknown
+                  - generic [ref=e1574]:
+                    - generic [ref=e1575]: Intent
+                    - strong [ref=e1576]: Seller Confirmed
+                  - generic [ref=e1577]:
+                    - generic [ref=e1578]: Next Action
+                    - strong [ref=e1579]: Review inbound and reply.
+                  - generic [ref=e1580]:
+                    - generic [ref=e1581]: Automation
+                    - strong [ref=e1582]: AUTO-BLOCKED
+                - paragraph: Not for sale!!!!
+              - button "+1 (805) 403-1157 No Address Jun 19 10:53 PM ownership confirmed new reply normal Unread Market Unknown Intent Seller Confirmed Next Action Review inbound and reply. Automation AUTO-BLOCKED And we are Not interested in selling" [ref=e1583] [cursor=pointer]:
+                - generic [ref=e1584]:
+                  - generic [ref=e1585]:
+                    - strong [ref=e1586]: +1 (805) 403-1157
+                    - generic [ref=e1587]: No Address
+                  - time [ref=e1588]: Jun 19 10:53 PM
+                - generic [ref=e1589]:
+                  - generic [ref=e1590]: ownership confirmed
+                  - generic [ref=e1591]: new reply
+                  - generic [ref=e1592]: normal
+                  - generic [ref=e1593]: Unread
+                - generic [ref=e1594]:
+                  - generic [ref=e1595]:
+                    - generic [ref=e1596]: Market
+                    - strong [ref=e1597]: Unknown
+                  - generic [ref=e1598]:
+                    - generic [ref=e1599]: Intent
+                    - strong [ref=e1600]: Seller Confirmed
+                  - generic [ref=e1601]:
+                    - generic [ref=e1602]: Next Action
+                    - strong [ref=e1603]: Review inbound and reply.
+                  - generic [ref=e1604]:
+                    - generic [ref=e1605]: Automation
+                    - strong [ref=e1606]: AUTO-BLOCKED
+                - paragraph: And we are Not interested in selling
+              - button "+1 (539) 235-3903 No Address Jun 19 5:35 PM ownership confirmed waiting normal Market Unknown Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING What condition is the property in?" [ref=e1607] [cursor=pointer]:
+                - generic [ref=e1608]:
+                  - generic [ref=e1609]:
+                    - strong [ref=e1610]: +1 (539) 235-3903
+                    - generic [ref=e1611]: No Address
+                  - time [ref=e1612]: Jun 19 5:35 PM
+                - generic [ref=e1613]:
+                  - generic [ref=e1614]: ownership confirmed
+                  - generic [ref=e1615]: waiting
+                  - generic [ref=e1616]: normal
+                - generic [ref=e1617]:
+                  - generic [ref=e1618]:
+                    - generic [ref=e1619]: Market
+                    - strong [ref=e1620]: Unknown
+                  - generic [ref=e1621]:
+                    - generic [ref=e1622]: Intent
+                    - strong [ref=e1623]: Seller Confirmed
+                  - generic [ref=e1624]:
+                    - generic [ref=e1625]: Next Action
+                    - strong [ref=e1626]: Wait for seller response.
+                  - generic [ref=e1627]:
+                    - generic [ref=e1628]: Automation
+                    - strong [ref=e1629]: WAITING
+                - paragraph: What condition is the property in?
+              - button "+1 (901) 425-8564 No Address Jun 19 1:41 PM ownership confirmed waiting normal Market Memphis, TN Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St?" [ref=e1630] [cursor=pointer]:
+                - generic [ref=e1631]:
+                  - generic [ref=e1632]:
+                    - strong [ref=e1633]: +1 (901) 425-8564
+                    - generic [ref=e1634]: No Address
+                  - time [ref=e1635]: Jun 19 1:41 PM
+                - generic [ref=e1636]:
+                  - generic [ref=e1637]: ownership confirmed
+                  - generic [ref=e1638]: waiting
+                  - generic [ref=e1639]: normal
+                - generic [ref=e1640]:
+                  - generic [ref=e1641]:
+                    - generic [ref=e1642]: Market
+                    - strong [ref=e1643]: Memphis, TN
+                  - generic [ref=e1644]:
+                    - generic [ref=e1645]: Intent
+                    - strong [ref=e1646]: Seller Confirmed
+                  - generic [ref=e1647]:
+                    - generic [ref=e1648]: Next Action
+                    - strong [ref=e1649]: Wait for seller response.
+                  - generic [ref=e1650]:
+                    - generic [ref=e1651]: Automation
+                    - strong [ref=e1652]: WAITING
+                - paragraph: Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St?
+              - button "+1 (509) 993-9397 No Address Jun 19 1:30 PM ownership confirmed new reply normal Unread Market Spokane, WA Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave?" [ref=e1653] [cursor=pointer]:
+                - generic [ref=e1654]:
+                  - generic [ref=e1655]:
+                    - strong [ref=e1656]: +1 (509) 993-9397
+                    - generic [ref=e1657]: No Address
+                  - time [ref=e1658]: Jun 19 1:30 PM
+                - generic [ref=e1659]:
+                  - generic [ref=e1660]: ownership confirmed
+                  - generic [ref=e1661]: new reply
+                  - generic [ref=e1662]: normal
+                  - generic [ref=e1663]: Unread
+                - generic [ref=e1664]:
+                  - generic [ref=e1665]:
+                    - generic [ref=e1666]: Market
+                    - strong [ref=e1667]: Spokane, WA
+                  - generic [ref=e1668]:
+                    - generic [ref=e1669]: Intent
+                    - strong [ref=e1670]: Seller Confirmed
+                  - generic [ref=e1671]:
+                    - generic [ref=e1672]: Next Action
+                    - strong [ref=e1673]: Wait for seller response.
+                  - generic [ref=e1674]:
+                    - generic [ref=e1675]: Automation
+                    - strong [ref=e1676]: WAITING
+                - paragraph: Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave?
+              - button "+1 (913) 313-1111 No Address Jun 19 1:21 PM ownership confirmed waiting normal Market Kansas City, MO Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours?" [ref=e1677] [cursor=pointer]:
+                - generic [ref=e1678]:
+                  - generic [ref=e1679]:
+                    - strong [ref=e1680]: +1 (913) 313-1111
+                    - generic [ref=e1681]: No Address
+                  - time [ref=e1682]: Jun 19 1:21 PM
+                - generic [ref=e1683]:
+                  - generic [ref=e1684]: ownership confirmed
+                  - generic [ref=e1685]: waiting
+                  - generic [ref=e1686]: normal
+                - generic [ref=e1687]:
+                  - generic [ref=e1688]:
+                    - generic [ref=e1689]: Market
+                    - strong [ref=e1690]: Kansas City, MO
+                  - generic [ref=e1691]:
+                    - generic [ref=e1692]: Intent
+                    - strong [ref=e1693]: Seller Confirmed
+                  - generic [ref=e1694]:
+                    - generic [ref=e1695]: Next Action
+                    - strong [ref=e1696]: Wait for seller response.
+                  - generic [ref=e1697]:
+                    - generic [ref=e1698]: Automation
+                    - strong [ref=e1699]: WAITING
+                - paragraph: Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours?
+              - button "+1 (918) 859-2228 No Address Jun 19 1:11 PM ownership confirmed waiting normal Market Tulsa, OK Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave?" [ref=e1700] [cursor=pointer]:
+                - generic [ref=e1701]:
+                  - generic [ref=e1702]:
+                    - strong [ref=e1703]: +1 (918) 859-2228
+                    - generic [ref=e1704]: No Address
+                  - time [ref=e1705]: Jun 19 1:11 PM
+                - generic [ref=e1706]:
+                  - generic [ref=e1707]: ownership confirmed
+                  - generic [ref=e1708]: waiting
+                  - generic [ref=e1709]: normal
+                - generic [ref=e1710]:
+                  - generic [ref=e1711]:
+                    - generic [ref=e1712]: Market
+                    - strong [ref=e1713]: Tulsa, OK
+                  - generic [ref=e1714]:
+                    - generic [ref=e1715]: Intent
+                    - strong [ref=e1716]: Seller Confirmed
+                  - generic [ref=e1717]:
+                    - generic [ref=e1718]: Next Action
+                    - strong [ref=e1719]: Wait for seller response.
+                  - generic [ref=e1720]:
+                    - generic [ref=e1721]: Automation
+                    - strong [ref=e1722]: WAITING
+                - paragraph: Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave?
+              - button "+1 (901) 598-8824 No Address Jun 19 12:51 PM ownership confirmed waiting normal Market Memphis, TN Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave?" [ref=e1723] [cursor=pointer]:
+                - generic [ref=e1724]:
+                  - generic [ref=e1725]:
+                    - strong [ref=e1726]: +1 (901) 598-8824
+                    - generic [ref=e1727]: No Address
+                  - time [ref=e1728]: Jun 19 12:51 PM
+                - generic [ref=e1729]:
+                  - generic [ref=e1730]: ownership confirmed
+                  - generic [ref=e1731]: waiting
+                  - generic [ref=e1732]: normal
+                - generic [ref=e1733]:
+                  - generic [ref=e1734]:
+                    - generic [ref=e1735]: Market
+                    - strong [ref=e1736]: Memphis, TN
+                  - generic [ref=e1737]:
+                    - generic [ref=e1738]: Intent
+                    - strong [ref=e1739]: Seller Confirmed
+                  - generic [ref=e1740]:
+                    - generic [ref=e1741]: Next Action
+                    - strong [ref=e1742]: Wait for seller response.
+                  - generic [ref=e1743]:
+                    - generic [ref=e1744]: Automation
+                    - strong [ref=e1745]: WAITING
+                - paragraph: Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave?
+              - button "+1 (913) 244-6677 No Address Jun 19 12:40 PM ownership confirmed waiting normal Market Kansas City, MO Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad?" [ref=e1746] [cursor=pointer]:
+                - generic [ref=e1747]:
+                  - generic [ref=e1748]:
+                    - strong [ref=e1749]: +1 (913) 244-6677
+                    - generic [ref=e1750]: No Address
+                  - time [ref=e1751]: Jun 19 12:40 PM
+                - generic [ref=e1752]:
+                  - generic [ref=e1753]: ownership confirmed
+                  - generic [ref=e1754]: waiting
+                  - generic [ref=e1755]: normal
+                - generic [ref=e1756]:
+                  - generic [ref=e1757]:
+                    - generic [ref=e1758]: Market
+                    - strong [ref=e1759]: Kansas City, MO
+                  - generic [ref=e1760]:
+                    - generic [ref=e1761]: Intent
+                    - strong [ref=e1762]: Seller Confirmed
+                  - generic [ref=e1763]:
+                    - generic [ref=e1764]: Next Action
+                    - strong [ref=e1765]: Wait for seller response.
+                  - generic [ref=e1766]:
+                    - generic [ref=e1767]: Automation
+                    - strong [ref=e1768]: WAITING
+                - paragraph: Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad?
+              - button "+1 (612) 670-7973 No Address Jun 19 12:31 PM ownership confirmed waiting normal Market Minneapolis, MN Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours?" [ref=e1769] [cursor=pointer]:
+                - generic [ref=e1770]:
+                  - generic [ref=e1771]:
+                    - strong [ref=e1772]: +1 (612) 670-7973
+                    - generic [ref=e1773]: No Address
+                  - time [ref=e1774]: Jun 19 12:31 PM
+                - generic [ref=e1775]:
+                  - generic [ref=e1776]: ownership confirmed
+                  - generic [ref=e1777]: waiting
+                  - generic [ref=e1778]: normal
+                - generic [ref=e1779]:
+                  - generic [ref=e1780]:
+                    - generic [ref=e1781]: Market
+                    - strong [ref=e1782]: Minneapolis, MN
+                  - generic [ref=e1783]:
+                    - generic [ref=e1784]: Intent
+                    - strong [ref=e1785]: Seller Confirmed
+                  - generic [ref=e1786]:
+                    - generic [ref=e1787]: Next Action
+                    - strong [ref=e1788]: Wait for seller response.
+                  - generic [ref=e1789]:
+                    - generic [ref=e1790]: Automation
+                    - strong [ref=e1791]: WAITING
+                - paragraph: Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours?
+              - button "+1 (612) 770-5458 No Address Jun 19 12:20 PM ownership confirmed waiting normal Market Minneapolis, MN Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours?" [ref=e1792] [cursor=pointer]:
+                - generic [ref=e1793]:
+                  - generic [ref=e1794]:
+                    - strong [ref=e1795]: +1 (612) 770-5458
+                    - generic [ref=e1796]: No Address
+                  - time [ref=e1797]: Jun 19 12:20 PM
+                - generic [ref=e1798]:
+                  - generic [ref=e1799]: ownership confirmed
+                  - generic [ref=e1800]: waiting
+                  - generic [ref=e1801]: normal
+                - generic [ref=e1802]:
+                  - generic [ref=e1803]:
+                    - generic [ref=e1804]: Market
+                    - strong [ref=e1805]: Minneapolis, MN
+                  - generic [ref=e1806]:
+                    - generic [ref=e1807]: Intent
+                    - strong [ref=e1808]: Seller Confirmed
+                  - generic [ref=e1809]:
+                    - generic [ref=e1810]: Next Action
+                    - strong [ref=e1811]: Wait for seller response.
+                  - generic [ref=e1812]:
+                    - generic [ref=e1813]: Automation
+                    - strong [ref=e1814]: WAITING
+                - paragraph: Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours?
+              - button "+1 (901) 277-7262 No Address Jun 19 12:10 PM ownership confirmed waiting normal Market Memphis, TN Intent Seller Confirmed Next Action Wait for seller response. Automation WAITING Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours?" [ref=e1815] [cursor=pointer]:
+                - generic [ref=e1816]:
+                  - generic [ref=e1817]:
+                    - strong [ref=e1818]: +1 (901) 277-7262
+                    - generic [ref=e1819]: No Address
+                  - time [ref=e1820]: Jun 19 12:10 PM
+                - generic [ref=e1821]:
+                  - generic [ref=e1822]: ownership confirmed
+                  - generic [ref=e1823]: waiting
+                  - generic [ref=e1824]: normal
+                - generic [ref=e1825]:
+                  - generic [ref=e1826]:
+                    - generic [ref=e1827]: Market
+                    - strong [ref=e1828]: Memphis, TN
+                  - generic [ref=e1829]:
+                    - generic [ref=e1830]: Intent
+                    - strong [ref=e1831]: Seller Confirmed
+                  - generic [ref=e1832]:
+                    - generic [ref=e1833]: Next Action
+                    - strong [ref=e1834]: Wait for seller response.
+                  - generic [ref=e1835]:
+                    - generic [ref=e1836]: Automation
+                    - strong [ref=e1837]: WAITING
+                - paragraph: Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours?
+  - button "NEXUS Copilot" [ref=e1838] [cursor=pointer]:
+    - generic: Standing by

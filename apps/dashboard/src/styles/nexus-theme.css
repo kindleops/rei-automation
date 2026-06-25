@@ -709,84 +709,96 @@
   background: var(--nx-accent-soft);
 }
 /* ── Accent palette — canonical 12-variant set (single authority) ─────────── */
-:root[data-nexus-accent="cyan"] {
+:root[data-nexus-accent="cyan"],
+.nx-premium-inbox[data-nexus-accent="cyan"] {
   --nx-accent:        #06b6d4;
   --nx-accent-rgb:    6, 182, 212;
   --nx-accent-soft:   rgba(6, 182, 212, 0.14);
   --nx-accent-border: rgba(6, 182, 212, 0.38);
   --nx-accent-glow:   rgba(6, 182, 212, 0.26);
 }
-:root[data-nexus-accent="emerald"] {
+:root[data-nexus-accent="emerald"],
+.nx-premium-inbox[data-nexus-accent="emerald"] {
   --nx-accent:        #10b981;
   --nx-accent-rgb:    16, 185, 129;
   --nx-accent-soft:   rgba(16, 185, 129, 0.14);
   --nx-accent-border: rgba(16, 185, 129, 0.38);
   --nx-accent-glow:   rgba(16, 185, 129, 0.26);
 }
-:root[data-nexus-accent="amber"] {
+:root[data-nexus-accent="amber"],
+.nx-premium-inbox[data-nexus-accent="amber"] {
   --nx-accent:        #f59e0b;
   --nx-accent-rgb:    245, 158, 11;
   --nx-accent-soft:   rgba(245, 158, 11, 0.14);
   --nx-accent-border: rgba(245, 158, 11, 0.40);
   --nx-accent-glow:   rgba(245, 158, 11, 0.26);
 }
-:root[data-nexus-accent="violet"] {
+:root[data-nexus-accent="violet"],
+.nx-premium-inbox[data-nexus-accent="violet"] {
   --nx-accent:        #7c3aed;
   --nx-accent-rgb:    124, 58, 237;
   --nx-accent-soft:   rgba(124, 58, 237, 0.14);
   --nx-accent-border: rgba(124, 58, 237, 0.38);
   --nx-accent-glow:   rgba(124, 58, 237, 0.26);
 }
-:root[data-nexus-accent="rose"] {
+:root[data-nexus-accent="rose"],
+.nx-premium-inbox[data-nexus-accent="rose"] {
   --nx-accent:        #e11d48;
   --nx-accent-rgb:    225, 29, 72;
   --nx-accent-soft:   rgba(225, 29, 72, 0.14);
   --nx-accent-border: rgba(225, 29, 72, 0.38);
   --nx-accent-glow:   rgba(225, 29, 72, 0.26);
 }
-:root[data-nexus-accent="ice"] {
+:root[data-nexus-accent="ice"],
+.nx-premium-inbox[data-nexus-accent="ice"] {
   --nx-accent:        #38bdf8;
   --nx-accent-rgb:    56, 189, 248;
   --nx-accent-soft:   rgba(56, 189, 248, 0.13);
   --nx-accent-border: rgba(56, 189, 248, 0.36);
   --nx-accent-glow:   rgba(56, 189, 248, 0.24);
 }
-:root[data-nexus-accent="blue"] {
+:root[data-nexus-accent="blue"],
+.nx-premium-inbox[data-nexus-accent="blue"] {
   --nx-accent:        #2563eb;
   --nx-accent-rgb:    37, 99, 235;
   --nx-accent-soft:   rgba(37, 99, 235, 0.13);
   --nx-accent-border: rgba(37, 99, 235, 0.36);
   --nx-accent-glow:   rgba(37, 99, 235, 0.24);
 }
-:root[data-nexus-accent="teal"] {
+:root[data-nexus-accent="teal"],
+.nx-premium-inbox[data-nexus-accent="teal"] {
   --nx-accent:        #14b8a6;
   --nx-accent-rgb:    20, 184, 166;
   --nx-accent-soft:   rgba(20, 184, 166, 0.14);
   --nx-accent-border: rgba(20, 184, 166, 0.38);
   --nx-accent-glow:   rgba(20, 184, 166, 0.26);
 }
-:root[data-nexus-accent="lime"] {
+:root[data-nexus-accent="lime"],
+.nx-premium-inbox[data-nexus-accent="lime"] {
   --nx-accent:        #84cc16;
   --nx-accent-rgb:    132, 204, 22;
   --nx-accent-soft:   rgba(132, 204, 22, 0.14);
   --nx-accent-border: rgba(132, 204, 22, 0.38);
   --nx-accent-glow:   rgba(132, 204, 22, 0.26);
 }
-:root[data-nexus-accent="orange"] {
+:root[data-nexus-accent="orange"],
+.nx-premium-inbox[data-nexus-accent="orange"] {
   --nx-accent:        #f97316;
   --nx-accent-rgb:    249, 115, 22;
   --nx-accent-soft:   rgba(249, 115, 22, 0.14);
   --nx-accent-border: rgba(249, 115, 22, 0.40);
   --nx-accent-glow:   rgba(249, 115, 22, 0.26);
 }
-:root[data-nexus-accent="pink"] {
+:root[data-nexus-accent="pink"],
+.nx-premium-inbox[data-nexus-accent="pink"] {
   --nx-accent:        #ec4899;
   --nx-accent-rgb:    236, 72, 153;
   --nx-accent-soft:   rgba(236, 72, 153, 0.14);
   --nx-accent-border: rgba(236, 72, 153, 0.38);
   --nx-accent-glow:   rgba(236, 72, 153, 0.26);
 }
-:root[data-nexus-accent="gold"] {
+:root[data-nexus-accent="gold"],
+.nx-premium-inbox[data-nexus-accent="gold"] {
   --nx-accent:        #eab308;
   --nx-accent-rgb:    234, 179, 8;
   --nx-accent-soft:   rgba(234, 179, 8, 0.14);
@@ -796,18 +808,26 @@
 /* Shared derived tokens — valid for any accent.
    !important overrides the stale --nexus-* inline styles set at mount by applyThemeToDOM().
    The picker updates --nx-accent inline but not --nexus-accent, so we must force derivation. */
-:root[data-nexus-accent] {
-  --nx-accent-2:         color-mix(in srgb, var(--nx-accent) 76%, white 24%);
-  --nx-badge-border:     var(--nx-accent-border);
-  --nexus-accent:        var(--nx-accent) !important;
-  --nexus-accent-rgb:    var(--nx-accent-rgb) !important;
-  --nexus-accent-soft:   var(--nx-accent-soft) !important;
-  --nexus-accent-glow:   var(--nx-accent-glow) !important;
-  --nexus-accent-border: var(--nx-accent-border) !important;
+:root[data-nexus-accent],
+.nx-premium-inbox[data-nexus-accent] {
+  --nx-accent-2:           color-mix(in srgb, var(--nx-accent) 76%, white 24%);
+  --nx-accent-strong:      color-mix(in srgb, var(--nx-accent) 82%, #000 18%);
+  --nx-accent-contrast:    #ffffff;
+  --nx-accent-text:        var(--nx-accent);
+  --nx-bubble-outbound:    linear-gradient(155deg, color-mix(in srgb, var(--nx-accent) 92%, #fff 8%), color-mix(in srgb, var(--nx-accent) 68%, #000 32%));
+  --nx-badge-border:       var(--nx-accent-border);
+  --tone-primary:          var(--nx-accent);
+  --accent-cyan:           var(--nx-accent);
+  --nexus-accent:          var(--nx-accent) !important;
+  --nexus-accent-rgb:      var(--nx-accent-rgb) !important;
+  --nexus-accent-soft:     var(--nx-accent-soft) !important;
+  --nexus-accent-glow:     var(--nx-accent-glow) !important;
+  --nexus-accent-border:   var(--nx-accent-border) !important;
 }
 /* ── Light-mode accent palette overrides (higher contrast on white) ─────── */
 /* These come AFTER the generic accent blocks so they win in light mode.      */
-:root[data-nexus-theme="light"][data-nexus-accent="cyan"] {
+:root[data-nexus-theme="light"][data-nexus-accent="cyan"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="cyan"] {
   --nx-accent:          #06b6d4;
   --nx-accent-glow:     rgba(6, 182, 212, 0.22);
   --nx-accent-soft:     rgba(6, 182, 212, 0.13);
@@ -818,7 +838,8 @@
   --nexus-accent-glow:  rgba(6, 182, 212, 0.22);
   --nexus-accent-border: rgba(6, 182, 212, 0.36);
 }
-:root[data-nexus-theme="light"][data-nexus-accent="emerald"] {
+:root[data-nexus-theme="light"][data-nexus-accent="emerald"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="emerald"] {
   --nx-accent:          #10b981;
   --nx-accent-glow:     rgba(16, 185, 129, 0.22);
   --nx-accent-soft:     rgba(16, 185, 129, 0.13);
@@ -829,7 +850,8 @@
   --nexus-accent-glow:  rgba(16, 185, 129, 0.22);
   --nexus-accent-border: rgba(16, 185, 129, 0.36);
 }
-:root[data-nexus-theme="light"][data-nexus-accent="amber"] {
+:root[data-nexus-theme="light"][data-nexus-accent="amber"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="amber"] {
   --nx-accent:          #f59e0b;
   --nx-accent-glow:     rgba(245, 158, 11, 0.24);
   --nx-accent-soft:     rgba(245, 158, 11, 0.15);
@@ -840,7 +862,8 @@
   --nexus-accent-glow:  rgba(245, 158, 11, 0.24);
   --nexus-accent-border: rgba(245, 158, 11, 0.40);
 }
-:root[data-nexus-theme="light"][data-nexus-accent="violet"] {
+:root[data-nexus-theme="light"][data-nexus-accent="violet"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="violet"] {
   --nx-accent:          #8b5cf6;
   --nx-accent-glow:     rgba(139, 92, 246, 0.22);
   --nx-accent-soft:     rgba(139, 92, 246, 0.13);
@@ -851,7 +874,8 @@
   --nexus-accent-glow:  rgba(139, 92, 246, 0.22);
   --nexus-accent-border: rgba(139, 92, 246, 0.36);
 }
-:root[data-nexus-theme="light"][data-nexus-accent="rose"] {
+:root[data-nexus-theme="light"][data-nexus-accent="rose"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="rose"] {
   --nx-accent:          #f43f5e;
   --nx-accent-glow:     rgba(244, 63, 94, 0.22);
   --nx-accent-soft:     rgba(244, 63, 94, 0.13);
@@ -862,7 +886,8 @@
   --nexus-accent-glow:  rgba(244, 63, 94, 0.22);
   --nexus-accent-border: rgba(244, 63, 94, 0.36);
 }
-:root[data-nexus-theme="light"][data-nexus-accent="ice"] {
+:root[data-nexus-theme="light"][data-nexus-accent="ice"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="ice"] {
   --nx-accent:          #2563eb;
   --nx-accent-glow:     rgba(37, 99, 235, 0.22);
   --nx-accent-soft:     rgba(37, 99, 235, 0.12);
@@ -872,6 +897,78 @@
   --nexus-accent-soft:  rgba(37, 99, 235, 0.12);
   --nexus-accent-glow:  rgba(37, 99, 235, 0.22);
   --nexus-accent-border: rgba(37, 99, 235, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="blue"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="blue"] {
+  --nx-accent:          #2563eb;
+  --nx-accent-glow:     rgba(37, 99, 235, 0.22);
+  --nx-accent-soft:     rgba(37, 99, 235, 0.12);
+  --nx-badge-border:    rgba(37, 99, 235, 0.36);
+  --nexus-accent:       #2563eb;
+  --nexus-accent-rgb:   37, 99, 235;
+  --nexus-accent-soft:  rgba(37, 99, 235, 0.12);
+  --nexus-accent-glow:  rgba(37, 99, 235, 0.22);
+  --nexus-accent-border: rgba(37, 99, 235, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="teal"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="teal"] {
+  --nx-accent:          #0d9488;
+  --nx-accent-glow:     rgba(13, 148, 136, 0.22);
+  --nx-accent-soft:     rgba(13, 148, 136, 0.13);
+  --nx-badge-border:    rgba(13, 148, 136, 0.36);
+  --nexus-accent:       #0d9488;
+  --nexus-accent-rgb:   13, 148, 136;
+  --nexus-accent-soft:  rgba(13, 148, 136, 0.13);
+  --nexus-accent-glow:  rgba(13, 148, 136, 0.22);
+  --nexus-accent-border: rgba(13, 148, 136, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="lime"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="lime"] {
+  --nx-accent:          #65a30d;
+  --nx-accent-glow:     rgba(101, 163, 13, 0.22);
+  --nx-accent-soft:     rgba(101, 163, 13, 0.13);
+  --nx-badge-border:    rgba(101, 163, 13, 0.36);
+  --nexus-accent:       #65a30d;
+  --nexus-accent-rgb:   101, 163, 13;
+  --nexus-accent-soft:  rgba(101, 163, 13, 0.13);
+  --nexus-accent-glow:  rgba(101, 163, 13, 0.22);
+  --nexus-accent-border: rgba(101, 163, 13, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="orange"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="orange"] {
+  --nx-accent:          #ea580c;
+  --nx-accent-glow:     rgba(234, 88, 12, 0.22);
+  --nx-accent-soft:     rgba(234, 88, 12, 0.13);
+  --nx-badge-border:    rgba(234, 88, 12, 0.36);
+  --nexus-accent:       #ea580c;
+  --nexus-accent-rgb:   234, 88, 12;
+  --nexus-accent-soft:  rgba(234, 88, 12, 0.13);
+  --nexus-accent-glow:  rgba(234, 88, 12, 0.22);
+  --nexus-accent-border: rgba(234, 88, 12, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="pink"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="pink"] {
+  --nx-accent:          #db2777;
+  --nx-accent-glow:     rgba(219, 39, 119, 0.22);
+  --nx-accent-soft:     rgba(219, 39, 119, 0.13);
+  --nx-badge-border:    rgba(219, 39, 119, 0.36);
+  --nexus-accent:       #db2777;
+  --nexus-accent-rgb:   219, 39, 119;
+  --nexus-accent-soft:  rgba(219, 39, 119, 0.13);
+  --nexus-accent-glow:  rgba(219, 39, 119, 0.22);
+  --nexus-accent-border: rgba(219, 39, 119, 0.36);
+}
+:root[data-nexus-theme="light"][data-nexus-accent="gold"],
+.nx-premium-inbox[data-nexus-theme="light"][data-nexus-accent="gold"] {
+  --nx-accent:          #ca8a04;
+  --nx-accent-glow:     rgba(202, 138, 4, 0.22);
+  --nx-accent-soft:     rgba(202, 138, 4, 0.13);
+  --nx-badge-border:    rgba(202, 138, 4, 0.36);
+  --nexus-accent:       #ca8a04;
+  --nexus-accent-rgb:   202, 138, 4;
+  --nexus-accent-soft:  rgba(202, 138, 4, 0.13);
+  --nexus-accent-glow:  rgba(202, 138, 4, 0.22);
+  --nexus-accent-border: rgba(202, 138, 4, 0.36);
 }
 /* Map chrome responds to Nexus theme + accent */
 .nx-map-right-body,

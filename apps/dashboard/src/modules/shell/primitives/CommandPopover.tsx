@@ -1,8 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
 type Placement = 'bottom-start' | 'bottom-end'
+
+type AnchorPosition = {
+  top: number
+  left: number
+}
 
 export const CommandPopover = ({
   open,
@@ -24,17 +30,53 @@ export const CommandPopover = ({
   width?: number | string
 }) => {
   const popoverRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState<AnchorPosition | null>(null)
   const [flipLeft, setFlipLeft] = useState(false)
 
-  useLayoutEffect(() => {
-    if (!open) return
+  const updatePosition = useCallback(() => {
     const anchor = anchorRef.current?.getBoundingClientRect()
     const panel = popoverRef.current
-    if (!anchor || !panel) return
-    const panelWidth = panel.offsetWidth || 320
-    const overflowRight = anchor.left + panelWidth > window.innerWidth - 12
-    setFlipLeft(overflowRight && placement === 'bottom-start')
-  }, [open, anchorRef, placement])
+    if (!anchor) return
+
+    const panelWidth = panel?.offsetWidth
+      || (typeof width === 'number' ? width : Number.parseFloat(String(width)) || 320)
+    const gap = 8
+    let left = placement === 'bottom-end' ? anchor.right - panelWidth : anchor.left
+    const overflowRight = left + panelWidth > window.innerWidth - 12
+
+    if (overflowRight && placement === 'bottom-start') {
+      left = Math.max(12, anchor.right - panelWidth)
+      setFlipLeft(true)
+    } else {
+      setFlipLeft(false)
+    }
+
+    if (left < 12) left = 12
+
+    setPosition({
+      top: anchor.bottom + gap,
+      left,
+    })
+  }, [anchorRef, placement, width])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null)
+      return
+    }
+    updatePosition()
+  }, [open, updatePosition])
+
+  useEffect(() => {
+    if (!open) return
+    const handleViewportChange = () => updatePosition()
+    window.addEventListener('resize', handleViewportChange)
+    window.addEventListener('scroll', handleViewportChange, true)
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+      window.removeEventListener('scroll', handleViewportChange, true)
+    }
+  }, [open, updatePosition])
 
   useEffect(() => {
     if (!open) return
@@ -48,18 +90,25 @@ export const CommandPopover = ({
     return () => window.removeEventListener('mousedown', handlePointer)
   }, [open, onClose, anchorRef])
 
-  if (!open) return null
+  if (!open || !position) return null
 
-  return (
+  const popover = (
     <div
       ref={popoverRef}
       className={cls(
-        'nx-command-popover nx-liquid-popover',
+        'nx-command-popover nx-liquid-popover nx-shell-popover-portal',
         placement === 'bottom-end' && 'is-anchor-end',
         flipLeft && 'is-flip-left',
         className,
       )}
-      style={{ maxHeight, width }}
+      style={{
+        position: 'fixed',
+        top: position.top,
+        left: position.left,
+        maxHeight,
+        width,
+        zIndex: 13000,
+      }}
       role="dialog"
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -67,4 +116,6 @@ export const CommandPopover = ({
       {children}
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(popover, document.body) : null
 }

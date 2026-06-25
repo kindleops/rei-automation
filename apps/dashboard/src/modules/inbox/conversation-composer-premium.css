@@ -447,9 +447,10 @@
 }
 
 .nx-composer-tool-btn:hover:not(:disabled) {
-  color: var(--nx-text-primary);
-  background: var(--nx-conv-glass-highlight);
-  border-color: var(--nx-conv-glass-border);
+  color: var(--nx-accent);
+  background: color-mix(in srgb, var(--nx-accent) 10%, var(--nx-conv-glass-highlight));
+  border-color: color-mix(in srgb, var(--nx-accent) 24%, var(--nx-conv-glass-border));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--nx-accent) 12%, transparent);
 }
 
 .nx-composer-tool-btn.is-active {

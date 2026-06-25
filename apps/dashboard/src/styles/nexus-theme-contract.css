@@ -28,9 +28,9 @@
   --nx-contract-border:      var(--nx-border, rgba(148, 163, 184, 0.12));
   --nx-contract-accent:      var(--nx-accent, #38d0f0);
 
-  --nx-contract-menu-bg:     var(--nx-glass-bg-strong, rgba(6, 12, 20, 0.94));
+  --nx-contract-menu-bg:     var(--nx-glass-bg-strong, linear-gradient(180deg, rgba(12, 18, 30, 0.42), rgba(8, 14, 24, 0.34)));
   --nx-contract-menu-text:   var(--nx-glass-text, #e2e8f0);
-  --nx-contract-menu-border: var(--nx-glass-border, rgba(148, 163, 184, 0.16));
+  --nx-contract-menu-border: var(--nx-glass-border, rgba(255, 255, 255, 0.14));
   --nx-contract-menu-hover:  var(--nx-glass-bg-hover, rgba(255, 255, 255, 0.06));
 
   /* Glass/Blur Tokens */

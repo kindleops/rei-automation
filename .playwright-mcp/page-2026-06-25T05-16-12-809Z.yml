@@ -1,0 +1,75 @@
+- generic [ref=e3]:
+  - generic: Inbox
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - generic [ref=e64]:
+            - generic [ref=e65]: Live Map
+            - strong [ref=e66]: "0"
+          - button "Map Controls" [ref=e68] [cursor=pointer]
+        - generic [ref=e69]:
+          - region "Map" [ref=e71]
+          - group [ref=e72]:
+            - generic "Toggle attribution" [ref=e73] [cursor=pointer]
+            - generic [ref=e74]: CARTO
+        - generic [ref=e76]:
+          - generic [ref=e77]: No visible pins
+          - generic [ref=e78]: No mapped pins found. 25 conversations are missing coordinates.
+        - generic:
+          - generic [ref=e79]: Selected Conversation Is Unmapped
+          - paragraph [ref=e80]: No coordinates are available for Unknown Seller.
+        - generic "Map mode KPIs":
+          - button "New Replies 0" [ref=e81] [cursor=pointer]:
+            - generic [ref=e82]: New Replies
+            - strong [ref=e83]: "0"
+          - button "Needs Review 0" [ref=e84] [cursor=pointer]:
+            - generic [ref=e85]: Needs Review
+            - strong [ref=e86]: "0"
+          - button "Waiting 0" [ref=e87] [cursor=pointer]:
+            - generic [ref=e88]: Waiting
+            - strong [ref=e89]: "0"
+          - button "Negotiating 0" [ref=e90] [cursor=pointer]:
+            - generic [ref=e91]: Negotiating
+            - strong [ref=e92]: "0"
+          - button "Follow-Up Due 0" [ref=e93] [cursor=pointer]:
+            - generic [ref=e94]: Follow-Up Due
+            - strong [ref=e95]: "0"
+          - button "Not Contacted 0" [ref=e96] [cursor=pointer]:
+            - generic [ref=e97]: Not Contacted
+            - strong [ref=e98]: "0"
+          - button "Suppressed 0" [ref=e99] [cursor=pointer]:
+            - generic [ref=e100]: Suppressed
+            - strong [ref=e101]: "0"
+  - button "NEXUS Copilot" [ref=e102] [cursor=pointer]:
+    - generic: Standing by

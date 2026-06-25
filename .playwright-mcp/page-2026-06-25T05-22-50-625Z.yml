@@ -1,0 +1,565 @@
+- generic [ref=e7]:
+  - generic: Inbox
+  - main [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic "NEXUS Dashboard" [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e16]:
+              - generic [ref=e17]: NEXUS
+              - strong [ref=e18]: Deal Desk
+              - generic [ref=e19]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e20]:
+            - img [ref=e26] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e29] [cursor=pointer]':
+              - strong [ref=e30]:
+                - img [ref=e31]
+            - button "Queue & System Status · Unknown" [ref=e34] [cursor=pointer]:
+              - img [ref=e36]
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e43]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e44]: CMD+K
+        - generic [ref=e45]:
+          - button "99+" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+            - generic [ref=e50]: 99+
+          - button "Live Activity" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "Notifications" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+          - button "RK" [ref=e61] [cursor=pointer]:
+            - generic [ref=e62]: RK
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - img [ref=e69]
+            - generic [ref=e72]: Campaign Command
+          - generic [ref=e73]:
+            - button "New" [ref=e74] [cursor=pointer]:
+              - img [ref=e75]
+              - text: New
+            - button "Refresh" [ref=e77] [cursor=pointer]:
+              - img [ref=e78]
+              - text: Refresh
+        - generic [ref=e80]:
+          - generic [ref=e81]:
+            - generic [ref=e82]: Active Campaigns
+            - generic [ref=e83]: "0"
+          - generic [ref=e84]:
+            - generic [ref=e85]: Total Targets
+            - generic [ref=e86]: "923"
+          - generic [ref=e87]:
+            - generic [ref=e88]: Ready Targets
+            - generic [ref=e89]: "838"
+          - generic [ref=e90]:
+            - generic [ref=e91]: Scheduled Queue Rows
+            - generic [ref=e92]: "0"
+          - generic [ref=e93]:
+            - generic [ref=e94]: Planned Targets
+            - generic [ref=e95]: "30"
+          - generic [ref=e96]:
+            - generic [ref=e97]: Sent Today
+            - generic [ref=e98]: "0"
+          - generic [ref=e99]:
+            - generic [ref=e100]: Delivered Today
+            - generic [ref=e101]: "0"
+          - generic [ref=e102]:
+            - generic [ref=e103]: Reply Rate
+            - generic [ref=e104]: 0.0%
+          - generic [ref=e105]:
+            - generic [ref=e106]: Positive Replies
+            - generic [ref=e107]: "0"
+          - generic [ref=e108]:
+            - generic [ref=e109]: Opt-Out Rate
+            - generic [ref=e110]: 0.0%
+          - generic [ref=e111]:
+            - generic [ref=e112]: Failure Rate
+            - generic [ref=e113]: 0.0%
+        - generic [ref=e114]:
+          - generic [ref=e115]:
+            - generic [ref=e117]:
+              - img [ref=e118]
+              - textbox "Search…" [ref=e121]
+            - generic [ref=e122]:
+              - button "All 27" [ref=e123] [cursor=pointer]:
+                - text: All
+                - generic [ref=e124]: "27"
+              - button "Draft 3" [ref=e125] [cursor=pointer]:
+                - text: Draft
+                - generic [ref=e126]: "3"
+              - button "Ready 1" [ref=e127] [cursor=pointer]:
+                - text: Ready
+                - generic [ref=e128]: "1"
+              - button "Scheduled 0" [ref=e129] [cursor=pointer]:
+                - text: Scheduled
+                - generic [ref=e130]: "0"
+              - button "Live 0" [ref=e131] [cursor=pointer]:
+                - text: Live
+                - generic [ref=e132]: "0"
+              - button "Paused 1" [ref=e133] [cursor=pointer]:
+                - text: Paused
+                - generic [ref=e134]: "1"
+              - button "Done 0" [ref=e135] [cursor=pointer]:
+                - text: Done
+                - generic [ref=e136]: "0"
+              - button "Archived 22" [ref=e137] [cursor=pointer]:
+                - text: Archived
+                - generic [ref=e138]: "22"
+              - button "Attention 0" [ref=e139] [cursor=pointer]:
+                - text: Attention
+                - generic [ref=e140]: "0"
+            - generic [ref=e141]: 27 campaigns
+            - generic [ref=e142]:
+              - generic [ref=e143] [cursor=pointer]:
+                - generic [ref=e145]:
+                  - generic "Miami - Test Campaign" [ref=e146]
+                  - generic [ref=e147]:
+                    - generic [ref=e148]: Test Mode
+                    - generic [ref=e150]: ·
+                    - generic [ref=e151]: 802 tgt
+                    - generic [ref=e152]: ·
+                    - generic [ref=e153]: 774 ready
+                    - generic [ref=e154]: ·
+                    - generic [ref=e155]: 0 sent
+                  - generic [ref=e156]:
+                    - generic [ref=e157]: Not Started
+                    - generic [ref=e158]: ·
+                    - generic [ref=e159]: next 4d ago
+                - generic [ref=e160]:
+                  - button "Campaign actions" [ref=e161]:
+                    - img [ref=e162]
+                  - button "Prepare Test Batch" [ref=e166]
+              - generic [ref=e167] [cursor=pointer]:
+                - generic [ref=e169]:
+                  - generic "Activate Test 1781998292754" [ref=e170]
+                  - generic [ref=e171]:
+                    - generic [ref=e172]: Targets Built
+                    - generic [ref=e174]: ·
+                    - generic [ref=e175]: 5 tgt
+                    - generic [ref=e176]: ·
+                    - generic [ref=e177]: 4 ready
+                    - generic [ref=e178]: ·
+                    - generic [ref=e179]: 0 sent
+                  - generic [ref=e181]: Not Started
+                - generic [ref=e182]:
+                  - button "Campaign actions" [ref=e183]:
+                    - img [ref=e184]
+                  - button "Activate" [ref=e188]
+              - generic [ref=e189] [cursor=pointer]:
+                - generic [ref=e191]:
+                  - generic "Proof Campaign Launch Execution 1781998170967" [ref=e192]
+                  - generic [ref=e193]:
+                    - generic [ref=e194]: Archived
+                    - generic [ref=e196]: ·
+                    - generic [ref=e197]: 25 tgt
+                    - generic [ref=e198]: ·
+                    - generic [ref=e199]: 15 ready
+                    - generic [ref=e200]: ·
+                    - generic [ref=e201]: 0 sent
+                  - generic [ref=e203]: Not Started
+                - generic [ref=e204]:
+                  - button "Campaign actions" [ref=e205]:
+                    - img [ref=e206]
+                  - button "Restore" [ref=e210]
+              - generic [ref=e211] [cursor=pointer]:
+                - generic [ref=e213]:
+                  - generic "test" [ref=e214]
+                  - generic [ref=e215]:
+                    - generic [ref=e216]: Draft
+                    - generic [ref=e218]: ·
+                    - generic [ref=e219]: 0 tgt
+                    - generic [ref=e220]: ·
+                    - generic [ref=e221]: 0 ready
+                    - generic [ref=e222]: ·
+                    - generic [ref=e223]: 0 sent
+                  - generic [ref=e225]: Not Started
+                - generic [ref=e226]:
+                  - button "Campaign actions" [ref=e227]:
+                    - img [ref=e228]
+                  - button "Build Targets" [ref=e232]
+              - generic [ref=e233] [cursor=pointer]:
+                - generic [ref=e235]:
+                  - generic "c" [ref=e236]
+                  - generic [ref=e237]:
+                    - generic [ref=e238]: Draft
+                    - generic [ref=e240]: ·
+                    - generic [ref=e241]: 0 tgt
+                    - generic [ref=e242]: ·
+                    - generic [ref=e243]: 0 ready
+                    - generic [ref=e244]: ·
+                    - generic [ref=e245]: 0 sent
+                  - generic [ref=e247]: Not Started
+                - generic [ref=e248]:
+                  - button "Campaign actions" [ref=e249]:
+                    - img [ref=e250]
+                  - button "Build Targets" [ref=e254]
+              - generic [ref=e255] [cursor=pointer]:
+                - generic [ref=e257]:
+                  - generic "Proof Campaign Launch Execution 1780391673004" [ref=e258]
+                  - generic [ref=e259]:
+                    - generic [ref=e260]: Archived
+                    - generic [ref=e262]: ·
+                    - generic [ref=e263]: 25 tgt
+                    - generic [ref=e264]: ·
+                    - generic [ref=e265]: 10 ready
+                    - generic [ref=e266]: ·
+                    - generic [ref=e267]: 0 sent
+                  - generic [ref=e268]:
+                    - generic [ref=e269]: Not Started
+                    - generic [ref=e270]: ·
+                    - generic [ref=e271]: next in 26492d
+                - generic [ref=e272]:
+                  - button "Campaign actions" [ref=e273]:
+                    - img [ref=e274]
+                  - button "Restore" [ref=e278]
+              - generic [ref=e279] [cursor=pointer]:
+                - generic [ref=e281]:
+                  - generic "Campaign 2026-06-02" [ref=e282]
+                  - generic [ref=e283]:
+                    - generic [ref=e284]: Draft
+                    - generic [ref=e286]: ·
+                    - generic [ref=e287]: 0 tgt
+                    - generic [ref=e288]: ·
+                    - generic [ref=e289]: 0 ready
+                    - generic [ref=e290]: ·
+                    - generic [ref=e291]: 0 sent
+                  - generic [ref=e293]: Not Started
+                - generic [ref=e294]:
+                  - button "Campaign actions" [ref=e295]:
+                    - img [ref=e296]
+                  - button "Build Targets" [ref=e300]
+              - generic [ref=e301] [cursor=pointer]:
+                - generic [ref=e303]:
+                  - generic "Proof Queue Plan 1780381052093" [ref=e304]
+                  - generic [ref=e305]:
+                    - generic [ref=e306]: Archived
+                    - generic [ref=e308]: ·
+                    - generic [ref=e309]: 0 tgt
+                    - generic [ref=e310]: ·
+                    - generic [ref=e311]: 0 ready
+                    - generic [ref=e312]: ·
+                    - generic [ref=e313]: 0 sent
+                  - generic [ref=e315]: Not Started
+                - generic [ref=e316]:
+                  - button "Campaign actions" [ref=e317]:
+                    - img [ref=e318]
+                  - button "Restore" [ref=e322]
+              - generic [ref=e323] [cursor=pointer]:
+                - generic [ref=e325]:
+                  - generic "Proof Campaign Launch Execution 1780380960469" [ref=e326]
+                  - generic [ref=e327]:
+                    - generic [ref=e328]: Archived
+                    - generic [ref=e330]: ·
+                    - generic [ref=e331]: 25 tgt
+                    - generic [ref=e332]: ·
+                    - generic [ref=e333]: 10 ready
+                    - generic [ref=e334]: ·
+                    - generic [ref=e335]: 0 sent
+                  - generic [ref=e336]:
+                    - generic [ref=e337]: Not Started
+                    - generic [ref=e338]: ·
+                    - generic [ref=e339]: next in 26492d
+                - generic [ref=e340]:
+                  - button "Campaign actions" [ref=e341]:
+                    - img [ref=e342]
+                  - button "Restore" [ref=e346]
+              - generic [ref=e347] [cursor=pointer]:
+                - generic [ref=e349]:
+                  - generic "Proof Campaign Launch Execution 1780380857598" [ref=e350]
+                  - generic [ref=e351]:
+                    - generic [ref=e352]: Archived
+                    - generic [ref=e354]: ·
+                    - generic [ref=e355]: 25 tgt
+                    - generic [ref=e356]: ·
+                    - generic [ref=e357]: 11 ready
+                    - generic [ref=e358]: ·
+                    - generic [ref=e359]: 0 sent
+                  - generic [ref=e361]: Not Started
+                - generic [ref=e362]:
+                  - button "Campaign actions" [ref=e363]:
+                    - img [ref=e364]
+                  - button "Restore" [ref=e368]
+              - generic [ref=e369] [cursor=pointer]:
+                - generic [ref=e371]:
+                  - generic "Proof Campaign Launch Execution 1780380654354" [ref=e372]
+                  - generic [ref=e373]:
+                    - generic [ref=e374]: Archived
+                    - generic [ref=e376]: ·
+                    - generic [ref=e377]: 5 tgt
+                    - generic [ref=e378]: ·
+                    - generic [ref=e379]: 4 ready
+                    - generic [ref=e380]: ·
+                    - generic [ref=e381]: 0 sent
+                  - generic [ref=e383]: Not Started
+                - generic [ref=e384]:
+                  - button "Campaign actions" [ref=e385]:
+                    - img [ref=e386]
+                  - button "Restore" [ref=e390]
+              - generic [ref=e391] [cursor=pointer]:
+                - generic [ref=e393]:
+                  - generic "Full Graph Launch 2026-06-02T05:04:44.896Z" [ref=e394]
+                  - generic [ref=e395]:
+                    - generic [ref=e396]: Archived
+                    - generic [ref=e398]: ·
+                    - generic [ref=e399]: 5 tgt
+                    - generic [ref=e400]: ·
+                    - generic [ref=e401]: 4 ready
+                    - generic [ref=e402]: ·
+                    - generic [ref=e403]: 0 sent
+                  - generic [ref=e405]: Not Started
+                - generic [ref=e406]:
+                  - button "Campaign actions" [ref=e407]:
+                    - img [ref=e408]
+                  - button "Restore" [ref=e412]
+              - generic [ref=e413] [cursor=pointer]:
+                - generic [ref=e415]:
+                  - generic "Proof Build Targets 1780356321948" [ref=e416]
+                  - generic [ref=e417]:
+                    - generic [ref=e418]: Archived
+                    - generic [ref=e420]: ·
+                    - generic [ref=e421]: 0 tgt
+                    - generic [ref=e422]: ·
+                    - generic [ref=e423]: 0 ready
+                    - generic [ref=e424]: ·
+                    - generic [ref=e425]: 0 sent
+                  - generic [ref=e427]: Not Started
+                - generic [ref=e428]:
+                  - button "Campaign actions" [ref=e429]:
+                    - img [ref=e430]
+                  - button "Restore" [ref=e434]
+              - generic [ref=e435] [cursor=pointer]:
+                - generic [ref=e437]:
+                  - generic "Proof Build Targets 1780356299337" [ref=e438]
+                  - generic [ref=e439]:
+                    - generic [ref=e440]: Archived
+                    - generic [ref=e442]: ·
+                    - generic [ref=e443]: 0 tgt
+                    - generic [ref=e444]: ·
+                    - generic [ref=e445]: 0 ready
+                    - generic [ref=e446]: ·
+                    - generic [ref=e447]: 0 sent
+                  - generic [ref=e449]: Not Started
+                - generic [ref=e450]:
+                  - button "Campaign actions" [ref=e451]:
+                    - img [ref=e452]
+                  - button "Restore" [ref=e456]
+              - generic [ref=e457] [cursor=pointer]:
+                - generic [ref=e459]:
+                  - generic "Proof Build Targets 1780356254406" [ref=e460]
+                  - generic [ref=e461]:
+                    - generic [ref=e462]: Archived
+                    - generic [ref=e464]: ·
+                    - generic [ref=e465]: 0 tgt
+                    - generic [ref=e466]: ·
+                    - generic [ref=e467]: 0 ready
+                    - generic [ref=e468]: ·
+                    - generic [ref=e469]: 0 sent
+                  - generic [ref=e471]: Not Started
+                - generic [ref=e472]:
+                  - button "Campaign actions" [ref=e473]:
+                    - img [ref=e474]
+                  - button "Restore" [ref=e478]
+              - generic [ref=e479] [cursor=pointer]:
+                - generic [ref=e481]:
+                  - generic "Proof Queue Plan 1780266449256" [ref=e482]
+                  - generic [ref=e483]:
+                    - generic [ref=e484]: Archived
+                    - generic [ref=e486]: ·
+                    - generic [ref=e487]: 0 tgt
+                    - generic [ref=e488]: ·
+                    - generic [ref=e489]: 0 ready
+                    - generic [ref=e490]: ·
+                    - generic [ref=e491]: 0 sent
+                  - generic [ref=e493]: Not Started
+                - generic [ref=e494]:
+                  - button "Campaign actions" [ref=e495]:
+                    - img [ref=e496]
+                  - button "Restore" [ref=e500]
+              - generic [ref=e501] [cursor=pointer]:
+                - generic [ref=e503]:
+                  - generic "Proof Queue Plan 1780265867636" [ref=e504]
+                  - generic [ref=e505]:
+                    - generic [ref=e506]: Archived
+                    - generic [ref=e508]: ·
+                    - generic [ref=e509]: 0 tgt
+                    - generic [ref=e510]: ·
+                    - generic [ref=e511]: 0 ready
+                    - generic [ref=e512]: ·
+                    - generic [ref=e513]: 0 sent
+                  - generic [ref=e515]: Not Started
+                - generic [ref=e516]:
+                  - button "Campaign actions" [ref=e517]:
+                    - img [ref=e518]
+                  - button "Restore" [ref=e522]
+              - generic [ref=e523] [cursor=pointer]:
+                - generic [ref=e525]:
+                  - generic "Proof Queue Plan 1780215947110" [ref=e526]
+                  - generic [ref=e527]:
+                    - generic [ref=e528]: Archived
+                    - generic [ref=e530]: ·
+                    - generic [ref=e531]: 0 tgt
+                    - generic [ref=e532]: ·
+                    - generic [ref=e533]: 0 ready
+                    - generic [ref=e534]: ·
+                    - generic [ref=e535]: 0 sent
+                  - generic [ref=e537]: Not Started
+                - generic [ref=e538]:
+                  - button "Campaign actions" [ref=e539]:
+                    - img [ref=e540]
+                  - button "Restore" [ref=e544]
+              - generic [ref=e545] [cursor=pointer]:
+                - generic [ref=e547]:
+                  - generic "Proof Build Targets 1780215921362" [ref=e548]
+                  - generic [ref=e549]:
+                    - generic [ref=e550]: Archived
+                    - generic [ref=e552]: ·
+                    - generic [ref=e553]: 0 tgt
+                    - generic [ref=e554]: ·
+                    - generic [ref=e555]: 0 ready
+                    - generic [ref=e556]: ·
+                    - generic [ref=e557]: 0 sent
+                  - generic [ref=e559]: Not Started
+                - generic [ref=e560]:
+                  - button "Campaign actions" [ref=e561]:
+                    - img [ref=e562]
+                  - button "Restore" [ref=e566]
+              - generic [ref=e567] [cursor=pointer]:
+                - generic [ref=e569]:
+                  - generic "Probe 1780215905215" [ref=e570]
+                  - generic [ref=e571]:
+                    - generic [ref=e572]: Archived
+                    - generic [ref=e574]: ·
+                    - generic [ref=e575]: 0 tgt
+                    - generic [ref=e576]: ·
+                    - generic [ref=e577]: 0 ready
+                    - generic [ref=e578]: ·
+                    - generic [ref=e579]: 0 sent
+                  - generic [ref=e581]: Not Started
+                - generic [ref=e582]:
+                  - button "Campaign actions" [ref=e583]:
+                    - img [ref=e584]
+                  - button "Restore" [ref=e588]
+              - generic [ref=e589] [cursor=pointer]:
+                - generic [ref=e591]:
+                  - generic "Proof Build Targets 1780215734631" [ref=e592]
+                  - generic [ref=e593]:
+                    - generic [ref=e594]: Archived
+                    - generic [ref=e596]: ·
+                    - generic [ref=e597]: 0 tgt
+                    - generic [ref=e598]: ·
+                    - generic [ref=e599]: 0 ready
+                    - generic [ref=e600]: ·
+                    - generic [ref=e601]: 0 sent
+                  - generic [ref=e603]: Not Started
+                - generic [ref=e604]:
+                  - button "Campaign actions" [ref=e605]:
+                    - img [ref=e606]
+                  - button "Restore" [ref=e610]
+              - generic [ref=e611] [cursor=pointer]:
+                - generic [ref=e613]:
+                  - generic "Proof Queue Plan 1780212087086" [ref=e614]
+                  - generic [ref=e615]:
+                    - generic [ref=e616]: Archived
+                    - generic [ref=e618]: ·
+                    - generic [ref=e619]: 0 tgt
+                    - generic [ref=e620]: ·
+                    - generic [ref=e621]: 0 ready
+                    - generic [ref=e622]: ·
+                    - generic [ref=e623]: 0 sent
+                  - generic [ref=e625]: Not Started
+                - generic [ref=e626]:
+                  - button "Campaign actions" [ref=e627]:
+                    - img [ref=e628]
+                  - button "Restore" [ref=e632]
+              - generic [ref=e633] [cursor=pointer]:
+                - generic [ref=e635]:
+                  - generic "Proof Build Targets 1780212059424" [ref=e636]
+                  - generic [ref=e637]:
+                    - generic [ref=e638]: Archived
+                    - generic [ref=e640]: ·
+                    - generic [ref=e641]: 0 tgt
+                    - generic [ref=e642]: ·
+                    - generic [ref=e643]: 0 ready
+                    - generic [ref=e644]: ·
+                    - generic [ref=e645]: 0 sent
+                  - generic [ref=e647]: Not Started
+                - generic [ref=e648]:
+                  - button "Campaign actions" [ref=e649]:
+                    - img [ref=e650]
+                  - button "Restore" [ref=e654]
+              - generic [ref=e655] [cursor=pointer]:
+                - generic [ref=e657]:
+                  - generic "Proof Queue Plan 1780187674677" [ref=e658]
+                  - generic [ref=e659]:
+                    - generic [ref=e660]: Archived
+                    - generic [ref=e662]: ·
+                    - generic [ref=e663]: 0 tgt
+                    - generic [ref=e664]: ·
+                    - generic [ref=e665]: 0 ready
+                    - generic [ref=e666]: ·
+                    - generic [ref=e667]: 0 sent
+                  - generic [ref=e669]: Not Started
+                - generic [ref=e670]:
+                  - button "Campaign actions" [ref=e671]:
+                    - img [ref=e672]
+                  - button "Restore" [ref=e676]
+              - generic [ref=e677] [cursor=pointer]:
+                - generic [ref=e679]:
+                  - generic "Proof Build Targets 1780187674157" [ref=e680]
+                  - generic [ref=e681]:
+                    - generic [ref=e682]: Archived
+                    - generic [ref=e684]: ·
+                    - generic [ref=e685]: 3 tgt
+                    - generic [ref=e686]: ·
+                    - generic [ref=e687]: 3 ready
+                    - generic [ref=e688]: ·
+                    - generic [ref=e689]: 0 sent
+                  - generic [ref=e691]: Not Started
+                - generic [ref=e692]:
+                  - button "Campaign actions" [ref=e693]:
+                    - img [ref=e694]
+                  - button "Restore" [ref=e698]
+              - generic [ref=e699] [cursor=pointer]:
+                - generic [ref=e701]:
+                  - generic "Proof Queue Plan 1780187486484" [ref=e702]
+                  - generic [ref=e703]:
+                    - generic [ref=e704]: Archived
+                    - generic [ref=e706]: ·
+                    - generic [ref=e707]: 0 tgt
+                    - generic [ref=e708]: ·
+                    - generic [ref=e709]: 0 ready
+                    - generic [ref=e710]: ·
+                    - generic [ref=e711]: 0 sent
+                  - generic [ref=e713]: Not Started
+                - generic [ref=e714]:
+                  - button "Campaign actions" [ref=e715]:
+                    - img [ref=e716]
+                  - button "Restore" [ref=e720]
+              - generic [ref=e721] [cursor=pointer]:
+                - generic [ref=e723]:
+                  - generic "Proof Build Targets 1780187485881" [ref=e724]
+                  - generic [ref=e725]:
+                    - generic [ref=e726]: Archived
+                    - generic [ref=e728]: ·
+                    - generic [ref=e729]: 3 tgt
+                    - generic [ref=e730]: ·
+                    - generic [ref=e731]: 3 ready
+                    - generic [ref=e732]: ·
+                    - generic [ref=e733]: 0 sent
+                  - generic [ref=e735]: Not Started
+                - generic [ref=e736]:
+                  - button "Campaign actions" [ref=e737]:
+                    - img [ref=e738]
+                  - button "Restore" [ref=e742]
+          - generic [ref=e744]:
+            - img [ref=e746]
+            - generic [ref=e748]: Select a Campaign
+            - generic [ref=e749]: Click any campaign row to view details, targets, queue, and performance
+          - generic [ref=e750]:
+            - generic [ref=e752]: Campaign Intelligence
+            - generic [ref=e753]: Select a campaign for launch readiness and health
+  - button "NEXUS Copilot" [ref=e754] [cursor=pointer]:
+    - generic: Standing by

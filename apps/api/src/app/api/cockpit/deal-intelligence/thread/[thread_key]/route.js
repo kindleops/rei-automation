@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, getCorsHeaders, handleOptionsResponse } from '../../../_shared.js'
 import { getUniversalDealDossier } from '@/lib/cockpit/universal-deal-dossier-service.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,14 +38,22 @@ async function handleRequest(request, params, isPost = false) {
   const master_owner_id = url.searchParams.get('master_owner_id') || payload.master_owner_id
 
   try {
-    const dossier = await getUniversalDealDossier({
+    const cacheKey = [
+      'deal-dossier',
+      thread_key,
+      property_id || '',
+      prospect_id || '',
+      master_owner_id || '',
+      canonical_e164 || '',
+    ].join(':')
+    const dossier = await readThroughCache(cacheKey, 8_000, () => getUniversalDealDossier({
       thread_key,
       property_id,
       prospect_id,
       master_owner_id,
       canonical_e164,
-      debug
-    })
+      debug,
+    }))
 
     return NextResponse.json(
       {

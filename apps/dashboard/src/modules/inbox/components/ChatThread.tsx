@@ -100,18 +100,21 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   if (message.deliveredAt) return 'delivered'
   if (statusEvidence.some((value) => value.includes('deliver') && !value.includes('undeliv'))) return 'delivered'
 
-  if (message.sentAt) return 'sent'
-  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'sent'
-
-  if (statusEvidence.some((value) => (
+  const messageAt = String(message.sentAt || message.deliveredAt || message.createdAt || message.at || '').trim()
+  const messageAgeMs = messageAt ? Math.max(0, Date.now() - new Date(messageAt).getTime()) : Number.POSITIVE_INFINITY
+  const isActivelySending = messageAgeMs < 45_000 && statusEvidence.some((value) => (
     value.includes('pending')
     || value.includes('queue')
     || value.includes('process')
     || value === 'queued'
     || value === 'sending'
-  ))) return 'sending'
+  ))
+  if (isActivelySending) return 'sending'
 
-  return 'sending'
+  if (message.sentAt) return 'delivered'
+  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'delivered'
+
+  return 'delivered'
 }
 
 const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string } => {

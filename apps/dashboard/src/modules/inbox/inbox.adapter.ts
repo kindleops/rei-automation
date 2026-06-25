@@ -1212,13 +1212,6 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   useEffect(() => {
     let cancelled = false
 
-    const bootCountsController = new AbortController()
-    void fetchAuthoritativeCounts(bootCountsController.signal).then((counts) => {
-      if (cancelled || !counts) return
-      dispatch({ type: 'SET_VIEW_COUNTS', counts })
-      writeCachedViewCounts(counts)
-    }).catch(() => {})
-
     void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot' })
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
@@ -1463,7 +1456,6 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     return () => {
       cancelled = true
-      bootCountsController.abort()
       Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
       window.clearInterval(pollInterval)

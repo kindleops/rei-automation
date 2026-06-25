@@ -1,0 +1,600 @@
+- generic [ref=e7]:
+  - generic: Inbox
+  - main [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic "NEXUS Dashboard" [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e16]:
+              - generic [ref=e17]: NEXUS
+              - strong [ref=e18]: Deal Desk
+              - generic [ref=e19]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e20]:
+            - img [ref=e26] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e29] [cursor=pointer]':
+              - strong [ref=e30]:
+                - img [ref=e31]
+            - button "Queue & System Status · Unknown" [ref=e34] [cursor=pointer]:
+              - img [ref=e36]
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e43]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e44]: CMD+K
+        - generic [ref=e45]:
+          - button "99+" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+            - generic [ref=e50]: 99+
+          - button "Live Activity" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "Notifications" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+          - button "RK" [ref=e61] [cursor=pointer]:
+            - generic [ref=e62]: RK
+      - main [ref=e64]:
+        - generic [ref=e65]:
+          - complementary [ref=e68]:
+            - generic [ref=e70]:
+              - generic [ref=e71]:
+                - generic [ref=e72]:
+                  - img [ref=e73]
+                  - textbox "Search inbox threads" [ref=e76]:
+                    - /placeholder: Search operator inbox...
+                - generic [ref=e77]:
+                  - button "Advanced filters" [ref=e78] [cursor=pointer]:
+                    - img [ref=e79]
+                  - button "Clear filters" [ref=e81] [cursor=pointer]:
+                    - img [ref=e82]
+              - tablist "Inbox categories" [ref=e84]:
+                - tab "Priority 49" [ref=e85] [cursor=pointer]:
+                  - generic [ref=e86]: 🔥
+                  - generic "Priority" [ref=e87]
+                  - generic [ref=e88]: "49"
+                - tab "New Replies 31 Unread replies" [ref=e89] [cursor=pointer]:
+                  - generic [ref=e90]: 📥
+                  - generic "New Replies" [ref=e91]
+                  - generic [ref=e92]: "31"
+                  - generic "Unread replies" [ref=e93]
+                - tab "Needs Review 111" [ref=e94] [cursor=pointer]:
+                  - generic [ref=e95]: 🧠
+                  - generic "Needs Review" [ref=e96]
+                  - generic [ref=e97]: "111"
+                - tab "Waiting 1" [selected] [ref=e98] [cursor=pointer]:
+                  - generic [ref=e99]: ⏳
+                  - generic "Waiting" [ref=e100]
+                  - generic [ref=e101]: "1"
+                - tab "All Threads 7897" [ref=e102] [cursor=pointer]:
+                  - generic [ref=e103]: 📦
+                  - generic "All Threads" [ref=e104]
+                  - generic [ref=e105]: "7897"
+            - generic [ref=e106]:
+              - generic [ref=e107]:
+                - button "+ Save Current Filter" [ref=e108] [cursor=pointer]
+                - button "Manage Lists" [ref=e109] [cursor=pointer]
+              - button "(770) 203-3651 No Address Sorry about that, my system had an error. Are you open to a proposal on the property? Delivered 9:18 PM Atlanta, GA Value, priority, equity, and condition" [ref=e1391] [cursor=pointer]:
+                - generic [ref=e1392]:
+                  - generic [ref=e1395]: (770) 203-3651
+                  - generic [ref=e1396]: No Address
+                  - generic [ref=e1397]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+                  - generic "Delivered 9:18 PM" [ref=e1399]:
+                    - img [ref=e1400]
+                    - generic [ref=e1403]: Delivered
+                    - generic [ref=e1404]: ·
+                    - time [ref=e1405]: 9:18 PM
+                  - generic [ref=e1407]: Atlanta, GA
+                  - generic "Value, priority, equity, and condition" [ref=e1408]:
+                    - generic [ref=e1409]:
+                      - generic [ref=e1410]: Value
+                      - generic [ref=e1411]: —
+                    - generic [ref=e1412]:
+                      - generic [ref=e1413]: Priority
+                      - generic [ref=e1414]: "0"
+                    - generic [ref=e1415]:
+                      - generic [ref=e1416]: Equity
+                      - generic [ref=e1417]: —
+                    - generic [ref=e1418]:
+                      - generic [ref=e1419]: Condition
+                      - generic [ref=e1420]: —
+          - generic [ref=e867]:
+            - generic [ref=e868]:
+              - generic [ref=e1421]:
+                - generic [ref=e1422]:
+                  - generic [ref=e1423]:
+                    - heading "(770) 203-3651" [level=2] [ref=e1424]
+                    - generic [ref=e1425]:
+                      - generic [ref=e1426]:
+                        - img [ref=e1427]
+                        - text: "+17702033651"
+                      - generic [ref=e1429]:
+                        - img [ref=e1430]
+                        - text: Atlanta, GA
+                      - button "Debug thread" [ref=e1433] [cursor=pointer]:
+                        - img [ref=e1434]
+                    - generic [ref=e1437]: No Address
+                  - generic [ref=e1438]:
+                    - button "Star thread" [ref=e1439] [cursor=pointer]:
+                      - img [ref=e1440]
+                    - button "Pin thread" [ref=e1442] [cursor=pointer]:
+                      - img [ref=e1443]
+                    - button "Thread notes and details" [ref=e1445] [cursor=pointer]:
+                      - img [ref=e1446]
+                    - button "Archive thread (stays in All Messages)" [ref=e1449] [cursor=pointer]:
+                      - img [ref=e1450]
+                - generic "Property intelligence" [ref=e1453]:
+                  - generic [ref=e1454]:
+                    - generic [ref=e1455]: Market
+                    - generic [ref=e1456]: Atlanta, GA
+              - generic "Universal thread controls" [ref=e1457]:
+                - generic [ref=e1458]:
+                  - 'button "Conversation status: Waiting" [ref=e1460] [cursor=pointer]':
+                    - generic [ref=e1462]: Waiting
+                    - generic [ref=e1463]: ▾
+                  - 'button "Acquisition stage: S1 Ownership Check" [ref=e1465] [cursor=pointer]':
+                    - generic [ref=e1467]: S1 Ownership Check
+                    - generic [ref=e1468]: ▾
+                  - 'button "Lead temperature: Cold" [ref=e1470] [cursor=pointer]':
+                    - generic [ref=e1472]: Cold
+                    - generic [ref=e1473]: ▾
+                - 'button "Automation state: Autopilot" [ref=e1475] [cursor=pointer]':
+                  - img [ref=e1476]
+                  - generic [ref=e1478]: Autopilot
+                  - generic [ref=e1479]: ▾
+              - generic [ref=e1480]:
+                - generic [ref=e1481]:
+                  - separator "Today" [ref=e1482]:
+                    - generic [ref=e1483]: Today
+                  - generic [ref=e1484]:
+                    - generic [ref=e1485]: Hey Linda, this is Andre. I have been investing in Decatur. Do you still own 4381 Sterling Forest Dr?
+                    - generic [ref=e1486]:
+                      - time [ref=e1487]: Jun 24 · 7:41 PM
+                      - generic [ref=e1488]:
+                        - generic [ref=e1489]: ✓✓
+                        - generic [ref=e1490]: Delivered
+                    - generic:
+                      - button "Add note":
+                        - img
+                - generic [ref=e1492]:
+                  - generic [ref=e1493]: "Yes"
+                  - time [ref=e1495]: Jun 24 · 8:29 PM
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1497]:
+                  - generic [ref=e1498]: Schema proof 53186945
+                  - generic [ref=e1499]:
+                    - time [ref=e1500]: Jun 24 · 9:06 PM
+                    - generic [ref=e1501]:
+                      - generic [ref=e1502]: ✓✓
+                      - generic [ref=e1503]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1505]:
+                  - generic [ref=e1506]: Schema proof 53211250
+                  - generic [ref=e1507]:
+                    - time [ref=e1508]: Jun 24 · 9:06 PM
+                    - generic [ref=e1509]:
+                      - generic [ref=e1510]: ✓✓
+                      - generic [ref=e1511]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+                - generic [ref=e1513]:
+                  - generic [ref=e1514]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+                  - generic [ref=e1515]:
+                    - time [ref=e1516]: Jun 24 · 9:18 PM
+                    - generic [ref=e1517]:
+                      - generic [ref=e1518]: ✓✓
+                      - generic [ref=e1519]: Delivered
+                  - generic:
+                    - button "Add note":
+                      - img
+            - generic [ref=e870]:
+              - button "Open quick actions" [ref=e872] [cursor=pointer]:
+                - img [ref=e873]
+              - generic [ref=e877]:
+                - textbox "Type a message…" [active] [ref=e878]
+                - generic [ref=e879]:
+                  - button "Operator polish" [disabled] [ref=e880]:
+                    - img [ref=e881]
+                  - button "Translate draft" [disabled] [ref=e883]:
+                    - img [ref=e884]
+                  - button "Schedule message" [ref=e888] [cursor=pointer]:
+                    - img [ref=e889]
+                  - button "Voice input" [ref=e892] [cursor=pointer]:
+                    - img [ref=e893]
+              - button "Send message" [disabled] [ref=e897]:
+                - img [ref=e898]
+          - complementary [ref=e901]:
+            - generic [ref=e1521]:
+              - generic [ref=e1522]:
+                - tablist [ref=e1523]:
+                  - tab "Street View" [selected] [ref=e1524] [cursor=pointer]
+                  - tab "Aerial" [ref=e1525] [cursor=pointer]
+                - generic [ref=e1527]:
+                  - iframe [ref=e1528]:
+                    - generic [ref=f3e3]:
+                      - generic:
+                        - button "Keyboard shortcuts"
+                      - region "Map" [ref=f3e4]:
+                        - generic [ref=f3e5]:
+                          - region "Main Display" [ref=f3e8]
+                          - generic:
+                            - img
+                      - iframe [ref=f3e12]:
+                        
+                      - button "Toggle fullscreen view" [ref=f3e13] [cursor=pointer]
+                      - generic:
+                        - generic:
+                          - generic [ref=f3e15]:
+                            - button "Rotate counterclockwise" [ref=f3e16] [cursor=pointer]
+                            - button "Reset the view" [ref=f3e17] [cursor=pointer]
+                            - button "Rotate clockwise" [ref=f3e18] [cursor=pointer]
+                            - generic [ref=f3e19]: Rotate the view
+                          - generic [ref=f3e23] [cursor=pointer]:
+                            - button "Zoom in" [ref=f3e24]
+                            - button "Zoom out" [ref=f3e26]
+                      - img "Google" [ref=f3e28]
+                      - generic [ref=f3e29]:
+                        - button "Keyboard shortcuts" [ref=f3e35] [cursor=pointer]
+                        - generic [ref=f3e40]: Image may be subject to copyright
+                        - link "Terms (opens in new tab)" [ref=f3e45] [cursor=pointer]:
+                          - /url: https://www.google.com/intl/en-US_US/help/terms_maps.html
+                          - text: Terms
+                        - generic [ref=f3e49]: Report a problem
+                  - generic [ref=e1529]: Interactive Street View
+                - generic [ref=e1530]:
+                  - link "Zillow" [ref=e1531] [cursor=pointer]:
+                    - /url: https://www.zillow.com/homes/4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034_rb/
+                  - link "Realtor" [ref=e1532] [cursor=pointer]:
+                    - /url: https://www.realtor.com/realestateandhomes-search/4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034
+                  - link "Google" [ref=e1533] [cursor=pointer]:
+                    - /url: https://www.google.com/search?q=4381%20Sterling%20Forest%20Dr%2C%20Decatur%2C%20Ga%2030034
+                  - button "Copy Address" [ref=e1534] [cursor=pointer]
+              - generic [ref=e1535]:
+                - heading "4381 Sterling Forest Dr, Decatur, Ga 30034" [level=2] [ref=e1536]
+                - generic [ref=e1537]:
+                  - generic [ref=e1538]: Atlanta, GA
+                  - generic [ref=e1539]: SFR
+                  - generic [ref=e1540]: Residential
+                  - generic [ref=e1541]: Average
+                - generic [ref=e1542]:
+                  - generic [ref=e1543]: Tax Delinquent
+                  - generic [ref=e1544]: Absentee Owner
+                  - generic [ref=e1545]: High Equity
+                  - generic [ref=e1546]: Heavily Dated
+                  - generic [ref=e1547]: "+3"
+              - generic [ref=e1548]:
+                - generic [ref=e1550]: Property Snapshot
+                - generic [ref=e1551]:
+                  - generic [ref=e1552]:
+                    - generic [ref=e1553]: Value
+                    - strong [ref=e1554]: $248,000
+                  - generic [ref=e1555]:
+                    - generic [ref=e1556]: Equity
+                    - strong [ref=e1557]: $248,000
+                    - emphasis [ref=e1558]: 100%
+                  - generic [ref=e1559]:
+                    - generic [ref=e1560]: Debt
+                    - strong [ref=e1561]: $0
+                  - generic [ref=e1562]:
+                    - generic [ref=e1563]: Repairs
+                    - strong [ref=e1564]: $99,680
+                  - generic [ref=e1565]:
+                    - generic [ref=e1566]: Last Sale
+                    - strong [ref=e1567]: $125,000
+                    - emphasis [ref=e1568]: Jul 31, 2017
+                  - generic [ref=e1569]:
+                    - generic [ref=e1570]: Ownership
+                    - strong [ref=e1571]: 9 yrs
+                - generic [ref=e1572]:
+                  - generic [ref=e1573]: Last sale → current value
+                  - strong [ref=e1574]: $123,000 (98%)
+                  - emphasis [ref=e1575]: 8.9 yr hold
+                - generic [ref=e1576]:
+                  - generic "Equity $248,000" [ref=e1578]
+                  - generic [ref=e1580]:
+                    - generic [ref=e1581]: Equity $248,000 (100%)
+                    - generic [ref=e1582]: Debt $0 (0%)
+              - generic [ref=e1583]:
+                - generic [ref=e1585]: Baseline Property Intelligence
+                - generic [ref=e1586]:
+                  - generic [ref=e1587]:
+                    - img [ref=e1588]
+                    - generic [ref=e1591]:
+                      - strong [ref=e1592]: "69"
+                      - generic [ref=e1593]: Acquisition
+                  - generic [ref=e1594]:
+                    - generic [ref=e1595]:
+                      - generic [ref=e1596]: Strength
+                      - strong [ref=e1597]: "75"
+                    - generic [ref=e1598]:
+                      - generic [ref=e1599]: Motivation
+                      - strong [ref=e1600]: "70"
+                    - generic [ref=e1601]:
+                      - generic [ref=e1602]: Distress
+                      - strong [ref=e1603]: "48.8"
+              - generic [ref=e1604]:
+                - generic [ref=e1605]:
+                  - generic [ref=e1606]: Full Acquisition Decision Engine
+                  - emphasis [ref=e1607]: AOS 675
+                - generic [ref=e1609]:
+                  - generic [ref=e1610]:
+                    - heading "Decision" [level=4] [ref=e1611]
+                    - generic [ref=e1612]:
+                      - generic [ref=e1613]:
+                        - generic [ref=e1614]: AOS
+                        - strong [ref=e1615]: "675"
+                      - generic [ref=e1616]:
+                        - generic [ref=e1617]: Confidence
+                        - strong [ref=e1618]: 69%
+                      - generic [ref=e1619]:
+                        - generic [ref=e1620]: Tier
+                        - strong [ref=e1621]: Creative Terms
+                      - generic [ref=e1622]:
+                        - generic [ref=e1623]: Computed
+                        - strong [ref=e1624]: Jun 24, 2026
+                  - generic [ref=e1625]:
+                    - heading "Offer" [level=4] [ref=e1626]
+                    - generic [ref=e1627]:
+                      - generic [ref=e1628]:
+                        - generic [ref=e1629]: Cash Offer
+                        - strong [ref=e1630]: $68,500
+                      - generic [ref=e1631]:
+                        - generic [ref=e1632]: Minimum
+                        - strong [ref=e1633]: $61,600
+                      - generic [ref=e1634]:
+                        - generic [ref=e1635]: Assignment Fee
+                        - strong [ref=e1636]: $18,300
+                      - generic [ref=e1637]:
+                        - generic [ref=e1638]: Ceiling Mid
+                        - strong [ref=e1639]: $161,600
+                    - generic [ref=e1646]:
+                      - generic [ref=e1647]: $182,900
+                      - generic [ref=e1648]: $282,100
+                  - generic [ref=e1649]:
+                    - heading "Strategy" [level=4] [ref=e1650]
+                    - generic [ref=e1651]:
+                      - generic [ref=e1652]: Best Strategy
+                      - strong [ref=e1653]: Cash Assignment
+                    - generic [ref=e1654]:
+                      - generic [ref=e1655]:
+                        - generic [ref=e1656]: Subject-To
+                        - strong [ref=e1659]: "23"
+                      - generic [ref=e1660]:
+                        - generic [ref=e1661]: Seller Finance
+                        - strong [ref=e1664]: "69"
+                      - generic [ref=e1665]:
+                        - generic [ref=e1666]: Lease Option
+                        - strong [ref=e1669]: "70"
+                      - generic [ref=e1670]:
+                        - generic [ref=e1671]: Novation
+                        - strong [ref=e1674]: "82"
+                  - generic [ref=e1675]:
+                    - heading "Pressure & Probability" [level=4] [ref=e1676]
+                    - generic [ref=e1677]:
+                      - generic [ref=e1678]:
+                        - generic [ref=e1679]: Seller Pressure
+                        - strong [ref=e1680]: "60"
+                      - generic [ref=e1681]:
+                        - generic [ref=e1682]: Forced Sale
+                        - strong [ref=e1683]: "22"
+                      - generic [ref=e1684]:
+                        - generic [ref=e1685]: Foreclosure Risk
+                        - strong [ref=e1686]: "0"
+                      - generic [ref=e1687]:
+                        - generic [ref=e1688]: 90d Probability
+                        - strong [ref=e1689]: 39%
+                      - generic [ref=e1690]:
+                        - generic [ref=e1691]: 180d Probability
+                        - strong [ref=e1692]: 56%
+                      - generic [ref=e1693]:
+                        - generic [ref=e1694]: 365d Probability
+                        - strong [ref=e1695]: 72%
+                      - generic [ref=e1696]:
+                        - generic [ref=e1697]: Landlord Fatigue
+                        - strong [ref=e1698]: "43"
+                      - generic [ref=e1699]:
+                        - generic [ref=e1700]: Tax Pain
+                        - strong [ref=e1701]: "55"
+                      - generic [ref=e1702]:
+                        - generic [ref=e1703]: Equity Unlock
+                        - strong [ref=e1704]: "87"
+                      - generic [ref=e1705]:
+                        - generic [ref=e1706]: Debt Pressure
+                        - strong [ref=e1707]: "0"
+                      - generic [ref=e1708]:
+                        - generic [ref=e1709]: Repair Burden
+                        - strong [ref=e1710]: "85"
+                  - generic [ref=e1711]:
+                    - heading "Recommended Execution" [level=4] [ref=e1712]
+                    - generic [ref=e1713]:
+                      - generic [ref=e1714]:
+                        - generic [ref=e1715]: Owner Situation
+                        - strong [ref=e1716]: Creative Finance Candidate
+                      - generic [ref=e1717]:
+                        - generic [ref=e1718]: Conversation Angle
+                        - strong [ref=e1719]: Certainty Speed And As Is Exit
+                      - generic [ref=e1720]:
+                        - generic [ref=e1721]: Next Action
+                        - strong [ref=e1722]: Certainty Speed And As Is Exit
+                  - button "Re-run Decision Engine" [ref=e1723] [cursor=pointer]
+              - generic [ref=e1724]:
+                - generic [ref=e1725]:
+                  - generic [ref=e1726]: Buyer Market
+                  - strong [ref=e1727]: Thin
+                - generic [ref=e1728]:
+                  - generic [ref=e1729]: Confidence
+                  - strong [ref=e1730]: 69%
+                - generic [ref=e1731]:
+                  - generic [ref=e1732]: Comps
+                  - strong [ref=e1733]: 0 / 100
+                - generic [ref=e1734]:
+                  - generic [ref=e1735]: Strategy
+                  - strong [ref=e1736]: Cash Assignment
+              - generic [ref=e1737]:
+                - button "Comparable Sales" [ref=e1738] [cursor=pointer]:
+                  - generic [ref=e1739]: Comparable Sales
+                  - img [ref=e1740]
+                - generic [ref=e1742]:
+                  - paragraph [ref=e1743]: Insufficient qualified comps
+                  - generic [ref=e1744]:
+                    - generic [ref=e1745]: 100 candidates
+                    - generic [ref=e1746]: 0 asset match
+                    - generic [ref=e1747]: 100 location
+                    - generic [ref=e1748]: 0 similarity
+                    - strong [ref=e1749]: 0 weighted usable
+                  - generic [ref=e1751]:
+                    - generic [ref=e1752]: Confidence
+                    - strong [ref=e1753]: Low sample
+                  - generic [ref=e1754]:
+                    - article [ref=e1755]:
+                      - generic [ref=e1756]:
+                        - generic [ref=e1757]:
+                          - strong [ref=e1758]: 1414 Golf Link Dr, Stone Mountain, Ga 30088
+                          - generic [ref=e1759]: 3.78 mi
+                        - emphasis [ref=e1760]: Excluded
+                      - generic [ref=e1761]:
+                        - generic [ref=e1762]:
+                          - generic [ref=e1763]: Sale
+                          - strong [ref=e1764]: $229,000
+                        - generic [ref=e1765]:
+                          - generic [ref=e1766]: Date
+                          - strong [ref=e1767]: Jan 29, 2026
+                        - generic [ref=e1768]:
+                          - generic [ref=e1769]: Type
+                          - strong [ref=e1770]: Single Family
+                        - generic [ref=e1771]:
+                          - generic [ref=e1772]: Beds/Baths
+                          - strong [ref=e1773]: 4 / 2.5
+                        - generic [ref=e1774]:
+                          - generic [ref=e1775]: Sq Ft
+                          - strong [ref=e1776]: 2,892 sq ft
+                        - generic [ref=e1777]:
+                          - generic [ref=e1778]: Reason
+                          - strong [ref=e1779]: Asset Type Mismatch
+                      - link "View property" [ref=e1780] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=1414%20Golf%20Link%20Dr%2C%20Stone%20Mountain%2C%20Ga%2030088
+                    - article [ref=e1781]:
+                      - generic [ref=e1782]:
+                        - generic [ref=e1783]:
+                          - strong [ref=e1784]: 3980 Cheru Dr, Decatur, Ga 30034
+                          - generic [ref=e1785]: 1.05 mi
+                        - emphasis [ref=e1786]: Excluded
+                      - generic [ref=e1787]:
+                        - generic [ref=e1788]:
+                          - generic [ref=e1789]: Sale
+                          - strong [ref=e1790]: $10,116
+                        - generic [ref=e1791]:
+                          - generic [ref=e1792]: Date
+                          - strong [ref=e1793]: Mar 23, 2026
+                        - generic [ref=e1794]:
+                          - generic [ref=e1795]: Type
+                          - strong [ref=e1796]: Single Family
+                        - generic [ref=e1797]:
+                          - generic [ref=e1798]: Beds/Baths
+                          - strong [ref=e1799]: 4 / 2.5
+                        - generic [ref=e1800]:
+                          - generic [ref=e1801]: Sq Ft
+                          - strong [ref=e1802]: 2,496 sq ft
+                        - generic [ref=e1803]:
+                          - generic [ref=e1804]: Reason
+                          - strong [ref=e1805]: Asset Type Mismatch
+                      - link "View property" [ref=e1806] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=3980%20Cheru%20Dr%2C%20Decatur%2C%20Ga%2030034
+                    - article [ref=e1807]:
+                      - generic [ref=e1808]:
+                        - generic [ref=e1809]:
+                          - strong [ref=e1810]: 3412 Warbler Dr, Decatur, Ga 30034
+                          - generic [ref=e1811]: 2.22 mi
+                        - emphasis [ref=e1812]: Excluded
+                      - generic [ref=e1813]:
+                        - generic [ref=e1814]:
+                          - generic [ref=e1815]: Date
+                          - strong [ref=e1816]: Jan 28, 2026
+                        - generic [ref=e1817]:
+                          - generic [ref=e1818]: Type
+                          - strong [ref=e1819]: Single Family
+                        - generic [ref=e1820]:
+                          - generic [ref=e1821]: Beds/Baths
+                          - strong [ref=e1822]: 4 / 2.5
+                        - generic [ref=e1823]:
+                          - generic [ref=e1824]: Sq Ft
+                          - strong [ref=e1825]: 2,572 sq ft
+                        - generic [ref=e1826]:
+                          - generic [ref=e1827]: Reason
+                          - strong [ref=e1828]: Invalid Sale Price
+                      - link "View property" [ref=e1829] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=3412%20Warbler%20Dr%2C%20Decatur%2C%20Ga%2030034
+                    - article [ref=e1830]:
+                      - generic [ref=e1831]:
+                        - generic [ref=e1832]:
+                          - strong [ref=e1833]: 1727 Canberra Dr, Stone Mountain, Ga 30088
+                          - generic [ref=e1834]: 3.24 mi
+                        - emphasis [ref=e1835]: Excluded
+                      - generic [ref=e1836]:
+                        - generic [ref=e1837]:
+                          - generic [ref=e1838]: Date
+                          - strong [ref=e1839]: Dec 19, 2025
+                        - generic [ref=e1840]:
+                          - generic [ref=e1841]: Type
+                          - strong [ref=e1842]: Single Family
+                        - generic [ref=e1843]:
+                          - generic [ref=e1844]: Beds/Baths
+                          - strong [ref=e1845]: 4 / 2.5
+                        - generic [ref=e1846]:
+                          - generic [ref=e1847]: Sq Ft
+                          - strong [ref=e1848]: 2,462 sq ft
+                        - generic [ref=e1849]:
+                          - generic [ref=e1850]: Reason
+                          - strong [ref=e1851]: Invalid Sale Price
+                      - link "View property" [ref=e1852] [cursor=pointer]:
+                        - /url: https://www.google.com/maps/search/?api=1&query=1727%20Canberra%20Dr%2C%20Stone%20Mountain%2C%20Ga%2030088
+                  - button "View all 100 comps" [ref=e1853] [cursor=pointer]
+              - generic [ref=e1854]:
+                - button "Conversation Intelligence" [ref=e1855] [cursor=pointer]:
+                  - generic [ref=e1856]: Conversation Intelligence
+                  - img [ref=e1857]
+                - generic [ref=e1860]:
+                  - generic [ref=e1861]:
+                    - generic [ref=e1862]: Seller State
+                    - strong [ref=e1863]: Needs Response
+                  - generic [ref=e1864]:
+                    - generic [ref=e1865]: Language
+                    - strong [ref=e1866]: English
+                  - generic [ref=e1867]:
+                    - generic [ref=e1868]: Conversation Angle
+                    - strong [ref=e1869]: Certainty Speed And As Is Exit
+                  - generic [ref=e1870]:
+                    - generic [ref=e1871]: Latest Inbound
+                    - strong [ref=e1872]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+              - button "Master Owner" [ref=e1874] [cursor=pointer]:
+                - generic [ref=e1875]: Master Owner
+                - img [ref=e1876]
+              - button "Prospect Intelligence" [ref=e1879] [cursor=pointer]:
+                - generic [ref=e1880]: Prospect Intelligence
+                - img [ref=e1881]
+              - button "Phone Intelligence" [ref=e1884] [cursor=pointer]:
+                - generic [ref=e1885]: Phone Intelligence
+                - img [ref=e1886]
+              - button "Valuation Debt" [ref=e1889] [cursor=pointer]:
+                - generic [ref=e1890]: Valuation Debt
+                - img [ref=e1891]
+              - button "Sale Recording" [ref=e1894] [cursor=pointer]:
+                - generic [ref=e1895]: Sale Recording
+                - img [ref=e1896]
+              - button "Physical" [ref=e1899] [cursor=pointer]:
+                - generic [ref=e1900]: Physical
+                - img [ref=e1901]
+              - button "Distress Flags" [ref=e1904] [cursor=pointer]:
+                - generic [ref=e1905]: Distress Flags
+                - img [ref=e1906]
+              - button "Activity Timeline" [ref=e1909] [cursor=pointer]:
+                - generic [ref=e1910]: Activity Timeline
+                - img [ref=e1911]
+              - button "Census" [ref=e1914] [cursor=pointer]:
+                - generic [ref=e1915]: Census
+                - img [ref=e1916]
+  - button "NEXUS Copilot" [ref=e904] [cursor=pointer]:
+    - generic: Standing by

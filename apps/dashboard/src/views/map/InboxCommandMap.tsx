@@ -632,15 +632,25 @@ type CinematicThemeDef = { id: MapStyleMode; label: string; description: string;
 const CINEMATIC_THEME_DEFINITIONS: CinematicThemeDef[] = [
   { id: 'satellite', label: 'Satellite Recon', description: 'Parcel-level satellite acquisition view', bestFor: 'Acquisitions' },
   { id: 'red_ops', label: 'Red Ops', description: 'High-intensity execution mode', bestFor: 'Execution' },
-  { id: 'dark_ops', label: 'Executive', description: 'Clean institutional review mode', bestFor: 'Review' },
+  { id: 'executive', label: 'Executive', description: 'Clean institutional review mode', bestFor: 'Review' },
+  { id: 'dark_ops', label: 'Dark Ops', description: 'Tactical low-noise operations view', bestFor: 'Ops' },
   { id: 'blueprint', label: 'Blueprint', description: 'Technical parcel and census analysis', bestFor: 'Analysis' },
+  { id: 'night_vision', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
+  { id: 'matrix', label: 'Matrix', description: 'High-contrast signal mode', bestFor: 'Signals' },
   { id: 'light_street', label: 'Light Street', description: 'Bright street-level review mode', bestFor: 'Due Diligence' },
   { id: 'terrain', label: 'Terrain', description: 'Land and geography context', bestFor: 'Land' },
   { id: 'monochrome', label: 'Monochrome', description: 'Low-noise neutral analysis', bestFor: 'Stealth' },
-  { id: 'executive', label: 'Night Vision', description: 'Low-light tactical night mode', bestFor: 'Night Ops' },
-  { id: 'night_vision', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
-  { id: 'matrix', label: 'Matrix', description: 'High-contrast signal mode', bestFor: 'Signals' },
 ]
+
+const OVERLAY_RASTER_THEMES = new Set<MapStyleMode>([
+  'dark_ops',
+  'red_ops',
+  'executive',
+  'blueprint',
+  'monochrome',
+  'night_vision',
+  'matrix',
+])
 
 
 const MAP_LEGEND_ITEMS = [
@@ -805,9 +815,30 @@ const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapS
   }
 }
 
+const ringColorsForTheme = (styleMode: MapStyleMode) => {
+  const theme = getCommandMapTheme(styleMode)
+  const palette = theme.pinPalette
+  return {
+    unread: theme.accentColor,
+    offer: palette.delivered ?? palette.positive_intent ?? theme.accentColor,
+    contract: palette.active ?? palette.scheduled ?? theme.accentColor,
+  }
+}
+
 const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): string => {
   const tone =
-    styleMode === 'red_ops' ? {
+    styleMode === 'satellite' ? {
+      neutral: '#8fa4bc',
+      engaged: '#6b9fd4',
+      reply: '#8ec8f0',
+      positive: '#6db89a',
+      negotiating: '#a88fd4',
+      hot: '#e8b84a',
+      issue: '#e06060',
+      contract: '#7ec8d8',
+      offer: '#d4b86a',
+      overdue: '#e06060',
+    } : styleMode === 'red_ops' ? {
       neutral: '#c8a3a0',
       engaged: '#ff8b7d',
       reply: '#ff6e66',
@@ -819,16 +850,16 @@ const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): s
       offer: '#ffba7a',
       overdue: '#ff4d4d',
     } : styleMode === 'executive' ? {
-      neutral: '#8aa0c9',
-      engaged: '#8fb3ff',
-      reply: '#7fc8ff',
-      positive: '#7ed9c3',
-      negotiating: '#c0b3ff',
-      hot: '#f3c96b',
-      issue: '#ff7a7a',
-      contract: '#7ec4d9',
-      offer: '#c8b88b',
-      overdue: '#ff8b8b',
+      neutral: '#6e6555',
+      engaged: '#b8954a',
+      reply: '#d4b76a',
+      positive: '#c9a85c',
+      negotiating: '#a88850',
+      hot: '#f5de9c',
+      issue: '#d45a5a',
+      contract: '#dcc070',
+      offer: '#f0d080',
+      overdue: '#d45a5a',
     } : styleMode === 'blueprint' ? {
       neutral: '#7aa6b7',
       engaged: '#56c9df',
@@ -1739,6 +1770,8 @@ const featureCollectionForPins = (
 ): FeatureCollection<Point, PinFeatureProps> => {
   const features: FeatureCollection<Point, PinFeatureProps>['features'] = []
 
+  const rings = ringColorsForTheme(styleMode)
+
   pins.forEach((pin) => {
     const selected = pin.conversation_id === selectedConversationId ? 1 : 0
     const focusMatch = matchesKpiFilter(pin, activeKpiFilter)
@@ -1770,9 +1803,9 @@ const featureCollectionForPins = (
               : pulseTierFor(pin.last_activity_at),
         pulseMode: pulseModeFor(pin),
         glowStrength: glowStrength(pin.priority_score),
-        unreadRingColor: pin.unread && pin.last_message_direction === 'inbound' ? '#3b82f6' : 'transparent',
-        offerRingColor: lower(pin.offer_status).includes('ready') || lower(pin.offer_status).includes('sent') ? '#30d158' : 'transparent',
-        contractRingColor: lower(pin.contract_status).includes('active') ? '#14b8a6' : 'transparent',
+        unreadRingColor: pin.unread && pin.last_message_direction === 'inbound' ? rings.unread : 'transparent',
+        offerRingColor: lower(pin.offer_status).includes('ready') || lower(pin.offer_status).includes('sent') ? rings.offer : 'transparent',
+        contractRingColor: lower(pin.contract_status).includes('active') ? rings.contract : 'transparent',
         badgeColor: badgeColor(pin, styleMode),
         pinCount: 1,
         lockState: pin.suppression_status !== 'clear' ? 1 : 0,
@@ -1898,16 +1931,12 @@ const mapThemeRootClassName = (styleMode: MapStyleMode): string => {
 }
 
 const canvasFilterForTheme = (styleMode: MapStyleMode): string => {
-  if (styleMode === 'red_ops') return 'sepia(0.9) hue-rotate(320deg) saturate(3) brightness(0.92) contrast(1.35)'
-  if (styleMode === 'executive') return 'sepia(0.55) hue-rotate(196deg) saturate(2.2) brightness(0.92) contrast(1.26)'
-  if (styleMode === 'blueprint') return 'hue-rotate(172deg) saturate(3) brightness(0.96) contrast(1.32)'
-  if (styleMode === 'light_street') return 'none'
-  if (styleMode === 'terrain') return 'saturate(1.1) contrast(1.05)'
-  if (styleMode === 'monochrome') return 'grayscale(1) brightness(1.02) contrast(1.28)'
-  if (styleMode === 'night_vision') return 'hue-rotate(94deg) saturate(2.4) brightness(0.95) contrast(1.26)'
-  if (styleMode === 'matrix') return 'hue-rotate(108deg) saturate(3) brightness(0.9) contrast(1.34)'
-  if (styleMode === 'satellite') return 'none'
-  return 'brightness(0.95) contrast(1.16) saturate(1.15)'
+  // Overlay raster themes are tinted via MapLibre raster paint — stacking CSS filters
+  // on top double-processes the canvas and blacks out red_ops / matrix / etc.
+  if (OVERLAY_RASTER_THEMES.has(styleMode)) return 'none'
+  if (styleMode === 'light_street' || styleMode === 'satellite') return 'none'
+  if (styleMode === 'terrain') return 'saturate(1.08) contrast(1.04)'
+  return 'none'
 }
 
 const countBuyerFilters = (filters: BuyerMapFilters | undefined): number => {
@@ -5036,43 +5065,52 @@ export function InboxCommandMap({
             if (typedLayer.paint && 'icon-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'icon-color', tone === 'light_street' ? '#64748b' : tone === 'matrix' ? '#00c46a' : tone === 'red_ops' ? '#ff7a72' : tone === 'blueprint' ? '#57d5ff' : tone === 'night_vision' ? '#6affb7' : '#7ecfff')
           }
           if (typedLayer.type === 'raster') {
+            // Keep overlay themes readable: light hue shifts on the basemap, avoid crushing brightness.
             const saturation =
               tone === 'satellite' ? -0.12
                 : tone === 'light_street' ? 0
                   : tone === 'terrain' ? 0.18
                     : tone === 'monochrome' ? -1
-                      : tone === 'blueprint' ? 0.7
-                        : tone === 'night_vision' || tone === 'matrix' ? 0.34
-                          : tone === 'red_ops' ? 0.02 : -0.28
+                      : tone === 'blueprint' ? 0.42
+                        : tone === 'executive' ? 0.28
+                          : tone === 'night_vision' ? 0.4
+                            : tone === 'matrix' ? 0.44
+                              : tone === 'red_ops' ? 0.38
+                                : tone === 'dark_ops' ? -0.22 : -0.28
             const contrast =
               tone === 'light_street' ? 0.04
                 : tone === 'terrain' ? 0.12
-                  : tone === 'monochrome' ? 0.3
-                    : tone === 'blueprint' ? 0.38
-                      : tone === 'executive' ? 0.22
-                        : tone === 'red_ops' ? 0.34 : 0.24
+                  : tone === 'monochrome' ? 0.35
+                    : tone === 'blueprint' ? 0.14
+                      : tone === 'executive' ? 0.08
+                        : tone === 'red_ops' ? 0.16
+                          : tone === 'matrix' ? 0.18
+                            : tone === 'night_vision' ? 0.16
+                              : tone === 'dark_ops' ? 0.2 : 0.18
             const brightnessMin =
               tone === 'light_street' ? 0.1
                 : tone === 'satellite' ? 0.05
                   : tone === 'terrain' ? 0.05
-                    : tone === 'matrix' ? 0.02
-                      : tone === 'night_vision' ? 0.03
-                        : 0.02
+                    : tone === 'executive' ? 0.08
+                      : 0.04
             const brightnessMax =
               tone === 'light_street' ? 1
                 : tone === 'satellite' ? 0.92
                   : tone === 'terrain' ? 0.84
-                    : tone === 'matrix' ? 0.82
-                      : tone === 'night_vision' ? 0.84
-                        : tone === 'blueprint' ? 0.68
-                          : tone === 'monochrome' ? 0.64
-                            : tone === 'red_ops' ? 0.82 : 0.8
+                    : tone === 'monochrome' ? 0.72
+                      : tone === 'executive' ? 0.96
+                        : tone === 'red_ops' || tone === 'blueprint' || tone === 'night_vision' || tone === 'matrix'
+                          ? 0.92
+                          : tone === 'dark_ops' ? 0.88 : 0.9
             const hueRotate =
-              tone === 'red_ops' ? 320
-                : tone === 'blueprint' ? 170
-                  : tone === 'night_vision' ? 100
-                    : tone === 'matrix' ? 112
-                      : 0
+              tone === 'red_ops' ? 318
+                : tone === 'executive' ? 32
+                  : tone === 'blueprint' ? 178
+                    : tone === 'night_vision' ? 92
+                      : tone === 'matrix' ? 108
+                        : tone === 'dark_ops' ? 195
+                          : tone === 'monochrome' ? 0
+                            : 0
             map.setPaintProperty(typedLayer.id, 'raster-saturation', saturation)
             map.setPaintProperty(typedLayer.id, 'raster-contrast', contrast)
             map.setPaintProperty(typedLayer.id, 'raster-brightness-min', brightnessMin)
@@ -5174,6 +5212,37 @@ export function InboxCommandMap({
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-color', puTokens.markerIconHaloColor)
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-width', puTokens.markerIconHaloWidth)
       }
+
+      const pinAccent = theme.accentColor
+      const pinColorExpr = ['coalesce', ['get', 'pin_color'], pinAccent] as maplibregl.ExpressionSpecification
+      const pinRingExpr = ['coalesce', ['get', 'execution_ring_color'], ['get', 'pin_color'], `${pinAccent}66`] as maplibregl.ExpressionSpecification
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.glow)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-color', pinColorExpr)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.ring)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.ring, 'circle-stroke-color', pinRingExpr)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-color', pinColorExpr)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.core)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.core, 'circle-color', pinColorExpr)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.icon)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-halo-color', pinColorExpr)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterGlow)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterGlow, 'circle-color', clusterPalette.glow)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCore)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-color', clusterPalette.core)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-stroke-color', clusterPalette.stroke)
+      }
+      if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCount)) {
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCount, 'text-color', clusterPalette.label)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCount, 'text-halo-color', clusterPalette.halo)
+      }
     }
 
     const ensureThemeOverlayInfrastructure = (map: maplibregl.Map) => {
@@ -5249,24 +5318,25 @@ export function InboxCommandMap({
       ensureThemeOverlayInfrastructure(map)
       const tone = theme.baseStyleTone
       const tintColor =
-        tone === 'matrix' ? 'rgba(0, 176, 92, 0.13)'
-          : tone === 'red_ops' ? 'rgba(146, 26, 32, 0.18)'
-            : tone === 'blueprint' ? 'rgba(24, 120, 182, 0.15)'
-              : tone === 'executive' ? 'rgba(56, 88, 182, 0.12)'
-                : tone === 'night_vision' ? 'rgba(32, 134, 82, 0.15)'
-                  : tone === 'monochrome' ? 'rgba(0, 0, 0, 0.14)'
+        tone === 'matrix' ? 'rgba(0, 170, 95, 0.16)'
+          : tone === 'red_ops' ? 'rgba(170, 45, 52, 0.18)'
+            : tone === 'blueprint' ? 'rgba(35, 130, 185, 0.16)'
+              : tone === 'executive' ? 'rgba(195, 160, 80, 0.16)'
+                : tone === 'night_vision' ? 'rgba(28, 130, 88, 0.16)'
+                  : tone === 'monochrome' ? 'rgba(0, 0, 0, 0.22)'
                     : tone === 'light_street' ? 'rgba(255, 255, 255, 0.01)'
-                      : 'rgba(22, 56, 108, 0.11)'
+                      : 'rgba(28, 68, 130, 0.14)'
       const tintOpacity =
         tone === 'light_street' ? 0
-          : tone === 'monochrome' ? 0.16
-            : tone === 'executive' ? 0.2
-              : tone === 'red_ops' ? 0.26
-                : tone === 'blueprint' ? 0.24
-                  : tone === 'night_vision' || tone === 'matrix' ? 0.26
-                    : 0.16
+          : tone === 'monochrome' ? 0.14
+            : tone === 'executive' ? 0.12
+              : tone === 'red_ops' ? 0.14
+                : tone === 'blueprint' ? 0.12
+                  : tone === 'night_vision' || tone === 'matrix' ? 0.12
+                    : tone === 'dark_ops' ? 0.1
+                      : 0.1
       const showGrid = tone === 'matrix' || tone === 'blueprint'
-      const showRadar = tone === 'matrix' || tone === 'night_vision'
+      const showRadar = tone === 'night_vision'
 
       if (map.getLayer(THEME_TINT_LAYER_ID)) {
         map.setPaintProperty(THEME_TINT_LAYER_ID, 'fill-color', tintColor)
@@ -5274,13 +5344,13 @@ export function InboxCommandMap({
         map.setLayoutProperty(THEME_TINT_LAYER_ID, 'visibility', theme.id === 'satellite' || theme.id === 'terrain' ? 'none' : 'visible')
       }
       if (map.getLayer(THEME_GRID_LAYER_ID)) {
-        map.setPaintProperty(THEME_GRID_LAYER_ID, 'line-color', tone === 'matrix' ? 'rgba(0, 255, 136, 0.14)' : 'rgba(105, 215, 255, 0.14)')
-        map.setPaintProperty(THEME_GRID_LAYER_ID, 'line-opacity', showGrid ? 0.5 : 0)
+        map.setPaintProperty(THEME_GRID_LAYER_ID, 'line-color', tone === 'matrix' ? 'rgba(0, 255, 136, 0.1)' : 'rgba(105, 215, 255, 0.1)')
+        map.setPaintProperty(THEME_GRID_LAYER_ID, 'line-opacity', showGrid ? 0.2 : 0)
         map.setLayoutProperty(THEME_GRID_LAYER_ID, 'visibility', showGrid ? 'visible' : 'none')
       }
       if (map.getLayer(THEME_RADAR_LAYER_ID)) {
-        map.setPaintProperty(THEME_RADAR_LAYER_ID, 'line-color', tone === 'matrix' ? 'rgba(0, 255, 136, 0.18)' : 'rgba(114, 255, 178, 0.18)')
-        map.setPaintProperty(THEME_RADAR_LAYER_ID, 'line-opacity', showRadar ? 0.44 : 0)
+        map.setPaintProperty(THEME_RADAR_LAYER_ID, 'line-color', 'rgba(114, 255, 178, 0.12)')
+        map.setPaintProperty(THEME_RADAR_LAYER_ID, 'line-opacity', showRadar ? 0.18 : 0)
         map.setLayoutProperty(THEME_RADAR_LAYER_ID, 'visibility', showRadar ? 'visible' : 'none')
       }
     }
@@ -6517,14 +6587,37 @@ export function InboxCommandMap({
       }, 6500)
       map.setStyle(resolveStyle(nextThemeId))
       map.once('style.load', () => {
+        if (requestSeq !== styleLoadSeqRef.current) return
         try { addMapLayers(map) } catch { /* getSource/getLayer guards handle duplicates */ }
         void syncBasemapPresentation(map)
         syncLayerVisibility(map, activityModeRef.current)
         scheduleMapResize()
+        if (styleLoadTimerRef.current) {
+          clearTimeout(styleLoadTimerRef.current)
+          styleLoadTimerRef.current = null
+        }
+        styleFallbackGuardRef.current = false
+        setBaseStyleLoading(false)
+        setStyleFallbackWarning(null)
+        activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
         requestAnimationFrame(() => {
           map.resize()
           map.triggerRepaint()
         })
+        if (import.meta.env.DEV) {
+          const styleLoadMs = styleLoadStartedAtRef.current
+            ? Math.round(performance.now() - styleLoadStartedAtRef.current)
+            : null
+          console.log('[CommandMapTheme]', {
+            theme: mapStyleModeRef.current,
+            mode,
+            setStyleCalled: true,
+            styleUrl: theme.mapStyleUrl ?? null,
+            loadMs: styleLoadMs,
+            reattachCount: customAttachmentCount(map),
+            fallbackUsed: false,
+          })
+        }
       })
       if (import.meta.env.DEV) {
         console.log('[CommandMapTheme]', {
@@ -8003,13 +8096,11 @@ export function InboxCommandMap({
       const sellerState = resolveEffectiveSellerState(normalizedPin)
       const executionState = lower(normalizedPin.execution_state)
       const resolvedPinColor =
-        normalizedPin.pin_color
-        || palette[sellerState]
+        palette[sellerState]
         || palette[executionState]
         || palette.not_contacted
       const executionRingColor =
-        normalizedPin.execution_ring_color
-        || (executionState ? palette[executionState] : undefined)
+        (executionState ? palette[executionState] : undefined)
         || 'transparent'
       return ({
         type: 'Feature' as const,

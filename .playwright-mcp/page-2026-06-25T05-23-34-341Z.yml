@@ -1,0 +1,676 @@
+- generic [ref=e7]:
+  - generic: Inbox
+  - main [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic "NEXUS Dashboard" [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e16]:
+              - generic [ref=e17]: NEXUS
+              - strong [ref=e18]: Deal Desk
+              - generic [ref=e19]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e20]:
+            - img [ref=e26] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e29] [cursor=pointer]':
+              - strong [ref=e30]:
+                - img [ref=e31]
+            - button "Queue & System Status · Unknown" [ref=e34] [cursor=pointer]:
+              - img [ref=e36]
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e43]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e44]: CMD+K
+        - generic [ref=e45]:
+          - button "99+" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+            - generic [ref=e50]: 99+
+          - button "Live Activity" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "Notifications" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+          - button "RK" [ref=e61] [cursor=pointer]:
+            - generic [ref=e62]: RK
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - generic [ref=e68]: LIST VIEW
+            - heading "Operational Conversations" [level=2] [ref=e69]
+          - tablist "Table density" [ref=e71]:
+            - button "Comfortable" [ref=e72] [cursor=pointer]
+            - button "Compact" [ref=e73] [cursor=pointer]
+            - button "Ultra Compact" [ref=e74] [cursor=pointer]
+        - generic [ref=e75]:
+          - searchbox "Search seller, phone, address, message, market…" [ref=e76]
+          - combobox [ref=e77]:
+            - option "Contact Level" [selected]
+            - option "Uncontacted Only"
+            - option "Contacted Only"
+            - option "Has Conversation"
+            - option "In Queue"
+            - option "Has Events"
+          - combobox [ref=e78]:
+            - option "All Status" [selected]
+            - option "Unread"
+            - option "Hot"
+            - option "Suppressed"
+          - combobox [ref=e79]:
+            - option "All Reply States" [selected]
+            - option "Needs Reply"
+            - option "Awaiting Response"
+            - option "Follow-Up Due"
+          - combobox [ref=e80]:
+            - option "All Markets" [selected]
+            - option "Kansas City, MO"
+            - option "Memphis, TN"
+            - option "Minneapolis, MN"
+            - option "Spokane, WA"
+            - option "Tulsa, OK"
+            - option "Unknown"
+          - combobox [ref=e81]:
+            - option "Latest Activity" [selected]
+            - option "Priority"
+            - option "Seller"
+            - option "Temperature"
+            - option "Follow-Up"
+        - generic "List view stats" [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]: New Replies
+            - strong [ref=e85]: "31"
+          - generic [ref=e86]:
+            - generic [ref=e87]: Priority
+            - strong [ref=e88]: "49"
+          - generic [ref=e89]:
+            - generic [ref=e90]: Needs Review
+            - strong [ref=e91]: "111"
+          - generic [ref=e92]:
+            - generic [ref=e93]: Follow-Up Due
+            - strong [ref=e94]: "1"
+          - generic [ref=e95]:
+            - generic [ref=e96]: Auto-Eligible
+            - strong [ref=e97]: "111"
+        - table [ref=e99]:
+          - rowgroup [ref=e100]:
+            - row "Seller Property Market Status Stage Priority Intent Next Action Automation Message Last Flags" [ref=e101]:
+              - columnheader "Seller" [ref=e102]
+              - columnheader "Property" [ref=e103]
+              - columnheader "Market" [ref=e104]
+              - columnheader "Status" [ref=e105]
+              - columnheader "Stage" [ref=e106]
+              - columnheader "Priority" [ref=e107]
+              - columnheader "Intent" [ref=e108]
+              - columnheader "Next Action" [ref=e109]
+              - columnheader "Automation" [ref=e110]
+              - columnheader "Message" [ref=e111]
+              - columnheader "Last" [ref=e112]
+              - columnheader "Flags" [ref=e113]
+          - rowgroup [ref=e114]:
+            - row "+1 (770) 203-3651 +17702033651 No Address — Unknown waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Sorry about that, my system had an error. Are you open to a proposal on the property? Yesterday 9:18 PM" [ref=e115] [cursor=pointer]:
+              - cell "+1 (770) 203-3651 +17702033651" [ref=e116]:
+                - generic [ref=e117]: +1 (770) 203-3651
+                - generic [ref=e118]: "+17702033651"
+              - cell "No Address —" [ref=e119]:
+                - generic [ref=e120]: No Address
+                - generic [ref=e121]: —
+              - cell "Unknown" [ref=e122]
+              - cell "waiting" [ref=e123]:
+                - generic [ref=e124]: waiting
+              - cell "ownership confirmed" [ref=e125]:
+                - generic [ref=e126]: ownership confirmed
+              - cell "normal" [ref=e127]:
+                - generic [ref=e128]: normal
+              - cell "Seller Confirmed" [ref=e129]:
+                - generic [ref=e130]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e131]
+              - cell "WAITING" [ref=e132]:
+                - generic [ref=e133]: WAITING
+              - cell "Sorry about that, my system had an error. Are you open to a proposal on the property?" [ref=e134]
+              - cell "Yesterday 9:18 PM" [ref=e135]
+              - cell [ref=e136]
+            - row "+1 (918) 200-8537 +19182008537 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Operator review required. REVIEW REQUIRED Fuck off Yesterday 7:57 PM Unread" [ref=e137] [cursor=pointer]:
+              - cell "+1 (918) 200-8537 +19182008537" [ref=e138]:
+                - generic [ref=e139]: +1 (918) 200-8537
+                - generic [ref=e140]: "+19182008537"
+              - cell "No Address —" [ref=e141]:
+                - generic [ref=e142]: No Address
+                - generic [ref=e143]: —
+              - cell "Unknown" [ref=e144]
+              - cell "new reply" [ref=e145]:
+                - generic [ref=e146]: new reply
+              - cell "ownership confirmed" [ref=e147]:
+                - generic [ref=e148]: ownership confirmed
+              - cell "normal" [ref=e149]:
+                - generic [ref=e150]: normal
+              - cell "Seller Confirmed" [ref=e151]:
+                - generic [ref=e152]: Seller Confirmed
+              - cell "Operator review required." [ref=e153]
+              - cell "REVIEW REQUIRED" [ref=e154]:
+                - generic [ref=e155]: REVIEW REQUIRED
+              - cell "Fuck off" [ref=e156]
+              - cell "Yesterday 7:57 PM" [ref=e157]
+              - cell "Unread" [ref=e158]:
+                - generic [ref=e160]: Unread
+            - row "+1 (555) 555-0202 +15555550202 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Wait for seller response. WAITING No recent message Yesterday 6:00 PM Unread" [ref=e161] [cursor=pointer]:
+              - cell "+1 (555) 555-0202 +15555550202" [ref=e162]:
+                - generic [ref=e163]: +1 (555) 555-0202
+                - generic [ref=e164]: "+15555550202"
+              - cell "No Address —" [ref=e165]:
+                - generic [ref=e166]: No Address
+                - generic [ref=e167]: —
+              - cell "Unknown" [ref=e168]
+              - cell "new reply" [ref=e169]:
+                - generic [ref=e170]: new reply
+              - cell "ownership confirmed" [ref=e171]:
+                - generic [ref=e172]: ownership confirmed
+              - cell "normal" [ref=e173]:
+                - generic [ref=e174]: normal
+              - cell "Seller Confirmed" [ref=e175]:
+                - generic [ref=e176]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e177]
+              - cell "WAITING" [ref=e178]:
+                - generic [ref=e179]: WAITING
+              - cell "No recent message" [ref=e180]
+              - cell "Yesterday 6:00 PM" [ref=e181]
+              - cell "Unread" [ref=e182]:
+                - generic [ref=e184]: Unread
+            - row "+1 (847) 867-9735 +18478679735 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. REVIEW REQUIRED Yes not looking to sell Yesterday 4:05 PM Unread" [ref=e185] [cursor=pointer]:
+              - cell "+1 (847) 867-9735 +18478679735" [ref=e186]:
+                - generic [ref=e187]: +1 (847) 867-9735
+                - generic [ref=e188]: "+18478679735"
+              - cell "No Address —" [ref=e189]:
+                - generic [ref=e190]: No Address
+                - generic [ref=e191]: —
+              - cell "Unknown" [ref=e192]
+              - cell "new reply" [ref=e193]:
+                - generic [ref=e194]: new reply
+              - cell "ownership confirmed" [ref=e195]:
+                - generic [ref=e196]: ownership confirmed
+              - cell "normal" [ref=e197]:
+                - generic [ref=e198]: normal
+              - cell "Seller Confirmed" [ref=e199]:
+                - generic [ref=e200]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e201]
+              - cell "REVIEW REQUIRED" [ref=e202]:
+                - generic [ref=e203]: REVIEW REQUIRED
+              - cell "Yes not looking to sell" [ref=e204]
+              - cell "Yesterday 4:05 PM" [ref=e205]
+              - cell "Unread" [ref=e206]:
+                - generic [ref=e208]: Unread
+            - row "+1 (612) 743-3952 +16127433952 No Address — Minneapolis, MN new reply ownership confirmed normal Seller Confirmed Review inbound and reply. REVIEW REQUIRED Deployed verification inbound deployed-dzdevzuroh Yesterday 3:45 PM Unread" [ref=e209] [cursor=pointer]:
+              - cell "+1 (612) 743-3952 +16127433952" [ref=e210]:
+                - generic [ref=e211]: +1 (612) 743-3952
+                - generic [ref=e212]: "+16127433952"
+              - cell "No Address —" [ref=e213]:
+                - generic [ref=e214]: No Address
+                - generic [ref=e215]: —
+              - cell "Minneapolis, MN" [ref=e216]
+              - cell "new reply" [ref=e217]:
+                - generic [ref=e218]: new reply
+              - cell "ownership confirmed" [ref=e219]:
+                - generic [ref=e220]: ownership confirmed
+              - cell "normal" [ref=e221]:
+                - generic [ref=e222]: normal
+              - cell "Seller Confirmed" [ref=e223]:
+                - generic [ref=e224]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e225]
+              - cell "REVIEW REQUIRED" [ref=e226]:
+                - generic [ref=e227]: REVIEW REQUIRED
+              - cell "Deployed verification inbound deployed-dzdevzuroh" [ref=e228]
+              - cell "Yesterday 3:45 PM" [ref=e229]
+              - cell "Unread" [ref=e230]:
+                - generic [ref=e232]: Unread
+            - row "+1 (913) 636-3462 +19136363462 No Address — Unknown new reply ownership confirmed normal Seller Confirmed No contact. Respect suppression. SUPPRESSED Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people. Yesterday 1:14 PM Suppressed Unread" [ref=e233] [cursor=pointer]:
+              - cell "+1 (913) 636-3462 +19136363462" [ref=e234]:
+                - generic [ref=e235]: +1 (913) 636-3462
+                - generic [ref=e236]: "+19136363462"
+              - cell "No Address —" [ref=e237]:
+                - generic [ref=e238]: No Address
+                - generic [ref=e239]: —
+              - cell "Unknown" [ref=e240]
+              - cell "new reply" [ref=e241]:
+                - generic [ref=e242]: new reply
+              - cell "ownership confirmed" [ref=e243]:
+                - generic [ref=e244]: ownership confirmed
+              - cell "normal" [ref=e245]:
+                - generic [ref=e246]: normal
+              - cell "Seller Confirmed" [ref=e247]:
+                - generic [ref=e248]: Seller Confirmed
+              - cell "No contact. Respect suppression." [ref=e249]
+              - cell "SUPPRESSED" [ref=e250]:
+                - generic [ref=e251]: SUPPRESSED
+              - cell "Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses for sale as many as you want. Stop bothering people." [ref=e252]
+              - cell "Yesterday 1:14 PM" [ref=e253]
+              - cell "Suppressed Unread" [ref=e254]:
+                - generic [ref=e255]:
+                  - generic [ref=e256]: Suppressed
+                  - generic [ref=e257]: Unread
+            - row "+1 (918) 282-8080 +19182828080 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. AUTO-BLOCKED No Yesterday 12:14 PM Unread" [ref=e258] [cursor=pointer]:
+              - cell "+1 (918) 282-8080 +19182828080" [ref=e259]:
+                - generic [ref=e260]: +1 (918) 282-8080
+                - generic [ref=e261]: "+19182828080"
+              - cell "No Address —" [ref=e262]:
+                - generic [ref=e263]: No Address
+                - generic [ref=e264]: —
+              - cell "Unknown" [ref=e265]
+              - cell "new reply" [ref=e266]:
+                - generic [ref=e267]: new reply
+              - cell "ownership confirmed" [ref=e268]:
+                - generic [ref=e269]: ownership confirmed
+              - cell "normal" [ref=e270]:
+                - generic [ref=e271]: normal
+              - cell "Seller Confirmed" [ref=e272]:
+                - generic [ref=e273]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e274]
+              - cell "AUTO-BLOCKED" [ref=e275]:
+                - generic [ref=e276]: AUTO-BLOCKED
+              - cell "No" [ref=e277]
+              - cell "Yesterday 12:14 PM" [ref=e278]
+              - cell "Unread" [ref=e279]:
+                - generic [ref=e281]: Unread
+            - row "+1 (248) 227-4246 +12482274246 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. REVIEW REQUIRED Please DO NOT contact me again! Jun 23 6:44 PM Unread" [ref=e282] [cursor=pointer]:
+              - cell "+1 (248) 227-4246 +12482274246" [ref=e283]:
+                - generic [ref=e284]: +1 (248) 227-4246
+                - generic [ref=e285]: "+12482274246"
+              - cell "No Address —" [ref=e286]:
+                - generic [ref=e287]: No Address
+                - generic [ref=e288]: —
+              - cell "Unknown" [ref=e289]
+              - cell "new reply" [ref=e290]:
+                - generic [ref=e291]: new reply
+              - cell "ownership confirmed" [ref=e292]:
+                - generic [ref=e293]: ownership confirmed
+              - cell "normal" [ref=e294]:
+                - generic [ref=e295]: normal
+              - cell "Seller Confirmed" [ref=e296]:
+                - generic [ref=e297]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e298]
+              - cell "REVIEW REQUIRED" [ref=e299]:
+                - generic [ref=e300]: REVIEW REQUIRED
+              - cell "Please DO NOT contact me again!" [ref=e301]
+              - cell "Jun 23 6:44 PM" [ref=e302]
+              - cell "Unread" [ref=e303]:
+                - generic [ref=e305]: Unread
+            - row "+1 (918) 606-6313 +19186066313 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. REVIEW REQUIRED Sold Jun 23 5:58 PM Unread" [ref=e306] [cursor=pointer]:
+              - cell "+1 (918) 606-6313 +19186066313" [ref=e307]:
+                - generic [ref=e308]: +1 (918) 606-6313
+                - generic [ref=e309]: "+19186066313"
+              - cell "No Address —" [ref=e310]:
+                - generic [ref=e311]: No Address
+                - generic [ref=e312]: —
+              - cell "Unknown" [ref=e313]
+              - cell "new reply" [ref=e314]:
+                - generic [ref=e315]: new reply
+              - cell "ownership confirmed" [ref=e316]:
+                - generic [ref=e317]: ownership confirmed
+              - cell "normal" [ref=e318]:
+                - generic [ref=e319]: normal
+              - cell "Seller Confirmed" [ref=e320]:
+                - generic [ref=e321]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e322]
+              - cell "REVIEW REQUIRED" [ref=e323]:
+                - generic [ref=e324]: REVIEW REQUIRED
+              - cell "Sold" [ref=e325]
+              - cell "Jun 23 5:58 PM" [ref=e326]
+              - cell "Unread" [ref=e327]:
+                - generic [ref=e329]: Unread
+            - row "+1 (816) 665-3415 +18166653415 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. REVIEW REQUIRED I'm not Erika Jun 23 12:02 PM Unread" [ref=e330] [cursor=pointer]:
+              - cell "+1 (816) 665-3415 +18166653415" [ref=e331]:
+                - generic [ref=e332]: +1 (816) 665-3415
+                - generic [ref=e333]: "+18166653415"
+              - cell "No Address —" [ref=e334]:
+                - generic [ref=e335]: No Address
+                - generic [ref=e336]: —
+              - cell "Unknown" [ref=e337]
+              - cell "new reply" [ref=e338]:
+                - generic [ref=e339]: new reply
+              - cell "ownership confirmed" [ref=e340]:
+                - generic [ref=e341]: ownership confirmed
+              - cell "normal" [ref=e342]:
+                - generic [ref=e343]: normal
+              - cell "Seller Confirmed" [ref=e344]:
+                - generic [ref=e345]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e346]
+              - cell "REVIEW REQUIRED" [ref=e347]:
+                - generic [ref=e348]: REVIEW REQUIRED
+              - cell "I'm not Erika" [ref=e349]
+              - cell "Jun 23 12:02 PM" [ref=e350]
+              - cell "Unread" [ref=e351]:
+                - generic [ref=e353]: Unread
+            - row "+1 (612) 386-2761 +16123862761 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. AUTO-BLOCKED Not for sale. Jun 22 12:36 PM Unread" [ref=e354] [cursor=pointer]:
+              - cell "+1 (612) 386-2761 +16123862761" [ref=e355]:
+                - generic [ref=e356]: +1 (612) 386-2761
+                - generic [ref=e357]: "+16123862761"
+              - cell "No Address —" [ref=e358]:
+                - generic [ref=e359]: No Address
+                - generic [ref=e360]: —
+              - cell "Unknown" [ref=e361]
+              - cell "new reply" [ref=e362]:
+                - generic [ref=e363]: new reply
+              - cell "ownership confirmed" [ref=e364]:
+                - generic [ref=e365]: ownership confirmed
+              - cell "normal" [ref=e366]:
+                - generic [ref=e367]: normal
+              - cell "Seller Confirmed" [ref=e368]:
+                - generic [ref=e369]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e370]
+              - cell "AUTO-BLOCKED" [ref=e371]:
+                - generic [ref=e372]: AUTO-BLOCKED
+              - cell "Not for sale." [ref=e373]
+              - cell "Jun 22 12:36 PM" [ref=e374]
+              - cell "Unread" [ref=e375]:
+                - generic [ref=e377]: Unread
+            - row "+1 (918) 814-8960 +19188148960 No Address — Unknown waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING ¿En qué condiciones se encuentra la propiedad? Jun 21 12:41 AM" [ref=e378] [cursor=pointer]:
+              - cell "+1 (918) 814-8960 +19188148960" [ref=e379]:
+                - generic [ref=e380]: +1 (918) 814-8960
+                - generic [ref=e381]: "+19188148960"
+              - cell "No Address —" [ref=e382]:
+                - generic [ref=e383]: No Address
+                - generic [ref=e384]: —
+              - cell "Unknown" [ref=e385]
+              - cell "waiting" [ref=e386]:
+                - generic [ref=e387]: waiting
+              - cell "ownership confirmed" [ref=e388]:
+                - generic [ref=e389]: ownership confirmed
+              - cell "normal" [ref=e390]:
+                - generic [ref=e391]: normal
+              - cell "Seller Confirmed" [ref=e392]:
+                - generic [ref=e393]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e394]
+              - cell "WAITING" [ref=e395]:
+                - generic [ref=e396]: WAITING
+              - cell "¿En qué condiciones se encuentra la propiedad?" [ref=e397]
+              - cell "Jun 21 12:41 AM" [ref=e398]
+              - cell [ref=e399]
+            - row "+1 (970) 282-9594 +19702829594 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. AUTO-BLOCKED No Jun 21 12:41 AM Unread" [ref=e400] [cursor=pointer]:
+              - cell "+1 (970) 282-9594 +19702829594" [ref=e401]:
+                - generic [ref=e402]: +1 (970) 282-9594
+                - generic [ref=e403]: "+19702829594"
+              - cell "No Address —" [ref=e404]:
+                - generic [ref=e405]: No Address
+                - generic [ref=e406]: —
+              - cell "Unknown" [ref=e407]
+              - cell "new reply" [ref=e408]:
+                - generic [ref=e409]: new reply
+              - cell "ownership confirmed" [ref=e410]:
+                - generic [ref=e411]: ownership confirmed
+              - cell "normal" [ref=e412]:
+                - generic [ref=e413]: normal
+              - cell "Seller Confirmed" [ref=e414]:
+                - generic [ref=e415]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e416]
+              - cell "AUTO-BLOCKED" [ref=e417]:
+                - generic [ref=e418]: AUTO-BLOCKED
+              - cell "No" [ref=e419]
+              - cell "Jun 21 12:41 AM" [ref=e420]
+              - cell "Unread" [ref=e421]:
+                - generic [ref=e423]: Unread
+            - row "+1 (480) 244-7520 +14802447520 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. AUTO-BLOCKED Not for sale!!!! Jun 20 9:13 PM Unread" [ref=e424] [cursor=pointer]:
+              - cell "+1 (480) 244-7520 +14802447520" [ref=e425]:
+                - generic [ref=e426]: +1 (480) 244-7520
+                - generic [ref=e427]: "+14802447520"
+              - cell "No Address —" [ref=e428]:
+                - generic [ref=e429]: No Address
+                - generic [ref=e430]: —
+              - cell "Unknown" [ref=e431]
+              - cell "new reply" [ref=e432]:
+                - generic [ref=e433]: new reply
+              - cell "ownership confirmed" [ref=e434]:
+                - generic [ref=e435]: ownership confirmed
+              - cell "normal" [ref=e436]:
+                - generic [ref=e437]: normal
+              - cell "Seller Confirmed" [ref=e438]:
+                - generic [ref=e439]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e440]
+              - cell "AUTO-BLOCKED" [ref=e441]:
+                - generic [ref=e442]: AUTO-BLOCKED
+              - cell "Not for sale!!!!" [ref=e443]
+              - cell "Jun 20 9:13 PM" [ref=e444]
+              - cell "Unread" [ref=e445]:
+                - generic [ref=e447]: Unread
+            - row "+1 (805) 403-1157 +18054031157 No Address — Unknown new reply ownership confirmed normal Seller Confirmed Review inbound and reply. AUTO-BLOCKED And we are Not interested in selling Jun 19 10:53 PM Unread" [ref=e448] [cursor=pointer]:
+              - cell "+1 (805) 403-1157 +18054031157" [ref=e449]:
+                - generic [ref=e450]: +1 (805) 403-1157
+                - generic [ref=e451]: "+18054031157"
+              - cell "No Address —" [ref=e452]:
+                - generic [ref=e453]: No Address
+                - generic [ref=e454]: —
+              - cell "Unknown" [ref=e455]
+              - cell "new reply" [ref=e456]:
+                - generic [ref=e457]: new reply
+              - cell "ownership confirmed" [ref=e458]:
+                - generic [ref=e459]: ownership confirmed
+              - cell "normal" [ref=e460]:
+                - generic [ref=e461]: normal
+              - cell "Seller Confirmed" [ref=e462]:
+                - generic [ref=e463]: Seller Confirmed
+              - cell "Review inbound and reply." [ref=e464]
+              - cell "AUTO-BLOCKED" [ref=e465]:
+                - generic [ref=e466]: AUTO-BLOCKED
+              - cell "And we are Not interested in selling" [ref=e467]
+              - cell "Jun 19 10:53 PM" [ref=e468]
+              - cell "Unread" [ref=e469]:
+                - generic [ref=e471]: Unread
+            - row "+1 (539) 235-3903 +15392353903 No Address — Unknown waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING What condition is the property in? Jun 19 5:35 PM" [ref=e472] [cursor=pointer]:
+              - cell "+1 (539) 235-3903 +15392353903" [ref=e473]:
+                - generic [ref=e474]: +1 (539) 235-3903
+                - generic [ref=e475]: "+15392353903"
+              - cell "No Address —" [ref=e476]:
+                - generic [ref=e477]: No Address
+                - generic [ref=e478]: —
+              - cell "Unknown" [ref=e479]
+              - cell "waiting" [ref=e480]:
+                - generic [ref=e481]: waiting
+              - cell "ownership confirmed" [ref=e482]:
+                - generic [ref=e483]: ownership confirmed
+              - cell "normal" [ref=e484]:
+                - generic [ref=e485]: normal
+              - cell "Seller Confirmed" [ref=e486]:
+                - generic [ref=e487]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e488]
+              - cell "WAITING" [ref=e489]:
+                - generic [ref=e490]: WAITING
+              - cell "What condition is the property in?" [ref=e491]
+              - cell "Jun 19 5:35 PM" [ref=e492]
+              - cell [ref=e493]
+            - row "+1 (901) 425-8564 +19014258564 No Address — Memphis, TN waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St? Jun 19 1:41 PM" [ref=e494] [cursor=pointer]:
+              - cell "+1 (901) 425-8564 +19014258564" [ref=e495]:
+                - generic [ref=e496]: +1 (901) 425-8564
+                - generic [ref=e497]: "+19014258564"
+              - cell "No Address —" [ref=e498]:
+                - generic [ref=e499]: No Address
+                - generic [ref=e500]: —
+              - cell "Memphis, TN" [ref=e501]
+              - cell "waiting" [ref=e502]:
+                - generic [ref=e503]: waiting
+              - cell "ownership confirmed" [ref=e504]:
+                - generic [ref=e505]: ownership confirmed
+              - cell "normal" [ref=e506]:
+                - generic [ref=e507]: normal
+              - cell "Seller Confirmed" [ref=e508]:
+                - generic [ref=e509]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e510]
+              - cell "WAITING" [ref=e511]:
+                - generic [ref=e512]: WAITING
+              - cell "Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St?" [ref=e513]
+              - cell "Jun 19 1:41 PM" [ref=e514]
+              - cell [ref=e515]
+            - row "+1 (509) 993-9397 +15099939397 No Address — Spokane, WA new reply ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave? Jun 19 1:30 PM Unread" [ref=e516] [cursor=pointer]:
+              - cell "+1 (509) 993-9397 +15099939397" [ref=e517]:
+                - generic [ref=e518]: +1 (509) 993-9397
+                - generic [ref=e519]: "+15099939397"
+              - cell "No Address —" [ref=e520]:
+                - generic [ref=e521]: No Address
+                - generic [ref=e522]: —
+              - cell "Spokane, WA" [ref=e523]
+              - cell "new reply" [ref=e524]:
+                - generic [ref=e525]: new reply
+              - cell "ownership confirmed" [ref=e526]:
+                - generic [ref=e527]: ownership confirmed
+              - cell "normal" [ref=e528]:
+                - generic [ref=e529]: normal
+              - cell "Seller Confirmed" [ref=e530]:
+                - generic [ref=e531]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e532]
+              - cell "WAITING" [ref=e533]:
+                - generic [ref=e534]: WAITING
+              - cell "Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave?" [ref=e535]
+              - cell "Jun 19 1:30 PM" [ref=e536]
+              - cell "Unread" [ref=e537]:
+                - generic [ref=e539]: Unread
+            - row "+1 (913) 313-1111 +19133131111 No Address — Kansas City, MO waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours? Jun 19 1:21 PM" [ref=e540] [cursor=pointer]:
+              - cell "+1 (913) 313-1111 +19133131111" [ref=e541]:
+                - generic [ref=e542]: +1 (913) 313-1111
+                - generic [ref=e543]: "+19133131111"
+              - cell "No Address —" [ref=e544]:
+                - generic [ref=e545]: No Address
+                - generic [ref=e546]: —
+              - cell "Kansas City, MO" [ref=e547]
+              - cell "waiting" [ref=e548]:
+                - generic [ref=e549]: waiting
+              - cell "ownership confirmed" [ref=e550]:
+                - generic [ref=e551]: ownership confirmed
+              - cell "normal" [ref=e552]:
+                - generic [ref=e553]: normal
+              - cell "Seller Confirmed" [ref=e554]:
+                - generic [ref=e555]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e556]
+              - cell "WAITING" [ref=e557]:
+                - generic [ref=e558]: WAITING
+              - cell "Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours?" [ref=e559]
+              - cell "Jun 19 1:21 PM" [ref=e560]
+              - cell [ref=e561]
+            - row "+1 (918) 859-2228 +19188592228 No Address — Tulsa, OK waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave? Jun 19 1:11 PM" [ref=e562] [cursor=pointer]:
+              - cell "+1 (918) 859-2228 +19188592228" [ref=e563]:
+                - generic [ref=e564]: +1 (918) 859-2228
+                - generic [ref=e565]: "+19188592228"
+              - cell "No Address —" [ref=e566]:
+                - generic [ref=e567]: No Address
+                - generic [ref=e568]: —
+              - cell "Tulsa, OK" [ref=e569]
+              - cell "waiting" [ref=e570]:
+                - generic [ref=e571]: waiting
+              - cell "ownership confirmed" [ref=e572]:
+                - generic [ref=e573]: ownership confirmed
+              - cell "normal" [ref=e574]:
+                - generic [ref=e575]: normal
+              - cell "Seller Confirmed" [ref=e576]:
+                - generic [ref=e577]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e578]
+              - cell "WAITING" [ref=e579]:
+                - generic [ref=e580]: WAITING
+              - cell "Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave?" [ref=e581]
+              - cell "Jun 19 1:11 PM" [ref=e582]
+              - cell [ref=e583]
+            - row "+1 (901) 598-8824 +19015988824 No Address — Memphis, TN waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave? Jun 19 12:51 PM" [ref=e584] [cursor=pointer]:
+              - cell "+1 (901) 598-8824 +19015988824" [ref=e585]:
+                - generic [ref=e586]: +1 (901) 598-8824
+                - generic [ref=e587]: "+19015988824"
+              - cell "No Address —" [ref=e588]:
+                - generic [ref=e589]: No Address
+                - generic [ref=e590]: —
+              - cell "Memphis, TN" [ref=e591]
+              - cell "waiting" [ref=e592]:
+                - generic [ref=e593]: waiting
+              - cell "ownership confirmed" [ref=e594]:
+                - generic [ref=e595]: ownership confirmed
+              - cell "normal" [ref=e596]:
+                - generic [ref=e597]: normal
+              - cell "Seller Confirmed" [ref=e598]:
+                - generic [ref=e599]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e600]
+              - cell "WAITING" [ref=e601]:
+                - generic [ref=e602]: WAITING
+              - cell "Hey Robert, this is Jake. I invest in Memphis. Just checking, do you own 1598 Whitney Ave?" [ref=e603]
+              - cell "Jun 19 12:51 PM" [ref=e604]
+              - cell [ref=e605]
+            - row "+1 (913) 244-6677 +19132446677 No Address — Kansas City, MO waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad? Jun 19 12:40 PM" [ref=e606] [cursor=pointer]:
+              - cell "+1 (913) 244-6677 +19132446677" [ref=e607]:
+                - generic [ref=e608]: +1 (913) 244-6677
+                - generic [ref=e609]: "+19132446677"
+              - cell "No Address —" [ref=e610]:
+                - generic [ref=e611]: No Address
+                - generic [ref=e612]: —
+              - cell "Kansas City, MO" [ref=e613]
+              - cell "waiting" [ref=e614]:
+                - generic [ref=e615]: waiting
+              - cell "ownership confirmed" [ref=e616]:
+                - generic [ref=e617]: ownership confirmed
+              - cell "normal" [ref=e618]:
+                - generic [ref=e619]: normal
+              - cell "Seller Confirmed" [ref=e620]:
+                - generic [ref=e621]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e622]
+              - cell "WAITING" [ref=e623]:
+                - generic [ref=e624]: WAITING
+              - cell "Hola Monica, soy Carlos. Soy comprador local en Kansas City. 4928 Freeman Ave es tu propiedad?" [ref=e625]
+              - cell "Jun 19 12:40 PM" [ref=e626]
+              - cell [ref=e627]
+            - row "+1 (612) 670-7973 +16126707973 No Address — Minneapolis, MN waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours? Jun 19 12:31 PM" [ref=e628] [cursor=pointer]:
+              - cell "+1 (612) 670-7973 +16126707973" [ref=e629]:
+                - generic [ref=e630]: +1 (612) 670-7973
+                - generic [ref=e631]: "+16126707973"
+              - cell "No Address —" [ref=e632]:
+                - generic [ref=e633]: No Address
+                - generic [ref=e634]: —
+              - cell "Minneapolis, MN" [ref=e635]
+              - cell "waiting" [ref=e636]:
+                - generic [ref=e637]: waiting
+              - cell "ownership confirmed" [ref=e638]:
+                - generic [ref=e639]: ownership confirmed
+              - cell "normal" [ref=e640]:
+                - generic [ref=e641]: normal
+              - cell "Seller Confirmed" [ref=e642]:
+                - generic [ref=e643]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e644]
+              - cell "WAITING" [ref=e645]:
+                - generic [ref=e646]: WAITING
+              - cell "Hey Patrick, this is Jake. I am a local real estate investor in Minneapolis. Is 1752 132nd Ave Nw yours?" [ref=e647]
+              - cell "Jun 19 12:31 PM" [ref=e648]
+              - cell [ref=e649]
+            - row "+1 (612) 770-5458 +16127705458 No Address — Minneapolis, MN waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours? Jun 19 12:20 PM" [ref=e650] [cursor=pointer]:
+              - cell "+1 (612) 770-5458 +16127705458" [ref=e651]:
+                - generic [ref=e652]: +1 (612) 770-5458
+                - generic [ref=e653]: "+16127705458"
+              - cell "No Address —" [ref=e654]:
+                - generic [ref=e655]: No Address
+                - generic [ref=e656]: —
+              - cell "Minneapolis, MN" [ref=e657]
+              - cell "waiting" [ref=e658]:
+                - generic [ref=e659]: waiting
+              - cell "ownership confirmed" [ref=e660]:
+                - generic [ref=e661]: ownership confirmed
+              - cell "normal" [ref=e662]:
+                - generic [ref=e663]: normal
+              - cell "Seller Confirmed" [ref=e664]:
+                - generic [ref=e665]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e666]
+              - cell "WAITING" [ref=e667]:
+                - generic [ref=e668]: WAITING
+              - cell "Hello Brian, this is Jake. I have been investing in Minneapolis. Is 1243 Thomas Ave N yours?" [ref=e669]
+              - cell "Jun 19 12:20 PM" [ref=e670]
+              - cell [ref=e671]
+            - row "+1 (901) 277-7262 +19012777262 No Address — Memphis, TN waiting ownership confirmed normal Seller Confirmed Wait for seller response. WAITING Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours? Jun 19 12:10 PM" [ref=e672] [cursor=pointer]:
+              - cell "+1 (901) 277-7262 +19012777262" [ref=e673]:
+                - generic [ref=e674]: +1 (901) 277-7262
+                - generic [ref=e675]: "+19012777262"
+              - cell "No Address —" [ref=e676]:
+                - generic [ref=e677]: No Address
+                - generic [ref=e678]: —
+              - cell "Memphis, TN" [ref=e679]
+              - cell "waiting" [ref=e680]:
+                - generic [ref=e681]: waiting
+              - cell "ownership confirmed" [ref=e682]:
+                - generic [ref=e683]: ownership confirmed
+              - cell "normal" [ref=e684]:
+                - generic [ref=e685]: normal
+              - cell "Seller Confirmed" [ref=e686]:
+                - generic [ref=e687]: Seller Confirmed
+              - cell "Wait for seller response." [ref=e688]
+              - cell "WAITING" [ref=e689]:
+                - generic [ref=e690]: WAITING
+              - cell "Hello Donna, this is Jake. I have been investing in Memphis. Is 2886 Saint Elmo Ave yours?" [ref=e691]
+              - cell "Jun 19 12:10 PM" [ref=e692]
+              - cell [ref=e693]
+  - button "NEXUS Copilot" [ref=e694] [cursor=pointer]:
+    - generic: Standing by

@@ -37,7 +37,8 @@
   overflow: hidden;
   color: var(--text-primary);
   background:
-    radial-gradient(circle at 20% -10%, rgba(10,132,255,0.22), transparent 28%),
+    radial-gradient(circle at 20% -10%, color-mix(in srgb, var(--nx-accent) 22%, transparent), transparent 28%),
+    radial-gradient(circle at 88% 108%, color-mix(in srgb, var(--nx-accent) 8%, transparent), transparent 32%),
     linear-gradient(180deg, #0b0f18 0%, var(--bg-main) 34%, #070910 100%);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -309,11 +310,12 @@
   top: calc(100% + 12px);
   width: 320px;
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--nx-glass-border, rgba(255, 255, 255, 0.14));
   border-radius: 14px;
-  background: var(--nexus-panel-strong);
-  backdrop-filter: blur(48px) saturate(200%);
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  background: var(--nx-glass-bg-strong);
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur, 48px)) saturate(var(--nx-glass-saturate, 1.85));
+  backdrop-filter: blur(var(--nx-glass-blur, 48px)) saturate(var(--nx-glass-saturate, 1.85));
+  box-shadow: var(--nx-glass-shadow, 0 32px 80px rgba(0, 0, 0, 0.45)), var(--nx-glass-inner-highlight, inset 0 1px 0 rgba(255, 255, 255, 0.08));
   animation: nx-popover-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 12000;
 }
@@ -2625,7 +2627,10 @@
   --success:            var(--nx-success);
 
   color: var(--text-primary);
-  background: var(--nx-bg);
+  background:
+    radial-gradient(circle at 18% -8%, color-mix(in srgb, var(--nx-accent) 14%, transparent), transparent 30%),
+    radial-gradient(circle at 92% 102%, color-mix(in srgb, var(--nx-accent) 6%, transparent), transparent 34%),
+    var(--nx-bg);
 }
 [data-nexus-theme="light"] .nx-premium-inbox .nx-topbar {
   background: rgba(255, 255, 255, 0.85);
@@ -3367,14 +3372,14 @@
 /* ─── Liquid Glass Variables & Base ──────────────────────────────────── */
 
 .nx-premium-inbox {
-  --glass-bg: rgba(12, 18, 30, 0.52);
-  --glass-bg-strong: rgba(15, 21, 34, 0.72);
+  --glass-bg: var(--nx-glass-fill-top, rgba(12, 18, 30, 0.42));
+  --glass-bg-strong: var(--nx-glass-fill-bottom, rgba(8, 14, 24, 0.34));
   --glass-bg-soft: rgba(255, 255, 255, 0.045);
-  --glass-border: rgba(255, 255, 255, 0.11);
-  --glass-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-border: var(--nx-glass-border, rgba(255, 255, 255, 0.14));
+  --glass-border-strong: var(--nx-glass-border, rgba(255, 255, 255, 0.14));
   --glass-highlight: rgba(255, 255, 255, 0.18);
-  --glass-shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
-  --glass-blur: blur(26px) saturate(1.35);
+  --glass-shadow: var(--nx-glass-shadow, 0 32px 80px rgba(0, 0, 0, 0.45));
+  --glass-blur: blur(var(--nx-glass-blur, 48px)) saturate(var(--nx-glass-saturate, 1.85));
 }
 /* ─── Layout State Classes ───────────────────────────────────────────── */
 
@@ -4788,8 +4793,10 @@ center+right hidden */
 /* ─── Command Map Surface ─────────────────────────────────────────────── */
 
 .nx-icm {
-  --map-card-bg: linear-gradient(180deg, var(--nx-card-shell-top, rgba(8, 14, 24, 0.96)), var(--nx-card-shell-bottom, rgba(4, 8, 16, 0.94)));
-  --map-card-border: var(--nx-card-border, rgba(170, 200, 240, 0.12));
+  --map-glass-top: var(--nx-glass-fill-top, rgba(12, 18, 30, 0.42));
+  --map-glass-bottom: var(--nx-glass-fill-bottom, rgba(8, 14, 24, 0.34));
+  --map-card-bg: var(--nx-glass-bg-strong);
+  --map-card-border: var(--nx-glass-border, rgba(255, 255, 255, 0.14));
   --map-card-shadow: 0 30px 100px var(--nx-card-shadow, rgba(0, 0, 0, 0.42));
   --map-accent: var(--nx-card-accent, #68d9ff);
   --map-accent-soft: var(--nx-card-accent-soft, rgba(104, 217, 255, 0.16));
@@ -4818,7 +4825,7 @@ center+right hidden */
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
+  z-index: 0;
 }
 
 .nx-icm::before {
@@ -4836,7 +4843,7 @@ center+right hidden */
 .nx-icm__canvas {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
 }
 
 .nx-icm__canvas .maplibregl-map,
@@ -4898,7 +4905,9 @@ center+right hidden */
 }
 
 .nx-icm--theme-light_street {
-  --map-card-bg: linear-gradient(180deg, rgba(246, 250, 254, 0.98), rgba(235, 243, 251, 0.96));
+  --map-glass-top: var(--nx-glass-fill-top, rgba(255, 255, 255, 0.62));
+  --map-glass-bottom: var(--nx-glass-fill-bottom, rgba(248, 250, 255, 0.52));
+  --map-card-bg: var(--nx-glass-bg-strong);
   --map-card-border: rgba(100, 140, 200, 0.18);
   --map-card-shadow: 0 24px 72px rgba(30, 60, 110, 0.14);
   --map-accent: #1d4ed8;
@@ -4939,49 +4948,62 @@ center+right hidden */
   border-color: rgba(37, 99, 235, 0.22);
 }
 
-.nx-icm--theme-red_ops::before {
+.nx-icm--theme-red_ops::before,
+.nx-icm--theme-red-ops::before {
+  opacity: 0.22;
   background:
-    radial-gradient(circle at top left, rgba(255, 107, 99, 0.12), transparent 26%),
+    radial-gradient(circle at top left, rgba(255, 107, 99, 0.14), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.014), transparent 24%);
 }
 
+.nx-icm--theme-executive::before,
 .nx-icm--theme-midnight::before {
   background:
-    radial-gradient(circle at top left, rgba(123, 157, 255, 0.1), transparent 28%),
+    radial-gradient(circle at top left, rgba(220, 191, 116, 0.1), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 24%);
 }
 
 .nx-icm--theme-blueprint::before {
   background:
-    linear-gradient(90deg, rgba(92, 214, 255, 0.05) 0, rgba(92, 214, 255, 0.05) 1px, transparent 1px, transparent 72px),
-    linear-gradient(0deg, rgba(92, 214, 255, 0.04) 0, rgba(92, 214, 255, 0.04) 1px, transparent 1px, transparent 72px),
-    radial-gradient(circle at top left, rgba(92, 214, 255, 0.08), transparent 28%);
+    linear-gradient(90deg, rgba(92, 214, 255, 0.03) 0, rgba(92, 214, 255, 0.03) 1px, transparent 1px, transparent 72px),
+    linear-gradient(0deg, rgba(92, 214, 255, 0.025) 0, rgba(92, 214, 255, 0.025) 1px, transparent 1px, transparent 72px),
+    radial-gradient(circle at top left, rgba(92, 214, 255, 0.05), transparent 28%);
   background-size: 72px 72px, 72px 72px, auto;
-  opacity: 0.28;
+  opacity: 0.14;
 }
 
-.nx-icm--theme-acquisition_radar::after {
-  opacity: 0.24;
+.nx-icm--theme-acquisition_radar::after,
+.nx-icm--theme-night_vision::after,
+.nx-icm--theme-night-vision::after {
+  opacity: 0.12;
   background:
-    radial-gradient(circle at center, transparent 0 42%, rgba(114, 255, 178, 0.08) 42%, transparent 43%, transparent 57%, rgba(114, 255, 178, 0.05) 57%, transparent 58%),
-    linear-gradient(90deg, transparent 49.7%, rgba(114, 255, 178, 0.06) 50%, transparent 50.3%),
-    linear-gradient(0deg, transparent 49.7%, rgba(114, 255, 178, 0.06) 50%, transparent 50.3%);
+    radial-gradient(circle at center, transparent 0 42%, rgba(114, 255, 178, 0.04) 42%, transparent 43%, transparent 57%, rgba(114, 255, 178, 0.03) 57%, transparent 58%),
+    linear-gradient(90deg, transparent 49.7%, rgba(114, 255, 178, 0.03) 50%, transparent 50.3%),
+    linear-gradient(0deg, transparent 49.7%, rgba(114, 255, 178, 0.03) 50%, transparent 50.3%);
+}
+
+.nx-icm--theme-night_vision::before,
+.nx-icm--theme-night-vision::before {
+  background:
+    radial-gradient(circle at top left, rgba(114, 255, 178, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(114, 255, 178, 0.04), transparent 22%);
+  opacity: 0.2;
 }
 
 .nx-icm--theme-matrix::before {
   background:
-    linear-gradient(90deg, rgba(0, 255, 136, 0.03) 0, rgba(0, 255, 136, 0.03) 1px, transparent 1px, transparent 64px),
-    linear-gradient(0deg, rgba(0, 255, 136, 0.022) 0, rgba(0, 255, 136, 0.022) 1px, transparent 1px, transparent 64px),
-    radial-gradient(circle at top left, rgba(0, 255, 136, 0.08), transparent 24%);
+    linear-gradient(90deg, rgba(0, 255, 136, 0.02) 0, rgba(0, 255, 136, 0.02) 1px, transparent 1px, transparent 64px),
+    linear-gradient(0deg, rgba(0, 255, 136, 0.015) 0, rgba(0, 255, 136, 0.015) 1px, transparent 1px, transparent 64px),
+    radial-gradient(circle at top left, rgba(0, 255, 136, 0.05), transparent 24%);
   background-size: 64px 64px, 64px 64px, auto;
-  opacity: 0.22;
+  opacity: 0.12;
 }
 
 .nx-icm--theme-matrix::after {
-  opacity: 0.18;
+  opacity: 0.08;
   background:
-    linear-gradient(180deg, rgba(0, 255, 136, 0.05), transparent 16%, transparent 84%, rgba(0, 255, 136, 0.05)),
-    linear-gradient(90deg, rgba(0, 255, 136, 0.08), transparent 10%, transparent 90%, rgba(0, 255, 136, 0.08));
+    linear-gradient(180deg, rgba(0, 255, 136, 0.03), transparent 16%, transparent 84%, rgba(0, 255, 136, 0.03)),
+    linear-gradient(90deg, rgba(0, 255, 136, 0.04), transparent 10%, transparent 90%, rgba(0, 255, 136, 0.04));
 }
 
 .nx-icm__toolbar,
@@ -5010,13 +5032,18 @@ center+right hidden */
   position: absolute;
   top: 18px;
   left: 18px;
-  right: 18px;
+  right: auto;
   z-index: 28;
   display: flex !important;
   flex-direction: column;
   align-items: flex-start !important;
-  gap: 12px;
+  gap: 0;
+  width: max-content;
+  max-width: min(400px, calc(100vw - 36px));
+  height: auto;
   background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
 
 .nx-icm__header {
@@ -5024,7 +5051,8 @@ center+right hidden */
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
 }
 
 .nx-icm__header-badge,
@@ -5122,7 +5150,8 @@ center+right hidden */
   border: 1px solid var(--map-card-border);
   background: var(--map-card-bg);
   box-shadow: var(--map-card-shadow);
-  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(48px) saturate(1.85);
+  backdrop-filter: blur(48px) saturate(1.85);
   animation: nx-icm-controls-in 180ms ease-out;
 }
 
@@ -5440,7 +5469,7 @@ center+right hidden */
   gap: 8px;
   padding: 10px 14px 12px;
   border-top: 1px solid var(--map-card-border);
-  background: color-mix(in srgb, var(--map-card-bg) 96%, transparent);
+  background: var(--map-glass-top, rgba(12, 18, 30, 0.28));
 }
 
 /* Style preset list */
@@ -5946,8 +5975,8 @@ center+right hidden */
   padding: 10px 14px 10px 16px;
   border-radius: 999px;
   border: 1px solid var(--map-card-border);
-  background: color-mix(in srgb, var(--map-card-bg) 94%, transparent);
-  backdrop-filter: blur(18px);
+  background: var(--map-glass-top, rgba(12, 18, 30, 0.42));
+  backdrop-filter: blur(48px) saturate(1.85);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   white-space: nowrap;
@@ -6039,10 +6068,11 @@ center+right hidden */
   gap: 10px;
   padding: 14px 16px;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(8, 14, 24, 0.94), rgba(6, 10, 18, 0.9));
-  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(20px);
+  border: 1px solid var(--map-card-border);
+  background: var(--map-card-bg);
+  box-shadow: var(--map-card-shadow);
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur, 48px)) saturate(var(--nx-glass-saturate, 1.85));
+  backdrop-filter: blur(var(--nx-glass-blur, 48px)) saturate(var(--nx-glass-saturate, 1.85));
 }
 
 .nx-icm__census-legend-card {
@@ -21844,20 +21874,25 @@ rows
   color: var(--map-text-muted);
   font-weight: 400;
 }
-/* ── Drawer visual upgrade — dark premium glass surface ──────────────────── */
+/* ── Drawer visual upgrade — clear liquid glass (map bleeds through) ─────── */
 
 .nx-icm__controls-popover {
-  border-color: color-mix(in srgb, var(--map-accent) 14%, rgba(255,255,255,0.07));
-  background: color-mix(in srgb, var(--map-card-bg) 97%, rgba(0,0,0,0.4));
+  border-color: rgba(255, 255, 255, 0.14);
+  background:
+    linear-gradient(180deg, var(--map-glass-top), var(--map-glass-bottom)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--map-accent) 10%, transparent), transparent 42%);
   box-shadow:
-    0 32px 80px rgba(0,0,0,0.5),
-    0 0 0 1px rgba(255,255,255,0.04) inset,
-    0 1px 0 rgba(255,255,255,0.06) inset;
+    0 32px 80px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(48px) saturate(1.85);
+  backdrop-filter: blur(48px) saturate(1.85);
 }
-/* Drawer header — luminous border bottom */
+
 .nx-icm__controls-drawer-header {
-  background: color-mix(in srgb, var(--map-card-bg) 95%, rgba(255,255,255,0.02));
-  border-bottom-color: color-mix(in srgb, var(--map-accent) 10%, rgba(255,255,255,0.06));
+  background: rgba(12, 18, 30, 0.22);
+  border-bottom-color: color-mix(in srgb, var(--map-accent) 10%, rgba(255, 255, 255, 0.06));
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
 }
 /* Eyebrow — stronger hierarchy */
 .nx-icm__controls-drawer-eyebrow {
@@ -21910,14 +21945,19 @@ no clipping */
 /* ── Light theme overrides — crisp premium ────────────────────────────────── */
 
 .nx-icm--theme-light_street .nx-icm__controls-popover {
-  background: rgba(255, 255, 255, 0.97);
+  background:
+    linear-gradient(180deg, var(--map-glass-top), var(--map-glass-bottom)),
+    radial-gradient(circle at top left, color-mix(in srgb, var(--map-accent) 8%, transparent), transparent 42%);
   border-color: rgba(0, 30, 80, 0.12);
   box-shadow:
-    0 24px 64px rgba(0, 20, 60, 0.15),
-    0 2px 8px rgba(0, 20, 60, 0.08);
+    0 24px 64px rgba(0, 20, 60, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  -webkit-backdrop-filter: blur(48px) saturate(1.85);
+  backdrop-filter: blur(48px) saturate(1.85);
 }
+
 .nx-icm--theme-light_street .nx-icm__controls-drawer-header {
-  background: rgba(248, 250, 255, 0.98);
+  background: rgba(255, 255, 255, 0.38);
   border-bottom-color: rgba(0, 30, 80, 0.08);
 }
 .nx-icm--theme-light_street .nx-icm__controls-drawer-eyebrow {
@@ -21956,11 +21996,11 @@ no clipping */
   padding: 10px 14px;
   gap: 8px;
   border-top: 1px solid rgba(255,255,255,0.05);
-  background: color-mix(in srgb, var(--map-card-bg) 96%, transparent);
+  background: var(--map-glass-top, rgba(12, 18, 30, 0.28));
 }
 .nx-icm--theme-light_street .nx-icm__controls-footer {
   border-top-color: rgba(0, 30, 80, 0.07);
-  background: rgba(248, 250, 255, 0.98);
+  background: rgba(255, 255, 255, 0.38);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

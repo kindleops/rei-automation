@@ -102,7 +102,9 @@ export const resolveSellerIdentity = (item: QueueItem): SellerIdentity => {
     String(md.property_owner_name ?? targetSnap.property_owner_name ?? ''),
     String(md.thread_participant_name ?? md.participant_name ?? ''),
     String(md.contact_owner_name ?? md.contact_method_owner ?? ''),
-  ]) ?? 'Unknown owner'
+  ])
+    ?? (phone && !phone.toLowerCase().includes('no phone') ? phone : null)
+    ?? 'Unknown owner'
 
   const masterOwner = clean(
     item.masterOwnerDisplayName
