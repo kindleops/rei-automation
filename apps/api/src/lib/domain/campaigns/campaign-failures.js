@@ -109,7 +109,7 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
   const [{ data: targetRows, error: targetErr }, { data: queueRows, error: queueErr }] = await Promise.all([
     supabase
       .from('campaign_targets')
-      .select('id,seller_full_name,property_address_full,language,market,target_status,block_reason,suppression_status,routing_status,template_status,identity_status,to_phone_number,updated_at')
+      .select('id,owner_name,property_address,language,market,target_status,block_reason,suppression_status,routing_status,template_status,identity_status,to_phone_number,updated_at')
       .eq('campaign_id', campaignId)
       .in('target_status', TARGET_FAILURE_STATUSES)
       .limit(1000),
@@ -133,8 +133,8 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
       campaign_target_id: target.id,
       queue_row_id: null,
       failure_class: 'target_preparation',
-      recipient: target.seller_full_name || target.to_phone_number || null,
-      property: target.property_address_full || null,
+      recipient: target.owner_name || target.to_phone_number || null,
+      property: target.property_address || null,
       target_id: target.id,
       failure_category: category,
       failure_reason: target.block_reason || target.target_status || null,
@@ -157,7 +157,7 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
   if (targetIds.length) {
     const { data: targets } = await supabase
       .from('campaign_targets')
-      .select('id,seller_full_name,property_address_full,language,market')
+      .select('id,owner_name,property_address,language,market')
       .in('id', targetIds)
     for (const t of targets || []) targetMap.set(t.id, t)
   }
@@ -173,8 +173,8 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
       campaign_target_id: row.campaign_target_id,
       queue_row_id: row.id,
       failure_class: 'execution',
-      recipient: target?.seller_full_name || row.to_phone_number || null,
-      property: target?.property_address_full || null,
+      recipient: target?.owner_name || row.to_phone_number || null,
+      property: target?.property_address || null,
       target_id: row.campaign_target_id,
       stage_touch: clean(meta.stage_code || meta.touch_number) || null,
       template_id: row.template_id || meta.template_id || null,

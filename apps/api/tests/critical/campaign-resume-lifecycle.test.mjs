@@ -16,6 +16,16 @@ function makeChain(table, selectedColumns, terminalResult) {
           "must not query missing send_queue.failure_category"
         );
       }
+      if (table === "campaign_targets") {
+        assert.ok(
+          !String(columns).includes("seller_full_name"),
+          "must not query missing campaign_targets.seller_full_name"
+        );
+        assert.ok(
+          !String(columns).includes("property_address_full"),
+          "must not query missing campaign_targets.property_address_full"
+        );
+      }
       return chain;
     },
     eq() {
