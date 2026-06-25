@@ -50,7 +50,7 @@ function makeClaimConflictSupabase() {
   };
 }
 
-test("manual inbox send bypasses only queue_emergency_stop_active and records metadata", async () => {
+test("manual inbox send bypasses runtime brakes including queue_emergency_stop_active and records metadata", async () => {
   const supabase = makeClaimConflictSupabase();
   let create_called = 0;
   let create_input = null;

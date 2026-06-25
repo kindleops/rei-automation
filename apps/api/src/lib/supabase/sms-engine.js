@@ -362,7 +362,18 @@ export function normalizeSendQueueRow(row) {
     property_id: safe_row.property_id || null,
     phone_id: safe_row.phone_id || safe_row.phone_item_id || null,
     market_id: safe_row.market_id || null,
-    sms_agent_id: safe_row.sms_agent_id || null,
+    sms_agent_id:
+      safe_row.sms_agent_id ||
+      safe_row.agent_id ||
+      safe_row.metadata?.agent_id ||
+      safe_row.metadata?.legacy_agent_id ||
+      null,
+    selected_agent_id:
+      safe_row.selected_agent_id ||
+      safe_row.metadata?.selected_agent_id ||
+      safe_row.metadata?.routing_agent_id ||
+      null,
+    agent_name: clean(safe_row.agent_name) || null,
     textgrid_number_id: safe_row.textgrid_number_id || null,
     template_id: safe_row.template_id || null,
     seller_first_name: resolved_seller_first_name || null,
@@ -396,7 +407,12 @@ export function normalizeSendQueueRow(row) {
     type: safe_row.type || null,
     thread_key: canonical_thread_key,
     owner_id: safe_row.owner_id || null,
-    agent_id: safe_row.agent_id || null,
+    agent_id:
+      safe_row.sms_agent_id ||
+      safe_row.agent_id ||
+      safe_row.metadata?.agent_id ||
+      safe_row.metadata?.legacy_agent_id ||
+      null,
     template_source: safe_row.template_source || null,
     template_selected: clean(safe_row.template_selected) || null,
     rendered_message: safe_row.rendered_message || null,
@@ -3357,45 +3373,146 @@ export function buildSendQueueDedupeKey({
   return parts.join(":");
 }
 
-const SEND_QUEUE_COLUMNS = [
-  "id", "queue_key", "queue_status", "scheduled_for", "send_priority", "is_locked", "locked_at", 
-  "lock_token", "retry_count", "max_retries", "next_retry_at", "message_body", "phone_number_id", "phone_id",
-  "to_phone_number", "from_phone_number", "metadata", "created_at", "updated_at", "property_address", 
-  "queue_id", "queue_sequence", "property_type", "owner_type", "scheduled_for_local", 
-  "scheduled_for_utc", "timezone", "contact_window", "sent_at", "delivered_at", "failed_reason", 
-  "delivery_confirmed", "master_owner_id", "prospect_id", "property_id", "market_id", "sms_agent_id", 
-  "textgrid_number_id", "template_id", "touch_number", "dnc_check", "current_stage", "message_type", 
-  "use_case_template", "message_text", "personalization_tags_used", "character_count", 
-  "provider_message_id", "local_send_date", "local_send_hour", "paused_reason", 
-  "last_guard_checked_at", "dedupe_key", "seller_first_name", "seller_display_name", "thread_key", 
-  "template_source", "priority", "risk", "sms_eligible", "routing_allowed", "safety_status", 
-  "type", "source_event_id", "inbound_message_id", "detected_intent", "stage_before", "stage_after",
-  "rendered_message", "template_selected", "textgrid_message_id", "market",
-  "textgrid_number", "selected_template_id",
-  "property_address_state", "language", "routing_tier",
-  "property_address_city", "property_address_zip", "seller_status",
-  "pipeline_stage", "agent_name", "template_key",
-  "campaign_id", "campaign_target_id", "campaign_send_window_id"
+// Verified against production information_schema.columns (public.send_queue, 2026-06-24).
+export const SEND_QUEUE_INSERT_COLUMNS = [
+  "queue_key",
+  "queue_status",
+  "scheduled_for",
+  "send_priority",
+  "is_locked",
+  "locked_at",
+  "lock_token",
+  "retry_count",
+  "max_retries",
+  "next_retry_at",
+  "message_body",
+  "phone_number_id",
+  "to_phone_number",
+  "from_phone_number",
+  "metadata",
+  "created_at",
+  "updated_at",
+  "property_address",
+  "queue_id",
+  "queue_sequence",
+  "property_type",
+  "owner_type",
+  "scheduled_for_local",
+  "scheduled_for_utc",
+  "timezone",
+  "contact_window",
+  "sent_at",
+  "delivered_at",
+  "failed_reason",
+  "delivery_confirmed",
+  "master_owner_id",
+  "prospect_id",
+  "property_id",
+  "market_id",
+  "sms_agent_id",
+  "textgrid_number_id",
+  "template_id",
+  "touch_number",
+  "dnc_check",
+  "current_stage",
+  "message_type",
+  "use_case_template",
+  "message_text",
+  "personalization_tags_used",
+  "character_count",
+  "provider_message_id",
+  "local_send_date",
+  "local_send_hour",
+  "paused_reason",
+  "last_guard_checked_at",
+  "dedupe_key",
+  "seller_first_name",
+  "seller_display_name",
+  "thread_key",
+  "template_source",
+  "priority",
+  "risk",
+  "sms_eligible",
+  "routing_allowed",
+  "safety_status",
+  "type",
+  "detected_intent",
+  "stage_before",
+  "stage_after",
+  "textgrid_message_id",
+  "selected_template_id",
+  "market",
+  "textgrid_number",
+  "guard_status",
+  "guard_reason",
+  "selected_agent_id",
+  "risk_level",
+  "ai_confidence",
+  "estimated_cost",
+  "approved_at",
+  "held_at",
+  "language",
+  "owner_id",
+  "blocked_reason",
+  "blocked_reasons",
+  "source",
+  "property_address_state",
+  "routing_tier",
+  "routing_reason",
+  "rendered_message",
+  "source_event_id",
+  "inbound_message_id",
+  "template_selected",
+  "property_address_city",
+  "property_address_zip",
+  "seller_status",
+  "pipeline_stage",
+  "agent_name",
+  "template_key",
+  "campaign_id",
+  "campaign_target_id",
+  "campaign_send_window_id",
+  "phone_id",
 ];
 
+const SEND_QUEUE_INSERT_COLUMN_SET = new Set(SEND_QUEUE_INSERT_COLUMNS);
+
+function mapLegacyAgentFields(payload = {}) {
+  const mapped = { ...payload };
+  const metadata = ensureObject(mapped.metadata);
+  const legacy_agent_id = clean(
+    mapped.agent_id || metadata.agent_id || metadata.legacy_agent_id
+  );
+  const routing_agent_id = clean(metadata.routing_agent_id || mapped.selected_agent_id);
+
+  if (legacy_agent_id && !clean(mapped.sms_agent_id)) {
+    mapped.sms_agent_id = legacy_agent_id;
+  }
+  if (routing_agent_id && !clean(mapped.selected_agent_id)) {
+    mapped.selected_agent_id = routing_agent_id;
+  }
+  if (legacy_agent_id) {
+    metadata.legacy_agent_id = legacy_agent_id;
+  }
+  delete mapped.agent_id;
+  mapped.metadata = metadata;
+  return mapped;
+}
+
 function sanitizeSendQueuePayload(payload) {
+  const mapped = mapLegacyAgentFields(payload);
   const sanitized = {};
   const unknown = {};
-  const metadata = { ...(payload.metadata || {}) };
+  const metadata = { ...(mapped.metadata || {}) };
 
-  for (const [key, value] of Object.entries(payload)) {
-    if (SEND_QUEUE_COLUMNS.includes(key)) {
+  for (const [key, value] of Object.entries(mapped)) {
+    if (SEND_QUEUE_INSERT_COLUMN_SET.has(key)) {
       sanitized[key] = value;
-    } else {
-      // Map legacy fields to metadata
-      if (key === "agent_id") {
-        metadata.agent_id = value;
-      } else if (key === "owner_id") {
-        metadata.owner_id = value;
-        sanitized.owner_id = value;
-      } else if (key !== "metadata") {
-        unknown[key] = value;
-      }
+    } else if (key === "owner_id") {
+      sanitized.owner_id = value;
+      metadata.owner_id = value;
+    } else if (key !== "metadata") {
+      unknown[key] = value;
     }
   }
 
@@ -3408,6 +3525,128 @@ function sanitizeSendQueuePayload(payload) {
 
   sanitized.metadata = metadata;
   return sanitized;
+}
+
+export function buildSendQueueInsertPayload(row = {}, now = null) {
+  const ts = now || nowIso();
+  const normalized = normalizeSendQueueRow(row);
+  const metadata = ensureObject(normalized.metadata);
+
+  const candidate = {
+    queue_key: clean(normalized.queue_key) || crypto.randomUUID(),
+    queue_id: clean(normalized.queue_id) || clean(normalized.queue_key) || crypto.randomUUID(),
+    queue_status: normalizeQueueStatusValue(normalized.queue_status) || "queued",
+    scheduled_for: normalized.scheduled_for || ts,
+    send_priority: asNumber(normalized.send_priority, 5),
+    is_locked: false,
+    locked_at: null,
+    lock_token: null,
+    retry_count: asNumber(normalized.retry_count, 0),
+    max_retries: asNumber(normalized.max_retries, 3),
+    next_retry_at: normalized.next_retry_at || null,
+    message_body: normalized.message_body,
+    message_text: normalized.message_text || normalized.message_body,
+    phone_number_id: normalized.phone_number_id || null,
+    phone_id: normalized.phone_id || null,
+    to_phone_number: resolveQueueDestinationPhone(normalized).phone || null,
+    from_phone_number: normalizePhone(normalized.from_phone_number) || null,
+    metadata,
+    created_at: normalized.created_at || ts,
+    updated_at: normalized.updated_at || ts,
+    property_address: normalized.property_address || null,
+    queue_sequence: normalized.touch_number || null,
+    property_type: normalized.property_type || null,
+    owner_type: normalized.owner_type || null,
+    scheduled_for_local: normalized.scheduled_for_local || normalized.scheduled_for || ts,
+    scheduled_for_utc: normalized.scheduled_for_utc || normalized.scheduled_for || ts,
+    timezone: normalized.timezone || "America/Chicago",
+    contact_window: normalized.contact_window || null,
+    sent_at: normalized.sent_at || null,
+    delivered_at: normalized.delivered_at || null,
+    failed_reason: normalized.failed_reason || null,
+    delivery_confirmed: normalized.delivery_confirmed || null,
+    owner_id: normalized.owner_id || metadata.owner_id || null,
+    master_owner_id: normalized.master_owner_id || null,
+    prospect_id: normalized.prospect_id || null,
+    property_id: normalized.property_id || null,
+    market_id: normalized.market_id || null,
+    sms_agent_id: normalized.sms_agent_id || metadata.legacy_agent_id || metadata.agent_id || null,
+    selected_agent_id:
+      normalized.selected_agent_id || metadata.selected_agent_id || metadata.routing_agent_id || null,
+    textgrid_number_id: normalized.textgrid_number_id || null,
+    template_id: normalized.template_id || null,
+    touch_number: normalized.touch_number || null,
+    dnc_check: normalized.dnc_check || null,
+    current_stage: normalized.current_stage || null,
+    message_type: normalized.message_type || null,
+    use_case_template: normalized.use_case_template || null,
+    personalization_tags_used: normalized.personalization_tags_used || null,
+    character_count: asNumber(
+      normalized.character_count,
+      normalized.message_body ? normalized.message_body.length : 0
+    ),
+    provider_message_id: normalized.provider_message_id || null,
+    dedupe_key:
+      clean(normalized.dedupe_key || metadata.idempotency_key || normalized.queue_key) || null,
+    seller_first_name:
+      clean(
+        normalized.seller_first_name ||
+          metadata.seller_first_name ||
+          metadata.queue_context?.seller_first_name
+      ) || null,
+    seller_display_name:
+      clean(normalized.seller_display_name || metadata.seller_display_name) || null,
+    thread_key: normalizePhone(normalized.to_phone_number) || clean(normalized.thread_key) || null,
+    template_source: clean(normalized.template_source || "catalog") || null,
+    rendered_message: clean(normalized.rendered_message || normalized.message_body) || null,
+    priority: clean(normalized.priority || "normal") || "normal",
+    risk: clean(normalized.risk || "low") || "low",
+    sms_eligible: typeof normalized.sms_eligible === "boolean" ? normalized.sms_eligible : true,
+    routing_allowed:
+      typeof normalized.routing_allowed === "boolean" ? normalized.routing_allowed : true,
+    safety_status: clean(normalized.safety_status || "pending") || "pending",
+    type: clean(normalized.type || "outbound") || "outbound",
+    source: clean(normalized.source || metadata.source) || null,
+    source_event_id: normalized.source_event_id || null,
+    inbound_message_id: clean(normalized.inbound_message_id) || null,
+    detected_intent: clean(normalized.detected_intent) || null,
+    stage_before: clean(normalized.stage_before) || null,
+    stage_after: clean(normalized.stage_after) || null,
+    template_selected: clean(normalized.template_selected) || null,
+    textgrid_message_id: clean(normalized.textgrid_message_id || normalized.provider_message_id) || null,
+    textgrid_number: clean(normalized.textgrid_number) || null,
+    market: clean(normalized.market) || null,
+    selected_template_id: clean(normalized.selected_template_id || normalized.template_id) || null,
+    guard_status: clean(normalized.guard_status) || null,
+    guard_reason: clean(normalized.guard_reason) || null,
+    property_address_state: clean(normalized.property_address_state || normalized.seller_state) || null,
+    language: clean(normalized.language) || null,
+    routing_tier: asNumber(normalized.routing_tier, null),
+    routing_reason: clean(normalized.routing_reason) || null,
+    property_address_city: clean(normalized.property_address_city) || null,
+    property_address_zip: clean(normalized.property_address_zip) || null,
+    seller_status:
+      clean(normalized.seller_status || normalized.contact_status || normalized.activity_status) ||
+      null,
+    pipeline_stage:
+      clean(normalized.pipeline_stage || normalized.stage_code || normalized.conversation_stage) ||
+      null,
+    agent_name: clean(normalized.agent_name || normalized.agent_first_name) || null,
+    template_key:
+      clean(normalized.template_key || normalized.template_id || normalized.selected_template_id) ||
+      null,
+    campaign_id: normalized.campaign_id || null,
+    campaign_target_id: normalized.campaign_target_id || null,
+    campaign_send_window_id: normalized.campaign_send_window_id || null,
+  };
+
+  const payload = {};
+  for (const column of SEND_QUEUE_INSERT_COLUMNS) {
+    if (Object.prototype.hasOwnProperty.call(candidate, column)) {
+      payload[column] = candidate[column];
+    }
+  }
+  return payload;
 }
 
 function insertPayloadForGuard(row = {}, now = null) {
@@ -3601,9 +3840,10 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
       }
 
       const supabase = getSupabase(deps);
+      const paused_insert_payload = buildSendQueueInsertPayload(paused_row, now);
       const { data } = await supabase
         .from(SEND_QUEUE_TABLE)
-        .insert(paused_row)
+        .insert(paused_insert_payload)
         .select()
         .maybeSingle();
 
@@ -3619,86 +3859,7 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     }
   }
 
-  const insert_payload = {
-    queue_key: clean(row.queue_key) || crypto.randomUUID(),
-    queue_id: clean(row.queue_id) || clean(row.queue_key) || crypto.randomUUID(),
-    queue_status: normalizeQueueStatusValue(row.queue_status) || "queued",
-    scheduled_for: row.scheduled_for || now,
-    send_priority: asNumber(row.send_priority, 5),
-    is_locked: false,
-    locked_at: null,
-    lock_token: null,
-    retry_count: asNumber(row.retry_count, 0),
-    max_retries: asNumber(row.max_retries, 3),
-    next_retry_at: row.next_retry_at || null,
-    message_body: row.message_body,
-    message_text: row.message_text || row.message_body,
-    to_phone_number: resolveQueueDestinationPhone(row).phone || null,
-    from_phone_number: normalizePhone(row.from_phone_number) || null,
-    metadata: row.metadata,
-    created_at: row.created_at || now,
-    updated_at: row.updated_at || now,
-    property_address: row.property_address || null,
-    queue_sequence: row.touch_number || null,
-    property_type: row.property_type || null,
-    owner_type: row.owner_type || null,
-    scheduled_for_local: row.scheduled_for_local || row.scheduled_for || now,
-    scheduled_for_utc: row.scheduled_for_utc || row.scheduled_for || now,
-    timezone: row.timezone || "America/Chicago",
-    contact_window: row.contact_window || null,
-    sent_at: row.sent_at || null,
-    delivered_at: row.delivered_at || null,
-    failed_reason: row.failed_reason || null,
-    delivery_confirmed: row.delivery_confirmed || null,
-    owner_id: row.owner_id || row.metadata?.owner_id || null,
-    agent_id: row.agent_id || row.metadata?.agent_id || null,
-    master_owner_id: row.master_owner_id || null,
-    prospect_id: row.prospect_id || null,
-    property_id: row.property_id || null,
-    market_id: row.market_id || null,
-    sms_agent_id: row.sms_agent_id || null,
-    textgrid_number_id: row.textgrid_number_id || null,
-    template_id: row.template_id || null,
-    touch_number: row.touch_number || null,
-    dnc_check: row.dnc_check || null,
-    current_stage: row.current_stage || null,
-    message_type: row.message_type || null,
-    use_case_template: row.use_case_template || null,
-    personalization_tags_used: row.personalization_tags_used || null,
-    character_count: asNumber(row.character_count, row.message_body ? row.message_body.length : 0),
-    provider_message_id: row.provider_message_id || null,
-    dedupe_key: clean(row.dedupe_key || row.metadata?.idempotency_key || row.queue_key) || null,
-    seller_first_name: clean(row.seller_first_name || row.metadata?.seller_first_name || row.metadata?.queue_context?.seller_first_name) || null,
-    seller_display_name: clean(row.seller_display_name || row.metadata?.seller_display_name) || null,
-    thread_key: normalizePhone(row.to_phone_number) || clean(row.thread_key) || null,
-    template_source: clean(row.template_source || "catalog") || null,
-    rendered_message: clean(row.rendered_message || row.message_body) || null,
-    priority: clean(row.priority || "normal") || "normal",
-    risk: clean(row.risk || "low") || "low",
-    sms_eligible: typeof row.sms_eligible === "boolean" ? row.sms_eligible : true,
-    routing_allowed: typeof row.routing_allowed === "boolean" ? row.routing_allowed : true,
-    safety_status: clean(row.safety_status || "pending") || "pending",
-    type: clean(row.type || "outbound") || "outbound",
-    source_event_id: row.source_event_id || null,
-    inbound_message_id: clean(row.inbound_message_id) || null,
-    detected_intent: clean(row.detected_intent) || null,
-    stage_before: clean(row.stage_before) || null,
-    stage_after: clean(row.stage_after) || null,
-    template_selected: clean(row.template_selected) || null,
-    textgrid_message_id: clean(row.textgrid_message_id || row.provider_message_id) || null,
-    textgrid_number: clean(row.textgrid_number) || null,
-    market: clean(row.market) || null,
-    selected_template_id: clean(row.selected_template_id || row.template_id) || null,
-    property_address_state: clean(row.property_address_state || row.seller_state) || null,
-    language: clean(row.language) || null,
-    routing_tier: asNumber(row.routing_tier, null),
-    property_address_city: clean(row.property_address_city) || null,
-    property_address_zip: clean(row.property_address_zip) || null,
-    seller_status: clean(row.seller_status || row.contact_status || row.activity_status) || null,
-    pipeline_stage: clean(row.pipeline_stage || row.stage_code || row.conversation_stage) || null,
-    agent_name: clean(row.agent_name || row.agent_first_name) || null,
-    template_key: clean(row.template_key || row.template_id || row.selected_template_id) || null,
-  };
+  const insert_payload = buildSendQueueInsertPayload(row, now);
 
   if (typeof deps.insertSupabaseSendQueueRow === "function") {
     return deps.insertSupabaseSendQueueRow(insert_payload);

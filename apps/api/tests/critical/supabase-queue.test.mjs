@@ -7,6 +7,7 @@ import {
   insertSupabaseSendQueueRow,
   normalizeSendQueueRow,
   buildSendQueueDedupeKey,
+  SEND_QUEUE_INSERT_COLUMNS,
 } from "@/lib/supabase/sms-engine.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 
@@ -126,7 +127,15 @@ describe("Supabase send_queue auto-queue", () => {
     assert.strictEqual(inserted.payload.textgrid_number, payload.textgrid_number);
     assert.strictEqual(inserted.payload.template_source, payload.template_source);
     assert.strictEqual(inserted.payload.rendered_message, payload.rendered_message);
-    assert.strictEqual(inserted.payload.agent_id, payload.agent_id);
+    assert.strictEqual(inserted.payload.sms_agent_id, String(payload.agent_id));
+    assert.equal("agent_id" in inserted.payload, false);
+    for (const key of Object.keys(inserted.payload)) {
+      assert.equal(
+        SEND_QUEUE_INSERT_COLUMNS.includes(key),
+        true,
+        `unexpected insert column: ${key}`
+      );
+    }
     assert.strictEqual(inserted.payload.priority, payload.priority);
     assert.strictEqual(inserted.payload.risk, payload.risk);
     assert.strictEqual(inserted.payload.sms_eligible, payload.sms_eligible);

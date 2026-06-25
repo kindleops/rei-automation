@@ -87,14 +87,28 @@ function isTransportFailureReason(reason = "") {
 // OUTBOUND SEND GATE
 // ════════════════════════════════════════════════════════════════════════════
 
+function isManualOperatorSend(input = {}) {
+  const input_metadata = objectMetadata(input.metadata);
+  return (
+    asBoolean(input.manual_operator_send, false) ||
+    clean(input.source) === "manual_inbox" ||
+    clean(input.send_source) === "manual_inbox" ||
+    clean(input_metadata.source) === "manual_inbox" ||
+    clean(input_metadata.send_source) === "manual_inbox" ||
+    clean(input.action) === "send_now" ||
+    clean(input_metadata.action) === "send_now"
+  );
+}
+
 export async function canSend(input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const thread_key = clean(input.thread_key) || normalizePhone(input.to_phone_number);
+  const manual_operator_send = isManualOperatorSend(input);
 
   const validation = validateOutboundSmsPayload(input);
   if (!validation.ok) return validation;
 
-  if (thread_key) {
+  if (!manual_operator_send && thread_key) {
     try {
       const { data: thread_state } = await supabase
         .from("inbox_thread_state")
@@ -469,6 +483,10 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
       source,
       action,
       created_from,
+      manual_operator_send:
+        source === "manual_inbox" ||
+        action === "send_now" ||
+        asBoolean(input.manual_operator_send, false),
       operator_override: asBoolean(input.operator_override, false),
       force: asBoolean(input.force, false),
     },
@@ -774,6 +792,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     recentDeliveryFailuresImpl = shouldSuppressRecentDeliveryFailuresReconciled,
     supabase = defaultSupabase,
   } = deps;
+  const insert_deps = { supabase, ...deps };
 
   const input_metadata = objectMetadata(input.metadata);
   const bypassed_queue_emergency_stop =
@@ -812,28 +831,31 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     // but NEVER queue_status='queued'
     let audit_insert = null;
     try {
-      audit_insert = await insertImpl({
-        queue_key: `inbox:send_now:failed:${clean(input.thread_key) || "unknown"}:${Date.now()}`,
-        queue_status: "paused_invalid_queue_row",
-        scheduled_for: nowIso(),
-        message_body: clean(input.message_body) || "",
-        to_phone_number: normalizePhone(clean(input.to_phone_number)) || null,
-        from_phone_number: resolved_from || null,
-        thread_key: clean(input.thread_key) || null,
-        metadata: {
-          source: metadata_source,
-          send_source: metadata_source,
-          action: "send_now",
-          created_from: "leadcommand_inbox",
-          ...(clean(input.action).toLowerCase() === "send_now" || !clean(input.action) ? { manual_operator_send: true } : {}),
-          ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
-          validation_error: validation.error,
-          input_preview: {
-            thread_key: clean(input.thread_key)?.slice(0, 40) || null,
-            message_body_length: clean(input.message_body)?.length || 0,
+      audit_insert = await insertImpl(
+        {
+          queue_key: `inbox:send_now:failed:${clean(input.thread_key) || "unknown"}:${Date.now()}`,
+          queue_status: "paused_invalid_queue_row",
+          scheduled_for: nowIso(),
+          message_body: clean(input.message_body) || "",
+          to_phone_number: normalizePhone(clean(input.to_phone_number)) || null,
+          from_phone_number: resolved_from || null,
+          thread_key: clean(input.thread_key) || null,
+          metadata: {
+            source: metadata_source,
+            send_source: metadata_source,
+            action: "send_now",
+            created_from: "leadcommand_inbox",
+            ...(clean(input.action).toLowerCase() === "send_now" || !clean(input.action) ? { manual_operator_send: true } : {}),
+            ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+            validation_error: validation.error,
+            input_preview: {
+              thread_key: clean(input.thread_key)?.slice(0, 40) || null,
+              message_body_length: clean(input.message_body)?.length || 0,
+            },
           },
         },
-      }).catch(() => null);
+        insert_deps
+      ).catch(() => null);
     } catch {
       // Non-critical - audit row best-effort
     }
@@ -1076,49 +1098,52 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
   let queue_result;
   try {
-    queue_result = await insertImpl({
-      queue_key: normalized.queue_key,
-      queue_id,
-      queue_status: "queued",
-      scheduled_for: clean(input.scheduled_for) || now,
-      scheduled_for_utc: now,
-      scheduled_for_local: now,
-      timezone: clean(input.timezone) || "America/Chicago",
-      send_priority: 10,
-      is_locked: false,
-      retry_count: 0,
-      max_retries: 3,
-      message_body: normalized.message_body,
-      message_text: normalized.message_text || normalized.message_body,
-      to_phone_number: normalized.to_phone_number,
-      from_phone_number: normalized.from_phone_number,
-      thread_key: normalized.thread_key,
-      type: normalized.type,
-      message_type: normalized.message_type,
-      use_case_template: normalized.use_case_template,
-      master_owner_id: normalized.master_owner_id,
-      property_id: normalized.property_id,
-      prospect_id: normalized.prospect_id,
-      phone_number_id: normalized.phone_number_id,
-      textgrid_number_id: normalized.textgrid_number_id,
-      market_id: normalized.market_id,
-      character_count: normalized.message_body.length,
-      touch_number: 1,
-      dnc_check: "✅ Cleared",
-      delivery_confirmed: "⏳ Pending",
-      metadata: {
-        source: normalized.source,
-        send_source: normalized.source,
-        action: normalized.action,
-        created_from: normalized.created_from,
-        ...(is_manual_send_now ? { manual_operator_send: true } : {}),
-        ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
-        operator_override: operator_override ? true : false,
-        transport_fingerprint,
-        manual_send_warning_codes: warning_codes,
-        client_send_id: clean(input.client_send_id || input.metadata?.client_send_id) || null,
+    queue_result = await insertImpl(
+      {
+        queue_key: normalized.queue_key,
+        queue_id,
+        queue_status: "queued",
+        scheduled_for: clean(input.scheduled_for) || now,
+        scheduled_for_utc: now,
+        scheduled_for_local: now,
+        timezone: clean(input.timezone) || "America/Chicago",
+        send_priority: 10,
+        is_locked: false,
+        retry_count: 0,
+        max_retries: 3,
+        message_body: normalized.message_body,
+        message_text: normalized.message_text || normalized.message_body,
+        to_phone_number: normalized.to_phone_number,
+        from_phone_number: normalized.from_phone_number,
+        thread_key: normalized.thread_key,
+        type: normalized.type,
+        message_type: normalized.message_type,
+        use_case_template: normalized.use_case_template,
+        master_owner_id: normalized.master_owner_id,
+        property_id: normalized.property_id,
+        prospect_id: normalized.prospect_id,
+        phone_number_id: normalized.phone_number_id,
+        textgrid_number_id: normalized.textgrid_number_id,
+        market_id: normalized.market_id,
+        character_count: normalized.message_body.length,
+        touch_number: 1,
+        dnc_check: "✅ Cleared",
+        delivery_confirmed: "⏳ Pending",
+        metadata: {
+          source: normalized.source,
+          send_source: normalized.source,
+          action: normalized.action,
+          created_from: normalized.created_from,
+          ...(is_manual_send_now ? { manual_operator_send: true } : {}),
+          ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+          operator_override: operator_override ? true : false,
+          transport_fingerprint,
+          manual_send_warning_codes: warning_codes,
+          client_send_id: clean(input.client_send_id || input.metadata?.client_send_id) || null,
+        },
       },
-    });
+      insert_deps
+    );
   } catch (insert_error) {
     const proof = buildManualSendProof({
       input,
@@ -1325,38 +1350,33 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     runtime_settings,
     { action: "manual_inbox_send_now_queue_create", failClosed: false }
   );
+  const bypassed_runtime_brake = runtime_brake.ok === false;
   const bypassed_queue_emergency_stop =
-    runtime_brake.ok === false && runtime_brake.reason === "queue_emergency_stop_active";
-  if (!runtime_brake.ok && !bypassed_queue_emergency_stop) {
-    return {
-      ok: false,
-      status: 423,
-      error: "runtime_brake_active",
-      reason: runtime_brake.reason,
-      detail_reason: runtime_brake.reason,
-      message: runtime_brake.message,
-      diagnostics: runtime_brake.diagnostics,
-      message_event_id: null,
-      queue_audit_id: null,
-      provider_message_id: null,
-      provider_message_sid: null,
-      delivery_status_display: null,
-      hard_block: true,
-      operator_override_allowed: false,
-    };
-  }
+    bypassed_runtime_brake && runtime_brake.reason === "queue_emergency_stop_active";
 
   const manual_input = {
     ...input,
     source: "manual_inbox",
     send_source: "manual_inbox",
     manual_operator_send: true,
+    ...(bypassed_runtime_brake
+      ? {
+          bypassed_runtime_brake: true,
+          bypassed_runtime_brake_reason: runtime_brake.reason,
+        }
+      : {}),
     ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
     metadata: {
       ...objectMetadata(input.metadata),
       source: "manual_inbox",
       send_source: "manual_inbox",
       manual_operator_send: true,
+      ...(bypassed_runtime_brake
+        ? {
+            bypassed_runtime_brake: true,
+            bypassed_runtime_brake_reason: runtime_brake.reason,
+          }
+        : {}),
       ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
     },
   };
