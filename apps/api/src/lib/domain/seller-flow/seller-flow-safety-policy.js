@@ -1,4 +1,5 @@
 import { SELLER_FLOW_STAGES } from "./canonical-seller-flow.js";
+import { normalizeCanonicalIntent } from "./coverage-net/canonical-intent-aliases.js";
 
 export const SELLER_FLOW_SAFETY_TIERS = Object.freeze({
   AUTO_SEND: "auto_send",   // High confidence, low risk, autopilot enabled
@@ -23,7 +24,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
       template: SELLER_FLOW_STAGES.WHO_IS_THIS,
       safety: SELLER_FLOW_SAFETY_TIERS.AUTO_SEND,
     },
-    wrong_person: {
+    wrong_number: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
       template: SELLER_FLOW_STAGES.WRONG_PERSON,
       safety: SELLER_FLOW_SAFETY_TIERS.AUTO_SEND,
@@ -71,12 +72,12 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
 
   // --- Stage 3: Asking Price ---
   [SELLER_FLOW_STAGES.ASKING_PRICE]: {
-    asking_price_value: {
+    asking_price_provided: {
       next_stage: SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS,
       template: SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS,
       safety: SELLER_FLOW_SAFETY_TIERS.REVIEW, // Price values usually need a human look before auto-confirm
     },
-    condition_signal: {
+    condition_disclosed: {
       next_stage: SELLER_FLOW_STAGES.PRICE_HIGH_CONDITION_PROBE,
       template: SELLER_FLOW_STAGES.PRICE_HIGH_CONDITION_PROBE,
       safety: SELLER_FLOW_SAFETY_TIERS.AUTO_SEND,
@@ -90,7 +91,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
 
   // --- Stage 4A: Confirm Basics ---
   [SELLER_FLOW_STAGES.PRICE_WORKS_CONFIRM_BASICS]: {
-    condition_signal: {
+    condition_disclosed: {
       next_stage: SELLER_FLOW_STAGES.CREATIVE_PROBE,
       template: SELLER_FLOW_STAGES.CREATIVE_PROBE,
       safety: SELLER_FLOW_SAFETY_TIERS.AUTO_SEND,
@@ -123,7 +124,7 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
       template: SELLER_FLOW_STAGES.STOP_OR_OPT_OUT,
       safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
     },
-    wrong_person: {
+    wrong_number: {
       next_stage: SELLER_FLOW_STAGES.TERMINAL,
       template: SELLER_FLOW_STAGES.WRONG_PERSON,
       safety: SELLER_FLOW_SAFETY_TIERS.AUTO_SEND,
@@ -139,12 +140,27 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
 /**
  * Resolves the safety tier for a given plan.
  */
+/**
+ * Canonical-aware policy lookup. The policy table is keyed on CANONICAL intents
+ * only; legacy/divergent labels (asking_price_value, condition_signal,
+ * wrong_person) are normalized through the single aliaser before lookup.
+ * Stage-specific entries take precedence over global.
+ */
+export function lookupSafetyPolicy(stage_key = null, raw_intent = null) {
+  const intent = normalizeCanonicalIntent(raw_intent);
+  return (
+    (stage_key && SELLER_FLOW_SAFETY_POLICY[stage_key]?.[intent]) ||
+    SELLER_FLOW_SAFETY_POLICY.global?.[intent] ||
+    null
+  );
+}
+
 export function resolveSafetyTier(plan, autopilot_enabled = false) {
   if (!autopilot_enabled) return SELLER_FLOW_SAFETY_TIERS.REVIEW;
-  
-  const policy = SELLER_FLOW_SAFETY_POLICY[plan.current_stage]?.[plan.inbound_intent] 
-    || SELLER_FLOW_SAFETY_POLICY.global[plan.inbound_intent]
-    || { safety: SELLER_FLOW_SAFETY_TIERS.REVIEW };
+
+  const policy =
+    lookupSafetyPolicy(plan.current_stage, plan.inbound_intent) ||
+    { safety: SELLER_FLOW_SAFETY_TIERS.REVIEW };
 
   // Even if policy says AUTO_SEND, if we didn't queue a reply (e.g. template missing), it's a REVIEW
   if (policy.safety === SELLER_FLOW_SAFETY_TIERS.AUTO_SEND && !plan.should_queue_reply) {

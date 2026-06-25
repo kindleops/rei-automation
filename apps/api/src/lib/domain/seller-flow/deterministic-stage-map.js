@@ -2,6 +2,7 @@ import {
   SELLER_FLOW_SAFETY_POLICY,
   SELLER_FLOW_SAFETY_TIERS,
 } from "@/lib/domain/seller-flow/seller-flow-safety-policy.js";
+import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -132,9 +133,13 @@ export function resolveDeterministicStageTransition({
     };
   }
 
+  // Policy is keyed on canonical intents; normalize the (possibly legacy) intent
+  // so asking_price_value/condition_signal/wrong_person resolve to canonical
+  // entries. Stage/global distinction preserved for diagnostics.
+  const canonical_intent = normalizeCanonicalIntent(intent_key);
   const stage_policy =
-    (stage_key && SELLER_FLOW_SAFETY_POLICY[stage_key]?.[intent_key]) || null;
-  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[intent_key] || null;
+    (stage_key && SELLER_FLOW_SAFETY_POLICY[stage_key]?.[canonical_intent]) || null;
+  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[canonical_intent] || null;
   const selected_policy = stage_policy || global_policy || null;
 
   let safety_tier = selected_policy?.safety || SELLER_FLOW_SAFETY_TIERS.REVIEW;

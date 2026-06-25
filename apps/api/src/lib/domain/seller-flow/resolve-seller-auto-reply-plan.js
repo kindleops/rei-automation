@@ -2,11 +2,12 @@ import { hasSupabaseConfig, supabase } from "@/lib/supabase/client.js";
 import { warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
 import {
+  lookupSafetyPolicy,
   resolveSafetyTier,
-  SELLER_FLOW_SAFETY_POLICY,
   SELLER_FLOW_SAFETY_TIERS,
 } from "./seller-flow-safety-policy.js";
 import { SELLER_FLOW_STAGES } from "./canonical-seller-flow.js";
+import { resolveStageAwareClarifier } from "./coverage-net/stage-aware-clarifier.js";
 
 // Phase 8: only these intents qualify for live auto-reply
 const AUTO_REPLY_WHITELIST = new Set([
@@ -207,14 +208,10 @@ export function resolveNextSellerStage(input) {
   if (intent === "tenant_or_occupancy") return "tenant_or_occupancy";
   if (intent === "unclear") return "unclear_clarifier";
 
-  const stage_policy = current_stage && SELLER_FLOW_SAFETY_POLICY[current_stage]?.[intent];
-  if (stage_policy?.next_stage) {
-    return toLegacyStageName(stage_policy.next_stage, intent);
-  }
-
-  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[intent];
-  if (global_policy?.next_stage) {
-    return toLegacyStageName(global_policy.next_stage, intent);
+  // Canonical-aware lookup (legacy labels normalized internally).
+  const policy = lookupSafetyPolicy(current_stage, intent);
+  if (policy?.next_stage) {
+    return toLegacyStageName(policy.next_stage, intent);
   }
 
   if (intent === "ownership_confirmed") return SELLER_FLOW_STAGES.CONSIDER_SELLING;
@@ -238,21 +235,14 @@ export function resolveAutoReplyUseCase(input) {
 
   if (intent === "hostile_or_legal" || intent === "timing_complaint") return null;
 
-  const stage_policy = current_stage && SELLER_FLOW_SAFETY_POLICY[current_stage]?.[intent];
-  if (stage_policy?.template) {
-    if (stage_policy.template === SELLER_FLOW_STAGES.TERMINAL) {
-      return mapTerminalStage(intent, stage_policy.template);
+  // Canonical-aware lookup (stage precedence, then global). template===null => no reply.
+  const policy = lookupSafetyPolicy(current_stage, intent);
+  if (policy && policy.template === null) return null;
+  if (policy?.template) {
+    if (policy.template === SELLER_FLOW_STAGES.TERMINAL) {
+      return mapTerminalStage(intent, policy.template);
     }
-    return toLegacyStageName(stage_policy.template, intent);
-  }
-
-  const global_policy = SELLER_FLOW_SAFETY_POLICY.global?.[intent];
-  if (global_policy?.template === null) return null;
-  if (global_policy?.template) {
-    if (global_policy.template === SELLER_FLOW_STAGES.TERMINAL) {
-      return mapTerminalStage(intent, global_policy.template);
-    }
-    return toLegacyStageName(global_policy.template, intent);
+    return toLegacyStageName(policy.template, intent);
   }
 
   const next_stage = resolveNextSellerStage(input);
@@ -333,7 +323,7 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
   const next_stage = resolveNextSellerStage(input);
   const selected_use_case = resolveAutoReplyUseCase(input);
   const suppression = shouldSuppressSellerAutoReply(input);
-  const selected_stage_code = selected_use_case ? STAGE_CODES[next_stage] || null : null;
+  let selected_stage_code = selected_use_case ? STAGE_CODES[next_stage] || null : null;
   const current_stage = input?.current_stage || input?.conversation_context?.summary?.conversation_stage || null;
   const selected_language = input?.classification?.language || input?.conversation_context?.summary?.language_preference || "English";
 
@@ -433,6 +423,26 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
 
   if (next_stage === "manual_review") reply_mode = "manual_review";
 
+  // Stage-aware clarifier (Pass 1, Goal 2). Additive: surfaces a stage-scoped
+  // clarifier decision + stage-specific content without changing send behavior.
+  const clarifier = resolveStageAwareClarifier({
+    stage: current_stage,
+    canonical_intent: intent,
+    identity_class:
+      input?.contact_identity ||
+      input?.classification?.contact_identity ||
+      input?.conversation_context?.summary?.contact_identity ||
+      "unknown",
+    confidence: input?.classification?.confidence ?? 1,
+    safe_for_auto_reply: true,
+    reply_mode,
+  });
+
+  if (clarifier.is_clarifier) {
+    selected_stage_code = clarifier.selected_stage_code || selected_stage_code;
+    if (!fallback_reply) fallback_reply = clarifier.clarifier_text;
+  }
+
   const result = {
     ok: true,
     should_queue_reply,
@@ -447,6 +457,11 @@ export async function resolveSellerAutoReplyPlan(input = {}) {
     fallback_reply,
     priority,
     reply_mode,
+    clarifier,
+    template_selection_reason: clarifier.template_selection_reason,
+    fallback_path: clarifier.fallback_path,
+    human_review_required: clarifier.human_review_required,
+    no_send_reason: clarifier.no_send_reason,
     reason: suppression_reason || "plan_resolved",
     safety: {
       opt_out: intent === "opt_out",

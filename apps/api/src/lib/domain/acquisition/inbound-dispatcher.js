@@ -27,7 +27,7 @@ import {
 import { selectAcquisitionTemplate } from "@/lib/domain/acquisition/acquisition-template-service.js";
 import { buildThreadStatePatchFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
-  SELLER_FLOW_SAFETY_POLICY,
+  lookupSafetyPolicy,
   SELLER_FLOW_SAFETY_TIERS,
 } from "@/lib/domain/seller-flow/seller-flow-safety-policy.js";
 import { extractUnderwritingSignals } from "@/lib/domain/underwriting/extract-underwriting-signals.js";
@@ -159,10 +159,9 @@ function stageDecision(stage, rawIntent, signals = {}) {
 }
 
 function resolvePolicy(decision) {
+  // Canonical-aware lookup: policy_intent may carry legacy labels; normalized internally.
   return (
-    SELLER_FLOW_SAFETY_POLICY[decision.policy_stage]?.[decision.policy_intent] ||
-    SELLER_FLOW_SAFETY_POLICY.global?.[decision.policy_intent] ||
-    {
+    lookupSafetyPolicy(decision.policy_stage, decision.policy_intent) || {
       next_stage: decision.next_stage,
       template: decision.use_case,
       safety: SELLER_FLOW_SAFETY_TIERS.REVIEW,
