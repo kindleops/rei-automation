@@ -19,6 +19,7 @@ import {
 } from '@/lib/domain/queue/queue-control-safety.js'
 import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
+import { normalizeQueueExecutionMode } from '@/lib/domain/queue/queue-execution-mode.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,6 +61,7 @@ const CONTROL_KEYS = [
   'queue_last_run_at',
   'queue_last_run_diagnostics',
   'queue_emergency_stop_at',
+  'queue_execution_mode',
 ]
 
 const DEFAULTS = {
@@ -90,6 +92,7 @@ const DEFAULTS = {
   queue_last_run_at: '',
   queue_last_run_diagnostics: '',
   queue_emergency_stop_at: '',
+  queue_execution_mode: 'stopped',
 }
 
 const QUEUE_LIMITED_ACTIVE_STATUSES = ['queued', 'scheduled']
@@ -348,6 +351,9 @@ function parseBody(body = {}) {
   }
   if (patch.auto_reply_mode) {
     patch.auto_reply_mode = clean(patch.auto_reply_mode).toLowerCase()
+  }
+  if (patch.queue_execution_mode) {
+    patch.queue_execution_mode = normalizeQueueExecutionMode(patch.queue_execution_mode)
   }
   return patch
 }

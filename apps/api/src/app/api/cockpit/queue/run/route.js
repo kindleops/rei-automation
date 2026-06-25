@@ -10,6 +10,11 @@ import {
   normalizeSafetyInput,
   validateLiveLimitedRails,
 } from '@/lib/domain/queue/queue-control-safety.js'
+import {
+  blockedExecutionModeResult,
+  evaluateUnrestrictedDispatchGate,
+  getQueueExecutionMode,
+} from '@/lib/domain/queue/queue-execution-mode.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,6 +48,13 @@ export async function POST(request) {
   const requestedMode = clean(body.mode || configuredMode || 'safe').toLowerCase()
   const runLimit = Math.max(1, Math.min(250, asNumber(body.limit ?? body.caps?.queue_run_limit, asNumber(await getSystemValue('queue_run_limit'), 50))))
   const safety = normalizeSafetyInput({ ...body, limit: runLimit }, safetySettings)
+  const executionMode = await getQueueExecutionMode()
+  const modeGate = evaluateUnrestrictedDispatchGate(executionMode, { action: 'cockpit_queue_run' })
+  if (!modeGate.ok) {
+    return NextResponse.json(blockedExecutionModeResult(modeGate, 'cockpit_queue_run'), {
+      status: modeGate.status,
+    })
+  }
   const runtimeBrake = evaluateQueueSendRuntimeBrakes(safetySettings, {
     action: 'queue-run',
     failClosed: true,

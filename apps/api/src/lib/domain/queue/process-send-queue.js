@@ -2023,28 +2023,31 @@ export async function processSendQueueItem(queue_row, deps = {}) {
     };
   }
 
-  const get_system_value =
-    deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-  const runtime_brake = evaluateQueueSendRuntimeBrakes(
-    {
-      queue_processor_mode: await get_system_value("queue_processor_mode"),
-      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
-    },
-    { action: "processSendQueueItem", failClosed: false }
-  );
-  if (!runtime_brake.ok) {
-    return {
-      ok: false,
-      status: 423,
-      sent: false,
-      skipped: true,
-      reason: runtime_brake.reason,
-      error: runtime_brake.error,
-      message: runtime_brake.message,
-      diagnostics: runtime_brake.diagnostics,
-      queue_row_id: getQueueRowId(resolved_queue_row),
-      queue_item_id: getQueueRowId(resolved_queue_row),
-    };
+  const scoped_canary = deps.scoped_canary === true;
+  if (!scoped_canary) {
+    const get_system_value =
+      deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+    const runtime_brake = evaluateQueueSendRuntimeBrakes(
+      {
+        queue_processor_mode: await get_system_value("queue_processor_mode"),
+        queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
+      },
+      { action: "processSendQueueItem", failClosed: false }
+    );
+    if (!runtime_brake.ok) {
+      return {
+        ok: false,
+        status: 423,
+        sent: false,
+        skipped: true,
+        reason: runtime_brake.reason,
+        error: runtime_brake.error,
+        message: runtime_brake.message,
+        diagnostics: runtime_brake.diagnostics,
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        queue_item_id: getQueueRowId(resolved_queue_row),
+      };
+    }
   }
 
   const result = isSupabaseQueueRow(resolved_queue_row)

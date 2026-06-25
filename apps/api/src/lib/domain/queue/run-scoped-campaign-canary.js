@@ -2,10 +2,22 @@ import crypto from "node:crypto";
 import { info, warn } from "@/lib/logging/logger.js";
 import {
   normalizeSendQueueRow,
-  shouldRunSendQueueRow,
   validateSendQueueRowPreclaim,
 } from "@/lib/supabase/sms-engine.js";
 import { processSendQueueItem as defaultProcessSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
+import { getSystemValue } from "@/lib/system-control.js";
+import {
+  blockedExecutionModeResult,
+  evaluateScopedCanaryDispatchGate,
+  getQueueExecutionMode,
+} from "@/lib/domain/queue/queue-execution-mode.js";
+import {
+  acquireGlobalExecutionLock,
+  GLOBAL_LOCK_OWNER,
+  releaseGlobalExecutionLock,
+} from "@/lib/domain/queue/queue-global-execution-lock.js";
+import { persistCanaryExecutionAudit } from "@/lib/domain/queue/queue-canary-audit.js";
+import { isEmergencyStopActive } from "@/lib/domain/queue/queue-control-safety.js";
 
 export const SCOPED_CANARY_MAX_ROWS = 5;
 
@@ -248,7 +260,16 @@ export async function evaluateScopedCanaryCandidates(request = {}, deps = {}) {
     candidates,
     validate_only: request.validate_only === true,
     dry_run: request.dry_run === true,
+    excluded,
   };
+}
+
+async function writeCanaryAudit(supabase, audit = {}) {
+  try {
+    return await persistCanaryExecutionAudit(supabase, audit);
+  } catch (error) {
+    return { ok: false, reason: "audit_persist_failed", message: error?.message };
+  }
 }
 
 export async function runScopedCampaignCanary(request = {}, deps = {}) {
@@ -257,109 +278,236 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
   const log_warn = deps.warn || warn;
   const process_item = deps.processSendQueueItem || defaultProcessSendQueueItem;
   const supabase = deps.supabase || deps.supabaseClient;
+  const get_system_value = deps.getSystemValue || getSystemValue;
   const now = deps.now || new Date().toISOString();
   const processing_run_id = deps.processing_run_id || crypto.randomUUID();
 
-  const evaluation = await evaluateScopedCanaryCandidates(parsed, { ...deps, now });
-  if (!evaluation.ok) return evaluation;
-
-  if (parsed.validate_only || parsed.dry_run) {
+  if (!deps.authorization_validated) {
     return {
-      ok: true,
-      scoped_canary: true,
-      validate_only: true,
-      dry_run: true,
+      ok: false,
+      status: 401,
+      reason: "authorization_not_validated",
+      error: "authorization_not_validated",
       sent_count: 0,
-      campaign_id: evaluation.campaign_id,
-      canary_run_id: evaluation.canary_run_id,
-      requested_ids: evaluation.requested_ids,
-      candidate_ids: evaluation.candidate_ids,
       claimed_count: 0,
-      processed_count: 0,
-      results: evaluation.candidate_ids.map((queue_row_id) => ({
-        ok: true,
-        queue_row_id,
-        dry_run: true,
-        validate_only: true,
-      })),
     };
   }
 
-  const results = [];
-  let sent_count = 0;
-  let failed_count = 0;
-  let skipped_count = 0;
+  const execution_mode =
+    deps.queue_execution_mode || (await getQueueExecutionMode({ getSystemValue: get_system_value }));
+  const mode_gate = evaluateScopedCanaryDispatchGate(execution_mode, { action: "runScopedCampaignCanary" });
+  if (!mode_gate.ok) {
+    return {
+      ...blockedExecutionModeResult(mode_gate, "runScopedCampaignCanary"),
+      scoped_canary: true,
+      campaign_id: parsed.campaign_id,
+      canary_run_id: parsed.canary_run_id,
+    };
+  }
 
-  for (const row of evaluation.candidates) {
-    try {
-      const result = await process_item(row, {
-        ...deps,
-        now,
-        supabaseClient: supabase,
-        processing_run_id,
-        run_started_at: now,
+  const request_validation = validateScopedCanaryRequest(parsed);
+  if (!request_validation.ok) {
+    return {
+      ok: false,
+      status: request_validation.status,
+      reason: request_validation.errors[0],
+      errors: request_validation.errors,
+      scoped_canary: true,
+    };
+  }
+
+  const emergency_stop_at = await get_system_value("queue_emergency_stop_at");
+  const emergency_stop_active = isEmergencyStopActive(emergency_stop_at);
+
+  const lock = await acquireGlobalExecutionLock(supabase, {
+    owner_type: GLOBAL_LOCK_OWNER.SCOPED_CANARY,
+    canary_run_id: parsed.canary_run_id,
+  });
+  if (!lock.acquired) {
+    return {
+      ok: false,
+      status: 423,
+      reason: lock.reason || "global_execution_lock_held",
+      scoped_canary: true,
+      campaign_id: parsed.campaign_id,
+      canary_run_id: parsed.canary_run_id,
+      sent_count: 0,
+      claimed_count: 0,
+      queue_execution_mode: execution_mode,
+      emergency_stop_active,
+    };
+  }
+
+  const claimed_ids = [];
+  const dispatched_ids = [];
+  const excluded = [];
+
+  try {
+    const evaluation = await evaluateScopedCanaryCandidates(parsed, { ...deps, now });
+    if (!evaluation.ok) {
+      await writeCanaryAudit(supabase, {
         canary_run_id: parsed.canary_run_id,
-        scoped_canary: true,
+        campaign_id: parsed.campaign_id,
+        processing_run_id,
+        validate_only: parsed.validate_only === true,
+        requested_ids: parsed.queue_row_ids,
+        selected_ids: evaluation.candidate_ids || [],
+        claimed_ids: [],
+        dispatched_ids: [],
+        excluded: evaluation.excluded || [{ reason: evaluation.reason }],
+        queue_execution_mode: execution_mode,
+        emergency_stop_active,
+        authorization_id: deps.authorization_id || null,
+        audit_payload: { failure_stage: "post_lock_revalidation" },
       });
-      if (result?.sent) {
-        sent_count += 1;
-        results.push({
+      return { ...evaluation, scoped_canary: true, emergency_stop_active, queue_execution_mode: execution_mode };
+    }
+
+    if (parsed.validate_only || parsed.dry_run) {
+      await writeCanaryAudit(supabase, {
+        canary_run_id: parsed.canary_run_id,
+        campaign_id: parsed.campaign_id,
+        processing_run_id,
+        validate_only: true,
+        requested_ids: evaluation.requested_ids,
+        selected_ids: evaluation.candidate_ids,
+        claimed_ids: [],
+        dispatched_ids: [],
+        excluded: evaluation.excluded || [],
+        queue_execution_mode: execution_mode,
+        emergency_stop_active,
+        authorization_id: deps.authorization_id || null,
+        audit_payload: { validate_only: true },
+      });
+
+      return {
+        ok: true,
+        scoped_canary: true,
+        validate_only: true,
+        dry_run: true,
+        sent_count: 0,
+        campaign_id: evaluation.campaign_id,
+        canary_run_id: evaluation.canary_run_id,
+        requested_ids: evaluation.requested_ids,
+        candidate_ids: evaluation.candidate_ids,
+        claimed_count: 0,
+        processed_count: 0,
+        emergency_stop_active,
+        queue_execution_mode: execution_mode,
+        processing_run_id,
+        results: evaluation.candidate_ids.map((queue_row_id) => ({
           ok: true,
-          queue_row_id: row.id,
-          sent: true,
-          provider_message_id: result.provider_message_id || null,
-          final_queue_status: result.final_queue_status || result.queue_status || "sent",
+          queue_row_id,
+          dry_run: true,
+          validate_only: true,
+        })),
+      };
+    }
+
+    const results = [];
+    let sent_count = 0;
+    let failed_count = 0;
+    let skipped_count = 0;
+
+    for (const row of evaluation.candidates) {
+      claimed_ids.push(row.id);
+      try {
+        const result = await process_item(row, {
+          ...deps,
+          now,
+          supabaseClient: supabase,
+          processing_run_id,
+          run_started_at: now,
+          canary_run_id: parsed.canary_run_id,
+          scoped_canary: true,
         });
-      } else if (result?.skipped) {
-        skipped_count += 1;
-        results.push({
-          ok: true,
-          skipped: true,
-          queue_row_id: row.id,
-          reason: result.reason || "skipped",
-          final_queue_status: result.final_queue_status || result.queue_status || null,
-        });
-      } else {
+        if (result?.sent) {
+          sent_count += 1;
+          dispatched_ids.push(row.id);
+          results.push({
+            ok: true,
+            queue_row_id: row.id,
+            sent: true,
+            provider_message_id: result.provider_message_id || null,
+            final_queue_status: result.final_queue_status || result.queue_status || "sent",
+          });
+        } else if (result?.skipped) {
+          skipped_count += 1;
+          excluded.push({ queue_row_id: row.id, reason: result.reason || "skipped" });
+          results.push({
+            ok: true,
+            skipped: true,
+            queue_row_id: row.id,
+            reason: result.reason || "skipped",
+            final_queue_status: result.final_queue_status || result.queue_status || null,
+          });
+        } else {
+          failed_count += 1;
+          excluded.push({ queue_row_id: row.id, reason: result?.reason || "failed" });
+          results.push({
+            ok: false,
+            queue_row_id: row.id,
+            reason: result?.reason || "failed",
+            final_queue_status: result?.final_queue_status || result?.queue_status || null,
+          });
+        }
+      } catch (error) {
         failed_count += 1;
+        excluded.push({ queue_row_id: row.id, reason: error?.message || "queue_processing_exception" });
         results.push({
           ok: false,
           queue_row_id: row.id,
-          reason: result?.reason || "failed",
-          final_queue_status: result?.final_queue_status || result?.queue_status || null,
+          reason: error?.message || "queue_processing_exception",
         });
+        log_warn("scoped_canary.row_failed", { queue_row_id: row.id, error: error?.message });
       }
-    } catch (error) {
-      failed_count += 1;
-      results.push({
-        ok: false,
-        queue_row_id: row.id,
-        reason: error?.message || "queue_processing_exception",
-      });
-      log_warn("scoped_canary.row_failed", { queue_row_id: row.id, error: error?.message });
     }
+
+    await writeCanaryAudit(supabase, {
+      canary_run_id: parsed.canary_run_id,
+      campaign_id: parsed.campaign_id,
+      processing_run_id,
+      validate_only: false,
+      requested_ids: evaluation.requested_ids,
+      selected_ids: evaluation.candidate_ids,
+      claimed_ids,
+      dispatched_ids,
+      excluded,
+      queue_execution_mode: execution_mode,
+      emergency_stop_active,
+      authorization_id: deps.authorization_id || null,
+      audit_payload: { sent_count, failed_count, skipped_count },
+    });
+
+    log_info("scoped_canary.completed", {
+      campaign_id: parsed.campaign_id,
+      canary_run_id: parsed.canary_run_id,
+      sent_count,
+      failed_count,
+      skipped_count,
+      candidate_ids: evaluation.candidate_ids,
+      emergency_stop_active,
+      queue_execution_mode: execution_mode,
+    });
+
+    return {
+      ok: failed_count === 0,
+      scoped_canary: true,
+      campaign_id: parsed.campaign_id,
+      canary_run_id: parsed.canary_run_id,
+      requested_ids: evaluation.requested_ids,
+      candidate_ids: evaluation.candidate_ids,
+      claimed_count: claimed_ids.length,
+      processed_count: results.length,
+      sent_count,
+      failed_count,
+      skipped_count,
+      emergency_stop_active,
+      queue_execution_mode: execution_mode,
+      processing_run_id,
+      results,
+    };
+  } finally {
+    await releaseGlobalExecutionLock(supabase, lock.token);
   }
-
-  log_info("scoped_canary.completed", {
-    campaign_id: parsed.campaign_id,
-    canary_run_id: parsed.canary_run_id,
-    sent_count,
-    failed_count,
-    skipped_count,
-    candidate_ids: evaluation.candidate_ids,
-  });
-
-  return {
-    ok: failed_count === 0,
-    scoped_canary: true,
-    campaign_id: parsed.campaign_id,
-    canary_run_id: parsed.canary_run_id,
-    requested_ids: evaluation.requested_ids,
-    candidate_ids: evaluation.candidate_ids,
-    claimed_count: evaluation.candidates.length,
-    processed_count: results.length,
-    sent_count,
-    failed_count,
-    skipped_count,
-    results,
-  };
 }

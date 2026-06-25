@@ -213,29 +213,59 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
 
     if (scoped_canary_request.scoped) {
       const { runScopedCampaignCanary } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
-      scoped_canary_request.dry_run =
-        scoped_canary_request.validate_only || dry_run;
+      const {
+        requireScopedCanaryExecutionAuth,
+        readCanaryAuthorizationToken,
+      } = await import("@/lib/security/scoped-canary-auth.js");
+      const {
+        consumeCanaryAuthorization,
+        validateCanaryAuthorizationToken,
+      } = await import("@/lib/domain/queue/queue-canary-authorization.js");
+      const { supabase: default_supabase } = await import("@/lib/supabase/client.js");
+
+      const scoped_auth = await requireScopedCanaryExecutionAuth(request, route_logger);
+      if (!scoped_auth.authorized) return scoped_auth.response;
+
+      const supabase_client = deps.supabase || deps.supabaseClient || default_supabase;
+      const auth_token = readCanaryAuthorizationToken(request, body);
+      const auth_validation = await validateCanaryAuthorizationToken(
+        supabase_client,
+        {
+          campaign_id: scoped_canary_request.campaign_id,
+          canary_run_id: scoped_canary_request.canary_run_id,
+          queue_row_ids: scoped_canary_request.queue_row_ids,
+        },
+        auth_token
+      );
+      if (!auth_validation.ok) {
+        return json_response(
+          { ok: false, error: auth_validation.reason || "unauthorized" },
+          { status: auth_validation.status || 401 }
+        );
+      }
+
       if (!scoped_canary_request.validate_only && !dry_run) {
-        const runtime_brake = evaluateQueueSendRuntimeBrakes(safety_settings, {
-          action: "run_scoped_campaign_canary",
-          failClosed: true,
-        });
-        if (!runtime_brake.ok) {
-          return json_response(blockedRuntimeBrakeResult(runtime_brake, "run_scoped_campaign_canary"), {
-            status: runtime_brake.status,
-          });
-        }
-        const validation = validateLiveLimitedRails(safety, {
-          require_scope: false,
-          require_send_caps: true,
-        });
-        if (!validation.ok) {
-          return json_response(blockedSafetyResult(validation, "run_scoped_campaign_canary"), {
-            status: validation.status,
-          });
+        const consumed = await consumeCanaryAuthorization(
+          supabase_client,
+          auth_validation.authorization_id
+        );
+        if (!consumed.ok) {
+          return json_response(
+            { ok: false, error: consumed.reason || "authorization_consume_failed" },
+            { status: 401 }
+          );
         }
       }
-      const result = await runScopedCampaignCanary(scoped_canary_request, deps);
+
+      scoped_canary_request.dry_run =
+        scoped_canary_request.validate_only || dry_run;
+
+      const result = await runScopedCampaignCanary(scoped_canary_request, {
+        ...deps,
+        supabase: supabase_client,
+        authorization_id: auth_validation.authorization_id,
+        authorization_validated: true,
+      });
       return json_response(
         {
           ok: result?.ok !== false,
@@ -248,6 +278,19 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         },
         { status: result?.status || (result?.ok === false ? 423 : 200) }
       );
+    }
+
+    const {
+      blockedExecutionModeResult,
+      evaluateUnrestrictedDispatchGate,
+      getQueueExecutionMode,
+    } = await import("@/lib/domain/queue/queue-execution-mode.js");
+    const execution_mode = await getQueueExecutionMode({ getSystemValue: get_system_value });
+    const unrestricted_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action: "queue_run" });
+    if (!unrestricted_gate.ok) {
+      return json_response(blockedExecutionModeResult(unrestricted_gate, "queue_run"), {
+        status: unrestricted_gate.status,
+      });
     }
 
     if (!dry_run) {

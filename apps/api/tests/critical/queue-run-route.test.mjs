@@ -526,6 +526,7 @@ test("handleQueueRunRequest POST body dry_run:true is passed to runSendQueue and
 
   await handleQueueRunRequest(makePostRequest({ dry_run: true, limit: 10 }), "POST", {
     requireCronAuth: makeAuth(true),
+    getSystemValue: makeLiveQueueSystemValue(),
     runSendQueue: async (opts) => { run_calls.push(opts); return stub_result; },
     logger,
     jsonResponse: fn,
@@ -598,6 +599,7 @@ test("handleQueueRunRequest GET ignores POST body and reads dry_run from query p
     "GET",
     {
       requireCronAuth: makeAuth(true),
+      getSystemValue: makeLiveQueueSystemValue(),
       runSendQueue: async (opts) => { run_calls.push(opts); return { ok: true, sent_count: 0, failed_count: 0, blocked_count: 0, skipped_count: 0, attempted_count: 0, claimed_count: 0, started_count: 0, processed_count: 0, duplicate_locked_count: 0, first_failing_queue_item_id: null, first_failing_reason: null, first_failure_queue_item_id: null, first_failure_reason: null, batch_duration_ms: 0, due_rows: 0, future_rows: 0, total_rows_loaded: 0, results: [] }; },
       logger,
       jsonResponse: fn,
@@ -623,6 +625,7 @@ test("handleQueueRunRequest safety guard fires when dry_run was explicitly reque
     "GET",
     {
       requireCronAuth: makeAuth(true),
+      getSystemValue: makeLiveQueueSystemValue(),
       runSendQueue: async (opts) => { run_calls.push(opts); return { ok: true, sent_count: 0, failed_count: 0, blocked_count: 0, skipped_count: 0, attempted_count: 0, claimed_count: 0, started_count: 0, processed_count: 0, duplicate_locked_count: 0, first_failing_queue_item_id: null, first_failing_reason: null, first_failure_queue_item_id: null, first_failure_reason: null, batch_duration_ms: 0, due_rows: 0, future_rows: 0, total_rows_loaded: 0, results: [] }; },
       logger,
       jsonResponse: fn,

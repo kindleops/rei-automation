@@ -14,6 +14,16 @@ import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 import { isLiveCampaignStatus, LIVE_CAMPAIGN_STATES } from "@/lib/domain/campaigns/campaign-state-machine.js";
 import { filterRowsByLiveCampaigns } from "@/lib/domain/queue/queue-send-brake-state.js";
+import {
+  blockedExecutionModeResult,
+  evaluateUnrestrictedDispatchGate,
+  getQueueExecutionMode,
+} from "@/lib/domain/queue/queue-execution-mode.js";
+import {
+  acquireGlobalExecutionLock,
+  GLOBAL_LOCK_OWNER,
+  releaseGlobalExecutionLock,
+} from "@/lib/domain/queue/queue-global-execution-lock.js";
 
 export { filterRowsByLiveCampaigns };
 function normalizeRows(data) {
@@ -157,6 +167,44 @@ export async function runSendQueue(
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
 
+  const execution_mode = await getQueueExecutionMode({ getSystemValue: get_system_value });
+  const mode_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action: "runSendQueue" });
+  if (!mode_gate.ok) {
+    log_info("queue_runner.blocked_execution_mode", {
+      reason: mode_gate.reason,
+      queue_execution_mode: mode_gate.queue_execution_mode,
+    });
+    return {
+      status: mode_gate.status || 423,
+      ...blockedExecutionModeResult(mode_gate, "runSendQueue"),
+      skipped: true,
+      sent_count: 0,
+      claimed_count: 0,
+      results: [],
+    };
+  }
+
+  const lock = await acquireGlobalExecutionLock(supabase, {
+    owner_type: GLOBAL_LOCK_OWNER.UNRESTRICTED,
+  });
+  if (!lock.acquired) {
+    log_info("queue_runner.blocked_global_lock", {
+      reason: lock.reason || "global_execution_lock_held",
+      enforced: lock.enforced,
+    });
+    return {
+      ok: true,
+      skipped: true,
+      reason: lock.reason || "global_execution_lock_held",
+      queue_execution_mode: execution_mode,
+      sent_count: 0,
+      claimed_count: 0,
+      processed_count: 0,
+      results: [],
+    };
+  }
+
+  try {
   if (!dry_run) {
     const runtime_brake = evaluateQueueSendRuntimeBrakes(
       await loadQueueSendBrakeSettings(get_system_value),
@@ -371,5 +419,9 @@ export async function runSendQueue(
     invalid_queue_row_count: candidates.preclaim_paused_invalid_count,
     skipped_invalid_phone_count: candidates.skipped_invalid_phone_count,
     skipped_missing_body_count: candidates.skipped_missing_body_count,
+    queue_execution_mode: execution_mode,
   };
+  } finally {
+    await releaseGlobalExecutionLock(supabase, lock.token);
+  }
 }

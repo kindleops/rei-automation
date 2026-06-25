@@ -242,6 +242,7 @@ export function makeCampaignsSupabase(liveIds = []) {
 export function makeLiveQueueSystemValue(overrides = {}) {
   const values = {
     queue_processor_mode: 'live',
+    queue_execution_mode: 'normal',
     campaign_mode: 'live_limited',
     queue_hard_cap: '50',
     queue_max_batch_size: '50',
@@ -253,6 +254,24 @@ export function makeLiveQueueSystemValue(overrides = {}) {
     ...overrides,
   }
   return async (key) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null)
+}
+
+export function makeRunSendQueueSupabase(liveCampaignIds = []) {
+  const campaigns = makeCampaignsSupabase(liveCampaignIds)
+  return {
+    rpc(name) {
+      if (name === 'queue_acquire_global_execution_lock') {
+        return Promise.resolve({ data: true, error: null })
+      }
+      if (name === 'queue_release_global_execution_lock') {
+        return Promise.resolve({ data: true, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    },
+    from(table) {
+      return campaigns.from(table)
+    },
+  }
 }
 
 export function makeRunSendQueueDeps({
@@ -268,10 +287,10 @@ export function makeRunSendQueueDeps({
 
   const deps = {
     getSystemFlag: async () => true,
-    getSystemValue: async () => null,
+    getSystemValue: makeLiveQueueSystemValue(),
     reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled: 0 }),
     loadRunnableSendQueueRows: makeRunnableRowsLoader(rows, now),
-    supabaseClient: makeCampaignsSupabase(liveCampaignIds),
+    supabaseClient: makeRunSendQueueSupabase(liveCampaignIds),
     processSendQueueItem: processImpl || (async (row) => {
       processed.push(row)
       return processResult
