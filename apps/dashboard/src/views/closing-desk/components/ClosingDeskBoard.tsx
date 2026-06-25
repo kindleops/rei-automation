@@ -24,6 +24,7 @@ export function ClosingDeskBoard({ grouped, selectedId, mobileLane, onOpenCase }
 
   return (
     <div className="cd-pipeline" data-testid="cd-board" role="region" aria-label="Closing lifecycle pipeline">
+      <span className="cd-pipeline__scroll-hint" aria-hidden>Scroll →</span>
       <div className="cd-pipeline__track">
         {columns.map((col, idx) => {
           const cases = grouped.get(col.id) ?? []

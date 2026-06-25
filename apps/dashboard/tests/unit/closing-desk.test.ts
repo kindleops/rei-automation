@@ -20,6 +20,12 @@ import { mapToClosingStage, projectClosingCase } from '../../src/domain/closing-
 import { computeClosingSummary } from '../../src/domain/closing-desk/closing-summary'
 import { buildClosingDeskFixtureModel } from '../../src/domain/closing-desk/closing-fixtures'
 import { buildCopilotReadout } from '../../src/domain/closing-desk/closing-copilot'
+import {
+  formatClosingDate,
+  formatDaysToClose,
+  humanizeEnum,
+  humanizeOperatorText,
+} from '../../src/views/closing-desk/closing-desk-present'
 import type { ClosingIssue, ClosingReadiness, ClosingDates } from '../../src/domain/closing-desk/closing-desk.types'
 
 const NOW = Date.parse('2026-06-25T12:00:00Z')
@@ -230,6 +236,33 @@ test('copilot: never marks an action executed; all require approval', () => {
       assert.ok(typeof i.headline === 'string')
     }
   }
+})
+
+// ── Presentation formatters ─────────────────────────────────────────────────────
+test('present: humanizeEnum title-cases snake_case enums', () => {
+  assert.equal(humanizeEnum('on_track'), 'On Track')
+  assert.equal(humanizeEnum('fully_executed'), 'Fully Executed')
+  assert.equal(humanizeEnum('assignment_signed'), 'Assignment Signed')
+  assert.equal(humanizeEnum('issues_open'), 'Issues Open')
+  assert.equal(humanizeEnum('not_scheduled'), 'Not Scheduled')
+})
+
+test('present: formatClosingDate returns Not Scheduled for missing dates', () => {
+  assert.equal(formatClosingDate(null), 'Not Scheduled')
+  assert.equal(formatClosingDate(undefined), 'Not Scheduled')
+})
+
+test('present: humanizeOperatorText sanitizes copilot strings', () => {
+  assert.equal(
+    humanizeOperatorText('Health 72/100 (on_track) · universalStage=under_contract'),
+    'Health 72/100 (On Track) · universalStage=Under Contract',
+  )
+})
+
+test('present: formatDaysToClose handles null and overdue', () => {
+  assert.equal(formatDaysToClose(null), 'Not Scheduled')
+  assert.equal(formatDaysToClose(-3), '3d overdue')
+  assert.equal(formatDaysToClose(5), '5')
 })
 
 // ── Report ───────────────────────────────────────────────────────────────────────

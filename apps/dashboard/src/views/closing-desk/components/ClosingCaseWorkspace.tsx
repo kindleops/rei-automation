@@ -1,45 +1,42 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import type { ClosingCase } from '../../../domain/closing-desk/closing-desk.types'
 import { boardColumnLabel } from '../../../domain/closing-desk/closing-board'
-import { milestoneLabel } from '../../../domain/closing-desk/closing-milestones'
-import { orderIssues } from '../../../domain/closing-desk/closing-issues'
 import { buildCopilotReadout } from '../../../domain/closing-desk/closing-copilot'
-import { ClosingHealthBadge } from './ClosingHealthBadge'
+import { orderIssues } from '../../../domain/closing-desk/closing-issues'
 import { ClosingReadinessRing } from './ClosingReadinessRing'
-import { daysRemaining, formatDate, money, primaryBlocker, stageLabel } from '../closing-desk-utils'
+import { daysRemaining, money, primaryBlocker, stageLabel } from '../closing-desk-utils'
+import { formatClosingDate, formatDaysToClose, formatTimestamp, humanizeOperatorText } from '../closing-desk-present'
+import {
+  DossierAuditSection,
+  DossierBuyerSection,
+  DossierCommunicationsSection,
+  DossierContractSection,
+  DossierDocumentsSection,
+  DossierFinancialsSection,
+  DossierIssuesSection,
+  DossierMilestonesSection,
+  DossierOverviewSection,
+  DossierPartiesSection,
+  DossierTasksSection,
+  DossierTitleSection,
+} from './dossier-sections'
 
-const TABS = [
-  'Overview',
-  'Contract',
-  'Parties & Authority',
-  'Buyer / Assignment',
-  'Title & Escrow',
-  'Milestones',
-  'Issues / Curative',
-  'Tasks & SLA',
-  'Documents',
-  'Communications',
-  'Financials',
-  'Audit Trail',
+export const DOSSIER_SECTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'contract', label: 'Contract' },
+  { id: 'parties', label: 'Parties & Authority' },
+  { id: 'buyer', label: 'Buyer / Assignment' },
+  { id: 'title', label: 'Title & Escrow' },
+  { id: 'milestones', label: 'Milestones' },
+  { id: 'issues', label: 'Issues / Curative' },
+  { id: 'tasks', label: 'Tasks & SLA' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'communications', label: 'Communications' },
+  { id: 'financials', label: 'Financials' },
+  { id: 'audit', label: 'Audit Trail' },
 ] as const
 
-type Tab = (typeof TABS)[number]
-
-const bool = (v: boolean | null) => (v === null ? null : v ? 'Yes' : 'No')
-
-function Val({ children }: { children: string | null }) {
-  if (children === null || children === '') return <span className="cd-absent">Not projected</span>
-  return <>{children}</>
-}
-
-function KV({ k, v, kind = 'fact' }: { k: string; v: string | null; kind?: 'fact' | 'derived' | 'missing' }) {
-  return (
-    <div className={`cd-kv-item cd-kv-item--${kind}`}>
-      <span className="k">{k}</span>
-      <span className="v"><Val>{v}</Val></span>
-    </div>
-  )
-}
+export type DossierSectionId = (typeof DOSSIER_SECTIONS)[number]['id']
 
 export interface ClosingCaseWorkspaceProps {
   closingCase: ClosingCase
@@ -47,54 +44,158 @@ export interface ClosingCaseWorkspaceProps {
 }
 
 export function ClosingCaseWorkspace({ closingCase: c, onClose }: ClosingCaseWorkspaceProps) {
-  const [tab, setTab] = useState<Tab>('Overview')
+  const [section, setSection] = useState<DossierSectionId>('overview')
+  const [explainHealthOpen, setExplainHealthOpen] = useState(false)
+  const [whyActionOpen, setWhyActionOpen] = useState(false)
+
   const copilot = useMemo(() => buildCopilotReadout(c), [c])
-  const issues = useMemo(() => orderIssues(c.issues), [c.issues])
   const isFixture = c.provenance.fields.identity === 'fixture'
   const blocker = primaryBlocker(c)
   const days = c.health.daysUntilClosing ?? daysRemaining(c.dates.scheduledClosingDate)
   const milestonePct = c.milestones.length > 0 ? Math.min(100, Math.round((c.milestones.length / 8) * 100)) : 0
 
+  const primaryInsight = copilot.insights.find((i) => i.kind === 'blocker') ?? copilot.insights.find((i) => i.kind === 'summary')
+  const primaryRec = copilot.proposedActions[0]
+  const riskInsight = copilot.insights.find((i) => i.kind === 'risk')
+
+  const onNavKeyDown = useCallback(
+    (e: KeyboardEvent, idx: number) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+        e.preventDefault()
+        const next = DOSSIER_SECTIONS[(idx + 1) % DOSSIER_SECTIONS.length]
+        setSection(next.id)
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+        e.preventDefault()
+        const prev = DOSSIER_SECTIONS[(idx - 1 + DOSSIER_SECTIONS.length) % DOSSIER_SECTIONS.length]
+        setSection(prev.id)
+      }
+    },
+    [],
+  )
+
+  const sectionPanel = (() => {
+    switch (section) {
+      case 'overview':
+        return <DossierOverviewSection c={c} copilot={copilot} />
+      case 'contract':
+        return <DossierContractSection c={c} />
+      case 'parties':
+        return <DossierPartiesSection c={c} />
+      case 'buyer':
+        return <DossierBuyerSection c={c} />
+      case 'title':
+        return <DossierTitleSection c={c} />
+      case 'milestones':
+        return <DossierMilestonesSection c={c} />
+      case 'issues':
+        return <DossierIssuesSection c={c} />
+      case 'tasks':
+        return <DossierTasksSection c={c} />
+      case 'documents':
+        return <DossierDocumentsSection c={c} />
+      case 'communications':
+        return <DossierCommunicationsSection />
+      case 'financials':
+        return <DossierFinancialsSection c={c} />
+      case 'audit':
+        return <DossierAuditSection c={c} isFixture={isFixture} />
+      default:
+        return null
+    }
+  })()
+
+  const activeLabel = DOSSIER_SECTIONS.find((s) => s.id === section)?.label ?? 'Overview'
+
   return (
-    <div className="cd-dossier-overlay" role="dialog" aria-modal="true" aria-label={`Closing case ${c.displayName}`} onClick={onClose}>
+    <div
+      className="cd-dossier-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Closing case ${c.displayName}`}
+      onClick={onClose}
+    >
       <div className="cd-dossier" onClick={(e) => e.stopPropagation()} data-testid="cd-dossier">
-        <header className="cd-dossier__command">
+        <header className="cd-dossier__command cd-dossier__command--sticky">
           <div className="cd-dossier__identity">
             <p className="cd-dossier__eyebrow">TRANSACTION DOSSIER</p>
-            <h2>{c.displayName}</h2>
+            <h2 title={c.displayName}>{c.displayName}</h2>
+            {c.propertyAddress && c.propertyAddress !== c.displayName ? (
+              <p className="cd-dossier__subaddress" title={c.propertyAddress}>{c.propertyAddress}</p>
+            ) : null}
             <div className="cd-dossier__chips">
-              <span>{c.market ?? '—'}</span>
+              <span>{c.market ?? 'Market unknown'}</span>
               <span>{stageLabel(c.universalStage)}</span>
               <span>{boardColumnLabel(c.boardColumn)}</span>
+              {isFixture ? <span className="cd-dossier__fixture-chip" data-testid="cd-dossier-fixture">Synthetic Fixture</span> : null}
             </div>
           </div>
           <div className="cd-dossier__vitals">
             <ClosingReadinessRing score={c.health.score} band={c.health.band} size={64} />
             <div className="cd-dossier__countdown">
-              <strong>{days ?? '—'}</strong>
+              <strong>{formatDaysToClose(days)}</strong>
               <span>days to close</span>
+              <small title={c.dates.scheduledClosingDate ?? undefined}>{formatClosingDate(c.dates.scheduledClosingDate)}</small>
             </div>
             <div className="cd-dossier__revenue">
               <strong>{money(c.financials.expectedGrossRevenue) ?? '—'}</strong>
               <span>expected revenue</span>
+              <small className="cd-dossier__revenue-note">
+                {c.financials.confirmedGrossRevenue !== null
+                  ? `Confirmed ${money(c.financials.confirmedGrossRevenue)}`
+                  : 'Not yet confirmed'}
+              </small>
             </div>
           </div>
           <button className="cd-dossier__close" onClick={onClose} aria-label="Close dossier">×</button>
         </header>
 
-        {isFixture ? <div className="cd-env cd-env--demo cd-env--compact" role="status"><span className="cd-env__pill">Synthetic fixture</span></div> : null}
+        <div className="cd-dossier__copilot-compact" data-testid="cd-copilot-compact">
+          <div className="cd-dossier__copilot-head">
+            <span className="cd-dossier__copilot-label">Copilot</span>
+            <span className="cd-dossier__copilot-badge">Read only</span>
+          </div>
+          {primaryInsight ? (
+            <p className="cd-dossier__copilot-rec">
+              <strong>{humanizeOperatorText(primaryRec?.label ?? primaryInsight.headline)}</strong>
+              <span>{blocker ? blocker.title : humanizeOperatorText(primaryInsight.detail)}</span>
+            </p>
+          ) : null}
+          <div className="cd-dossier__copilot-actions">
+            <button type="button" className="cd-btn cd-btn--ghost" onClick={() => setExplainHealthOpen((v) => !v)} aria-expanded={explainHealthOpen}>
+              Explain health
+            </button>
+            {primaryRec ? (
+              <button type="button" className="cd-btn cd-btn--ghost" onClick={() => setWhyActionOpen((v) => !v)} aria-expanded={whyActionOpen}>
+                Why this action?
+              </button>
+            ) : null}
+          </div>
+          {explainHealthOpen ? (
+            <div className="cd-dossier__copilot-expand" data-testid="cd-explain-health">
+              <p>{humanizeOperatorText(copilot.insights.find((i) => i.kind === 'summary')?.detail ?? 'Health derived from readiness, milestones, and issues.')}</p>
+              <ul>{c.health.factors.slice(0, 5).map((f) => <li key={f.rule}>{f.label}: {humanizeOperatorText(f.evidence)}</li>)}</ul>
+              {riskInsight ? <p>{humanizeOperatorText(riskInsight.detail)}</p> : null}
+            </div>
+          ) : null}
+          {whyActionOpen && primaryRec ? (
+            <div className="cd-dossier__copilot-expand" data-testid="cd-why-action">
+              <p>{humanizeOperatorText(primaryRec.rationale)}</p>
+              <ul>{primaryRec.citedFacts.map((f) => <li key={f}>{humanizeOperatorText(f)}</li>)}</ul>
+            </div>
+          ) : null}
+        </div>
 
         <div className="cd-dossier__next" data-testid="cd-next-action">
-          <strong>Next required action</strong>
+          <strong className="cd-dossier__next-label">Next required action</strong>
           <p>{c.health.nextRequiredAction ?? 'None pending'}</p>
-          <small>{c.health.responsibleParty ?? 'Unassigned'} · SLA {formatDate(c.health.slaDeadline) ?? 'none'}</small>
+          <small>{c.health.responsibleParty ?? 'Unassigned'} · SLA {formatTimestamp(c.health.slaDeadline) ?? 'none'}</small>
         </div>
 
         {blocker ? (
-          <div className="cd-dossier__blocker" data-sev={blocker.severity}>
-            <span>Primary blocker</span>
-            <strong>{blocker.title}</strong>
-            <small>{blocker.owner ?? 'Unassigned'}</small>
+          <div className="cd-dossier__blocker" data-sev={blocker.severity} data-testid="cd-primary-blocker">
+            <span className="cd-dossier__blocker-label">Primary blocker</span>
+            <strong className="cd-dossier__blocker-title">{blocker.title}</strong>
+            <small className="cd-dossier__blocker-owner">{blocker.owner ?? 'Unassigned'}</small>
           </div>
         ) : null}
 
@@ -117,175 +218,55 @@ export function ClosingCaseWorkspace({ closingCase: c, onClose }: ClosingCaseWor
           </div>
         </div>
 
-        <nav className="cd-dossier__tabs" role="tablist" aria-label="Dossier sections">
-          {TABS.map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} className={tab === t ? 'is-active' : ''} onClick={() => setTab(t)}>{t}</button>
-          ))}
-        </nav>
-
-        <div className="cd-dossier__body">
-          {tab === 'Overview' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Health band" v={c.health.band} kind="derived" />
-                <KV k="Risk level" v={c.riskLevel} kind="derived" />
-                <KV k="Closing status" v={c.closingStatus} />
-                <KV k="Escrow" v={c.escrowStatus} />
-                <KV k="Scheduled close" v={formatDate(c.dates.scheduledClosingDate)} />
-                <KV k="Seller" v={c.sellerName} />
-              </div>
-              <ClosingHealthBadge health={c.health} />
-            </section>
-          )}
-
-          {tab === 'Contract' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Contract status" v={c.contractStatus} />
-                <KV k="Contract ID" v={c.identity.contractId} />
-                <KV k="Signed" v={formatDate(c.dates.contractSignedDate)} />
-                <KV k="Effective" v={formatDate(c.dates.effectiveDate)} />
-                <KV k="Signers verified" v={bool(c.readiness.allSignersVerified)} />
-                <KV k="Authority verified" v={bool(c.readiness.authorityVerified)} />
-              </div>
-            </section>
-          )}
-
-          {tab === 'Parties & Authority' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Property ID" v={c.identity.propertyId} />
-                <KV k="Master owner" v={c.identity.masterOwnerId} />
-                <KV k="Opportunity" v={c.identity.opportunityId} />
-                <KV k="Offer" v={c.identity.offerId} />
-              </div>
-              {c.parties.map((p) => (
-                <div className="cd-party" key={`${p.role}-${p.name}`}>
-                  <strong>{p.role}</strong> {p.name} · verified {bool(p.verified) ?? '—'}
-                </div>
-              ))}
-            </section>
-          )}
-
-          {tab === 'Buyer / Assignment' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Disposition" v={c.dispositionStatus} />
-                <KV k="Buyer ID" v={c.identity.buyerId} />
-                <KV k="Assignment ID" v={c.identity.assignmentId} />
-                <KV k="Buyer secured" v={bool(c.readiness.buyerSecured)} />
-                <KV k="Funds verified" v={bool(c.readiness.buyerFundsVerified)} />
-                <KV k="EMD received" v={bool(c.readiness.emdReceived)} />
-              </div>
-            </section>
-          )}
-
-          {tab === 'Title & Escrow' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Title status" v={c.titleStatus} />
-                <KV k="Escrow status" v={c.escrowStatus} />
-                <KV k="Escrow file" v={c.identity.escrowFileNumber} />
-                <KV k="Title opened" v={formatDate(c.dates.titleOpenedDate)} />
-                <KV k="Commitment" v={formatDate(c.dates.titleCommitmentDate)} />
-                <KV k="Cure deadline" v={formatDate(c.dates.cureDeadline)} />
-              </div>
-            </section>
-          )}
-
-          {tab === 'Milestones' && (
-            <section className="cd-dossier-section">
-              <h3>Closing Milestones ({c.milestones.length})</h3>
-              <ul className="cd-milestone-track">
-                {c.milestones.length === 0 ? <li className="cd-absent">No milestones recorded.</li> : null}
-                {c.milestones.map((m) => (
-                  <li key={m.eventId}>
-                    <span className="cd-milestone-track__dot" aria-hidden />
-                    <div>
-                      <strong>{milestoneLabel(m.type)}</strong>
-                      <small>{formatDate(m.occurredAt) ?? '—'} · {m.sourceSystem}</small>
-                    </div>
-                  </li>
+        <div className="cd-dossier__layout">
+          <nav className="cd-dossier__nav" aria-label="Dossier sections">
+            <div className="cd-dossier__nav-mobile">
+              <label className="cd-dossier__nav-select-label" htmlFor="cd-dossier-section-select">Section</label>
+              <select
+                id="cd-dossier-section-select"
+                className="cd-dossier__nav-select"
+                value={section}
+                onChange={(e) => setSection(e.target.value as DossierSectionId)}
+                data-testid="cd-dossier-section-select"
+              >
+                {DOSSIER_SECTIONS.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
                 ))}
-              </ul>
-            </section>
-          )}
-
-          {tab === 'Issues / Curative' && (
-            <section className="cd-dossier-section">
-              <h3>Issues &amp; Curative ({issues.length})</h3>
-              {issues.length === 0 ? <p className="cd-absent">No open issues.</p> : null}
-              {issues.map((i) => (
-                <div className="cd-issue" data-sev={i.severity} key={i.issueId}>
-                  <div className="cd-issue__title">{i.title}</div>
-                  <div className="cd-issue__meta">{i.category} · {i.severity} · {i.status} · {i.owner ?? '—'}</div>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {tab === 'Tasks & SLA' && (
-            <section className="cd-dossier-section">
-              <p className="cd-absent">Tasks ({c.tasks.length}) not yet projected from Podio into Supabase.</p>
-              <KV k="SLA deadline" v={formatDate(c.health.slaDeadline)} kind="derived" />
-            </section>
-          )}
-
-          {tab === 'Documents' && (
-            <section className="cd-dossier-section">
-              <p className="cd-absent">Documents ({c.documents.length}) not yet projected.</p>
-            </section>
-          )}
-
-          {tab === 'Communications' && (
-            <section className="cd-dossier-section">
-              <p className="cd-absent">Communications timeline not yet mirrored from message events.</p>
-            </section>
-          )}
-
-          {tab === 'Financials' && (
-            <section className="cd-dossier-section">
-              <div className="cd-kv-grid">
-                <KV k="Seller contract" v={money(c.financials.sellerContractPrice)} />
-                <KV k="Buyer price" v={money(c.financials.buyerPrice)} />
-                <KV k="Assignment fee" v={money(c.financials.assignmentFee)} />
-                <KV k="Expected gross" v={money(c.financials.expectedGrossRevenue)} />
-                <KV k="Confirmed gross" v={money(c.financials.confirmedGrossRevenue)} />
-                <KV k="Revenue status" v={c.financials.revenueStatus} />
-              </div>
-              <div className="cd-revenue-compare">
-                <div><span>Expected</span><strong>{money(c.financials.expectedGrossRevenue) ?? '—'}</strong></div>
-                <div><span>Confirmed</span><strong>{money(c.financials.confirmedGrossRevenue) ?? '—'}</strong></div>
-              </div>
-            </section>
-          )}
-
-          {tab === 'Audit Trail' && (
-            <section className="cd-dossier-section">
-              <KV k="Fully backed" v={c.provenance.fullyBacked ? 'Yes' : 'No'} kind="derived" />
-              {c.provenance.degraded.map((d, i) => <p className="cd-diag-line" key={i}>{d}</p>)}
-            </section>
-          )}
-
-          <section className="cd-dossier-section cd-dossier-copilot">
-            <h3>Closing Copilot — Read Only</h3>
-            <p className="cd-copilot-note">Summarizes and recommends — cannot execute actions.</p>
-            <div className="cd-copilot">
-              {copilot.insights.map((insight, idx) => (
-                <div className="cd-insight" key={`${insight.kind}-${idx}`}>
-                  <div className="cd-insight__headline">{insight.headline}</div>
-                  <div className="cd-insight__detail">{insight.detail}</div>
-                </div>
-              ))}
-              {copilot.proposedActions.map((action, idx) => (
-                <div className="cd-proposed" key={`${action.kind}-${idx}`}>
-                  <span className="cd-proposed__badge">Proposed · requires approval</span>
-                  <div className="cd-insight__headline">{action.label}</div>
-                  <button type="button" disabled>Execution disabled</button>
-                </div>
+              </select>
+            </div>
+            <div className="cd-dossier__nav-rail" role="tablist" aria-label="Dossier sections">
+              {DOSSIER_SECTIONS.map((s, idx) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  id={`cd-tab-${s.id}`}
+                  aria-selected={section === s.id}
+                  aria-controls={`cd-panel-${s.id}`}
+                  className={section === s.id ? 'is-active' : ''}
+                  onClick={() => setSection(s.id)}
+                  onKeyDown={(e) => onNavKeyDown(e, idx)}
+                  data-testid={`cd-dossier-tab-${s.id}`}
+                >
+                  {s.label}
+                  {s.id === 'issues' && orderIssues(c.issues).length > 0 ? (
+                    <span className="cd-dossier__nav-badge">{orderIssues(c.issues).length}</span>
+                  ) : null}
+                </button>
               ))}
             </div>
-          </section>
+          </nav>
+
+          <div
+            className="cd-dossier__body"
+            role="tabpanel"
+            id={`cd-panel-${section}`}
+            aria-labelledby={`cd-tab-${section}`}
+            data-testid="cd-dossier-panel"
+          >
+            <h2 className="cd-dossier__panel-title">{activeLabel}</h2>
+            {sectionPanel}
+          </div>
         </div>
       </div>
     </div>

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import type { ClosingCase } from '../../../domain/closing-desk/closing-desk.types'
 import { boardColumnLabel } from '../../../domain/closing-desk/closing-board'
 import { ClosingHealthBadge } from './ClosingHealthBadge'
-import { formatDate, money, primaryBlocker, sortCases, stageLabel, type TableSortKey } from '../closing-desk-utils'
+import { money, primaryBlocker, sortCases, stageLabel, type TableSortKey } from '../closing-desk-utils'
+import { formatClosingDate } from '../closing-desk-present'
 
 const COLUMNS: { key: TableSortKey; label: string }[] = [
   { key: 'displayName', label: 'Property' },
@@ -75,19 +76,19 @@ export function ClosingDeskTable({ cases, selectedId, onOpenCase }: ClosingDeskT
                   data-case-id={c.identity.closingCaseId}
                   onKeyDown={(e) => { if (e.key === 'Enter') onOpenCase(c) }}
                 >
-                  <td className="cd-ledger__property">{c.displayName}</td>
-                  <td>{c.sellerName ?? '—'}</td>
-                  <td>{c.market ?? '—'}</td>
-                  <td>{stageLabel(c.universalStage)}</td>
-                  <td>{boardColumnLabel(c.boardColumn)}</td>
+                  <td className="cd-ledger__property" title={c.displayName}>{c.displayName}</td>
+                  <td title={c.sellerName ?? undefined}>{c.sellerName ?? '—'}</td>
+                  <td title={c.market ?? undefined}>{c.market ?? '—'}</td>
+                  <td title={c.universalStage}>{stageLabel(c.universalStage)}</td>
+                  <td title={c.boardColumn}>{boardColumnLabel(c.boardColumn)}</td>
                   <td><ClosingHealthBadge health={c.health} /></td>
-                  <td>{formatDate(c.dates.scheduledClosingDate) ?? '—'}</td>
-                  <td>{c.health.daysUntilClosing ?? '—'}</td>
-                  <td className="cd-ledger__blocker">{blocker?.title ?? '—'}</td>
-                  <td>{blocker?.owner ?? c.health.responsibleParty ?? '—'}</td>
-                  <td>{money(c.financials.sellerContractPrice) ?? '—'}</td>
-                  <td>{money(c.financials.expectedGrossRevenue) ?? '—'}</td>
-                  <td className="cd-ledger__action">{c.health.nextRequiredAction ?? '—'}</td>
+                  <td title={c.dates.scheduledClosingDate ?? undefined}>{formatClosingDate(c.dates.scheduledClosingDate)}</td>
+                  <td title={String(c.health.daysUntilClosing ?? '')}>{c.health.daysUntilClosing ?? '—'}</td>
+                  <td className="cd-ledger__blocker" title={blocker?.title}>{blocker?.title ?? '—'}</td>
+                  <td title={blocker?.owner ?? c.health.responsibleParty ?? undefined}>{blocker?.owner ?? c.health.responsibleParty ?? '—'}</td>
+                  <td title={String(c.financials.sellerContractPrice ?? '')}>{money(c.financials.sellerContractPrice) ?? '—'}</td>
+                  <td title={String(c.financials.expectedGrossRevenue ?? '')}>{money(c.financials.expectedGrossRevenue) ?? '—'}</td>
+                  <td className="cd-ledger__action" title={c.health.nextRequiredAction ?? undefined}>{c.health.nextRequiredAction ?? '—'}</td>
                 </tr>
               )
             })

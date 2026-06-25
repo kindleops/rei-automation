@@ -2,6 +2,7 @@ import type { ClosingCase, ClosingBoardColumn, ClosingDeskSummary } from '../../
 import { CLOSING_BOARD_COLUMNS } from '../../domain/closing-desk/closing-board'
 import { computeClosingSummary } from '../../domain/closing-desk/closing-summary'
 import { highestSeverityBlocker, isActivelyBlocking } from '../../domain/closing-desk/closing-issues'
+import { humanizeEnum } from './closing-desk-present'
 
 const MS_PER_DAY = 86_400_000
 
@@ -22,7 +23,7 @@ export function daysRemaining(iso: string | null, now = Date.now()): number | nu
 }
 
 export function stageLabel(stage: string): string {
-  return stage.replace(/_/g, ' ')
+  return humanizeEnum(stage) ?? stage
 }
 
 export function primaryBlocker(c: ClosingCase) {

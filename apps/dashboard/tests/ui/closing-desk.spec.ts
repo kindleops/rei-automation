@@ -113,7 +113,7 @@ test('Case dossier opens from board and table with same selection', async ({ pag
   await firstCard.click()
   await expect(page.locator('[data-testid="cd-dossier"]')).toBeVisible()
   await expect(page.locator('[data-testid="cd-next-action"]')).toBeVisible()
-  await expect(page.locator('.cd-dossier').getByText('Closing Copilot — Read Only', { exact: false })).toBeVisible()
+  await expect(page.locator('[data-testid="cd-copilot-compact"]')).toBeVisible()
 
   const execButtons = page.locator('.cd-proposed button')
   for (let i = 0, n = await execButtons.count(); i < n; i++) await expect(execButtons.nth(i)).toBeDisabled()
