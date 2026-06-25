@@ -88,6 +88,43 @@ export function makeInboundWebhookBaseDeps(overrides = {}) {
         plan: { selected_use_case: "ownership_check", detected_intent: "Ownership Confirmed" },
       },
     }),
+    runInboundIntelligencePhase: async (args = {}) => {
+      const legacy = args.legacy_plan || {};
+      const canonical_intent =
+        legacy.inbound_intent || legacy.detected_intent || args.classification?.primary_intent || "unclear";
+      const snapshot = {
+        decision_version: "inbound_intelligence_v2_shadow",
+        canonical_intent,
+        universal_stage: args.route?.stage || args.context?.summary?.conversation_stage || null,
+        granular_stage: legacy.selected_use_case || null,
+        safety_status: legacy.safety_tier === "suppress" ? "suppressed" : "allowed",
+        automation_execution_status: args.execution_allowed ? "execution_eligible" : "shadow_only",
+        execution_blocked_reason: args.execution_allowed ? null : "auto_reply_mode_disabled",
+        canonical_decision: {
+          should_queue_reply: Boolean(legacy.should_queue_reply),
+          should_mark_human_review: false,
+          route_hint: legacy.selected_use_case || null,
+        },
+        follow_up_recommendation: { shadow_only: true, dispatchable: false },
+        referral_detected: false,
+        source_thread_key: args.threadKey || null,
+      };
+      return {
+        ok: true,
+        intelligence_snapshot: snapshot,
+        seller_stage_reply: {
+          ok: true,
+          queued: false,
+          handled: true,
+          reason: snapshot.execution_blocked_reason || "intelligence_only",
+          plan: legacy,
+          brain_stage: legacy.selected_use_case || null,
+          intelligence_snapshot: snapshot,
+        },
+      };
+    },
+    persistInboundIntelligenceSnapshot: async () => ({ ok: true, dry_run: true }),
+    persistSellerContactReferral: async () => ({ ok: true, skipped: true }),
     ...overrides,
   };
 }

@@ -10,6 +10,12 @@ export const CONTACT_IDENTITY_CLASSES = [
   "confirmed_owner",
   "probable_owner",
   "owner_related_contact",
+  "respondent_non_owner",
+  "referral_source",
+  "referred_possible_owner",
+  "former_owner",
+  "agent_representative",
+  "property_manager",
   "renter_occupant",
   "wrong_person",
   "wrong_number",
@@ -20,6 +26,12 @@ const CONTACT_IDENTITY_LABELS = {
   confirmed_owner: "Confirmed Owner",
   probable_owner: "Probable Owner",
   owner_related_contact: "Owner-Related Contact",
+  respondent_non_owner: "Respondent (Non-Owner)",
+  referral_source: "Referral Source",
+  referred_possible_owner: "Referred Possible Owner",
+  former_owner: "Former Owner",
+  agent_representative: "Agent / Representative",
+  property_manager: "Property Manager",
   renter_occupant: "Renter / Occupant",
   wrong_person: "Wrong Person",
   wrong_number: "Wrong Number",
@@ -35,6 +47,22 @@ export function resolveContactIdentityClass(row = {}) {
   const disposition = lower(row.disposition || "");
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
 
+  if (clean(metadata.contact_identity)) {
+    return lower(metadata.contact_identity);
+  }
+  if (metadata.relationship_outcome === "property_specific_non_owner_with_referral") {
+    return "referral_source";
+  }
+  if (
+    metadata.relationship_outcome === "property_specific_non_owner" ||
+    intent === "non_owner_referral" ||
+    intent === "property_specific_non_owner"
+  ) {
+    return "respondent_non_owner";
+  }
+  if (intent === "referred_possible_owner" || metadata.is_referred_contact === true) {
+    return "referred_possible_owner";
+  }
   if (row.wrong_number === true || intent === "wrong_number" || disposition === "wrong_number") {
     return "wrong_number";
   }

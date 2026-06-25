@@ -19,6 +19,7 @@ import { getSystemValue } from "@/lib/system-control.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
+import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
@@ -1153,58 +1154,6 @@ export async function checkInboundAutoReplySuppression({
   return { suppressed: false, reason: null };
 }
 
-function automationDecisionToLegacyPlan({
-  decision,
-  classification,
-  selectedTemplate = null,
-  renderedMessageText = null,
-  queueResult = null,
-} = {}) {
-  const primary_intent = clean(classification?.primary_intent) || "unclear";
-  const suppression_reason = decision?.suppression_reason || null;
-  const should_queue_reply = Boolean(decision?.should_queue_reply);
-  const safety_tier = decision?.should_suppress_contact
-    ? "suppress"
-    : should_queue_reply
-      ? "auto_send"
-      : "review";
-
-  return {
-    ok: true,
-    inbound_intent: primary_intent,
-    detected_intent: primary_intent,
-    next_stage: decision?.route_hint || null,
-    selected_use_case:
-      clean(selectedTemplate?.use_case) ||
-      routeProfileCandidates(decision?.route_hint, primary_intent)[0] ||
-      null,
-    selected_stage_code: clean(selectedTemplate?.stage_code) || null,
-    selected_language: clean(selectedTemplate?.language) || clean(classification?.language) || "English",
-    selected_template_id: clean(selectedTemplate?.template_id || selectedTemplate?.id) || null,
-    fallback_reply: renderedMessageText || clean(selectedTemplate?.template_body) || null,
-    should_queue_reply,
-    suppression_reason,
-    reply_mode: decision?.reply_mode || "none",
-    reason: decision?.audit_reason || "automation_decision",
-    route_hint: decision?.route_hint || null,
-    stage_hint: decision?.stage_hint || null,
-    allowed_template_stages: asArray(decision?.allowed_template_stages),
-    queue_item_id: queueResult?.queue_item_id || null,
-    queue_row_id: queueResult?.queue_row_id || null,
-    routing_allowed: should_queue_reply,
-    safety: {
-      opt_out: suppression_reason === "opt_out",
-      wrong_number: suppression_reason === "wrong_number",
-      hostile_or_legal: primary_intent === "hostile_or_legal",
-      not_interested: primary_intent === "not_interested",
-      missing_context: decision?.audit_reason === "missing_context",
-    },
-    safety_tier,
-    auto_send_eligible: should_queue_reply,
-    automation_decision: decision,
-  };
-}
-
 export async function executeInboundAutomationDecision({
   message,
   threadKey,
@@ -1272,9 +1221,9 @@ export async function executeInboundAutomationDecision({
     const disabled_decision = {
       ...base_decision,
       should_queue_reply: false,
-      should_mark_human_review: false,
-      reply_mode: "none",
-      audit_reason: "auto_reply_disabled",
+      reply_mode: base_decision.reply_mode || "none",
+      execution_blocked_reason: "auto_reply_mode_disabled",
+      audit_reason: base_decision.audit_reason || "auto_reply_disabled",
     };
 
     return {
@@ -1291,17 +1240,19 @@ export async function executeInboundAutomationDecision({
       dry_run: true,
       auto_reply_mode: effective_auto_reply_mode,
       queue_permission,
+      execution_blocked_reason: "auto_reply_mode_disabled",
       audit_reason: disabled_decision.audit_reason,
       seller_stage_reply: {
         ok: true,
         queued: false,
         handled: true,
-        reason: disabled_decision.audit_reason,
+        reason: "auto_reply_mode_disabled",
         plan: automationDecisionToLegacyPlan({
           decision: disabled_decision,
           classification,
         }),
-        brain_stage: null,
+        brain_stage: disabled_decision.route_hint || disabled_decision.stage_hint || null,
+        automation_decision: disabled_decision,
       },
     };
   }
