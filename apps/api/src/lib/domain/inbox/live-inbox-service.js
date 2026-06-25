@@ -117,8 +117,14 @@ function compactBootThreadRow(row = {}) {
     property_id: row.property_id || null,
     prospect_id: row.prospect_id || null,
     master_owner_id: row.master_owner_id || null,
-    delivery_status: row.delivery_status || row.latest_delivery_status || null,
-    latest_delivery_status: row.latest_delivery_status || row.delivery_status || null,
+    delivery_status:
+      (row.latest_message_direction || row.direction) === "inbound"
+        ? null
+        : (row.delivery_status || row.latest_delivery_status || null),
+    latest_delivery_status:
+      (row.latest_message_direction || row.direction) === "inbound"
+        ? null
+        : (row.latest_delivery_status || row.delivery_status || null),
     queue_status: row.queue_status || null,
     unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : 0,
     message_count: row.message_count ?? null,
@@ -1000,6 +1006,13 @@ function queueFailureReason(row = {}) {
 }
 
 function applyDeliverySnapshot(row = {}, delivery = null, queue = null) {
+  const normalizedDirection = normalizeLatestMessageDirection(
+    row.latest_message_direction || row.latest_direction || row.direction,
+  );
+  if (normalizedDirection === "inbound") {
+    return row;
+  }
+
   const latestDeliveryStatus = firstClean(
     delivery?.delivery_status,
     delivery?.raw_carrier_status,
@@ -1258,6 +1271,13 @@ async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabas
   }
 
   return rows.map((row) => {
+    const normalizedDirection = normalizeLatestMessageDirection(
+      row.latest_message_direction || row.latest_direction || row.direction,
+    );
+    if (normalizedDirection === "inbound") {
+      return row;
+    }
+
     const threadKey = clean(row.thread_key || row.canonical_thread_key);
     const hasStrongIdentity = Boolean(clean(row.prospect_id || row.final_prospect_id || row.property_id || row.final_property_id || row.master_owner_id || row.final_master_owner_id || row.owner_id));
     const delivery = sortedDeliveryRows.find((candidate) => candidateMatchesThreadIdentity(candidate, row)) || (!hasStrongIdentity ? latestDeliveryByThread.get(threadKey) : null) || null;
@@ -2116,11 +2136,12 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const supabase = deps.supabase || defaultSupabase;
   const timeoutMode = lower(params.timeout_mode || params.timeoutMode);
   const initialBootMode = timeoutMode === "initial_boot" || options.selectMode === "initial_boot_safe";
+  const fastBucketMode = timeoutMode === "manual_bucket_switch" || timeoutMode === "auto_refresh";
   const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : DEFAULT_LIMIT);
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
-  const skipCounts = bool(params.skip_counts) || deps.skipCounts === true || options.skipCounts === true;
-  const skipDelivery = bool(params.skip_delivery) || options.skipDelivery === true;
+  const skipCounts = bool(params.skip_counts) || fastBucketMode || deps.skipCounts === true || options.skipCounts === true;
+  const skipDelivery = bool(params.skip_delivery) || fastBucketMode || options.skipDelivery === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2141,7 +2162,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     }
   }
 
-  if (!initialBootMode) {
+  if (!initialBootMode && !fastBucketMode) {
     try {
       await transitionStaleWaitingThreads(supabase);
     } catch (error) {
@@ -2161,7 +2182,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   });
   const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
-  const bucketByThreadKey = initialBootMode
+  const bucketByThreadKey = (initialBootMode || fastBucketMode)
     ? new Map()
     : await fetchInboxBucketsByThreadKeys(
       supabase,
@@ -2253,14 +2274,16 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
-  try {
-    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
-    finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
-    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
-    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-  } catch (error) {
-    linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
-    console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
+  if (!fastBucketMode) {
+    try {
+      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+      finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
+      finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+    } catch (error) {
+      linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
+      console.warn("[INBOX_LINKED_CONTEXT_HYDRATION_FAILED]", error?.message || error);
+    }
   }
 
   const deliveryHydrationStartedAt = nowMs();
@@ -3313,7 +3336,7 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
       owner_id: lookup.ownerId,
       latest_message_id: lookup.latestMessageId,
     },
-    lookup_strategy_used: "message_events_fallback_order",
+    lookup_strategy_used: "message_events_canonical_indexed",
     fallback_used: false,
     strategies_tried: strategies.map((strategy) => strategy.name),
     fallback_order: [
@@ -3370,12 +3393,11 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     };
   }
 
-  const PRIMARY_PARALLEL_STRATEGIES = new Set([
+  const CANONICAL_INDEXED_STRATEGIES = [
+    "latest_message_id_exact",
     "conversation_thread_id",
     "thread_key=canonical_e164",
-    "to_phone_number=canonical_e164",
-    "from_phone_number=canonical_e164",
-  ]);
+  ];
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
   const runStrategy = async (strategy) => {
@@ -3391,32 +3413,25 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
   };
   const mergedCount = () => dedupeRowsByMessageId(strategyResults.flatMap((entry) => entry.rows)).length;
 
-  const exactStrategy = strategies.find((strategy) => strategy.name === "latest_message_id_exact");
-  if (exactStrategy) {
-    const exactResult = await runStrategy(exactStrategy);
-    if (exactResult.error) {
+  for (const strategyName of CANONICAL_INDEXED_STRATEGIES) {
+    if (mergedCount() >= fetchLimit) break;
+    const strategy = strategies.find((entry) => entry.name === strategyName);
+    if (!strategy) continue;
+    const result = await runStrategy(strategy);
+    if (result.error) {
       diagnostics.fallback_used = true;
-    } else if (exactResult.rows.length > 0) {
-      strategyResults.push(exactResult);
-      diagnostics.lookup_strategy_used = exactStrategy.name;
+      continue;
     }
-  }
-
-  if (mergedCount() < fetchLimit) {
-    const primaryStrategies = strategies.filter((strategy) => PRIMARY_PARALLEL_STRATEGIES.has(strategy.name));
-    const primaryResults = await Promise.all(primaryStrategies.map(runStrategy));
-    for (const result of primaryResults) {
-      if (result.error) {
-        diagnostics.fallback_used = true;
-        continue;
-      }
-      if (result.rows.length > 0) strategyResults.push(result);
+    if (result.rows.length > 0) {
+      strategyResults.push(result);
+      diagnostics.lookup_strategy_used = strategy.name;
+      if (strategyName !== "latest_message_id_exact") break;
     }
   }
 
   if (mergedCount() < fetchLimit) {
     const secondaryStrategies = strategies.filter(
-      (strategy) => strategy.name !== "latest_message_id_exact" && !PRIMARY_PARALLEL_STRATEGIES.has(strategy.name),
+      (strategy) => !CANONICAL_INDEXED_STRATEGIES.includes(strategy.name),
     );
     for (const strategy of secondaryStrategies) {
       const result = await runStrategy(strategy);
@@ -3424,7 +3439,10 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
         diagnostics.fallback_used = true;
         continue;
       }
-      if (result.rows.length > 0) strategyResults.push(result);
+      if (result.rows.length > 0) {
+        strategyResults.push(result);
+        diagnostics.lookup_strategy_used = diagnostics.lookup_strategy_used || strategy.name;
+      }
       if (mergedCount() >= fetchLimit) break;
     }
   }

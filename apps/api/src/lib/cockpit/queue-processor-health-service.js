@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase/client.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { createRequestTimer } from './server-timing.js'
 
 const ACTIVE_CANONICAL_STATUSES = ['queued', 'pending', 'approval', 'scheduled', 'processing']
@@ -81,7 +82,7 @@ async function fetchQueueProcessorHealthFallback() {
   }
 }
 
-export async function fetchQueueProcessorHealth() {
+async function loadQueueProcessorHealth() {
   const timer = createRequestTimer('queue-processor-health')
   const checkedAt = new Date().toISOString()
 
@@ -127,4 +128,8 @@ export async function fetchQueueProcessorHealth() {
 
   timer.mark('serialization')
   return response
+}
+
+export async function fetchQueueProcessorHealth() {
+  return readThroughCache('cockpit:queue-processor-health', 5_000, loadQueueProcessorHealth)
 }

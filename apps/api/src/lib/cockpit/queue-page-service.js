@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase/client.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { createRequestTimer } from './server-timing.js'
 
 const QUEUE_PAGE_COLUMNS = [
@@ -49,7 +50,21 @@ async function bucketCount(opts, values) {
   return Number(res.count || 0)
 }
 
-export async function fetchQueuePage(opts = {}) {
+function queuePageCacheKey(opts = {}) {
+  return [
+    'cockpit:queue-page',
+    opts.page ?? 0,
+    opts.pageSize ?? 25,
+    opts.status ?? 'all',
+    opts.dateBasis ?? 'created_at',
+    opts.dateFrom ?? '',
+    opts.dateTo ?? '',
+    opts.market ?? 'all',
+    opts.sender ?? 'all',
+  ].join(':')
+}
+
+async function loadQueuePage(opts = {}) {
   const timer = createRequestTimer('queue-page')
   const page = Math.max(0, Math.floor(opts.page ?? 0))
   const pageSize = Math.max(1, Math.min(100, Math.floor(opts.pageSize ?? 25)))
@@ -123,4 +138,8 @@ export async function fetchQueuePage(opts = {}) {
 
   timer.mark('serialization')
   return response
+}
+
+export async function fetchQueuePage(opts = {}) {
+  return readThroughCache(queuePageCacheKey(opts), 5_000, () => loadQueuePage(opts))
 }

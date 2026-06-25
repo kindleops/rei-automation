@@ -51,7 +51,7 @@ export async function PATCH(request) {
   }
 
   const status = result.ok ? 200 : 400
-  return responseFromResult(result, status)
+  return withCors(request, responseFromResult(result, status))
 }
 
 export async function OPTIONS(request) {

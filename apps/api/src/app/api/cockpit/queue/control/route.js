@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server.js'
-import { ensureMutationAuth } from '../../_shared.js'
+import { ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shared.js'
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
@@ -23,6 +23,14 @@ import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+function corsJson(request, payload, status = 200) {
+  return withCors(request, NextResponse.json(payload, { status }))
+}
+
+export async function OPTIONS(request) {
+  return handleOptionsResponse(request)
+}
 
 const CONTROL_KEYS = [
   'queue_processor_mode',
@@ -567,13 +575,13 @@ async function computeQueueLimitedCap(safety = {}) {
   }
 }
 
-function responseWithDiagnostics(payload, values, status = 200) {
+function responseWithDiagnostics(request, payload, values, status = 200) {
   const timer = createRequestTimer('queue-control:get')
   return readThroughCache('cockpit:queue-control:diagnostics', 8_000, () => loadCampaignDiagnostics(values))
     .then((campaign) => {
       timer.mark('diagnostics_loaded')
       const timing = timer.summary()
-      return NextResponse.json({
+      return corsJson(request, {
         ...payload,
         diagnostics: {
           ...values,
@@ -586,7 +594,7 @@ function responseWithDiagnostics(payload, values, status = 200) {
         queryMs: timing.totalMs,
         sourceUsed: 'queue-control:cached-diagnostics',
         timing,
-      }, { status })
+      }, status)
     })
 }
 
@@ -634,7 +642,7 @@ export async function GET(request) {
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return auth.response
   const values = await loadSettings()
-  return responseWithDiagnostics({ ok: true, action: 'queue-control:get' }, values, 200)
+  return responseWithDiagnostics(request, { ok: true, action: 'queue-control:get' }, values, 200)
 }
 
 export async function POST(request) {
@@ -651,9 +659,9 @@ export async function POST(request) {
       queue_auto_send_enabled: 'false',
       queue_auto_enqueue_enabled: 'false',
     })
-    if (!result.ok) return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
+    if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
-    return responseWithDiagnostics({ ok: true, action }, updated, 200)
+    return responseWithDiagnostics(request, { ok: true, action }, updated, 200)
   }
 
   if (action === 'resume_queue_processor') {
@@ -665,9 +673,9 @@ export async function POST(request) {
       queue_auto_enqueue_enabled: 'true',
       queue_auto_send_enabled: 'false',
     })
-    if (!result.ok) return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
+    if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
-    return responseWithDiagnostics({ ok: true, action, campaign_mode }, updated, 200)
+    return responseWithDiagnostics(request, { ok: true, action, campaign_mode }, updated, 200)
   }
 
   if (action === 'emergency_stop') {
@@ -683,15 +691,15 @@ export async function POST(request) {
       queue_last_run_at: stoppedAt,
       queue_last_run_diagnostics: JSON.stringify({ action, reason, stopped_at: stoppedAt }),
     })
-    if (!result.ok) return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
+    if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
-    return responseWithDiagnostics({ ok: true, action, reason, stopped_at: stoppedAt }, updated, 200)
+    return responseWithDiagnostics(request, { ok: true, action, reason, stopped_at: stoppedAt }, updated, 200)
   }
 
   if (action === 'run_dry_run_feeder') {
     const result = await runDryRunFeeder(body, values)
     const updated = await loadSettings()
-    return responseWithDiagnostics({
+    return responseWithDiagnostics(request, {
       ok: result?.ok !== false,
       action,
       dry_run: true,
@@ -728,11 +736,11 @@ export async function POST(request) {
       failClosed: true,
     })
     if (!runtimeBrake.ok) {
-      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+      return corsJson(request, blockedRuntimeBrakeResult(runtimeBrake, action), runtimeBrake.status)
     }
     const validation = validateLiveLimitedRails(safety, { require_scope: true, require_send_caps: true })
     if (!validation.ok) {
-      return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
+      return corsJson(request, blockedSafetyResult(validation, action), validation.status)
     }
     const cap = await computeQueueLimitedCap(safety)
     if (!cap.ok) {
@@ -750,7 +758,7 @@ export async function POST(request) {
         total_created_count: 0,
       })
       const updated = await loadSettings()
-      return responseWithDiagnostics({
+      return responseWithDiagnostics(request, {
         ok: false,
         action,
         campaign_session_id: campaignSessionId,
@@ -824,7 +832,7 @@ export async function POST(request) {
       error: result?.error || null,
     })
     const updated = await loadSettings()
-    return responseWithDiagnostics({
+    return responseWithDiagnostics(request, {
       ok: result?.ok !== false,
       action,
       campaign_session_id: campaignSessionId,
@@ -841,12 +849,12 @@ export async function POST(request) {
   if (action === 'queue_one') {
     const campaignSessionId = clean(body.campaign_session_id || body.campaignSessionId || body.session_id)
     if (!campaignSessionId) {
-      return NextResponse.json({ ok: false, action, error: 'campaign_session_id_required', reason: 'campaign_session_id_required' }, { status: 400 })
+      return corsJson(request,{ ok: false, action, error: 'campaign_session_id_required', reason: 'campaign_session_id_required' }, 400)
     }
 
     const globalBrake = oneRowQueueSafetyFailure(values)
     if (!globalBrake.ok) {
-      return NextResponse.json({
+      return corsJson(request,{
         ok: false,
         action,
         error: globalBrake.reason,
@@ -859,17 +867,17 @@ export async function POST(request) {
           queue_auto_enqueue_enabled: values.queue_auto_enqueue_enabled,
           queue_emergency_stop_at: values.queue_emergency_stop_at,
         },
-      }, { status: globalBrake.status })
+      }, globalBrake.status)
     }
 
     const scheduleFor = clean(body.schedule_for || body.scheduled_for || 'now').toLowerCase()
     if (!['now', 'immediate'].includes(scheduleFor)) {
-      return NextResponse.json({
+      return corsJson(request,{
         ok: false,
         action,
         error: 'schedule_for_must_be_now_or_immediate',
         reason: 'schedule_for_must_be_now_or_immediate',
-      }, { status: 423 })
+      }, 423)
     }
 
     const safety = normalizeSafetyInput({
@@ -883,7 +891,7 @@ export async function POST(request) {
     }, values)
     const validation = validateOneRowRails(safety)
     if (!validation.ok) {
-      return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
+      return corsJson(request, blockedSafetyResult(validation, action), validation.status)
     }
 
     const cap = await computeQueueLimitedCap(safety)
@@ -899,7 +907,7 @@ export async function POST(request) {
         total_created_count: 0,
       })
       const updated = await loadSettings()
-      return responseWithDiagnostics({
+      return responseWithDiagnostics(request, {
         ok: false,
         action,
         campaign_session_id: campaignSessionId,
@@ -1004,7 +1012,7 @@ export async function POST(request) {
       error: result?.error || null,
     })
     const updated = await loadSettings()
-    return responseWithDiagnostics({
+    return responseWithDiagnostics(request, {
       ok: result?.ok !== false && createdTotal === 1 && Boolean(queueRowId),
       action,
       campaign_session_id: campaignSessionId,
@@ -1027,11 +1035,11 @@ export async function POST(request) {
       failClosed: true,
     })
     if (!runtimeBrake.ok) {
-      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+      return corsJson(request, blockedRuntimeBrakeResult(runtimeBrake, action), runtimeBrake.status)
     }
     const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true })
     if (!validation.ok) {
-      return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
+      return corsJson(request, blockedSafetyResult(validation, action), validation.status)
     }
     const { runSendQueue } = await import('@/lib/domain/queue/run-send-queue.js')
     const limit = Math.max(1, Math.min(25, validation.effective_limit))
@@ -1045,7 +1053,7 @@ export async function POST(request) {
       blocked_count: result?.blocked_count || 0,
     })
     const updated = await loadSettings()
-    return responseWithDiagnostics({
+    return responseWithDiagnostics(request, {
       ok: result?.ok !== false,
       action,
       rows_sent: Number(result?.sent_count || 0),
@@ -1060,45 +1068,45 @@ export async function POST(request) {
   if (action === 'send_one_queue_row') {
     const queue_row_id = clean(body.queue_row_id || body.queue_item_id || body.item_id || body.id)
     if (!queue_row_id) {
-      return NextResponse.json({ ok: false, action, error: 'queue_row_id_required', reason: 'queue_row_id_required' }, { status: 400 })
+      return corsJson(request,{ ok: false, action, error: 'queue_row_id_required', reason: 'queue_row_id_required' }, 400)
     }
     if (normalizeCampaignMode(body.campaign_mode) !== 'live_limited') {
-      return NextResponse.json({ ok: false, action, error: 'campaign_mode_live_limited_required', reason: 'campaign_mode_live_limited_required' }, { status: 423 })
+      return corsJson(request,{ ok: false, action, error: 'campaign_mode_live_limited_required', reason: 'campaign_mode_live_limited_required' }, 423)
     }
     if (clean(body.confirm) !== SEND_ONE_CONFIRM) {
-      return NextResponse.json({ ok: false, action, error: 'confirm_string_required', reason: 'confirm_string_required' }, { status: 423 })
+      return corsJson(request,{ ok: false, action, error: 'confirm_string_required', reason: 'confirm_string_required' }, 423)
     }
 
     const { loadQueueRowById, processSendQueue } = await import('@/lib/domain/queue/process-send-queue.js')
     const row = await loadQueueRowById(queue_row_id)
-    if (!row) return NextResponse.json({ ok: false, action, error: 'missing_queue_row', reason: 'missing_queue_row', queue_row_id }, { status: 404 })
+    if (!row) return corsJson(request,{ ok: false, action, error: 'missing_queue_row', reason: 'missing_queue_row', queue_row_id }, 404)
 
     const metadata = rowMetadata(row)
     if (normalizeCampaignMode(metadata.campaign_mode || row.campaign_mode || 'paused') !== 'live_limited') {
-      return NextResponse.json({ ok: false, action, error: 'queue_row_not_live_limited', reason: 'queue_row_not_live_limited', queue_row_id }, { status: 423 })
+      return corsJson(request,{ ok: false, action, error: 'queue_row_not_live_limited', reason: 'queue_row_not_live_limited', queue_row_id }, 423)
     }
 
     const statusReason = rejectOneRowStatusReason(row)
     if (statusReason) {
-      return NextResponse.json({
+      return corsJson(request,{
         ok: false,
         action,
         error: statusReason,
         reason: statusReason,
         queue_row_id,
         queue_status: row.queue_status || null,
-      }, { status: 423 })
+      }, 423)
     }
 
     if (isEmergencyStopActive(values.queue_emergency_stop_at) && !asBoolean(body.clear_one_send_window, false)) {
-      return NextResponse.json({
+      return corsJson(request,{
         ok: false,
         action,
         error: 'queue_emergency_stop_active',
         reason: 'queue_emergency_stop_active',
         message: 'Emergency stop is active; pass clear_one_send_window=true only after explicit approval for this one row.',
         queue_row_id,
-      }, { status: 423 })
+      }, 423)
     }
 
     if (queueRowIsNoSend(row)) {
@@ -1106,7 +1114,7 @@ export async function POST(request) {
         ? await rearmEmergencyStopAfterOneSend(action, 'send_one_no_send_refused', { queue_row_id })
         : null
       const updated = stoppedAt ? await loadSettings() : values
-      return responseWithDiagnostics({
+      return responseWithDiagnostics(request, {
         ok: false,
         action,
         error: 'no_send_queue_row',
@@ -1120,14 +1128,14 @@ export async function POST(request) {
     }
 
     if (rowScheduledInFuture(row)) {
-      return NextResponse.json({
+      return corsJson(request,{
         ok: false,
         action,
         error: 'queue_row_scheduled_for_future',
         reason: 'queue_row_scheduled_for_future',
         queue_row_id,
         scheduled_for: row.scheduled_for_utc || row.scheduled_for || null,
-      }, { status: 423 })
+      }, 423)
     }
 
     let result = null
@@ -1151,7 +1159,7 @@ export async function POST(request) {
       })
     }
     const updated = await loadSettings()
-    return responseWithDiagnostics({
+    return responseWithDiagnostics(request, {
       ok: result?.ok !== false && result?.sent === true,
       action,
       queue_row_id,
@@ -1166,11 +1174,11 @@ export async function POST(request) {
   if (action === 'run_targeted_queue_row') {
     const queue_row_id = clean(body.queue_row_id || body.queue_item_id || body.item_id || body.id)
     if (!queue_row_id) {
-      return NextResponse.json({ ok: false, action, error: 'queue_row_id_required' }, { status: 400 })
+      return corsJson(request,{ ok: false, action, error: 'queue_row_id_required' }, 400)
     }
     const { loadQueueRowById, processSendQueue } = await import('@/lib/domain/queue/process-send-queue.js')
     const row = await loadQueueRowById(queue_row_id)
-    if (!row) return NextResponse.json({ ok: false, action, error: 'missing_queue_row', queue_row_id }, { status: 404 })
+    if (!row) return corsJson(request,{ ok: false, action, error: 'missing_queue_row', queue_row_id }, 404)
 
     const proof = queueRowIsProof(row)
     const runtimeBrake = evaluateQueueSendRuntimeBrakes(values, {
@@ -1178,16 +1186,16 @@ export async function POST(request) {
       failClosed: true,
     })
     if (!runtimeBrake.ok) {
-      return NextResponse.json(blockedRuntimeBrakeResult(runtimeBrake, action), { status: runtimeBrake.status })
+      return corsJson(request, blockedRuntimeBrakeResult(runtimeBrake, action), runtimeBrake.status)
     }
     if (isInternalTestPhone(row.to_phone_number) && !proof) {
-      return NextResponse.json({ ok: false, action, error: 'internal_test_phone_requires_proof_mode', queue_row_id }, { status: 423 })
+      return corsJson(request,{ ok: false, action, error: 'internal_test_phone_requires_proof_mode', queue_row_id }, 423)
     }
     if (!proof) {
       const safety = normalizeSafetyInput(body, values)
       const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true })
       if (!validation.ok) {
-        return NextResponse.json(blockedSafetyResult(validation, action), { status: validation.status })
+        return corsJson(request, blockedSafetyResult(validation, action), validation.status)
       }
     }
     const result = await processSendQueue({ queue_row_id })
@@ -1199,14 +1207,14 @@ export async function POST(request) {
       reason: result?.reason || null,
     })
     const updated = await loadSettings()
-    return responseWithDiagnostics({ ok: result?.ok !== false, action, queue_row_id, result }, updated, result?.ok === false ? Number(result?.status || 500) : 200)
+    return responseWithDiagnostics(request, { ok: result?.ok !== false, action, queue_row_id, result }, updated, result?.ok === false ? Number(result?.status || 500) : 200)
   }
 
   const patch = parseBody(body)
   const result = await setSystemValues(patch)
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: 'queue_control_update_failed' }, { status: 500 })
+    return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
   }
   const updated = await loadSettings()
-  return responseWithDiagnostics({ ok: true, action: 'queue-control:set' }, updated, 200)
+  return responseWithDiagnostics(request, { ok: true, action: 'queue-control:set' }, updated, 200)
 }

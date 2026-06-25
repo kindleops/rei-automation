@@ -1,38 +1,12 @@
 import { NextResponse } from 'next/server.js'
-import { ensureMutationAuth } from '../../../_shared.js'
+import { ensureMutationAuth, getCorsHeaders, handleOptionsResponse } from '../../../_shared.js'
 import { getUniversalDealDossier } from '@/lib/cockpit/universal-deal-dossier-service.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_ORIGINS = new Set([
-  'https://ops.leadcommand.ai',
-  'https://nexus-dashboard.vercel.app',
-  'http://localhost:5173',
-])
-
-function resolveAllowedOrigin(origin) {
-  if (!origin) return null
-  if (ALLOWED_ORIGINS.has(origin)) return origin
-  if (/^https:\/\/nexus-dashboard(-[a-z0-9]+)*\.vercel\.app$/.test(origin)) return origin
-  return null
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.get('origin')
-  const allowedOrigin = resolveAllowedOrigin(origin)
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ops-dashboard-secret, X-Requested-With, Accept',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  }
-  if (allowedOrigin) headers['Access-Control-Allow-Origin'] = allowedOrigin
-  return headers
-}
-
 export async function OPTIONS(request) {
-  return new Response(null, { status: 204, headers: corsHeaders(request) })
+  return handleOptionsResponse(request)
 }
 
 export async function GET(request, { params }) {
@@ -44,7 +18,7 @@ export async function POST(request, { params }) {
 }
 
 async function handleRequest(request, params, isPost = false) {
-  const cors = corsHeaders(request)
+  const cors = getCorsHeaders(request)
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return auth.response
 

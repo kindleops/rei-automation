@@ -13,12 +13,21 @@ async function getQueueEngineSharedSecret() {
   return clean(await getSystemValue("queue_engine_shared_secret"));
 }
 
+function readProvidedCronSecret(request) {
+  const authorization = clean(request?.headers?.get("authorization"));
+  if (authorization.toLowerCase().startsWith("bearer ")) {
+    return authorization.slice(7).trim();
+  }
+  return clean(request?.headers?.get("x-vercel-cron-secret"));
+}
+
 export function getCronAuthResult(request) {
   const cron_secret = clean(process.env.CRON_SECRET);
   const authorization = clean(request?.headers?.get("authorization"));
   const user_agent = clean(request?.headers?.get("user-agent"));
   const is_vercel_production = clean(process.env.VERCEL_ENV).toLowerCase() === "production";
   const is_vercel_cron = user_agent.includes("vercel-cron/1.0");
+  const provided_secret = readProvidedCronSecret(request);
 
   if (!cron_secret) {
     if (is_vercel_production) {
@@ -41,7 +50,7 @@ export function getCronAuthResult(request) {
     };
   }
 
-  if (authorization !== `Bearer ${cron_secret}`) {
+  if (!provided_secret || provided_secret !== cron_secret) {
     return {
       ok: false,
       status: 401,

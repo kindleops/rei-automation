@@ -850,23 +850,23 @@ async function fetchActivityTimeline({ thread_key, canonical_e164, property_id, 
   if (thread_key) {
     const threadState = await queryMaybe(
       'inbox_thread_state',
-      'universal_stage, universal_status, inbox_bucket, updated_at, next_action',
+      'stage, status, updated_at, next_action',
       { thread_key },
       abortSignal,
     )
     if (threadState?.updated_at) {
-      if (threadState.universal_stage) {
+      if (threadState.stage) {
         pushUnique({
           type: 'stage_change',
-          label: `Stage changed · ${threadState.universal_stage}`,
+          label: `Stage changed · ${threadState.stage}`,
           timestamp: threadState.updated_at,
           source: 'inbox_thread_state',
         })
       }
-      if (threadState.universal_status || threadState.inbox_bucket) {
+      if (threadState.status) {
         pushUnique({
           type: 'status_change',
-          label: `Status changed · ${threadState.universal_status || threadState.inbox_bucket}`,
+          label: `Status changed · ${threadState.status}`,
           timestamp: threadState.updated_at,
           source: 'inbox_thread_state',
         })
@@ -1258,7 +1258,12 @@ export async function buildDealIntelligenceDossier({
   const baseline_scores = buildBaselineScores(propertyRow, hydrated)
 
   const censusRow = location.zip
-    ? await queryMaybe('census_geo_metrics', '*', { zip: location.zip }, abortSignal)
+    ? await queryMaybe(
+      'census_geo_metrics',
+      'geo_level,geoid,name,median_household_income,total_population,total_households,total_housing_units,vacancy_rate,renter_rate,owner_occupancy_rate,median_year_built,acquisition_pressure_score',
+      { geo_level: 'zcta', geoid: location.zip },
+      abortSignal,
+    )
     : null
 
   const propertySnapshot = buildPropertySnapshot(propertyRow, hydrated, property)
@@ -1300,9 +1305,9 @@ export async function buildDealIntelligenceDossier({
     ? {
         status: 'available',
         median_household_income: num(censusRow.median_household_income),
-        population: num(censusRow.population),
-        households: num(censusRow.households),
-        housing_units: num(censusRow.housing_units),
+        population: num(censusRow.total_population ?? censusRow.population),
+        households: num(censusRow.total_households ?? censusRow.households),
+        housing_units: num(censusRow.total_housing_units ?? censusRow.housing_units),
         vacancy_rate: num(censusRow.vacancy_rate),
         renter_rate: num(censusRow.renter_occupied_percent ?? censusRow.renter_rate),
         owner_occupancy_rate: num(censusRow.owner_occupied_percent ?? censusRow.owner_occupancy_rate),
