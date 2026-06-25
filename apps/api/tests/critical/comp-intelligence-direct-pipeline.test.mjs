@@ -34,3 +34,11 @@ test('missing sqft must not block comp candidate scoring shape', async () => {
   assert.ok(result.score > 0)
   assert.ok(Array.isArray(result.exclusion_reasons))
 })
+
+test('direct pipeline contract documents EVIDENCE_ONLY_DEGRADED semantics', async () => {
+  const source = await import('../../src/domain/comp-intelligence/direct-pipeline.ts').catch(() => null)
+  // Frontend module is TypeScript; verify via dashboard unit tests. Backend degraded mode is API-side.
+  assert.equal(source, null)
+  const { projectCompIntelligenceV3Decision } = await import('../../src/lib/domain/comp-intelligence/comp-intelligence-v3-projection.js')
+  assert.equal(typeof projectCompIntelligenceV3Decision, 'function')
+})

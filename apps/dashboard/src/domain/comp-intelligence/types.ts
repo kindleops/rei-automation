@@ -99,8 +99,28 @@ export interface CompCandidateEvidence {
   }
 }
 
+import type {
+  CompIntelligenceDecisionProjection,
+  CompLegacyValuation,
+  CompTransactionEvidence,
+} from './v3-types'
+
 export interface CompIntelligencePayload {
   subject: CanonicalSubjectProperty
+  decision_projection?: CompIntelligenceDecisionProjection | null
+  transaction_evidence?: CompTransactionEvidence[]
+  qualification_summary?: Record<string, unknown> | null
+  projection_meta?: {
+    read_only?: boolean
+    persisted?: boolean
+    score_table_write?: boolean
+    snapshot_write?: boolean
+    event_publication?: boolean
+    outbound_execution?: boolean
+    queryMs?: number
+  } | null
+  legacy_valuation?: CompLegacyValuation | null
+  data_source_mode?: 'api' | 'direct_rpc' | 'EVIDENCE_ONLY_DEGRADED' | null
   discovery: {
     search_mode: string
     is_market_fallback: boolean
