@@ -19,7 +19,12 @@ import {
 } from '@/lib/domain/queue/queue-control-safety.js'
 import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
-import { normalizeQueueExecutionMode } from '@/lib/domain/queue/queue-execution-mode.js'
+import {
+  blockedExecutionModeResult,
+  evaluateUnrestrictedDispatchGate,
+  getQueueExecutionMode,
+  normalizeQueueExecutionMode,
+} from '@/lib/domain/queue/queue-execution-mode.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -1035,6 +1040,11 @@ export async function POST(request) {
   }
 
   if (action === 'safe_batch' || action === 'run_due_queue' || action === 'run_small_queue_batch') {
+    const execution_mode = await getQueueExecutionMode({ getSystemValue })
+    const mode_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action })
+    if (!mode_gate.ok) {
+      return corsJson(request, blockedExecutionModeResult(mode_gate, action), mode_gate.status || 423)
+    }
     const safety = normalizeSafetyInput(body, values)
     const runtimeBrake = evaluateQueueSendRuntimeBrakes(values, {
       action,
@@ -1081,6 +1091,12 @@ export async function POST(request) {
     }
     if (clean(body.confirm) !== SEND_ONE_CONFIRM) {
       return corsJson(request,{ ok: false, action, error: 'confirm_string_required', reason: 'confirm_string_required' }, 423)
+    }
+
+    const execution_mode = await getQueueExecutionMode({ getSystemValue })
+    const mode_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action })
+    if (!mode_gate.ok) {
+      return corsJson(request, blockedExecutionModeResult(mode_gate, action), mode_gate.status || 423)
     }
 
     const { loadQueueRowById, processSendQueue } = await import('@/lib/domain/queue/process-send-queue.js')

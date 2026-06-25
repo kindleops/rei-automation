@@ -274,6 +274,8 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         supabase: supabase_client,
         authorization_id: auth_validation.authorization_id,
         authorization_validated: true,
+        authorization_token: auth_token,
+        campaign_id: scoped_canary_request.campaign_id,
       });
       return json_response(
         {

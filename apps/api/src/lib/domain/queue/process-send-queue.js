@@ -32,6 +32,7 @@ import {
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import {
   claimSendQueueRow,
   evaluateContactWindow,
@@ -125,6 +126,18 @@ function isPositiveCategory(value) {
     "_ active",
     "_ warming up",
   ].includes(lower(value));
+}
+
+async function assertDispatchAuthorization(queue_row_id, lock_token, deps = {}) {
+  if (!queue_row_id || !lock_token) {
+    return { ok: false, reason: "missing_dispatch_claim_token" };
+  }
+  const verify =
+    typeof deps.verifyDispatchAuthorization === "function"
+      ? deps.verifyDispatchAuthorization
+      : verifyDispatchAuthorization;
+  const supabase = deps.supabase || deps.supabaseClient || defaultSupabase;
+  return verify(queue_row_id, lock_token, { supabase });
 }
 
 function isNegativeCategory(value) {
@@ -1121,6 +1134,29 @@ async function processLegacyQueueItem(resolved_queue_row, deps = {}) {
   try {
     await markQueueRowSending(resolved_queue_row, deps);
 
+    const legacy_lock_token =
+      clean(deps.claimedLockToken || resolved_queue_row?.lock_token) || null;
+    const dispatch_auth = await assertDispatchAuthorization(
+      queue_row_id,
+      legacy_lock_token,
+      deps
+    );
+    if (!dispatch_auth.ok) {
+      warn("queue.dispatch_authorization_denied", {
+        queue_row_id,
+        reason: dispatch_auth.reason,
+        path: "processLegacyQueueItem",
+      });
+      return {
+        ok: false,
+        sent: false,
+        skipped: true,
+        reason: dispatch_auth.reason || "dispatch_authorization_denied",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
     console.log("ABOUT TO SEND MESSAGE");
     console.log("SENDING SMS", {
       to: message_fields.to,
@@ -1689,6 +1725,28 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       character_count: queue_row.character_count ?? message_fields.body.length,
       campaign_id: queue_row.metadata?.campaign_id ?? null,
     });
+
+    const dispatch_auth = await assertDispatchAuthorization(queue_row_id, lock_token, deps);
+    if (!dispatch_auth.ok) {
+      warn("queue.dispatch_authorization_denied", {
+        queue_row_id,
+        reason: dispatch_auth.reason,
+        path: "processSupabaseQueueItem",
+      });
+      await releaseSkippedQueueRow(queue_row, lock_token, dispatch_auth.reason, {
+        ...deps,
+        now,
+      });
+      return {
+        ok: true,
+        skipped: true,
+        sent: false,
+        reason: dispatch_auth.reason || "dispatch_authorization_denied",
+        queue_status: queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
 
     const send_result = await send_textgrid_sms({
       to: message_fields.to,

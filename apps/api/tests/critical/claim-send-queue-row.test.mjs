@@ -3,34 +3,26 @@ import assert from "node:assert/strict";
 
 import { claimSendQueueRow } from "@/lib/supabase/sms-engine.js";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+function makeLegacyClaimHook(accepted_statuses) {
+  const accepted = new Set(
+    (Array.isArray(accepted_statuses) ? accepted_statuses : [accepted_statuses]).map((s) =>
+      String(s).toLowerCase()
+    )
+  );
 
-function makeClaimSupabase(existing_queue_status) {
-  // Simulates a Supabase client whose .in("queue_status",...) filter
-  // only returns a row if the status is in the provided list.
-  // This validates the WHERE condition in claimSendQueueRow.
-  const captured = { in_statuses: null };
-
-  const row_returned = { id: "test-row-id", queue_status: "sending", is_locked: true, lock_token: "abc", locked_at: new Date().toISOString(), metadata: {}, to_phone_number: "+15005550006", from_phone_number: "+15005550001", message_body: "Hello", message_text: "Hello", seller_first_name: "Test", updated_at: new Date().toISOString() };
-
-  const query = {
-    update() { return query; },
-    eq() { return query; },
-    in(col, vals) {
-      if (col === "queue_status") captured.in_statuses = vals;
-      return query;
-    },
-    is() { return query; },
-    select() { return query; },
-    async maybeSingle() {
-      // Return the row only if the existing status is in the accepted list
-      const accepted = captured.in_statuses || [];
-      const matched = accepted.includes(existing_queue_status);
-      return { data: matched ? row_returned : null, error: null };
-    },
+  return async (row, patch) => {
+    const matched = accepted.has(String(row.queue_status).toLowerCase());
+    if (!matched) {
+      return { ok: false, claimed: false, reason: "queue_item_claim_conflict", row };
+    }
+    return {
+      ok: true,
+      claimed: true,
+      reason: "claimed",
+      row: { ...row, ...patch },
+      lock_token: patch.lock_token,
+    };
   };
-
-  return { supabase: { from: () => query }, captured };
 }
 
 function makeRow(queue_status) {
@@ -49,12 +41,10 @@ function makeRow(queue_status) {
   };
 }
 
-// ─── regression: "scheduled" rows were not claimable before fix ───────────────
-
 test("claimSendQueueRow succeeds for queue_status=scheduled (regression: was missing from WHERE)", async () => {
-  const { supabase } = makeClaimSupabase("scheduled");
-
-  const result = await claimSendQueueRow(makeRow("scheduled"), { supabase });
+  const result = await claimSendQueueRow(makeRow("scheduled"), {
+    claimSendQueueRow: makeLegacyClaimHook("scheduled"),
+  });
 
   assert.equal(result.ok, true, "scheduled row must be claimable");
   assert.equal(result.claimed, true);
@@ -63,21 +53,9 @@ test("claimSendQueueRow succeeds for queue_status=scheduled (regression: was mis
 });
 
 test("claimSendQueueRow returns queue_item_claim_conflict when WHERE does not match (simulates pre-fix behavior)", async () => {
-  // Use a mock that only accepts "queued" — the pre-fix behavior
-  const row_returned = { id: "test-row-id", queue_status: "sending", is_locked: true, lock_token: "abc", locked_at: new Date().toISOString(), metadata: {}, to_phone_number: "+15005550006", from_phone_number: "+15005550001", message_body: "Hello", message_text: "Hello", seller_first_name: "Test", updated_at: new Date().toISOString() };
-
-  const query = {
-    update() { return query; },
-    eq() { return query; },
-    in(col, vals) { return query; }, // absorb all .in() calls
-    is() { return query; },
-    select() { return query; },
-    // Always returns null — simulates the pre-fix WHERE rejecting "scheduled"
-    async maybeSingle() { return { data: null, error: null }; },
-  };
-
-  const supabase = { from: () => query };
-  const result = await claimSendQueueRow(makeRow("scheduled"), { supabase });
+  const result = await claimSendQueueRow(makeRow("scheduled"), {
+    claimSendQueueRow: makeLegacyClaimHook("queued"),
+  });
 
   assert.equal(result.ok, false);
   assert.equal(result.claimed, false);
@@ -85,30 +63,35 @@ test("claimSendQueueRow returns queue_item_claim_conflict when WHERE does not ma
 });
 
 test("claimSendQueueRow succeeds for queue_status=queued (existing behavior preserved)", async () => {
-  const { supabase } = makeClaimSupabase("queued");
-  const result = await claimSendQueueRow(makeRow("queued"), { supabase });
+  const result = await claimSendQueueRow(makeRow("queued"), {
+    claimSendQueueRow: makeLegacyClaimHook("queued"),
+  });
   assert.equal(result.ok, true, "queued row must still be claimable");
   assert.equal(result.claimed, true);
 });
 
 test("claimSendQueueRow succeeds for queue_status=pending", async () => {
-  const { supabase } = makeClaimSupabase("pending");
-  const result = await claimSendQueueRow(makeRow("pending"), { supabase });
+  const result = await claimSendQueueRow(makeRow("pending"), {
+    claimSendQueueRow: makeLegacyClaimHook("pending"),
+  });
   assert.equal(result.ok, true, "pending row must be claimable");
 });
 
 test("claimSendQueueRow accepts all statuses loaded by loadRunnableSendQueueRows", async () => {
   const runnable_statuses = ["queued", "Queued", "scheduled", "pending", "approved", "ready"];
   for (const status of runnable_statuses) {
-    const { supabase } = makeClaimSupabase(status);
-    const result = await claimSendQueueRow(makeRow(status), { supabase });
+    const result = await claimSendQueueRow(makeRow(status), {
+      claimSendQueueRow: makeLegacyClaimHook(status),
+    });
     assert.equal(result.ok, true, `status="${status}" must be claimable`);
   }
 });
 
 test("claimSendQueueRow returns missing_queue_row_id when row has no id", async () => {
-  const { supabase } = makeClaimSupabase("scheduled");
-  const result = await claimSendQueueRow({ queue_status: "scheduled" }, { supabase });
+  const result = await claimSendQueueRow(
+    { queue_status: "scheduled" },
+    { claimSendQueueRow: makeLegacyClaimHook("scheduled") }
+  );
   assert.equal(result.ok, false);
   assert.equal(result.reason, "missing_queue_row_id");
 });

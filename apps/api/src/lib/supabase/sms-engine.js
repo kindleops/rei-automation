@@ -929,65 +929,35 @@ export async function claimSendQueueRow(row, deps = {}) {
       row: normalized,
     };
   }
-  const claimed_at = deps.now || nowIso();
-  const lock_token = crypto.randomUUID();
-  const metadata = ensureObject(normalized.metadata);
-  const processing_run_id = clean(deps.processing_run_id || deps.run_id || metadata.processing_run_id || lock_token);
-  const run_started_at = clean(deps.run_started_at || metadata.run_started_at || claimed_at);
-  const processing_lease_minutes = Math.max(Number(deps.processing_lease_minutes ?? deps.processingLeaseMinutes ?? 10), 1);
-  const processing_timeout_at = addMinutesIso(claimed_at, processing_lease_minutes);
-  const payload = {
-    queue_status: "processing",
-    is_locked: true,
-    locked_at: claimed_at,
-    lock_token,
-    metadata: {
-      ...metadata,
-      processing_run_id,
-      run_started_at,
-      processing_started_at: claimed_at,
-      processing_worker_id: processing_run_id,
-      processing_timeout_at,
-      claimed_at: metadata.claimed_at || claimed_at,
-      claimed_by: metadata.claimed_by || "queue_runner",
-    },
-    updated_at: claimed_at,
-  };
 
   if (typeof deps.claimSendQueueRow === "function") {
-    return deps.claimSendQueueRow(normalized, payload);
+    const claimed_at = deps.now || nowIso();
+    const lock_token = crypto.randomUUID();
+    const metadata = ensureObject(normalized.metadata);
+    const processing_run_id = clean(deps.processing_run_id || deps.run_id || metadata.processing_run_id || lock_token);
+    return deps.claimSendQueueRow(normalized, {
+      queue_status: "processing",
+      is_locked: true,
+      locked_at: claimed_at,
+      lock_token,
+      metadata: {
+        ...metadata,
+        processing_run_id,
+        claimed_at,
+        claimed_by: deps.scoped_canary ? "scoped_canary" : "queue_runner",
+        claim_authorization_token: lock_token,
+      },
+      updated_at: claimed_at,
+    });
   }
 
-  const supabase = getSupabase(deps);
-
-  const query = supabase
-    .from(SEND_QUEUE_TABLE)
-    .update(payload)
-    .eq("id", normalized.id)
-    .in("queue_status", ["queued", "Queued", "scheduled", "pending", "approved", "ready"])
-    .is("lock_token", null)
-    .select()
-    .maybeSingle();
-
-  const { data, error } = await query;
-  if (error) throw error;
-  if (!data) {
-    return {
-      ok: false,
-      claimed: false,
-      reason: "queue_item_claim_conflict",
-      row: normalized,
-    };
-  }
-
-  return {
-    ok: true,
-    claimed: true,
-    reason: "claimed",
-    row: normalizeSendQueueRow(data),
-    lock_token,
-    claimed_at,
-  };
+  const { atomicClaimSendQueueRow } = await import("@/lib/domain/queue/queue-atomic-claim.js");
+  const metadata = ensureObject(normalized.metadata);
+  return atomicClaimSendQueueRow(normalized, {
+    ...deps,
+    supabase: getSupabase(deps),
+    campaign_id: deps.campaign_id || normalized.campaign_id || metadata.campaign_id,
+  });
 }
 
 export async function updateSendQueueRowWithLock(row_id, lock_token, payload, deps = {}) {

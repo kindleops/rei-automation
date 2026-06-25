@@ -415,10 +415,13 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
         const result = await process_item(row, {
           ...deps,
           now,
+          supabase: supabase,
           supabaseClient: supabase,
           processing_run_id,
           run_started_at: now,
           canary_run_id: parsed.canary_run_id,
+          campaign_id: parsed.campaign_id,
+          authorization_token: deps.authorization_token,
           scoped_canary: true,
         });
         if (result?.sent) {
