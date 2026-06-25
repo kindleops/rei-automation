@@ -209,9 +209,19 @@ WHERE me.direction = 'inbound'
   AND me.property_id IS NOT NULL;
 
 COMMENT ON VIEW public.property_participant_graph IS
-  'Read-only participant projection for inbox UI. Projects message_events + reviewed referrals; not an identity source of truth.';
+  'Read-only participant projection for inbox UI. Projects message_events + reviewed referrals; not an identity source of truth. '
+  'Query pattern: property_id filter + last_message_at DESC per participant. '
+  'Indexes: idx on message_events(property_id), phones(canonical_e164), seller_contact_referrals(property_id). '
+  'Materialization threshold: only introduce property_participant_graph_mv if p95 inbox load exceeds 500ms '
+  'with >5k participants/property; refresh strategy would be REFRESH MATERIALIZED VIEW CONCURRENTLY on '
+  'message_events insert + referral review_status change. Until benchmarked, keep this view-only projection.';
 
 -- ── RLS ───────────────────────────────────────────────────────────────────
+-- Preferred access model:
+--   * service_role: writes audit/referral records and replay metadata
+--   * dashboard: reads via authenticated server APIs (no direct client SELECT on audit)
+--   * anon: denied on all sensitive tables
+--   * referral review mutations: narrow authenticated API + immutable audit event (not direct client UPDATE)
 ALTER TABLE public.inbound_intelligence_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.seller_contact_referrals ENABLE ROW LEVEL SECURITY;
 
@@ -240,6 +250,12 @@ CREATE POLICY "deny_authenticated_delete_inbound_intelligence_audit"
   TO authenticated
   USING (false);
 
+CREATE POLICY "deny_authenticated_select_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR SELECT
+  TO authenticated
+  USING (false);
+
 CREATE POLICY "service_role_all_seller_contact_referrals"
   ON public.seller_contact_referrals
   FOR ALL
@@ -247,11 +263,17 @@ CREATE POLICY "service_role_all_seller_contact_referrals"
   USING (true)
   WITH CHECK (true);
 
-CREATE POLICY "authenticated_read_seller_contact_referrals"
+CREATE POLICY "deny_authenticated_select_seller_contact_referrals"
   ON public.seller_contact_referrals
   FOR SELECT
   TO authenticated
-  USING (true);
+  USING (false);
+
+CREATE POLICY "deny_authenticated_update_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR UPDATE
+  TO authenticated
+  USING (false);
 
 CREATE POLICY "deny_authenticated_insert_seller_contact_referrals"
   ON public.seller_contact_referrals

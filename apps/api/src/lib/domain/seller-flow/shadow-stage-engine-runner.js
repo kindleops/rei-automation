@@ -10,6 +10,12 @@ import {
   mapCanonicalToComparisonShape,
   mapShadowToComparisonShape,
 } from "@/lib/domain/seller-flow/shadow-comparison-contract.js";
+import {
+  compareTransitionShapes,
+  mapCanonicalTransitionShape,
+  mapShadowTransitionShape,
+} from "@/lib/domain/seller-flow/shadow-stage-transition.js";
+import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -22,11 +28,9 @@ function lower(value) {
 function normalizeUniversalStage(stage = null) {
   const value = lower(stage);
   if (!value) return "ownership_confirmation";
+  if (value === "offer_interest" || value.includes("consider")) return "offer_interest";
   if (value.includes("ownership") || value === "s1" || value === SELLER_FLOW_STAGES.OWNERSHIP_CHECK) {
     return "ownership_confirmation";
-  }
-  if (value.includes("consider") || value === "s2" || value === SELLER_FLOW_STAGES.CONSIDER_SELLING) {
-    return "offer_interest";
   }
   if (value.includes("asking") || value === "s3" || value === SELLER_FLOW_STAGES.ASKING_PRICE) {
     return "asking_price";
@@ -34,7 +38,7 @@ function normalizeUniversalStage(stage = null) {
   if (value.includes("condition") || value.includes("basics") || value === "s4") {
     return "condition_justification";
   }
-  if (value.includes("offer") || value.includes("negotiat") || value === "s5") {
+  if (value.includes("negotiat") || value === "s5") {
     return "offer_negotiation";
   }
   if (value.includes("contract") || value.includes("close") || value === "s6") {
@@ -54,6 +58,27 @@ function resolveShadowInboundIntent({
     clean(classification?.primary_intent || classification?.detected_intent) ||
     "unclear"
   );
+}
+
+function applyRelationshipPolicyToShadow(shadow, { relationship, canonical_decision, granular_stage }) {
+  const policy = enforceRelationshipTemplatePolicy({
+    relationship,
+    canonical_intent: canonical_decision?.canonical_intent,
+    granular_stage,
+    template_use_case: shadow.proposed_decision?.template_use_case,
+  });
+  if (!policy.blocked && !policy.use_case) return shadow;
+  return {
+    ...shadow,
+    granular_stage: policy.stage_code || shadow.granular_stage,
+    proposed_decision: {
+      ...shadow.proposed_decision,
+      template_use_case: policy.use_case || null,
+      next_stage: policy.stage_code || shadow.proposed_decision?.next_stage,
+      should_queue_reply: false,
+      policy_source: policy.reason || "relationship_template_policy",
+    },
+  };
 }
 
 function runStage1Shadow({
@@ -175,25 +200,76 @@ export function runShadowStageEngine({
   follow_up_recommendation = null,
   recommended_use_case = null,
   human_review_required = false,
+  route = null,
 } = {}) {
-  const current_stage =
+  const post_decision_stage =
     clean(universal_stage) ||
     clean(classification?.stage_hint) ||
     clean(context?.summary?.conversation_stage) ||
     SELLER_FLOW_STAGES.OWNERSHIP_CHECK;
 
-  const normalized_universal_stage = normalizeUniversalStage(current_stage);
+  const invocation_stage = normalizeUniversalStage(
+    clean(context?.summary?.conversation_stage) ||
+      clean(classification?.stage_hint) ||
+      post_decision_stage
+  );
+  const normalized_universal_stage = normalizeUniversalStage(post_decision_stage);
 
-  const shadow = runStageEngine(normalized_universal_stage, {
+  let shadow = runStageEngine(invocation_stage, {
     message,
     classification,
     context,
-    current_stage,
-    conversation_stage: current_stage,
+    current_stage: post_decision_stage,
+    conversation_stage: clean(context?.summary?.conversation_stage) || post_decision_stage,
     seller_message: message,
     canonical_decision,
     relationship,
+    route,
   });
+
+  shadow = applyRelationshipPolicyToShadow(shadow, {
+    relationship,
+    canonical_decision,
+    granular_stage,
+  });
+
+  const relationship_template = enforceRelationshipTemplatePolicy({
+    relationship,
+    canonical_intent: canonical_decision?.canonical_intent,
+    granular_stage,
+    template_use_case: recommended_use_case,
+  });
+
+  const effective_recommended_use_case = relationship_template.blocked
+    ? relationship_template.use_case
+    : recommended_use_case;
+
+  const shadow_recommended_use_case = relationship_template.blocked
+    ? relationship_template.use_case
+    : shadow.proposed_decision?.template_use_case || null;
+
+  const canonical_transition = mapCanonicalTransitionShape({
+    context,
+    route,
+    canonical_decision,
+    relationship,
+    universal_stage,
+    granular_stage,
+    classification,
+  });
+
+  const shadow_transition = mapShadowTransitionShape({
+    context,
+    shadow_engine: shadow,
+    relationship,
+    canonical_decision,
+    classification,
+  });
+
+  const transition_comparison = compareTransitionShapes(
+    canonical_transition,
+    shadow_transition
+  );
 
   const canonical_shape = mapCanonicalToComparisonShape({
     canonical_decision,
@@ -203,17 +279,21 @@ export function runShadowStageEngine({
     universal_stage: universal_stage || shadow.universal_stage,
     granular_stage,
     follow_up_recommendation,
-    recommended_use_case,
+    recommended_use_case: effective_recommended_use_case,
     human_review_required,
   });
 
   const shadow_shape = mapShadowToComparisonShape({
     shadow_engine: shadow,
     relationship,
+    canonical_decision,
     follow_up_recommendation,
+    recommended_use_case: shadow_recommended_use_case,
   });
 
-  const comparison = compareNormalizedDecisionShapes(canonical_shape, shadow_shape);
+  const comparison = compareNormalizedDecisionShapes(canonical_shape, shadow_shape, {
+    transition_comparison,
+  });
 
   return {
     universal_stage: normalized_universal_stage,
@@ -226,6 +306,7 @@ export function runShadowStageEngine({
     legacy_disagreement_reason: null,
     shadow_mode: true,
     execution_authority: false,
+    transition_comparison,
     comparison,
   };
 }

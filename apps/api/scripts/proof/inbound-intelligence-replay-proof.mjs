@@ -167,6 +167,9 @@ async function replayFixture(fixture) {
       comparison_class: comparison.comparison_class || null,
       material_disagreement: comparison.material_disagreement ?? null,
       material_disagreement_fields: comparison.material_disagreement_fields || [],
+      non_material_disagreement_fields: comparison.non_material_disagreement_fields || [],
+      materiality_model: comparison.materiality_model || null,
+      transition_comparison: comparison.transition_comparison || null,
       canonical_shape: comparison.canonical_shape || null,
       shadow_shape: comparison.shadow_shape || null,
     },
@@ -194,10 +197,26 @@ for (const fixture of FIXTURES) {
   if (!result.shadow_comparison.comparison_class) {
     violations.push(`${result.event_id}:missing_normalized_comparison`);
   }
+  if (
+    result.shadow_comparison.non_material_disagreement_fields?.includes("safety_disposition") ||
+    (result.shadow_comparison.agreement?.safety_disposition === false &&
+      result.shadow_comparison.comparison_class === "non_material_disagreement")
+  ) {
+    violations.push(`${result.event_id}:safety_disagreement_classified_non_material`);
+  }
+  if (
+    result.canonical_intent === "non_owner_referral" &&
+    ["consider_selling", "ownership_check", "seller_asking_price"].includes(result.recommended_template)
+  ) {
+    violations.push(`${result.event_id}:referral_seller_interest_template_leak`);
+  }
 }
 
 const comparison_summary = {
   full_agreement: results.filter((r) => r.shadow_comparison.comparison_class === "full_agreement").length,
+  expected_transition_context_difference: results.filter(
+    (r) => r.shadow_comparison.comparison_class === "expected_transition_context_difference"
+  ).length,
   non_material_disagreement: results.filter(
     (r) => r.shadow_comparison.comparison_class === "non_material_disagreement"
   ).length,

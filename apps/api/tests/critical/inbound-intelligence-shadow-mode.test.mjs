@@ -13,6 +13,16 @@ import { buildIntelligenceMessageEventPatch } from "@/lib/domain/seller-flow/per
 import { runShadowStageEngine } from "@/lib/domain/seller-flow/shadow-stage-engine-runner.js";
 import { resolveFollowUpPlan } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import {
+  ALWAYS_MATERIAL_FIELDS,
+  compareNormalizedDecisionShapes,
+} from "@/lib/domain/seller-flow/shadow-comparison-contract.js";
+import {
+  compareTransitionShapes,
+  mapCanonicalTransitionShape,
+  mapShadowTransitionShape,
+} from "@/lib/domain/seller-flow/shadow-stage-transition.js";
+import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
+import {
   handleTextgridInboundWebhook,
   __setTextgridInboundTestDeps,
   __resetTextgridInboundTestDeps,
@@ -602,4 +612,170 @@ test("stage 1 shadow uses relationship override not raw wrong_number classifier"
   assert.notEqual(shadow.shadow_stage_engine.granular_stage, "wrong_person");
   assert.equal(shadow.shadow_stage_engine.proposed_decision.inbound_intent, "non_owner_referral");
   assert.equal(shadow.comparison.comparison_class, "full_agreement");
+});
+
+test("transition-aware ownership confirmation agrees on offer_interest advance", () => {
+  const context = baseContext();
+  const canonical = mapCanonicalTransitionShape({
+    context,
+    route: { stage: "Ownership Confirmation" },
+    canonical_decision: { canonical_intent: "ownership_confirmed" },
+    relationship: {
+      canonical_intent: "ownership_confirmed",
+      ownership_confirmed: true,
+      universal_stage: "offer_interest",
+    },
+    classification: baseClassification(),
+  });
+  const shadow = mapShadowTransitionShape({
+    context,
+    shadow_engine: {
+      universal_stage: "offer_interest",
+      proposed_decision: { inbound_intent: "ownership_confirmed", next_stage: "consider_selling" },
+    },
+    relationship: {
+      canonical_intent: "ownership_confirmed",
+      ownership_confirmed: true,
+    },
+    canonical_decision: { canonical_intent: "ownership_confirmed" },
+    classification: baseClassification(),
+  });
+  const result = compareTransitionShapes(canonical, shadow);
+  assert.equal(canonical.stage_before_message, "ownership_confirmation");
+  assert.equal(canonical.proposed_next_stage, "offer_interest");
+  assert.equal(result.comparison_class, "full_agreement");
+});
+
+test("transition-aware asking-price progression preserves stage_after_decision", () => {
+  const context = {
+    ...baseContext(),
+    summary: { ...baseContext().summary, conversation_stage: "Asking Price" },
+  };
+  const canonical = mapCanonicalTransitionShape({
+    context,
+    route: { stage: "Asking Price" },
+    canonical_decision: { canonical_intent: "asking_price_provided" },
+    classification: { primary_intent: "asking_price_provided", confidence: 0.9 },
+  });
+  const shadow = mapShadowTransitionShape({
+    context,
+    shadow_engine: {
+      universal_stage: "asking_price",
+      granular_stage: "asking_price",
+      proposed_decision: { inbound_intent: "asking_price_provided", next_stage: "asking_price" },
+    },
+    canonical_decision: { canonical_intent: "asking_price_provided" },
+    classification: { primary_intent: "asking_price_provided", confidence: 0.9 },
+  });
+  const result = compareTransitionShapes(canonical, shadow);
+  assert.equal(canonical.event_intent, "asking_price_provided");
+  assert.equal(canonical.stage_after_decision, "asking_price");
+  assert.equal(result.comparison_class, "full_agreement");
+});
+
+test("transition-aware condition progression holds condition_justification", () => {
+  const context = {
+    ...baseContext(),
+    summary: { ...baseContext().summary, conversation_stage: "Condition Probe" },
+  };
+  const canonical = mapCanonicalTransitionShape({
+    context,
+    route: { stage: "Condition Probe" },
+    canonical_decision: { canonical_intent: "condition_disclosed" },
+    classification: { primary_intent: "condition_disclosed", confidence: 0.85 },
+  });
+  const shadow = mapShadowTransitionShape({
+    context,
+    shadow_engine: {
+      universal_stage: "condition_justification",
+      granular_stage: "condition_disclosed",
+      proposed_decision: { inbound_intent: "condition_disclosed", next_stage: "condition_disclosed" },
+    },
+    canonical_decision: { canonical_intent: "condition_disclosed" },
+    classification: { primary_intent: "condition_disclosed", confidence: 0.85 },
+  });
+  const result = compareTransitionShapes(canonical, shadow);
+  assert.equal(canonical.proposed_next_stage, "condition_justification");
+  assert.equal(result.comparison_class, "full_agreement");
+});
+
+test("referral name-only template selection blocks seller-interest use cases", async () => {
+  const message = "I do not own it. His name is Maria Garcia";
+  const relationship = resolveInboundRelationship({
+    message,
+    classification: { primary_intent: "wrong_number" },
+    property_id: "1016",
+  });
+  const policy = enforceRelationshipTemplatePolicy({
+    relationship,
+    canonical_intent: relationship.canonical_intent,
+    template_use_case: "consider_selling",
+  });
+  assert.equal(policy.blocked, true);
+  assert.equal(policy.use_case, "referral_review");
+  assert.notEqual(policy.use_case, "consider_selling");
+
+  const intelligence = await runInboundIntelligencePhase({
+    message,
+    threadKey: "+15550000016",
+    propertyId: "1016",
+    prospectId: "31",
+    ownerId: "21",
+    phoneId: "51",
+    classification: { primary_intent: "wrong_number", confidence: 0.8 },
+    latestThreadContext: baseContext(),
+    context: baseContext(),
+    route: { stage: "Ownership Confirmation", use_case: "ownership_check" },
+    inboundFrom: "+15550000016",
+    inboundEventId: "referral-name-01",
+    auto_reply_mode: "disabled",
+    execution_allowed: false,
+  });
+  assert.equal(intelligence.intelligence_snapshot.recommended_use_case, "referral_review");
+  assert.notEqual(intelligence.intelligence_snapshot.recommended_use_case, "consider_selling");
+});
+
+test("safety disposition disagreement is always material", () => {
+  const comparison = compareNormalizedDecisionShapes(
+    {
+      canonical_intent: "hostile_or_legal",
+      identity_class: "unknown",
+      relationship_outcome: null,
+      suppression_scope: "incident",
+      universal_stage: "ownership_confirmation",
+      granular_stage: "hostile_or_legal",
+      safety_disposition: "review",
+      proposed_action: "human_review",
+      selected_use_case: null,
+      follow_up_policy: "suppressed",
+      human_review_required: true,
+    },
+    {
+      canonical_intent: "hostile_or_legal",
+      identity_class: "unknown",
+      relationship_outcome: null,
+      suppression_scope: "incident",
+      universal_stage: "ownership_confirmation",
+      granular_stage: "hostile_or_legal",
+      safety_disposition: "suppressed",
+      proposed_action: "suppress_globally",
+      selected_use_case: null,
+      follow_up_policy: "suppressed",
+      human_review_required: true,
+    }
+  );
+  assert.ok(ALWAYS_MATERIAL_FIELDS.includes("safety_disposition"));
+  assert.ok(comparison.material_disagreement_fields.includes("safety_disposition"));
+  assert.equal(comparison.comparison_class, "material_disagreement");
+});
+
+test("unapproved follow-up policy returns explicit review_required_no_schedule", () => {
+  for (const intent of ["condition_disclosed", "latent_interest"]) {
+    const plan = resolveFollowUpPlan(intent, { thread_key: "+15550000022" });
+    assert.equal(plan.reason, "follow_up_policy_not_approved");
+    assert.equal(plan.follow_up_policy, "review_required_no_schedule");
+    assert.equal(plan.dispatchable, false);
+    assert.equal(plan.followup_created, false);
+    assert.notEqual(plan.reason, "no_followup_rule_for_intent:" + intent);
+  }
 });

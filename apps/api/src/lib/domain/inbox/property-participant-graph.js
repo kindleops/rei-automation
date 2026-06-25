@@ -1,6 +1,17 @@
 /**
  * Canonical property-centered participant graph contract.
  *
+ * Materialization policy (shadow branch):
+ * - Current: read-only SQL view `property_participant_graph` (see PROPOSED migration).
+ * - Expected query pattern: filter by property_id, order participants by last_message_at DESC.
+ * - Indexes relied on: message_events(property_id), phones(canonical_e164),
+ *   seller_contact_referrals(property_id, review_status).
+ * - Benchmark threshold: introduce `property_participant_graph_mv` only if p95 property
+ *   inbox load exceeds 500ms with >5k participants per property.
+ * - Required refresh strategy if materialized later: REFRESH MATERIALIZED VIEW CONCURRENTLY
+ *   triggered on message_events insert and seller_contact_referrals review_status change.
+ * - Do not duplicate state prematurely; the view remains the canonical read projection.
+ *
  * UI rules:
  * - property/opportunity is the permanent conversation container
  * - each phone number has its own SMS thread (never merge cross-number bubbles)

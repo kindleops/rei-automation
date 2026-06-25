@@ -10,6 +10,7 @@ import {
   resolveInboundRelationship,
 } from "@/lib/domain/seller-flow/resolve-inbound-relationship.js";
 import { runShadowStageEngine } from "@/lib/domain/seller-flow/shadow-stage-engine-runner.js";
+import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { detectInboundConditionOrMotivationIntent } from "@/lib/domain/seller-flow/detect-inbound-condition-intent.js";
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
@@ -81,7 +82,8 @@ function applyRelationshipOverride(canonical_decision = {}, relationship = null)
   if (
     !relationship?.relationship_claim &&
     !relationship?.referral_detected &&
-    !relationship?.ownership_confirmed
+    !relationship?.ownership_confirmed &&
+    !relationship?.should_suppress_contact
   ) {
     return canonical_decision;
   }
@@ -123,10 +125,18 @@ function applyRelationshipOverride(canonical_decision = {}, relationship = null)
     overridden.audit_reason = relationship.referral_detected
       ? "non_owner_referral_property_scoped"
       : "property_specific_non_owner";
-  } else if (relationship.is_global_suppression) {
+  } else if (relationship.is_global_suppression || relationship.should_suppress_contact) {
     overridden.should_suppress_contact = true;
-    overridden.suppression_reason = "wrong_number";
-    overridden.safety_status = "suppressed";
+    overridden.suppression_reason =
+      relationship.canonical_intent === "hostile_or_legal"
+        ? "hostile_or_legal_intent"
+        : relationship.canonical_intent === "opt_out"
+          ? "opt_out_intent_no_marketing"
+          : "wrong_number";
+    overridden.safety_status = relationship.safety_status || "suppressed";
+    overridden.next_action = "suppress_contact";
+    overridden.should_mark_human_review = false;
+    overridden.human_review_required = false;
   }
 
   return overridden;
@@ -263,6 +273,28 @@ export async function runInboundIntelligencePhase({
     relationship
   );
 
+  const relationship_template = enforceRelationshipTemplatePolicy({
+    relationship,
+    canonical_intent: canonical_decision.canonical_intent,
+    granular_stage,
+    template_use_case:
+      clean(template_result?.template?.use_case) || canonical_decision.route_hint || null,
+  });
+
+  const recommended_use_case = relationship_template.blocked
+    ? relationship_template.use_case
+    : clean(template_result?.template?.use_case) || canonical_decision.route_hint || null;
+
+  if (relationship_template.blocked && relationship_template.use_case) {
+    canonical_decision = {
+      ...canonical_decision,
+      route_hint: relationship_template.use_case,
+      next_action: "mark_human_review",
+      should_queue_reply: false,
+      reply_mode: "manual_review",
+    };
+  }
+
   const follow_up_suppressed = Boolean(
     canonical_decision.should_suppress_contact ||
       isGlobalSuppressionRelationship(relationship) ||
@@ -293,11 +325,11 @@ export async function runInboundIntelligencePhase({
     universal_stage,
     granular_stage,
     follow_up_recommendation,
-    recommended_use_case:
-      clean(template_result?.template?.use_case) || canonical_decision.route_hint || null,
+    recommended_use_case,
     human_review_required: Boolean(
       relationship.human_review_required || canonical_decision.should_mark_human_review
     ),
+    route,
   });
 
   const execution_blocked_reason = deriveExecutionBlockedReason({
@@ -345,10 +377,7 @@ export async function runInboundIntelligencePhase({
           safe_for_auto_reply: template_result.template?.safe_for_auto_reply === true,
         }
       : null,
-    recommended_use_case:
-      clean(template_result?.template?.use_case) ||
-      canonical_decision.route_hint ||
-      null,
+    recommended_use_case,
     automation_execution_status: execution_allowed ? "execution_eligible" : "shadow_only",
     execution_blocked_reason,
     human_review_required,
