@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
-import { useInboxData, toWorkflowThread } from './inbox.adapter'
+import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
+import { resolveCanonicalThreadStateKey } from '../../domain/inbox/resolveCanonicalThreadStateKey'
 import './inbox-universal.css'
 import {
   updateThreadStage,
@@ -614,6 +615,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [activityFeed, setActivityFeed] = useState<InboxActivityEvent[]>([])
   const [autonomyControls, setAutonomyControls] = useState<AutonomyControlState>(defaultAutonomyControlState)
   const messageCacheRef = useRef<Record<string, ThreadMessage[]>>({})
+  const dealContextCacheRef = useRef<Record<string, DealContext>>({})
   const optimisticMessageMapRef = useRef<Map<string, string>>(new Map()) // clientSendId → optimisticMessage.id
   const inFlightSendMapRef = useRef<Set<string>>(new Set()) // clientSendIds currently in-flight
   const prevThreadsRef = useRef<InboxWorkflowThread[]>([])
@@ -648,7 +650,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // Phase 2 trace — log whether the thread array reference is stable across refreshes
   useEffect(() => {
     const stable = threads === prevThreadsRef.current
-    console.log('[THREADS_CHANGED]', { stable, length: threads.length })
+    if (isInboxDebugEnabled()) {
+      console.log('[THREADS_CHANGED]', { stable, length: threads.length })
+    }
     prevThreadsRef.current = threads
   }, [threads])
 
@@ -710,6 +714,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return Math.round(rate)
     }
     const local = getInboxViewCounts(threads)
+    const storeCounts = data.counts ?? {}
+    const readStoreCount = (key: string): number | undefined => {
+      const value = storeCounts[key]
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+    }
+    const hasStoreCount = (key: string): boolean => readStoreCount(key) !== undefined
+    const storeHasAnyCounts = Object.keys(storeCounts).some(hasStoreCount)
     const now = new Date()
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
     const sentToday = threads.filter((thread) => {
@@ -742,25 +753,31 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // Category tab counts must be global backend counts (pagination-safe).
     // Do NOT fall back to visible-row counts when the server returns 0 —
     // that causes phantom count inflation when counts genuinely drop to zero.
-    const srv = data.counts ?? {}
-    const sv = (key: string, fallback: number) => {
-      const v = srv[key]
-      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v
+    const sv = (key: string, aliases: string[] = [], fallback?: number): number | undefined => {
+      const direct = readStoreCount(key)
+      if (direct !== undefined) return direct
+      for (const alias of aliases) {
+        const aliasValue = readStoreCount(alias)
+        if (aliasValue !== undefined) return aliasValue
+      }
+      if (storeHasAnyCounts) return undefined
       return fallback
     }
 
-    const allCount = sv('all', data.allInboxCount ?? local.all)
-    const newReplies = sv('new_replies', sv('new_inbound', sv('needs_reply', local.new_replies)))
-    const priorityCount = sv('priority', sv('hot_leads', local.priority ?? local.hot_leads))
-    const needsReview = sv('needs_review', sv('manual_review', local.needs_review))
-    const followUpCount = sv('follow_up', sv('follow_up_due', local.follow_up ?? local.follow_up_due ?? 0))
-    const suppressed = sv('suppressed', sv('dnc_opt_out', local.suppressed))
-    const coldNoResp = sv('cold', sv('cold_no_response', local.cold ?? local.cold_no_response))
-    const deadCount = sv('dead', local.dead ?? local.wrong_number ?? 0)
-    const automated = sv('automated', sv('auto_replied', local.automated))
-    const hotLeads = sv('hot_leads', local.hot_leads)
-    const activeCount = sv('active', local.active)
-    const waitingCount = sv('waiting', sv('waiting_on_seller', local.waiting ?? local.waiting_on_seller ?? 0))
+    const num = (value: number | undefined, fallback = 0) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback)
+
+    const allCount = num(sv('all', ['all_messages'], data.allInboxCount ?? local.all))
+    const newReplies = num(sv('new_replies', ['new_inbound', 'needs_reply'], local.new_replies))
+    const priorityCount = num(sv('priority', ['hot_leads'], local.priority ?? local.hot_leads))
+    const needsReview = num(sv('needs_review', ['manual_review'], local.needs_review))
+    const followUpCount = num(sv('follow_up', ['follow_up_due', 'outbound_active'], local.follow_up ?? local.follow_up_due ?? 0))
+    const suppressed = num(sv('suppressed', ['dnc_opt_out'], local.suppressed))
+    const coldNoResp = num(sv('cold', ['cold_no_response'], local.cold ?? local.cold_no_response))
+    const deadCount = num(sv('dead', [], local.dead ?? local.wrong_number ?? 0))
+    const automated = num(sv('automated', ['auto_replied'], local.automated))
+    const hotLeads = num(sv('hot_leads', [], local.hot_leads))
+    const activeCount = num(sv('active', [], local.active))
+    const waitingCount = num(sv('waiting', ['waiting_on_seller'], local.waiting ?? local.waiting_on_seller ?? 0))
 
     return {
       ...local,
@@ -1679,10 +1696,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setThreadViewMode('original')
     setDetectedThreadLanguage(null)
     setDealContext(fallbackDealContext)
-    setSelectedMessages([])
+    if (cachedMessages.length > 0) {
+      setSelectedMessages(cachedMessages)
+      setMessagesLoading(false)
+    } else {
+      setSelectedMessages([])
+      setMessagesLoading(true)
+    }
     setHasOlderMessages(false)
     setOlderMessagesLoading(false)
-    setMessagesLoading(true)
     setContextLoading(true)
     setThreadIntelligence((thread ?? null) as unknown as ThreadIntelligenceRecord | null)
 
@@ -3009,9 +3031,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
-    // Immediately clear old messages and show skeleton — effect fetches fresh ones
-    setSelectedMessages([])
-    setMessagesLoading(true)
+    const cacheKey = thread ? (getConversationThreadIdForThread(thread) || thread.threadKey || thread.id) : id
+    const cachedMessages = cacheKey ? (messageCacheRef.current[cacheKey] ?? []) : []
+    if (cachedMessages.length > 0) {
+      setSelectedMessages(cachedMessages)
+      setMessagesLoading(false)
+    } else {
+      setMessagesLoading(true)
+    }
     if (thread) {
       setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
       setSelectedId(thread.id)
@@ -3025,10 +3052,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setLayoutState((current) => ({ ...current, selectedThreadId: id }))
     }
     // Mark thread read and clear unread count in canonical state
-    if (threadKey) {
+    const canonicalStateKey = thread ? resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>) : resolveCanonicalThreadStateKey({ thread_key: threadKey, threadKey })
+    if (canonicalStateKey) {
       void callBackend('/api/cockpit/inbox/thread-state', {
         method: 'PATCH',
-        body: JSON.stringify({ thread_key: threadKey, is_read: true, unread_count: 0 }),
+        body: JSON.stringify({ thread_key: canonicalStateKey, patch: { is_read: true } }),
       })
     }
   }, [setActiveContext, threads, viewFilter])
@@ -3072,18 +3100,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     let cancelled = false
     const controller = new AbortController()
     const fallback = dealContextFromActiveInbox(active)
-    if (fallback && !dealContext) setDealContext(fallback)
+    const cacheKey = active.threadKey || active.propertyId || active.masterOwnerId || active.sellerId || ''
+    const cachedDealContext = cacheKey ? dealContextCacheRef.current[cacheKey] : null
+    if (cachedDealContext) {
+      setDealContext(cachedDealContext)
+    } else if (fallback && !dealContext) {
+      setDealContext(fallback)
+    }
 
     void (async () => {
       try {
-        let hydrated: DealContext | null = null
-        if (active.threadKey) {
+        let hydrated: DealContext | null = cachedDealContext ?? null
+        if (!hydrated && active.threadKey) {
           hydrated = await getDealContextByThread(active.threadKey, controller.signal)
         }
         if (!hydrated && active.propertyId) {
           hydrated = await getDealContextByProperty(active.propertyId, controller.signal)
         }
         if (cancelled || !hydrated) return
+        if (cacheKey) dealContextCacheRef.current[cacheKey] = hydrated
         if (selected && !activeContextMatchesThread(active, selected)) return
         setDealContext((current) => {
           if (!current) return hydrated

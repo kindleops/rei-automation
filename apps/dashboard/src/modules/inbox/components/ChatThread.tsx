@@ -426,7 +426,7 @@ export const ChatThread = ({
     const deliveredCount = outboundMessages.filter((message) => normalizeDeliveryBadge(message) === 'delivered').length
     const failedCount = outboundMessages.filter((message) => normalizeDeliveryBadge(message) === 'failed').length
     const lastMessage = timelineMessages[timelineMessages.length - 1] ?? null
-    console.log('[THREAD_MESSAGES_RENDER_AUDIT]', {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('nexus.inbox.debug') === '1') console.log('[THREAD_MESSAGES_RENDER_AUDIT]', {
       selectedConversationThreadId: thread ? ((thread as any).conversationThreadId || (thread as any).conversation_thread_id || thread.threadKey || thread.id) : null,
       messagesReceived: messages.length,
       inboundCount: timelineMessages.filter((message) => message.direction === 'inbound').length,

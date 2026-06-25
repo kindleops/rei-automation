@@ -441,6 +441,32 @@ test("latest inbound message appears at the top of the inbox when it is the newe
   assert.equal(result.threads[0].inbox_bucket, "new_replies");
 });
 
+test("inbound-last thread rows clear stale outbound delivery fields", async () => {
+  const supabase = createCanonicalInboxSupabase({
+    threadRows: [
+      makeThread({
+        thread_key: "+15550000021",
+        latest_message_at: "2026-05-29T12:12:00.000Z",
+        latest_message_body: "Seller replied",
+        latest_message_direction: "inbound",
+        inbox_bucket: "new_replies",
+        delivery_status: "delivered",
+        latest_delivery_status: "delivered",
+        provider_delivery_status: "delivered",
+        latest_provider_delivery_status: "delivered",
+      }),
+    ],
+  });
+
+  const result = await getLiveInbox({ filter: "all", limit: 20 }, { supabase });
+  const thread = result.threads[0];
+
+  assert.equal(thread.latest_message_direction, "inbound");
+  assert.equal(thread.latest_delivery_status, null);
+  assert.equal(thread.delivery_status, null);
+  assert.equal(thread.provider_delivery_status, null);
+});
+
 test("live inbox rows preserve latest delivery fields", async () => {
   const supabase = createCanonicalInboxSupabase({
     threadRows: [

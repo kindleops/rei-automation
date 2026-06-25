@@ -1749,20 +1749,22 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     row.inbox_bucket || row.inbox_category || row.inboxBucket || row.inboxCategory ||
     dc.inbox_bucket || dc.inboxBucket || 'all_messages',
   ).toLowerCase()
-  const deliveryStatus = asString(getFirst(row, [
+  const rawDeliveryStatus = asString(getFirst(row, [
     'latest_delivery_status',
     'delivery_status',
     'provider_delivery_status',
     'latest_provider_delivery_status',
     'queue_status',
   ]), '')
-  const providerDeliveryStatus = asString(getFirst(row, [
+  const rawProviderDeliveryStatus = asString(getFirst(row, [
     'latest_provider_delivery_status',
     'provider_delivery_status',
     'latest_delivery_status',
     'delivery_status',
     'queue_status',
-  ]), deliveryStatus)
+  ]), rawDeliveryStatus)
+  const deliveryStatus = latestMessageDirection === 'inbound' ? '' : rawDeliveryStatus
+  const providerDeliveryStatus = latestMessageDirection === 'inbound' ? '' : rawProviderDeliveryStatus
   const latestDeliveredAt = asIso(getFirst(row, ['latest_delivered_at', 'delivered_at'])) ?? null
   const latestFailedAt = asIso(getFirst(row, ['latest_failed_at', 'failed_at'])) ?? null
   const latestFailureReason = asString(getFirst(row, [
@@ -2631,59 +2633,24 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     return undefined
   }
 
-  // Seed from the counts already embedded in the /live response — always available.
-  let categoryCounts = {
-    hot_leads: concreteCount('priority', 'hot_leads') ?? 0,
-    needs_review: concreteCount('needs_review') ?? 0,
-    new_inbound: concreteCount('new_replies', 'new_inbound') ?? 0,
-    automated: concreteCount('automated') ?? 0,
-    outbound_active: concreteCount('follow_up', 'outbound_active') ?? 0,
-    waiting: concreteCount('waiting', 'waiting_on_seller') ?? 0,
-    cold_no_response: concreteCount('cold', 'cold_no_response') ?? 0,
-    dead: concreteCount('dead') ?? 0,
-    all: concreteCount('all_messages', 'all', 'total') ?? 0,
-    dnc_opt_out: concreteCount('suppressed', 'dnc_opt_out') ?? 0,
+  const buildCategoryCountsFromEmbedded = () => ({
+    hot_leads: concreteCount('priority', 'hot_leads'),
+    needs_review: concreteCount('needs_review'),
+    new_inbound: concreteCount('new_replies', 'new_inbound'),
+    automated: concreteCount('automated'),
+    outbound_active: concreteCount('follow_up', 'outbound_active'),
+    waiting: concreteCount('waiting', 'waiting_on_seller'),
+    cold_no_response: concreteCount('cold', 'cold_no_response'),
+    dead: concreteCount('dead'),
+    all: concreteCount('all_messages', 'all', 'total'),
+    dnc_opt_out: concreteCount('suppressed', 'dnc_opt_out'),
     all_inbound: allInboundCount,
-  }
+  })
 
-  const hasEmbeddedCounts = Boolean(viewCounts && Object.values(viewCounts).some((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0))
+  let categoryCounts = buildCategoryCountsFromEmbedded()
+  const hasEmbeddedCounts = Object.values(categoryCounts).some((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0)
   const countsWereSkipped = countsSource === 'skipped' || countPreservedReason === 'counts_skipped_by_request'
-
-  if ((!hasEmbeddedCounts || countsWereSkipped) && !options.signal?.aborted) {
-    try {
-      const countsRace = Promise.race([
-        backendClient.fetchInboxCounts(options.signal).catch(() => null),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
-      ])
-      const countsRes = await countsRace
-      if (countsRes?.ok) {
-        const payloadRecord = countsRes.data as AnyRecord
-        const rawCounts = (
-          payloadRecord?.counts
-          ?? (payloadRecord?.data as AnyRecord | undefined)?.counts
-          ?? {}
-        ) as AnyRecord
-        if (Object.keys(rawCounts).length > 0) {
-          categoryCounts = {
-            hot_leads: Number(rawCounts.priority ?? rawCounts.hot_leads ?? categoryCounts.hot_leads),
-            needs_review: Number(rawCounts.needs_review ?? categoryCounts.needs_review),
-            new_inbound: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? categoryCounts.new_inbound),
-            automated: Number(rawCounts.automated ?? categoryCounts.automated),
-            outbound_active: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? categoryCounts.outbound_active),
-            waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? categoryCounts.waiting),
-            cold_no_response: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? categoryCounts.cold_no_response),
-            dead: Number(rawCounts.dead ?? categoryCounts.dead),
-            all: Number(rawCounts.all_messages ?? rawCounts.all ?? categoryCounts.all),
-            dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? categoryCounts.dnc_opt_out),
-            all_inbound: allInboundCount,
-          }
-          if (DEV) console.log('[fetchInboxModel] counts enriched from /api/cockpit/inbox/counts', { categoryCounts })
-        }
-      }
-    } catch {
-      // counts remain best-effort; rows are already committed
-    }
-  }
+  let countsResolved = hasEmbeddedCounts && !countsWereSkipped
 
   const shouldBlockOnBackgroundCounts =
     Boolean((viewResult as AnyRecord)?.allowBlockingCountFallback) &&
@@ -2722,6 +2689,7 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
         dnc_opt_out: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? byInboxBucket.suppressed ?? categoryCounts.dnc_opt_out),
         all_inbound: allInboundCount,
       }
+      countsResolved = true
       if (DEV) console.log('[fetchInboxModel] counts enriched from deal-context', { categoryCounts })
     } else if (countsRes === null && DEV) {
       console.log('[fetchInboxModel] counts timed out or failed — using live response counts')
@@ -2736,14 +2704,18 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     console.log('[fetchInboxModel] using counts embedded in live response')
   }
 
-  const priorityInboxCount = concreteCount('priority') ?? categoryCounts.hot_leads
-  const activeInboxCount = concreteCount('active') ?? (categoryCounts.hot_leads + categoryCounts.needs_review + categoryCounts.new_inbound + categoryCounts.outbound_active)
-  const waitingInboxCount = concreteCount('waiting', 'waiting_on_seller') ?? categoryCounts.waiting ?? 0
-  const allInboxCount = categoryCounts.all || totalAvailable
+  const numOr = (value: number | undefined, fallback = 0) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback)
+  const priorityInboxCount = concreteCount('priority') ?? numOr(categoryCounts.hot_leads)
+  const activeInboxCount = concreteCount('active') ?? (
+    numOr(categoryCounts.hot_leads) + numOr(categoryCounts.needs_review) + numOr(categoryCounts.new_inbound) + numOr(categoryCounts.outbound_active)
+  )
+  const waitingInboxCount = concreteCount('waiting', 'waiting_on_seller') ?? numOr(categoryCounts.waiting)
+  const allInboxCount = numOr(categoryCounts.all) || totalAvailable
   
-  const unreadThreadsCount = categoryCounts.new_inbound
-  const suppressedThreadsCount = categoryCounts.dnc_opt_out
-  const deadThreadsCount = categoryCounts.dead
+  const unreadThreadsCount = numOr(categoryCounts.new_inbound)
+  const suppressedThreadsCount = numOr(categoryCounts.dnc_opt_out)
+  const deadThreadsCount = numOr(categoryCounts.dead)
+  const countsPayloadDegraded = !countsResolved || countsDegraded
   const loadedCount = threads.length
   
   const threadList = threads as InboxThread[]
@@ -2764,20 +2736,20 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   let bucketTotal = allInboxCount
   if (view === 'new_replies' || view === 'new_inbound' || view === 'needs_reply') bucketTotal = unreadThreadsCount
   else if (view === 'priority') bucketTotal = priorityInboxCount
-  else if (view === 'needs_review') bucketTotal = categoryCounts.needs_review
+  else if (view === 'needs_review') bucketTotal = numOr(categoryCounts.needs_review)
   else if (view === 'active') bucketTotal = activeInboxCount
   else if (view === 'waiting' || view === 'waiting_on_seller') bucketTotal = waitingInboxCount
-  else if (view === 'automated') bucketTotal = categoryCounts.automated
-  else if (view === 'outbound_active' || view === 'follow_up') bucketTotal = categoryCounts.outbound_active
-  else if (view === 'cold_no_response' || view === 'cold') bucketTotal = categoryCounts.cold_no_response
-  else if (view === 'dead') bucketTotal = categoryCounts.dead
-  else if (view === 'dnc_opt_out' || view === 'suppressed') bucketTotal = categoryCounts.dnc_opt_out
+  else if (view === 'automated') bucketTotal = numOr(categoryCounts.automated)
+  else if (view === 'outbound_active' || view === 'follow_up') bucketTotal = numOr(categoryCounts.outbound_active)
+  else if (view === 'cold_no_response' || view === 'cold') bucketTotal = numOr(categoryCounts.cold_no_response)
+  else if (view === 'dead') bucketTotal = numOr(categoryCounts.dead)
+  else if (view === 'dnc_opt_out' || view === 'suppressed') bucketTotal = numOr(categoryCounts.dnc_opt_out)
   else if (view === 'unlinked') bucketTotal = concreteCount('unlinked') ?? threads.filter((thread: InboxThread) => !thread.propertyId).length
 
   return {
     threads,
     unreadCount: unreadThreadsCount,
-    urgentCount: categoryCounts.hot_leads,
+    urgentCount: numOr(categoryCounts.hot_leads),
     totalCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     aiDraftCount: threadList.filter((thread) => thread.aiDraft !== null).length,
     dataMode: 'live',
@@ -2829,10 +2801,10 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     partiallyHydratedCount,
     orphanCount,
     latestFetchMs,
-    countsDegraded,
-    countsApproximate,
-    countsSource,
-    countPreservedReason,
+    countsDegraded: countsPayloadDegraded,
+    countsApproximate: countsApproximate || !countsResolved,
+    countsSource: countsResolved ? countsSource : (countsSource ?? 'deferred_parallel'),
+    countPreservedReason: countsResolved ? countPreservedReason : (countPreservedReason ?? 'counts_deferred_non_blocking'),
     liveDiagnostics,
     liveDataSource: viewResult?.liveDataSource ?? viewResult?.source ?? liveDiagnostics.source ?? null,
     fallbackUsed: viewResult?.fallbackUsed ?? liveDiagnostics.fallbackUsed ?? false,

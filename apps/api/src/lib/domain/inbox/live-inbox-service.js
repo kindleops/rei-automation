@@ -36,6 +36,7 @@ import {
   CANONICAL_INBOX_COUNT_KEYS,
   buildEnrichmentCoverageDiagnostics,
 } from "@/lib/domain/inbox/canonical-inbox-row-contract.js";
+import { normalizeLatestMessageDirection } from "./latest-message-presentation.js";
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
@@ -704,8 +705,8 @@ function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
     const numericValue = Number(value);
     const currentValue = Number(next[key]);
     if (!Number.isFinite(numericValue) || numericValue <= 0) continue;
-    // Preserve authoritative zero counts from canonical views; only fill missing buckets.
-    if (!Number.isFinite(currentValue)) {
+    // Fill missing buckets and replace stale zero counts when visible rows prove activity.
+    if (!Number.isFinite(currentValue) || (currentValue === 0 && numericValue > 0)) {
       next[key] = numericValue;
       applied = true;
     }
@@ -797,7 +798,9 @@ function bucketFromEnrichedRow(row = {}) {
 }
 
 function normalizeThreadRow(row = {}, query = {}) {
-  const normalizedDirection = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);
+  const normalizedDirection = normalizeLatestMessageDirection(
+    row.latest_message_direction || row.latest_direction || row.direction,
+  );
   const latestMessageAt = latestAt(row);
   const canonicalThreadKey = normalizeCanonicalThreadKey(row);
   const normalizedPhone = normalizedPhoneForIdentity({
@@ -815,17 +818,19 @@ function normalizeThreadRow(row = {}, query = {}) {
     deriveInboxBucketFromThreadState(row) ||
     null;
   const detectedIntent = lower(row.detected_intent || row.reply_intent || row.ui_intent);
-  const latestDeliveryStatus =
+  const rawLatestDeliveryStatus =
     clean(row.latest_delivery_status) ||
     clean(row.delivery_status) ||
     clean(row.provider_delivery_status) ||
     clean(row.latest_provider_delivery_status) ||
     clean(row.queue_status) ||
     null;
-  const latestProviderDeliveryStatus =
+  const rawLatestProviderDeliveryStatus =
     clean(row.latest_provider_delivery_status) ||
     clean(row.provider_delivery_status) ||
-    latestDeliveryStatus;
+    rawLatestDeliveryStatus;
+  const latestDeliveryStatus = normalizedDirection === "inbound" ? null : rawLatestDeliveryStatus;
+  const latestProviderDeliveryStatus = normalizedDirection === "inbound" ? null : rawLatestProviderDeliveryStatus;
   const latestMessageEventId = firstClean(
     row.latest_message_id,
     row.latestMessageId,
@@ -866,9 +871,9 @@ function normalizeThreadRow(row = {}, query = {}) {
     message_body: row.latest_message_body ?? row.preview ?? row.message_body ?? null,
     latest_message_direction: normalizedDirection,
     direction: normalizedDirection,
-    delivery_status: row.delivery_status || latestDeliveryStatus,
+    delivery_status: normalizedDirection === "inbound" ? null : (row.delivery_status || latestDeliveryStatus),
     latest_delivery_status: latestDeliveryStatus,
-    provider_delivery_status: row.provider_delivery_status || latestProviderDeliveryStatus,
+    provider_delivery_status: normalizedDirection === "inbound" ? null : (row.provider_delivery_status || latestProviderDeliveryStatus),
     latest_provider_delivery_status: latestProviderDeliveryStatus,
     latest_delivered_at: row.latest_delivered_at || row.delivered_at || null,
     latest_failed_at: row.latest_failed_at || row.failed_at || null,
@@ -3363,9 +3368,15 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     };
   }
 
+  const PRIMARY_PARALLEL_STRATEGIES = new Set([
+    "conversation_thread_id",
+    "thread_key=canonical_e164",
+    "to_phone_number=canonical_e164",
+    "from_phone_number=canonical_e164",
+  ]);
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
-  for (const strategy of strategies) {
+  const runStrategy = async (strategy) => {
     const result = await queryMessageEventsByStrictStrategy({
       supabase,
       lookup,
@@ -3374,20 +3385,46 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
       limit: fetchLimit,
       diagnostics,
     });
-    if (result.error) {
+    return { ...result, strategy };
+  };
+  const mergedCount = () => dedupeRowsByMessageId(strategyResults.flatMap((entry) => entry.rows)).length;
+
+  const exactStrategy = strategies.find((strategy) => strategy.name === "latest_message_id_exact");
+  if (exactStrategy) {
+    const exactResult = await runStrategy(exactStrategy);
+    if (exactResult.error) {
       diagnostics.fallback_used = true;
-      continue;
+    } else if (exactResult.rows.length > 0) {
+      strategyResults.push(exactResult);
+      diagnostics.lookup_strategy_used = exactStrategy.name;
     }
-    if (result.rows.length > 0) {
-      strategyResults.push({ ...result, strategy });
+  }
+
+  if (mergedCount() < fetchLimit) {
+    const primaryStrategies = strategies.filter((strategy) => PRIMARY_PARALLEL_STRATEGIES.has(strategy.name));
+    const primaryResults = await Promise.all(primaryStrategies.map(runStrategy));
+    for (const result of primaryResults) {
+      if (result.error) {
+        diagnostics.fallback_used = true;
+        continue;
+      }
+      if (result.rows.length > 0) strategyResults.push(result);
     }
-    // Only short-circuit on exact latest-message lookup; merge all other strategies.
-    if (result.rows.length > 0 && strategy.name === "latest_message_id_exact") {
-      diagnostics.lookup_strategy_used = strategy.name;
-      break;
+  }
+
+  if (mergedCount() < fetchLimit) {
+    const secondaryStrategies = strategies.filter(
+      (strategy) => strategy.name !== "latest_message_id_exact" && !PRIMARY_PARALLEL_STRATEGIES.has(strategy.name),
+    );
+    for (const strategy of secondaryStrategies) {
+      const result = await runStrategy(strategy);
+      if (result.error) {
+        diagnostics.fallback_used = true;
+        continue;
+      }
+      if (result.rows.length > 0) strategyResults.push(result);
+      if (mergedCount() >= fetchLimit) break;
     }
-    const totalFound = dedupeRowsByMessageId(strategyResults.flatMap((entry) => entry.rows)).length;
-    if (totalFound >= fetchLimit) break;
   }
 
   if (strategyResults.flatMap((r) => r.rows).length === 0 && deps.latestPreviewRow) {
