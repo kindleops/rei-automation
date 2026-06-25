@@ -3,7 +3,11 @@ import type { CompTransactionEvidence } from '../../../domain/comp-intelligence/
 interface Props {
   row: CompTransactionEvidence
   selected?: boolean
+  hovered?: boolean
+  expanded?: boolean
+  cardRef?: (el: HTMLButtonElement | null) => void
   onSelect?: (id: string) => void
+  onHover?: (id: string | null) => void
 }
 
 const fmt = (n: number | null) =>
@@ -19,15 +23,33 @@ function evidenceBadge(row: CompTransactionEvidence): string {
   return 'CONTEXT ONLY'
 }
 
-export function TransactionEvidenceCard({ row, selected, onSelect }: Props) {
+export function TransactionEvidenceCard({
+  row,
+  selected,
+  hovered,
+  expanded,
+  cardRef,
+  onSelect,
+  onHover,
+}: Props) {
   const id = row.candidate_id || row.property_id || ''
   const badge = evidenceBadge(row)
 
   return (
     <button
+      ref={cardRef}
       type="button"
-      className={`ci-evidence-card ${selected ? 'is-selected' : ''} ci-evidence-card--${badge.toLowerCase().replace(/\s+/g, '-')}`}
+      data-evidence-id={id}
+      className={[
+        'ci-evidence-card',
+        selected ? 'is-selected' : '',
+        hovered ? 'is-hovered' : '',
+        expanded ? 'is-expanded' : '',
+        `ci-evidence-card--${badge.toLowerCase().replace(/\s+/g, '-')}`,
+      ].filter(Boolean).join(' ')}
       onClick={() => onSelect?.(id)}
+      onMouseEnter={() => onHover?.(id)}
+      onMouseLeave={() => onHover?.(null)}
       aria-pressed={selected}
     >
       <div className="ci-evidence-card__top">
@@ -38,16 +60,23 @@ export function TransactionEvidenceCard({ row, selected, onSelect }: Props) {
       <div className="ci-evidence-card__meta">
         <span>{row.sale_date ?? '—'}</span>
         <span>{row.geography.distance_miles != null ? `${row.geography.distance_miles.toFixed(2)} mi` : '—'}</span>
-        <span>{row.canonical_asset_lane ?? '—'}</span>
+        <span>{row.routed_universe ?? row.canonical_asset_lane ?? '—'}</span>
       </div>
       <div className="ci-evidence-card__detail">
-        <span>{row.buyer ?? 'Buyer unknown'}</span>
-        <span>{row.transaction_channel ?? '—'}</span>
-        <span>{row.routed_universe ?? '—'}</span>
+        {row.buyer && <span>{row.buyer}</span>}
+        {row.transaction_channel && <span>{row.transaction_channel}</span>}
         <span>ESS {row.ess_contribution ?? '—'}</span>
+        {row.similarity != null && <span>Match {Math.round(row.similarity)}</span>}
       </div>
       {row.rejection_review_reasons.length > 0 && (
-        <p className="ci-evidence-card__reasons">{row.rejection_review_reasons.join(' · ')}</p>
+        <p className="ci-evidence-card__reasons">{row.rejection_review_reasons.slice(0, expanded ? 6 : 2).join(' · ')}</p>
+      )}
+      {expanded && (
+        <div className="ci-evidence-card__expanded">
+          <div>Cluster: {row.transaction_cluster_id ?? '—'}</div>
+          <div>Role: {row.evidence_role ?? '—'}</div>
+          <div>Source: {row.source_lineage.source_table ?? '—'}</div>
+        </div>
       )}
     </button>
   )
