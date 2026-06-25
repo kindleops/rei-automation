@@ -24,6 +24,11 @@ import {
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
+import {
+  mergeDeliveryReceiptState,
+  mergeQueueDeliveryState,
+  shouldPromoteThreadDelivery,
+} from "@/lib/domain/delivery/delivery-receipt-reconcile.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -2603,6 +2608,272 @@ export async function writeWebhookLog(options = {}) {
   throw last_error || new Error("webhook_log_write_failed");
 }
 
+export async function markWebhookLogProcessed(webhook_log_id, options = {}) {
+  const id = Number(webhook_log_id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const now = options.now || nowIso();
+
+  if (typeof options.markWebhookLogProcessed === "function") {
+    return options.markWebhookLogProcessed(id, { now });
+  }
+
+  const supabase = getSupabase(options);
+  const { data, error } = await supabase
+    .from(WEBHOOK_LOG_TABLE)
+    .update({
+      processed: true,
+      processed_at: now,
+      error_message: null,
+    })
+    .eq("id", id)
+    .select("id, processed, processed_at")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function markWebhookLogFailed(webhook_log_id, error_message, options = {}) {
+  const id = Number(webhook_log_id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  if (typeof options.markWebhookLogFailed === "function") {
+    return options.markWebhookLogFailed(id, error_message);
+  }
+
+  const supabase = getSupabase(options);
+  const { data, error } = await supabase
+    .from(WEBHOOK_LOG_TABLE)
+    .update({
+      processed: false,
+      error_message: clean(error_message).slice(0, 2000) || "delivery_reconcile_failed",
+    })
+    .eq("id", id)
+    .select("id, processed, error_message")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function reconcileDeliveryReceiptViaRpc({
+  supabase,
+  provider_message_sid,
+  provider_status,
+  raw_carrier_status,
+  incoming_delivery_status,
+  incoming_sent_at,
+  incoming_delivered_at,
+  provider_failure_reason,
+  normalized_failure,
+  webhook_log_id,
+  now,
+}) {
+  const terminal_queue_status = mapTransportTerminalStatus({
+    error_message: provider_failure_reason,
+    error_status: normalized_failure?.error_status,
+  });
+
+  const rpc_args = {
+    p_provider_message_sid: provider_message_sid,
+    p_provider_status: provider_status || null,
+    p_raw_carrier_status: raw_carrier_status || null,
+    p_incoming_delivery_status: incoming_delivery_status,
+    p_sent_at: incoming_sent_at,
+    p_delivered_at: incoming_delivered_at,
+    p_failed_at: incoming_delivery_status === "failed" ? now : null,
+    p_failure_reason: incoming_delivery_status === "failed" ? provider_failure_reason : null,
+    p_failure_bucket:
+      incoming_delivery_status === "failed"
+        ? legacyFailureBucketForTextGrid(normalized_failure, {
+            ok: false,
+            error_message: provider_failure_reason,
+            error_status: normalized_failure?.error_status,
+          })
+        : null,
+    p_failure_metadata:
+      incoming_delivery_status === "failed" ? textGridFailureMetadata(normalized_failure) : null,
+    p_webhook_log_id: webhook_log_id ? Number(webhook_log_id) : null,
+    p_now: now,
+  };
+
+  const { data, error } = await supabase.rpc("reconcile_delivery_receipt", rpc_args);
+  if (error) throw error;
+
+  const result = ensureObject(data);
+  return {
+    ...result,
+    terminal_queue_status,
+  };
+}
+
+async function reconcileDeliveryReceiptLocal({
+  supabase,
+  provider_message_sid,
+  provider_status,
+  raw_carrier_status,
+  incoming_delivery_status,
+  incoming_sent_at,
+  incoming_delivered_at,
+  provider_failure_reason,
+  normalized_failure,
+  webhook_log_id,
+  now,
+  options = {},
+}) {
+  const { data: loaded_events, error: existing_events_error } = await supabase
+    .from(MESSAGE_EVENTS_TABLE)
+    .select(
+      "id, thread_key, queue_id, metadata, delivery_status, provider_delivery_status, raw_carrier_status, sent_at, delivered_at, failed_at, error_message, failure_reason, failure_bucket, master_owner_id, to_phone_number"
+    )
+    .eq("provider_message_sid", provider_message_sid);
+
+  if (existing_events_error) throw existing_events_error;
+
+  const message_events_data = [];
+  let final_delivery_status = incoming_delivery_status;
+  let reconciled_event_id = null;
+  let reconciled_thread_key = null;
+
+  for (const existing of loaded_events || []) {
+    const merged = mergeDeliveryReceiptState(existing, {
+      delivery_status: incoming_delivery_status,
+      provider_delivery_status: provider_status || null,
+      raw_carrier_status: raw_carrier_status || null,
+      sent_at: incoming_sent_at,
+      delivered_at: incoming_delivered_at,
+      failed_at: incoming_delivery_status === "failed" ? now : null,
+      error_message: incoming_delivery_status === "failed" ? provider_failure_reason : null,
+      failure_reason: incoming_delivery_status === "failed" ? provider_failure_reason : null,
+      failure_bucket:
+        incoming_delivery_status === "failed"
+          ? legacyFailureBucketForTextGrid(normalized_failure, {
+              ok: false,
+              error_message: provider_failure_reason,
+              error_status: normalized_failure?.error_status,
+            })
+          : null,
+      updated_at: now,
+    });
+
+    final_delivery_status = merged.delivery_status;
+    const event_update = {
+      ...merged,
+      updated_at: now,
+    };
+
+    if (incoming_delivery_status === "failed") {
+      event_update.metadata = {
+        ...ensureObject(existing.metadata),
+        ...textGridFailureMetadata(normalized_failure),
+      };
+    }
+
+    const { data: updated_event, error: update_event_error } = await supabase
+      .from(MESSAGE_EVENTS_TABLE)
+      .update(event_update)
+      .eq("id", existing.id)
+      .select()
+      .maybeSingle();
+
+    if (update_event_error) throw update_event_error;
+    if (updated_event) {
+      message_events_data.push(updated_event);
+      reconciled_event_id = updated_event.id;
+      reconciled_thread_key = updated_event.thread_key;
+    }
+  }
+
+  const terminal_queue_status = mapTransportTerminalStatus({
+    error_message: provider_failure_reason,
+    error_status: normalized_failure?.error_status,
+  });
+
+  const { data: queue_rows, error: queue_load_error } = await supabase
+    .from(SEND_QUEUE_TABLE)
+    .select("*")
+    .or(`provider_message_id.eq.${provider_message_sid},textgrid_message_id.eq.${provider_message_sid}`);
+
+  if (queue_load_error) throw queue_load_error;
+
+  const send_queue_data = [];
+  for (const row of queue_rows || []) {
+    const merged_queue = mergeQueueDeliveryState(row, {
+      delivery_status: final_delivery_status,
+      provider_delivery_status: provider_status || null,
+      delivered_at: incoming_delivered_at,
+      sent_at: incoming_sent_at,
+      failed_at: final_delivery_status === "failed" ? now : null,
+      failed_reason: final_delivery_status === "failed" ? provider_failure_reason : null,
+      queue_status_terminal: terminal_queue_status,
+      updated_at: now,
+    });
+
+    const queue_update = {
+      ...merged_queue,
+      textgrid_message_id: row.textgrid_message_id || provider_message_sid,
+      updated_at: now,
+    };
+
+    if (final_delivery_status === "failed" && normalized_failure.failure_class) {
+      queue_update.metadata = {
+        ...ensureObject(row.metadata),
+        ...textGridFailureMetadata(normalized_failure),
+      };
+    }
+
+    const { data: updated_queue, error: queue_update_error } = await supabase
+      .from(SEND_QUEUE_TABLE)
+      .update(queue_update)
+      .eq("id", row.id)
+      .select()
+      .maybeSingle();
+
+    if (queue_update_error) throw queue_update_error;
+    if (updated_queue) send_queue_data.push(updated_queue);
+  }
+
+  if (reconciled_thread_key && reconciled_event_id) {
+    const { data: current_thread } = await supabase
+      .from("inbox_thread_state")
+      .select("latest_direction, latest_message_event_id")
+      .eq("thread_key", reconciled_thread_key)
+      .maybeSingle();
+
+    if (
+      shouldPromoteThreadDelivery({
+        latest_direction: current_thread?.latest_direction,
+        latest_message_event_id: current_thread?.latest_message_event_id,
+        reconciled_event_id,
+      })
+    ) {
+      await supabase
+        .from("inbox_thread_state")
+        .update({
+          latest_delivery_status: final_delivery_status,
+          updated_at: now,
+        })
+        .eq("thread_key", reconciled_thread_key);
+    }
+  }
+
+  if (webhook_log_id) {
+    await markWebhookLogProcessed(webhook_log_id, { ...options, supabase, now });
+  }
+
+  return {
+    ok: true,
+    final_delivery_status,
+    message_events_updated: message_events_data.length,
+    send_queue_updated: send_queue_data.length,
+    message_events_data,
+    send_queue_data,
+    reconciled_event_id,
+    reconciled_thread_key,
+    terminal_queue_status,
+  };
+}
+
 export async function logInboundMessageEvent(payload, options = {}) {
   const now = options.now || nowIso();
   const message_sid = clean(
@@ -3048,11 +3319,11 @@ export async function syncDeliveryEvent(payload, options = {}) {
   const incoming_sent_at = toIsoOrNull(payload?.sent_at) || now;
   const incoming_delivered_at = toIsoOrNull(payload?.delivered_at) || now;
 
-  let existing_events = [];
   let final_delivery_status = incoming_delivery_status;
+  let message_events_data = [];
+  let send_queue_data = [];
 
   if (typeof options.syncDeliveryEvent === "function") {
-    // Analytics fires before DI early return — delivery_status is already computed.
     captureSystemEvent("sms_delivery_updated", {
       provider_message_sid: provider_message_sid || null,
       delivery_status: final_delivery_status,
@@ -3069,240 +3340,79 @@ export async function syncDeliveryEvent(payload, options = {}) {
       updated_at: now,
     });
   }
+
   const supabase = getSupabase(options);
-  const { data: loaded_events, error: existing_events_error } = await supabase
-    .from(MESSAGE_EVENTS_TABLE)
-    .select("id, thread_key, queue_id, metadata, delivery_status, sent_at, delivered_at, failed_at")
-    .eq("provider_message_sid", provider_message_sid);
+  const webhook_log_id = options.webhook_log_id || payload?.webhook_log_id || null;
+  const reconcile_args = {
+    supabase,
+    provider_message_sid,
+    provider_status,
+    raw_carrier_status,
+    incoming_delivery_status,
+    incoming_sent_at,
+    incoming_delivered_at,
+    provider_failure_reason,
+    normalized_failure,
+    webhook_log_id,
+    now,
+    options,
+  };
 
-  if (existing_events_error) throw existing_events_error;
-  existing_events = loaded_events || [];
-  const any_delivered_already = existing_events.some((row) => {
-    return lower(row?.delivery_status) === "delivered" || Boolean(row?.delivered_at);
-  });
-  const any_sent_already = existing_events.some((row) => {
-    const status = lower(row?.delivery_status);
-    return status === "sent" || status === "delivered" || Boolean(row?.sent_at);
-  });
-  // Never downgrade an already-delivered event. Failed/undelivered callbacks
-  // always win over "sent" — they represent a carrier-confirmed final state.
-  final_delivery_status =
-    incoming_delivery_status === "delivered" || any_delivered_already
-      ? "delivered"
-      : incoming_delivery_status;
-  const message_events_data = [];
-  for (const existing of existing_events || []) {
-    const existing_sent_at = toIsoOrNull(existing.sent_at);
-    const existing_delivered_at = toIsoOrNull(existing.delivered_at);
-    const merged_sent_at = existing_sent_at || incoming_sent_at;
-    let merged_delivered_at =
-      final_delivery_status === "delivered"
-        ? (existing_delivered_at || incoming_delivered_at)
-        : null;
-    if (merged_delivered_at && merged_sent_at && toTimestamp(merged_delivered_at) < toTimestamp(merged_sent_at)) {
-      merged_delivered_at = merged_sent_at;
+  let reconcile_result;
+  try {
+    if (typeof options.reconcileDeliveryReceipt === "function") {
+      reconcile_result = await options.reconcileDeliveryReceipt(reconcile_args);
+    } else if (typeof supabase.rpc === "function" && options.force_local_delivery_reconcile !== true) {
+      reconcile_result = await reconcileDeliveryReceiptViaRpc(reconcile_args);
+    } else {
+      reconcile_result = await reconcileDeliveryReceiptLocal(reconcile_args);
     }
-
-    const event_update = {
-      provider_delivery_status: provider_status || null,
-      raw_carrier_status: raw_carrier_status || null,
-      delivery_status: final_delivery_status,
-      sent_at: merged_sent_at,
-      delivered_at: merged_delivered_at,
-      updated_at: now,
-    };
-
-    if (final_delivery_status === "delivered" || final_delivery_status === "sent") {
-      event_update.failed_at = null;
-      event_update.error_message = null;
-      event_update.failure_reason = null;
-      event_update.failure_bucket = null;
-    } else if (final_delivery_status === "failed") {
-      event_update.failed_at = now;
-      event_update.error_message = provider_failure_reason;
-      event_update.failure_reason = provider_failure_reason;
-      event_update.failure_bucket = legacyFailureBucketForTextGrid(normalized_failure, {
-        ok: false,
-        error_message: provider_failure_reason,
-        error_status: payload?.error_status,
-      });
-      event_update.metadata = {
-        ...ensureObject(existing.metadata),
-        ...textGridFailureMetadata(normalized_failure),
-      };
+  } catch (reconcile_error) {
+    if (webhook_log_id) {
+      await markWebhookLogFailed(webhook_log_id, reconcile_error?.message || "delivery_reconcile_failed", {
+        ...options,
+        supabase,
+      }).catch(() => {});
     }
-
-    const { data: updated_event, error: update_event_error } = await supabase
-      .from(MESSAGE_EVENTS_TABLE)
-      .update(event_update)
-      .eq("id", existing.id)
-      .select()
-      .maybeSingle();
-
-    if (update_event_error) throw update_event_error;
-    if (updated_event) message_events_data.push(updated_event);
-
-    debugLifecycle("event_reconcile", {
-      provider_sid: provider_message_sid,
-      event_id: existing.id,
-      provider_raw_status: provider_status || null,
-      queue_status: null,
-      event_type: "outbound_send",
-      sent_at: event_update.sent_at,
-      delivered_at: event_update.delivered_at,
-      failure_reason: event_update.failure_reason || null,
-      reconciliation_source: "sync_delivery_event",
-    });
+    throw reconcile_error;
   }
+
+  final_delivery_status =
+    reconcile_result?.final_delivery_status || incoming_delivery_status;
+  message_events_data = reconcile_result?.message_events_data || [];
+  send_queue_data = reconcile_result?.send_queue_data || [];
+
+  if (!message_events_data.length && Number(reconcile_result?.message_events_updated || 0) > 0) {
+    const { data: refreshed_events } = await supabase
+      .from(MESSAGE_EVENTS_TABLE)
+      .select("id, thread_key, queue_id, metadata, delivery_status, delivered_at, master_owner_id, to_phone_number")
+      .eq("provider_message_sid", provider_message_sid);
+    message_events_data = refreshed_events || [];
+  }
+
+  if (!send_queue_data.length && Number(reconcile_result?.send_queue_updated || 0) > 0) {
+    const { data: refreshed_queue } = await supabase
+      .from(SEND_QUEUE_TABLE)
+      .select("*")
+      .or(`provider_message_id.eq.${provider_message_sid},textgrid_message_id.eq.${provider_message_sid}`);
+    send_queue_data = refreshed_queue || [];
+  }
+
+  const outreachUpdater = options.updateContactOutreachState || updateContactOutreachState;
 
   if (Array.isArray(message_events_data) && message_events_data.length > 0) {
     const event = message_events_data[0];
-    const thread_key = event.thread_key;
-    const queue_id = event.metadata?.queue_id || event.queue_id;
-
-    // ── Reconcile send_queue status ───────────────────────────────────────────
-    if (queue_id) {
-      try {
-        const { data: queue_data, error: queue_error } = await supabase
-          .from(SEND_QUEUE_TABLE)
-          .update({
-          queue_status: final_delivery_status === "delivered" ? "delivered" : final_delivery_status,
-          updated_at: now,
-          delivered_at: final_delivery_status === "delivered" ? now : null,
-        })
-          .eq("id", queue_id)
-          .select();
-        
-        if (queue_error) {
-          info("delivery_webhook.queue_reconcile_failed", { queue_id, error: queue_error.message });
-        } else if (Array.isArray(queue_data) && queue_data.length > 0) {
-          info("delivery_webhook.queue_status_enriched", { queue_id, new_status: final_delivery_status });
-        }
-      } catch (qErr) {
-        info("delivery_webhook.queue_reconcile_exception", { queue_id, error: qErr.message });
-      }
-    }
-    // ──────────────────────────────────────────────────────────────────────────
-
-    if (thread_key) {
-      try {
-        // Only promote delivery status to thread latest when the latest message on the thread
-        // is (still) an outbound. Inbound-last threads must not display Delivered.
-        const { data: current } = await supabase
-          .from("inbox_thread_state")
-          .select("latest_message_direction, latest_message_at, last_outbound_at")
-          .eq("thread_key", thread_key)
-          .maybeSingle();
-
-        const latestDir = (current?.latest_message_direction || "").toLowerCase();
-        const canPromoteDelivery =
-          !current ||
-          latestDir === "outbound" ||
-          (current.last_outbound_at && (!current.latest_message_at || new Date(current.last_outbound_at) >= new Date(current.latest_message_at)));
-
-        if (canPromoteDelivery) {
-          await supabase
-            .from("inbox_thread_state")
-            .update({ latest_delivery_status: final_delivery_status })
-            .eq("thread_key", thread_key);
-        }
-        // Always track the last known outbound delivery separately in metadata if needed;
-        // thread latest_delivery_status only reflects when latest conversational msg is outbound.
-      } catch (err) {
-        console.error("FAILED TO UPDATE THREAD STATE DELIVERY STATUS", err);
-      }
-    }
-
-    // ── Update outreach state ──────────────────────────────────────────────
     try {
-        const ev = message_events_data[0];
-        await updateContactOutreachState({
-            master_owner_id: ev.master_owner_id,
-            to_phone_number: ev.to_phone_number,
-            event_type: final_delivery_status === 'delivered' ? 'delivered' : 'failed',
-            message_event_id: ev.id,
-            timestamp: ev.delivered_at || ev.updated_at || now
-        }, options);
+      await outreachUpdater({
+        master_owner_id: event.master_owner_id,
+        to_phone_number: event.to_phone_number,
+        event_type: final_delivery_status === "delivered" ? "delivered" : "failed",
+        message_event_id: event.id,
+        timestamp: event.delivered_at || event.updated_at || now,
+      }, options);
     } catch (outreachErr) {
-        console.error("FAILED TO UPDATE OUTREACH STATE ON DELIVERY", outreachErr);
+      console.error("FAILED TO UPDATE OUTREACH STATE ON DELIVERY", outreachErr);
     }
-  }
-
-  const queue_payload = {
-    updated_at: now,
-    textgrid_message_id: provider_message_sid || null,
-  };
-
-  if (final_delivery_status === "delivered") {
-    queue_payload.sent_at = pickFirst(incoming_sent_at, now);
-    queue_payload.delivered_at = pickFirst(incoming_delivered_at, now);
-    if (
-      queue_payload.delivered_at &&
-      queue_payload.sent_at &&
-      toTimestamp(queue_payload.delivered_at) < toTimestamp(queue_payload.sent_at)
-    ) {
-      queue_payload.delivered_at = queue_payload.sent_at;
-    }
-    queue_payload.delivery_confirmed = "confirmed";
-    queue_payload.queue_status = "delivered";
-    queue_payload.failed_reason = null;
-  } else if (final_delivery_status === "failed") {
-    const terminal_status = mapTransportTerminalStatus({
-      error_message: provider_failure_reason,
-      error_status: payload?.error_status,
-    });
-    queue_payload.delivery_confirmed = "failed";
-    queue_payload.failed_reason = provider_failure_reason;
-    queue_payload.queue_status = final_delivery_status === "sent" ? "sent" : terminal_status;
-  } else if (provider_status === "sent") {
-    queue_payload.queue_status = "sent";
-    queue_payload.sent_at = pickFirst(incoming_sent_at, now);
-  }
-
-  const { data: send_queue_data, error: send_queue_error } = await supabase
-    .from(SEND_QUEUE_TABLE)
-    .update(queue_payload)
-    .or(`provider_message_id.eq.${provider_message_sid},textgrid_message_id.eq.${provider_message_sid}`)
-    .select();
-
-  if (send_queue_error) throw send_queue_error;
-
-  for (const row of send_queue_data || []) {
-    if (final_delivery_status === "failed" && normalized_failure.failure_class) {
-      const { error: queue_metadata_error } = await supabase
-        .from(SEND_QUEUE_TABLE)
-        .update({
-          metadata: {
-            ...ensureObject(row?.metadata),
-            ...textGridFailureMetadata(normalized_failure),
-          },
-          updated_at: now,
-        })
-        .eq("id", row.id);
-      if (queue_metadata_error) throw queue_metadata_error;
-    }
-
-    const sent_at = toIsoOrNull(row?.sent_at);
-    let delivered_at = toIsoOrNull(row?.delivered_at);
-    if (delivered_at && sent_at && toTimestamp(delivered_at) < toTimestamp(sent_at)) {
-      delivered_at = sent_at;
-      await supabase
-        .from(SEND_QUEUE_TABLE)
-        .update({ delivered_at, updated_at: now })
-        .eq("id", row.id);
-    }
-
-    debugLifecycle("queue_reconcile", {
-      queue_row_id: row?.id || null,
-      provider_sid: provider_message_sid,
-      provider_raw_status: provider_status || null,
-      queue_status: row?.queue_status || null,
-      event_type: "outbound_send",
-      sent_at,
-      delivered_at,
-      failure_reason: row?.failed_reason || null,
-      reconciliation_source: "sync_delivery_event",
-    });
   }
 
   captureSystemEvent("sms_delivery_updated", {
@@ -3714,36 +3824,43 @@ async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number },
   if (!to_phone) return { suppressed: false };
 
   const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
+  const from_phone = normalizePhone(from_phone_number);
   try {
-    let pair_count = 0;
-    if (from_phone_number) {
-      const pair_result = await supabase_client
-        .from(SEND_QUEUE_TABLE)
-        .select("id", { count: "exact", head: true })
-        .eq("to_phone_number", to_phone)
-        .eq("from_phone_number", normalizePhone(from_phone_number))
-        .eq("queue_status", "failed")
-        .ilike("failed_reason", "%21610%");
-      pair_count = pair_result.count ?? 0;
-    }
+    if (from_phone) {
+      const pair_checks = await Promise.all([
+        supabase_client
+          .from(SEND_QUEUE_TABLE)
+          .select("id", { count: "exact", head: true })
+          .eq("to_phone_number", to_phone)
+          .eq("from_phone_number", from_phone)
+          .or("failed_reason.ilike.%21610%,metadata->>non_retryable_reason.eq.textgrid_21610_blacklist"),
+        supabase_client
+          .from(MESSAGE_EVENTS_TABLE)
+          .select("id", { count: "exact", head: true })
+          .eq("to_phone_number", to_phone)
+          .eq("from_phone_number", from_phone)
+          .eq("failure_bucket", "provider_blacklist_pair"),
+        supabase_client
+          .from("sms_suppression_list")
+          .select("id", { count: "exact", head: true })
+          .eq("phone_e164", to_phone)
+          .eq("suppression_type", "provider_blacklist_pair")
+          .ilike("suppression_reason", "%21610%"),
+      ]);
 
-    const recipient_failure_result = await supabase_client
-      .from(SEND_QUEUE_TABLE)
-      .select("id", { count: "exact", head: true })
-      .eq("to_phone_number", to_phone)
-      .eq("queue_status", "failed")
-      .ilike("failed_reason", "%21610%");
-    const recipient_failure_count = recipient_failure_result.count ?? 0;
+      const pair_blocked = pair_checks.some((result) => Number(result.count || 0) > 0);
+      if (pair_blocked) {
+        return { suppressed: true, reason: "phone_suppressed_21610", scope: "pair" };
+      }
+    }
 
     const recipient_result = await supabase_client
       .from("sms_suppression_list")
       .select("id", { count: "exact", head: true })
       .eq("phone_e164", to_phone)
       .ilike("suppression_reason", "%21610%");
-    const recipient_count = recipient_result.count ?? 0;
-
-    if ((pair_count ?? 0) > 0 || (recipient_failure_count ?? 0) > 0 || (recipient_count ?? 0) > 0) {
-      return { suppressed: true, reason: "phone_suppressed_21610" };
+    if ((recipient_result.count ?? 0) > 0) {
+      return { suppressed: true, reason: "phone_suppressed_21610", scope: "recipient" };
     }
   } catch (check_error) {
     warn("enqueue_21610_suppression_check_failed", {

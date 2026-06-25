@@ -932,6 +932,8 @@ function normalizeThreadRow(row = {}, query = {}) {
     equity_percent: row.equity_percent ?? null,
     final_acquisition_score: row.final_acquisition_score ?? null,
     priority_score: row.priority_score ?? null,
+    priority_bucket: row.priority_bucket ?? null,
+    building_condition: row.building_condition ?? row.condition ?? null,
     acquisition_stage: row.acquisition_stage || row.seller_stage || row.conversation_stage || null,
     classification_confidence: row.classification_confidence ?? null,
     priority: row.priority || row.lead_temperature || null,

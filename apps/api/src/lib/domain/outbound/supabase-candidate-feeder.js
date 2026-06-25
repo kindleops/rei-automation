@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { evaluateContactWindow, insertSupabaseSendQueueRow, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
+import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
 import {
   SEND_QUEUE_HISTORY_SELECT,
@@ -4232,7 +4232,18 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
     return deps.createSendQueueItem(payload, { idempotency_key, queue_key });
   }
 
-  const inserted = await insertSupabaseSendQueueRow(payload, deps);
+  const inserted = await enqueueSendQueueItem(payload, deps);
+  if (!inserted?.ok && inserted?.reason === "phone_suppressed_21610") {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.SUPPRESSED,
+      reason: "phone_suppressed_21610",
+      suppressed: true,
+      queue_key,
+      idempotency_key,
+      inserted,
+    };
+  }
   if (!inserted?.ok && inserted?.reason === "duplicate_blocked") {
     return {
       ok: false,

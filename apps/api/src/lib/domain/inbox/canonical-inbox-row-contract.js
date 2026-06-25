@@ -35,6 +35,8 @@ export const CANONICAL_INBOX_ROW_SELECT_FIELDS = [
   "equity_percent",
   "final_acquisition_score",
   "priority_score",
+  "priority_bucket",
+  "building_condition",
   "acquisition_stage",
   "seller_stage",
   "conversation_stage",

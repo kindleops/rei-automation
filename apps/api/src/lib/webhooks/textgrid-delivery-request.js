@@ -2,6 +2,7 @@ import { handleTextgridDelivery } from "@/lib/flows/handle-textgrid-delivery.js"
 import { child } from "@/lib/logging/logger.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import {
+  markWebhookLogFailed,
   syncDeliveryEvent,
   writeWebhookLog,
 } from "@/lib/supabase/sms-engine.js";
@@ -245,8 +246,9 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
       typeof deps.writeWebhookLogImpl === "function" ||
       typeof deps.syncDeliveryEventImpl === "function"
     ) {
+      let webhook_log_row = null;
       try {
-        await writeWebhookLogImpl({
+        webhook_log_row = await writeWebhookLogImpl({
           event_type: payload.header_event || "delivery",
           direction: "outbound",
           provider_message_sid: payload.message_id || null,
@@ -255,10 +257,27 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
           received_at: nowIso(),
           source: "textgrid",
         });
-        await syncDeliveryEventImpl(payload, {
-          now: nowIso(),
-        });
+        await syncDeliveryEventImpl(
+          {
+            ...payload,
+            webhook_log_id: webhook_log_row?.id || null,
+          },
+          {
+            now: nowIso(),
+            webhook_log_id: webhook_log_row?.id || null,
+          },
+        );
       } catch (supabase_error) {
+        if (webhook_log_row?.id) {
+          try {
+            await markWebhookLogFailed(
+              webhook_log_row.id,
+              supabase_error?.message || "delivery_reconcile_failed",
+            );
+          } catch {
+            // Best-effort webhook_log error annotation.
+          }
+        }
         logger.error("textgrid_delivery.supabase_logging_failed", {
           ...buildTextgridWebhookLogMeta({
             payload,
@@ -266,6 +285,7 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
             downstream_handler_invoked,
             podio_persistence_attempted,
           }),
+          webhook_log_id: webhook_log_row?.id || null,
           message: supabase_error?.message || "Unknown Supabase delivery logging error",
         });
       }
