@@ -39,6 +39,57 @@ export function boardColumnLabel(id: ClosingBoardColumn): string {
   return BOARD_LABELS[id] ?? id
 }
 
+/** Operator-facing guidance shown when a lane has zero cases. */
+export interface ClosingLaneGuidance {
+  /** One-line description of what this lane represents. */
+  hint: string
+  /** What must be true for a case to land here. */
+  qualifies: string
+}
+
+export const LANE_GUIDANCE: Readonly<Record<ClosingBoardColumn, ClosingLaneGuidance>> = Object.freeze({
+  contract_intake: {
+    hint: 'Fresh post-contract deals entering the closing lifecycle.',
+    qualifies: 'Formal Contract or early Under Contract — contract executed, title not yet opened.',
+  },
+  title_open: {
+    hint: 'Title work in flight — commitment, curative prep, or clearance pending.',
+    qualifies: 'Title opened, commitment received, or cleared — no active blocking issues.',
+  },
+  issues_curative: {
+    hint: 'Active title, lien, probate, or municipal blockers requiring resolution.',
+    qualifies: 'Any open blocking issue, or title status explicitly flagged issues_open.',
+  },
+  disposition: {
+    hint: 'Buyer matching, assignment, and disposition execution.',
+    qualifies: 'Under Contract disposition stage — matching, buyer selected, or assignment out.',
+  },
+  buyer_secured: {
+    hint: 'Buyer locked — EMD, funds verification, or assignment signed.',
+    qualifies: 'EMD received, funds verified, or assignment fully executed.',
+  },
+  closing_scheduled: {
+    hint: 'Closing date confirmed or signing scheduled with parties.',
+    qualifies: 'Closing status scheduled/confirmed, or a scheduled closing date is set.',
+  },
+  clear_to_close: {
+    hint: 'All readiness gates satisfied — awaiting final signing and funding.',
+    qualifies: 'clearToClose flag is true — every curative and readiness gate passed.',
+  },
+  funded: {
+    hint: 'Funds disbursed — recording and revenue confirmation next.',
+    qualifies: 'Funding status funded or recorded, not yet closed in the universal stage.',
+  },
+  closed: {
+    hint: 'Terminal success — deal completed and revenue path closed.',
+    qualifies: 'Universal stage closed, or closing status completed.',
+  },
+  cancelled: {
+    hint: 'Terminal loss — deal withdrawn, expired, or mutually cancelled.',
+    qualifies: 'Closing status cancelled at any point in the lifecycle.',
+  },
+})
+
 interface BoardInputs {
   universalStage: ClosingUniversalStage
   closingStatus: ClosingStatus

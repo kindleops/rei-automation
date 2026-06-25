@@ -39,7 +39,7 @@ export function ClosingCaseWorkspace({ closingCase: c, onClose }: ClosingCaseWor
       <div className="cd-drawer" onClick={(e) => e.stopPropagation()}>
         <header className="cd-drawer__head">
           <div>
-            <p className="eyebrow" style={{ margin: 0, fontSize: 10, letterSpacing: '0.2em', color: 'var(--nx-accent,#38bdf8)' }}>CLOSING CASE</p>
+            <p className="cd-header__eyebrow cd-drawer__eyebrow">CLOSING CASE</p>
             <h2 style={{ margin: '2px 0', fontSize: 17 }}>{c.displayName}</h2>
             <ClosingHealthBadge health={c.health} />
           </div>
