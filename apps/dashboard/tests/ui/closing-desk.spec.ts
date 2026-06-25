@@ -5,9 +5,9 @@ const OUT = path.resolve('test-results/closing-desk-screenshots')
 const shot = (page: Page, name: string) =>
   page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false })
 
-/** Patterns that would indicate an unauthorized external comm / mutation. */
 const FORBIDDEN_HOSTS = /textgrid|docusign|signpro|podio\.com\/.*\/(items|push)/i
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const DEMO_CASE_COUNT = 4
 
 async function gotoClosingDesk(page: Page, opts: { demo?: boolean } = {}) {
   const consoleErrors: string[] = []
@@ -20,11 +20,7 @@ async function gotoClosingDesk(page: Page, opts: { demo?: boolean } = {}) {
   page.on('request', (req) => {
     const url = req.url()
     let host = ''
-    try {
-      host = new URL(url).hostname
-    } catch {
-      /* ignore */
-    }
+    try { host = new URL(url).hostname } catch { /* ignore */ }
     const isLocal = host === '127.0.0.1' || host === 'localhost'
     if (!isLocal && FORBIDDEN_HOSTS.test(url)) forbidden.push(`${req.method()} ${url}`)
     if (MUTATING_METHODS.has(req.method()) && /\/api\//.test(url)) mutations.push(`${req.method()} ${url}`)
@@ -32,104 +28,129 @@ async function gotoClosingDesk(page: Page, opts: { demo?: boolean } = {}) {
 
   await page.goto(opts.demo ? '/closing-desk?demo=1' : '/closing-desk')
   await page.locator('.closing-desk-view').waitFor({ state: 'attached', timeout: 120_000 })
-  await page
-    .locator('[data-testid="cd-board"], [data-testid="cd-table"], [data-testid="cd-loading"]')
-    .first()
-    .waitFor({ state: 'attached', timeout: 60_000 })
+  await page.locator('[data-testid="cd-board"], [data-testid="cd-table"], [data-testid="cd-loading"]').first().waitFor({ state: 'attached', timeout: 60_000 })
   await page.locator('[data-testid="cd-loading"]').waitFor({ state: 'detached', timeout: 60_000 }).catch(() => {})
 
   return { consoleErrors, forbidden, mutations }
 }
 
-test('Real route: empty pipeline, command card, no duplicate eyebrow, no fixtures', async ({ page }) => {
+async function boardCardCount(page: Page) {
+  return page.locator('[data-testid="cd-card"]').count()
+}
+
+async function sumLaneCounts(page: Page) {
+  const counts = await page.locator('[data-testid^="cd-lane-count-"]').allTextContents()
+  return counts.reduce((sum, t) => sum + Number.parseInt(t.trim(), 10), 0)
+}
+
+test('Real zero-state: pipeline, no fixtures, command card, diagnostics drawer', async ({ page }) => {
   const { forbidden, mutations } = await gotoClosingDesk(page)
 
-  await expect(page.locator('.cd-header h1')).toHaveText(/Closing Desk/)
-  await expect(page.locator('.cd-header__eyebrow')).toHaveCount(1)
-  await expect(page.locator('.cd-header__eyebrow')).toHaveText(/POST-CONTRACT COMMAND/)
-  await expect(page.locator('.cd-header__eyebrow')).not.toContainText(/CLOSING DESK.*OSING DESK/)
-
-  await expect(page.locator('[data-testid="cd-demo-banner"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid="cd-command-header"]')).toBeVisible()
+  await expect(page.locator('.cd-command-header__eyebrow')).toHaveText(/CLOSING OPERATIONS/)
+  await expect(page.locator('[data-testid="cd-env-demo"]')).toHaveCount(0)
   await expect(page.locator('[data-testid="cd-command-card"]')).toBeVisible()
-  await expect(page.locator('[data-testid="cd-board"]')).toBeVisible()
-  await expect(page.locator('[data-testid="cd-lane-contract_intake"]')).toBeVisible()
-  await expect(page.locator('[data-testid="cd-lane-closed"]')).toBeVisible()
   await expect(page.locator('[data-testid="cd-card"]')).toHaveCount(0)
 
-  await expect(page.locator('[data-testid="cd-metrics"] .cd-metric--primary')).toHaveCount(5)
-  await expect(page.locator('[data-testid="cd-metrics"] .cd-metric--compact')).toHaveCount(4)
+  const boardCards = await boardCardCount(page)
+  const laneSum = await sumLaneCounts(page)
+  expect(boardCards).toBe(0)
+  expect(laneSum).toBe(0)
 
-  await shot(page, 'closing-desk-empty-desktop')
+  await page.locator('[data-testid="cd-diagnostics-btn"]').click()
+  await expect(page.locator('[data-testid="cd-diagnostics-panel"]')).toBeVisible()
+  await page.locator('[data-testid="cd-diagnostics-panel"] .cd-diag-panel__close').click()
 
-  expect(forbidden, `external comm/mutation requests: ${forbidden.join(', ')}`).toHaveLength(0)
-  expect(mutations, `mutating API requests: ${mutations.join(', ')}`).toHaveLength(0)
+  await shot(page, 'closing-desk-zero-desktop')
+
+  expect(forbidden).toHaveLength(0)
+  expect(mutations).toHaveLength(0)
 })
 
-test('Demo mode: labeled fixtures, populated board, unmistakable DEMO banner', async ({ page }) => {
+test('Demo: every fixture case visible on board and table with reconciled counts', async ({ page }) => {
   await gotoClosingDesk(page, { demo: true })
 
-  await expect(page.locator('[data-testid="cd-demo-banner"]')).toBeVisible()
+  await expect(page.locator('[data-testid="cd-env-demo"]')).toBeVisible()
   await expect(page.locator('[data-testid="cd-command-card"]')).toHaveCount(0)
-  await expect(page.locator('[data-testid="cd-card"]').first()).toBeVisible()
+
+  const boardCards = await boardCardCount(page)
+  const laneSum = await sumLaneCounts(page)
+  expect(boardCards).toBe(DEMO_CASE_COUNT)
+  expect(laneSum).toBe(DEMO_CASE_COUNT)
+
+  const verifyBoard = await page.locator('.closing-desk-view').getAttribute('data-verify-board')
+  const verifyTable = await page.locator('.closing-desk-view').getAttribute('data-verify-table')
+  expect(Number(verifyBoard)).toBe(DEMO_CASE_COUNT)
+  expect(Number(verifyTable)).toBe(DEMO_CASE_COUNT)
 
   await shot(page, 'closing-desk-demo-board')
-})
-
-test('Board ↔ Table switch, filters, and keyboard focus', async ({ page }) => {
-  await gotoClosingDesk(page, { demo: true })
 
   await page.getByRole('tab', { name: 'Table' }).click()
-  await expect(page.locator('[data-testid="cd-table"]')).toBeVisible()
-  await page.getByRole('tab', { name: 'Board' }).click()
-  await expect(page.locator('[data-testid="cd-board"]')).toBeVisible()
+  await expect(page.locator('[data-testid="cd-table-row"]')).toHaveCount(DEMO_CASE_COUNT)
+  await shot(page, 'closing-desk-demo-table')
+})
 
-  await page.getByLabel('Search closing cases').fill('zzz-no-such-case')
-  await expect(page.locator('[data-testid="cd-filter-empty"]')).toBeVisible()
+test('Filters reconcile board and table counts', async ({ page }) => {
+  await gotoClosingDesk(page, { demo: true })
+
+  await page.getByLabel('Search closing cases').fill('Memphis')
+  await expect(page.locator('[data-testid="cd-card"]')).toHaveCount(1)
+  expect(await sumLaneCounts(page)).toBe(1)
+
+  await page.getByRole('tab', { name: 'Table' }).click()
+  await expect(page.locator('[data-testid="cd-table-row"]')).toHaveCount(1)
+
   await page.getByLabel('Search closing cases').fill('')
+  await page.getByRole('tab', { name: 'Board' }).click()
+  await expect(page.locator('[data-testid="cd-card"]')).toHaveCount(DEMO_CASE_COUNT)
+})
 
+test('Case dossier opens from board and table with same selection', async ({ page }) => {
+  await gotoClosingDesk(page, { demo: true })
+
+  const firstCard = page.locator('[data-testid="cd-card"]').first()
+  const caseId = await firstCard.getAttribute('data-case-id')
+  await firstCard.click()
+  await expect(page.locator('[data-testid="cd-dossier"]')).toBeVisible()
+  await expect(page.locator('[data-testid="cd-next-action"]')).toBeVisible()
+  await expect(page.locator('.cd-dossier').getByText('Closing Copilot — Read Only', { exact: false })).toBeVisible()
+
+  const execButtons = page.locator('.cd-proposed button')
+  for (let i = 0, n = await execButtons.count(); i < n; i++) await expect(execButtons.nth(i)).toBeDisabled()
+
+  await shot(page, 'closing-desk-workspace')
+  await page.locator('.cd-dossier__close').click()
+
+  await page.getByRole('tab', { name: 'Table' }).click()
+  await page.locator(`[data-testid="cd-table-row"][data-case-id="${caseId}"]`).click()
+  await expect(page.locator('[data-testid="cd-dossier"]')).toBeVisible()
+  await page.locator('.cd-dossier__close').click()
+})
+
+test('Keyboard focus on view mode tabs', async ({ page }) => {
+  await gotoClosingDesk(page, { demo: true })
   await page.getByRole('tab', { name: 'Board' }).focus()
   await expect(page.getByRole('tab', { name: 'Board' })).toBeFocused()
 })
 
-test('Case workspace opens with milestones, issues, financials, read-only copilot', async ({ page }) => {
-  await gotoClosingDesk(page, { demo: true })
-  await page.locator('[data-testid="cd-card"]').first().click()
-  const drawer = page.locator('.cd-drawer')
-  await expect(drawer).toBeVisible()
-
-  await expect(page.locator('[data-testid="cd-next-action"]')).toBeVisible()
-  await expect(drawer.getByText('Closing Milestones', { exact: false })).toBeVisible()
-  await expect(drawer.getByText(/Closing Health — Why/)).toBeVisible()
-  await expect(drawer.getByText('Closing Copilot — Read Only', { exact: false })).toBeVisible()
-
-  const execButtons = drawer.locator('.cd-proposed button')
-  const n = await execButtons.count()
-  for (let i = 0; i < n; i++) await expect(execButtons.nth(i)).toBeDisabled()
-
-  await shot(page, 'closing-desk-workspace')
-  await page.locator('.cd-drawer__close').click()
-})
-
-test('Light + dark themes and mobile layout without console errors', async ({ page }) => {
-  const { consoleErrors } = await gotoClosingDesk(page)
+test('Light, dark, tablet, mobile without console errors', async ({ page }) => {
+  const { consoleErrors } = await gotoClosingDesk(page, { demo: true })
+  await page.getByRole('tab', { name: 'Board' }).click()
 
   for (const theme of ['dark', 'light'] as const) {
     await page.evaluate((t) => document.documentElement.setAttribute('data-nexus-theme', t), theme)
-    await page.waitForTimeout(250)
+    await page.waitForTimeout(200)
     await shot(page, `closing-desk-${theme}`)
   }
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.waitForTimeout(250)
-  await expect(page.locator('.closing-desk-view')).toBeVisible()
+  await page.setViewportSize({ width: 820, height: 1024 })
+  await page.waitForTimeout(200)
   await expect(page.locator('[data-testid="cd-board"]')).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.waitForTimeout(200)
+  await expect(page.locator('.closing-desk-view')).toBeVisible()
   await shot(page, 'closing-desk-mobile')
 
-  expect(consoleErrors, `console errors: ${consoleErrors.join(' | ')}`).toHaveLength(0)
-})
-
-test('Degraded diagnostics panel visible on real empty route', async ({ page }) => {
-  await gotoClosingDesk(page)
-  await expect(page.locator('[data-testid="cd-diagnostics-panel"]')).toBeVisible()
-  await expect(page.locator('[data-testid="cd-lifecycle-reqs"]')).toBeVisible()
+  expect(consoleErrors, consoleErrors.join(' | ')).toHaveLength(0)
 })

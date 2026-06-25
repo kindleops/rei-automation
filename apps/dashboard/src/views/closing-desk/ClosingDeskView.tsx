@@ -1,19 +1,23 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './styles/closing-desk.css'
 import { useClosingDesk } from './hooks/useClosingDesk'
-import type { ClosingCase } from '../../domain/closing-desk/closing-desk.types'
-import { CLOSING_BOARD_COLUMNS, boardColumnLabel } from '../../domain/closing-desk/closing-board'
-import { casesForDisplay, resolveClosingDeskSurfaceState } from './closing-desk-state'
-import { ClosingHealthBadge } from './components/ClosingHealthBadge'
+import type { ClosingBoardColumn, ClosingCase } from '../../domain/closing-desk/closing-desk.types'
+import {
+  groupCasesByLane,
+  resolveClosingDeskSurfaceState,
+  resolveDisplaySummary,
+  resolveRenderableCases,
+} from './closing-desk-state'
 import { ClosingCaseWorkspace } from './components/ClosingCaseWorkspace'
 import { ClosingDeskMetrics } from './components/ClosingDeskMetrics'
 import { ClosingDeskCommandCard } from './components/ClosingDeskCommandCard'
 import { ClosingDeskBoard } from './components/ClosingDeskBoard'
+import { ClosingDeskTable } from './components/ClosingDeskTable'
 import { ClosingDeskControls } from './components/ClosingDeskControls'
 import { ClosingDeskIntelligenceRail } from './components/ClosingDeskIntelligenceRail'
-import { ClosingDeskLifecycleReqs } from './components/ClosingDeskLifecycleReqs'
-
-const money = (v: number) => `$${Math.round(v).toLocaleString()}`
+import { ClosingDeskHeader } from './components/ClosingDeskHeader'
+import { ClosingDeskEnvironment } from './components/ClosingDeskEnvironment'
+import { ClosingDeskDiagnosticsPanel } from './components/ClosingDeskDiagnosticsPanel'
 
 export function ClosingDeskView() {
   const fixtureQuery = useMemo(() => {
@@ -25,36 +29,34 @@ export function ClosingDeskView() {
   const { model, loading, error, filters, setFilters, markets, filteredCases } = useClosingDesk({ fixture: fixtureQuery })
   const [mode, setMode] = useState<'board' | 'table'>('board')
   const [active, setActive] = useState<ClosingCase | null>(null)
-  const diagnosticsRef = useRef<HTMLDivElement>(null)
+  const [diagOpen, setDiagOpen] = useState(false)
+  const [diagTab, setDiagTab] = useState<'diagnostics' | 'lifecycle'>('diagnostics')
+  const [mobileLane, setMobileLane] = useState<ClosingBoardColumn | 'all'>('all')
 
-  const displayCases = useMemo(
-    () => casesForDisplay(filteredCases, model, fixtureQuery),
+  const renderableCases = useMemo(
+    () => resolveRenderableCases(filteredCases, { fixtureQuery, modelMode: model?.mode ?? null }),
     [filteredCases, model, fixtureQuery],
   )
 
-  const surfaceState = resolveClosingDeskSurfaceState(model, { fixtureQuery, loading, error })
+  const displaySummary = useMemo(
+    () => resolveDisplaySummary(renderableCases, model?.summary, { fixtureQuery, modelMode: model?.mode ?? null }),
+    [renderableCases, model, fixtureQuery],
+  )
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, ClosingCase[]>()
-    for (const col of CLOSING_BOARD_COLUMNS) map.set(col.id, [])
-    for (const c of displayCases) map.get(c.boardColumn)?.push(c)
-    return map
-  }, [displayCases])
+  const surfaceState = resolveClosingDeskSurfaceState(model, { fixtureQuery, loading, error })
+  const grouped = useMemo(() => groupCasesByLane(renderableCases), [renderableCases])
 
   const degradedNotes = useMemo(() => {
     const notes = [...(model?.provenance.degraded ?? [])]
     if (model?.mode !== 'live' && !fixtureQuery) {
-      notes.unshift('Live closing projection is incomplete — display is degraded, not fixture-backed.')
+      notes.unshift('Live closing projection is incomplete — metrics and cases are withheld until canonical mirror exists.')
     }
     return notes
   }, [model, fixtureQuery])
 
-  const showDiagnostics = fixtureQuery
-    ? false
-    : surfaceState === 'zero' || surfaceState === 'degraded' || (model?.diagnostics?.length ?? 0) > 0
-
-  const scrollDiagnostics = useCallback(() => {
-    diagnosticsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  const openDiagnostics = useCallback((tab: 'diagnostics' | 'lifecycle' = 'diagnostics') => {
+    setDiagTab(tab)
+    setDiagOpen(true)
   }, [])
 
   const openDemo = useCallback(() => {
@@ -63,32 +65,51 @@ export function ClosingDeskView() {
     window.location.assign(url.toString())
   }, [])
 
-  const showFilteredEmpty = !loading && !error && displayCases.length === 0 && (filters.search || filters.market !== 'all' || filters.risk !== 'all' || filters.boardColumn !== 'all')
+  const showFilteredEmpty =
+    !loading &&
+    !error &&
+    renderableCases.length === 0 &&
+    (filters.search || filters.market !== 'all' || filters.risk !== 'all' || filters.boardColumn !== 'all')
+
+  const selectedId = active?.identity.closingCaseId ?? null
+
+  useEffect(() => {
+    const root = document.querySelector('.closing-desk-view')
+    if (!root) return
+    if (selectedId) root.setAttribute('data-selected-case', selectedId)
+    else root.removeAttribute('data-selected-case')
+    return () => root.removeAttribute('data-selected-case')
+  }, [selectedId])
+
+  const verifyCounts = useMemo(() => {
+    let boardCards = 0
+    grouped.forEach((cases) => { boardCards += cases.length })
+    return { boardCards, tableRows: renderableCases.length, cases: renderableCases.length }
+  }, [grouped, renderableCases])
 
   return (
-    <main className="closing-desk-view">
-      <header className="cd-header">
-        <p className="cd-header__eyebrow">NEXUS · POST-CONTRACT COMMAND</p>
-        <h1>Closing Desk</h1>
-        <p className="cd-header__sub">
-          Post-contract command center — Formal Contract → Under Contract → Disposition → Prepared to Close → Closed.
-        </p>
-      </header>
+    <main
+      className={`closing-desk-view ${surfaceState === 'demo' ? 'is-demo' : ''} ${selectedId ? 'has-selection' : ''}`}
+      data-verify-board={verifyCounts.boardCards}
+      data-verify-table={verifyCounts.tableRows}
+    >
+      <ClosingDeskHeader surfaceState={surfaceState} summary={displaySummary} cases={renderableCases} loading={loading} />
 
-      {fixtureQuery ? (
-        <div className="cd-demo-banner" role="status" data-testid="cd-demo-banner">
-          DEMO DATA — synthetic fixtures. Live closing data is unavailable; nothing here reflects a real deal.
-        </div>
-      ) : null}
+      <ClosingDeskEnvironment
+        surfaceState={surfaceState}
+        degradedNotes={degradedNotes}
+        diagnostics={model?.diagnostics ?? []}
+      />
 
-      <ClosingDeskMetrics summary={model?.summary ?? null} loading={loading} />
+      <ClosingDeskMetrics summary={displaySummary} loading={loading} onFilter={setFilters} />
 
       <ClosingDeskCommandCard
         surfaceState={surfaceState}
         diagnostics={model?.diagnostics ?? []}
         degradedNotes={degradedNotes}
         onOpenDemo={openDemo}
-        onScrollDiagnostics={scrollDiagnostics}
+        onScrollDiagnostics={() => openDiagnostics('diagnostics')}
+        onOpenLifecycleGuide={() => openDiagnostics('lifecycle')}
       />
 
       <ClosingDeskControls
@@ -96,17 +117,19 @@ export function ClosingDeskView() {
         markets={markets}
         mode={mode}
         fixtureQuery={fixtureQuery}
+        mobileLane={mobileLane}
         onFiltersChange={setFilters}
         onModeChange={setMode}
+        onMobileLaneChange={setMobileLane}
         onOpenDemo={openDemo}
-        onScrollDiagnostics={scrollDiagnostics}
+        onOpenDiagnostics={() => openDiagnostics('diagnostics')}
       />
 
-      <div className="cd-workspace">
+      <div className="cd-canvas">
         {loading ? (
           <div className="cd-state" data-testid="cd-loading">
-            <div className="cd-skeleton" style={{ width: 280, height: 80 }} />
-            <span>Loading closing cases…</span>
+            <div className="cd-skeleton cd-skeleton--board" />
+            <span>Loading closing portfolio…</span>
           </div>
         ) : error ? (
           <div className="cd-state" data-testid="cd-error">
@@ -116,68 +139,36 @@ export function ClosingDeskView() {
         ) : showFilteredEmpty ? (
           <div className="cd-filter-empty" data-testid="cd-filter-empty" role="status">
             <span>No cases match the current filters.</span>
-            <button type="button" className="cd-btn cd-btn--ghost cd-btn--sm" onClick={() => setFilters({ search: '', market: 'all', risk: 'all', boardColumn: 'all' })}>
+            <button type="button" className="cd-btn cd-btn--ghost" onClick={() => setFilters({ search: '', market: 'all', risk: 'all', boardColumn: 'all' })}>
               Clear filters
             </button>
           </div>
         ) : null}
 
         {mode === 'board' ? (
-          <ClosingDeskBoard grouped={grouped} onOpenCase={setActive} />
+          <ClosingDeskBoard
+            grouped={grouped}
+            selectedId={selectedId}
+            mobileLane={mobileLane}
+            onOpenCase={setActive}
+          />
         ) : (
-          <div className="cd-table-wrap" data-testid="cd-table">
-            <table className="cd-table">
-              <thead>
-                <tr>
-                  <th>Property</th><th>Seller</th><th>Market</th><th>Lane</th><th>Stage</th><th>Health</th><th>Seller Price</th><th>Next Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayCases.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="cd-table__empty">No cases in table view — adjust filters or wait for projection.</td>
-                  </tr>
-                ) : (
-                  displayCases.map((c) => (
-                    <tr
-                      key={c.identity.closingCaseId}
-                      onClick={() => setActive(c)}
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter') setActive(c) }}
-                    >
-                      <td>{c.displayName}</td>
-                      <td>{c.sellerName ?? '—'}</td>
-                      <td>{c.market ?? '—'}</td>
-                      <td>{boardColumnLabel(c.boardColumn)}</td>
-                      <td>{c.universalStage.replace(/_/g, ' ')}</td>
-                      <td><ClosingHealthBadge health={c.health} /></td>
-                      <td>{c.financials.sellerContractPrice !== null ? money(c.financials.sellerContractPrice) : '—'}</td>
-                      <td>{c.health.nextRequiredAction ?? '—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ClosingDeskTable cases={renderableCases} selectedId={selectedId} onOpenCase={setActive} />
         )}
       </div>
 
-      <ClosingDeskIntelligenceRail cases={displayCases} degraded={surfaceState === 'degraded' || surfaceState === 'zero'} />
+      <ClosingDeskIntelligenceRail
+        cases={renderableCases}
+        degraded={surfaceState === 'degraded' || surfaceState === 'zero'}
+      />
 
-      {showDiagnostics ? (
-        <div className="cd-diagnostics-panel" ref={diagnosticsRef} data-testid="cd-diagnostics-panel">
-          <h3>Source diagnostics</h3>
-          {[...degradedNotes, ...(model?.diagnostics ?? [])].filter((v, i, a) => a.indexOf(v) === i).map((d, i) => (
-            <p className="cd-diagnostics" key={i} role="status">{d}</p>
-          ))}
-        </div>
-      ) : null}
-
-      <ClosingDeskLifecycleReqs />
-
-      <aside className="cd-copilot-hint" aria-hidden="true">
-        <span>Closing Copilot — read-only recommendations</span>
-      </aside>
+      <ClosingDeskDiagnosticsPanel
+        open={diagOpen}
+        onClose={() => setDiagOpen(false)}
+        degradedNotes={degradedNotes}
+        diagnostics={model?.diagnostics ?? []}
+        initialTab={diagTab}
+      />
 
       {active ? <ClosingCaseWorkspace closingCase={active} onClose={() => setActive(null)} /> : null}
     </main>

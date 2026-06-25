@@ -1,4 +1,8 @@
 import type { ClosingDeskModel } from '../../domain/closing-desk/closing-desk.types'
+import { resolveRenderableCases } from './closing-desk-utils'
+
+export type { ClosingCase } from '../../domain/closing-desk/closing-desk.types'
+export { resolveRenderableCases, resolveDisplaySummary, groupCasesByLane } from './closing-desk-utils'
 
 export type ClosingDeskSurfaceState = 'loading' | 'error' | 'demo' | 'zero' | 'degraded' | 'live'
 
@@ -13,23 +17,26 @@ export function resolveClosingDeskSurfaceState(
   if (opts.fixtureQuery) return 'demo'
   if (!model) return 'degraded'
 
+  const renderable = resolveRenderableCases(model.cases, { fixtureQuery: false, modelMode: model.mode })
+  if (renderable.length > 0) return 'live'
+
   const hasProjectionGap =
+    model.mode !== 'live' ||
     (model.provenance.degraded?.length ?? 0) > 0 ||
     model.diagnostics.some((d) => PROJECTION_MARKERS.test(d))
 
-  if (model.cases.length > 0) return 'live'
-  if (model.mode !== 'live') return 'degraded'
   if (hasProjectionGap) return 'degraded'
   return 'zero'
 }
 
-/** Live routes must never render fixture-backed rows unless ?demo=1 is set. */
+/** @deprecated Use resolveRenderableCases */
 export function casesForDisplay<T extends { identity: { closingCaseId: string } }>(
   cases: T[],
   model: ClosingDeskModel | null,
   fixtureQuery: boolean,
 ): T[] {
-  if (fixtureQuery) return cases
-  if (!model || model.mode !== 'live') return []
-  return cases
+  return resolveRenderableCases(cases as never, {
+    fixtureQuery,
+    modelMode: model?.mode ?? null,
+  }) as T[]
 }

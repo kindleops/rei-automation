@@ -1,32 +1,34 @@
 import type { ClosingDeskSummary, ClosingDataSource } from '../../../domain/closing-desk/closing-desk.types'
+import type { ClosingDeskFilters } from '../hooks/useClosingDesk'
 
 const money = (v: number) => `$${Math.round(v).toLocaleString()}`
 
-interface MetricDef {
-  key: keyof ClosingDeskSummary
+type MetricKey = keyof ClosingDeskSummary
+
+interface PrimaryDef {
+  key: MetricKey
   label: string
-  shortLabel?: string
-  tone?: 'alert' | 'good' | 'revenue'
+  context?: string
+  tone?: 'healthy' | 'warning' | 'critical' | 'revenue' | 'unknown'
   format?: 'money'
-  primary?: boolean
+  filterKey?: keyof ClosingDeskFilters
+  filterValue?: string
 }
 
-const METRICS: MetricDef[] = [
-  { key: 'underContract', label: 'Under Contract', primary: true },
-  { key: 'closingsThisWeek', label: 'Closing This Week', shortLabel: 'This Week', primary: true },
-  { key: 'clearToClose', label: 'Clear to Close', tone: 'good', primary: true },
-  { key: 'titleBlocked', label: 'Title Blocked', tone: 'alert', primary: true },
-  { key: 'expectedRevenue', label: 'Expected Revenue', format: 'money', tone: 'revenue', primary: true },
-  { key: 'sellerActionRequired', label: 'Seller Action Required', shortLabel: 'Seller Action', tone: 'alert' },
-  { key: 'buyerActionRequired', label: 'Buyer Action Required', shortLabel: 'Buyer Action', tone: 'alert' },
-  { key: 'emdOverdue', label: 'EMD Overdue', tone: 'alert' },
-  { key: 'confirmedRevenueThisMonth', label: 'Confirmed Revenue MTD', shortLabel: 'Confirmed (MTD)', format: 'money', tone: 'good' },
+const PRIMARY: PrimaryDef[] = [
+  { key: 'underContract', label: 'Active Under Contract', context: 'Stages 6–7', tone: 'healthy' },
+  { key: 'closingsThisWeek', label: 'Closings This Week', context: 'Next 7 days', tone: 'healthy' },
+  { key: 'clearToClose', label: 'Clear to Close', context: 'Readiness gate', tone: 'healthy' },
+  { key: 'titleBlocked', label: 'At-Risk / Title Blocked', context: 'Title + curative', tone: 'warning', filterKey: 'risk', filterValue: 'high' },
+  { key: 'expectedRevenue', label: 'Expected Revenue', context: 'Assignment spread', tone: 'revenue', format: 'money' },
 ]
 
-function formatMetricValue(raw: number, format?: 'money'): string {
-  if (format === 'money') return money(raw)
-  return String(raw)
-}
+const SECONDARY: PrimaryDef[] = [
+  { key: 'sellerActionRequired', label: 'Seller Action', tone: 'warning' },
+  { key: 'buyerActionRequired', label: 'Buyer Action', tone: 'warning' },
+  { key: 'emdOverdue', label: 'EMD Overdue', tone: 'critical' },
+  { key: 'confirmedRevenueThisMonth', label: 'Confirmed MTD', tone: 'healthy', format: 'money' },
+]
 
 function sourceLabel(source: ClosingDataSource | undefined): string {
   if (!source || source === 'absent') return 'Not projected'
@@ -35,71 +37,65 @@ function sourceLabel(source: ClosingDataSource | undefined): string {
   return source.replace(/_/g, ' ')
 }
 
-function MetricCard({
-  def,
-  raw,
-  source,
-  loading,
-  compact,
-}: {
-  def: MetricDef
-  raw: number
-  source: ClosingDataSource | undefined
-  loading: boolean
-  compact?: boolean
-}) {
-  const unknown = source === 'absent'
-  const value = loading ? '…' : unknown ? '—' : formatMetricValue(raw, def.format)
-  const alertActive = def.tone === 'alert' && !unknown && raw > 0
-
-  return (
-    <div
-      className={`cd-metric ${compact ? 'cd-metric--compact' : 'cd-metric--primary'} ${alertActive ? 'is-alert' : ''} ${def.tone === 'good' && !unknown ? 'is-good' : ''} ${def.tone === 'revenue' ? 'is-revenue' : ''} ${unknown ? 'is-unknown' : ''}`}
-      data-testid={`cd-metric-${def.key}`}
-    >
-      <span className="cd-metric__value">{value}</span>
-      <span className="cd-metric__label">{compact ? (def.shortLabel ?? def.label) : def.label}</span>
-      <span className="cd-metric__source" title={`Source: ${sourceLabel(source)}`}>
-        {sourceLabel(source)}
-      </span>
-    </div>
-  )
+function toneClass(raw: number, tone?: PrimaryDef['tone'], unknown?: boolean): string {
+  if (unknown) return 'is-unknown'
+  if (tone === 'warning' && raw > 0) return 'is-warning'
+  if (tone === 'critical' && raw > 0) return 'is-critical'
+  if (tone === 'healthy' && raw > 0) return 'is-healthy'
+  if (tone === 'revenue') return 'is-revenue'
+  return ''
 }
 
 export interface ClosingDeskMetricsProps {
   summary: ClosingDeskSummary | null
   loading: boolean
+  onFilter?: (patch: Partial<ClosingDeskFilters>) => void
 }
 
-export function ClosingDeskMetrics({ summary, loading }: ClosingDeskMetricsProps) {
-  const primary = METRICS.filter((m) => m.primary)
-  const secondary = METRICS.filter((m) => !m.primary)
+export function ClosingDeskMetrics({ summary, loading, onFilter }: ClosingDeskMetricsProps) {
+  const renderPrimary = (def: PrimaryDef) => {
+    const raw = summary ? (summary[def.key] as number) : 0
+    const source = summary?.metricSources?.[def.key]
+    const unknown = source === 'absent'
+    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw) : String(raw)
+    const clickable = def.filterKey && onFilter && raw > 0
+
+    return (
+      <div
+        key={def.key}
+        className={`cd-kpi cd-kpi--primary ${toneClass(raw, def.tone, unknown)}`}
+        data-testid={`cd-metric-${def.key}`}
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? () => onFilter({ [def.filterKey!]: def.filterValue ?? 'all' }) : undefined}
+        onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onFilter({ [def.filterKey!]: def.filterValue ?? 'all' }) } : undefined}
+      >
+        <span className="cd-kpi__value">{value}</span>
+        <span className="cd-kpi__label">{def.label}</span>
+        {def.context ? <span className="cd-kpi__context">{def.context}</span> : null}
+        <span className="cd-kpi__provenance">{sourceLabel(source)}</span>
+      </div>
+    )
+  }
+
+  const renderSignal = (def: PrimaryDef) => {
+    const raw = summary ? (summary[def.key] as number) : 0
+    const source = summary?.metricSources?.[def.key]
+    const unknown = source === 'absent'
+    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw) : String(raw)
+
+    return (
+      <div key={def.key} className={`cd-signal ${toneClass(raw, def.tone, unknown)}`} data-testid={`cd-metric-${def.key}`}>
+        <span className="cd-signal__value">{value}</span>
+        <span className="cd-signal__label">{def.label}</span>
+      </div>
+    )
+  }
 
   return (
-    <div className="cd-metrics-stack" data-testid="cd-metrics">
-      <div className="cd-metrics cd-metrics--primary" aria-label="Primary closing metrics">
-        {primary.map((m) => (
-          <MetricCard
-            key={m.key}
-            def={m}
-            raw={summary ? (summary[m.key] as number) : 0}
-            source={summary?.metricSources?.[m.key]}
-            loading={loading}
-          />
-        ))}
-      </div>
-      <div className="cd-metrics cd-metrics--secondary" aria-label="Operational signals">
-        {secondary.map((m) => (
-          <MetricCard
-            key={m.key}
-            def={m}
-            raw={summary ? (summary[m.key] as number) : 0}
-            source={summary?.metricSources?.[m.key]}
-            loading={loading}
-            compact
-          />
-        ))}
-      </div>
-    </div>
+    <section className="cd-metrics-command" data-testid="cd-metrics" aria-label="Portfolio metrics">
+      <div className="cd-kpi-row">{PRIMARY.map(renderPrimary)}</div>
+      <div className="cd-signal-row">{SECONDARY.map(renderSignal)}</div>
+    </section>
   )
 }

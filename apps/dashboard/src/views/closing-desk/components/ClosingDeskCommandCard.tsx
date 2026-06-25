@@ -6,6 +6,7 @@ export interface ClosingDeskCommandCardProps {
   degradedNotes: string[]
   onOpenDemo: () => void
   onScrollDiagnostics: () => void
+  onOpenLifecycleGuide?: () => void
 }
 
 export function ClosingDeskCommandCard({
@@ -14,6 +15,7 @@ export function ClosingDeskCommandCard({
   degradedNotes,
   onOpenDemo,
   onScrollDiagnostics,
+  onOpenLifecycleGuide,
 }: ClosingDeskCommandCardProps) {
   if (surfaceState === 'demo' || surfaceState === 'live') return null
 
@@ -40,9 +42,9 @@ export function ClosingDeskCommandCard({
         <button type="button" className="cd-btn cd-btn--accent" onClick={onOpenDemo}>
           Open Demo Workspace
         </button>
-        <a className="cd-btn cd-btn--ghost" href="#cd-lifecycle-reqs">
+        <button type="button" className="cd-btn cd-btn--ghost" onClick={onOpenLifecycleGuide ?? onScrollDiagnostics}>
           Review Lifecycle Requirements
-        </a>
+        </button>
       </div>
     </section>
   )
