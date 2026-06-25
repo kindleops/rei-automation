@@ -616,6 +616,7 @@ const OBJECTION_MAP = [
     phrases: [
       // English
       "wrong number", "you have the wrong number", "wrong person",
+      "never been the owner", "never was the owner",
       "not the owner", "not the property owner", "not the homeowner",
       "doesn't own", "don't own", "no longer own", "i no longer own",
       "i sold it", "already sold", "sold that property", "sold that house",

@@ -22,6 +22,12 @@ import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js
 import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
 import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
 import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
+import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
+import {
+  buildIntelligenceMessageEventPatch,
+  persistInboundIntelligenceSnapshot,
+  persistSellerContactReferral,
+} from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
 import {
   autoReplyModeAllowsDiagnostics,
   autoReplyModeAllowsQueue,
@@ -83,6 +89,9 @@ const defaultDeps = {
   processAutonomousSellerReply,
   resolveSellerAutoReplyPlan,
   executeInboundAutomationDecision,
+  runInboundIntelligencePhase,
+  persistInboundIntelligenceSnapshot,
+  persistSellerContactReferral,
   scheduleFollowUp,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
@@ -1314,61 +1323,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       return { ok: true, stage: "after_offer_stage_ai", offer_stage_ai_result };
     }
 
-    const second_pass_supabase_payload = buildSecondPassSupabasePayload({
-      extracted,
-      inbound_from,
-      inbound_to,
-      message_body,
-      payload,
-      classification,
-      route,
-      context,
-      auto_reply_plan: null,
-    });
-
-    emitInboundTrace("TEXTGRID_INBOUND_SECOND_PASS_SUPABASE_START", {
-      message_id: extracted.message_id,
-      provider_message_sid: second_pass_supabase_payload.provider_message_sid,
-      detected_intent: second_pass_supabase_payload.detected_intent,
-      language: second_pass_supabase_payload.language,
-      classification_confidence:
-        second_pass_supabase_payload.classification_confidence,
-      safety_status: second_pass_supabase_payload.safety_status,
-    });
-
-    try {
-      const log_inbound_message_event_supabase =
-        runtimeDeps.logInboundMessageEventSupabase ||
-        (await import("@/lib/supabase/sms-engine.js")).logInboundMessageEvent;
-
-      await log_inbound_message_event_supabase(
-        second_pass_supabase_payload,
-        {
-          now: new Date().toISOString(),
-          supabaseClient: runtimeDeps.getSupabaseClient?.(),
-        }
-      );
-      emitInboundTrace("TEXTGRID_INBOUND_SECOND_PASS_SUPABASE_SUCCESS", {
-        message_id: extracted.message_id,
-        provider_message_sid: second_pass_supabase_payload.provider_message_sid,
-        detected_intent: second_pass_supabase_payload.detected_intent,
-        language: second_pass_supabase_payload.language,
-        classification_confidence:
-          second_pass_supabase_payload.classification_confidence,
-        safety_status: second_pass_supabase_payload.safety_status,
-        priority: second_pass_supabase_payload.priority,
-        risk: second_pass_supabase_payload.risk,
-        routing_allowed: second_pass_supabase_payload.routing_allowed,
-      });
-    } catch (error) {
-      emitInboundTrace("TEXTGRID_INBOUND_SECOND_PASS_SUPABASE_ERROR", {
-        message_id: extracted.message_id,
-        provider_message_sid: second_pass_supabase_payload.provider_message_sid,
-        error_message: error?.message || "unknown_second_pass_supabase_error",
-      });
-      throw error;
-    }
-
     // ── SEGMENT: prospect_resolution ──────────────────────────────────────
     // Write brain activity, master-owner timestamps, and stage/language/profile
     // updates in parallel.
@@ -1392,42 +1346,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             ...(sms_agent_id ? { "sms-agent": sms_agent_id } : {}),
           },
         });
-        // ─── SUPABASE PERSISTENCE (Second Pass with Classification) ──────
-        try {
-          const supabase_payload = {
-            message_id: extracted.message_id,
-            from: inbound_from,
-            to: inbound_to,
-            message_body,
-            detected_intent:
-              classification?.detected_intent ||
-              classification?.primary_intent ||
-              classification?.objection ||
-              classification?.source ||
-              null,
-            language:
-              classification?.language ||
-              context?.summary?.language_preference ||
-              "English",
-            classification_confidence: classification?.confidence || 0,
-            safety_status: second_pass_supabase_payload.safety_status || "review_required",
-            routing_allowed: second_pass_supabase_payload.routing_allowed,
-            metadata: {
-              ...(classification || {}),
-              route_stage: route?.stage || null,
-              use_case: route?.use_case || null,
-              seller_stage_reply_reason: null,
-              second_pass_authoritative: true,
-            },
-          };
-
-          await runtimeDeps.logInboundMessageEventSupabase(supabase_payload);
-        } catch (supaErr) {
-          safeWarn("textgrid.inbound_supabase_update_failed", {
-            message_id: extracted.message_id,
-            error: supaErr?.message || "unknown",
-          });
-        }
       }
     } catch (err) {
       return failStepAndReturn("textgrid_inbound_failed_prospect_resolution", err);
@@ -1459,7 +1377,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     let maybe_offer_progress, initial_offer, underwriting, seller_stage_reply,
       underwriting_follow_up, maybe_offer, active_offer_item_id,
       contract, pipeline, underwriting_transfer, autopilot_queue_row = null,
-      seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" };
+      seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" },
+      intelligence_snapshot = null;
 
     try {
       const offer_route = offer_routing?.offer_route || null;
@@ -1529,7 +1448,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         notes: message_body,
       });
 
-      const auto_reply_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
+      const legacy_auto_reply_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
         inbound_event: { item_id: inbound_message_event_id, provider_message_id: extracted.message_id, from: inbound_from, to: inbound_to },
         message_body,
         classification,
@@ -1539,22 +1458,85 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         prior_use_case: route?.use_case || null,
         recent_outbound: latest_outbound_event,
         underwriting_signals: signals,
-        auto_reply_enabled: inbound_autopilot_enabled,
+        auto_reply_enabled: true,
         force_queue_reply: false,
         now: new Date().toISOString()
       });
+      const auto_reply_plan = legacy_auto_reply_plan;
 
-      // ── SEGMENT: follow-up scheduling ───────────────────────────────────────
-      // Wire follow-up after safety+classification decision. Gated by system_followup_enabled.
-      // Never schedules for: opt_out, wrong_person, hostile_or_legal, timing_complaint.
-      // not_interested → 30-day nurture. Active whitelisted intents → no nurture (active workflow).
+      const queue_permission = autoReplyModeAllowsQueue({
+        mode: auto_reply_mode_final,
+        inboundFrom: inbound_from,
+        threadKey: inbound_from,
+      });
+      const execution_allowed = Boolean(
+        inbound_auto_reply_queue_enabled && queue_permission.allowed
+      );
+
+      const inbound_intelligence = await runtimeDeps.runInboundIntelligencePhase({
+        message: message_body,
+        threadKey: inbound_from,
+        propertyId: property_id,
+        prospectId: prospect_id,
+        ownerId: master_owner_id,
+        phoneId: phone_item_id,
+        classification,
+        conversationBrain: brain_item,
+        latestThreadContext: context,
+        context,
+        route,
+        inboundFrom: inbound_from,
+        inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
+        inboundEventId: inbound_message_event_id || extracted.message_id,
+        legacy_plan: legacy_auto_reply_plan,
+        auto_reply_mode: auto_reply_mode_final,
+        execution_allowed,
+        supabaseClient: runtimeDeps.getSupabaseClient?.(),
+      });
+
+      seller_stage_reply = inbound_intelligence?.seller_stage_reply || null;
+      intelligence_snapshot = inbound_intelligence?.intelligence_snapshot || null;
+
       try {
-        if (system_followup_enabled) {
+        await runtimeDeps.persistInboundIntelligenceSnapshot({
+          supabaseClient: runtimeDeps.getSupabaseClient?.(),
+          intelligence_snapshot,
+          provider_message_sid: extracted.message_id,
+          message_event_id: inbound_message_event_id,
+          dry_run: Boolean(dry_run),
+        });
+        if (intelligence_snapshot?.referral_detected) {
+          await runtimeDeps.persistSellerContactReferral({
+            supabaseClient: runtimeDeps.getSupabaseClient?.(),
+            referral: intelligence_snapshot.referral,
+            dry_run: Boolean(dry_run),
+          });
+        }
+      } catch (persistErr) {
+        safeWarn("textgrid.inbound_intelligence_persist_failed", {
+          message_id: extracted.message_id,
+          inbound_from,
+          error: persistErr?.message || "unknown",
+        });
+      }
+
+      seller_followup_result = {
+        ok: true,
+        skipped: true,
+        shadow_only: true,
+        reason: "shadow_followup_recommendation_only",
+        ...(intelligence_snapshot?.follow_up_recommendation || {}),
+      };
+
+      // Phase B only: dispatchable follow-up rows remain gated by system controls.
+      try {
+        if (system_followup_enabled && execution_allowed) {
           seller_followup_result = await runtimeDeps.scheduleFollowUp(
-            auto_reply_plan.inbound_intent,
-            inbound_from,  // thread_key = seller E.164 phone
+            intelligence_snapshot?.canonical_intent || auto_reply_plan.inbound_intent,
+            inbound_from,
             {
               is_suppressed: Boolean(
+                intelligence_snapshot?.canonical_decision?.should_suppress_contact ||
                 auto_reply_plan.safety?.opt_out ||
                 auto_reply_plan.safety?.wrong_number ||
                 auto_reply_plan.safety?.hostile_or_legal
@@ -1571,7 +1553,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         safeWarn("textgrid.inbound_followup_schedule_failed", {
           message_id: extracted.message_id,
           inbound_from,
-          intent: auto_reply_plan.inbound_intent,
+          intent: intelligence_snapshot?.canonical_intent || auto_reply_plan.inbound_intent,
           error: err?.message || "unknown",
         });
       }
@@ -1614,19 +1596,28 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       safeInfo("auto_reply_decision", {
         inbound_id: extracted.message_id,
         inbound_from,
-        intent: auto_reply_plan.inbound_intent,
+        intent: intelligence_snapshot?.canonical_intent || auto_reply_plan.inbound_intent,
         language: auto_reply_plan.selected_language || classification?.language || null,
         confidence: classification?.confidence ?? null,
-        selected_template_id: auto_reply_plan.selected_template_id || null,
-        should_queue_reply: auto_reply_plan.should_queue_reply,
-        blocked_reason: auto_reply_plan.suppression_reason || null,
+        selected_template_id:
+          intelligence_snapshot?.selected_template?.template_id ||
+          auto_reply_plan.selected_template_id ||
+          null,
+        should_queue_reply: intelligence_snapshot?.canonical_decision?.should_queue_reply,
+        blocked_reason:
+          intelligence_snapshot?.execution_blocked_reason ||
+          auto_reply_plan.suppression_reason ||
+          null,
         cap_reached,
         auto_reply_mode: auto_reply_mode_final,
         auto_reply_mode_source: auto_reply_mode_resolution.source,
         auto_reply_queue_enabled: inbound_auto_reply_queue_enabled,
+        execution_allowed,
+        intelligence_only: !execution_allowed,
         followup_scheduled: Boolean(seller_followup_result?.followup_created),
         followup_scheduled_for: seller_followup_result?.scheduled_for || null,
         followup_reason: seller_followup_result?.reason || null,
+        shadow_followup_recommendation: intelligence_snapshot?.follow_up_recommendation || null,
         system_followup_enabled,
       });
 
@@ -1693,19 +1684,16 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       }
 
       if (offer_route !== "manual_review") {
-        const queue_permission = autoReplyModeAllowsQueue({
-          mode: auto_reply_mode_final,
-          inboundFrom: inbound_from,
-          threadKey: inbound_from,
-        });
         const should_queue_live = Boolean(
-          inbound_auto_reply_queue_enabled &&
-            queue_permission.allowed &&
+          execution_allowed &&
             !cap_reached &&
-            auto_reply_plan?.should_queue_reply
+            (
+              intelligence_snapshot?.canonical_decision?.should_queue_reply ??
+              auto_reply_plan?.should_queue_reply
+            )
         );
 
-        if (inbound_autopilot_enabled) {
+        if (execution_allowed) {
           const auto_reply_execution = await runtimeDeps.executeInboundAutomationDecision({
             message: message_body,
             threadKey: inbound_from,
@@ -1730,23 +1718,29 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             supabaseClient: runtimeDeps.getSupabaseClient?.(),
           });
 
-          seller_stage_reply = auto_reply_execution?.seller_stage_reply || {
-            ok: true,
-            queued: false,
-            handled: true,
-            reason: auto_reply_execution?.audit_reason || "auto_reply_execution_unavailable",
-            plan: auto_reply_plan,
-            brain_stage: auto_reply_plan?.selected_use_case,
+          seller_stage_reply = {
+            ...(seller_stage_reply || {}),
+            ...(auto_reply_execution?.seller_stage_reply || {}),
+            intelligence_snapshot,
+            automation_decision:
+              auto_reply_execution?.automation_decision ||
+              intelligence_snapshot?.canonical_decision ||
+              null,
           };
 
           extra_queue_context = {
             ...extra_queue_context,
             auto_reply_mode: auto_reply_mode_final,
             auto_reply_mode_source: auto_reply_mode_resolution.source,
-            automation_decision: auto_reply_execution?.automation_decision || null,
+            automation_decision:
+              auto_reply_execution?.automation_decision ||
+              intelligence_snapshot?.canonical_decision ||
+              null,
             human_review_required: Boolean(
-              auto_reply_execution?.automation_decision?.should_mark_human_review
+              auto_reply_execution?.automation_decision?.should_mark_human_review ||
+                intelligence_snapshot?.canonical_decision?.should_mark_human_review
             ),
+            intelligence_snapshot,
           };
 
           if (auto_reply_execution?.queued && auto_reply_execution?.queue_row_id) {
@@ -1759,15 +1753,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
               metadata: { ...extra_queue_context, action_type: "autopilot_inbound_reply" },
             };
           }
-        } else {
-          seller_stage_reply = {
-            ok: true,
-            queued: false,
-            handled: true,
-            reason: is_preview ? "preview_only" : (auto_reply_plan?.should_queue_reply ? "auto_reply_blocked" : "no_auto_reply_needed"),
-            plan: auto_reply_plan,
-            brain_stage: auto_reply_plan?.selected_use_case,
-          };
         }
       }
 
@@ -1954,6 +1939,17 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             discord_card_error,
           });
         }
+        const intelligence_patch = buildIntelligenceMessageEventPatch(
+          seller_stage_reply?.intelligence_snapshot || intelligence_snapshot
+        );
+        const authoritative_intent =
+          intelligence_patch.detected_intent ||
+          seller_stage_reply?.plan?.inbound_intent ||
+          seller_stage_reply?.plan?.detected_intent ||
+          classification?.primary_intent ||
+          classification?.detected_intent ||
+          "unclear";
+
         await runtimeDeps.logInboundMessageEvent({
           record_item_id: inbound_message_event_id,
           brain_item,
@@ -1981,77 +1977,87 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           prior_message_id,
           response_to_message_id,
           stage_before,
+          current_stage: intelligence_patch.current_stage || route?.stage || null,
           stage_after:
+            intelligence_patch.stage_after ||
             seller_stage_reply?.brain_stage ||
             deterministic_state?.conversation_stage ||
             route?.stage ||
             null,
           is_opt_out:
+            authoritative_intent === "opt_out" ||
             seller_stage_reply?.plan?.selected_use_case === SELLER_FLOW_STAGES.STOP_OR_OPT_OUT ||
             inbound_is_negative,
-          detected_intent:
-            seller_stage_reply?.plan?.inbound_intent ||
-            seller_stage_reply?.plan?.detected_intent ||
-            classification?.detected_intent ||
-            classification?.inbound_intent ||
-            classification?.objection ||
-            "unclear",
+          detected_intent: authoritative_intent,
           priority: classification?.priority || "normal",
           risk: classification?.risk || "low",
-          safety_status: classification?.safety_status || "pending",
-          auto_reply_status,
+          safety_status: intelligence_patch.safety_status || classification?.safety_status || "review",
+          auto_reply_status: outbound_queue_id ? auto_reply_status : intelligence_patch.auto_reply_status || auto_reply_status,
           auto_reply_queue_id: outbound_queue_id,
-          human_review_required,
-          needs_human_review: human_review_required,
-          automation_decision,
-          routing_allowed: seller_stage_reply?.plan?.routing_allowed ?? true,
+          human_review_required: intelligence_patch.human_review_required ?? human_review_required,
+          needs_human_review: intelligence_patch.needs_human_review ?? human_review_required,
+          automation_decision: intelligence_patch.automation_decision || automation_decision,
+          routing_allowed: intelligence_patch.routing_allowed ?? seller_stage_reply?.plan?.routing_allowed ?? true,
           language: classification?.language || null,
-          classification_confidence: classification?.confidence || 0,
+          classification_confidence:
+            intelligence_patch.classification_confidence ??
+            classification?.confidence ??
+            0,
           metadata: {
              ...inbound_context_match_metadata,
-             // Classification fields for inbox thread categorization
-             detected_intent:
-               second_pass_supabase_payload.detected_intent ||
-               classification?.detected_intent ||
-               classification?.inbound_intent ||
-               classification?.objection ||
-               seller_stage_reply?.plan?.detected_intent ||
-               "unclear",
+             ...intelligence_patch.metadata,
+             detected_intent: authoritative_intent,
              sentiment: classification?.emotion || null,
-             seller_stage: route?.stage || deterministic_state?.conversation_stage || null,
-             conversation_stage: deterministic_state?.conversation_stage || route?.stage || null,
-             classification_confidence: second_pass_supabase_payload.classification_confidence,
+             seller_stage:
+               intelligence_patch.current_stage ||
+               route?.stage ||
+               deterministic_state?.conversation_stage ||
+               null,
+             conversation_stage:
+               intelligence_patch.current_stage ||
+               deterministic_state?.conversation_stage ||
+               route?.stage ||
+               null,
+             classification_confidence:
+               intelligence_patch.classification_confidence ??
+               classification?.confidence ??
+               null,
              needs_human_review:
-               second_pass_supabase_payload.classification_confidence !== null &&
-               second_pass_supabase_payload.classification_confidence < 0.5,
+               intelligence_patch.needs_human_review ??
+               human_review_required,
              is_hot_lead: ['interested', 'offer_request', 'price_inquiry', 'maybe_interested'].includes(classification?.objection),
              is_dnc: ['stop_texting', 'opt_out', 'wrong_person'].includes(classification?.compliance_flag) || classification?.objection === 'not_interested',
-             is_wrong_number: classification?.objection === 'wrong_person' || classification?.compliance_flag === 'wrong_person',
+             is_wrong_number:
+               authoritative_intent === "wrong_number" &&
+               intelligence_snapshot?.suppression_scope !== "property" &&
+               intelligence_snapshot?.invalidate_phone_globally !== false,
+             is_property_scoped_non_owner:
+               intelligence_snapshot?.suppression_scope === "property" ||
+               ["non_owner_referral", "property_specific_non_owner"].includes(authoritative_intent),
              is_not_interested: classification?.objection === 'not_interested',
-             language: second_pass_supabase_payload.language,
-             next_action: route?.use_case || seller_stage_reply?.plan?.selected_use_case || null,
-             priority: second_pass_supabase_payload.priority,
-             risk: second_pass_supabase_payload.risk,
-             routing_allowed: second_pass_supabase_payload.routing_allowed,
-             safety_status: second_pass_supabase_payload.safety_status,
-             auto_reply_status,
+             language: classification?.language || "English",
+             next_action:
+               intelligence_snapshot?.recommended_use_case ||
+               route?.use_case ||
+               seller_stage_reply?.plan?.selected_use_case ||
+               null,
+             priority: classification?.priority || "normal",
+             risk: classification?.risk || "low",
+             routing_allowed: intelligence_patch.routing_allowed ?? true,
+             safety_status: intelligence_patch.safety_status || "review",
+             auto_reply_status: outbound_queue_id ? auto_reply_status : intelligence_patch.auto_reply_status || "shadow_only",
              auto_reply_queue_id: outbound_queue_id,
-             automation_decision,
-             human_review_required,
-             // Unified classification metadata for thread_state mapping
+             automation_decision: intelligence_patch.automation_decision || automation_decision,
+             human_review_required: intelligence_patch.human_review_required ?? human_review_required,
              classification,
-             // Legacy fields
              classification_source: classification?.source || null,
-             classification_result:
-               classification?.detected_intent ||
-               classification?.inbound_intent ||
-               classification?.objection ||
-               seller_stage_reply?.plan?.detected_intent ||
-               "unclear",
+             classification_result: authoritative_intent,
              route_stage: route?.stage || null,
              route_use_case: route?.use_case || null,
              seller_stage_use_case:
-               seller_stage_reply?.plan?.selected_use_case || null,
+               intelligence_snapshot?.recommended_use_case ||
+               seller_stage_reply?.plan?.selected_use_case ||
+               null,
             ...buildDiscordReviewMetadata({
               autopilot_enabled: Boolean(inbound_autopilot_enabled && outbound_queue_id),
               autopilot_delay_seconds: inbound_autopilot_delay_seconds,
@@ -2071,34 +2077,34 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
               offer_routing?.offer_route === "underwriting"
                 ? offer_routing?.reason || null
                 : null,
+            second_pass_authoritative: true,
           },
         });
-        // ─── SUPABASE PERSISTENCE (Second Pass with Classification) ──────
         try {
           const supabase_payload = {
             message_id: extracted.message_id,
+            provider_message_sid: extracted.message_id,
             from: inbound_from,
             to: inbound_to,
             message_body,
-            detected_intent:
-              seller_stage_reply?.plan?.inbound_intent ||
-              seller_stage_reply?.plan?.detected_intent ||
-              classification?.objection ||
-              classification?.source ||
-              null,
+            detected_intent: authoritative_intent,
             priority: classification?.priority || "normal",
             risk: classification?.risk || "low",
-            safety_status: classification?.safety_status || "pending",
-            routing_allowed: seller_stage_reply?.plan?.routing_allowed ?? true,
-            auto_reply_status,
+            safety_status: intelligence_patch.safety_status || "review",
+            routing_allowed: intelligence_patch.routing_allowed ?? true,
+            auto_reply_status: outbound_queue_id ? auto_reply_status : intelligence_patch.auto_reply_status || "shadow_only",
             auto_reply_queue_id: outbound_queue_id,
-            human_review_required,
-            needs_human_review: human_review_required,
-            automation_decision,
+            human_review_required: intelligence_patch.human_review_required ?? human_review_required,
+            needs_human_review: intelligence_patch.needs_human_review ?? human_review_required,
+            automation_decision: intelligence_patch.automation_decision || automation_decision,
             language: classification?.language || null,
-            classification_confidence: classification?.confidence || 0,
+            classification_confidence:
+              intelligence_patch.classification_confidence ??
+              classification?.confidence ??
+              0,
             stage_before,
             stage_after:
+              intelligence_patch.stage_after ||
               seller_stage_reply?.brain_stage ||
               deterministic_state?.conversation_stage ||
               route?.stage ||
@@ -2109,29 +2115,15 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             market: payload?.market || null,
             metadata: {
               ...(classification || {}),
+              ...(intelligence_patch.metadata || {}),
               route_stage: route?.stage || null,
               use_case: route?.use_case || null,
               seller_stage_reply_reason: seller_stage_reply?.reason || null,
-              auto_reply_status,
-              auto_reply_queue_id: outbound_queue_id,
-              automation_decision,
-              human_review_required,
               second_pass_authoritative: true,
             },
           };
 
           await runtimeDeps.logInboundMessageEventSupabase(supabase_payload);
-
-          if (supabase_payload.detected_intent === "wrong_number" || classification?.objection === "wrong_person" || classification?.compliance_flag === "wrong_person") {
-            const supabase = runtimeDeps.getSupabaseClient?.();
-            if (supabase && inbound_from) {
-              await supabase.from("phones").update({
-                phone_contact_status: "wrong_number",
-                wrong_number_at: new Date().toISOString(),
-                wrong_number_source_thread_key: inbound_from,
-              }).eq("canonical_e164", inbound_from).catch(() => null);
-            }
-          }
         } catch (supaErr) {
           safeWarn("textgrid.inbound_supabase_update_failed", {
             message_id: extracted.message_id,
@@ -2300,7 +2292,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         source: "textgrid_inbound",
         dedupe_key: `textgrid-inbound:${idempotency_key}`,
         conversation_thread_id:
-          second_pass_supabase_payload?.thread_key ||
+          intelligence_snapshot?.source_thread_key ||
           context?.thread_key ||
           inbound_from ||
           null,
@@ -2318,14 +2310,15 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           from_phone_number: inbound_from,
           to_phone_number: inbound_to,
           thread_key:
-            second_pass_supabase_payload?.thread_key ||
+            intelligence_snapshot?.source_thread_key ||
             context?.thread_key ||
             inbound_from ||
             null,
           classification,
           route,
           detected_intent:
-            second_pass_supabase_payload?.detected_intent ||
+            intelligence_snapshot?.canonical_intent ||
+            classification?.primary_intent ||
             classification?.detected_intent ||
             classification?.inbound_intent ||
             classification?.objection ||
@@ -2340,7 +2333,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             null,
           lead_temperature:
             classification?.lead_temperature ||
-            second_pass_supabase_payload?.metadata?.lead_temperature ||
+            intelligence_snapshot?.metadata?.lead_temperature ||
             null,
           property_address: property_address || null,
           queue_cancellation,
@@ -2348,8 +2341,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           seller_stage_use_case: seller_stage_reply?.plan?.selected_use_case || null,
           auto_reply_status:
             seller_stage_reply?.queue_status ||
-            second_pass_supabase_payload?.auto_reply_status ||
-            null,
+            intelligence_snapshot?.automation_execution_status ||
+            "shadow_only",
         },
       }, automation_supabase_client ? { supabaseClient: automation_supabase_client } : {});
     } catch (automation_error) {

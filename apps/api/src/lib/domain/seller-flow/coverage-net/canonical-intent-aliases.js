@@ -46,6 +46,15 @@ export const CANONICAL_INTENTS = Object.freeze([
   "reaction_only",
   "acknowledgement",
   "unclear",
+  "non_owner_referral",
+  "property_specific_non_owner",
+  "tenant_respondent",
+  "former_owner_respondent",
+  "property_manager_respondent",
+  "agent_representative_respondent",
+  "co_owner_respondent",
+  "executor_heir_respondent",
+  "entity_representative_respondent",
 ]);
 
 const CANONICAL_INTENT_SET = new Set(CANONICAL_INTENTS);
@@ -61,9 +70,12 @@ const INTENT_ALIASES = Object.freeze({
   "wrong person": "wrong_number",
   "wrong number": "wrong_number",
   wrong_num: "wrong_number",
-  not_the_owner: "wrong_number",
-  no_longer_owner: "wrong_number",
-  former_owner: "wrong_number",
+  non_owner_referral: "non_owner_referral",
+  property_specific_non_owner: "property_specific_non_owner",
+  never_been_owner: "property_specific_non_owner",
+  not_the_owner: "property_specific_non_owner",
+  no_longer_owner: "former_owner_respondent",
+  former_owner: "former_owner_respondent",
 
   // ── opt-out / DNC ─────────────────────────────────────────────────────────
   stop: "opt_out",
