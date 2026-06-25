@@ -21,7 +21,63 @@ import {
 } from '../../lib/data/dashboardDataLayer'
 
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
+const CACHE_COUNTS_KEY = 'leadcommand.liveInbox.lastGoodCounts'
 type InboxTimeoutMode = NonNullable<InboxFetchOptions['_timeoutMode']>
+
+export const isInboxDebugEnabled = (): boolean =>
+  isDev && typeof localStorage !== 'undefined' && localStorage.getItem('nexus.inbox.debug') === '1'
+
+const readCachedViewCounts = (): Record<string, number> => {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(CACHE_COUNTS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const counts: Record<string, number> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      const numeric = Number(value)
+      if (Number.isFinite(numeric) && numeric >= 0) counts[key] = numeric
+    }
+    return counts
+  } catch {
+    localStorage.removeItem(CACHE_COUNTS_KEY)
+    return {}
+  }
+}
+
+const writeCachedViewCounts = (counts: Record<string, number>) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (!counts || Object.keys(counts).length === 0) return
+    localStorage.setItem(CACHE_COUNTS_KEY, JSON.stringify(counts))
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+const mapAuthoritativeCounts = (rawCounts: Record<string, unknown>): Record<string, number> => ({
+  priority: Number(rawCounts.priority ?? rawCounts.hot_leads ?? 0),
+  new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
+  needs_review: Number(rawCounts.needs_review ?? 0),
+  waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? 0),
+  follow_up: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? 0),
+  cold: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? 0),
+  dead: Number(rawCounts.dead ?? 0),
+  suppressed: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? 0),
+  all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
+  all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
+  active: Number(rawCounts.active ?? 0),
+  automated: Number(rawCounts.automated ?? 0),
+})
+
+const fetchAuthoritativeCounts = async (signal?: AbortSignal): Promise<Record<string, number> | null> => {
+  const res = await backendClient.fetchInboxCounts(signal).catch(() => null)
+  if (!res?.ok) return null
+  const payload = (res.data ?? {}) as Record<string, unknown>
+  const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, unknown> | undefined
+  if (!rawCounts || Object.keys(rawCounts).length === 0) return null
+  return mapAuthoritativeCounts(rawCounts)
+}
 const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConnectionState => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline'
   if (status === 'connected') return 'live'
@@ -31,9 +87,9 @@ const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConne
 }
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
-  initial_boot: 5_000,
-  manual_bucket_switch: 5_000,
-  auto_refresh: 5_000,
+  initial_boot: 12_000,
+  manual_bucket_switch: 8_000,
+  auto_refresh: 8_000,
 }
 
 const DEFAULT_LIVE_INBOX_TIMEOUT_MODE: InboxTimeoutMode = 'manual_bucket_switch'
@@ -72,11 +128,13 @@ const withTimeout = async <T,>(
   try {
     timeoutId = setTimeout(() => {
       timedOut = true
-      console.warn('[INBOX_TIMEOUT_FIRED]', {
-        timeoutFired: true,
-        timeoutMs,
-        ...trace,
-      })
+      if (isInboxDebugEnabled()) {
+        console.warn('[INBOX_TIMEOUT_FIRED]', {
+          timeoutFired: true,
+          timeoutMs,
+          ...trace,
+        })
+      }
       controller.abort()
     }, timeoutMs)
     return await run(controller.signal)
@@ -87,11 +145,13 @@ const withTimeout = async <T,>(
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
     if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort)
-    console.log('[INBOX_TIMEOUT_SETTLED]', {
-      timeoutFired: timedOut,
-      timeoutMs,
-      ...trace,
-    })
+    if (isInboxDebugEnabled()) {
+      console.log('[INBOX_TIMEOUT_SETTLED]', {
+        timeoutFired: timedOut,
+        timeoutMs,
+        ...trace,
+      })
+    }
   }
 }
 
@@ -193,7 +253,7 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     ? options
     : { ...options, _timeoutMode: timeoutMode }
 
-  console.info('[INBOX_TIMEOUT_CONFIG]', {
+  if (isInboxDebugEnabled()) console.info('[INBOX_TIMEOUT_CONFIG]', {
     filterKey,
     timeoutMode,
     timeoutMs,
@@ -266,7 +326,7 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
       localStorage.removeItem(scopedCacheKey)
     }
 
-    console.log('[INBOX_LOAD_RESPONSE_MODEL]', {
+    if (isInboxDebugEnabled()) console.log('[INBOX_LOAD_RESPONSE_MODEL]', {
       filterKey,
       dataMode: result.dataMode,
       responseBodyCount: result.threads.length,
@@ -350,10 +410,10 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
     autoReplyStatus: t.autoReplyStatus,
     matchedKeywords: t.matchedKeywords,
     updatedAt: lastAt,
-    deliveryStatus: t.deliveryStatus,
-    latestDeliveryStatus: t.latestDeliveryStatus || t.deliveryStatus,
-    providerDeliveryStatus: t.providerDeliveryStatus,
-    latestProviderDeliveryStatus: t.latestProviderDeliveryStatus || t.providerDeliveryStatus,
+    deliveryStatus: (t.latestDirection === 'inbound' || t.latest_message_direction === 'inbound') ? undefined : t.deliveryStatus,
+    latestDeliveryStatus: (t.latestDirection === 'inbound' || t.latest_message_direction === 'inbound') ? undefined : (t.latestDeliveryStatus || t.deliveryStatus),
+    providerDeliveryStatus: (t.latestDirection === 'inbound' || t.latest_message_direction === 'inbound') ? undefined : t.providerDeliveryStatus,
+    latestProviderDeliveryStatus: (t.latestDirection === 'inbound' || t.latest_message_direction === 'inbound') ? undefined : (t.latestProviderDeliveryStatus || t.providerDeliveryStatus),
     latestDeliveredAt: t.latestDeliveredAt ?? t.latest_delivered_at ?? null,
     latest_delivered_at: t.latest_delivered_at ?? t.latestDeliveredAt ?? null,
     latestFailedAt: t.latestFailedAt ?? t.latest_failed_at ?? null,
@@ -692,7 +752,11 @@ const rowIdentityMatches = (row: Record<string, unknown>, threadKey: string): bo
 export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; paused?: boolean } = {}) => {
   const { initialSourceMode = 'conversations', paused = false } = options
   const [sourceMode, setSourceMode] = useState<InboxSourceMode>(initialSourceMode)
-  const [storeState, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STORE_STATE)
+  const [storeState, dispatch] = useReducer(inboxReducer, EMPTY_INBOX_STORE_STATE, (initial) => {
+    const cachedCounts = readCachedViewCounts()
+    if (Object.keys(cachedCounts).length === 0) return initial
+    return { ...initial, viewCounts: cachedCounts }
+  })
 
   // Sync ref so async callbacks can read latest state without stale closures.
   const stateRef = useRef(storeState)
@@ -739,7 +803,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       const forceMaySupersede = options._force === true && options._timeoutMode !== 'initial_boot'
       const appendMaySupersede = mode === 'append'
       if (!forceMaySupersede && !appendMaySupersede) {
-        console.log('[INBOX_FETCH_SKIPPED]', {
+        if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_SKIPPED]', {
           bucketKey,
           mode,
           refresh_skipped_reason: options._timeoutMode === 'initial_boot' ? 'boot_fetch_already_in_flight' : 'already_in_flight',
@@ -750,7 +814,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         return null
       }
 
-      console.log('[INBOX_FETCH_SUPERSEDE]', {
+      if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_SUPERSEDE]', {
         bucketKey,
         mode,
         previousRequestId: latestRequestIdByBucketRef.current[bucketKey] ?? null,
@@ -765,7 +829,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     latestRequestIdByBucketRef.current[bucketKey] = requestId
 
     dispatch({ type: 'BUCKET_FETCH_START', bucketKey, requestId })
-    console.log('[INBOX_FETCH_START]', {
+    if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_START]', {
       bucketKey,
       requestId,
       mode,
@@ -778,7 +842,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     try {
       const model = await loadInbox({ ...normalizedOptions, signal: controller.signal })
       const fetchMs = Math.round(performance.now() - fetchStart)
-      console.log('[INBOX_FETCH_DONE]', {
+      if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_DONE]', {
         bucketKey,
         requestId,
         responseBodyCount: model?.threads?.length ?? 0,
@@ -788,13 +852,15 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
       const latestRequestId = latestRequestIdByBucketRef.current[bucketKey] ?? null
       const staleGuardPassed = latestRequestId === requestId && abortByBucketRef.current[bucketKey] === controller && !controller.signal.aborted
-      console.log('[INBOX_STALE_GUARD]', {
-        bucketKey,
-        requestId,
-        latestRequestId,
-        staleGuardPassed,
-        staleGuardResult: staleGuardPassed ? 'commit_allowed' : 'stale_response_ignored',
-      })
+      if (isInboxDebugEnabled()) {
+        console.log('[INBOX_STALE_GUARD]', {
+          bucketKey,
+          requestId,
+          latestRequestId,
+          staleGuardPassed,
+          staleGuardResult: staleGuardPassed ? 'commit_allowed' : 'stale_response_ignored',
+        })
+      }
       if (!staleGuardPassed) {
         if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
@@ -879,7 +945,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           hasMore: Boolean(model.pagination?.hasMore),
         })
       }
-      console.log('[INBOX_COMMIT_DONE]', {
+      if (isInboxDebugEnabled()) console.log('[INBOX_COMMIT_DONE]', {
         bucketKey,
         requestId,
         mode,
@@ -908,6 +974,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         const counts = extractViewCounts(model)
         if (Object.keys(counts).length > 0) {
           dispatch({ type: 'SET_VIEW_COUNTS', counts })
+          writeCachedViewCounts(counts)
         }
       } else if (model.countsApproximate === true) {
         const counts = Object.fromEntries(
@@ -937,21 +1004,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           const payload = (res.data ?? {}) as Record<string, unknown>
           const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, number> | undefined
           if (!rawCounts || Object.keys(rawCounts).length === 0) return
-          dispatch({
-            type: 'SET_VIEW_COUNTS',
-            counts: {
-              priority: Number(rawCounts.priority ?? 0),
-              new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
-              needs_review: Number(rawCounts.needs_review ?? 0),
-              waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? 0),
-              follow_up: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? 0),
-              cold: Number(rawCounts.cold ?? 0),
-              dead: Number(rawCounts.dead ?? 0),
-              suppressed: Number(rawCounts.suppressed ?? 0),
-              all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
-              all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
-            },
-          })
+          const counts = mapAuthoritativeCounts(rawCounts as Record<string, unknown>)
+          dispatch({ type: 'SET_VIEW_COUNTS', counts })
+          writeCachedViewCounts(counts)
         }).catch(() => {})
       }
 
@@ -1117,6 +1172,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   useEffect(() => {
     let cancelled = false
+
+    const bootCountsController = new AbortController()
+    void fetchAuthoritativeCounts(bootCountsController.signal).then((counts) => {
+      if (cancelled || !counts) return
+      dispatch({ type: 'SET_VIEW_COUNTS', counts })
+      writeCachedViewCounts(counts)
+    }).catch(() => {})
 
     void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot' })
 
@@ -1362,6 +1424,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     return () => {
       cancelled = true
+      bootCountsController.abort()
       Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
       window.clearInterval(pollInterval)

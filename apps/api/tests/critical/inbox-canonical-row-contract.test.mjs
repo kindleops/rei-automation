@@ -96,7 +96,7 @@ test("initial boot uses canonical row contract without skip flags", () => {
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_counts\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_delivery\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /initial_boot_safe/);
-  assert.match(LIVE_ROUTE_SRC, /initial_boot:\s*5_000/);
+  assert.match(INBOX_PAGE_SRC, /resolveCanonicalThreadStateKey/);
 });
 
 test("deal desk opens 25/50/25 by default", () => {

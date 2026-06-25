@@ -16,6 +16,7 @@ import {
   type ConversationDecision,
 } from '../../../domain/inbox/inbox-decisioning'
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
+import { isInboxDebugEnabled } from '../inbox.adapter'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -527,7 +528,13 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   const propertyType = readString(thread, 'propertyType', 'property_type') || 'Unknown Type'
   const sellerPhone = readString(thread, 'sellerPhone', 'seller_phone', 'displayPhone', 'best_phone', 'canonical_e164', 'phone')
   const latestMessageBody = readString(thread, 'latestMessageBody', 'latest_message_body', 'lastMessageBody', 'preview') || 'No latest message'
-  const latestDirection = String(thread.latestDirection || (thread as any).latest_direction || '').toLowerCase() || 'unknown'
+  const latestDirection = String(
+    (thread as any).latest_message_direction
+    || thread.latestDirection
+    || (thread as any).latest_direction
+    || (thread as any).directionUsed
+    || '',
+  ).toLowerCase() || 'unknown'
   const statusLabel = normalizeLabel(readString(thread, 'universalStatus', 'universal_status', 'workflowStatus', 'inboxStatus', 'statusText', 'status') || 'unknown')
   const stageLabel = normalizeLabel(readString(thread, 'universalStage', 'universal_stage', 'stage', 'conversationStage', 'workflowStage') || 'unknown')
   const bucketLabel = normalizeLabel(readString(thread, 'inboxBucket', 'inbox_bucket', 'priorityBucket', 'priority_bucket', 'inboxCategory', 'inbox_category') || 'all_messages')
@@ -1184,7 +1191,9 @@ export const InboxSidebar = ({
     // Rows are already bucket-scoped by useInboxData; only apply search, sort, and cold stale-age.
     const sorted = sortThreadsByDecision(searchableThreads, decisionMap).slice(0, visibleThreadCount)
 
-    console.log('[VISIBLE_THREADS_SOURCE]', activeBucket, threads.length, sorted.length, 'store')
+    if (isInboxDebugEnabled()) {
+      console.log('[VISIBLE_THREADS_SOURCE]', activeBucket, threads.length, sorted.length, 'store')
+    }
 
     if (activeBucket !== 'cold' || coldStaleDays === null) return sorted
     const cutoff = Date.now() - coldStaleDays * 24 * 60 * 60 * 1000
