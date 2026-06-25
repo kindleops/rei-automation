@@ -18,20 +18,35 @@ export const COMPARISON_FIELDS = Object.freeze([
   "human_review_required",
 ]);
 
-/** Fields whose disagreement can change routing, suppression, or execution. */
+/** Fields whose disagreement always affects routing, suppression, or execution. */
+export const ALWAYS_MATERIAL_FIELDS = Object.freeze([
+  "canonical_intent",
+  "identity_class",
+  "relationship_outcome",
+  "suppression_scope",
+  "safety_disposition",
+  "proposed_action",
+  "selected_use_case",
+  "follow_up_policy",
+  "human_review_required",
+]);
+
+/** Material only when the disagreement changes downstream execution semantics. */
+export const CONDITIONALLY_MATERIAL_FIELDS = Object.freeze(["granular_stage"]);
+
+/** Presentation/context fields — non-material when transition shapes agree. */
+export const PRESENTATION_ONLY_FIELDS = Object.freeze(["universal_stage"]);
+
 export const MATERIAL_COMPARISON_FIELDS = Object.freeze(
-  new Set([
-    "canonical_intent",
-    "identity_class",
-    "relationship_outcome",
-    "suppression_scope",
-    "universal_stage",
-    "proposed_action",
-    "selected_use_case",
-    "follow_up_policy",
-    "human_review_required",
-  ])
+  new Set([...ALWAYS_MATERIAL_FIELDS, ...CONDITIONALLY_MATERIAL_FIELDS])
 );
+
+const GRANULAR_DOWNSTREAM_FIELDS = Object.freeze([
+  "selected_use_case",
+  "proposed_action",
+  "follow_up_policy",
+  "human_review_required",
+]);
 
 const UNIVERSAL_STAGE_ALIASES = Object.freeze({
   ownership_confirmation: "ownership_confirmation",
@@ -66,6 +81,7 @@ const GRANULAR_STAGE_ALIASES = Object.freeze({
   stop_or_opt_out: "stop_or_opt_out",
   condition_disclosed: "condition_disclosed",
   price_high_condition_probe: "condition_disclosed",
+  offer: "offer",
 });
 
 const INTENT_ALIASES = Object.freeze({
@@ -125,6 +141,9 @@ function normalizeProposedAction(value) {
 function normalizeFollowUpPolicy(value) {
   const key = lower(value);
   if (!key) return null;
+  if (key === "follow_up_policy_not_approved" || key.includes("review_required_no_schedule")) {
+    return "review_required_no_schedule";
+  }
   if (key.includes("permanent_suppression") || key.includes("thread_already_suppressed")) {
     return "suppressed";
   }
@@ -225,7 +244,9 @@ export function mapCanonicalToComparisonShape({
     ),
     follow_up_policy: normalizeField(
       "follow_up_policy",
-      follow_up_recommendation?.reason || follow_up_recommendation?.source_respondent?.reason
+      follow_up_recommendation?.follow_up_policy ||
+        follow_up_recommendation?.reason ||
+        follow_up_recommendation?.source_respondent?.reason
     ),
     human_review_required: normalizeField(
       "human_review_required",
@@ -240,17 +261,35 @@ export function mapCanonicalToComparisonShape({
 export function mapShadowToComparisonShape({
   shadow_engine = {},
   relationship = null,
+  canonical_decision = null,
   follow_up_recommendation = null,
+  recommended_use_case = null,
 } = {}) {
   const proposed = shadow_engine.proposed_decision || {};
-  const relationship_intent = relationship?.canonical_intent || proposed.inbound_intent;
+  const relationship_override =
+    relationship?.referral_detected ||
+    relationship?.ownership_confirmed ||
+    relationship?.should_suppress_contact;
+  const relationship_intent = relationship_override
+    ? relationship?.canonical_intent
+    : canonical_decision?.canonical_intent ||
+      relationship?.canonical_intent ||
+      proposed.inbound_intent;
   const relationship_identity = relationship?.identity_class;
   const relationship_outcome = relationship?.relationship_outcome;
 
   const suppress_globally =
     relationship?.invalidate_phone_globally ||
+    relationship?.should_suppress_contact ||
     proposed.suppression_reason?.includes("wrong_number") ||
-    proposed.suppression_reason?.includes("opt_out");
+    proposed.suppression_reason?.includes("opt_out") ||
+    proposed.suppression_reason?.includes("hostile");
+
+  const shadow_safety_tier = proposed.safety_tier;
+  const shadow_suppressed =
+    Boolean(proposed.suppression_reason) ||
+    shadow_safety_tier === "suppress" ||
+    relationship?.should_suppress_contact;
 
   return {
     canonical_intent: normalizeField("canonical_intent", relationship_intent),
@@ -269,13 +308,14 @@ export function mapShadowToComparisonShape({
     safety_disposition: normalizeField(
       "safety_disposition",
       deriveSafetyDisposition({
-        safety_tier: proposed.safety_tier,
-        should_suppress_contact: Boolean(proposed.suppression_reason),
+        safety_tier: shadow_safety_tier,
+        safety_status: relationship?.safety_status,
+        should_suppress_contact: shadow_suppressed,
       })
     ),
     proposed_action: normalizeField(
       "proposed_action",
-      proposed.suppression_reason
+      suppress_globally || proposed.suppression_reason
         ? "suppress_globally"
         : proposed.should_queue_reply
           ? "auto_reply"
@@ -283,17 +323,20 @@ export function mapShadowToComparisonShape({
     ),
     selected_use_case: normalizeField(
       "selected_use_case",
-      proposed.template_use_case
+      recommended_use_case || proposed.template_use_case
     ),
     follow_up_policy: normalizeField(
       "follow_up_policy",
-      follow_up_recommendation?.reason
+      follow_up_recommendation?.follow_up_policy ||
+        follow_up_recommendation?.reason
     ),
     human_review_required: normalizeField(
       "human_review_required",
-      relationship?.human_review_required ||
-        proposed.safety_tier === "review" ||
-        proposed.safety_tier === "suppress"
+      shadow_suppressed
+        ? false
+        : relationship?.human_review_required ||
+          proposed.safety_tier === "review" ||
+          proposed.safety_tier === "suppress"
     ),
   };
 }
@@ -306,12 +349,63 @@ function fieldsEquivalent(field, left, right) {
   return a === b;
 }
 
-function classifyComparison({ agreement = {}, canonical = {}, shadow = {} } = {}) {
-  const material_disagreement_fields = COMPARISON_FIELDS.filter(
-    (field) =>
-      MATERIAL_COMPARISON_FIELDS.has(field) &&
-      agreement[field] === false
+function isFieldMaterial(field, agreement, canonical = {}, shadow = {}) {
+  if (agreement[field] !== false) return false;
+
+  if (ALWAYS_MATERIAL_FIELDS.includes(field)) {
+    return true;
+  }
+
+  if (field === "granular_stage") {
+    return GRANULAR_DOWNSTREAM_FIELDS.some((downstream) => agreement[downstream] === false);
+  }
+
+  if (field === "universal_stage") {
+    return false;
+  }
+
+  return MATERIAL_COMPARISON_FIELDS.has(field);
+}
+
+function classifyComparison({
+  agreement = {},
+  canonical = {},
+  shadow = {},
+  transition_comparison = null,
+} = {}) {
+  const transition_class = transition_comparison?.comparison_class || null;
+  const transition_agrees =
+    transition_class === "full_agreement" ||
+    transition_class === "expected_transition_context_difference";
+
+  const material_disagreement_fields = COMPARISON_FIELDS.filter((field) =>
+    isFieldMaterial(field, agreement, canonical, shadow)
   );
+
+  const both_suppress =
+    normalizeField("proposed_action", canonical.proposed_action) === "suppress_globally" &&
+    normalizeField("proposed_action", shadow.proposed_action) === "suppress_globally";
+
+  if (transition_agrees) {
+    for (const field of PRESENTATION_ONLY_FIELDS) {
+      const idx = material_disagreement_fields.indexOf(field);
+      if (idx >= 0) material_disagreement_fields.splice(idx, 1);
+    }
+    if (
+      agreement.granular_stage === false &&
+      !GRANULAR_DOWNSTREAM_FIELDS.some((f) => agreement[f] === false)
+    ) {
+      const idx = material_disagreement_fields.indexOf("granular_stage");
+      if (idx >= 0) material_disagreement_fields.splice(idx, 1);
+    }
+  }
+
+  if (both_suppress) {
+    for (const field of ["selected_use_case", "granular_stage", "human_review_required"]) {
+      const idx = material_disagreement_fields.indexOf(field);
+      if (idx >= 0) material_disagreement_fields.splice(idx, 1);
+    }
+  }
 
   const insufficient_context_fields = COMPARISON_FIELDS.filter((field) => {
     const c = normalizeField(field, canonical[field]);
@@ -322,33 +416,47 @@ function classifyComparison({ agreement = {}, canonical = {}, shadow = {} } = {}
   const review_required_both =
     canonical.human_review_required === true && shadow.human_review_required === true;
 
+  const non_material_disagreement_fields = COMPARISON_FIELDS.filter(
+    (field) => agreement[field] === false && !material_disagreement_fields.includes(field)
+  );
+
   if (material_disagreement_fields.length === 0 && insufficient_context_fields.length === 0) {
+    if (non_material_disagreement_fields.length > 0 && transition_agrees) {
+      return {
+        comparison_class: "non_material_disagreement",
+        material_disagreement: false,
+        material_disagreement_fields: [],
+        non_material_disagreement_fields,
+        insufficient_context_fields: [],
+      };
+    }
     return {
-      comparison_class: "full_agreement",
+      comparison_class: transition_class === "expected_transition_context_difference"
+        ? "expected_transition_context_difference"
+        : "full_agreement",
       material_disagreement: false,
       material_disagreement_fields: [],
+      non_material_disagreement_fields,
       insufficient_context_fields: [],
     };
   }
 
-  if (
-    material_disagreement_fields.length === 0 &&
-    insufficient_context_fields.length > 0
-  ) {
+  if (material_disagreement_fields.length === 0 && insufficient_context_fields.length > 0) {
     return {
       comparison_class: "insufficient_context",
       material_disagreement: false,
       material_disagreement_fields: [],
+      non_material_disagreement_fields,
       insufficient_context_fields,
     };
   }
 
-  const non_material_only = material_disagreement_fields.length === 0;
-  if (non_material_only) {
+  if (material_disagreement_fields.length === 0) {
     return {
       comparison_class: "non_material_disagreement",
       material_disagreement: false,
       material_disagreement_fields: [],
+      non_material_disagreement_fields,
       insufficient_context_fields,
     };
   }
@@ -356,13 +464,16 @@ function classifyComparison({ agreement = {}, canonical = {}, shadow = {} } = {}
   if (
     review_required_both &&
     material_disagreement_fields.every((f) =>
-      ["granular_stage", "selected_use_case"].includes(f)
-    )
+      ["granular_stage", "selected_use_case", "proposed_action"].includes(f)
+    ) &&
+    !material_disagreement_fields.includes("safety_disposition") &&
+    !material_disagreement_fields.includes("suppression_scope")
   ) {
     return {
       comparison_class: "intentionally_review_required",
       material_disagreement: false,
       material_disagreement_fields: [],
+      non_material_disagreement_fields,
       insufficient_context_fields,
     };
   }
@@ -371,6 +482,7 @@ function classifyComparison({ agreement = {}, canonical = {}, shadow = {} } = {}
     comparison_class: "material_disagreement",
     material_disagreement: true,
     material_disagreement_fields,
+    non_material_disagreement_fields,
     insufficient_context_fields,
   };
 }
@@ -378,7 +490,11 @@ function classifyComparison({ agreement = {}, canonical = {}, shadow = {} } = {}
 /**
  * Compare canonical and shadow normalized shapes field-by-field.
  */
-export function compareNormalizedDecisionShapes(canonical_shape = {}, shadow_shape = {}) {
+export function compareNormalizedDecisionShapes(
+  canonical_shape = {},
+  shadow_shape = {},
+  { transition_comparison = null } = {}
+) {
   const agreement = {};
   let agreed_count = 0;
 
@@ -397,6 +513,7 @@ export function compareNormalizedDecisionShapes(canonical_shape = {}, shadow_sha
     agreement,
     canonical: canonical_shape,
     shadow: shadow_shape,
+    transition_comparison,
   });
 
   return {
@@ -404,8 +521,15 @@ export function compareNormalizedDecisionShapes(canonical_shape = {}, shadow_sha
     agreement_score,
     material_disagreement: classification.material_disagreement,
     material_disagreement_fields: classification.material_disagreement_fields,
+    non_material_disagreement_fields: classification.non_material_disagreement_fields || [],
     insufficient_context_fields: classification.insufficient_context_fields,
     comparison_class: classification.comparison_class,
+    materiality_model: {
+      always_material: ALWAYS_MATERIAL_FIELDS,
+      conditionally_material: CONDITIONALLY_MATERIAL_FIELDS,
+      presentation_only: PRESENTATION_ONLY_FIELDS,
+    },
+    transition_comparison: transition_comparison || null,
     canonical_shape,
     shadow_shape,
   };

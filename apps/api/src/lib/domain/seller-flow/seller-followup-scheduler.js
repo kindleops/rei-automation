@@ -44,6 +44,9 @@ const ACTIVE_INTENTS = new Set([
   "positive_interest",
 ]);
 
+/** Intents with no approved follow-up schedule yet — explicit safe hold state. */
+const UNAPPROVED_FOLLOWUP_INTENTS = new Set(["condition_disclosed", "latent_interest"]);
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -147,6 +150,17 @@ export function resolveFollowUpPlan(intent, opts = {}) {
 
   if (ACTIVE_INTENTS.has(intent)) {
     return { suppressed: false, followup_created: false, reason: "active_workflow_no_nurture" };
+  }
+
+  if (UNAPPROVED_FOLLOWUP_INTENTS.has(intent)) {
+    return {
+      suppressed: false,
+      followup_created: false,
+      reason: "follow_up_policy_not_approved",
+      follow_up_policy: "review_required_no_schedule",
+      dispatchable: false,
+      shadow_only: true,
+    };
   }
 
   const days = NURTURE_DAYS[intent] ?? null;

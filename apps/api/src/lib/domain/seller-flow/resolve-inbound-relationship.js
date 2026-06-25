@@ -87,8 +87,27 @@ function includesAny(text, phrases = []) {
   return phrases.some((phrase) => normalized.includes(lower(phrase)));
 }
 
+const NEGATIVE_OWNERSHIP_PHRASES = [
+  "do not own",
+  "don't own",
+  "not the owner",
+  "not the property owner",
+  "not the homeowner",
+  "not my property",
+  "not mine",
+  "never been the owner",
+  "never was the owner",
+  "never owned",
+  "wrong person",
+  "no soy el dueño",
+  "no soy el dueno",
+  "no soy la dueña",
+  "no soy la duena",
+];
+
 function detectOwnershipConfirmation(message = "", classifier_intent = null) {
   const text = lower(message);
+  if (includesAny(text, NEGATIVE_OWNERSHIP_PHRASES)) return false;
   if (classifier_intent === "ownership_confirmed") return true;
   return includesAny(text, OWNERSHIP_CONFIRM_PHRASES);
 }
@@ -133,14 +152,14 @@ function deriveCanonicalIntent({
   classifier_intent = null,
   ownership_confirmed = false,
 } = {}) {
-  if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
-    return "ownership_confirmed";
-  }
   if (classifier_intent === "hostile_or_legal") return "hostile_or_legal";
   if (relationship_claim === "actual_wrong_number" || classifier_intent === "opt_out") {
     return classifier_intent === "opt_out" ? "opt_out" : "wrong_number";
   }
   if (referral_detected) return "non_owner_referral";
+  if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
+    return "ownership_confirmed";
+  }
   if (relationship_claim === "tenant") return "tenant_respondent";
   if (relationship_claim === "former_owner") return "former_owner_respondent";
   if (relationship_claim === "property_manager") return "property_manager_respondent";
@@ -157,11 +176,11 @@ function deriveIdentityClass({
   referral_detected = false,
   ownership_confirmed = false,
 } = {}) {
+  if (relationship_claim === "actual_wrong_number") return "wrong_number";
+  if (referral_detected || relationship_claim === "referral_source") return "respondent_non_owner";
   if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
     return "confirmed_owner";
   }
-  if (relationship_claim === "actual_wrong_number") return "wrong_number";
-  if (referral_detected || relationship_claim === "referral_source") return "respondent_non_owner";
   if (relationship_claim === "tenant") return "renter_occupant";
   if (relationship_claim === "agent") return "agent_representative";
   if (relationship_claim === "property_manager") return "property_manager";
@@ -178,11 +197,11 @@ function deriveRelationshipOutcome({
   referral_detected = false,
   ownership_confirmed = false,
 } = {}) {
+  if (relationship_claim === "actual_wrong_number") return "actual_wrong_number";
+  if (referral_detected) return "property_specific_non_owner_with_referral";
   if (ownership_confirmed || relationship_claim === "ownership_confirmed") {
     return "confirmed_owner";
   }
-  if (relationship_claim === "actual_wrong_number") return "actual_wrong_number";
-  if (referral_detected) return "property_specific_non_owner_with_referral";
   if (relationship_claim === "spouse_co_owner") return "co_owner";
   if (relationship_claim === "executor_heir") return "executor_or_heir";
   if (relationship_claim === "llc_representative") return "entity_representative";
