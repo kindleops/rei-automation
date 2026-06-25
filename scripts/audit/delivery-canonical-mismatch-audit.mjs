@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 const args = new Set(process.argv.slice(2));
 const repair = args.has("--repair");
 const dryRun = !repair;
+const BATCH = 200;
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -22,48 +23,90 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-async function count(sqlLabel, query) {
-  const { data, error } = await query;
-  if (error) throw new Error(`${sqlLabel}: ${error.message}`);
-  return Array.isArray(data) ? data.length : Number(data || 0);
+async function fetchAll(builderFactory, pageSize = 1000) {
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await builderFactory(offset, pageSize);
+    if (error) throw error;
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return rows;
 }
 
-async function fetchRows(query) {
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+function chunk(values, size = BATCH) {
+  const out = [];
+  for (let i = 0; i < values.length; i += size) {
+    out.push(values.slice(i, i + size));
+  }
+  return out;
+}
+
+async function fetchEventsBySid(sids) {
+  const bySid = new Map();
+  for (const group of chunk([...new Set(sids.filter(Boolean))])) {
+    const { data, error } = await supabase
+      .from("message_events")
+      .select("id, provider_message_sid, delivery_status, delivered_at, sent_at")
+      .in("provider_message_sid", group);
+    if (error) throw error;
+    for (const row of data || []) {
+      const list = bySid.get(row.provider_message_sid) || [];
+      list.push(row);
+      bySid.set(row.provider_message_sid, list);
+    }
+  }
+  return bySid;
+}
+
+async function fetchQueueBySid(sids) {
+  const bySid = new Map();
+  for (const group of chunk([...new Set(sids.filter(Boolean))])) {
+    const { data: byProvider, error: providerError } = await supabase
+      .from("send_queue")
+      .select("id, provider_message_id, textgrid_message_id, queue_status, delivered_at")
+      .in("provider_message_id", group);
+    if (providerError) throw providerError;
+    const { data: byTextgrid, error: textgridError } = await supabase
+      .from("send_queue")
+      .select("id, provider_message_id, textgrid_message_id, queue_status, delivered_at")
+      .in("textgrid_message_id", group);
+    if (textgridError) throw textgridError;
+    for (const row of [...(byProvider || []), ...(byTextgrid || [])]) {
+      const sid = row.provider_message_id || row.textgrid_message_id;
+      if (!sid) continue;
+      const list = bySid.get(sid) || [];
+      if (!list.some((item) => item.id === row.id)) list.push(row);
+      bySid.set(sid, list);
+    }
+  }
+  return bySid;
 }
 
 async function main() {
   console.log(`delivery-canonical-mismatch-audit mode=${dryRun ? "dry_run" : "repair"}`);
 
-  const queueDeliveredMessageNot = await fetchRows(
-    supabase
-      .from("message_events")
-      .select("id, provider_message_sid, delivery_status, queue_id")
-      .eq("direction", "outbound")
-      .in("delivery_status", ["pending", "sent", "queued", "failed"])
-      .not("provider_message_sid", "is", null)
-      .limit(5000),
-  );
-
-  const queueDeliveredPairs = await fetchRows(
+  const queueDeliveredPairs = await fetchAll((offset, limit) =>
     supabase
       .from("send_queue")
       .select("id, provider_message_id, textgrid_message_id, queue_status, delivered_at")
       .eq("queue_status", "delivered")
-      .limit(5000),
+      .range(offset, offset + limit - 1),
   );
+
+  const deliveredSids = queueDeliveredPairs
+    .map((row) => row.provider_message_id || row.textgrid_message_id)
+    .filter(Boolean);
+  const eventsBySid = await fetchEventsBySid(deliveredSids);
 
   const queueDeliveredMessageMismatch = [];
   for (const queueRow of queueDeliveredPairs) {
     const sid = queueRow.provider_message_id || queueRow.textgrid_message_id;
     if (!sid) continue;
-    const { data: events } = await supabase
-      .from("message_events")
-      .select("id, delivery_status, delivered_at")
-      .eq("provider_message_sid", sid);
-    for (const event of events || []) {
+    for (const event of eventsBySid.get(sid) || []) {
       if (event.delivery_status !== "delivered") {
         queueDeliveredMessageMismatch.push({
           queue_id: queueRow.id,
@@ -76,23 +119,22 @@ async function main() {
     }
   }
 
-  const messageDeliveredQueueMismatch = [];
-  const { data: deliveredEvents } = await supabase
-    .from("message_events")
-    .select("id, provider_message_sid, delivery_status, delivered_at")
-    .eq("delivery_status", "delivered")
-    .eq("direction", "outbound")
-    .limit(5000);
+  const deliveredEvents = await fetchAll((offset, limit) =>
+    supabase
+      .from("message_events")
+      .select("id, provider_message_sid, delivery_status, delivered_at, sent_at")
+      .eq("delivery_status", "delivered")
+      .eq("direction", "outbound")
+      .range(offset, offset + limit - 1),
+  );
 
-  for (const event of deliveredEvents || []) {
+  const eventSids = deliveredEvents.map((row) => row.provider_message_sid).filter(Boolean);
+  const queueBySid = await fetchQueueBySid(eventSids);
+
+  const messageDeliveredQueueMismatch = [];
+  for (const event of deliveredEvents) {
     if (!event.provider_message_sid) continue;
-    const { data: queueRows } = await supabase
-      .from("send_queue")
-      .select("id, queue_status, delivered_at")
-      .or(
-        `provider_message_id.eq.${event.provider_message_sid},textgrid_message_id.eq.${event.provider_message_sid}`,
-      );
-    for (const queueRow of queueRows || []) {
+    for (const queueRow of queueBySid.get(event.provider_message_sid) || []) {
       if (queueRow.queue_status !== "delivered") {
         messageDeliveredQueueMismatch.push({
           queue_id: queueRow.id,
@@ -105,28 +147,39 @@ async function main() {
     }
   }
 
-  const { data: inboundDeliveredThreads } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key, latest_direction, latest_delivery_status, latest_message_event_id, inbox_bucket")
-    .eq("latest_direction", "inbound")
-    .not("latest_delivery_status", "is", null)
-    .limit(5000);
+  const inboundDeliveredThreads = await fetchAll((offset, limit) =>
+    supabase
+      .from("inbox_thread_state")
+      .select("thread_key, latest_direction, latest_delivery_status, latest_message_event_id, inbox_bucket")
+      .eq("latest_direction", "inbound")
+      .not("latest_delivery_status", "is", null)
+      .range(offset, offset + limit - 1),
+  );
 
-  const { data: outboundThreadMismatch } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key, latest_direction, latest_delivery_status, latest_message_event_id, inbox_bucket")
-    .eq("latest_direction", "outbound")
-    .not("latest_message_event_id", "is", null)
-    .limit(5000);
+  const outboundThreads = await fetchAll((offset, limit) =>
+    supabase
+      .from("inbox_thread_state")
+      .select("thread_key, latest_direction, latest_delivery_status, latest_message_event_id, inbox_bucket")
+      .eq("latest_direction", "outbound")
+      .not("latest_message_event_id", "is", null)
+      .range(offset, offset + limit - 1),
+  );
 
-  const threadStatusMismatch = [];
-  for (const thread of outboundThreadMismatch || []) {
-    const { data: event } = await supabase
+  const eventIds = outboundThreads.map((row) => row.latest_message_event_id).filter(Boolean);
+  const eventsById = new Map();
+  for (const group of chunk(eventIds)) {
+    const { data, error } = await supabase
       .from("message_events")
       .select("id, delivery_status")
-      .eq("id", thread.latest_message_event_id)
-      .maybeSingle();
-    if (event && event.delivery_status && thread.latest_delivery_status !== event.delivery_status) {
+      .in("id", group);
+    if (error) throw error;
+    for (const row of data || []) eventsById.set(String(row.id), row);
+  }
+
+  const threadStatusMismatch = [];
+  for (const thread of outboundThreads) {
+    const event = eventsById.get(String(thread.latest_message_event_id));
+    if (event?.delivery_status && thread.latest_delivery_status !== event.delivery_status) {
       threadStatusMismatch.push({
         thread_key: thread.thread_key,
         thread_status: thread.latest_delivery_status,
@@ -136,31 +189,24 @@ async function main() {
     }
   }
 
-  const { data: timestampMismatch } = await supabase
-    .from("message_events")
-    .select("id, provider_message_sid, sent_at, delivered_at, delivery_status")
-    .eq("direction", "outbound")
-    .not("delivered_at", "is", null)
-    .not("sent_at", "is", null)
-    .limit(5000);
-
-  const deliveredBeforeSent = (timestampMismatch || []).filter((row) => {
+  const deliveredBeforeSent = deliveredEvents.filter((row) => {
+    if (!row.delivered_at || !row.sent_at) return false;
     return new Date(row.delivered_at).getTime() < new Date(row.sent_at).getTime();
   });
 
-  const terminalMissingTimestamp = (deliveredEvents || []).filter((row) => !row.delivered_at);
+  const terminalMissingTimestamp = deliveredEvents.filter((row) => !row.delivered_at);
 
   const report = {
     queue_delivered_message_non_delivered: queueDeliveredMessageMismatch.length,
     message_delivered_queue_non_delivered: messageDeliveredQueueMismatch.length,
-    inbound_thread_with_delivery_status: (inboundDeliveredThreads || []).length,
+    inbound_thread_with_delivery_status: inboundDeliveredThreads.length,
     outbound_thread_status_mismatch: threadStatusMismatch.length,
     delivered_at_before_sent_at: deliveredBeforeSent.length,
     delivered_without_delivered_at: terminalMissingTimestamp.length,
     samples: {
       queue_delivered_message_non_delivered: queueDeliveredMessageMismatch.slice(0, 10),
       message_delivered_queue_non_delivered: messageDeliveredQueueMismatch.slice(0, 10),
-      inbound_thread_with_delivery_status: (inboundDeliveredThreads || []).slice(0, 10),
+      inbound_thread_with_delivery_status: inboundDeliveredThreads.slice(0, 10),
       outbound_thread_status_mismatch: threadStatusMismatch.slice(0, 10),
       delivered_at_before_sent_at: deliveredBeforeSent.slice(0, 10),
     },
@@ -200,7 +246,7 @@ async function main() {
     if (!error) repaired += 1;
   }
 
-  for (const thread of inboundDeliveredThreads || []) {
+  for (const thread of inboundDeliveredThreads) {
     const { error } = await supabase
       .from("inbox_thread_state")
       .update({
