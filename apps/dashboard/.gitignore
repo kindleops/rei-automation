@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Test artifacts (screenshots, traces, reports) — never commit
+test-results/
+playwright-report/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
