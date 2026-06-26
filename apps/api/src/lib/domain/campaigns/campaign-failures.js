@@ -17,7 +17,7 @@ function classifyExecutionFailure(row = {}) {
   if (explicit) return explicit
 
   const reason = clean(row.failed_reason || meta.failed_reason || meta.provider_error).toLowerCase()
-  if (reason.includes('21610') || reason.includes('opt-out') || reason.includes('suppression')) {
+  if (reason.includes('21610') || reason.includes('blacklist') || reason.includes('opt-out') || reason.includes('suppression')) {
     return 'compliance_terminalization'
   }
   if (reason.includes('invalid') && (reason.includes('phone') || reason.includes('recipient'))) {
@@ -166,7 +166,7 @@ export async function fetchCampaignFailureRows(campaignId, deps = {}) {
     const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
     const target = row.campaign_target_id ? targetMap.get(row.campaign_target_id) : null
     const category = classifyExecutionFailure(row)
-    const retryable = category === 'provider_failure'
+    const retryable = category === 'provider_failure' && !reason.includes('21610') && !reason.includes('blacklist')
     return {
       id: row.id,
       campaign_id: row.campaign_id,
