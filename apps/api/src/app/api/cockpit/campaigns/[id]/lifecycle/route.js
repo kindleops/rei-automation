@@ -57,6 +57,8 @@ export async function POST(request, { params }) {
       ok: false,
       error: 'campaign_lifecycle_failed',
       message: error?.message || String(error),
+      details: error?.details || error?.hint || null,
+      code: error?.code || null,
     }, 500)
   }
 }

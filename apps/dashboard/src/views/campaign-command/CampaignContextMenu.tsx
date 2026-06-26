@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { getAvailableCampaignActions } from './campaign-health'
 import type { CampaignSummary } from './campaigns.types'
@@ -10,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   restore: 'Restore',
   archive: 'Archive',
   delete_draft: 'Delete Draft',
+  delete: 'Delete',
 }
 
 interface CampaignContextMenuProps {
@@ -28,6 +30,28 @@ export const CampaignContextMenu = ({
   onClose,
 }: CampaignContextMenuProps) => {
   const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: y, left: x })
+  const actions = getAvailableCampaignActions(campaign)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) {
+      setPos({ top: y, left: x })
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    const pad = 8
+    let top = y
+    let left = x
+    if (top + rect.height > window.innerHeight - pad) {
+      top = Math.max(pad, y - rect.height - 4)
+    }
+    if (left + rect.width > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - rect.width - pad)
+    }
+    if (left < pad) left = pad
+    setPos({ top, left })
+  }, [x, y, actions.length])
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -44,20 +68,18 @@ export const CampaignContextMenu = ({
     }
   }, [onClose])
 
-  const actions = getAvailableCampaignActions(campaign)
-
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="ccc-context-menu"
-      style={{ top: y, left: x }}
+      style={{ top: pos.top, left: pos.left }}
       role="menu"
     >
       {actions.map((action) => (
         <button
           key={action}
           type="button"
-          className={`ccc-context-menu__item ${action === 'delete_draft' ? 'is-danger' : ''}`}
+          className={`ccc-context-menu__item ${action === 'delete_draft' || action === 'delete' ? 'is-danger' : ''}`}
           onClick={() => {
             onAction(action, campaign)
             onClose()
@@ -66,7 +88,8 @@ export const CampaignContextMenu = ({
           {ACTION_LABELS[action] ?? action}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   )
 }
 

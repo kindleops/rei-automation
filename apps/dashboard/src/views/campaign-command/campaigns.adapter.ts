@@ -38,6 +38,7 @@ import {
 export type CampaignLifecycleAction =
   | 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation'
   | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive' | 'restore'
+  | 'convert_to_live' | 'sync_metrics'
 
 export type ActivationResult = {
   ok: boolean
@@ -896,8 +897,8 @@ export const cloneCampaign = async (campaignId: string, name?: string): Promise<
   return res.data.campaign_id
 }
 
-export const deleteCampaign = async (campaignId: string) => {
-  const res = await deleteCampaignBackend(campaignId)
+export const deleteCampaign = async (campaignId: string, options: { force_delete?: boolean } = {}) => {
+  const res = await deleteCampaignBackend(campaignId, options)
   if (!res.ok) throw new Error(res.message || res.error || 'campaign_delete_failed')
   return res.data
 }
@@ -913,7 +914,12 @@ export const fetchCampaignMarketMetrics = async (campaignId: string): Promise<Ca
 }
 
 const buildKpis = (campaigns: CampaignSummary[]): CampaignKpis => {
-  const active = campaigns.filter((c) => ['active', 'ready', 'live_limited'].includes(c.status))
+  const active = campaigns.filter((c) =>
+    ['active', 'activating', 'live_limited', 'scheduled'].includes(c.status) ||
+    (c.status === 'paused' && c.ready_targets > 0) ||
+    c.operator_state === 'test_mode' ||
+    c.operator_state === 'live',
+  )
   const totalTargets = campaigns.reduce((s, c) => s + c.total_targets, 0)
   const readyTargets = campaigns.reduce((s, c) => s + c.ready_targets, 0)
   const scheduledQueueRows = campaigns.reduce((s, c) => s + Number(c.scheduled_queue_rows ?? c.scheduled_targets ?? 0), 0)

@@ -121,9 +121,11 @@ const StatusBadge = ({
     draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
     completed: 'Completed', archived: 'Archived',
   }
-  const label = executionProof?.proof_mode
-    ? operatorStateLabel({ status, execution_proof: executionProof } as CampaignSummary)
-    : (labels[status] ?? status)
+  const operatorLabel = executionProof?.proof_mode ? 'Test' : null
+  const label = operatorLabel
+    ?? (executionProof?.proof_mode
+      ? operatorStateLabel({ status, execution_proof: executionProof } as CampaignSummary)
+      : (labels[status] ?? status))
   return (
     <span className={cls('ccc-status', `is-${status}`, executionProof?.proof_mode && 'is-proof')}>
       <span className="ccc-status__dot" />
@@ -1066,7 +1068,17 @@ export const DetailPanel = ({
           </button>
         </div>
         {isTestModeCampaign(campaign) && (
-          <div className="ccc__test-mode-banner">TEST MODE — NO MESSAGES WILL TRANSMIT</div>
+          <div className="ccc__test-mode-banner">
+            <span>TEST MODE — NO MESSAGES WILL TRANSMIT</span>
+            <button
+              type="button"
+              className="ccc-btn is-primary"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => onAction('convert_to_live', campaign)}
+            >
+              Convert to Live Campaign
+            </button>
+          </div>
         )}
         <div className="ccc__detail-meta-row">
           <StatusBadge status={campaign.status} executionProof={campaign.execution_proof} />
@@ -1103,6 +1115,10 @@ export const DetailPanel = ({
               {act.id === 'queue_batch' ? `Queue Batch (${fmt(campaign.ready_targets)})` : act.label}
             </button>
           ))}
+          <button className="ccc-btn is-blue" onClick={() => onAction('sync_metrics', campaign)}>
+            <Icon name="activity" size={11} />
+            Sync Metrics
+          </button>
           <button className="ccc-btn" onClick={() => onAction('refresh', campaign)}>
             <Icon name="refresh-cw" size={11} />
             Refresh
@@ -1273,7 +1289,7 @@ export const CampaignListPanel = ({
                   <CampaignOverflowButton
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                      setContextMenu({ campaign: c, x: rect.right - 160, y: rect.bottom + 4 })
+                      setContextMenu({ campaign: c, x: rect.left, y: rect.bottom + 4 })
                     }}
                   />
                   <button

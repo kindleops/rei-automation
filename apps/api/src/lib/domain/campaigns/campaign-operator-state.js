@@ -41,6 +41,7 @@ const OPERATOR_LABELS = Object.freeze({
 export function deriveOperatorState(campaign = {}, execution = {}, readiness = {}) {
   const status = normalizeCampaignStatus(campaign.status || 'draft')
   const proofMode = Boolean(execution?.proof_mode || execution?.no_messages_will_transmit)
+  const productionLaunch = Boolean(clean(campaign.metadata?.converted_to_live_at) || campaign.metadata?.production_launch)
   const liveSendRows = Number(execution?.live_send_rows || 0)
   const routingAllowed = Number(execution?.routing_allowed || 0)
   const transmissionEnabled = Boolean(execution?.transmission_enabled)
@@ -75,9 +76,10 @@ export function deriveOperatorState(campaign = {}, execution = {}, readiness = {
   if (status === 'scheduled') return 'scheduled'
 
   if (['active', 'activating'].includes(status)) {
-    if (liveSendRows > 0 && transmissionEnabled && routingAllowed > 0) return 'live'
+    if (liveSendRows > 0 && routingAllowed > 0 && (transmissionEnabled || productionLaunch)) return 'live'
     if (proofMode) return 'test_mode'
-    if (hasBlockers || routingAllowed === 0 || !transmissionEnabled) return 'blocked'
+    if (hasBlockers || routingAllowed === 0) return 'blocked'
+    if (!transmissionEnabled && !productionLaunch) return 'blocked'
     return 'live'
   }
 

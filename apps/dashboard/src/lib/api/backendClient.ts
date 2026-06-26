@@ -1628,7 +1628,7 @@ export interface CampaignLifecycleResponse {
 
 export function setCampaignLifecycle(
   campaignId: string,
-  action: 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive' | 'restore',
+  action: 'preview' | 'queue' | 'schedule' | 'unschedule' | 'begin_activation' | 'activate' | 'pause' | 'resume' | 'complete' | 'fail' | 'archive' | 'restore' | 'convert_to_live' | 'sync_metrics',
   payload: Record<string, unknown> = {},
 ): Promise<BackendResult<CampaignLifecycleResponse>> {
   return callBackend<CampaignLifecycleResponse>(`/api/cockpit/campaigns/${campaignId}/lifecycle`, {
@@ -1669,8 +1669,10 @@ export interface CampaignDeleteResponse {
 
 export function deleteCampaignBackend(
   campaignId: string,
+  options: { force_delete?: boolean } = {},
 ): Promise<BackendResult<CampaignDeleteResponse>> {
-  return callBackend<CampaignDeleteResponse>(`/api/cockpit/campaigns/${campaignId}`, {
+  const query = options.force_delete ? '?force_delete=1' : ''
+  return callBackend<CampaignDeleteResponse>(`/api/cockpit/campaigns/${campaignId}${query}`, {
     method: 'DELETE',
   })
 }

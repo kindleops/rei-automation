@@ -7,7 +7,9 @@ import {
   queueBatch,
   type CampaignLifecycleAction,
 } from './campaigns.adapter'
-import { canDeleteDraft, canQueueBatch, computeCampaignHealth } from './campaign-health'
+import { canDeleteDraft, canForceDeleteCampaign, canQueueBatch, computeCampaignHealth } from './campaign-health'
+
+type ExtendedLifecycleAction = CampaignLifecycleAction | 'convert_to_live' | 'sync_metrics'
 import type { CampaignSummary } from './campaigns.types'
 
 export type CampaignActionCallbacks = {
@@ -23,6 +25,8 @@ const pendingActions = new Set<string>()
 function actionKey(action: string, campaignId: string): string {
   return `${action}:${campaignId}`
 }
+
+const DIRECT_LIFECYCLE_ACTIONS = new Set(['convert_to_live', 'convert-to-live', 'sync_metrics', 'sync-metrics'])
 
 const LIFECYCLE_MAP: Record<string, CampaignLifecycleAction> = {
   pause: 'pause',
@@ -160,7 +164,7 @@ export async function executeCampaignAction(
       return true
     }
 
-    if (LIFECYCLE_MAP[action]) {
+    if (LIFECYCLE_MAP[action] && !DIRECT_LIFECYCLE_ACTIONS.has(action)) {
       pendingActions.add(key)
       const lifecycleAction = LIFECYCLE_MAP[action]
       const result = await campaignLifecycle(campaign.id, lifecycleAction, payload)
@@ -185,8 +189,38 @@ export async function executeCampaignAction(
       return Boolean(newId)
     }
 
+    if (action === 'convert_to_live' || action === 'convert-to-live') {
+      const confirmed = window.confirm(
+        `Convert "${campaign.campaign_name}" to a LIVE campaign?\n\nThis will purge test queue rows, hydrate the real send path, and schedule the next valid sending window. Targets, pacing, caps, and templates are preserved.`,
+      )
+      if (!confirmed) return false
+      pendingActions.add(key)
+      const result = await campaignLifecycle(campaign.id, 'convert_to_live' as ExtendedLifecycleAction, {
+        confirm_live: true,
+        explicit_operator_action: true,
+      })
+      emitNotification({
+        title: 'Converted to Live Campaign',
+        detail: result.to
+          ? `Now ${result.to}. Scheduled launch preserved.`
+          : 'Live conversion complete.',
+        severity: 'success',
+      })
+      await callbacks.onRefresh()
+      return true
+    }
+
+    if (action === 'sync_metrics' || action === 'sync-metrics') {
+      pendingActions.add(key)
+      await campaignLifecycle(campaign.id, 'sync_metrics' as ExtendedLifecycleAction)
+      emitNotification({ title: 'Metrics synced', detail: 'Campaign counts recomputed from canonical sources.', severity: 'success' })
+      await callbacks.onRefresh()
+      return true
+    }
+
     if (action === 'delete' || action === 'delete_draft') {
-      if (!canDeleteDraft(campaign)) {
+      const forceDelete = canForceDeleteCampaign(campaign)
+      if (!canDeleteDraft(campaign) && !forceDelete) {
         emitNotification({
           title: 'Cannot delete',
           detail: 'Only unexecuted drafts can be deleted. Archive instead.',
@@ -195,11 +229,13 @@ export async function executeCampaignAction(
         return false
       }
       const confirmed = window.confirm(
-        `Delete draft "${campaign.campaign_name}"? This cannot be undone.`,
+        forceDelete
+          ? `Permanently remove "${campaign.campaign_name}" and all test/mock rows? This cannot be undone.`
+          : `Delete draft "${campaign.campaign_name}"? This cannot be undone.`,
       )
       if (!confirmed) return false
       pendingActions.add(key)
-      const res = await deleteCampaign(campaign.id)
+      const res = await deleteCampaign(campaign.id, { force_delete: forceDelete })
       emitNotification({
         title: res.archived ? 'Campaign archived' : 'Campaign deleted',
         detail: res.archived

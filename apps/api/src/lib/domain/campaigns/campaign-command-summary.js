@@ -94,11 +94,12 @@ async function aggregateQueueExecution(supabase, campaignId, runId = null, campa
     const status = clean(row.queue_status).toLowerCase()
     const isLiveExecutable = !proofHydration && row.sms_eligible && row.routing_allowed
 
-    if (ACTIVE_QUEUE_STATUSES.includes(status) || TERMINAL_QUEUE_FAILURE.includes(status)) {
+    const isCancelled = status === 'cancelled'
+    if ((ACTIVE_QUEUE_STATUSES.includes(status) || TERMINAL_QUEUE_FAILURE.includes(status)) && !isCancelled) {
       counts.hydrated_queue_rows += 1
     }
 
-    if (proofHydration) {
+    if (proofHydration && !isCancelled && ACTIVE_QUEUE_STATUSES.includes(status)) {
       counts.proof_no_send_rows += 1
     } else {
       counts.live_send_rows += 1
@@ -124,10 +125,12 @@ async function aggregateQueueExecution(supabase, campaignId, runId = null, campa
     if (status === 'blocked') counts.blocked_rows += 1
   }
 
+  const productionLaunch = asBoolean(campaign.metadata?.production_launch, false)
+    || Boolean(clean(campaign.metadata?.converted_to_live_at))
   const transmissionEnabled =
     counts.live_send_rows > 0 &&
     counts.routing_allowed > 0 &&
-    asBoolean(campaign.auto_send_enabled, false)
+    (asBoolean(campaign.auto_send_enabled, false) || productionLaunch)
 
   const proofMode =
     counts.proof_no_send_rows > 0 &&
@@ -259,11 +262,16 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
   const currentRun = await loadCurrentRun(supabase, campaignId)
   const runId = currentRun?.id || null
 
+  const productionLaunch = Boolean(clean(campaign.metadata?.converted_to_live_at) || campaign.metadata?.production_launch)
   const [targets, queueExec, languageCoverage, readiness, processorState] = await Promise.all([
     aggregateTargetFunnel(supabase, campaignId),
     aggregateQueueExecution(supabase, campaignId, runId, campaign),
     aggregateLanguageCoverage(supabase, campaignId),
-    evaluateCampaignLaunchReadiness(campaignId, { supabase, ...deps }),
+    evaluateCampaignLaunchReadiness(campaignId, deps, {
+      guarded_live_launch: productionLaunch,
+      explicit_operator_action: productionLaunch,
+      scheduled_activation: productionLaunch,
+    }),
     loadQueueProcessorState(supabase),
   ])
 
@@ -271,7 +279,7 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
   queueExec.transmission_enabled =
     queueExec.live_send_rows > 0 &&
     queueExec.routing_allowed > 0 &&
-    asBoolean(campaign.auto_send_enabled, false)
+    (asBoolean(campaign.auto_send_enabled, false) || productionLaunch)
 
   const operatorState = deriveOperatorState(campaign, queueExec, readiness)
   const mode = operatorModeLabel(queueExec)

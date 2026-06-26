@@ -206,11 +206,22 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     b.total += 1
     if (clean(row.template_status) !== 'ready') b.unassigned += 1
   }
+  const totalLangTargets = [...langBuckets.values()].reduce((sum, bucket) => sum + bucket.total, 0)
+  const totalUnassigned = [...langBuckets.values()].reduce((sum, bucket) => sum + bucket.unassigned, 0)
+  const templateCoveragePct = totalLangTargets > 0
+    ? ((totalLangTargets - totalUnassigned) / totalLangTargets) * 100
+    : 100
+
   for (const [lang, bucket] of langBuckets) {
     if (bucket.unassigned > 0) {
       const label = lang === 'es' ? 'Spanish' : lang === 'ru' ? 'Russian' : lang === 'en' ? 'English' : lang
-      blockers.push(`${bucket.unassigned} ${label} targets have no assigned template`)
-      blockerCodes.push('language_template_gap')
+      const message = `${bucket.unassigned} ${label} targets have no assigned template`
+      if (context.controlled_hydration && templateCoveragePct >= 95) {
+        warnings.push(message)
+      } else {
+        blockers.push(message)
+        blockerCodes.push('language_template_gap')
+      }
     }
   }
 
@@ -235,8 +246,12 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
   }
 
   if (readyTotal && templateMissing === sampleSize) {
-    blockers.push(BLOCKER_LABELS.template_required)
-    blockerCodes.push('template_required')
+    if (context.controlled_hydration && routableTotal > 0) {
+      warnings.push(BLOCKER_LABELS.template_required)
+    } else {
+      blockers.push(BLOCKER_LABELS.template_required)
+      blockerCodes.push('template_required')
+    }
   } else if (templateMissing > 0) {
     warnings.push(`${templateMissing}/${sampleSize} sampled recipients missing template resolution`)
   }

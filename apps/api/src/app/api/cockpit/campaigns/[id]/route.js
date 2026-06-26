@@ -78,7 +78,10 @@ export async function DELETE(request, { params }) {
   }
 
   try {
-    const result = await deleteCampaign(campaignId)
+    const url = new URL(request.url)
+    const forceDelete = url.searchParams.get('force_delete') === '1'
+      || url.searchParams.get('force_delete') === 'true'
+    const result = await deleteCampaign(campaignId, { force_delete: forceDelete })
     return withCors(request, result, result.ok === false ? 400 : 200)
   } catch (error) {
     console.error('campaigns.delete_failed', error)

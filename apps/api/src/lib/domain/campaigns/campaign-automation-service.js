@@ -5229,21 +5229,33 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
   let liveSendRows = 0
   let smsEligible = 0
   let routingAllowed = 0
+  let queuedRows = 0
+  let scheduledQueueRows = 0
   let nextScheduledProofRow = null
+  let nextScheduledLiveRow = null
 
   for (const row of activeRows || []) {
     const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
     const noSend = asBoolean(metadata.no_send ?? metadata.proof_no_send, false)
-    if (noSend) {
+    const proofHydration = clean(metadata.launch_mode) === 'proof_hydration_no_send' || noSend
+    const status = clean(row.queue_status).toLowerCase()
+    if (proofHydration) {
       proofNoSendRows += 1
       if (row.scheduled_for && (!nextScheduledProofRow || row.scheduled_for < nextScheduledProofRow)) {
         nextScheduledProofRow = row.scheduled_for
       }
     } else {
       liveSendRows += 1
+      if (row.sms_eligible) smsEligible += 1
+      if (row.routing_allowed) routingAllowed += 1
+      if (status === 'queued') queuedRows += 1
+      if (status === 'scheduled') {
+        scheduledQueueRows += 1
+        if (row.scheduled_for && (!nextScheduledLiveRow || row.scheduled_for < nextScheduledLiveRow)) {
+          nextScheduledLiveRow = row.scheduled_for
+        }
+      }
     }
-    if (row.sms_eligible) smsEligible += 1
-    if (row.routing_allowed) routingAllowed += 1
   }
 
   let hydratedRows = (activeRows || []).length
@@ -5293,10 +5305,13 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
     hydrated_rows: hydratedRows,
     live_send_rows: liveSendRows,
     proof_no_send_rows: proofNoSendRows,
+    queued_rows: queuedRows,
+    scheduled_queue_rows: scheduledQueueRows,
     sms_eligible: smsEligible,
     routing_allowed: routingAllowed,
     transmission_enabled: transmissionEnabled,
     next_scheduled_proof_row: nextScheduledProofRow,
+    next_scheduled_at: nextScheduledLiveRow || nextScheduledProofRow,
     no_messages_will_transmit: proofMode,
     proof_mode: proofMode,
   }
@@ -5333,7 +5348,14 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   const ready = Number(counts.ready || 0)
   const planned = Number(counts.planned || 0)
   const queued = Number(counts.queued || 0)
-  const failed = Number(counts.failed || 0)
+  const sent = Number(counts.sent || 0) + Number(counts.delivered || 0)
+  const delivered = Number(counts.delivered || 0)
+  const failedTarget = Number(counts.failed || 0)
+  const proof = executionProof || {}
+  const liveQueued = Number(proof.queued_rows ?? queued)
+  const liveScheduled = Number(proof.scheduled_queue_rows ?? 0)
+  const scopedFailed = Number(proof.failed_execution_rows ?? failedTarget)
+  const failed = scopedFailed
   const nextWindow = windows
     .filter((window) => ['planned', 'open'].includes(clean(window.status)))
     .sort((left, right) => new Date(left.window_start_utc).getTime() - new Date(right.window_start_utc).getTime())[0] || null
@@ -5352,23 +5374,25 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     total_targets: totalFromBucket ?? targets.length,
     ready_targets: ready,
     planned_targets: planned,
-    scheduled_targets: 0,
-    scheduled_queue_rows: 0,
-    queued_targets: queued,
-    canonical_queued_count: Number(campaign.queued_count || 0),
-    sent_count: Number(counts.sent || 0) + Number(counts.delivered || 0),
-    delivered_count: Number(counts.delivered || 0),
+    scheduled_targets: liveScheduled,
+    scheduled_queue_rows: liveScheduled,
+    queued_targets: liveQueued,
+    canonical_queued_count: liveQueued + liveScheduled,
+    sent_count: sent,
+    delivered_count: delivered,
     failed_count: failed,
-    reply_count: Number(counts.replied || 0),
+    failed_target_rows: failedTarget,
+    failed_execution_rows: scopedFailed,
+    reply_count: Number(counts.replied || 0) + Number(counts.replied_positive || 0) + Number(counts.replied_negative || 0),
     positive_reply_count: Number(counts.replied_positive || 0),
     negative_reply_count: Number(counts.replied_negative || 0),
     opt_out_count: Number(counts.opt_out || 0),
-    delivery_rate: 0,
-    reply_rate: 0,
-    positive_rate: 0,
-    opt_out_rate: 0,
-    failure_rate: 0,
-    next_send_at: nextWindow?.window_start_utc || null,
+    delivery_rate: sent > 0 ? Math.round((delivered / sent) * 1000) / 10 : 0,
+    reply_rate: sent > 0 ? Math.round((Number(counts.replied || 0) / sent) * 1000) / 10 : 0,
+    positive_rate: sent > 0 ? Math.round((Number(counts.replied_positive || 0) / sent) * 1000) / 10 : 0,
+    opt_out_rate: sent > 0 ? Math.round((Number(counts.opt_out || 0) / sent) * 1000) / 10 : 0,
+    failure_rate: sent > 0 ? Math.round((failed / sent) * 1000) / 10 : 0,
+    next_send_at: proof.next_scheduled_at || nextWindow?.window_start_utc || campaign.scheduled_for || null,
     next_send_window: nextWindow,
     last_send_at: null,
     send_interval_seconds: campaign.send_interval_seconds || 0,
@@ -5419,34 +5443,70 @@ export async function listCampaigns(deps = {}) {
       .limit(1000)
     if (!windowRes.error) windows = windowRes.data || []
   }
+  const { deriveOperatorState, operatorStateLabel, operatorModeLabel } = await import('@/lib/domain/campaigns/campaign-operator-state.js')
   const summaries = (campaigns || []).map((campaign) => {
     const proofBase = proofByCampaign.get(campaign.id) || null
     const executionProof = proofBase
       ? { campaign_state: normalizeCampaignStatus(campaign.status), ...proofBase }
       : null
-    return mapCampaignSummary(
+    const summary = mapCampaignSummary(
       campaign,
       [],
       windows.filter((window) => window.campaign_id === campaign.id),
       countMap.get(campaign.id) || null,
       executionProof,
     )
+    const operatorState = deriveOperatorState(campaign, executionProof || {}, {})
+    summary.operator_state = operatorState
+    summary.operator_state_label = operatorStateLabel(operatorState)
+    summary.mode = operatorModeLabel(executionProof || {})
+    summary.mode_label = summary.mode === 'live' ? 'Live' : 'Test Mode'
+    if (executionProof?.proof_mode && operatorState === 'test_mode') {
+      summary.status = summary.status === 'active' ? summary.status : summary.status
+    }
+    return summary
   })
+
+  let activeCampaigns = 0
+  let totalSent = 0
+  let totalFailed = 0
+  let totalOptOut = 0
+  let totalReplied = 0
+  let deliveredTotal = 0
+  for (const campaign of summaries) {
+    const status = normalizeCampaignStatus(campaign.status)
+    const operator = campaign.operator_state
+    if (
+      isLiveCampaignStatus(status) ||
+      status === 'scheduled' ||
+      (status === 'paused' && campaign.ready_targets > 0) ||
+      operator === 'test_mode' ||
+      operator === 'live'
+    ) {
+      activeCampaigns += 1
+    }
+    totalSent += Number(campaign.sent_count || 0)
+    totalFailed += Number(campaign.failed_count || 0)
+    totalOptOut += Number(campaign.opt_out_count || 0)
+    totalReplied += Number(campaign.reply_count || 0)
+    deliveredTotal += Number(campaign.delivered_count || 0)
+  }
+
   return {
     ok: true,
     campaigns: summaries,
     kpis: {
-      activeCampaigns: summaries.filter((campaign) => isLiveCampaignStatus(campaign.status)).length,
+      activeCampaigns,
       totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),
       readyTargets: summaries.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
       scheduledQueueRows: summaries.reduce((sum, campaign) => sum + Number(campaign.scheduled_queue_rows || 0), 0),
       plannedTargets: summaries.reduce((sum, campaign) => sum + Number(campaign.planned_targets || 0), 0),
-      sentToday: 0,
-      deliveredToday: 0,
-      replyRate: 0,
+      sentToday: summaries.reduce((sum, campaign) => sum + Number(campaign.sent_count || 0), 0),
+      deliveredToday: deliveredTotal,
+      replyRate: deliveredTotal > 0 ? Math.round((totalReplied / deliveredTotal) * 1000) / 10 : 0,
       positiveReplies: summaries.reduce((sum, campaign) => sum + campaign.positive_reply_count, 0),
-      optOutRate: 0,
-      failureRate: 0,
+      optOutRate: totalSent > 0 ? Math.round((totalOptOut / totalSent) * 1000) / 10 : 0,
+      failureRate: totalSent > 0 ? Math.round((totalFailed / totalSent) * 1000) / 10 : 0,
     },
   }
 }
@@ -5629,15 +5689,19 @@ export async function cloneCampaign(campaignId, input = {}, deps = {}) {
  */
 export async function deleteCampaign(campaignId, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
+  const forceDelete = asBoolean(deps.force_delete ?? deps.forceDelete, false)
   const { data: campaign, error } = await supabase
-    .from('campaigns').select('id,status,name').eq('id', campaignId).maybeSingle()
+    .from('campaigns').select('id,status,name,metadata,sent_count').eq('id', campaignId).maybeSingle()
   if (error) throw error
   if (!campaign) return { ok: false, error: 'campaign_not_found' }
+
+  const { isTestOrMockCampaign } = await import('@/lib/domain/campaigns/campaign-sync-metrics.js')
+  const allowForcePurge = forceDelete || isTestOrMockCampaign(campaign)
 
   const { count: linkedCount } = await supabase
     .from('send_queue').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId)
 
-  if ((linkedCount || 0) > 0) {
+  if ((linkedCount || 0) > 0 && !allowForcePurge) {
     const { data: cancelled } = await supabase
       .from('send_queue')
       .update({ queue_status: 'cancelled', updated_at: new Date().toISOString() })
@@ -5658,15 +5722,21 @@ export async function deleteCampaign(campaignId, deps = {}) {
     }
   }
 
+  if (allowForcePurge && (linkedCount || 0) > 0) {
+    await supabase.from('send_queue').delete().eq('campaign_id', campaignId)
+  }
+
   const { data: targets } = await supabase.from('campaign_targets').delete().eq('campaign_id', campaignId).select('id')
   const { data: windows } = await supabase.from('campaign_send_windows').delete().eq('campaign_id', campaignId).select('id')
   await supabase.from('campaign_filters').delete().eq('campaign_id', campaignId)
   await supabase.from('campaign_events').delete().eq('campaign_id', campaignId)
+  await supabase.from('campaign_runs').delete().eq('campaign_id', campaignId)
   const { error: delError } = await supabase.from('campaigns').delete().eq('id', campaignId)
   if (delError) throw delError
   return {
-    ok: true, campaign_id: campaignId, deleted: true, archived: false,
-    targets_removed: targets?.length || 0, windows_removed: windows?.length || 0, queue_rows_cancelled: 0,
+    ok: true, campaign_id: campaignId, deleted: true, archived: false, force_purged: allowForcePurge,
+    targets_removed: targets?.length || 0, windows_removed: windows?.length || 0,
+    queue_rows_cancelled: allowForcePurge ? (linkedCount || 0) : 0,
   }
 }
 
@@ -7363,6 +7433,58 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
   const action = clean(input.action || input.lifecycle_action)
   const reason = clean(input.reason) || `operator:${action || 'lifecycle'}`
   const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || null
+
+  if (action === 'convert_to_live' || action === 'convert-to-live') {
+    const { convertTestCampaignToLive } = await import('@/lib/domain/campaigns/campaign-convert-to-live.js')
+    const result = await convertTestCampaignToLive(campaignId, input, deps)
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.error,
+        code: result.error,
+        campaign_id: campaignId,
+        blockers: result.blockers || [],
+        from: result.from || null,
+        to: result.to || null,
+        state: result.state || 'test_mode',
+        message: result.message || null,
+      }
+    }
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action: 'convert_to_live',
+      from: result.from,
+      to: result.to,
+      state: result.state,
+      state_label: result.state_label,
+      mode: result.mode,
+      campaign: result.campaign,
+      counts: result.counts,
+      schedule: result.schedule,
+      purged: result.purged,
+      blockers: result.blockers || [],
+      warnings: result.warnings || [],
+      activation_mode: 'live',
+      proof_hydration: false,
+      inserted: result.activation?.inserted ?? 0,
+    }
+  }
+
+  if (action === 'sync_metrics' || action === 'sync-metrics') {
+    const { syncCampaignMetrics } = await import('@/lib/domain/campaigns/campaign-sync-metrics.js')
+    const result = await syncCampaignMetrics(campaignId, deps)
+    if (!result.ok) return { ok: false, error: result.error, campaign_id: campaignId }
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action: 'sync_metrics',
+      counts: result.counts,
+      summary: result.summary,
+      campaign: result.campaign,
+      recomputed: result.recomputed,
+    }
+  }
 
   if (action === 'activate') {
     const { runCanonicalCampaignActivation } = await import('@/lib/domain/campaigns/campaign-activation-orchestrator.js')

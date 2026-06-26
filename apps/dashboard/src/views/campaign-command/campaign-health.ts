@@ -184,12 +184,31 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   }
 }
 
+function isTestOrMockCampaign(campaign: CampaignSummary): boolean {
+  const name = campaign.campaign_name.toLowerCase()
+  return (
+    name.includes('proof ') ||
+    name.startsWith('proof') ||
+    name.includes('test campaign') ||
+    name === 'test' ||
+    name.includes('activate test')
+  )
+}
+
 export function canDeleteDraft(campaign: CampaignSummary): boolean {
+  if (isTestOrMockCampaign(campaign)) return true
   return (
     campaign.status === 'draft' &&
     campaign.sent_count === 0 &&
     campaign.queued_targets === 0 &&
     campaign.scheduled_targets === 0
+  )
+}
+
+export function canForceDeleteCampaign(campaign: CampaignSummary): boolean {
+  return isTestOrMockCampaign(campaign) || (
+    ['draft', 'archived', 'built', 'previewed'].includes(campaign.status) &&
+    campaign.sent_count === 0
   )
 }
 
@@ -213,7 +232,7 @@ export function canQueueBatch(campaign: CampaignSummary): boolean {
 export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
   const operatorState = resolveOperatorState(campaign)
   if (operatorState === 'test_mode') {
-    return { id: 'queue_batch_test', label: 'Prepare Test Batch', variant: 'is-warn' }
+    return { id: 'convert_to_live', label: 'Convert to Live Campaign', variant: 'is-primary' }
   }
   if (operatorState === 'live' && campaign.readiness_label === 'Ready for Controlled Live') {
     return { id: 'queue_batch_live', label: 'Prepare Controlled Live Batch', variant: 'is-primary' }
@@ -250,6 +269,11 @@ export function getPrimaryAction(campaign: CampaignSummary): CampaignActionDef {
 
 export function getDetailActions(campaign: CampaignSummary): CampaignActionDef[] {
   const actions: CampaignActionDef[] = []
+  const operatorState = resolveOperatorState(campaign)
+
+  if (operatorState === 'test_mode') {
+    actions.push({ id: 'convert_to_live', label: 'Convert to Live Campaign', variant: 'is-primary' })
+  }
 
   switch (campaign.status) {
     case 'draft':
@@ -327,7 +351,7 @@ export function getAvailableCampaignActions(campaign: CampaignSummary): string[]
   }
 
   if (canDeleteDraft(campaign)) {
-    actions.push('delete_draft')
+    actions.push(isTestOrMockCampaign(campaign) ? 'delete' : 'delete_draft')
   }
 
   if (canArchiveCampaign(campaign)) {
@@ -353,7 +377,10 @@ export function matchesListFilter(campaign: CampaignSummary, filter: CampaignLis
   if (filter === 'draft') return campaign.status === 'draft'
   if (filter === 'ready') return READY_STATUSES.includes(campaign.status)
   if (filter === 'scheduled') return campaign.status === 'scheduled'
-  if (filter === 'live') return ['active', 'activating', 'live_limited', 'queued'].includes(campaign.status)
+  if (filter === 'live') {
+    return ['active', 'activating', 'live_limited', 'queued', 'scheduled', 'paused'].includes(campaign.status)
+      || resolveOperatorState(campaign) === 'test_mode'
+  }
   if (filter === 'paused') return campaign.status === 'paused'
   if (filter === 'completed') return campaign.status === 'completed'
   if (filter === 'archived') return campaign.status === 'archived'

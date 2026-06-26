@@ -54,7 +54,7 @@ export async function POST(request, { params }) {
     const supabase = defaultSupabase
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id,status,auto_send_enabled,auto_queue_enabled,name')
+      .select('id,status,auto_send_enabled,auto_queue_enabled,name,metadata')
       .eq('id', campaignId)
       .maybeSingle()
 
@@ -75,10 +75,15 @@ export async function POST(request, { params }) {
       }, 423)
     }
 
-    // Active proof campaigns stay no-send; live batch requires explicit auto_send opt-in.
-    const forceProofBatch = ['active', 'activating', 'paused'].includes(status) && !campaign.auto_send_enabled
-    const noSend = forceProofBatch || body?.no_send === true || body?.noSend === true
-    const confirmLive = forceProofBatch ? false : body?.confirm_live !== false && body?.confirmLive !== false
+    const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
+    const productionLaunch = Boolean(metadata.production_launch || metadata.converted_to_live_at)
+    const explicitLive = body?.confirm_live === true || body?.confirmLive === true
+    // Active proof campaigns stay no-send unless production launch conversion already occurred.
+    const forceProofBatch = ['active', 'activating', 'paused'].includes(status)
+      && !campaign.auto_send_enabled
+      && !productionLaunch
+    const noSend = (forceProofBatch && !explicitLive) || body?.no_send === true || body?.noSend === true
+    const confirmLive = productionLaunch || explicitLive || (!forceProofBatch && body?.confirm_live !== false && body?.confirmLive !== false)
 
     const result = await createCampaignQueuePlan(campaignId, {
       ...body,
