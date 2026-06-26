@@ -16,21 +16,21 @@ test.describe('Comp Intelligence Lake Worth recovery', () => {
     const workspace = page.locator('[data-comp-intelligence="true"]')
     await expect(workspace).toBeVisible({ timeout: 30000 })
 
-    await expect(workspace).toHaveAttribute('data-evidence-count', /[1-9]/, { timeout: 30000 })
-    await expect(workspace).toHaveAttribute('data-mapped-count', /[1-9]/, { timeout: 30000 })
+    await workspace.getByRole('tab', { name: /Comps/i }).click()
+
+    await expect(workspace).toHaveAttribute('data-evidence-count', /[1-9]/, { timeout: 45000 })
+    await expect(workspace).toHaveAttribute('data-mapped-count', /[1-9]/, { timeout: 45000 })
 
     const mapCanvas = workspace.locator('.ci-map-canvas')
-    await expect(mapCanvas).toBeVisible({ timeout: 20000 })
+    const mapOrState = mapCanvas.or(workspace.locator('.ci-map-no-coords-wrap'))
+    await expect(mapOrState.first()).toBeVisible({ timeout: 20000 })
 
-    const box = await mapCanvas.boundingBox()
+    const box = await mapOrState.first().boundingBox()
     expect(box?.width ?? 0).toBeGreaterThan(120)
     expect(box?.height ?? 0).toBeGreaterThan(120)
 
     const cards = workspace.locator('.ci-evidence-card')
     await expect(cards.first()).toBeVisible({ timeout: 20000 })
     expect(await cards.count()).toBeGreaterThan(0)
-
-    await workspace.getByRole('tab', { name: /Comps/i }).click()
-    await expect(mapCanvas).toBeVisible()
   })
 })

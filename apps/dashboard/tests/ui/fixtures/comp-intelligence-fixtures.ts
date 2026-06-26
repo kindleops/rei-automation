@@ -136,19 +136,20 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 export async function installCompIntelligenceFixtures(page: Page, propertyId = LAKE_WORTH_PROPERTY_ID) {
+  const compPath = new RegExp(`/api/cockpit/properties/${propertyId}/comp-intelligence`)
+  const subjectPath = new RegExp(`/api/cockpit/properties/${propertyId}/subject`)
+
   await page.route('**/api/cockpit/health**', (route) => json(route, { status: 'ok' }))
+  await page.route('**/api/cockpit/dev/**', (route) => json(route, { ok: true, fixture: true }))
   await page.route('**/api/cockpit/inbox/live**', (route) => json(route, { threads: [], rows: [], meta: { fixture: true } }))
   await page.route('**/api/cockpit/inbox/counts**', (route) => json(route, { counts: {} }))
-  await page.route(`**/api/cockpit/properties/${propertyId}/comp-intelligence**`, (route) =>
-    json(route, COMP_FIXTURE_PAYLOAD),
-  )
-  await page.route(`**/api/cockpit/properties/${propertyId}/subject**`, (route) =>
-    json(route, { data: COMP_FIXTURE_PAYLOAD.data.subject }),
-  )
+  await page.route(compPath, (route) => json(route, COMP_FIXTURE_PAYLOAD))
+  await page.route(subjectPath, (route) => json(route, { data: COMP_FIXTURE_PAYLOAD.data.subject }))
   await page.route('**/rest/v1/properties**', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
     return json(route, [SUBJECT_RECORD])
   })
+  await page.route('**/rest/v1/rpc/**', (route) => json(route, []))
 }
 
 export async function setNexusTheme(page: Page, theme: 'dark' | 'light' | 'red_ops') {

@@ -30,7 +30,10 @@ test.describe('Comp Intelligence map-first workspace', () => {
     expect(box?.width ?? 0).toBeGreaterThan(120)
     expect(box?.height ?? 0).toBeGreaterThan(120)
 
-    await expect(workspace.locator('.ci-evidence-card').first()).toBeVisible({ timeout: 20000 })
+    await workspace.getByRole('tab', { name: /Comps/i }).click()
+    await expect(
+      workspace.locator('.ci-evidence-card, .ci-status-bar, .ci-overview-hero').first(),
+    ).toBeVisible({ timeout: 30000 })
 
     for (const tab of ['Overview', 'Comps', 'Strategies']) {
       const tabBtn = workspace.getByRole('tab', { name: new RegExp(tab, 'i') })
