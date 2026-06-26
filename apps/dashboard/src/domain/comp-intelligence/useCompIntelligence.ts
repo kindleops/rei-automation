@@ -2,10 +2,32 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { resolveCanonicalProperty } from '../canonical-property/resolver'
-import { fetchCompIntelligence } from './comp-intelligence-api'
+import { fetchCanonicalSubjectProperty, fetchCompIntelligence } from './comp-intelligence-api'
+import { mapCandidatesToDegradedEvidence } from './degraded-evidence'
 import { runDirectCompIntelligence } from './direct-pipeline'
+import { fetchPropertyRecord } from './property-record-loader'
 import { subjectHasCoordinates } from './coordinate-resolver'
 import type { CompIntelligencePayload, ValuationPipelineState } from './types'
+
+function enrichPayloadEvidence(payload: CompIntelligencePayload): CompIntelligencePayload {
+  const candidates = payload.discovery?.candidates ?? []
+  if (payload.transaction_evidence?.length || !candidates.length) return payload
+  return {
+    ...payload,
+    transaction_evidence: mapCandidatesToDegradedEvidence(
+      candidates,
+      payload.discovery?.is_market_fallback ? 'MARKET_FALLBACK' : 'API_DISCOVERY',
+    ),
+  }
+}
+
+function mergeSubject(
+  payload: CompIntelligencePayload,
+  serverSubject: CompIntelligencePayload['subject'] | null,
+): CompIntelligencePayload {
+  if (!serverSubject?.is_subject_resolved) return payload
+  return { ...payload, subject: serverSubject }
+}
 
 function mapPipelineState(payload: CompIntelligencePayload | null, loading: boolean, error: string | null): ValuationPipelineState {
   if (loading) return 'loading_evidence'
@@ -20,7 +42,7 @@ function mapPipelineState(payload: CompIntelligencePayload | null, loading: bool
     case 'blocked_missing_subject':
       return 'blocked_missing_subject'
     case 'blocked_insufficient_evidence':
-      return 'blocked_insufficient_evidence'
+      return payload.discovery?.counts?.total ? 'scoring_comps' : 'blocked_insufficient_evidence'
     case 'valuing':
       return 'valuing'
     case 'scoring_comps':
@@ -46,11 +68,13 @@ export function useCompIntelligence({
   paused?: boolean
 }) {
   const t = thread as Record<string, unknown> | null
-  const opportunityId = String((dealContext as Record<string, unknown> | null)?.opportunityId || (t as Record<string, unknown>)?.opportunity_id || '')
+  const opportunityId = String((dealContext as Record<string, unknown> | null)?.opportunityId || t?.opportunity_id || '')
+
+  const [propertyRecord, setPropertyRecord] = useState<Record<string, unknown> | null>(null)
 
   const canonical = useMemo(
-    () => resolveCanonicalProperty({ dealContext, thread, opportunityId }),
-    [dealContext, thread, opportunityId],
+    () => resolveCanonicalProperty({ dealContext, thread, opportunityId, propertyRecord }),
+    [dealContext, thread, opportunityId, propertyRecord],
   )
 
   const propertyId = canonical?.property_id || ''
@@ -62,6 +86,18 @@ export function useCompIntelligence({
   const [error, setError] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<'api' | 'direct_rpc' | null>(null)
 
+  useEffect(() => {
+    if (!propertyId) {
+      setPropertyRecord(null)
+      return
+    }
+    let cancelled = false
+    void fetchPropertyRecord(propertyId).then((row) => {
+      if (!cancelled) setPropertyRecord(row)
+    })
+    return () => { cancelled = true }
+  }, [propertyId])
+
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!propertyId) {
       setPayload(null)
@@ -71,53 +107,87 @@ export function useCompIntelligence({
     setLoading(true)
     setError(null)
 
+    const hydratedRecord = propertyRecord ?? await fetchPropertyRecord(propertyId)
+
     try {
-      const data = await fetchCompIntelligence(
-        propertyId,
-        {
+      const [apiData, serverSubject, direct] = await Promise.all([
+        fetchCompIntelligence(
+          propertyId,
+          {
+            radius,
+            monthsBack,
+            assetClass,
+            threadKey: threadKey || null,
+            opportunityId: opportunityId || null,
+            masterOwnerId: masterOwnerId || null,
+          },
+          signal,
+        ).catch(() => null),
+        fetchCanonicalSubjectProperty(
+          propertyId,
+          { threadKey: threadKey || null, opportunityId: opportunityId || null },
+          signal,
+        ).catch(() => null),
+        runDirectCompIntelligence({
+          dealContext,
+          thread,
           radius,
           monthsBack,
-          assetClass,
-          threadKey: threadKey || null,
-          opportunityId: opportunityId || null,
-          masterOwnerId: masterOwnerId || null,
-        },
-        signal,
-      )
+          opportunityId,
+          propertyRecord: hydratedRecord,
+        }).catch(() => null),
+      ])
 
       if (signal?.aborted) return
 
-      if (data?.decision_projection?.projection_mode === 'authoritative_v3') {
-        setPayload({ ...data, data_source_mode: 'api' })
+      if (apiData?.decision_projection?.projection_mode === 'authoritative_v3') {
+        const merged = enrichPayloadEvidence(mergeSubject(apiData, serverSubject))
+        setPayload({ ...merged, data_source_mode: 'api' })
         setDataSource('api')
+        setError(null)
         return
       }
 
-      if (data?.subject?.is_subject_resolved && (data.discovery?.counts?.total ?? 0) > 0 && data.decision_projection) {
-        setPayload({ ...data, data_source_mode: 'api' })
-        setDataSource('api')
-        return
-      }
+      let mergedApi = apiData ? enrichPayloadEvidence(mergeSubject(apiData, serverSubject)) : null
+      let mergedDirect = direct
+        ? (serverSubject?.is_subject_resolved ? mergeSubject(direct, serverSubject) : direct)
+        : null
 
-      const direct = await runDirectCompIntelligence({
-        dealContext,
-        thread,
-        radius,
-        monthsBack,
-        opportunityId,
-      })
-      if (signal?.aborted) return
+      const apiEvidenceCount = mergedApi?.transaction_evidence?.length ?? mergedApi?.discovery?.counts?.total ?? 0
+      const directEvidenceCount = mergedDirect?.transaction_evidence?.length ?? mergedDirect?.discovery?.counts?.total ?? 0
 
-      if (direct) {
-        setPayload({ ...direct, data_source_mode: 'EVIDENCE_ONLY_DEGRADED' })
+      if (directEvidenceCount > apiEvidenceCount && mergedDirect) {
+        setPayload({ ...mergedDirect, data_source_mode: 'EVIDENCE_ONLY_DEGRADED' })
         setDataSource('direct_rpc')
-        if (!data) setError('V3 decision evidence unavailable — evidence-only degraded recovery')
+        setError(directEvidenceCount > 0 ? null : 'V3 decision unavailable — no comp evidence recovered')
         return
       }
 
-      setPayload(data)
-      setDataSource(data ? 'api' : null)
-      if (!data) setError('Comp intelligence pipeline returned no data')
+      if (mergedApi && (apiEvidenceCount > 0 || mergedApi.decision_projection)) {
+        if (!mergedApi.transaction_evidence?.length && (mergedApi.discovery?.counts?.total ?? 0) > 0) {
+          mergedApi = enrichPayloadEvidence(mergedApi)
+        }
+        setPayload({
+          ...mergedApi,
+          data_source_mode: mergedApi.decision_projection?.projection_mode === 'authoritative_v3'
+            ? 'api'
+            : 'EVIDENCE_ONLY_DEGRADED',
+        })
+        setDataSource('api')
+        setError(apiEvidenceCount > 0 ? null : 'V3 decision unavailable — no comp evidence recovered')
+        return
+      }
+
+      if (mergedDirect) {
+        setPayload({ ...mergedDirect, data_source_mode: 'EVIDENCE_ONLY_DEGRADED' })
+        setDataSource('direct_rpc')
+        setError(directEvidenceCount > 0 ? null : 'V3 decision unavailable — no comp evidence recovered')
+        return
+      }
+
+      setPayload(mergedApi)
+      setDataSource(mergedApi ? 'api' : null)
+      if (!mergedApi) setError('Comp intelligence pipeline returned no data')
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return
       try {
@@ -127,12 +197,13 @@ export function useCompIntelligence({
           radius,
           monthsBack,
           opportunityId,
+          propertyRecord: hydratedRecord ?? await fetchPropertyRecord(propertyId),
         })
         if (signal?.aborted) return
         if (direct) {
-          setPayload(direct)
+          setPayload({ ...direct, data_source_mode: 'EVIDENCE_ONLY_DEGRADED' })
           setDataSource('direct_rpc')
-          setError((err as Error)?.message || 'API failed — recovered via direct RPC')
+          setError((direct.discovery?.counts?.total ?? 0) > 0 ? null : (err as Error)?.message || 'API failed')
           return
         }
       } catch {
@@ -151,7 +222,8 @@ export function useCompIntelligence({
     const controller = new AbortController()
     void refresh(controller.signal)
     return () => controller.abort()
-  }, [paused, propertyId, radius, monthsBack, assetClass, refresh])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh identity is stable enough; avoid aborting in-flight RPC on unrelated renders
+  }, [paused, propertyId, radius, monthsBack, assetClass])
 
   const subject = payload?.subject ?? null
 
@@ -164,7 +236,7 @@ export function useCompIntelligence({
         lng: subject.longitude.value,
         coordinate_source: subject.coordinate_source,
         coordinate_confidence: subject.coordinate_confidence,
-        is_market_fallback: false,
+        is_market_fallback: subject.is_market_fallback,
         is_subject_resolved: true,
         failure_reason: null,
       }
@@ -178,7 +250,7 @@ export function useCompIntelligence({
         lng: canonical.longitude,
         coordinate_source: canonical.coordinate_source,
         coordinate_confidence: canonical.coordinate_confidence,
-        is_market_fallback: false,
+        is_market_fallback: canonical.is_market_fallback,
         is_subject_resolved: true,
         failure_reason: null,
       }
@@ -191,7 +263,7 @@ export function useCompIntelligence({
       lng: null,
       coordinate_source: canonical?.coordinate_source || 'unresolved',
       coordinate_confidence: canonical?.coordinate_confidence || 0,
-      is_market_fallback: false,
+      is_market_fallback: canonical?.is_market_fallback ?? false,
       is_subject_resolved: false,
       failure_reason: canonical?.coordinate_failure_reason || 'Subject coordinates unresolved',
     }

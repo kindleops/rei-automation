@@ -1,9 +1,20 @@
-import { loadSubjectComps } from '../../lib/data/commandMapData'
+import { loadSubjectComps, loadMarketComps } from '../../lib/data/commandMapData'
 import { resolveCanonicalProperty } from '../canonical-property/resolver'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import type { AnyRecord } from '../../lib/data/shared'
+import { mapCandidatesToDegradedEvidence } from './degraded-evidence'
+import { fetchPropertyRecord } from './property-record-loader'
 import type { CompCandidateEvidence, CompIntelligencePayload, CanonicalSubjectProperty } from './types'
 import type { CompIntelligenceDecisionProjection } from './v3-types'
+
+const EXPANSION_STEPS = [
+  { radius: 0.5, monthsBack: 6, label: 'strict_nearby', confidencePenalty: 0 },
+  { radius: 1, monthsBack: 6, label: 'radius_1mi_6mo', confidencePenalty: 2 },
+  { radius: 1, monthsBack: 12, label: 'radius_1mi_12mo', confidencePenalty: 5 },
+  { radius: 3, monthsBack: 12, label: 'radius_3mi_12mo', confidencePenalty: 8 },
+  { radius: 5, monthsBack: 24, label: 'radius_5mi_24mo', confidencePenalty: 14 },
+]
 
 function evidenceNumber(value: number | null, source: string) {
   return {
@@ -68,6 +79,8 @@ function mapRpcRow(
 ): CompCandidateEvidence {
   const soldPrice = Number(row.mls_sold_price || row.sale_price || 0) || null
   const soldDate = String(row.mls_sold_date || row.sale_date || '') || null
+  const lat = Number(row.latitude) || null
+  const lng = Number(row.longitude) || null
 
   return {
     comp_property_id: String(row.property_id || row.comp_id || `comp-${index}`),
@@ -79,8 +92,8 @@ function mapRpcRow(
     sold_date: soldDate,
     sold_source: row.mls_sold_price ? 'MLS SOLD' : 'PUBLIC RECORD SOLD',
     distance_miles: Number(row.distance_miles) || null,
-    latitude: Number(row.latitude) || null,
-    longitude: Number(row.longitude) || null,
+    latitude: lat && Math.abs(lat) > 0.0001 ? lat : null,
+    longitude: lng && Math.abs(lng) > 0.0001 ? lng : null,
     asset_type: String(row.asset_class || row.normalized_asset_class || row.property_type || 'single_family'),
     units: Number(row.units_count) || null,
     bedrooms: Number(row.total_bedrooms || row.beds) || null,
@@ -93,22 +106,22 @@ function mapRpcRow(
     state: String(row.property_address_state || row.state || ''),
     zip: String(row.property_address_zip || row.zip || ''),
     similarity_score: Number(row.similarity_score) || null,
-    comp_match_label: 'Evidence only',
-    selected: false,
-    excluded: true,
-    exclusion_reasons: ['V3 decision evidence unavailable — evidence-only degraded mode'],
+    comp_match_label: 'Recovered evidence',
+    selected: true,
+    excluded: false,
+    exclusion_reasons: [],
     scoring: {
       score: Number(row.similarity_score) || 0,
-      label: 'Evidence only',
+      label: 'Recovered evidence',
       reasoning: {},
-      auto_included: false,
-      auto_excluded: true,
-      exclusion_reasons: ['EVIDENCE_ONLY_DEGRADED'],
+      auto_included: true,
+      auto_excluded: false,
+      exclusion_reasons: [],
     },
   }
 }
 
-function buildDegradedProjection(): CompIntelligenceDecisionProjection {
+function buildDegradedProjection(candidateCount: number): CompIntelligenceDecisionProjection {
   return {
     engine_version: 'acquisition_decision_engine_v3',
     formula_version: 'degraded',
@@ -141,6 +154,63 @@ function buildDegradedProjection(): CompIntelligenceDecisionProjection {
     },
     strategy_ranking: null,
     projection_mode: 'evidence_only_degraded',
+    shadow_mode: false,
+    live_authorization_enabled: false,
+    recovered_evidence_count: candidateCount,
+  }
+}
+
+async function discoverCandidatesWithExpansion(
+  propertyId: string,
+  canonical: NonNullable<ReturnType<typeof resolveCanonicalProperty>>,
+  maxRadius: number,
+) {
+  const relaxations: Array<Record<string, unknown>> = []
+  let candidates: CompCandidateEvidence[] = []
+  let searchMode = 'subject_radius'
+  let expansionUsed: (typeof EXPANSION_STEPS)[number] | null = null
+
+  const steps = EXPANSION_STEPS.filter((step) => step.radius <= maxRadius)
+  const effectiveSteps = steps.length ? steps : EXPANSION_STEPS
+
+  for (const step of effectiveSteps) {
+    const rows = await loadSubjectComps(propertyId, step.radius, step.monthsBack, 100)
+    candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
+    relaxations.push({
+      step: step.label,
+      radius_miles: step.radius,
+      months_back: step.monthsBack,
+      result_count: candidates.length,
+      confidence_penalty: step.confidencePenalty,
+    })
+    expansionUsed = step
+    if (candidates.length >= 3) break
+  }
+
+  if (!candidates.length) {
+    searchMode = 'market_fallback'
+    const market = canonical.market || undefined
+    const zip = canonical.zip || undefined
+    const monthsBack = 12
+    const rows = await loadMarketComps(market, zip, 100, { monthsBack })
+    candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
+    relaxations.push({
+      step: 'market_fallback',
+      market,
+      zip,
+      months_back: monthsBack,
+      result_count: candidates.length,
+      confidence_penalty: 25,
+      reason: canonical.coordinate_failure_reason ?? 'subject_coordinates_unavailable',
+    })
+  }
+
+  return {
+    searchMode,
+    expansionUsed,
+    relaxations,
+    candidates,
+    isMarketFallback: searchMode === 'market_fallback',
   }
 }
 
@@ -150,126 +220,55 @@ export async function runDirectCompIntelligence({
   radius = 3,
   monthsBack = 12,
   opportunityId = null,
+  propertyRecord = null,
 }: {
   dealContext?: DealContext | null
   thread?: InboxWorkflowThread | null
   radius?: number
   monthsBack?: number
   opportunityId?: string | null
+  propertyRecord?: AnyRecord | null
 }): Promise<CompIntelligencePayload | null> {
-  const canonical = resolveCanonicalProperty({ dealContext, thread, opportunityId })
+  const hydratedRecord = propertyRecord ?? await fetchPropertyRecord(
+    String(
+      dealContext?.propertyId
+        || dealContext?.property_id
+        || (thread as Record<string, unknown> | null)?.property_id
+        || '',
+    ).trim(),
+  )
+
+  const canonical = resolveCanonicalProperty({
+    dealContext,
+    thread,
+    opportunityId,
+    propertyRecord: hydratedRecord,
+  })
   if (!canonical) return null
 
   const subject = toCanonicalSubject(canonical)
-  if (!canonical.is_subject_resolved || canonical.latitude === null || canonical.longitude === null) {
-    return {
-      subject,
-      data_source_mode: 'EVIDENCE_ONLY_DEGRADED',
-      decision_projection: buildDegradedProjection(),
-      transaction_evidence: [],
-      discovery: {
-        search_mode: 'blocked_unresolved_subject',
-        is_market_fallback: false,
-        relaxations: [],
-        candidates: [],
-        included: [],
-        excluded: [],
-        counts: { total: 0, included: 0, excluded: 0 },
-      },
-      legacy_valuation: {
-        model_version: 'comp_intelligence_direct_v1',
-        arv: null,
-        as_is_value: null,
-        repair_estimate: null,
-        confidence: 0,
-        data_gaps: ['subject_coordinates_unresolved'],
-        warnings: [canonical.coordinate_failure_reason || 'Subject coordinates unresolved'],
-        outputs: {},
-        authoritative: false,
-        label: 'Legacy direct valuation — not authoritative',
-      },
-      valuation: {
-        model_version: 'comp_intelligence_direct_v1',
-        arv: null,
-        as_is_value: null,
-        repair_estimate: null,
-        confidence: 0,
-        data_gaps: ['subject_coordinates_unresolved'],
-        warnings: [canonical.coordinate_failure_reason || 'Subject coordinates unresolved'],
-        outputs: {},
-      },
-      valuation_state: {
-        state: 'blocked_missing_subject',
-        label: 'Blocked: subject coordinates unresolved',
-        detail: canonical.coordinate_failure_reason || 'Exact parcel coordinates required',
-      },
-    }
-  }
-
-  const rows = await loadSubjectComps(canonical.property_id, radius, monthsBack, 100)
-  const candidates = rows.map((row, index) =>
-    mapRpcRow(row as unknown as Record<string, unknown>, index),
-  )
+  const maxRadius = Math.max(radius, monthsBack >= 12 ? 3 : 1)
+  const discoveryResult = await discoverCandidatesWithExpansion(canonical.property_id, canonical, maxRadius)
+  const { candidates, relaxations, searchMode, isMarketFallback } = discoveryResult
+  const sourcePath = isMarketFallback ? 'MARKET_FALLBACK' as const : 'DIRECT_RPC' as const
+  const transactionEvidence = mapCandidatesToDegradedEvidence(candidates, sourcePath)
 
   return {
     subject,
     data_source_mode: 'EVIDENCE_ONLY_DEGRADED',
-    decision_projection: buildDegradedProjection(),
-    transaction_evidence: candidates.map((c) => ({
-      candidate_id: c.comp_property_id,
-      source_record_id: c.comp_property_id,
-      transaction_cluster_id: null,
-      property_id: c.property_id ?? null,
-      address: c.address ?? null,
-      canonical_asset_lane: c.asset_type ?? null,
-      sale_price: c.sale_list_price ?? null,
-      sale_date: c.sale_list_date ?? null,
-      buyer: null,
-      buyer_archetype: null,
-      transaction_channel: c.source ?? null,
-      evidence_role: 'CONTEXT_ONLY',
-      routed_universe: null,
-      pricing_eligibility: false,
-      demand_eligibility: false,
-      package_probability: null,
-      parcel_count: null,
-      raw_row_count: 1,
-      peer_classification: null,
-      qualification_score: c.similarity_score ?? null,
-      similarity: c.similarity_score ?? null,
-      recency: c.sale_list_date ?? null,
-      geography: {
-        distance_miles: c.distance_miles ?? null,
-        zip: c.zip ?? null,
-        city: c.city ?? null,
-        state: c.state ?? null,
-        latitude: c.latitude ?? null,
-        longitude: c.longitude ?? null,
-      },
-      independence_weight: null,
-      ess_contribution: null,
-      rejection_review_reasons: c.exclusion_reasons ?? [],
-      source_lineage: {
-        source_table: 'direct_rpc',
-        source_record_id: c.comp_property_id,
-        identity_unresolved: true,
-        source_completeness: null,
-        channel_reasons: ['EVIDENCE_ONLY_DEGRADED'],
-      },
-      evidence_list_role: 'rejected',
-      qualification_status: 'EVIDENCE_ONLY',
-    })),
+    decision_projection: buildDegradedProjection(candidates.length),
+    transaction_evidence: transactionEvidence,
     discovery: {
-      search_mode: 'direct_rpc_evidence_only',
-      is_market_fallback: false,
-      relaxations: [{ step: 'direct_rpc_degraded', radius_miles: radius, months_back: monthsBack, result_count: candidates.length }],
+      search_mode: searchMode,
+      is_market_fallback: isMarketFallback,
+      relaxations,
       candidates,
-      included: [],
-      excluded: candidates,
+      included: candidates,
+      excluded: [],
       counts: {
         total: candidates.length,
-        included: 0,
-        excluded: candidates.length,
+        included: candidates.length,
+        excluded: 0,
       },
     },
     legacy_valuation: {
@@ -278,7 +277,7 @@ export async function runDirectCompIntelligence({
       as_is_value: null,
       repair_estimate: null,
       confidence: 0,
-      data_gaps: ['v3_decision_unavailable'],
+      data_gaps: candidates.length ? ['v3_decision_unavailable'] : ['no_comp_candidates_recovered'],
       warnings: ['Direct RPC fallback cannot produce authoritative valuation'],
       outputs: {},
       authoritative: false,
@@ -290,14 +289,18 @@ export async function runDirectCompIntelligence({
       as_is_value: null,
       repair_estimate: null,
       confidence: 0,
-      data_gaps: ['v3_decision_unavailable'],
+      data_gaps: candidates.length ? ['v3_decision_unavailable'] : ['no_comp_candidates_recovered'],
       warnings: ['Direct RPC fallback cannot produce authoritative valuation'],
       outputs: {},
     },
     valuation_state: {
-      state: 'blocked_insufficient_evidence',
-      label: 'V3 decision evidence unavailable',
-      detail: 'Direct RPC recovered subject and candidate evidence only — no authoritative valuation or offer',
+      state: candidates.length ? 'blocked_insufficient_evidence' : 'blocked_missing_subject',
+      label: candidates.length
+        ? 'V3 decision unavailable — recovered comp evidence'
+        : 'No comp evidence recovered',
+      detail: canonical.is_subject_resolved
+        ? 'Subject resolved; decision projection unavailable'
+        : canonical.coordinate_failure_reason || 'Subject coordinates unresolved',
     },
     projection_meta: {
       read_only: true,

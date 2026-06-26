@@ -48,9 +48,11 @@ export function resolveCoordinatesFromContext(sources: {
   thread?: AnyRecord | null
   property?: AnyRecord | null
   rawPayload?: AnyRecord | null
+  propertyRecord?: AnyRecord | null
 }): ResolvedCoordinates {
-  const { dealContext, thread, property, rawPayload } = sources
+  const { dealContext, thread, property, rawPayload, propertyRecord } = sources
   const propertyBag = [
+    propertyRecord,
     property,
     dealContext?.property,
     dealContext,
@@ -58,18 +60,22 @@ export function resolveCoordinatesFromContext(sources: {
     rawPayload,
   ].filter(Boolean)
 
-  const attempts: Array<{ source: string; lat: number | null; lng: number | null }> = []
-
   const chains: Array<{ id: string; confidence: number; latKeys: string[]; lngKeys: string[] }> = [
     {
-      id: 'deal_context',
+      id: 'properties_table',
       confidence: 95,
       latKeys: ['latitude', 'lat'],
       lngKeys: ['longitude', 'lng'],
     },
     {
+      id: 'deal_context',
+      confidence: 90,
+      latKeys: ['latitude', 'lat'],
+      lngKeys: ['longitude', 'lng'],
+    },
+    {
       id: 'property_record',
-      confidence: 92,
+      confidence: 88,
       latKeys: ['latitude', 'lat'],
       lngKeys: ['longitude', 'lng'],
     },
@@ -85,7 +91,6 @@ export function resolveCoordinatesFromContext(sources: {
     const rawLat = pickCoord(propertyBag, chain.latKeys)
     const rawLng = pickCoord(propertyBag, chain.lngKeys)
     const { lat, lng, reversed } = detectReversed(rawLat, rawLng)
-    attempts.push({ source: chain.id, lat, lng })
     if (isPlausible(lat, lng)) {
       return {
         latitude: lat,

@@ -1,5 +1,5 @@
 interface Props {
-  state: 'loading_subject' | 'loading_comps' | 'no_coords' | 'no_comps' | 'degraded' | 'style_error' | 'no_coord_evidence'
+  state: 'loading_subject' | 'loading_comps' | 'no_coords' | 'no_comps' | 'degraded' | 'style_error' | 'no_coord_evidence' | 'comps_only'
   detail?: string | null
 }
 
@@ -31,6 +31,10 @@ const COPY: Record<Props['state'], { title: string; body: string }> = {
   no_coord_evidence: {
     title: 'Evidence without coordinates',
     body: 'Transaction evidence loaded but no usable lat/lng pairs were found for map markers.',
+  },
+  comps_only: {
+    title: 'Comp evidence map',
+    body: 'Subject pin unavailable. Displaying recovered comp coordinates.',
   },
 }
 

@@ -16,6 +16,7 @@ const fmt = (n: number | null) =>
     : '—'
 
 function evidenceBadge(row: CompTransactionEvidence): string {
+  if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE') return 'RECOVERED'
   if (row.qualification_status === 'REJECTED' || row.qualification_status === 'QUARANTINED') return 'REJECTED'
   if (row.pricing_eligibility) return 'PRICING EVIDENCE'
   if (row.demand_eligibility && !row.pricing_eligibility) return 'DEMAND ONLY'
@@ -59,14 +60,19 @@ export function TransactionEvidenceCard({
       <div className="ci-evidence-card__address">{row.address ?? 'Address unknown'}</div>
       <div className="ci-evidence-card__meta">
         <span>{row.sale_date ?? '—'}</span>
-        <span>{row.geography.distance_miles != null ? `${row.geography.distance_miles.toFixed(2)} mi` : '—'}</span>
-        <span>{row.routed_universe ?? row.canonical_asset_lane ?? '—'}</span>
+        <span>{row.geography.distance_miles != null ? `${row.geography.distance_miles.toFixed(2)} mi` : 'Market-level'}</span>
+        <span>{row.transaction_channel ?? row.source_lineage?.source_table ?? '—'}</span>
       </div>
       <div className="ci-evidence-card__detail">
+        {row.square_feet != null && <span>{row.square_feet.toLocaleString()} sf</span>}
+        {row.bedrooms != null && <span>{row.bedrooms} bd</span>}
+        {row.bathrooms != null && <span>{row.bathrooms} ba</span>}
         {row.buyer && <span>{row.buyer}</span>}
-        {row.transaction_channel && <span>{row.transaction_channel}</span>}
-        <span>ESS {row.ess_contribution ?? '—'}</span>
+        {row.evidence_authority !== 'DEGRADED_NON_AUTHORITATIVE' && (
+          <span>ESS {row.ess_contribution ?? '—'}</span>
+        )}
         {row.similarity != null && <span>Match {Math.round(row.similarity)}</span>}
+        {row.comp_match_label && <span>{row.comp_match_label}</span>}
       </div>
       {row.rejection_review_reasons.length > 0 && (
         <p className="ci-evidence-card__reasons">{row.rejection_review_reasons.slice(0, expanded ? 6 : 2).join(' · ')}</p>

@@ -147,6 +147,14 @@ export interface CompTransactionEvidence {
   }
   evidence_list_role: 'accepted' | 'rejected' | string
   qualification_status: string
+  evidence_authority?: 'AUTHORITATIVE_V3' | 'DEGRADED_NON_AUTHORITATIVE' | string
+  display_eligible?: boolean
+  source_path?: 'DIRECT_RPC' | 'MARKET_FALLBACK' | 'API_DISCOVERY' | string
+  square_feet?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  units?: number | null
+  comp_match_label?: string | null
 }
 
 export interface CompIntelligenceDecisionProjection {
@@ -195,6 +203,8 @@ export interface CompIntelligenceDecisionProjection {
   backup_strategy?: string | null
   model_disagreement?: number | null
   projection_mode: string
+  recovered_evidence_count?: number | null
+  live_authorization_enabled?: boolean
 }
 
 export interface CompAnalystScenario {
