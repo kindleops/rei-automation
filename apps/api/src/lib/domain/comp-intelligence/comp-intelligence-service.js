@@ -7,6 +7,7 @@ import {
   deriveValuationState,
 } from './valuation-pipeline.js';
 import { projectCompIntelligenceV3Decision } from './comp-intelligence-v3-projection.js';
+import { mapDiscoveryToDegradedEvidence } from './degraded-evidence.js';
 
 /**
  * Comp Intelligence pipeline — authoritative V3 decision projection + legacy V1 evidence.
@@ -51,7 +52,9 @@ export async function runCompIntelligencePipeline(propertyId, context = {}, opti
     subject: subjectResult.subject,
     discovery,
     decision_projection: v3Projection.ok ? v3Projection.decision_projection : null,
-    transaction_evidence: v3Projection.ok ? v3Projection.transaction_evidence : [],
+    transaction_evidence: v3Projection.ok
+      ? v3Projection.transaction_evidence
+      : mapDiscoveryToDegradedEvidence(discovery),
     qualification_summary: v3Projection.ok ? v3Projection.qualification_summary : null,
     projection_meta: v3Projection.ok
       ? v3Projection.projection_meta

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { CompTransactionEvidence } from '../../../domain/comp-intelligence/v3-types'
@@ -13,10 +13,11 @@ export type MapPinTone =
   | 'rejected'
   | 'context'
   | 'package'
+  | 'degraded'
 
 interface Props {
-  subjectLat: number
-  subjectLng: number
+  subjectLat: number | null
+  subjectLng: number | null
   subjectAddress: string
   evidence: CompTransactionEvidence[]
   radiusMiles: number
@@ -33,6 +34,7 @@ interface Props {
 const DARK_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
 function pinTone(row: CompTransactionEvidence): MapPinTone {
+  if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE') return 'degraded'
   if (row.package_probability != null && row.package_probability > 0.5) return 'package'
   if (row.qualification_status === 'REJECTED' || row.qualification_status === 'QUARANTINED') return 'rejected'
   if (row.pricing_eligibility) {
@@ -48,6 +50,25 @@ function pinTone(row: CompTransactionEvidence): MapPinTone {
 
 function markerId(row: CompTransactionEvidence): string {
   return String(row.candidate_id || row.property_id || row.transaction_cluster_id || row.address || '')
+}
+
+function computeMapCenter(
+  subjectLat: number | null,
+  subjectLng: number | null,
+  evidence: CompTransactionEvidence[],
+): [number, number] {
+  if (isValidCoord(subjectLat, subjectLng)) return [subjectLng!, subjectLat!]
+  const coords = evidence
+    .map((row) => {
+      const lat = row.geography.latitude
+      const lng = row.geography.longitude
+      return isValidCoord(lat, lng) ? [lng!, lat!] as [number, number] : null
+    })
+    .filter(Boolean) as [number, number][]
+  if (!coords.length) return [-80.05, 26.6]
+  const avgLng = coords.reduce((sum, [lng]) => sum + lng, 0) / coords.length
+  const avgLat = coords.reduce((sum, [, lat]) => sum + lat, 0) / coords.length
+  return [avgLng, avgLat]
 }
 
 export function EvidenceMap({
@@ -71,11 +92,20 @@ export function EvidenceMap({
   const subjectMarkerRef = useRef<maplibregl.Marker | null>(null)
   const [mapReady, setMapReady] = useState(false)
 
+  const hasSubjectPin = isValidCoord(subjectLat, subjectLng)
+  const mapCenter = useMemo(
+    () => computeMapCenter(subjectLat, subjectLng, evidence),
+    [subjectLat, subjectLng, evidence],
+  )
+  const canMountMap = hasSubjectPin || evidence.some((row) =>
+    isValidCoord(row.geography.latitude, row.geography.longitude),
+  )
+
   const fitAllBounds = useCallback(() => {
     const map = mapInstanceRef.current
     if (!map || !mapReady) return
     const bounds = new maplibregl.LngLatBounds()
-    bounds.extend([subjectLng, subjectLat])
+    if (hasSubjectPin) bounds.extend([subjectLng!, subjectLat!])
     for (const row of evidence) {
       const lat = row.geography.latitude
       const lng = row.geography.longitude
@@ -83,20 +113,21 @@ export function EvidenceMap({
     }
     if (bounds.isEmpty()) return
     map.fitBounds(bounds, { padding: 56, maxZoom: 15, duration: 450 })
-  }, [evidence, mapReady, subjectLat, subjectLng])
+  }, [evidence, mapReady, hasSubjectPin, subjectLat, subjectLng])
 
   useEffect(() => {
-    if (!mapRef.current || !isValidCoord(subjectLat, subjectLng)) return undefined
+    if (!mapRef.current || !canMountMap) return undefined
 
     const container = mapRef.current
     const { offsetWidth, offsetHeight } = container
     if (offsetWidth < 2 || offsetHeight < 2) return undefined
 
+    const [centerLng, centerLat] = mapCenter
     const map = new maplibregl.Map({
       container,
       style: DARK_MAP_STYLE,
-      center: [subjectLng, subjectLat],
-      zoom: 14,
+      center: [centerLng, centerLat],
+      zoom: hasSubjectPin ? 14 : 12,
       attributionControl: false,
       pitchWithRotate: false,
     })
@@ -107,17 +138,19 @@ export function EvidenceMap({
     })
 
     map.on('load', () => {
-      const subEl = document.createElement('div')
-      subEl.className = 'ci-subject-pin'
-      subEl.setAttribute('aria-label', `Subject: ${subjectAddress}`)
-      subEl.textContent = '★'
-      subjectMarkerRef.current = new maplibregl.Marker({ element: subEl })
-        .setLngLat([subjectLng, subjectLat])
-        .addTo(map)
+      if (hasSubjectPin) {
+        const subEl = document.createElement('div')
+        subEl.className = 'ci-subject-pin'
+        subEl.setAttribute('aria-label', `Subject: ${subjectAddress}`)
+        subEl.textContent = '★'
+        subjectMarkerRef.current = new maplibregl.Marker({ element: subEl })
+          .setLngLat([subjectLng!, subjectLat!])
+          .addTo(map)
 
-      map.addSource('ci-radius', { type: 'geojson', data: makeRadiusGeoJson([subjectLng, subjectLat], radiusMiles) })
-      map.addLayer({ id: 'ci-radius-fill', type: 'fill', source: 'ci-radius', paint: { 'fill-color': 'rgba(59,130,246,0.05)' } })
-      map.addLayer({ id: 'ci-radius-line', type: 'line', source: 'ci-radius', paint: { 'line-color': 'rgba(59,130,246,0.45)', 'line-width': 1.5, 'line-dasharray': [4, 3] } })
+        map.addSource('ci-radius', { type: 'geojson', data: makeRadiusGeoJson([subjectLng!, subjectLat!], radiusMiles) })
+        map.addLayer({ id: 'ci-radius-fill', type: 'fill', source: 'ci-radius', paint: { 'fill-color': 'rgba(59,130,246,0.05)' } })
+        map.addLayer({ id: 'ci-radius-line', type: 'line', source: 'ci-radius', paint: { 'line-color': 'rgba(59,130,246,0.45)', 'line-width': 1.5, 'line-dasharray': [4, 3] } })
+      }
       setMapReady(true)
       onReady?.()
       requestAnimationFrame(() => map.resize())
@@ -140,14 +173,19 @@ export function EvidenceMap({
       map.remove()
       mapInstanceRef.current = null
     }
-  }, [subjectLat, subjectLng, subjectAddress, onReady, onStyleError])
+  }, [mapCenter, hasSubjectPin, subjectLat, subjectLng, subjectAddress, onReady, onStyleError, canMountMap, radiusMiles])
+
+  useEffect(() => {
+    if (!mapReady) return
+    fitAllBounds()
+  }, [mapReady, fitBoundsToken, fitAllBounds])
 
   useEffect(() => {
     const map = mapInstanceRef.current
-    if (!map || !mapReady) return
+    if (!map || !mapReady || !hasSubjectPin) return
     const source = map.getSource('ci-radius') as maplibregl.GeoJSONSource | undefined
-    source?.setData(makeRadiusGeoJson([subjectLng, subjectLat], radiusMiles))
-  }, [radiusMiles, mapReady, subjectLat, subjectLng])
+    source?.setData(makeRadiusGeoJson([subjectLng!, subjectLat!], radiusMiles))
+  }, [radiusMiles, mapReady, hasSubjectPin, subjectLat, subjectLng])
 
   useEffect(() => {
     const el = subjectMarkerRef.current?.getElement()

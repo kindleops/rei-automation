@@ -91,13 +91,15 @@ export function resolveCanonicalProperty({
   dealContext = null,
   thread = null,
   opportunityId = null,
+  propertyRecord = null,
 }: {
   dealContext?: DealContext | null
   thread?: InboxWorkflowThread | null
   opportunityId?: string | null
+  propertyRecord?: AnyRecord | null
 }): CanonicalPropertyRecord | null {
   const t = thread as unknown as AnyRecord | null
-  const bag = pickPropertyBag(dealContext, thread)
+  const bag = { ...pickPropertyBag(dealContext, thread), ...(propertyRecord ?? {}) }
 
   const propertyId = clean(
     dealContext?.propertyId ||
@@ -108,11 +110,17 @@ export function resolveCanonicalProperty({
   )
   if (!propertyId) return null
 
+  const rawPayload = (propertyRecord?.raw_payload_json
+    ?? propertyRecord?.raw_payload
+    ?? bag.raw_payload_json
+    ?? bag.raw_payload) as AnyRecord | undefined
+
   const coords = resolveCoordinatesFromContext({
     dealContext: dealContext as unknown as AnyRecord | null,
     thread: t,
     property: bag,
-    rawPayload: (bag.raw_payload_json ?? bag.raw_payload) as AnyRecord | undefined,
+    rawPayload,
+    propertyRecord: propertyRecord ?? null,
   })
 
   const displayAddress = clean(

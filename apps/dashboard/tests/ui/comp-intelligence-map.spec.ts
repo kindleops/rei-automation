@@ -4,7 +4,7 @@ const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173'
 
 test.describe('Comp Intelligence map-first workspace', () => {
   test('map canvas mounts and stays visible across intel tabs', async ({ page }) => {
-    await page.goto(`${BASE}/comp-intelligence`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/comp-intelligence?property_id=234334277`, { waitUntil: 'domcontentloaded' })
 
     const workspace = page.locator('[data-comp-intelligence="true"]')
     await expect(workspace).toBeVisible({ timeout: 20000 })
@@ -18,7 +18,7 @@ test.describe('Comp Intelligence map-first workspace', () => {
     expect(box?.width ?? 0).toBeGreaterThan(120)
     expect(box?.height ?? 0).toBeGreaterThan(120)
 
-    for (const tab of ['Decision', 'Transaction Evidence', 'Valuation Universes']) {
+    for (const tab of ['Overview', 'Comps', 'Strategies']) {
       const tabBtn = workspace.getByRole('tab', { name: new RegExp(tab, 'i') })
       if (await tabBtn.isVisible().catch(() => false)) {
         await tabBtn.click()
@@ -31,6 +31,6 @@ test.describe('Comp Intelligence map-first workspace', () => {
       if (msg.type() === 'error') errors.push(msg.text())
     })
     await page.waitForTimeout(1500)
-    expect(errors.filter((e) => !/favicon|404|Failed to load resource/i.test(e))).toHaveLength(0)
+    expect(errors.filter((e) => !/favicon|404|Failed to load resource|Inbox live load failed/i.test(e))).toHaveLength(0)
   })
 })

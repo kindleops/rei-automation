@@ -65,12 +65,23 @@ test('enrichEvidenceWithDiscoveryCoordinates fills missing lat/lng from discover
 
 test('filterEvidenceByMapMode keeps pricing and demand evidence separate', () => {
   const rows = [
-    { pricing_eligibility: true, demand_eligibility: false, qualification_status: 'ACCEPTED', evidence_role: 'PRICING', rejection_review_reasons: [] },
-    { pricing_eligibility: false, demand_eligibility: true, qualification_status: 'ACCEPTED', evidence_role: 'DEMAND', rejection_review_reasons: [] },
-    { pricing_eligibility: false, demand_eligibility: false, qualification_status: 'REJECTED', evidence_role: 'REJECTED', rejection_review_reasons: ['bad'] },
+    { pricing_eligibility: true, demand_eligibility: false, qualification_status: 'ACCEPTED', evidence_role: 'PRICING', rejection_review_reasons: [], geography: { latitude: 1, longitude: 1 } },
+    { pricing_eligibility: false, demand_eligibility: true, qualification_status: 'ACCEPTED', evidence_role: 'DEMAND', rejection_review_reasons: [], geography: { latitude: 1, longitude: 1 } },
+    { pricing_eligibility: false, demand_eligibility: false, qualification_status: 'REJECTED', evidence_role: 'REJECTED', rejection_review_reasons: ['bad'], geography: { latitude: 1, longitude: 1 } },
+    {
+      pricing_eligibility: false,
+      display_eligible: true,
+      evidence_authority: 'DEGRADED_NON_AUTHORITATIVE',
+      demand_eligibility: false,
+      qualification_status: 'EVIDENCE_ONLY',
+      evidence_role: 'DEGRADED_COMP',
+      rejection_review_reasons: [],
+      sale_price: 250000,
+      geography: { latitude: 26.6, longitude: -80.05 },
+    },
   ] as Parameters<typeof filterEvidenceByMapMode>[0]
 
-  assert.equal(filterEvidenceByMapMode(rows, 'PRICING').length, 1)
+  assert.equal(filterEvidenceByMapMode(rows, 'PRICING').length, 2)
   assert.equal(filterEvidenceByMapMode(rows, 'DEMAND').length, 1)
   assert.equal(filterEvidenceByMapMode(rows, 'RISK').length, 1)
 })

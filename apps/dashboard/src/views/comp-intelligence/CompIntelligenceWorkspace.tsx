@@ -4,7 +4,8 @@ import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { CompDecisionHeader } from './components/CompDecisionHeader'
-import { CompDecisionOverview } from './components/CompDecisionOverview'
+import { CompOverviewHero } from './components/CompOverviewHero'
+import { CompStatusBar } from './components/CompStatusBar'
 import { ValuationUniverseGrid } from './components/ValuationUniverseGrid'
 import { EvidenceMap } from './components/EvidenceMap'
 import { MapCommandRail } from './components/MapCommandRail'
@@ -14,10 +15,8 @@ import { TransactionEvidenceList } from './components/TransactionEvidenceList'
 import { OfferBridge } from './components/OfferBridge'
 import { StrategyMatrix } from './components/StrategyMatrix'
 import { ModelHealthDrawer } from './components/ModelHealthDrawer'
-import { AnalystScenarioLab } from './components/AnalystScenarioLab'
 import { useCompDecisionProjection } from './hooks/useCompDecisionProjection'
 import { useCompEvidenceFilters } from './hooks/useCompEvidenceFilters'
-import { useAnalystScenario } from './hooks/useAnalystScenario'
 import {
   evidenceWithValidCoordinates,
   filterEvidenceByMapMode,
@@ -25,7 +24,7 @@ import {
 } from './adapters/transactionEvidenceAdapter'
 import './comp-intelligence.css'
 
-type IntelTabId = 'DECISION' | 'UNIVERSES' | 'EVIDENCE' | 'STRATEGIES' | 'MODEL_HEALTH' | 'ANALYST_LAB'
+type IntelTabId = 'OVERVIEW' | 'COMPS' | 'STRATEGIES' | 'MODEL'
 type ShellTabId = 'MAP' | 'INTELLIGENCE'
 
 interface Props {
@@ -38,12 +37,10 @@ interface Props {
 }
 
 const INTEL_TABS: { id: IntelTabId; label: string }[] = [
-  { id: 'DECISION', label: 'Decision' },
-  { id: 'UNIVERSES', label: 'Valuation Universes' },
-  { id: 'EVIDENCE', label: 'Transaction Evidence' },
+  { id: 'OVERVIEW', label: 'Overview' },
+  { id: 'COMPS', label: 'Comps' },
   { id: 'STRATEGIES', label: 'Strategies' },
-  { id: 'MODEL_HEALTH', label: 'Model Health' },
-  { id: 'ANALYST_LAB', label: 'Analyst Lab' },
+  { id: 'MODEL', label: 'Model' },
 ]
 
 export function CompIntelligenceWorkspace({
@@ -53,7 +50,7 @@ export function CompIntelligenceWorkspace({
   layoutMode = 'split',
   paused = false,
 }: Props) {
-  const [intelTab, setIntelTab] = useState<IntelTabId>('DECISION')
+  const [intelTab, setIntelTab] = useState<IntelTabId>('OVERVIEW')
   const [shellTab, setShellTab] = useState<ShellTabId>('MAP')
   const [radius, setRadius] = useState(1)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -62,7 +59,36 @@ export function CompIntelligenceWorkspace({
   const [fitBoundsToken, setFitBoundsToken] = useState(0)
   const intelPaneRef = useRef<HTMLDivElement | null>(null)
 
+  const urlPropertyId = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    return new URLSearchParams(window.location.search).get('property_id')
+  }, [])
+
+  const effectiveDealContext = useMemo(() => {
+    if (dealContext?.propertyId || dealContext?.property_id) return dealContext
+    if (!urlPropertyId) return dealContext
+    return {
+      ...(dealContext ?? {}),
+      propertyId: urlPropertyId,
+      property_id: urlPropertyId,
+    } as DealContext
+  }, [dealContext, urlPropertyId])
+
+  const effectiveThread = useMemo(() => {
+    if (thread) return thread
+    const propertyId = urlPropertyId
+      || effectiveDealContext?.propertyId
+      || effectiveDealContext?.property_id
+    if (!propertyId) return null
+    return {
+      thread_key: `proof-${propertyId}`,
+      property_id: propertyId,
+      subject: effectiveDealContext?.propertyAddress || effectiveDealContext?.property_address_full || 'Subject property',
+    } as InboxWorkflowThread
+  }, [thread, urlPropertyId, effectiveDealContext])
+
   const {
+    propertyId,
     payload,
     subject,
     discovery,
@@ -72,7 +98,7 @@ export function CompIntelligenceWorkspace({
     error,
     dataSource,
     pipelineState,
-  } = useCompIntelligence({ thread, dealContext, radius, paused })
+  } = useCompIntelligence({ thread: effectiveThread, dealContext: effectiveDealContext, radius, paused })
 
   const v3 = useCompDecisionProjection(payload)
   const baseEvidence = useMemo(
@@ -80,7 +106,6 @@ export function CompIntelligenceWorkspace({
     [v3.evidence, discovery?.candidates],
   )
   const filters = useCompEvidenceFilters(baseEvidence)
-  const analyst = useAnalystScenario(baseEvidence, v3.marketValue)
 
   const mapModeFiltered = useMemo(
     () => filterEvidenceByMapMode(filters.filtered, filters.mapMode),
@@ -100,25 +125,10 @@ export function CompIntelligenceWorkspace({
     || subject?.normalized_address?.value
     || 'Subject property'
 
-  const dataSourceLabel = useMemo(() => {
-    if (v3.isDegraded) return 'Evidence-only degraded'
-    if (dataSource === 'api') return 'V3 API projection'
-    if (dataSource === 'direct_rpc') return 'Direct RPC degraded'
-    return 'Loading'
-  }, [dataSource, v3.isDegraded])
-
-  const offerBridge = useMemo(() => {
-    const bridge = (v3.cashOffer?.bridge as Array<{ label?: string; amount?: number }>) ?? []
-    return bridge.map((step) => ({
-      label: step.label ?? 'Step',
-      amount: typeof step.amount === 'number' ? step.amount : null,
-      tier: v3.authorizedOffer != null ? 'authorized' as const : v3.shadowOffer != null ? 'shadow' as const : 'scenario' as const,
-    }))
-  }, [v3.cashOffer, v3.authorizedOffer, v3.shadowOffer])
-
   const narrow = paneWidth === '25' || paneWidth === '50'
   const showMapPane = !narrow || shellTab === 'MAP'
   const showIntelPane = !narrow || shellTab === 'INTELLIGENCE'
+  const canShowMap = mappableEvidence.length > 0 || hasCoords
 
   const openPopoverRow = useMemo(
     () => baseEvidence.find((row) => (row.candidate_id || row.property_id || '') === openPopoverId) ?? null,
@@ -129,13 +139,13 @@ export function CompIntelligenceWorkspace({
     filters.setSelectedId(id)
     setOpenPopoverId((prev) => (prev === id ? null : id))
     if (narrow) setShellTab('INTELLIGENCE')
-    setIntelTab('EVIDENCE')
+    setIntelTab('COMPS')
   }, [filters, narrow])
 
   const handleViewEvidence = useCallback(() => {
     if (!openPopoverId) return
     filters.setSelectedId(openPopoverId)
-    setIntelTab('EVIDENCE')
+    setIntelTab('COMPS')
     if (narrow) setShellTab('INTELLIGENCE')
     setOpenPopoverId(null)
     requestAnimationFrame(() => {
@@ -147,16 +157,16 @@ export function CompIntelligenceWorkspace({
 
   const mapState = useMemo(() => {
     if (mapStyleError) return 'style_error' as const
-    if (loading && !hasCoords) return 'loading_subject' as const
-    if (!hasCoords || coords.lat == null || coords.lng == null) return 'no_coords' as const
+    if (loading && !baseEvidence.length) return 'loading_subject' as const
     if (loading) return 'loading_comps' as const
-    if (v3.isDegraded) return 'degraded' as const
+    if (!canShowMap) return 'no_coords' as const
+    if (!hasCoords && mappableEvidence.length) return 'comps_only' as const
     if (!mappableEvidence.length && baseEvidence.length) return 'no_coord_evidence' as const
     if (!baseEvidence.length) return 'no_comps' as const
     return null
-  }, [mapStyleError, loading, hasCoords, coords.lat, coords.lng, v3.isDegraded, mappableEvidence.length, baseEvidence.length])
+  }, [mapStyleError, loading, canShowMap, hasCoords, mappableEvidence.length, baseEvidence.length])
 
-  if (!thread) {
+  if (!effectiveThread) {
     return (
       <div className={`ci-workspace ci-workspace--empty is-pane-${paneWidth} is-layout-${layoutMode}`} data-comp-intelligence="true">
         <div className="ci-empty-state">
@@ -170,11 +180,11 @@ export function CompIntelligenceWorkspace({
 
   const mapColumn = (
     <div className="ci-workspace__map-col">
-      {hasCoords && coords.lat != null && coords.lng != null ? (
+      {canShowMap && !mapStyleError ? (
         <>
           <EvidenceMap
-            subjectLat={coords.lat}
-            subjectLng={coords.lng}
+            subjectLat={hasCoords ? coords.lat : null}
+            subjectLng={hasCoords ? coords.lng : null}
             subjectAddress={address}
             evidence={mapModeFiltered}
             radiusMiles={radius}
@@ -187,6 +197,11 @@ export function CompIntelligenceWorkspace({
             onReady={() => setFitBoundsToken((n) => n + 1)}
             fitBoundsToken={fitBoundsToken}
           />
+          {!hasCoords && mappableEvidence.length > 0 && (
+            <div className="ci-map-subject-notice" role="note">
+              Subject pin unavailable — displaying market-level comp evidence
+            </div>
+          )}
           <MapCommandRail
             mapMode={filters.mapMode}
             setMapMode={filters.setMapMode}
@@ -210,11 +225,14 @@ export function CompIntelligenceWorkspace({
         </>
       ) : (
         <div className="ci-map-canvas ci-map-no-coords-wrap">
-          <MapStatePanel state={mapState ?? 'no_coords'} detail={subject?.coordinate_failure_reason} />
+          <MapStatePanel
+            state={mapState ?? 'no_coords'}
+            detail={error || subject?.coordinate_failure_reason || `Property ${propertyId}`}
+          />
         </div>
       )}
 
-      {mapState && hasCoords && (
+      {mapState && canShowMap && mapState !== 'comps_only' && (
         <div className="ci-map-state-overlay">
           <MapStatePanel state={mapState} detail={error} />
         </div>
@@ -227,15 +245,18 @@ export function CompIntelligenceWorkspace({
       <CompDecisionHeader
         address={address}
         projection={v3.projection}
-        dataSourceLabel={dataSourceLabel}
+        dataSourceLabel={v3.isDegraded ? 'Evidence recovered' : dataSource === 'api' ? 'V3 projection' : 'Direct RPC'}
       />
 
-      {error && <div className="ci-banner ci-banner--warn" role="alert">{error}</div>}
-      {v3.isDegraded && (
-        <div className="ci-banner ci-banner--degraded" role="status">
-          V3 decision evidence unavailable — evidence-only degraded recovery.
-        </div>
-      )}
+      <CompStatusBar
+        evidenceCount={baseEvidence.length}
+        mappedCount={mappableEvidence.length}
+        isDegraded={v3.isDegraded}
+        isAuthoritative={v3.isAuthoritative}
+        searchMode={discovery?.search_mode}
+        subjectResolved={hasCoords}
+        liveAuthOff={!v3.authorizedOffer}
+      />
 
       <nav className="ci-tabs ci-tabs--intel" role="tablist" aria-label="Intelligence sections">
         {INTEL_TABS.map((tab) => (
@@ -253,50 +274,57 @@ export function CompIntelligenceWorkspace({
       </nav>
 
       <div className="ci-panel__scroll" role="tabpanel">
-        {intelTab === 'DECISION' && (
+        {intelTab === 'OVERVIEW' && (
           <>
-            <CompDecisionOverview
+            <CompOverviewHero
+              isDegraded={v3.isDegraded}
+              isAuthoritative={v3.isAuthoritative}
               projection={v3.projection}
               marketValue={v3.marketValue}
               marketClassification={v3.marketClassification}
               conservativeBuyerExit={v3.conservativeBuyerExit}
               shadowOffer={v3.shadowOffer}
               authorizedOffer={v3.authorizedOffer}
+              evidenceCount={baseEvidence.length}
+              mappedCount={mappableEvidence.length}
+              searchMode={discovery?.search_mode}
+              subjectResolved={hasCoords}
+              primaryStrategy={v3.primaryStrategy}
             />
-            <OfferBridge
-              bridge={offerBridge}
-              scenarioOffer={v3.offerAuthorization?.scenario_recommended_offer ?? null}
-              shadowOffer={v3.shadowOffer}
-              authorizedOffer={v3.authorizedOffer}
-            />
+            {!v3.isDegraded && (
+              <OfferBridge
+                bridge={[]}
+                scenarioOffer={v3.offerAuthorization?.scenario_recommended_offer ?? null}
+                shadowOffer={v3.shadowOffer}
+                authorizedOffer={v3.authorizedOffer}
+              />
+            )}
             <section className="ci-evidence-strip" aria-label="Top transaction evidence">
               <header>
                 <h3>Transaction Evidence</h3>
                 <span>{baseEvidence.length} records · {mappableEvidence.length} mapped</span>
               </header>
               <TransactionEvidenceList
-                rows={filters.filtered.slice(0, 6)}
+                rows={filters.filtered.slice(0, 5)}
                 selectedId={filters.selectedId}
                 hoveredId={hoveredId}
                 onSelect={handleSelectMarker}
                 onHover={setHoveredId}
-                height={320}
+                height={360}
                 compact
               />
             </section>
           </>
         )}
 
-        {intelTab === 'UNIVERSES' && <ValuationUniverseGrid universes={v3.universes} />}
-
-        {intelTab === 'EVIDENCE' && (
+        {intelTab === 'COMPS' && (
           <TransactionEvidenceList
             rows={filters.filtered}
             selectedId={filters.selectedId}
             hoveredId={hoveredId}
             onSelect={handleSelectMarker}
             onHover={setHoveredId}
-            height={640}
+            height={720}
           />
         )}
 
@@ -304,18 +332,11 @@ export function CompIntelligenceWorkspace({
           <StrategyMatrix ranked={v3.projection?.strategy_ranking?.ranked} />
         )}
 
-        {intelTab === 'MODEL_HEALTH' && (
-          <ModelHealthDrawer health={v3.modelHealth} open onClose={() => setIntelTab('DECISION')} />
-        )}
-
-        {intelTab === 'ANALYST_LAB' && (
-          <AnalystScenarioLab
-            scenario={analyst.scenario}
-            evidence={baseEvidence}
-            onToggleInclude={analyst.toggleInclude}
-            onToggleExclude={analyst.toggleExclude}
-            onReset={analyst.reset}
-          />
+        {intelTab === 'MODEL' && (
+          <>
+            <ValuationUniverseGrid universes={v3.universes} />
+            <ModelHealthDrawer health={v3.modelHealth} open onClose={() => setIntelTab('OVERVIEW')} />
+          </>
         )}
       </div>
     </div>
@@ -327,6 +348,9 @@ export function CompIntelligenceWorkspace({
       data-comp-intelligence="true"
       data-pipeline={pipelineState}
       data-source={dataSource}
+      data-property-id={propertyId}
+      data-evidence-count={baseEvidence.length}
+      data-mapped-count={mappableEvidence.length}
     >
       {narrow && (
         <nav className="ci-shell-tabs" role="tablist" aria-label="Workspace shell">
