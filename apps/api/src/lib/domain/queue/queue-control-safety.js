@@ -51,7 +51,7 @@ export function normalizeQueueProcessorMode(value, fallback = "paused") {
   const raw = clean(value || fallback).toLowerCase();
   if (["off", "paused", "pause"].includes(raw)) return "off";
   if (["safe", "assisted", "dry_run", "dryrun", "preview"].includes(raw)) return "safe";
-  if (["live", "automatic"].includes(raw)) return "live";
+  if (["live", "automatic", "on", "enabled", "active"].includes(raw)) return "live";
   return "off";
 }
 
