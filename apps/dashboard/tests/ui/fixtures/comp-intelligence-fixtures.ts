@@ -1,4 +1,4 @@
-import type { Page, Route } from '@playwright/test'
+import { expect, type Page, type Route } from '@playwright/test'
 
 export const LAKE_WORTH_PROPERTY_ID = '234334277'
 
@@ -147,9 +147,22 @@ export async function installCompIntelligenceFixtures(page: Page, propertyId = L
   await page.route(subjectPath, (route) => json(route, { data: COMP_FIXTURE_PAYLOAD.data.subject }))
   await page.route('**/rest/v1/properties**', (route) => {
     if (route.request().method() !== 'GET') return route.continue()
-    return json(route, [SUBJECT_RECORD])
+    const url = route.request().url()
+    if (url.includes(`property_id=eq.${propertyId}`) || url.includes(propertyId)) {
+      return json(route, [SUBJECT_RECORD])
+    }
+    return json(route, [])
   })
   await page.route('**/rest/v1/rpc/**', (route) => json(route, []))
+}
+
+export async function waitForRecoveredEvidence(page: import('@playwright/test').Page) {
+  const workspace = page.locator('[data-comp-intelligence="true"]')
+  await expect(workspace).toBeVisible({ timeout: 30000 })
+  await expect(workspace.locator('.ci-status-bar')).toContainText(/EVIDENCE RECOVERED/i, { timeout: 45000 })
+  await expect(workspace).toHaveAttribute('data-evidence-count', /[1-9]/, { timeout: 45000 })
+  await expect(workspace).toHaveAttribute('data-mapped-count', /[1-9]/, { timeout: 45000 })
+  return workspace
 }
 
 export async function setNexusTheme(page: Page, theme: 'dark' | 'light' | 'red_ops') {
