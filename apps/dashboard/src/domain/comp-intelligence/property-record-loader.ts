@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '../../lib/supabaseClient'
+import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import type { AnyRecord } from '../../lib/data/shared'
 
 const PROPERTY_SELECT = [
@@ -33,6 +33,7 @@ const PROPERTY_SELECT = [
 export async function fetchPropertyRecord(propertyId: string): Promise<AnyRecord | null> {
   const id = String(propertyId ?? '').trim()
   if (!id) return null
+  if (!hasSupabaseEnv) return null
 
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
