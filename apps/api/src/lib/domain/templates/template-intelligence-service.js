@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase/client.js'
+import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { chunk, unique } from '@/lib/utils/arrays.js'
 import {
   buildCanonicalDisplayName,
@@ -105,14 +106,19 @@ async function fetchKpiMap(templateKeys, timeWindow) {
   return map
 }
 
-async function fetchAllKpiRowsForKeys(templateKeys) {
+async function fetchAllKpiRowsForKeys(templateKeys, timeWindows = null) {
   if (!templateKeys.length) return []
+  const windows = Array.isArray(timeWindows) && timeWindows.length
+    ? [...new Set(timeWindows)]
+    : null
   const rows = []
   for (const batch of chunk(unique(templateKeys), KPI_FETCH_BATCH)) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('template_performance_kpis_v')
       .select('*')
       .in('template_key', batch)
+    if (windows) query = query.in('time_window', windows)
+    const { data, error } = await query
     if (error) throw error
     rows.push(...(data ?? []))
   }
@@ -132,8 +138,103 @@ function kpiMapsFromRows(rows, kpiWindow, priorWindow) {
 }
 
 async function fetchKpiMapsForWindows(templateKeys, kpiWindow, priorWindow) {
-  const rows = await fetchAllKpiRowsForKeys(templateKeys)
+  const rows = await fetchAllKpiRowsForKeys(templateKeys, [kpiWindow, priorWindow, 'all_time'])
   return kpiMapsFromRows(rows, kpiWindow, priorWindow)
+}
+
+function keysNeedingIntentAggregates(templateKeys, kpiMap) {
+  return templateKeys.filter((key) => {
+    const row = kpiMap.get(key)
+    if (!row) return true
+    if (String(row.metric_status ?? 'ok') === 'missing_source') return true
+    return row.inbound_replies == null && Number(row.sends ?? row.sample_size ?? 0) > 0
+  })
+}
+
+function keysNeedingQueueExecution(templateKeys, kpiMap) {
+  return templateKeys.filter((key) => {
+    const row = kpiMap.get(key)
+    return !row || Number(row.sends ?? row.sample_size ?? 0) === 0
+  })
+}
+
+async function fetchFilteredTemplateCatalog(filters = {}) {
+  const rows = []
+  let from = 0
+  const batchSize = 500
+  while (true) {
+    let query = supabase
+      .from('sms_templates')
+      .select('*')
+      .order('template_name', { ascending: true })
+      .range(from, from + batchSize - 1)
+    query = applyTemplateFilters(query, filters)
+    const { data, error } = await query
+    if (error) throw error
+    const batch = data ?? []
+    rows.push(...batch)
+    if (batch.length < batchSize) break
+    from += batchSize
+  }
+  return rows
+}
+
+function hasIntelligenceFilters(filters = {}) {
+  return Boolean(
+    filters.rotation_state
+    || filters.performance_label
+    || filters.confidence
+    || filters.risk_flag
+    || filters.market
+    || filters.campaign
+    || filters.sender
+    || filters.agent,
+  )
+}
+
+function buildSummaryRowsFromCatalog(templateRows, kpiWindow, priorWindow) {
+  const keys = templateRows.map(templateKey).filter(Boolean)
+  return fetchKpiMapsForWindows(keys, kpiWindow, priorWindow).then(({ currentMap, priorMap, baselineMap }) =>
+    templateRows.map((row) => {
+      const key = templateKey(row)
+      return {
+        identity: buildIdentity(row),
+        metrics: buildMetricsBlock(currentMap.get(key), priorMap.get(key), baselineMap.get(key)),
+      }
+    }),
+  )
+}
+
+function templateIntelCacheKey(kind, params = {}) {
+  const filters = params.filters ?? {}
+  return [
+    `cockpit:template-intel:${kind}`,
+    params.range ?? '7d',
+    params.page ?? 0,
+    params.pageSize ?? 500,
+    params.sort ?? 'template_name',
+    params.sortDir ?? 'asc',
+    params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
+    filters.query ?? '',
+    filters.stage ?? '',
+    filters.touch_number ?? '',
+    filters.follow_up_number ?? '',
+    filters.use_case ?? '',
+    filters.language ?? '',
+    filters.persona ?? '',
+    filters.asset_type ?? '',
+    filters.lifecycle ?? '',
+    filters.source ?? '',
+    filters.active_state ?? '',
+    filters.rotation_state ?? '',
+    filters.performance_label ?? '',
+    filters.confidence ?? '',
+    filters.risk_flag ?? '',
+    filters.market ?? '',
+    filters.campaign ?? '',
+    filters.sender ?? '',
+    filters.agent ?? '',
+  ].join(':')
 }
 
 async function fetchAllKpiRowsForWindow(timeWindow) {
@@ -305,7 +406,7 @@ function filterByIntelligence(rows, filters = {}) {
   })
 }
 
-export async function fetchTemplateIntelligence({
+async function loadTemplateIntelligence({
   page = 0,
   pageSize = 500,
   sort = 'template_name',
@@ -331,13 +432,14 @@ export async function fetchTemplateIntelligence({
   if (error) throw error
 
   const keys = (templates ?? []).map(templateKey).filter(Boolean)
-  const [kpiMaps, intentCurrent, intentPrior, execCurrent] = await Promise.all([
-    fetchKpiMapsForWindows(keys, kpiWindow, priorWindow),
-    fetchReplyIntentAggregates(keys, kpiWindow),
-    fetchReplyIntentAggregates(keys, priorWindow),
-    fetchQueueExecutionAggregates(keys, kpiWindow),
+  const { currentMap, priorMap, baselineMap } = await fetchKpiMapsForWindows(keys, kpiWindow, priorWindow)
+  const intentKeys = keysNeedingIntentAggregates(keys, currentMap)
+  const execKeys = keysNeedingQueueExecution(keys, currentMap)
+  const [intentCurrent, intentPrior, execCurrent] = await Promise.all([
+    intentKeys.length ? fetchReplyIntentAggregates(intentKeys, kpiWindow) : Promise.resolve(new Map()),
+    intentKeys.length ? fetchReplyIntentAggregates(intentKeys, priorWindow) : Promise.resolve(new Map()),
+    execKeys.length ? fetchQueueExecutionAggregates(execKeys, kpiWindow) : Promise.resolve(new Map()),
   ])
-  const { currentMap, priorMap, baselineMap } = kpiMaps
 
   let rows = (templates ?? []).map((row) => {
     const key = templateKey(row)
@@ -457,7 +559,11 @@ export async function fetchTemplateIntelligence({
   }
 }
 
-export async function fetchTemplateIntelligenceSummary(params = {}) {
+export async function fetchTemplateIntelligence(params = {}) {
+  return readThroughCache(templateIntelCacheKey('list', params), 15_000, () => loadTemplateIntelligence(params))
+}
+
+async function loadTemplateIntelligenceSummary(params = {}) {
   const filters = params.filters ?? {}
   const kpiWindow = mapRangeToKpiWindow(params.range ?? '7d')
   const priorWindow = priorKpiWindow(kpiWindow)
@@ -472,16 +578,22 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
   const { count: totalTemplates, error: totalError } = await totalQuery
   if (totalError) throw totalError
 
-  const list = await fetchTemplateIntelligence({
-    page: 0,
-    pageSize: 5000,
-    sort: 'template_name',
-    sortDir: 'asc',
-    filters,
-    range: params.range ?? '7d',
-    autopilotMode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
-  })
-  const rows = list.data ?? []
+  let rows = []
+  if (hasIntelligenceFilters(filters)) {
+    const list = await loadTemplateIntelligence({
+      page: 0,
+      pageSize: 5000,
+      sort: 'template_name',
+      sortDir: 'asc',
+      filters,
+      range: params.range ?? '7d',
+      autopilotMode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
+    })
+    rows = list.data ?? []
+  } else {
+    const catalog = await fetchFilteredTemplateCatalog(filters)
+    rows = await buildSummaryRowsFromCatalog(catalog, kpiWindow, priorWindow)
+  }
   const sumPrior = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.prior) || 0), 0)
   const sumBaseline = (field) => rows.reduce((n, r) => n + (Number(r.metrics?.comparison?.metrics?.[field]?.baseline) || 0), 0)
 
@@ -562,7 +674,7 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
       page: 0,
       page_size: 0,
       total_count: totalTemplates ?? 0,
-      filtered_count: list.meta?.filtered_count ?? rows.length,
+      filtered_count: rows.length,
       matching_templates: rows.length,
       tracked_templates: rows.filter((r) => (r.metrics?.current?.sends ?? 0) > 0).length,
       range: kpiWindow,
@@ -573,9 +685,13 @@ export async function fetchTemplateIntelligenceSummary(params = {}) {
       autopilot_mode: params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE,
       shadow_mode: (params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE) === 'shadow',
       production_mutations_enabled: false,
-      catalog_mode: 'summary_aggregate',
+      catalog_mode: hasIntelligenceFilters(filters) ? 'summary_full' : 'summary_kpi_aggregate',
     },
   }
+}
+
+export async function fetchTemplateIntelligenceSummary(params = {}) {
+  return readThroughCache(templateIntelCacheKey('summary', params), 15_000, () => loadTemplateIntelligenceSummary(params))
 }
 
 export async function fetchTemplateDossier(templateId, params = {}) {
@@ -593,7 +709,7 @@ export async function fetchTemplateDossier(templateId, params = {}) {
   const priorWindow = priorKpiWindow(kpiWindow)
   const autopilotMode = params.autopilotMode ?? DEFAULT_AUTOPILOT_MODE
   const key = templateKey(templateRow)
-  const allKpiRows = await fetchAllKpiRowsForKeys([key])
+  const allKpiRows = await fetchAllKpiRowsForKeys([key], [kpiWindow, priorWindow, 'all_time'])
   const { currentMap, priorMap, baselineMap } = kpiMapsFromRows(allKpiRows, kpiWindow, priorWindow)
 
   const identity = buildIdentity(templateRow)

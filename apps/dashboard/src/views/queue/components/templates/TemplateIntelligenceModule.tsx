@@ -57,19 +57,24 @@ export function TemplateIntelligenceModule({
     setLoading(true)
     setError(null)
     try {
-      const [list, summary] = await Promise.all([
-        fetchTemplateIntelligenceList(filters, page, pageSize, sort, sortDir, 'shadow'),
-        fetchTemplateIntelligenceSummary(filters, 'shadow'),
-      ])
+      const list = await fetchTemplateIntelligenceList(filters, page, pageSize, sort, sortDir, 'shadow')
       if (controller.signal.aborted) return
       if (!list.ok) throw new Error(list.error ?? 'Failed to load templates')
       setRows(list.data)
       setMeta(list.meta as unknown as Record<string, unknown>)
-      if (summary.ok) {
-        setKpiCards(kpiCardsFromSummary(summary.cards, summary.meta))
-        setRail(summary.intelligence_rail ?? null)
-      }
       setStale(false)
+
+      void fetchTemplateIntelligenceSummary(filters, 'shadow')
+        .then((summary) => {
+          if (controller.signal.aborted) return
+          if (summary.ok) {
+            setKpiCards(kpiCardsFromSummary(summary.cards, summary.meta))
+            setRail(summary.intelligence_rail ?? null)
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setStale(true)
+        })
     } catch (err) {
       if (controller.signal.aborted) return
       setError(err instanceof Error ? err.message : 'Load failed')
