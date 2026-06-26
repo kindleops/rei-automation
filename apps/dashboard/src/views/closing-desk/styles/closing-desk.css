@@ -1174,14 +1174,92 @@
   .cd-dossier__nav-rail button { font-size: 9px; padding: 7px 8px; }
 }
 
-/* ── Fullscreen shell ───────────────────────────────────────── */
+/* ── Inbox workspace embedding (25% · 50% · 75% · Full) ─────── */
+.nx-workspace-surface--closing-desk,
+.nx-workspace-pane.is-view-closing_desk {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.nx-workspace-surface--closing-desk .closing-desk-view,
+.nx-workspace-pane.is-view-closing_desk .closing-desk-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Dossier stays inside the pane — never covers the Nexus top bar */
+.nx-workspace-surface--closing-desk .cd-dossier-overlay,
+.nx-workspace-pane.is-view-closing_desk .cd-dossier-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1200;
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view,
+.nx-workspace-pane.is-width-50 .closing-desk-view {
+  padding: 10px 8px 8px;
+  gap: 6px;
+  grid-template-rows: auto auto auto 1fr;
+  grid-template-areas:
+    'header'
+    'env'
+    'bar'
+    'canvas';
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-metrics-command,
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-command-card,
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-ops-rail,
+.nx-workspace-pane.is-width-50 .closing-desk-view .cd-ops-rail {
+  display: none;
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-command-header,
+.nx-workspace-pane.is-width-50 .closing-desk-view .cd-command-header {
+  grid-template-columns: 1fr;
+  padding: 10px;
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-command-header__pulse,
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-command-header__meta {
+  display: none;
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-kpi-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nx-workspace-pane.is-width-50 .closing-desk-view .cd-kpi-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.nx-workspace-pane.is-width-75 .closing-desk-view {
+  padding: 16px 12px 10px;
+}
+
+.nx-workspace-pane.is-width-25 .closing-desk-view .cd-dossier,
+.nx-workspace-pane.is-width-50 .closing-desk-view .cd-dossier {
+  width: 100%;
+}
+
+/* ── Fullscreen shell (100% within inbox — top bar remains) ─── */
 .nx-fullscreen-app-shell.is-view-closing_desk {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
-.nx-fullscreen-app-shell.is-view-closing_desk > .closing-desk-view {
+.nx-fullscreen-app-shell.is-view-closing_desk .closing-desk-view,
+.nx-fullscreen-app-shell.is-view-closing_desk > .nx-workspace-surface--closing-desk .closing-desk-view {
   overflow-y: auto;
   overflow-x: hidden;
 }

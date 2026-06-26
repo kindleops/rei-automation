@@ -201,6 +201,7 @@ const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorksp
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
+const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
 
 const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<div className="nx-workspace-surface__loading">Loading workspace…</div>}>
@@ -355,10 +356,10 @@ const NEXUS_WORKSPACE_PRESETS: NexusWorkspacePreset[] = [
   {
     key: 'closing_desk',
     label: 'Closing Desk',
-    description: 'Offers · Contracts · Title',
-    status: 'backend_not_ready',
-    views: ['closing_desk', 'calendar', 'sms_thread'],
-    widths: { closing_desk: '50', calendar: '25', sms_thread: '25' },
+    description: 'Stages 6–10 · contract through close',
+    status: 'ready',
+    views: ['closing_desk'],
+    widths: { closing_desk: '100' },
   },
   {
     key: 'ops_monitor',
@@ -388,7 +389,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'entity_graph', label: 'Entity Graph', description: 'Universal entity search, dossier, and relationship selector.' },
   { key: 'command_map', label: 'Map', description: 'Command map for market and routing context.' },
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
-  { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
+  { key: 'closing_desk', label: 'Closing Desk', description: 'Post-contract lifecycle command center — title, disposition, and close readiness.' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
   { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
   { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
@@ -4508,29 +4509,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     if (view === 'closing_desk') {
-      return (
-        <section className="nx-workspace-surface nx-workspace-surface--queue">
-          <div className="nx-workspace-card">
-            <div className="nx-workspace-card__title"><Icon name="briefcase" /><span>Closing Desk</span></div>
-            <p className="nx-workspace-card__body">Offers, contracts, title, escrow, signatures, and closing timeline.</p>
-          </div>
-          <div className="nx-workspace-card-grid">
-            {[
-              ['Offers', 'Offer package review, approvals, and seller revisions.'],
-              ['Contracts', 'Drafts, sent contracts, counters, and execution health.'],
-              ['Title', 'Ownership verification, title tasks, and clearance blockers.'],
-              ['Escrow', 'Escrow milestones, deposits, and disbursement checkpoints.'],
-              ['Closing Timeline', 'Critical path milestones from offer to close.'],
-              ['Signatures', 'Signature state, pending signees, and reminders.'],
-            ].map(([title, desc]) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="file-text" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">{desc}</p>
-                <small>Section scaffold active. Live module wiring in progress.</small>
-              </div>
-            ))}
-          </div>
-        </section>
+      return wrapWorkspaceSurface(
+        view,
+        paneWidth,
+        layoutMode,
+        'nx-workspace-surface--closing-desk',
+        <WorkspaceSuspense>
+          <ClosingDeskView />
+        </WorkspaceSuspense>,
       )
     }
 
@@ -4655,6 +4641,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             'nx-fullscreen-app-shell',
             `is-view-${activeWorkspaceView}`,
             isDealIntelligenceView && 'nx-deal-intelligence-fullscreen',
+            activeWorkspaceView === 'closing_desk' && 'is-view-closing_desk',
           )}
         >
           {renderWorkspacePane(activeWorkspaceView, 'single', '100')}
