@@ -14,6 +14,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { sendSystemErrorAlert } from "@/lib/alerts/discord.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Dependency injection (for tests)
@@ -37,6 +38,28 @@ export function __resetSentryDeps() {
 // Public helpers
 // ---------------------------------------------------------------------------
 
+const SUPPRESSED_TERMINAL_FAILURE_CLASSES = new Set(["recipient_opted_out"]);
+const SUPPRESSED_TERMINAL_FAILURE_BUCKETS = new Set(["provider_blacklist_pair", "DNC"]);
+
+/**
+ * Returns false only for expected terminal compliance/provider outcomes that are
+ * already handled in queue state (21610 blacklist, opt-out, DNC).
+ */
+export function shouldCaptureRouteException(error) {
+  if (!error) return false;
+
+  const classified = classifyTextGridProviderError(error);
+  if (!classified.compliance_related || !classified.is_terminal) {
+    return true;
+  }
+
+  if (classified.provider_code === "21610") return false;
+  if (SUPPRESSED_TERMINAL_FAILURE_CLASSES.has(classified.failure_class)) return false;
+  if (SUPPRESSED_TERMINAL_FAILURE_BUCKETS.has(classified.failure_bucket)) return false;
+
+  return true;
+}
+
 /**
  * Capture an exception with standard route/subsystem tags.
  *
@@ -47,6 +70,15 @@ export function __resetSentryDeps() {
  * @param {object} [opts.context]    Non-secret context key/values attached to the Sentry event
  */
 export function captureRouteException(error, { route, subsystem, context } = {}) {
+  if (!shouldCaptureRouteException(error)) {
+    addSentryBreadcrumb("route_exception", "handled_terminal_provider_outcome_skipped", {
+      route: route || null,
+      subsystem: subsystem || null,
+      error_message: String(error?.message || error).slice(0, 240),
+    });
+    return;
+  }
+
   // Guard: Sentry may not be initialized in test environments without an init call.
   if (typeof runtimeDeps.sentry.withScope !== "function") return;
 

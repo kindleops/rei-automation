@@ -237,25 +237,37 @@ test("insertSupabaseSendQueueRow: dedupe conflict returns idempotent replay", as
   assert.equal(result.queue_row_id, 99);
 });
 
+function makeCountSelectChain(count = 0) {
+  const chain = {
+    eq() {
+      return chain;
+    },
+    or() {
+      return chain;
+    },
+    ilike: async () => ({ count, error: null }),
+    then(resolve) {
+      return resolve({ count, error: null });
+    },
+  };
+  return chain;
+}
+
 test("enqueueSendQueueItem: blocks 21610-suppressed phone", async () => {
   const client = {
     from(table) {
       if (table === "send_queue") {
         return {
-          select: () => ({
-            eq() {
-              return this;
-            },
-            ilike: async () => ({ count: 1, error: null }),
-          }),
+          select: () => makeCountSelectChain(1),
+        };
+      }
+      if (table === "message_events") {
+        return {
+          select: () => makeCountSelectChain(0),
         };
       }
       return {
-        select: () => ({
-          eq: () => ({
-            ilike: async () => ({ count: 0, error: null }),
-          }),
-        }),
+        select: () => makeCountSelectChain(0),
       };
     },
   };
