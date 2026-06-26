@@ -186,6 +186,8 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
   const apiProperties = safeArray(payload.properties as AnyRecord[])
   const apiOwners = safeArray(payload.owners as AnyRecord[])
   const apiProspects = safeArray(payload.prospects as AnyRecord[])
+  const apiCampaigns = safeArray(payload.campaigns as AnyRecord[])
+  const apiTextgridNumbers = safeArray(payload.textgridNumbers as AnyRecord[])
 
   // Step 2: Extract IDs
   const propertyIds = new Set<string>()
@@ -224,11 +226,11 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
   }
 
   // Step 3: Fetch Related Data
-  const qArr = Array.from(queueIds)
   const pArr = Array.from(propertyIds)
   const oArr = Array.from(ownerIds)
   const cArr = Array.from(campaignIds)
-  const tArr = Array.from(targetIds)
+  void Array.from(queueIds)
+  void Array.from(targetIds)
 
   const chunkArray = <T>(arr: T[], size: number): T[][] => {
     return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
@@ -248,11 +250,6 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     return { data: results.flatMap(r => r.data || []) }
   }
 
-  const fetchTargetChunked = async (_qArrChunk: string[], _tArrChunk: string[]) => {
-    // Disabled: frontend direct Supabase calls querying huge in(...) lists for sms_campaign_targets
-    return { data: [] }
-  }
-
   const propRes = apiProperties.length
     ? { data: apiProperties }
     : await fetchChunked(pArr, async chunk => await supabase.from('properties').select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market').in('property_id', chunk).limit(3000), 100)
@@ -261,31 +258,22 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     ? { data: apiProspects }
     : { data: [] as AnyRecord[] }
 
+  const needsOwnerFetch = apiOwners.length === 0 && oArr.length > 0
+  const needsCampaignFetch = apiCampaigns.length === 0 && cArr.length > 0
+  const needsTextgridFetch = apiTextgridNumbers.length === 0
+
   const [evtRes, tgtRes, cmpRes, ownerRes, tgRes] = await Promise.all([
-    fetchChunked(qArr, async _chunk => ({ data: [] }), 30), // Disabled message_events
-    (async () => {
-      if (prospectRes.data.length > 0) {
-        return { data: prospectRes.data }
-      }
-      if (qArr.length === 0 && tArr.length === 0) return { data: [] }
-      const qChunks = chunkArray(qArr, 30)
-      const tChunks = chunkArray(tArr, 30)
-      const maxLen = Math.max(qChunks.length, tChunks.length)
-      const results = []
-      for (let i = 0; i < maxLen; i += 5) {
-        const batch = Array.from({ length: Math.min(5, maxLen - i) }).map((_, j) => {
-          const idx = i + j
-          return fetchTargetChunked(qChunks[idx] || [], tChunks[idx] || [])
-        })
-        results.push(...await Promise.all(batch))
-      }
-      return { data: results.flatMap(r => r.data || []) }
-    })(),
-    fetchChunked(cArr, async chunk => await supabase.from('campaigns').select('id,name,status').in('id', chunk).limit(500), 100),
-    apiOwners.length
-      ? { data: apiOwners }
-      : fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100),
-    supabase.from('textgrid_numbers').select('*')
+    Promise.resolve({ data: [] as AnyRecord[] }),
+    Promise.resolve({ data: prospectRes.data }),
+    needsCampaignFetch
+      ? fetchChunked(cArr, async chunk => await supabase.from('campaigns').select('id,name,status').in('id', chunk).limit(500), 100)
+      : Promise.resolve({ data: apiCampaigns }),
+    needsOwnerFetch
+      ? fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100)
+      : Promise.resolve({ data: apiOwners }),
+    needsTextgridFetch
+      ? supabase.from('textgrid_numbers').select('number,phone_number,market,sender_market,status,state,paused,is_paused,active,is_active')
+      : Promise.resolve({ data: apiTextgridNumbers, error: null }),
   ])
 
   const propertyById = new Map(safeArray(propRes.data as AnyRecord[]).map(r => [r.property_id, r]))

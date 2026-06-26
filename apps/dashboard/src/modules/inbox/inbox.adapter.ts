@@ -113,14 +113,6 @@ const mapAuthoritativeCounts = (rawCounts: Record<string, unknown>): Record<stri
   automated: Number(rawCounts.automated ?? 0),
 })
 
-const fetchAuthoritativeCounts = async (signal?: AbortSignal): Promise<Record<string, number> | null> => {
-  const res = await backendClient.fetchInboxCounts(signal).catch(() => null)
-  if (!res?.ok) return null
-  const payload = (res.data ?? {}) as Record<string, unknown>
-  const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, unknown> | undefined
-  if (!rawCounts || Object.keys(rawCounts).length === 0) return null
-  return mapAuthoritativeCounts(rawCounts)
-}
 const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConnectionState => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline'
   if (status === 'connected') return 'live'

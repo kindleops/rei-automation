@@ -101,7 +101,11 @@ export function ClosingDeskView() {
         diagnostics={model?.diagnostics ?? []}
       />
 
-      <ClosingDeskMetrics summary={displaySummary} loading={loading} onFilter={setFilters} />
+      <ClosingDeskMetrics
+        summary={displaySummary}
+        loading={loading}
+        onFilter={(patch) => setFilters((prev) => ({ ...prev, ...patch }))}
+      />
 
       <ClosingDeskCommandCard
         surfaceState={surfaceState}

@@ -82,7 +82,7 @@ function toCanonicalSubject(
     bathrooms: evidenceNumber(canonical.bathrooms, 'properties.total_baths'),
     square_feet: evidenceNumber(canonical.square_feet, 'properties.building_square_feet'),
     year_built: evidenceNumber(canonical.year_built, 'properties.year_built'),
-    lot_square_feet: evidenceNumber(canonical.lot_square_feet, 'properties.lot_square_feet'),
+    lot_square_feet: evidenceNumber(canonical.lot_size, 'properties.lot_square_feet'),
     condition: evidenceString(null, 'properties.building_condition'),
     estimated_value: evidenceNumber(null, 'properties.estimated_value'),
     contract_version: 'comp_intelligence_subject_v1',
@@ -124,7 +124,7 @@ function mapRpcRow(
     year_built: Number(row.year_built) || null,
     lot_square_feet: Number(row.lot_square_feet) || null,
     property_type: String(row.property_type || row.normalized_asset_class || row.asset_class || '') || null,
-    similarity_score: Number(row.similarity_score) || null,
+    similarity_score: Number(row.similarity_score) || undefined,
     comp_match_label: 'Recovered evidence',
     selected: true,
     excluded: false,
@@ -257,7 +257,9 @@ export async function runDirectCompIntelligence({
   if (!canonical) return null
 
   const subject = toCanonicalSubject(canonical)
-  let discoveryResult = await discoverCandidatesExact(canonical.property_id, radius, monthsBack)
+  type DiscoveryResult = Awaited<ReturnType<typeof discoverCandidatesExact>>
+    | Awaited<ReturnType<typeof discoverCandidatesMarketFallback>>
+  let discoveryResult: DiscoveryResult = await discoverCandidatesExact(canonical.property_id, radius, monthsBack)
   if (!discoveryResult.candidates.length) {
     discoveryResult = await discoverCandidatesMarketFallback(canonical, monthsBack)
   }

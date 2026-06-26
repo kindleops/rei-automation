@@ -53,7 +53,7 @@ import { getDealContextByProperty, getDealContextByThread, normalizeDealContext,
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
-import { getSupabaseClient } from '../../lib/supabaseClient'
+import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { subscribeToInboxRealtime } from '../../lib/data/realtime'
 import { getQueueControlSettings, updateQueueControlSettings, callBackend, getBackendHealth } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
@@ -195,12 +195,13 @@ import { saveRecentCommandLocation } from '../command-center/providers/locationC
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
-const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.CompIntelligenceWorkspace })))
+const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.default })))
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
+const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
 
 const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<div className="nx-workspace-surface__loading">Loading workspace…</div>}>
@@ -355,10 +356,10 @@ const NEXUS_WORKSPACE_PRESETS: NexusWorkspacePreset[] = [
   {
     key: 'closing_desk',
     label: 'Closing Desk',
-    description: 'Offers · Contracts · Title',
-    status: 'backend_not_ready',
-    views: ['closing_desk', 'calendar', 'sms_thread'],
-    widths: { closing_desk: '50', calendar: '25', sms_thread: '25' },
+    description: 'Stages 6–10 · contract through close',
+    status: 'ready',
+    views: ['closing_desk'],
+    widths: { closing_desk: '100' },
   },
   {
     key: 'ops_monitor',
@@ -388,7 +389,7 @@ const WORKSPACE_VIEW_MENU_OPTIONS: Array<{
   { key: 'entity_graph', label: 'Entity Graph', description: 'Universal entity search, dossier, and relationship selector.' },
   { key: 'command_map', label: 'Map', description: 'Command map for market and routing context.' },
   { key: 'analytics', label: 'Analytics', description: 'Operational KPI and analytics modules.' },
-  { key: 'closing_desk', label: 'Closing Desk', description: 'Offers, contracts, title, escrow, and signatures.', status: 'backend_not_ready' },
+  { key: 'closing_desk', label: 'Closing Desk', description: 'Post-contract lifecycle command center — title, disposition, and close readiness.' },
   { key: 'campaigns', label: 'Campaign Command', description: 'SMS campaign intelligence, targets, and send performance.' },
   { key: 'email', label: 'Email Command', description: 'Brevo email records, inbox, composer, templates, and provider health.' },
   { key: 'workflow_studio', label: 'Workflow Studio', description: 'Workflow definitions, template variants, sender pools, and dry-run previews.' },
@@ -1970,6 +1971,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   useEffect(() => {
     if (!selectedKeyForEffect || data.dataMode !== 'live') return
+    if (!hasSupabaseEnv) return
 
     const selected = selectedRef.current
     if (!selected) return
@@ -4030,7 +4032,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // Full-page loading guard removed: bucket switches must never flash a blank page.
   // InboxSidebar shows an empty list while the fetch is in flight; that is intentional.
 
-  const { leftPanelMode, rightPanelMode, inboxMode, mapMode, activeOverlay } = layoutState
+  const { inboxMode, mapMode, activeOverlay } = layoutState
   const layoutClasses = getLayoutClassNames(layoutState)
   const mapOpen = mapMode !== 'off'
   const dossierOpen = activeOverlay === 'dossier'
@@ -4043,7 +4045,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const isMultiView = renderViews.length > 1
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
-  const isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
+  const _isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
+  void _isEntityGraphView
   const useFullscreenShell = !workspaceBlocked && !isMultiView
   const isDoubleSided = inboxMode === 'full_double'
 
@@ -4508,29 +4511,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     if (view === 'closing_desk') {
-      return (
-        <section className="nx-workspace-surface nx-workspace-surface--queue">
-          <div className="nx-workspace-card">
-            <div className="nx-workspace-card__title"><Icon name="briefcase" /><span>Closing Desk</span></div>
-            <p className="nx-workspace-card__body">Offers, contracts, title, escrow, signatures, and closing timeline.</p>
-          </div>
-          <div className="nx-workspace-card-grid">
-            {[
-              ['Offers', 'Offer package review, approvals, and seller revisions.'],
-              ['Contracts', 'Drafts, sent contracts, counters, and execution health.'],
-              ['Title', 'Ownership verification, title tasks, and clearance blockers.'],
-              ['Escrow', 'Escrow milestones, deposits, and disbursement checkpoints.'],
-              ['Closing Timeline', 'Critical path milestones from offer to close.'],
-              ['Signatures', 'Signature state, pending signees, and reminders.'],
-            ].map(([title, desc]) => (
-              <div key={title} className="nx-workspace-card">
-                <div className="nx-workspace-card__title"><Icon name="file-text" /><span>{title}</span></div>
-                <p className="nx-workspace-card__body">{desc}</p>
-                <small>Section scaffold active. Live module wiring in progress.</small>
-              </div>
-            ))}
-          </div>
-        </section>
+      return wrapWorkspaceSurface(
+        view,
+        paneWidth,
+        layoutMode,
+        'nx-workspace-surface--closing-desk',
+        <WorkspaceSuspense>
+          <ClosingDeskView />
+        </WorkspaceSuspense>,
       )
     }
 
@@ -4655,6 +4643,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             'nx-fullscreen-app-shell',
             `is-view-${activeWorkspaceView}`,
             isDealIntelligenceView && 'nx-deal-intelligence-fullscreen',
+            activeWorkspaceView === 'closing_desk' && 'is-view-closing_desk',
           )}
         >
           {renderWorkspacePane(activeWorkspaceView, 'single', '100')}

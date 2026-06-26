@@ -32,7 +32,7 @@ export const resolveWorkspaceFlexBases = <T extends string>(
   },
 ): Partial<Record<T, WorkspaceFlexBasis>> => {
   if (views.length === 0) return {}
-  if (views.length === 1) return { [views[0]]: 100 }
+  if (views.length === 1) return { [views[0]]: 100 } as Partial<Record<T, WorkspaceFlexBasis>>
 
   const explicit = views
     .map((view) => [view, overrides[view]] as const)
@@ -44,7 +44,7 @@ export const resolveWorkspaceFlexBases = <T extends string>(
     const others = views.filter((view) => view !== pinnedView)
     const remainder = Math.max(0, 100 - pinnedNum)
     const each = others.length > 0 ? remainder / others.length : 0
-    const result: Partial<Record<T, WorkspaceFlexBasis>> = { [pinnedView]: pinnedNum }
+    const result = { [pinnedView]: pinnedNum } as Partial<Record<T, WorkspaceFlexBasis>>
     others.forEach((view, index) => {
       result[view] = index === others.length - 1
         ? Math.round((remainder - each * (others.length - 1)) * 100) / 100
@@ -59,7 +59,7 @@ export const resolveWorkspaceFlexBases = <T extends string>(
     const others = views.filter((view) => view !== pinnedView)
     const remainder = Math.max(0, 100 - pinnedNum)
     const each = others.length > 0 ? remainder / others.length : 0
-    const result: Partial<Record<T, WorkspaceFlexBasis>> = { [pinnedView]: pinnedNum }
+    const result = { [pinnedView]: pinnedNum } as Partial<Record<T, WorkspaceFlexBasis>>
     others.forEach((view, index) => {
       result[view] = index === others.length - 1
         ? Math.round((remainder - each * (others.length - 1)) * 100) / 100
@@ -99,15 +99,15 @@ export const resolveWorkspaceFlexBases = <T extends string>(
       return {
         [views[0]]: Number(firstOverride),
         [views[1]]: Number(secondOverride),
-      }
+      } as Partial<Record<T, WorkspaceFlexBasis>>
     }
-    if (firstOverride === '75') return { [views[0]]: 75, [views[1]]: 25 }
-    if (firstOverride === '25') return { [views[0]]: 25, [views[1]]: 75 }
-    if (firstOverride === '50') return { [views[0]]: 50, [views[1]]: 50 }
-    if (secondOverride === '75') return { [views[0]]: 25, [views[1]]: 75 }
-    if (secondOverride === '25') return { [views[0]]: 75, [views[1]]: 25 }
-    if (secondOverride === '50') return { [views[0]]: 50, [views[1]]: 50 }
-    return { [views[0]]: 50, [views[1]]: 50 }
+    if (firstOverride === '75') return { [views[0]]: 75, [views[1]]: 25 } as Partial<Record<T, WorkspaceFlexBasis>>
+    if (firstOverride === '25') return { [views[0]]: 25, [views[1]]: 75 } as Partial<Record<T, WorkspaceFlexBasis>>
+    if (firstOverride === '50') return { [views[0]]: 50, [views[1]]: 50 } as Partial<Record<T, WorkspaceFlexBasis>>
+    if (secondOverride === '75') return { [views[0]]: 25, [views[1]]: 75 } as Partial<Record<T, WorkspaceFlexBasis>>
+    if (secondOverride === '25') return { [views[0]]: 75, [views[1]]: 25 } as Partial<Record<T, WorkspaceFlexBasis>>
+    if (secondOverride === '50') return { [views[0]]: 50, [views[1]]: 50 } as Partial<Record<T, WorkspaceFlexBasis>>
+    return { [views[0]]: 50, [views[1]]: 50 } as Partial<Record<T, WorkspaceFlexBasis>>
   }
 
   const each = 100 / views.length
@@ -126,7 +126,7 @@ export const resolveWorkspaceWidthLabels = <T extends string>(
   overrides: Partial<Record<T, ViewWidthPercent>>,
   flexBases: Partial<Record<T, WorkspaceFlexBasis>>,
 ): Partial<Record<T, ViewWidthPercent>> => {
-  if (views.length === 1) return { [views[0]]: '100' }
+  if (views.length === 1) return { [views[0]]: '100' } as Partial<Record<T, ViewWidthPercent>>
   return Object.fromEntries(
     views.map((view) => [
       view,

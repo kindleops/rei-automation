@@ -100,7 +100,7 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   if (message.deliveredAt) return 'delivered'
   if (statusEvidence.some((value) => value.includes('deliver') && !value.includes('undeliv'))) return 'delivered'
 
-  const messageAt = String(message.sentAt || message.deliveredAt || message.createdAt || message.at || '').trim()
+  const messageAt = String(message.sentAt || message.deliveredAt || message.createdAt || '').trim()
   const messageAgeMs = messageAt ? Math.max(0, Date.now() - new Date(messageAt).getTime()) : Number.POSITIVE_INFINITY
   const isActivelySending = messageAgeMs < 45_000 && statusEvidence.some((value) => (
     value.includes('pending')

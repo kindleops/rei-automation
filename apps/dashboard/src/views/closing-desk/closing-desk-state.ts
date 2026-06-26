@@ -38,5 +38,5 @@ export function casesForDisplay<T extends { identity: { closingCaseId: string } 
   return resolveRenderableCases(cases as never, {
     fixtureQuery,
     modelMode: model?.mode ?? null,
-  }) as T[]
+  }) as unknown as T[]
 }
