@@ -194,7 +194,6 @@ export function CompIntelligenceWorkspace({
             onSelect={handleSelectMarker}
             onHover={setHoveredId}
             onStyleError={() => setMapStyleError(true)}
-            onReady={() => setFitBoundsToken((n) => n + 1)}
             fitBoundsToken={fitBoundsToken}
           />
           {!hasCoords && mappableEvidence.length > 0 && (

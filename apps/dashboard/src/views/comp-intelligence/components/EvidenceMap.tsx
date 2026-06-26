@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { CompTransactionEvidence } from '../../../domain/comp-intelligence/v3-types'
@@ -27,7 +27,6 @@ interface Props {
   onSelect: (id: string) => void
   onHover: (id: string | null) => void
   onStyleError?: () => void
-  onReady?: () => void
   fitBoundsToken?: number
 }
 
@@ -71,6 +70,18 @@ function computeMapCenter(
   return [avgLng, avgLat]
 }
 
+function evidenceSignature(rows: CompTransactionEvidence[]): string {
+  return rows
+    .map((row) => {
+      const id = markerId(row)
+      const lat = row.geography.latitude
+      const lng = row.geography.longitude
+      return `${id}:${lat ?? ''}:${lng ?? ''}:${row.sale_price ?? ''}`
+    })
+    .sort()
+    .join('|')
+}
+
 export function EvidenceMap({
   subjectLat,
   subjectLng,
@@ -83,25 +94,31 @@ export function EvidenceMap({
   onSelect,
   onHover,
   onStyleError,
-  onReady,
   fitBoundsToken = 0,
 }: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<maplibregl.Map | null>(null)
-  const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const markersRef = useRef<Map<string, { marker: maplibregl.Marker; row: CompTransactionEvidence }>>(new Map())
   const subjectMarkerRef = useRef<maplibregl.Marker | null>(null)
   const [mapReady, setMapReady] = useState(false)
+  const initialFitDoneRef = useRef(false)
+  const lastFitTokenRef = useRef(fitBoundsToken)
+  const evidenceSigRef = useRef('')
+
+  const onSelectRef = useRef(onSelect)
+  const onHoverRef = useRef(onHover)
+  const onStyleErrorRef = useRef(onStyleError)
+  onSelectRef.current = onSelect
+  onHoverRef.current = onHover
+  onStyleErrorRef.current = onStyleError
 
   const hasSubjectPin = isValidCoord(subjectLat, subjectLng)
-  const mapCenter = useMemo(
-    () => computeMapCenter(subjectLat, subjectLng, evidence),
-    [subjectLat, subjectLng, evidence],
-  )
   const canMountMap = hasSubjectPin || evidence.some((row) =>
     isValidCoord(row.geography.latitude, row.geography.longitude),
   )
+  const mapBootKey = `${subjectLat ?? 'na'}:${subjectLng ?? 'na'}`
 
-  const fitAllBounds = useCallback(() => {
+  const fitAllBounds = useCallback((animate = true) => {
     const map = mapInstanceRef.current
     if (!map || !mapReady) return
     const bounds = new maplibregl.LngLatBounds()
@@ -112,7 +129,11 @@ export function EvidenceMap({
       if (isValidCoord(lat, lng)) bounds.extend([lng!, lat!])
     }
     if (bounds.isEmpty()) return
-    map.fitBounds(bounds, { padding: 56, maxZoom: 15, duration: 450 })
+    map.fitBounds(bounds, {
+      padding: 56,
+      maxZoom: 15,
+      duration: animate ? 450 : 0,
+    })
   }, [evidence, mapReady, hasSubjectPin, subjectLat, subjectLng])
 
   useEffect(() => {
@@ -122,7 +143,10 @@ export function EvidenceMap({
     const { offsetWidth, offsetHeight } = container
     if (offsetWidth < 2 || offsetHeight < 2) return undefined
 
-    const [centerLng, centerLat] = mapCenter
+    initialFitDoneRef.current = false
+    evidenceSigRef.current = ''
+    const [centerLng, centerLat] = computeMapCenter(subjectLat, subjectLng, evidence)
+
     const map = new maplibregl.Map({
       container,
       style: DARK_MAP_STYLE,
@@ -134,7 +158,7 @@ export function EvidenceMap({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left')
     map.on('error', (event) => {
-      if (event?.error?.message) onStyleError?.()
+      if (event?.error?.message) onStyleErrorRef.current?.()
     })
 
     map.on('load', () => {
@@ -152,20 +176,19 @@ export function EvidenceMap({
         map.addLayer({ id: 'ci-radius-line', type: 'line', source: 'ci-radius', paint: { 'line-color': 'rgba(59,130,246,0.45)', 'line-width': 1.5, 'line-dasharray': [4, 3] } })
       }
       setMapReady(true)
-      onReady?.()
       requestAnimationFrame(() => map.resize())
     })
 
     mapInstanceRef.current = map
 
     const observer = new ResizeObserver(() => {
-      if (mapInstanceRef.current) mapInstanceRef.current.resize()
+      mapInstanceRef.current?.resize()
     })
     observer.observe(container)
 
     return () => {
       observer.disconnect()
-      markersRef.current.forEach((marker) => marker.remove())
+      markersRef.current.forEach(({ marker }) => marker.remove())
       markersRef.current.clear()
       subjectMarkerRef.current?.remove()
       subjectMarkerRef.current = null
@@ -173,12 +196,9 @@ export function EvidenceMap({
       map.remove()
       mapInstanceRef.current = null
     }
-  }, [mapCenter, hasSubjectPin, subjectLat, subjectLng, subjectAddress, onReady, onStyleError, canMountMap, radiusMiles])
-
-  useEffect(() => {
-    if (!mapReady) return
-    fitAllBounds()
-  }, [mapReady, fitBoundsToken, fitAllBounds])
+  // Remount only when subject anchor changes or map becomes mountable from empty state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapBootKey, canMountMap])
 
   useEffect(() => {
     const map = mapInstanceRef.current
@@ -196,8 +216,9 @@ export function EvidenceMap({
     const map = mapInstanceRef.current
     if (!map || !mapReady) return
 
-    markersRef.current.forEach((marker) => marker.remove())
-    markersRef.current.clear()
+    const signature = evidenceSignature(evidence)
+    if (signature === evidenceSigRef.current) return
+    evidenceSigRef.current = signature
 
     const clusters = new Map<string, CompTransactionEvidence>()
     for (const row of evidence) {
@@ -205,46 +226,81 @@ export function EvidenceMap({
       if (!clusters.has(clusterId)) clusters.set(clusterId, row)
     }
 
+    const nextIds = new Set<string>()
     for (const row of clusters.values()) {
       const lat = row.geography.latitude
       const lng = row.geography.longitude
       if (!isValidCoord(lat, lng)) continue
 
       const id = markerId(row)
+      nextIds.add(id)
+      const existing = markersRef.current.get(id)
+      if (existing) {
+        existing.row = row
+        existing.marker.setLngLat([lng!, lat!])
+        continue
+      }
+
       const tone = pinTone(row)
       const el = document.createElement('button')
       el.type = 'button'
-      el.className = [
-        'ci-comp-pin',
-        `ci-comp-pin--${tone}`,
-        selectedId === id ? 'is-selected' : '',
-        hoveredId === id ? 'is-hovered' : '',
-        row.package_probability != null && row.package_probability > 0.5 ? 'is-package' : '',
-      ].filter(Boolean).join(' ')
+      el.className = `ci-comp-pin ci-comp-pin--${tone}`
       el.setAttribute('aria-label', `${row.address ?? 'Comp'}: ${fmtK(row.sale_price)}`)
       el.innerHTML = `<span>${row.sale_price ? fmtK(row.sale_price) : tone === 'package' ? 'PKG' : '—'}</span>`
-      el.addEventListener('mouseenter', () => onHover(id))
-      el.addEventListener('mouseleave', () => onHover(null))
+      el.addEventListener('mouseenter', () => onHoverRef.current(id))
+      el.addEventListener('mouseleave', () => onHoverRef.current(null))
       el.addEventListener('click', (event) => {
         event.stopPropagation()
-        onSelect(id)
+        onSelectRef.current(id)
       })
 
       const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([lng!, lat!])
         .addTo(map)
-      markersRef.current.set(id, marker)
+      markersRef.current.set(id, { marker, row })
     }
 
-    if (fitBoundsToken > 0) fitAllBounds()
-  }, [evidence, mapReady, selectedId, hoveredId, onHover, onSelect, fitBoundsToken, fitAllBounds])
+    for (const [id, entry] of markersRef.current.entries()) {
+      if (!nextIds.has(id)) {
+        entry.marker.remove()
+        markersRef.current.delete(id)
+      }
+    }
+
+    if (!initialFitDoneRef.current && nextIds.size > 0) {
+      initialFitDoneRef.current = true
+      fitAllBounds(true)
+    }
+  }, [evidence, mapReady, fitAllBounds])
+
+  useEffect(() => {
+    for (const [id, entry] of markersRef.current.entries()) {
+      const el = entry.marker.getElement()
+      if (!el) continue
+      const tone = pinTone(entry.row)
+      el.className = [
+        'ci-comp-pin',
+        `ci-comp-pin--${tone}`,
+        selectedId === id ? 'is-selected' : '',
+        hoveredId === id ? 'is-hovered' : '',
+        entry.row.package_probability != null && entry.row.package_probability > 0.5 ? 'is-package' : '',
+      ].filter(Boolean).join(' ')
+    }
+  }, [selectedId, hoveredId])
+
+  useEffect(() => {
+    if (!mapReady) return
+    if (fitBoundsToken === lastFitTokenRef.current) return
+    lastFitTokenRef.current = fitBoundsToken
+    fitAllBounds(true)
+  }, [fitBoundsToken, mapReady, fitAllBounds])
 
   useEffect(() => {
     if (!mapReady) return
     const map = mapInstanceRef.current
     if (!map) return
     requestAnimationFrame(() => map.resize())
-  }, [mapReady, fitBoundsToken])
+  }, [mapReady])
 
   return <div ref={mapRef} className="ci-map-canvas" role="application" aria-label="Transaction evidence map" />
 }
