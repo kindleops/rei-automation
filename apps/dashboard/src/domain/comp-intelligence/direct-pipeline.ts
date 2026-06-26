@@ -8,13 +8,29 @@ import { fetchPropertyRecord } from './property-record-loader'
 import type { CompCandidateEvidence, CompIntelligencePayload, CanonicalSubjectProperty } from './types'
 import type { CompIntelligenceDecisionProjection } from './v3-types'
 
-const EXPANSION_STEPS = [
+export const COMP_SEARCH_EXPANSION_STEPS = [
+  { radius: 0.25, monthsBack: 6, label: 'radius_0.25mi_6mo', confidencePenalty: 0 },
   { radius: 0.5, monthsBack: 6, label: 'strict_nearby', confidencePenalty: 0 },
   { radius: 1, monthsBack: 6, label: 'radius_1mi_6mo', confidencePenalty: 2 },
   { radius: 1, monthsBack: 12, label: 'radius_1mi_12mo', confidencePenalty: 5 },
+  { radius: 1.5, monthsBack: 12, label: 'radius_1.5mi_12mo', confidencePenalty: 6 },
   { radius: 3, monthsBack: 12, label: 'radius_3mi_12mo', confidencePenalty: 8 },
   { radius: 5, monthsBack: 24, label: 'radius_5mi_24mo', confidencePenalty: 14 },
-]
+] as const
+
+export type CompSearchExpansionStep = (typeof COMP_SEARCH_EXPANSION_STEPS)[number]
+
+export function getNextExpansionStep(
+  radius: number,
+  monthsBack: number,
+): CompSearchExpansionStep | null {
+  const idx = COMP_SEARCH_EXPANSION_STEPS.findIndex(
+    (step) => step.radius === radius && step.monthsBack === monthsBack,
+  )
+  const nextIdx = idx >= 0 ? idx + 1 : COMP_SEARCH_EXPANSION_STEPS.findIndex((step) => step.radius > radius || step.monthsBack > monthsBack)
+  if (nextIdx < 0 || nextIdx >= COMP_SEARCH_EXPANSION_STEPS.length) return null
+  return COMP_SEARCH_EXPANSION_STEPS[nextIdx]
+}
 
 function evidenceNumber(value: number | null, source: string) {
   return {
@@ -105,6 +121,9 @@ function mapRpcRow(
     city: String(row.property_address_city || row.city || ''),
     state: String(row.property_address_state || row.state || ''),
     zip: String(row.property_address_zip || row.zip || ''),
+    year_built: Number(row.year_built) || null,
+    lot_square_feet: Number(row.lot_square_feet) || null,
+    property_type: String(row.property_type || row.normalized_asset_class || row.asset_class || '') || null,
     similarity_score: Number(row.similarity_score) || null,
     comp_match_label: 'Recovered evidence',
     selected: true,
@@ -160,41 +179,38 @@ function buildDegradedProjection(candidateCount: number): CompIntelligenceDecisi
   }
 }
 
-async function discoverCandidatesWithExpansion(
+async function discoverCandidatesExact(
   propertyId: string,
-  canonical: NonNullable<ReturnType<typeof resolveCanonicalProperty>>,
-  maxRadius: number,
+  radius: number,
+  monthsBack: number,
 ) {
-  const relaxations: Array<Record<string, unknown>> = []
-  let candidates: CompCandidateEvidence[] = []
-  let searchMode = 'subject_radius'
-  let expansionUsed: (typeof EXPANSION_STEPS)[number] | null = null
-
-  const steps = EXPANSION_STEPS.filter((step) => step.radius <= maxRadius)
-  const effectiveSteps = steps.length ? steps : EXPANSION_STEPS
-
-  for (const step of effectiveSteps) {
-    const rows = await loadSubjectComps(propertyId, step.radius, step.monthsBack, 100)
-    candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
-    relaxations.push({
-      step: step.label,
-      radius_miles: step.radius,
-      months_back: step.monthsBack,
+  const rows = await loadSubjectComps(propertyId, radius, monthsBack, 100)
+  const candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
+  return {
+    searchMode: 'subject_radius' as const,
+    relaxations: [{
+      step: 'exact_radius',
+      radius_miles: radius,
+      months_back: monthsBack,
       result_count: candidates.length,
-      confidence_penalty: step.confidencePenalty,
-    })
-    expansionUsed = step
-    if (candidates.length >= 3) break
+      confidence_penalty: 0,
+    }],
+    candidates,
+    isMarketFallback: false,
   }
+}
 
-  if (!candidates.length) {
-    searchMode = 'market_fallback'
-    const market = canonical.market || undefined
-    const zip = canonical.zip || undefined
-    const monthsBack = 12
-    const rows = await loadMarketComps(market, zip, 100, { monthsBack })
-    candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
-    relaxations.push({
+async function discoverCandidatesMarketFallback(
+  canonical: NonNullable<ReturnType<typeof resolveCanonicalProperty>>,
+  monthsBack = 12,
+) {
+  const market = canonical.market || undefined
+  const zip = canonical.zip || undefined
+  const rows = await loadMarketComps(market, zip, 100, { monthsBack })
+  const candidates = rows.map((row, index) => mapRpcRow(row as unknown as Record<string, unknown>, index))
+  return {
+    searchMode: 'market_fallback' as const,
+    relaxations: [{
       step: 'market_fallback',
       market,
       zip,
@@ -202,15 +218,9 @@ async function discoverCandidatesWithExpansion(
       result_count: candidates.length,
       confidence_penalty: 25,
       reason: canonical.coordinate_failure_reason ?? 'subject_coordinates_unavailable',
-    })
-  }
-
-  return {
-    searchMode,
-    expansionUsed,
-    relaxations,
+    }],
     candidates,
-    isMarketFallback: searchMode === 'market_fallback',
+    isMarketFallback: true,
   }
 }
 
@@ -247,8 +257,10 @@ export async function runDirectCompIntelligence({
   if (!canonical) return null
 
   const subject = toCanonicalSubject(canonical)
-  const maxRadius = Math.max(radius, monthsBack >= 12 ? 3 : 1)
-  const discoveryResult = await discoverCandidatesWithExpansion(canonical.property_id, canonical, maxRadius)
+  let discoveryResult = await discoverCandidatesExact(canonical.property_id, radius, monthsBack)
+  if (!discoveryResult.candidates.length) {
+    discoveryResult = await discoverCandidatesMarketFallback(canonical, monthsBack)
+  }
   const { candidates, relaxations, searchMode, isMarketFallback } = discoveryResult
   const sourcePath = isMarketFallback ? 'MARKET_FALLBACK' as const : 'DIRECT_RPC' as const
   const transactionEvidence = mapCandidatesToDegradedEvidence(candidates, sourcePath)

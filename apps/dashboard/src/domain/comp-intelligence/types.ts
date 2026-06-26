@@ -77,6 +77,9 @@ export interface CompCandidateEvidence {
   bedrooms?: number | null
   bathrooms?: number | null
   square_feet?: number | null
+  lot_square_feet?: number | null
+  year_built?: number | null
+  property_type?: string | null
   ppsf?: number | null
   ppu?: number | null
   address?: string | null

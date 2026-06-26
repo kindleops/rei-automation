@@ -154,6 +154,9 @@ export interface CompTransactionEvidence {
   bedrooms?: number | null
   bathrooms?: number | null
   units?: number | null
+  year_built?: number | null
+  lot_square_feet?: number | null
+  property_type?: string | null
   comp_match_label?: string | null
 }
 

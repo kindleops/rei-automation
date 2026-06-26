@@ -61,6 +61,9 @@ export function mapCandidateToDegradedEvidence(
     bedrooms: candidate.bedrooms ?? null,
     bathrooms: candidate.bathrooms ?? null,
     units: candidate.units ?? null,
+    year_built: candidate.year_built ?? null,
+    lot_square_feet: candidate.lot_square_feet ?? null,
+    property_type: candidate.property_type ?? candidate.asset_type ?? null,
     comp_match_label: candidate.comp_match_label ?? null,
   }
 }

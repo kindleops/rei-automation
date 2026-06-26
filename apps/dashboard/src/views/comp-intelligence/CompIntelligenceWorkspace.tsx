@@ -1,31 +1,33 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCompIntelligence } from '../../domain/comp-intelligence/useCompIntelligence'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
-import { CompDecisionHeader } from './components/CompDecisionHeader'
-import { CompOverviewHero } from './components/CompOverviewHero'
-import { CompStatusBar } from './components/CompStatusBar'
-import { ValuationUniverseGrid } from './components/ValuationUniverseGrid'
 import { EvidenceMap } from './components/EvidenceMap'
 import { MapCommandRail } from './components/MapCommandRail'
 import { MapStatePanel } from './components/MapStatePanel'
-import { MapDetailPopover } from './components/MapDetailPopover'
-import { TransactionEvidenceList } from './components/TransactionEvidenceList'
-import { OfferBridge } from './components/OfferBridge'
-import { StrategyMatrix } from './components/StrategyMatrix'
-import { ModelHealthDrawer } from './components/ModelHealthDrawer'
+import { SelectedCompPreview } from './components/SelectedCompPreview'
+import { SubjectPropertyCard } from './components/SubjectPropertyCard'
+import { CompMarketSummary } from './components/CompMarketSummary'
+import { PropertyCompCard } from './components/PropertyCompCard'
+import { OfficialDecisionSection } from './components/OfficialDecisionSection'
+import { AdvancedModelDetails } from './components/AdvancedModelDetails'
 import { useCompDecisionProjection } from './hooks/useCompDecisionProjection'
 import { useCompEvidenceFilters } from './hooks/useCompEvidenceFilters'
+import { useAnalystScenario } from './hooks/useAnalystScenario'
 import {
   evidenceWithValidCoordinates,
   filterEvidenceByMapMode,
   mergeMapEvidence,
 } from './adapters/transactionEvidenceAdapter'
+import {
+  computeMarketSummary,
+  subjectFactsFromPayload,
+} from './utils/comp-display'
 import './comp-intelligence.css'
 
-type IntelTabId = 'OVERVIEW' | 'COMPS' | 'STRATEGIES' | 'MODEL'
-type ShellTabId = 'MAP' | 'INTELLIGENCE'
+type RightPaneTab = 'COMPS' | 'VALUE' | 'DECISION'
+type ShellTabId = 'MAP' | 'PROPERTY'
 
 interface Props {
   thread: InboxWorkflowThread | null
@@ -36,11 +38,11 @@ interface Props {
   paused?: boolean
 }
 
-const INTEL_TABS: { id: IntelTabId; label: string }[] = [
-  { id: 'OVERVIEW', label: 'Overview' },
-  { id: 'COMPS', label: 'Comps' },
-  { id: 'STRATEGIES', label: 'Strategies' },
-  { id: 'MODEL', label: 'Model' },
+const QUALITY_FILTERS = [
+  { id: 'all' as const, label: 'All comps' },
+  { id: 'strong' as const, label: 'Strong' },
+  { id: 'usable' as const, label: 'Usable' },
+  { id: 'excluded' as const, label: 'Excluded' },
 ]
 
 export function CompIntelligenceWorkspace({
@@ -50,14 +52,14 @@ export function CompIntelligenceWorkspace({
   layoutMode = 'split',
   paused = false,
 }: Props) {
-  const [intelTab, setIntelTab] = useState<IntelTabId>('OVERVIEW')
+  const [rightTab, setRightTab] = useState<RightPaneTab>('COMPS')
   const [shellTab, setShellTab] = useState<ShellTabId>('MAP')
-  const [radius, setRadius] = useState(1)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [openPopoverId, setOpenPopoverId] = useState<string | null>(null)
   const [mapStyleError, setMapStyleError] = useState(false)
   const [fitBoundsToken, setFitBoundsToken] = useState(0)
-  const intelPaneRef = useRef<HTMLDivElement | null>(null)
+  const [recenterToken, setRecenterToken] = useState(0)
+  const propertyPaneRef = useRef<HTMLDivElement | null>(null)
 
   const urlPropertyId = useMemo(() => {
     if (typeof window === 'undefined') return null
@@ -98,36 +100,48 @@ export function CompIntelligenceWorkspace({
     error,
     dataSource,
     pipelineState,
-  } = useCompIntelligence({ thread: effectiveThread, dealContext: effectiveDealContext, radius, paused })
+    radius,
+    setRadius,
+    monthsBack,
+    expansionLog,
+    findMoreComps,
+    canExpandFurther,
+  } = useCompIntelligence({ thread: effectiveThread, dealContext: effectiveDealContext, paused })
 
   const v3 = useCompDecisionProjection(payload)
   const baseEvidence = useMemo(
     () => mergeMapEvidence(v3.evidence, discovery?.candidates ?? []),
     [v3.evidence, discovery?.candidates],
   )
-  const filters = useCompEvidenceFilters(baseEvidence)
-
-  const mapModeFiltered = useMemo(
-    () => filterEvidenceByMapMode(filters.filtered, filters.mapMode),
-    [filters.filtered, filters.mapMode],
-  )
-  const mappableEvidence = useMemo(
-    () => evidenceWithValidCoordinates(mapModeFiltered),
-    [mapModeFiltered],
-  )
-
-  const universes = useMemo(
-    () => [...new Set(baseEvidence.map((row) => row.routed_universe).filter(Boolean))] as string[],
+  const displayEvidence = useMemo(
+    () => filterEvidenceByMapMode(baseEvidence, 'PRICING'),
     [baseEvidence],
+  )
+  const filters = useCompEvidenceFilters(displayEvidence)
+  const scenario = useAnalystScenario(baseEvidence, v3.marketValue)
+
+  const mappableEvidence = useMemo(
+    () => evidenceWithValidCoordinates(filters.filtered),
+    [filters.filtered],
   )
 
   const address = subject?.canonical_address?.value
     || subject?.normalized_address?.value
     || 'Subject property'
 
+  const subjectFacts = useMemo(
+    () => subjectFactsFromPayload(subject, address),
+    [subject, address],
+  )
+
+  const marketSummary = useMemo(
+    () => computeMarketSummary(displayEvidence, radius, monthsBack, v3.isDegraded || !v3.isAuthoritative),
+    [displayEvidence, radius, monthsBack, v3.isDegraded, v3.isAuthoritative],
+  )
+
   const narrow = paneWidth === '25' || paneWidth === '50'
   const showMapPane = !narrow || shellTab === 'MAP'
-  const showIntelPane = !narrow || shellTab === 'INTELLIGENCE'
+  const showPropertyPane = !narrow || shellTab === 'PROPERTY'
   const canShowMap = mappableEvidence.length > 0 || hasCoords
 
   const openPopoverRow = useMemo(
@@ -135,25 +149,32 @@ export function CompIntelligenceWorkspace({
     [baseEvidence, openPopoverId],
   )
 
-  const handleSelectMarker = useCallback((id: string) => {
+  const showDecisionTab = v3.isAuthoritative
+  const showValueTab = v3.isAuthoritative && v3.marketValue != null
+
+  useEffect(() => {
+    if (!filters.selectedId) return
+    const stillPresent = baseEvidence.some((row) => (row.candidate_id || row.property_id || '') === filters.selectedId)
+    if (!stillPresent) filters.setSelectedId(null)
+  }, [baseEvidence, filters.selectedId, filters])
+
+  const handleSelectComp = useCallback((id: string) => {
     filters.setSelectedId(id)
     setOpenPopoverId((prev) => (prev === id ? null : id))
-    if (narrow) setShellTab('INTELLIGENCE')
-    setIntelTab('COMPS')
-  }, [filters, narrow])
-
-  const handleViewEvidence = useCallback(() => {
-    if (!openPopoverId) return
-    filters.setSelectedId(openPopoverId)
-    setIntelTab('COMPS')
-    if (narrow) setShellTab('INTELLIGENCE')
-    setOpenPopoverId(null)
+    if (narrow) setShellTab('PROPERTY')
+    setRightTab('COMPS')
     requestAnimationFrame(() => {
-      intelPaneRef.current
-        ?.querySelector(`[data-evidence-id="${CSS.escape(openPopoverId)}"]`)
+      propertyPaneRef.current
+        ?.querySelector(`[data-evidence-id="${CSS.escape(id)}"]`)
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     })
-  }, [openPopoverId, filters, narrow])
+  }, [filters, narrow])
+
+  const handleViewFullComp = useCallback(() => {
+    if (!openPopoverId) return
+    handleSelectComp(openPopoverId)
+    setOpenPopoverId(null)
+  }, [openPopoverId, handleSelectComp])
 
   const mapState = useMemo(() => {
     if (mapStyleError) return 'style_error' as const
@@ -172,7 +193,7 @@ export function CompIntelligenceWorkspace({
         <div className="ci-empty-state">
           <div className="ci-empty-state__icon">⌖</div>
           <strong>No Subject Selected</strong>
-          <p>Select a seller or property to launch comp intelligence evidence.</p>
+          <p>Select a seller or property to launch comp intelligence.</p>
         </div>
       </div>
     )
@@ -186,39 +207,39 @@ export function CompIntelligenceWorkspace({
             subjectLat={hasCoords ? coords.lat : null}
             subjectLng={hasCoords ? coords.lng : null}
             subjectAddress={address}
-            evidence={mapModeFiltered}
+            evidence={displayEvidence}
             radiusMiles={radius}
             selectedId={filters.selectedId}
             hoveredId={hoveredId}
             loading={loading}
-            onSelect={handleSelectMarker}
+            onSelect={handleSelectComp}
             onHover={setHoveredId}
             onStyleError={() => setMapStyleError(true)}
             fitBoundsToken={fitBoundsToken}
+            recenterToken={recenterToken}
           />
           {!hasCoords && mappableEvidence.length > 0 && (
             <div className="ci-map-subject-notice" role="note">
-              Subject pin unavailable — displaying market-level comp evidence
+              Subject pin unavailable — displaying recovered comp evidence on map
             </div>
           )}
           <MapCommandRail
-            mapMode={filters.mapMode}
-            setMapMode={filters.setMapMode}
             radius={radius}
             setRadius={setRadius}
-            filters={filters.filters}
-            setFilters={filters.setFilters}
-            visibleCount={mappableEvidence.length}
-            totalCount={baseEvidence.length}
+            visibleCount={displayEvidence.length}
             loading={loading}
             onResetBounds={() => setFitBoundsToken((n) => n + 1)}
-            universes={universes}
+            onFitComps={() => setFitBoundsToken((n) => n + 1)}
+            onRecenter={() => setRecenterToken((n) => n + 1)}
+            onFindMoreComps={() => { void findMoreComps() }}
+            expansionLog={expansionLog}
+            canExpand={canExpandFurther}
           />
           {openPopoverRow && (
-            <MapDetailPopover
+            <SelectedCompPreview
               row={openPopoverRow}
               onClose={() => setOpenPopoverId(null)}
-              onViewEvidence={handleViewEvidence}
+              onViewFull={handleViewFullComp}
             />
           )}
         </>
@@ -239,102 +260,143 @@ export function CompIntelligenceWorkspace({
     </div>
   )
 
-  const intelColumn = (
-    <div className="ci-panel ci-panel--v3" ref={intelPaneRef}>
-      <CompDecisionHeader
-        address={address}
-        projection={v3.projection}
-        dataSourceLabel={v3.isDegraded ? 'Evidence recovered' : dataSource === 'api' ? 'V3 projection' : 'Direct RPC'}
-      />
-
-      <CompStatusBar
-        evidenceCount={baseEvidence.length}
-        mappedCount={mappableEvidence.length}
-        isDegraded={v3.isDegraded}
-        isAuthoritative={v3.isAuthoritative}
-        searchMode={discovery?.search_mode}
-        subjectResolved={hasCoords}
-        liveAuthOff={!v3.authorizedOffer}
-      />
-
-      <nav className="ci-tabs ci-tabs--intel" role="tablist" aria-label="Intelligence sections">
-        {INTEL_TABS.map((tab) => (
+  const propertyColumn = (
+    <div className="ci-panel ci-panel--property" ref={propertyPaneRef}>
+      <nav className="ci-tabs ci-tabs--secondary" role="tablist" aria-label="Property views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={rightTab === 'COMPS'}
+          className={`ci-tab ${rightTab === 'COMPS' ? 'is-active' : ''}`}
+          onClick={() => setRightTab('COMPS')}
+        >
+          Comps
+        </button>
+        {showValueTab && (
           <button
-            key={tab.id}
             type="button"
             role="tab"
-            aria-selected={intelTab === tab.id}
-            className={`ci-tab ${intelTab === tab.id ? 'is-active' : ''}`}
-            onClick={() => setIntelTab(tab.id)}
+            aria-selected={rightTab === 'VALUE'}
+            className={`ci-tab ${rightTab === 'VALUE' ? 'is-active' : ''}`}
+            onClick={() => setRightTab('VALUE')}
           >
-            {tab.label}
+            Value
           </button>
-        ))}
+        )}
+        {showDecisionTab && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={rightTab === 'DECISION'}
+            className={`ci-tab ${rightTab === 'DECISION' ? 'is-active' : ''}`}
+            onClick={() => setRightTab('DECISION')}
+          >
+            Decision
+          </button>
+        )}
       </nav>
 
       <div className="ci-panel__scroll" role="tabpanel">
-        {intelTab === 'OVERVIEW' && (
+        {rightTab === 'COMPS' && (
           <>
-            <CompOverviewHero
-              isDegraded={v3.isDegraded}
-              isAuthoritative={v3.isAuthoritative}
-              projection={v3.projection}
-              marketValue={v3.marketValue}
-              marketClassification={v3.marketClassification}
-              conservativeBuyerExit={v3.conservativeBuyerExit}
-              shadowOffer={v3.shadowOffer}
-              authorizedOffer={v3.authorizedOffer}
-              evidenceCount={baseEvidence.length}
-              mappedCount={mappableEvidence.length}
-              searchMode={discovery?.search_mode}
-              subjectResolved={hasCoords}
-              primaryStrategy={v3.primaryStrategy}
+            <SubjectPropertyCard
+              subject={subjectFacts}
+              radiusMiles={radius}
+              monthsBack={monthsBack}
+              compCount={displayEvidence.length}
+              loading={loading}
             />
-            {!v3.isDegraded && (
-              <OfferBridge
-                bridge={[]}
-                scenarioOffer={v3.offerAuthorization?.scenario_recommended_offer ?? null}
-                shadowOffer={v3.shadowOffer}
-                authorizedOffer={v3.authorizedOffer}
-              />
-            )}
-            <section className="ci-evidence-strip" aria-label="Top transaction evidence">
-              <header>
-                <h3>Transaction Evidence</h3>
-                <span>{baseEvidence.length} records · {mappableEvidence.length} mapped</span>
+            <CompMarketSummary summary={marketSummary} />
+            <div className="ci-comp-filters" role="group" aria-label="Comp quality filters">
+              {QUALITY_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  className={`ci-comp-filter-btn${filters.qualityFilter === filter.id ? ' is-active' : ''}`}
+                  onClick={() => filters.setQualityFilter(filter.id)}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+            <section className="ci-comp-list-section" aria-label="Comparable properties">
+              <header className="ci-comp-list-section__head">
+                <h3>Comparable Properties</h3>
+                <span>{filters.filtered.length} shown</span>
               </header>
-              <TransactionEvidenceList
-                rows={filters.filtered.slice(0, 5)}
-                selectedId={filters.selectedId}
-                hoveredId={hoveredId}
-                onSelect={handleSelectMarker}
-                onHover={setHoveredId}
-                height={360}
-                compact
-              />
+              {loading && !filters.filtered.length ? (
+                <div className="ci-comp-skeleton-list" aria-hidden>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="ci-comp-skeleton" />
+                  ))}
+                </div>
+              ) : !filters.filtered.length ? (
+                <p className="ci-empty">No comps match the current search and filters.</p>
+              ) : (
+                <div className="ci-evidence-list">
+                  {filters.filtered.map((row) => {
+                    const id = row.candidate_id || row.property_id || ''
+                    return (
+                      <PropertyCompCard
+                        key={id || row.address || ''}
+                        row={row}
+                        subject={subjectFacts}
+                        selected={filters.selectedId === id}
+                        hovered={hoveredId === id}
+                        expanded={filters.selectedId === id}
+                        scenarioIncluded={scenario.includedOverrides.has(id)}
+                        scenarioExcluded={scenario.excludedOverrides.has(id)}
+                        onSelect={handleSelectComp}
+                        onHover={setHoveredId}
+                        onIncludeScenario={scenario.toggleInclude}
+                        onExcludeScenario={scenario.toggleExclude}
+                      />
+                    )
+                  })}
+                </div>
+              )}
             </section>
+            <OfficialDecisionSection
+              projection={v3.projection}
+              isAuthoritative={v3.isAuthoritative}
+              supportingCompCount={v3.evidence.filter((r) => r.pricing_eligibility).length}
+            />
+            <AdvancedModelDetails
+              projection={v3.projection}
+              modelHealth={v3.modelHealth}
+              dataSource={dataSource}
+              executionState={v3.executionState}
+              canonicalLane={v3.canonicalLane}
+            />
           </>
         )}
 
-        {intelTab === 'COMPS' && (
-          <TransactionEvidenceList
-            rows={filters.filtered}
-            selectedId={filters.selectedId}
-            hoveredId={hoveredId}
-            onSelect={handleSelectMarker}
-            onHover={setHoveredId}
-            height={720}
-          />
+        {rightTab === 'VALUE' && showValueTab && (
+          <section className="ci-value-pane">
+            <h3>Qualified Market Value</h3>
+            <p className="ci-value-pane__amount tabular-nums">
+              {v3.marketValue != null
+                ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v3.marketValue)
+                : '—'}
+            </p>
+            <p className="ci-value-pane__note">Official V3 valuation projection</p>
+          </section>
         )}
 
-        {intelTab === 'STRATEGIES' && (
-          <StrategyMatrix ranked={v3.projection?.strategy_ranking?.ranked} />
-        )}
-
-        {intelTab === 'MODEL' && (
+        {rightTab === 'DECISION' && showDecisionTab && (
           <>
-            <ValuationUniverseGrid universes={v3.universes} />
-            <ModelHealthDrawer health={v3.modelHealth} open onClose={() => setIntelTab('OVERVIEW')} />
+            <OfficialDecisionSection
+              projection={v3.projection}
+              isAuthoritative
+              supportingCompCount={v3.evidence.filter((r) => r.pricing_eligibility).length}
+            />
+            <AdvancedModelDetails
+              projection={v3.projection}
+              modelHealth={v3.modelHealth}
+              dataSource={dataSource}
+              executionState={v3.executionState}
+              canonicalLane={v3.canonicalLane}
+            />
           </>
         )}
       </div>
@@ -343,24 +405,26 @@ export function CompIntelligenceWorkspace({
 
   return (
     <div
-      className={`ci-workspace ci-workspace--v3-mapfirst is-pane-${paneWidth} is-layout-${layoutMode} is-mode-${filters.mapMode}`}
+      className={`ci-workspace ci-workspace--property-first is-pane-${paneWidth} is-layout-${layoutMode}`}
       data-comp-intelligence="true"
       data-pipeline={pipelineState}
       data-source={dataSource}
       data-property-id={propertyId}
       data-evidence-count={baseEvidence.length}
       data-mapped-count={mappableEvidence.length}
+      data-radius={radius}
+      data-months-back={monthsBack}
     >
       {narrow && (
         <nav className="ci-shell-tabs" role="tablist" aria-label="Workspace shell">
           <button type="button" className={shellTab === 'MAP' ? 'is-active' : ''} onClick={() => setShellTab('MAP')}>Map</button>
-          <button type="button" className={shellTab === 'INTELLIGENCE' ? 'is-active' : ''} onClick={() => setShellTab('INTELLIGENCE')}>Intelligence</button>
+          <button type="button" className={shellTab === 'PROPERTY' ? 'is-active' : ''} onClick={() => setShellTab('PROPERTY')}>Property</button>
         </nav>
       )}
 
       <div className={`ci-split ${narrow ? 'ci-split--narrow' : ''}`}>
         {showMapPane && mapColumn}
-        {showIntelPane && intelColumn}
+        {showPropertyPane && propertyColumn}
       </div>
     </div>
   )

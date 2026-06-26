@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getNextExpansionStep } from './direct-pipeline'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { resolveCanonicalProperty } from '../canonical-property/resolver'
@@ -55,18 +56,19 @@ function mapPipelineState(payload: CompIntelligencePayload | null, loading: bool
 export function useCompIntelligence({
   thread,
   dealContext,
-  radius = 1,
-  monthsBack = 6,
+  initialRadius = 1,
+  initialMonthsBack = 12,
   assetClass,
   paused = false,
 }: {
   thread: InboxWorkflowThread | null
   dealContext?: DealContext | null
-  radius?: number
-  monthsBack?: number
+  initialRadius?: number
+  initialMonthsBack?: number
   assetClass?: string
   paused?: boolean
 }) {
+  const [radius, setRadius] = useState(initialRadius)
   const t = thread as Record<string, unknown> | null
   const opportunityId = String((dealContext as Record<string, unknown> | null)?.opportunityId || t?.opportunity_id || '')
 
@@ -85,6 +87,10 @@ export function useCompIntelligence({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<'api' | 'direct_rpc' | null>(null)
+  const [monthsBack, setMonthsBack] = useState(initialMonthsBack)
+  const [expansionLog, setExpansionLog] = useState<string | null>(null)
+  const priorSearchRef = useRef<{ radius: number; monthsBack: number; count: number } | null>(null)
+  const pendingExpansionRef = useRef<{ fromRadius: number; fromMonths: number; fromCount: number } | null>(null)
 
   useEffect(() => {
     if (!propertyId) {
@@ -215,7 +221,7 @@ export function useCompIntelligence({
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [propertyId, radius, monthsBack, assetClass, threadKey, opportunityId, masterOwnerId, dealContext, thread])
+  }, [propertyId, radius, monthsBack, assetClass, threadKey, opportunityId, masterOwnerId, dealContext, thread, propertyRecord])
 
   useEffect(() => {
     if (paused || !propertyId) return
@@ -224,6 +230,42 @@ export function useCompIntelligence({
     return () => controller.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh identity is stable enough; avoid aborting in-flight RPC on unrelated renders
   }, [paused, propertyId, radius, monthsBack, assetClass])
+
+  useEffect(() => {
+    const count = payload?.discovery?.counts?.total
+      ?? payload?.transaction_evidence?.length
+      ?? 0
+    const pending = pendingExpansionRef.current
+    if (pending && count >= 0) {
+      const added = Math.max(0, count - pending.fromCount)
+      setExpansionLog(
+        `Expanded from ${pending.fromRadius} mi / ${pending.fromMonths} months to ${radius} mi / ${monthsBack} months. Found ${added} additional sale${added === 1 ? '' : 's'}.`,
+      )
+      pendingExpansionRef.current = null
+    }
+    priorSearchRef.current = { radius, monthsBack, count }
+  }, [payload, radius, monthsBack])
+
+  const findMoreComps = useCallback(() => {
+    const next = getNextExpansionStep(radius, monthsBack)
+    if (!next) {
+      setExpansionLog('Search already at maximum expansion.')
+      return false
+    }
+    const currentCount = payload?.discovery?.counts?.total
+      ?? payload?.transaction_evidence?.length
+      ?? 0
+    pendingExpansionRef.current = {
+      fromRadius: radius,
+      fromMonths: monthsBack,
+      fromCount: currentCount,
+    }
+    setRadius(next.radius)
+    setMonthsBack(next.monthsBack)
+    return true
+  }, [radius, monthsBack, payload])
+
+  const canExpandFurther = getNextExpansionStep(radius, monthsBack) != null
 
   const subject = payload?.subject ?? null
 
@@ -285,6 +327,13 @@ export function useCompIntelligence({
     loading,
     error,
     dataSource,
+    radius,
+    setRadius,
+    monthsBack,
+    setMonthsBack,
+    expansionLog,
+    findMoreComps,
+    canExpandFurther,
     refresh,
   }
 }

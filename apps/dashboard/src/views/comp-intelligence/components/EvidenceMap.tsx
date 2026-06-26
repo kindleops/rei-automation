@@ -28,6 +28,7 @@ interface Props {
   onHover: (id: string | null) => void
   onStyleError?: () => void
   fitBoundsToken?: number
+  recenterToken?: number
 }
 
 const DARK_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -95,6 +96,7 @@ export function EvidenceMap({
   onHover,
   onStyleError,
   fitBoundsToken = 0,
+  recenterToken = 0,
 }: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<maplibregl.Map | null>(null)
@@ -103,6 +105,7 @@ export function EvidenceMap({
   const [mapReady, setMapReady] = useState(false)
   const initialFitDoneRef = useRef(false)
   const lastFitTokenRef = useRef(fitBoundsToken)
+  const lastRecenterTokenRef = useRef(recenterToken)
   const evidenceSigRef = useRef('')
 
   const onSelectRef = useRef(onSelect)
@@ -294,6 +297,14 @@ export function EvidenceMap({
     lastFitTokenRef.current = fitBoundsToken
     fitAllBounds(true)
   }, [fitBoundsToken, mapReady, fitAllBounds])
+
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map || !mapReady || !hasSubjectPin) return
+    if (recenterToken === lastRecenterTokenRef.current) return
+    lastRecenterTokenRef.current = recenterToken
+    map.flyTo({ center: [subjectLng!, subjectLat!], zoom: 15, duration: 450 })
+  }, [recenterToken, mapReady, hasSubjectPin, subjectLat, subjectLng])
 
   useEffect(() => {
     if (!mapReady) return
