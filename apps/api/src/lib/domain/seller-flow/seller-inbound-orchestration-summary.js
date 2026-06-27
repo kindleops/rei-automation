@@ -49,7 +49,7 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
     stage_before: decision?.stage_before || null,
     stage_after: decision?.stage_after || null,
     queued: Boolean(execution?.queued),
-    followup_scheduled: Boolean(follow_up?.followup_created),
+    followup_scheduled: Boolean(follow_up?.followup_created || follow_up?.scheduled_for),
     duplicate_suppressed: Boolean(orchestration.idempotent?.duplicate_suppressed),
     auto_reply_mode: orchestration.auto_reply_mode || null,
     execution_allowed: orchestration.execution_allowed ?? null,
