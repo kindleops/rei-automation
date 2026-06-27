@@ -34,9 +34,9 @@ export const SELLER_FLOW_SAFETY_POLICY = Object.freeze({
       safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
     },
     not_interested: {
-      next_stage: SELLER_FLOW_STAGES.TERMINAL,
-      template: SELLER_FLOW_STAGES.NOT_INTERESTED,
-      safety: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
+      next_stage: SELLER_FLOW_STAGES.CONSIDER_SELLING,
+      template: SELLER_FLOW_STAGES.CONSIDER_SELLING_FOLLOW_UP,
+      safety: SELLER_FLOW_SAFETY_TIERS.REVIEW,
     },
     unclear: {
       next_stage: SELLER_FLOW_STAGES.OWNERSHIP_CHECK,

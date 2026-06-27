@@ -20,6 +20,7 @@ import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ens
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
+import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
@@ -511,8 +512,47 @@ function computeInboundAutomationDecisionRaw({
  * / reply_mode / next_action / suppression_reason, so no new automated sends are
  * introduced — only owned-workflow + fallback metadata are attached.
  */
+function applyOwnershipProbeOverlay(decision = {}, args = {}) {
+  const ownership_probe = resolveOwnershipProbeDisinterestTransition({
+    classification: args.classification || {},
+    messageEvent: {
+      message_body: args.message,
+      direction: "inbound",
+    },
+    existingState: {
+      conversation_stage:
+        args.latestThreadContext?.summary?.conversation_stage ||
+        args.classification?.stage_hint ||
+        null,
+      seller_stage: args.latestThreadContext?.summary?.seller_stage || null,
+      ownership_status: args.latestThreadContext?.summary?.ownership_status || null,
+    },
+  });
+
+  if (!ownership_probe) return decision;
+
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_suppress_contact: false,
+    should_mark_human_review: false,
+    reply_mode: "none",
+    route_hint: "consider_selling",
+    stage_hint: "consider_selling",
+    allowed_template_stages: ["consider_selling", "consider_selling_follow_up"],
+    next_action: "schedule_later_followup",
+    audit_reason: "s1_not_for_sale_advance_with_followup",
+    ownership_status: ownership_probe.ownership_status,
+    ownership_inference_reason: ownership_probe.ownership_inference_reason,
+    disposition: ownership_probe.disposition,
+    lead_temperature: ownership_probe.lead_temperature,
+    follow_up_at: ownership_probe.follow_up_at,
+    operational_status: ownership_probe.operational_status,
+  };
+}
+
 export function applyInboundAutomationDecision(args = {}) {
-  const raw = computeInboundAutomationDecisionRaw(args);
+  const raw = applyOwnershipProbeOverlay(computeInboundAutomationDecisionRaw(args), args);
   const classification = args.classification || {};
   const stage =
     clean(classification.stage_hint) ||

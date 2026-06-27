@@ -20,21 +20,13 @@ import { maybeCreateContractFromAcceptedOffer } from "@/lib/domain/contracts/may
 import { isOfferStageTrigger, runOfferStageAI, buildOfferStageMetadata, shouldSkipOfferStageAI } from "@/lib/domain/offers/offer-stage-ai-integration.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
-import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
-import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
-import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
-import {
-  buildIntelligenceMessageEventPatch,
-  persistInboundIntelligenceSnapshot,
-  persistSellerContactReferral,
-} from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
-import { executeReferralAutomation } from "@/lib/domain/seller-flow/execute-referral-automation.js";
+import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
+import { buildIntelligenceMessageEventPatch } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
 import {
   autoReplyModeAllowsDiagnostics,
   autoReplyModeAllowsQueue,
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
-import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import {
   normalizeSellerFlowUseCase,
   SELLER_FLOW_STAGES,
@@ -91,13 +83,7 @@ const defaultDeps = {
   maybeCreateContractFromAcceptedOffer,
   syncPipelineState,
   processAutonomousSellerReply,
-  resolveSellerAutoReplyPlan,
-  executeInboundAutomationDecision,
-  runInboundIntelligencePhase,
-  persistInboundIntelligenceSnapshot,
-  persistSellerContactReferral,
-  executeReferralAutomation,
-  scheduleFollowUp,
+  processSellerInboundMessage,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
   cancelPendingQueueItemsForOwner,
@@ -1515,22 +1501,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           })
         : { ok: true, skipped: true, reason: "podio_sync_disabled" };
 
-      const legacy_auto_reply_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
-        inbound_event: { item_id: inbound_message_event_id, provider_message_id: extracted.message_id, from: inbound_from, to: inbound_to },
-        message_body,
-        classification,
-        route,
-        conversation_context: context,
-        current_stage: context?.summary?.conversation_stage || null,
-        prior_use_case: route?.use_case || null,
-        recent_outbound: latest_outbound_event,
-        underwriting_signals: signals,
-        auto_reply_enabled: true,
-        force_queue_reply: false,
-        now: new Date().toISOString()
-      });
-      const auto_reply_plan = legacy_auto_reply_plan;
-
       const queue_permission = autoReplyModeAllowsQueue({
         mode: auto_reply_mode_final,
         inboundFrom: inbound_from,
@@ -1539,107 +1509,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       const execution_allowed = Boolean(
         inbound_auto_reply_queue_enabled && queue_permission.allowed
       );
-
-      const inbound_intelligence = await runtimeDeps.runInboundIntelligencePhase({
-        message: message_body,
-        threadKey: inbound_from,
-        propertyId: property_id,
-        prospectId: prospect_id,
-        ownerId: master_owner_id,
-        phoneId: phone_item_id,
-        classification,
-        conversationBrain: brain_item,
-        latestThreadContext: context,
-        context,
-        route,
-        inboundFrom: inbound_from,
-        inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
-        inboundEventId: inbound_message_event_id || extracted.message_id,
-        legacy_plan: legacy_auto_reply_plan,
-        auto_reply_mode: auto_reply_mode_final,
-        execution_allowed,
-        supabaseClient: runtimeDeps.getSupabaseClient?.(),
-      });
-
-      seller_stage_reply = inbound_intelligence?.seller_stage_reply || null;
-      intelligence_snapshot = inbound_intelligence?.intelligence_snapshot || null;
-
-      try {
-        await runtimeDeps.persistInboundIntelligenceSnapshot({
-          supabaseClient: runtimeDeps.getSupabaseClient?.(),
-          intelligence_snapshot,
-          provider_message_sid: extracted.message_id,
-          message_event_id: inbound_message_event_id,
-          dry_run: Boolean(dry_run),
-        });
-        if (intelligence_snapshot?.referral_detected) {
-          const referral_persist = await runtimeDeps.persistSellerContactReferral({
-            supabaseClient: runtimeDeps.getSupabaseClient?.(),
-            referral: intelligence_snapshot.referral,
-            dry_run: Boolean(dry_run),
-          });
-          if (
-            intelligence_snapshot?.referral?.referred_automatic_send_allowed
-            || intelligence_snapshot?.referred_automatic_send_allowed
-          ) {
-            await runtimeDeps.executeReferralAutomation({
-              supabaseClient: runtimeDeps.getSupabaseClient?.(),
-              relationship: intelligence_snapshot.referral,
-              context,
-              inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
-              inboundEventId: inbound_message_event_id || extracted.message_id,
-              referralId: referral_persist?.referral_id || null,
-              execution_allowed,
-              auto_reply_mode: auto_reply_mode_final,
-              dry_run: Boolean(dry_run),
-            });
-          }
-        }
-      } catch (persistErr) {
-        safeWarn("textgrid.inbound_intelligence_persist_failed", {
-          message_id: extracted.message_id,
-          inbound_from,
-          error: persistErr?.message || "unknown",
-        });
-      }
-
-      seller_followup_result = {
-        ok: true,
-        skipped: true,
-        shadow_only: true,
-        reason: "shadow_followup_recommendation_only",
-        ...(intelligence_snapshot?.follow_up_recommendation || {}),
-      };
-
-      // Phase B only: dispatchable follow-up rows remain gated by system controls.
-      try {
-        if (system_followup_enabled && execution_allowed) {
-          seller_followup_result = await runtimeDeps.scheduleFollowUp(
-            intelligence_snapshot?.canonical_intent || auto_reply_plan.inbound_intent,
-            inbound_from,
-            {
-              is_suppressed: Boolean(
-                intelligence_snapshot?.canonical_decision?.should_suppress_contact ||
-                auto_reply_plan.safety?.opt_out ||
-                auto_reply_plan.safety?.wrong_number ||
-                auto_reply_plan.safety?.hostile_or_legal
-              ),
-              source: "inbound_sms_handler",
-              inbound_message_event_id,
-              master_owner_id,
-              property_id,
-              classification_confidence: classification?.confidence ?? null,
-            }
-          );
-        }
-      } catch (err) {
-        safeWarn("textgrid.inbound_followup_schedule_failed", {
-          message_id: extracted.message_id,
-          inbound_from,
-          intent: intelligence_snapshot?.canonical_intent || auto_reply_plan.inbound_intent,
-          error: err?.message || "unknown",
-        });
-      }
 
       // ── SEGMENT: auto-reply live cap ─────────────────────────────────────
       // Cap live auto-replies at AUTO_REPLY_LIVE_CAP (default 5) for Phase 8 validation.
@@ -1673,6 +1542,57 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           });
         }
       }
+
+      const autopilot_schedule = runtimeDeps.buildInboundAutopilotSchedule(
+        inbound_autopilot_delay_seconds,
+        new Date().toISOString()
+      );
+      const autopilot_queue_overrides = deriveInboundAutopilotQueueOverrides({
+        autopilot_schedule,
+        context,
+      });
+
+      const seller_flow_execution_allowed =
+        execution_allowed && !cap_reached && offer_route !== "manual_review";
+
+      const seller_orchestration = await runtimeDeps.processSellerInboundMessage({
+        message: message_body,
+        threadKey: inbound_from,
+        propertyId: property_id,
+        prospectId: prospect_id,
+        ownerId: master_owner_id,
+        phoneId: phone_item_id,
+        classification,
+        conversationBrain: brain_item,
+        context,
+        route,
+        inboundFrom: inbound_from,
+        inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
+        inboundEventId: inbound_message_event_id || extracted.message_id,
+        providerMessageId: extracted.message_id,
+        stageBefore: stage_before,
+        autoReplyMode: auto_reply_mode_final,
+        executionAllowed: seller_flow_execution_allowed,
+        systemFollowupEnabled: system_followup_enabled,
+        inboundAutopilotDelaySeconds: inbound_autopilot_delay_seconds,
+        timezoneOverride: autopilot_queue_overrides.timezone_label,
+        contactWindowOverride: autopilot_queue_overrides.contact_window,
+        dryRun: Boolean(dry_run),
+        applySuppression: true,
+        underwritingSignals: signals,
+        recentOutbound: latest_outbound_event,
+        supabaseClient: runtimeDeps.getSupabaseClient?.(),
+        getSystemValue: runtimeDeps.getSystemValue,
+      });
+
+      const auto_reply_plan = seller_orchestration?.seller_stage_reply?.plan || {};
+      seller_stage_reply = seller_orchestration?.seller_stage_reply || null;
+      intelligence_snapshot = seller_orchestration?.intelligence_snapshot || null;
+      seller_followup_result = seller_orchestration?.follow_up || {
+        ok: true,
+        skipped: true,
+        reason: "not_attempted",
+      };
 
       // ── SEGMENT: auto-reply decision log ────────────────────────────────────
       // Structured log for every auto-reply decision — sent, blocked, and followup.
@@ -1716,15 +1636,6 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         action_type: "autopilot_inbound_reply",
       };
 
-      const autopilot_schedule = runtimeDeps.buildInboundAutopilotSchedule(
-        inbound_autopilot_delay_seconds,
-        new Date().toISOString()
-      );
-      const autopilot_queue_overrides = deriveInboundAutopilotQueueOverrides({
-        autopilot_schedule,
-        context,
-      });
-
       const is_preview = !auto_reply_plan.should_queue_reply;
       let cash_offer_snapshot_id = null;
       if (offer_route === "sfh_cash_preview") {
@@ -1746,16 +1657,12 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         extra_queue_context.condition_clarifier_reason = offer_routing?.reason || null;
       } else if (offer_route === "manual_review") {
         seller_stage_reply = {
-          ok: true,
+          ...(seller_stage_reply || {}),
           queued: false,
-          handled: true,
           reason: "offer_manual_review_no_auto_send",
-          plan: {
-            selected_use_case: null,
-            detected_intent: null,
-          },
-          brain_stage: null,
         };
+        extra_queue_context.offer_route = offer_route;
+        extra_queue_context.offer_manual_review = true;
 
         runtimeDeps.warn("textgrid.inbound_offer_manual_review", {
           message_id: extracted.message_id,
@@ -1766,77 +1673,33 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         });
       }
 
-      if (offer_route !== "manual_review") {
-        const should_queue_live = Boolean(
-          execution_allowed &&
-            !cap_reached &&
-            (
-              intelligence_snapshot?.canonical_decision?.should_queue_reply ??
-              auto_reply_plan?.should_queue_reply
-            )
-        );
+      if (seller_orchestration?.execution?.queued) {
+        const auto_reply_execution = seller_orchestration.execution;
+        extra_queue_context = {
+          ...extra_queue_context,
+          auto_reply_mode: auto_reply_mode_final,
+          auto_reply_mode_source: auto_reply_mode_resolution.source,
+          automation_decision:
+            auto_reply_execution?.automation_decision ||
+            intelligence_snapshot?.canonical_decision ||
+            seller_orchestration?.decision?.automation_decision ||
+            null,
+          human_review_required: Boolean(
+            auto_reply_execution?.automation_decision?.should_mark_human_review ||
+              intelligence_snapshot?.canonical_decision?.should_mark_human_review
+          ),
+          intelligence_snapshot,
+          seller_flow_decision: seller_orchestration?.decision || null,
+        };
 
-        if (execution_allowed) {
-          const auto_reply_execution = await runtimeDeps.executeInboundAutomationDecision({
-            message: message_body,
-            threadKey: inbound_from,
-            propertyId: property_id,
-            prospectId: prospect_id,
-            ownerId: master_owner_id,
-            phoneId: phone_item_id,
-            classification,
-            conversationBrain: brain_item,
-            latestThreadContext: context,
-            context,
-            inboundFrom: inbound_from,
-            inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
-            inboundEventId: inbound_message_event_id || extracted.message_id,
-            enableQueueInsert: should_queue_live,
-            applySuppression: true,
-            dryRun: !should_queue_live,
-            autoReplyMode: auto_reply_mode_final,
-            scheduleDelaySeconds: inbound_autopilot_delay_seconds,
-            timezoneOverride: autopilot_queue_overrides.timezone_label,
-            contactWindowOverride: autopilot_queue_overrides.contact_window,
-            supabaseClient: runtimeDeps.getSupabaseClient?.(),
-          });
-
-          seller_stage_reply = {
-            ...(seller_stage_reply || {}),
-            ...(auto_reply_execution?.seller_stage_reply || {}),
-            intelligence_snapshot,
-            automation_decision:
-              auto_reply_execution?.automation_decision ||
-              intelligence_snapshot?.canonical_decision ||
-              null,
-          };
-
-          extra_queue_context = {
-            ...extra_queue_context,
-            auto_reply_mode: auto_reply_mode_final,
-            auto_reply_mode_source: auto_reply_mode_resolution.source,
-            automation_decision:
-              auto_reply_execution?.automation_decision ||
-              intelligence_snapshot?.canonical_decision ||
-              null,
-            human_review_required: Boolean(
-              auto_reply_execution?.automation_decision?.should_mark_human_review ||
-                intelligence_snapshot?.canonical_decision?.should_mark_human_review
-            ),
-            intelligence_snapshot,
-          };
-
-          if (auto_reply_execution?.queued && auto_reply_execution?.queue_row_id) {
-            autopilot_queue_row = {
-              id: auto_reply_execution.queue_row_id,
-              queue_status: "queued",
-              scheduled_for: auto_reply_execution.queue_result?.raw?.scheduled_for || null,
-              scheduled_for_utc: auto_reply_execution.queue_result?.raw?.scheduled_for_utc || null,
-              scheduled_for_local: auto_reply_execution.queue_result?.raw?.scheduled_for_local || null,
-              metadata: { ...extra_queue_context, action_type: "autopilot_inbound_reply" },
-            };
-          }
-        }
+        autopilot_queue_row = {
+          id: auto_reply_execution.queue_row_id,
+          queue_status: "queued",
+          scheduled_for: auto_reply_execution.queue_result?.raw?.scheduled_for || null,
+          scheduled_for_utc: auto_reply_execution.queue_result?.raw?.scheduled_for_utc || null,
+          scheduled_for_local: auto_reply_execution.queue_result?.raw?.scheduled_for_local || null,
+          metadata: { ...extra_queue_context, action_type: "autopilot_inbound_reply" },
+        };
       }
 
       if (podio_sync_enabled && shouldCreateBrainForInbound({ brain_id, seller_stage_reply, context, route })) {

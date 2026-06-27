@@ -55,14 +55,8 @@ const EXPLICIT_INTENT_RULES = Object.freeze({
     should_queue_reply: false,
     suppression_reason: "opt_out_intent_no_marketing",
   }),
-  not_interested: Object.freeze({
-    next_stage: "not_interested",
-    template_use_case: "not_interested",
-    safety_tier: SELLER_FLOW_SAFETY_TIERS.SUPPRESS,
-    auto_send_eligible: false,
-    should_queue_reply: false,
-    suppression_reason: "not_interested_intent",
-  }),
+  // not_interested is stage-contextual: S1 property-knowledge replies advance to
+  // consider_selling with scheduled follow-up (see ownership-probe overlay).
   listed_or_unavailable: Object.freeze({
     next_stage: "listed_or_unavailable",
     template_use_case: "listed_or_unavailable",
