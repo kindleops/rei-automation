@@ -155,6 +155,9 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
   assert.ok(result.execution.rendered_message_text);
   assert.equal(result.execution.queued, false);
   assert.equal(result.auto_reply_mode, "live_limited");
+  assert.ok((result.decision?.workflow_events || []).length > 0);
+  assert.ok((result.decision?.notification_events || []).length > 0);
+  assert.ok(result.intelligence_message_event_patch);
 });
 
 test("processSellerInboundMessage schedules follow-up for S1 not-for-sale without immediate queue", async () => {
@@ -297,6 +300,10 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
   assert.equal(yes_case.normalized_intent, "ownership_confirmed");
   assert.equal(yes_case.decision.stage_after, "offer_interest");
   assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
+  assert.ok((yes_case.side_effects?.workflow_events || []).length > 0);
+  assert.ok((yes_case.side_effects?.notification_events || []).length > 0);
+  assert.equal(yes_case.side_effects?.notifications_dispatched, true);
+  assert.equal(yes_case.side_effects?.universal_state_dispatched, true);
 
   assert.ok(nfs_case);
   assert.equal(nfs_case.normalized_intent, "not_interested");
@@ -349,20 +356,14 @@ test("recovery worker reprocesses incomplete inbound rows through canonical orch
     },
   };
 
+  installIoBoundaryMocks({ supabase: orchestrationSupabase });
+
   const result = await recoverUnprocessedInboundMessages({
     supabaseClient: mockSupabase,
     limit: 5,
     dryRun: true,
     autoReplyMode: "live_limited",
     loadContextImpl: async () => proofContext,
-    processInboundImpl: async (args) => {
-      installIoBoundaryMocks({ supabase: orchestrationSupabase });
-      return processSellerInboundMessage({
-        ...args,
-        skipNotifications: true,
-        skipUniversalStatePatch: true,
-      });
-    },
   });
 
   assert.equal(result.ok, true);
@@ -371,4 +372,6 @@ test("recovery worker reprocesses incomplete inbound rows through canonical orch
   assert.equal(result.results[0].ok, true);
   assert.equal(result.results[0].normalized_intent, "ownership_confirmed");
   assert.equal(result.results[0].decision.stage_after, "offer_interest");
+  assert.ok((result.results[0].side_effects?.workflow_events || []).length > 0);
+  assert.ok((result.results[0].side_effects?.notification_events || []).length > 0);
 });

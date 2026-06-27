@@ -28,13 +28,20 @@ import {
   __resetTextgridInboundTestDeps,
 } from "@/lib/flows/handle-textgrid-inbound.js";
 import {
+  processSellerInboundMessage,
+  __setSellerInboundOrchestratorDeps,
+  __resetSellerInboundOrchestratorDeps,
+} from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
+import {
   makeInboundWebhookBaseDeps,
   makeInboundLifecycleSupabase,
 } from "../helpers/chainable-supabase.mjs";
+import { makeSellerOrchestrationSupabase } from "../helpers/seller-orchestration-test-supabase.mjs";
 import { createInMemoryIdempotencyLedger, createPodioItem } from "../helpers/test-helpers.js";
 
 afterEach(() => {
   __resetTextgridInboundTestDeps();
+  __resetSellerInboundOrchestratorDeps();
 });
 
 function baseClassification(overrides = {}) {
@@ -281,6 +288,28 @@ test("referral name extraction strips trailing Tel token", () => {
 });
 
 function installShadowInboundDeps(overrides = {}) {
+  const orchestrationSupabase =
+    overrides.orchestrationSupabase || makeSellerOrchestrationSupabase();
+  const workflow_events_emitted = [];
+
+  __setSellerInboundOrchestratorDeps({
+    getSupabaseClient: () => orchestrationSupabase,
+    patchUniversalLeadState: async ({ patch, threadKey }) => ({
+      ok: true,
+      dry_run: true,
+      patch,
+      thread_key: threadKey,
+    }),
+    emitAutomationEvent: async (event) => {
+      workflow_events_emitted.push(event);
+      return { ok: true };
+    },
+    persistInboundIntelligenceSnapshot: async () => ({ ok: true, dry_run: true }),
+    persistSellerContactReferral: async () => ({ ok: true, skipped: true }),
+    scheduleFollowUp: async () => ({ ok: true, skipped: true, reason: "test_shadow_skip" }),
+    ...(overrides.orchestratorDeps || {}),
+  });
+
   const ledger = createInMemoryIdempotencyLedger();
   __setTextgridInboundTestDeps({
     ...makeInboundWebhookBaseDeps(overrides),
@@ -308,45 +337,20 @@ function installShadowInboundDeps(overrides = {}) {
     findInboundAutopilotQueue: async () => null,
     buildInboundAutopilotSchedule: () => ({ scheduled_for: new Date().toISOString() }),
     notifyDiscordOps: async () => ({ ok: true }),
-    emitAutomationEvent: async () => ({ ok: true }),
     isNegativeReply: () => false,
     cancelPendingQueueItemsForOwner: async () => ({ canceled_count: 0 }),
     buildInboundConversationState: () => ({}),
     extractUnderwritingSignals: () => ({}),
     transferDealToUnderwriting: async () => null,
-    processSellerInboundMessage: async (args) => {
-      const { runInboundIntelligencePhase: real } = await import(
-        "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js"
-      );
-      const intelligence = await real({ ...args, supabaseClient: null });
-      const execution_allowed = Boolean(args.executionAllowed);
-      let execution = { ok: true, queued: false, seller_stage_reply: intelligence.seller_stage_reply };
-      if (execution_allowed && overrides.executeInboundAutomationDecision) {
-        execution = await overrides.executeInboundAutomationDecision(args);
-      }
-      return {
-        ok: true,
-        intelligence,
-        intelligence_snapshot: intelligence.intelligence_snapshot,
-        seller_stage_reply: {
-          ...(intelligence.seller_stage_reply || {}),
-          ...(execution?.seller_stage_reply || {}),
-        },
-        execution,
-        follow_up: { ok: true, skipped: true, reason: "test_shadow_skip" },
-        decision: null,
-        contract: null,
-        auto_reply_mode: args.autoReplyMode,
-        execution_allowed,
-      };
-    },
+    processSellerInboundMessage,
     ...overrides,
   });
+
+  return { workflow_events_emitted, orchestrationSupabase };
 }
 
 test("handleTextgridInbound enriches canonical event without queue row when autopilot disabled", async () => {
   const supabase_updates = [];
-  const queue_inserts = [];
 
   installShadowInboundDeps({
     getSupabaseClient: () => makeInboundLifecycleSupabase(),
@@ -356,10 +360,6 @@ test("handleTextgridInbound enriches canonical event without queue row when auto
     },
     classify: async () => baseClassification(),
     resolveRoute: async () => ({ stage: "Ownership Confirmation", use_case: "ownership_check" }),
-    executeInboundAutomationDecision: async () => {
-      queue_inserts.push("should_not_run");
-      return { ok: true, queued: true };
-    },
     getSystemFlags: async () => ({ auto_reply_enabled: false, followup_enabled: false }),
     getSystemValue: async (key) => {
       if (key === "auto_reply_mode") return "disabled";
@@ -381,7 +381,7 @@ test("handleTextgridInbound enriches canonical event without queue row when auto
   });
 
   assert.equal(result.ok, true);
-  assert.equal(queue_inserts.length, 0);
+  assert.equal(Boolean(result.seller_stage_reply?.queued), false);
 
   const authoritative = supabase_updates.find((row) => row.authoritative);
   assert.ok(authoritative);
@@ -390,8 +390,6 @@ test("handleTextgridInbound enriches canonical event without queue row when auto
 });
 
 test("Sharon referral inbound enriches intelligence without queue or SMS", async () => {
-  const queue_inserts = [];
-
   installShadowInboundDeps({
     getSupabaseClient: () => makeInboundLifecycleSupabase(),
     classify: async () => ({
@@ -402,10 +400,6 @@ test("Sharon referral inbound enriches intelligence without queue or SMS", async
       language: "English",
     }),
     resolveRoute: async () => ({ stage: "Ownership Confirmation", use_case: "wrong_person" }),
-    executeInboundAutomationDecision: async () => {
-      queue_inserts.push("blocked");
-      return { queued: true };
-    },
     getSystemFlags: async () => ({ auto_reply_enabled: false, followup_enabled: false }),
     getSystemValue: async (key) => {
       if (key === "auto_reply_mode") return "disabled";
@@ -423,7 +417,7 @@ test("Sharon referral inbound enriches intelligence without queue or SMS", async
   });
 
   assert.equal(result.ok, true);
-  assert.equal(queue_inserts.length, 0);
+  assert.equal(Boolean(result.seller_stage_reply?.queued), false);
 
   const message = "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622";
   const relationship = resolveInboundRelationship({

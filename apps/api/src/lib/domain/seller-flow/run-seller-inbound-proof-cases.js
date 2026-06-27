@@ -39,6 +39,7 @@ export async function runSellerInboundProofCases({
   cases = DEFAULT_SELLER_INBOUND_PROOF_CASES,
   autoReplyMode = "live_limited",
   dryRun = true,
+  emitSideEffects = true,
   supabaseClient = null,
 } = {}) {
   const mode_resolution = resolveGuardedAutoReplyMode({ requestedMode: autoReplyMode });
@@ -70,8 +71,8 @@ export async function runSellerInboundProofCases({
       autoReplyMode: mode_resolution.mode,
       executionAllowed: true,
       dryRun: Boolean(dryRun),
-      skipNotifications: true,
-      skipUniversalStatePatch: Boolean(dryRun),
+      skipNotifications: !emitSideEffects,
+      skipUniversalStatePatch: !emitSideEffects,
       supabaseClient,
     });
 
@@ -81,6 +82,10 @@ export async function runSellerInboundProofCases({
         proof_case: proofCase.proof_case || message,
         live_send_allowed: false,
         recovery_action: "proof_shadow",
+        notifications_skipped: !emitSideEffects,
+        universal_state_skipped: !emitSideEffects,
+        notifications_dispatched: emitSideEffects,
+        universal_state_dispatched: emitSideEffects,
       })
     );
   }

@@ -4,16 +4,33 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+export function summarizeSellerInboundSideEffects(orchestration = {}, extras = {}) {
+  const decision = orchestration.decision || null;
+  const universal_state_patch =
+    orchestration.universal_state_patch?.patch ||
+    orchestration.universal_state_patch ||
+    (decision ? decisionToUniversalLeadStatePatch(decision) : null);
+
+  return {
+    workflow_events: decision?.workflow_events || [],
+    notification_events: decision?.notification_events || [],
+    intelligence_message_event_patch: orchestration.intelligence_message_event_patch || null,
+    universal_state_patch,
+    universal_state_dry_run: orchestration.universal_state_patch?.dry_run ?? null,
+    notifications_dispatched: extras.notifications_dispatched ?? !extras.notifications_skipped,
+    universal_state_dispatched: extras.universal_state_dispatched ?? !extras.universal_state_skipped,
+    workflow_events_count: (decision?.workflow_events || []).length,
+    notification_events_count: (decision?.notification_events || []).length,
+  };
+}
+
 export function summarizeSellerInboundOrchestration(orchestration = {}, extras = {}) {
   const contract = orchestration.contract || null;
   const intelligence_snapshot = orchestration.intelligence_snapshot || null;
   const decision = orchestration.decision || null;
   const execution = orchestration.execution || null;
   const follow_up = orchestration.follow_up || null;
-  const universal_state_patch =
-    orchestration.universal_state_patch?.patch ||
-    orchestration.universal_state_patch ||
-    (decision ? decisionToUniversalLeadStatePatch(decision) : null);
+  const side_effects = summarizeSellerInboundSideEffects(orchestration, extras);
 
   return {
     ok: orchestration.ok !== false,
@@ -27,7 +44,8 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
     decision,
     execution,
     follow_up,
-    universal_state_patch,
+    universal_state_patch: side_effects.universal_state_patch,
+    side_effects,
     stage_before: decision?.stage_before || null,
     stage_after: decision?.stage_after || null,
     queued: Boolean(execution?.queued),
