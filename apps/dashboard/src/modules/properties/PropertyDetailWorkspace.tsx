@@ -56,9 +56,7 @@ export const PropertyDetailWorkspace = ({
         threadKey,
         thread_key: threadKey,
         property_id: property.propertyId ?? property.id,
-        lifecycle_stage: property.stage ?? null,
-        operational_status: property.status ?? null,
-        lead_temperature: property.priorityScore >= 80 ? 'hot' : property.priorityScore >= 55 ? 'warm' : 'unscored',
+        lead_temperature: (property.priorityScore ?? 0) >= 80 ? 'hot' : (property.priorityScore ?? 0) >= 55 ? 'warm' : 'unscored',
       }
     : null
 

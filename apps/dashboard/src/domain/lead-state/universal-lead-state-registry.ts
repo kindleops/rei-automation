@@ -278,7 +278,7 @@ const STAGE_INDEX = new Map(LIFECYCLE_STAGE_ORDER.map((code, index) => [code, in
 export const normalizeLifecycleStage = (value: unknown, fallback: LifecycleStageCode = 'ownership_confirmation'): LifecycleStageCode => {
   const key = normalizeKey(value)
   if (!key) return fallback
-  if (STAGE_INDEX.has(key)) return key as LifecycleStageCode
+  if (STAGE_INDEX.has(key as LifecycleStageCode)) return key as LifecycleStageCode
   if (STAGE_ALIASES[key]) return STAGE_ALIASES[key]
   if (key.includes('contract') && key.includes('under')) return 'under_contract'
   if (key.includes('contract') || key.includes('closing')) return 'formal_contract'
