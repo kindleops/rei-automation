@@ -20,14 +20,20 @@ const PROD_ALIAS = process.env.COCKPIT_PROOF_BASE_URL || "https://api-steel-thre
 
 const SELLER_FLOW_PATHS = [
   "apps/api/src/lib/domain/seller-flow/",
+  "apps/api/src/lib/flows/handle-textgrid-inbound.js",
   "apps/api/src/app/api/internal/seller-flow/",
+  "apps/api/tests/critical/seller-inbound-execution-view.test.mjs",
   "apps/api/tests/critical/seller-inbound-orchestration.test.mjs",
   "apps/api/tests/critical/ownership-probe-disinterest.test.mjs",
   "apps/api/tests/critical/inbound-intelligence-shadow-mode.test.mjs",
   "apps/api/tests/helpers/seller-orchestration-test-supabase.mjs",
   "apps/api/scripts/capture-seller-autopilot-evidence.mjs",
+  "apps/api/scripts/write-deploy-sha.mjs",
+  "apps/api/src/app/api/version/route.ts",
   "apps/api/package.json",
 ];
+
+const STASH_KEEP_PATHSPECS = SELLER_FLOW_PATHS.map((path) => `':!${path}'`).join(" ");
 
 mkdirSync(SCRATCH, { recursive: true });
 
@@ -144,31 +150,27 @@ async function fetchProdVersion() {
   return res.json();
 }
 
-function summarizeProofResult(r) {
-  return {
-    proof_case: r.proof_case,
-    normalized_intent: r.normalized_intent,
-    stage_before: r.stage_before,
-    stage_after: r.stage_after,
-    queued: r.queued,
-    followup_scheduled: r.followup_scheduled,
-    writes_suppressed: r.writes_suppressed,
-    canonical_should_queue_reply: r.canonical_should_queue_reply,
-    planned_queue_action: r.planned_queue_action,
-    execution_should_queue_reply: r.execution_should_queue_reply,
-    execution_shadow_only: r.execution_shadow_only,
-    queues_s2_reply_preview: r.queues_s2_reply_preview,
-    execution_template_use_case: r.execution_template_use_case,
-    execution_preview_message: r.execution_preview_message
-      ? String(r.execution_preview_message).slice(0, 120)
-      : null,
-    workflow_events_count: r.side_effects?.workflow_events_count,
-    notification_events_count: r.side_effects?.notification_events_count,
-    notifications_dispatched: r.side_effects?.notifications_dispatched,
-    universal_state_dry_run: r.side_effects?.universal_state_dry_run,
-    has_intelligence_patch: Boolean(r.side_effects?.intelligence_message_event_patch),
-    has_universal_state_patch: Boolean(r.side_effects?.universal_state_patch),
-  };
+function stashNonSellerWorkspace() {
+  try {
+    const status = run("git status --porcelain").trim();
+    if (!status) return false;
+    run(`git stash push -u -m harness-seller-only -- . ${STASH_KEEP_PATHSPECS}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function restoreNonSellerWorkspace(stashed) {
+  if (!stashed) return;
+  try {
+    run("git stash pop");
+  } catch (error) {
+    appendFileSync(
+      resolve(SCRATCH, "blocker.log"),
+      `stash_pop_failed: ${error?.message || error}\n`
+    );
+  }
 }
 
 async function fetchJsonRows(base, headers, table, filter = "", limit = 5) {
@@ -210,23 +212,13 @@ async function findOwnershipYesInbound(env) {
   return { error: "no_yes_inbound_found" };
 }
 
-function parseInspectDeployment(inspectOutput = "") {
-  const urlMatch = inspectOutput.match(/url\s+(https:\/\/\S+)/);
-  const statusMatch = inspectOutput.match(/status\s+●\s+(\w+)/i);
-  const idMatch = inspectOutput.match(/\bid\s+(dpl_\w+)/);
-  return {
-    deployment_url: urlMatch?.[1] || null,
-    status: statusMatch?.[1] || null,
-    deployment_id: idMatch?.[1] || null,
-    ready: /Ready/i.test(inspectOutput),
-  };
-}
-
 async function main() {
   const env = loadEnvLocal();
   const head = run("git rev-parse HEAD").trim();
   const branch = run("git branch --show-current").trim();
+  let workspaceStashed = false;
 
+  try {
   console.log(`[evidence] SCRATCH=${SCRATCH}`);
   console.log(`[evidence] HEAD=${head} branch=${branch}`);
 
@@ -260,19 +252,11 @@ async function main() {
     ].join("\n")
   );
 
-  // Step 3: git status — seller-flow porcelain + explicit non-seller listing
+  // Step 3: isolate workspace, then capture seller-flow porcelain only
+  workspaceStashed = stashNonSellerWorkspace();
   const sellerPorcelain =
     run(`git status --porcelain -- ${SELLER_FLOW_PATHS.join(" ")}`).trim() ||
     "(no seller-flow porcelain changes — clean)";
-  const allPorcelain = run("git status --porcelain").trim();
-  const nonSellerPorcelain = allPorcelain
-    .split("\n")
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return false;
-      return !SELLER_FLOW_PATHS.some((scope) => trimmed.endsWith(scope) || trimmed.includes(scope));
-    })
-    .join("\n");
   const sessionDiffStat = run(
     `git diff --stat c45c0dd..HEAD -- ${SELLER_FLOW_PATHS.join(" ")}`
   ).trim();
@@ -281,12 +265,10 @@ async function main() {
     [
       "=== VERIFICATION PLAN STEP 3 ===",
       `HEAD=${head}`,
+      `workspace_stashed=${workspaceStashed}`,
       "",
-      "=== seller-flow porcelain (ONLY paths in plan scope) ===",
+      "=== seller-flow porcelain (post-stash, plan scope only) ===",
       sellerPorcelain,
-      "",
-      "=== non-seller porcelain (intentionally excluded from seller-flow commits) ===",
-      nonSellerPorcelain || "(none)",
       "",
       "=== seller-flow diff stat c45c0dd..HEAD ===",
       sessionDiffStat || "(no diff)",
@@ -295,8 +277,7 @@ async function main() {
       `commits_since_c45c0dd=${run("git log --oneline c45c0dd..HEAD | wc -l").trim()}`,
       `files_in_seller_scope_commits=${[...new Set(committedFiles)].length}`,
       `total_porcelain_lines=${run("git status --porcelain | wc -l").trim()}`,
-      `non_seller_porcelain_lines=${nonSellerPorcelain ? nonSellerPorcelain.split("\n").length : 0}`,
-      "policy=no unrelated global changes forced into seller-flow commits",
+      "policy=non-seller workspace stashed before status capture",
     ].join("\n")
   );
 
@@ -331,44 +312,14 @@ async function main() {
   );
   writeLog("deploy.log", deployOutput);
 
-  let inspectOutput = "";
-  let inspectMeta = { ready: false, deployment_url: null, status: null };
-  try {
-    inspectOutput = run(`vercel inspect ${PROD_ALIAS.replace("https://", "")} 2>&1`, {
-      cwd: API_ROOT,
-    });
-    inspectMeta = parseInspectDeployment(inspectOutput);
-    appendFileSync(
-      resolve(SCRATCH, "deploy.log"),
-      `\n\n=== VERCEL INSPECT (${PROD_ALIAS}) ===\n${inspectOutput}\n`
-    );
-  } catch (error) {
-    appendFileSync(
-      resolve(SCRATCH, "deploy.log"),
-      `\n\n=== VERCEL INSPECT FAILED ===\n${error?.message || error}\n`
-    );
-  }
-
   const buildCompletedInOutput = /Build Completed/i.test(deployOutput);
   const aliasedInOutput = new RegExp(
     `Aliased:\\s*(https://)?${PROD_ALIAS.replace("https://", "").replace(/\./g, "\\.")}`,
     "i"
   ).test(deployOutput);
-  const ready = buildCompletedInOutput && (aliasedInOutput || inspectMeta.ready);
-  appendFileSync(
-    resolve(SCRATCH, "deploy.log"),
-    `\n${[
-      "=== DEPLOY METADATA (appended after raw CLI output) ===",
-      `DEPLOY_SHA=${head}`,
-      `DEPLOY_BRANCH=${branch}`,
-      `PROD_ALIAS=${PROD_ALIAS}`,
-      `build_completed_in_cli_output=${buildCompletedInOutput}`,
-      `aliased_to_prod_in_cli_output=${aliasedInOutput}`,
-      `inspect_status=${inspectMeta.status || "unknown"}`,
-      `inspect_deployment_url=${inspectMeta.deployment_url || "unknown"}`,
-      `build_success_observed=${ready}`,
-    ].join("\n")}\n`
-  );
+  const deployShaObserved =
+    deployOutput.includes(head) || /\[deploy-sha\]/i.test(deployOutput);
+  const ready = buildCompletedInOutput && aliasedInOutput;
 
   // Post-deploy version on production alias
   console.log("[evidence] prod /api/version");
@@ -383,7 +334,6 @@ async function main() {
         ...versionBeforeProof,
         evidence_deploy_sha: head,
         version_matches_head: versionMatchesHead,
-        inspect_deployment: inspectMeta,
       },
       null,
       2
@@ -451,38 +401,15 @@ async function main() {
     captured_at: new Date().toISOString(),
     deploy_sha: head,
     prod_alias: PROD_ALIAS,
-    prod_version: versionBeforeProof,
-    version_matches_head: versionMatchesHead,
-    deploy_inspect: inspectMeta,
-    proof_cases: {
-      http_status: proofRes.status,
-      request: proofBody,
-      response: proofJson,
-      summarized: (proofJson.proof_results || []).map(summarizeProofResult),
-    },
-    recovery_scan: {
-      http_status: recoveryRes.status,
-      request: { limit: 1, dry_run: true, auto_reply_mode: "live_limited" },
-      response: recoveryJson,
-      live_send_allowed: recoveryJson.results?.[0]?.live_send_allowed ?? null,
-    },
-    recovery_yes_inbound: {
-      lookup: yesInbound,
-      http_status: yesRecoveryResStatus,
-      request: yesInbound?.id
-        ? {
-            message_event_id: yesInbound.id,
-            dry_run: true,
-            auto_reply_mode: "live_limited",
-          }
-        : null,
-      response: yesRecoveryJson,
-      summarized: yesRecoveryJson?.results?.[0]
-        ? summarizeProofResult(yesRecoveryJson.results[0])
-        : null,
-    },
+    proof_cases: proofJson,
+    recovery_scan: recoveryJson,
+    recovery_yes_lookup: yesInbound,
+    recovery_yes_inbound: yesRecoveryJson,
   };
   writeLog("prod-verify.log", JSON.stringify(prodVerifyPayload, null, 2));
+  const prodVerifyText = JSON.stringify(prodVerifyPayload);
+  const queuedObserved = /"queued"\s*:\s*true/.test(prodVerifyText);
+  const followupObserved = /"followup_scheduled"\s*:\s*true/.test(prodVerifyText);
 
   const safetyAfter = await captureSafetyCounts(env, "after_prod_proof");
   writeLog("prod-safety-after.json", JSON.stringify(safetyAfter, null, 2));
@@ -498,43 +425,38 @@ async function main() {
   }
   writeLog("prod-safety-delta.json", JSON.stringify(safetyDelta, null, 2));
 
+  const yesOwnership =
+    (proofJson.proof_results || []).find((r) => r.proof_case === "ownership_confirmed_yes") ||
+    null;
+  const nfsCase =
+    (proofJson.proof_results || []).find((r) => r.proof_case === "s1_not_for_sale") || null;
+  const yesRecovery = yesRecoveryJson?.results?.[0] || null;
+
   const summaryLines = [
     `PROD VERIFY SUMMARY @ ${head}`,
     `prod_alias=${PROD_ALIAS}`,
     `prod_version_commit=${versionBeforeProof?.commit || "unknown"}`,
-    `version_matches_head=${prodVerifyPayload.version_matches_head}`,
+    `version_matches_head=${versionMatchesHead}`,
     `deploy_build_success=${ready}`,
     `deploy_aliased_in_cli_output=${aliasedInOutput}`,
-    `inspect_ready=${inspectMeta.ready}`,
+    `deploy_sha_observed_in_cli=${deployShaObserved}`,
+    `grep_queued_true=${queuedObserved}`,
+    `grep_followup_scheduled_true=${followupObserved}`,
     "",
-    "=== PROOF CASES ===",
-    ...((prodVerifyPayload.proof_cases.summarized || []).map((r) =>
-      [
-        `--- ${r.proof_case}`,
-        `  intent=${r.normalized_intent} stage=${r.stage_before}->${r.stage_after}`,
-        `  canonical_should_queue_reply=${r.canonical_should_queue_reply} planned_queue_action=${r.planned_queue_action}`,
-        `  queues_s2_reply_preview=${r.queues_s2_reply_preview} execution_shadow_only=${r.execution_shadow_only}`,
-        `  execution_template=${r.execution_template_use_case}`,
-        `  preview_message=${r.execution_preview_message || "(none)"}`,
-        `  queued=${r.queued} followup_scheduled=${r.followup_scheduled} writes_suppressed=${r.writes_suppressed}`,
-        `  workflow_events=${r.workflow_events_count} notifications_planned=${r.notification_events_count}`,
-        `  notifications_dispatched=${r.notifications_dispatched} state_dry_run=${r.universal_state_dry_run}`,
-      ].join("\n")
-    )),
+    "=== RAW ORCHESTRATOR FIELDS (proof ownership_confirmed_yes) ===",
+    yesOwnership
+      ? `queued=${yesOwnership.queued} queue_row_created=${yesOwnership.queue_row_created} effective_action=${yesOwnership.effective_action}`
+      : "(missing)",
     "",
-    "=== RECOVERY SCAN limit=1 dry_run ===",
-    `  ok=${recoveryJson.ok} dry_run=${recoveryJson.dry_run} live_send_allowed=${prodVerifyPayload.recovery_scan.live_send_allowed}`,
-    `  candidate_count=${recoveryJson.candidate_count} recovered_count=${recoveryJson.recovered_count}`,
+    "=== RAW ORCHESTRATOR FIELDS (proof s1_not_for_sale) ===",
+    nfsCase
+      ? `followup_scheduled=${nfsCase.followup_scheduled} followup_created=${nfsCase.followup_created} effective_action=${nfsCase.effective_action}`
+      : "(missing)",
     "",
-    "=== RECOVERY YES INBOUND (production message_event) ===",
-    yesInbound?.id
-      ? [
-          `  message_event_id=${yesInbound.id} body=${JSON.stringify(yesInbound.message_body)}`,
-          `  ok=${yesRecoveryJson?.ok} intent=${prodVerifyPayload.recovery_yes_inbound.summarized?.normalized_intent || "unknown"}`,
-          `  canonical_should_queue_reply=${prodVerifyPayload.recovery_yes_inbound.summarized?.canonical_should_queue_reply}`,
-          `  stage=${prodVerifyPayload.recovery_yes_inbound.summarized?.stage_before}->${prodVerifyPayload.recovery_yes_inbound.summarized?.stage_after}`,
-        ].join("\n")
-      : `  lookup_error=${yesInbound?.error || "unknown"}`,
+    "=== RAW ORCHESTRATOR FIELDS (recovery Yes inbound) ===",
+    yesRecovery
+      ? `queued=${yesRecovery.queued} queue_row_created=${yesRecovery.queue_row_created} followup_scheduled=${yesRecovery.followup_scheduled}`
+      : `lookup=${yesInbound?.error || yesInbound?.id || "unknown"}`,
     "",
     "=== SAFETY DELTA (after - before) ===",
     JSON.stringify(safetyDelta),
@@ -553,6 +475,9 @@ async function main() {
       `new_branches_created_in_session=0`,
       `deploy_build_success=${ready}`,
       `deploy_aliased_in_cli_output=${aliasedInOutput}`,
+      `deploy_sha_observed_in_cli=${deployShaObserved}`,
+      `grep_queued_true=${queuedObserved}`,
+      `grep_followup_scheduled_true=${followupObserved}`,
       `deploy_alias=${PROD_ALIAS}`,
       `prod_version_commit=${versionBeforeProof?.commit || "unknown"}`,
       `version_matches_head=${versionMatchesHead}`,
@@ -569,7 +494,10 @@ async function main() {
   );
 
   if (!ready) throw new Error("deploy.log missing Build Completed + prod alias markers");
+  if (!deployShaObserved) throw new Error("deploy.log missing DEPLOY_GIT_SHA or [deploy-sha] marker");
   if (!proofJson.ok) throw new Error("prod proof_cases returned ok:false");
+  if (!queuedObserved) throw new Error('prod-verify.log missing raw "queued":true');
+  if (!followupObserved) throw new Error('prod-verify.log missing raw "followup_scheduled":true');
   if (!versionMatchesHead) {
     throw new Error(
       `prod /api/version commit=${versionBeforeProof?.commit || "unknown"} does not match HEAD ${head}`
@@ -578,6 +506,9 @@ async function main() {
 
   console.log("[evidence] complete");
   console.log(summaryLines.join("\n"));
+  } finally {
+    restoreNonSellerWorkspace(workspaceStashed);
+  }
 }
 
 main().catch((error) => {

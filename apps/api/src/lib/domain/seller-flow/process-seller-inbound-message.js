@@ -23,6 +23,7 @@ import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
+import { normalizeSellerInboundExecutionView } from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -487,6 +488,15 @@ export async function processSellerInboundMessage({
     seller_flow_decision: decision,
   };
 
+  const execution_view = normalizeSellerInboundExecutionView({
+    execution,
+    follow_up: follow_up_result,
+    canonical_decision,
+    decision,
+    contract,
+    writes_suppressed,
+  });
+
   runtimeDeps.info("[SELLER_INBOUND_ORCHESTRATED]", {
     thread_key: threadKey || inboundFrom,
     inbound_event_id: inboundEventId,
@@ -494,8 +504,11 @@ export async function processSellerInboundMessage({
     stage_before: decision.stage_before,
     stage_after: decision.stage_after,
     execution_mode: decision.execution_mode,
-    queued: Boolean(execution?.queued),
-    followup_scheduled: Boolean(follow_up_result?.followup_created),
+    queued: Boolean(execution_view.queued),
+    queue_row_created: Boolean(execution_view.queue_row_created),
+    followup_scheduled: Boolean(execution_view.followup_scheduled),
+    followup_created: Boolean(execution_view.followup_created),
+    effective_action: execution_view.effective_action,
     block_reason: decision.block_reason,
   });
 
@@ -522,8 +535,8 @@ export async function processSellerInboundMessage({
     contract,
     intelligence,
     intelligence_snapshot,
-    execution,
-    follow_up: follow_up_result,
+    execution: execution_view.execution,
+    follow_up: execution_view.follow_up,
     decision,
     seller_stage_reply,
     universal_state_patch,
@@ -534,6 +547,11 @@ export async function processSellerInboundMessage({
     intelligence_message_event_patch,
     proof_run: Boolean(proofRun),
     writes_suppressed,
+    queued: execution_view.queued,
+    followup_scheduled: execution_view.followup_scheduled,
+    queue_row_created: execution_view.queue_row_created,
+    followup_created: execution_view.followup_created,
+    effective_action: execution_view.effective_action,
     idempotent: {
       duplicate_suppressed: Boolean(execution?.duplicate_suppressed),
       queue_row_id: execution?.queue_row_id || null,

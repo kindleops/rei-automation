@@ -30,52 +30,12 @@ export function summarizeSellerInboundSideEffects(orchestration = {}, extras = {
   };
 }
 
-function resolveCanonicalShouldQueueReply({
-  intelligence_snapshot = null,
-  decision = null,
-  execution = null,
-  writes_suppressed = false,
-} = {}) {
-  const canonical_from_intelligence =
-    intelligence_snapshot?.canonical_decision?.should_queue_reply ?? null;
-  const canonical_from_decision =
-    decision?.immediate_next_action === "queue_auto_reply"
-      ? true
-      : decision?.immediate_next_action === "schedule_later_followup"
-        ? false
-        : null;
-  const shadow_execution =
-    Boolean(writes_suppressed || execution?.dry_run) &&
-    execution?.automation_decision?.should_queue_reply === false;
-
-  if (shadow_execution) {
-    if (canonical_from_intelligence != null) return Boolean(canonical_from_intelligence);
-    if (canonical_from_decision != null) return Boolean(canonical_from_decision);
-  }
-
-  if (execution?.automation_decision?.should_queue_reply != null) {
-    return Boolean(execution.automation_decision.should_queue_reply);
-  }
-  if (canonical_from_intelligence != null) return Boolean(canonical_from_intelligence);
-  if (canonical_from_decision != null) return Boolean(canonical_from_decision);
-  return false;
-}
-
 export function summarizeSellerInboundOrchestration(orchestration = {}, extras = {}) {
   const contract = orchestration.contract || null;
   const intelligence_snapshot = orchestration.intelligence_snapshot || null;
   const decision = orchestration.decision || null;
   const execution = orchestration.execution || null;
   const follow_up = orchestration.follow_up || null;
-  const writes_suppressed = Boolean(
-    extras.writes_suppressed ?? orchestration.writes_suppressed ?? false
-  );
-  const canonical_should_queue_reply = resolveCanonicalShouldQueueReply({
-    intelligence_snapshot,
-    decision,
-    execution,
-    writes_suppressed,
-  });
   const side_effects =
     orchestration.side_effects ||
     summarizeSellerInboundSideEffects(orchestration, {
@@ -100,30 +60,14 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
     side_effects,
     stage_before: decision?.stage_before || null,
     stage_after: decision?.stage_after || null,
-    queued: Boolean(execution?.queued),
+    queued: Boolean(orchestration.queued ?? execution?.queued),
     followup_scheduled: Boolean(
-      follow_up?.followup_created || follow_up?.scheduled_for || decision?.follow_up_at
+      orchestration.followup_scheduled ?? follow_up?.followup_scheduled
     ),
+    queue_row_created: Boolean(orchestration.queue_row_created ?? execution?.queue_row_created),
+    followup_created: Boolean(orchestration.followup_created ?? follow_up?.followup_created),
+    effective_action: orchestration.effective_action ?? execution?.effective_action ?? null,
     duplicate_suppressed: Boolean(orchestration.idempotent?.duplicate_suppressed),
-    canonical_should_queue_reply,
-    planned_queue_action:
-      decision?.immediate_next_action ||
-      intelligence_snapshot?.canonical_decision?.scheduled_next_action ||
-      null,
-    queues_s2_reply_preview: Boolean(
-      canonical_should_queue_reply &&
-        (execution?.selected_template?.use_case === "consider_selling" ||
-          execution?.selected_template?.stage_code === "consider_selling" ||
-          execution?.selected_template?.stage_code === "S2" ||
-          decision?.template_key === "consider_selling" ||
-          intelligence_snapshot?.recommended_use_case === "consider_selling")
-    ),
-    execution_should_queue_reply: canonical_should_queue_reply,
-    execution_shadow_only: Boolean(
-      orchestration.writes_suppressed ||
-        execution?.dry_run ||
-        intelligence_snapshot?.decision_layers?.execution?.shadow_only
-    ),
     execution_template_use_case:
       execution?.selected_template?.use_case || decision?.template_key || null,
     execution_preview_message: execution?.rendered_message_text || null,
