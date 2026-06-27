@@ -22,6 +22,7 @@ import {
 } from "@/lib/supabase/sms-engine.js";
 import {
   makeLiveQueueSystemValue,
+  makeQueueTestRpc,
   makeSendQueueRowsSupabase,
 } from "../helpers/queue-run-test-harness.js";
 
@@ -73,15 +74,7 @@ function makeFinalizeSuccessImpl(row) {
 
 function makeIdempotencySupabase() {
   return {
-    rpc(fn, _args) {
-      if (fn === "queue_verify_dispatch_authorization") {
-        return Promise.resolve({
-          data: { ok: true, reason: "dispatch_authorized", claim_mode: "test" },
-          error: null,
-        });
-      }
-      return Promise.resolve({ data: null, error: null });
-    },
+    rpc: makeQueueTestRpc(),
     from() {
       const query = {
         select() {

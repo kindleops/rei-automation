@@ -1,5 +1,30 @@
 import { normalizeSendQueueRow, shouldRunSendQueueRow, sortQueuedRows } from '@/lib/supabase/sms-engine.js'
 
+/** Shared Supabase RPC stub for queue send-path critical tests. */
+export function makeQueueTestRpc() {
+  return async (fn, _args) => {
+    if (fn === 'queue_verify_dispatch_authorization') {
+      return {
+        data: { ok: true, reason: 'dispatch_authorized', claim_mode: 'test' },
+        error: null,
+      }
+    }
+    if (fn === 'queue_acquire_global_execution_lock') {
+      return { data: true, error: null }
+    }
+    if (fn === 'queue_release_global_execution_lock') {
+      return { data: true, error: null }
+    }
+    if (fn === 'queue_atomic_claim_send_row') {
+      return {
+        data: { ok: true, claimed: true, reason: 'claimed', claim_token: 'test-lock' },
+        error: null,
+      }
+    }
+    return { data: null, error: null }
+  }
+}
+
 export function buildSupabaseQueueRow(id, overrides = {}) {
   return normalizeSendQueueRow({
     id,
@@ -187,6 +212,7 @@ export function makeSendQueueRowsSupabase(getRows = () => []) {
   }
 
   return {
+    rpc: makeQueueTestRpc(),
     from(table) {
       if (table === 'campaigns') {
         return makeCampaignsSupabase().from('campaigns')
