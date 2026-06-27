@@ -5,7 +5,6 @@ import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone 
 import {
   resolveThreadAddressLine,
   resolveThreadMarketBadge,
-  resolveThreadOwnerName,
   resolveThreadPrimaryName,
   type InboxSavedFilterPreset,
   type InboxViewSelectValue,
@@ -598,7 +597,7 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
 }
 
 const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecision) => {
-  const name = resolveThreadOwnerName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Owner'
+  const name = resolveThreadPrimaryName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Contact'
   const address = resolveThreadAddressLine(thread) || readString(thread, 'property_address_full', 'propertyAddressFull') || 'Property Unknown'
   const market = resolveThreadMarketBadge(thread) || 'Unknown Market'
   const propertyType = readString(thread, 'propertyType', 'property_type') || 'Unknown Type'

@@ -5,7 +5,8 @@ import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
-import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName } from '../inbox-ui-helpers'
+import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
+import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
@@ -35,6 +36,8 @@ interface ChatThreadProps {
   hasOlderMessages?: boolean
   olderMessagesLoading?: boolean
   onLoadOlder?: () => void
+  selectedParticipant?: PropertyParticipant | null
+  masterOwnerHouseholdLabel?: string | null
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -385,6 +388,8 @@ export const ChatThread = ({
   hasOlderMessages = false,
   olderMessagesLoading = false,
   onLoadOlder,
+  selectedParticipant = null,
+  masterOwnerHouseholdLabel = null,
 }: ChatThreadProps) => {
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -463,8 +468,13 @@ export const ChatThread = ({
     </div>
   )
 
-  const ownerName = resolveThreadOwnerName(thread)
-  const phoneNumber = fallback(thread.phoneNumber || thread.canonicalE164, '')
+  const prospectName = selectedParticipant?.display_name || resolveThreadPrimaryName(thread)
+  const householdLabel = masterOwnerHouseholdLabel
+    || (resolveThreadOwnerName(thread) ? `${resolveThreadOwnerName(thread)} household` : null)
+  const phoneNumber = fallback(
+    selectedParticipant?.canonical_e164 || thread.phoneNumber || thread.canonicalE164,
+    '',
+  )
   const propertyAddress = resolveThreadAddressLine(thread)
   const market = resolveThreadMarketBadge(thread)
   const matchedKeywords = getThreadMatchedKeywords(thread, searchQuery)
@@ -559,7 +569,7 @@ export const ChatThread = ({
 
         <div className="nx-conv-layer-a">
           <div className="nx-conv-layer-a__identity">
-            <h2 className="nx-conv-seller-name">{ownerName}</h2>
+            <h2 className="nx-conv-seller-name">{prospectName}</h2>
             <div className="nx-conv-identity-row">
               {phoneNumber && (
                 <span className="nx-conv-identity-phone">
@@ -567,6 +577,11 @@ export const ChatThread = ({
                   {phoneNumber}
                 </span>
               )}
+              {selectedParticipant?.relationship_to_property ? (
+                <span className="nx-conv-identity-relationship">
+                  {selectedParticipant.relationship_to_property.replace(/_/g, ' ')}
+                </span>
+              ) : null}
               {cleanMarket && (
                 <span className="nx-conv-identity-market">
                   <Icon name="pin" />
@@ -584,6 +599,9 @@ export const ChatThread = ({
                 </button>
               )}
             </div>
+            {householdLabel ? (
+              <div className="nx-conv-identity-household">{householdLabel}</div>
+            ) : null}
             {propertyAddress && (
               <div className="nx-conv-identity-address">{propertyAddress}</div>
             )}

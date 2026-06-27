@@ -13,6 +13,78 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+const OWNERSHIP_PROBE_STAGES = new Set([
+  "ownership_check",
+  "ownership_confirmation",
+  "ownership confirmation",
+  "s1",
+  "stage_1",
+  "stage_1_ownership",
+  "ownership_probe",
+]);
+
+const PROPERTY_KNOWLEDGE_PHRASES = [
+  "not for sale",
+  "not interested",
+  "we are not selling",
+  "we're not selling",
+  "not selling",
+  "no interest",
+  "do not want an offer",
+  "don't want an offer",
+  "stop asking about the house",
+];
+
+function includesAny(text, phrases = []) {
+  const normalized = lower(text);
+  return phrases.some((phrase) => normalized.includes(phrase));
+}
+
+export function resolveOwnershipProbeDisinterestTransition({
+  classification = {},
+  messageEvent = {},
+  existingState = {},
+} = {}) {
+  const flags = resolveThreadFlagsFromClassification(classification);
+  if (!flags.not_interested) return null;
+
+  const stage = lower(
+    existingState.universal_stage
+    || existingState.conversation_stage
+    || existingState.seller_stage
+    || existingState.stage
+    || "",
+  );
+  const isOwnershipProbe = OWNERSHIP_PROBE_STAGES.has(stage) || stage.includes("ownership");
+  if (!isOwnershipProbe) return null;
+
+  const message = clean(messageEvent.message_body || messageEvent.message || "");
+  const hasPropertyKnowledge = includesAny(message, PROPERTY_KNOWLEDGE_PHRASES);
+  if (!hasPropertyKnowledge && !flags.not_interested) return null;
+
+  const followUpAt = new Date();
+  followUpAt.setDate(followUpAt.getDate() + 30);
+
+  return {
+    universal_status: "follow_up",
+    universal_stage: "consider_selling",
+    seller_stage: "consider_selling",
+    conversation_stage: "consider_selling",
+    ownership_status: existingState.ownership_status === "confirmed" ? "confirmed" : "inferred",
+    ownership_inference_reason: existingState.ownership_status === "confirmed"
+      ? null
+      : "property_specific_non_sale_response",
+    disposition: "not_interested",
+    lead_temperature: "cold",
+    not_interested: true,
+    inbox_bucket: "follow_up",
+    automation_lane: "stage_follow_up",
+    follow_up_at: followUpAt.toISOString(),
+    operational_status: "scheduled",
+    leave_new_replies: false,
+  };
+}
+
 export function resolveThreadFlagsFromClassification(classification = {}) {
   const primary = clean(classification.primary_intent);
   const objection = clean(classification.objection);
@@ -81,6 +153,18 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     return {
       universal_status: "dead",
       universal_stage: "wrong_number"
+    };
+  }
+
+  const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
+    classification,
+    messageEvent,
+    existingState,
+  });
+  if (ownershipProbeTransition) {
+    return {
+      universal_status: ownershipProbeTransition.universal_status,
+      universal_stage: ownershipProbeTransition.universal_stage,
     };
   }
 
@@ -323,6 +407,15 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     return null;
   }
 
+  const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
+    classification,
+    messageEvent,
+    existingState,
+  });
+  if (ownershipProbeTransition?.inbox_bucket) {
+    return ownershipProbeTransition.inbox_bucket;
+  }
+
   if (
     flags.not_interested ||
     existingStatus === "dead" ||
@@ -398,6 +491,15 @@ export function resolveAutomationLaneFromClassification(
 
   if (flags.opt_out || lower(inbox_bucket) === "suppressed") return null;
 
+  const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
+    classification,
+    messageEvent,
+    existingState,
+  });
+  if (ownershipProbeTransition?.automation_lane) {
+    return ownershipProbeTransition.automation_lane;
+  }
+
   if (flags.wrong_number || flags.not_interested) return "disqualified";
 
   const deliveryStatus = clean(
@@ -447,6 +549,15 @@ export function resolveDispositionFromClassification(
 
   if (flags.opt_out || lower(inbox_bucket) === "suppressed") return "suppressed";
   if (flags.wrong_number) return "wrong_number";
+  const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
+    classification,
+    messageEvent,
+    existingState,
+  });
+  if (ownershipProbeTransition?.disposition) {
+    return ownershipProbeTransition.disposition;
+  }
+
   if (flags.not_interested) return "not_interested";
   if (["priority", "new_replies", "needs_review", "waiting"].includes(lower(inbox_bucket))) {
     return null;
@@ -518,7 +629,26 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
     bucket,
   );
 
-  if (is_inbound && classification?.seller_state?.lead_temperature) {
+  const ownershipProbeTransition = is_inbound
+    ? resolveOwnershipProbeDisinterestTransition({ classification, messageEvent, existingState })
+    : null;
+  if (ownershipProbeTransition) {
+    patch.universal_status = ownershipProbeTransition.universal_status;
+    patch.universal_stage = ownershipProbeTransition.universal_stage;
+    patch.seller_stage = ownershipProbeTransition.seller_stage;
+    patch.conversation_stage = ownershipProbeTransition.conversation_stage;
+    patch.ownership_status = ownershipProbeTransition.ownership_status;
+    patch.ownership_inference_reason = ownershipProbeTransition.ownership_inference_reason;
+    patch.disposition = ownershipProbeTransition.disposition;
+    patch.lead_temperature = ownershipProbeTransition.lead_temperature;
+    patch.inbox_bucket = ownershipProbeTransition.inbox_bucket;
+    patch.inbox_category = ownershipProbeTransition.inbox_bucket;
+    patch.resolved_inbox_bucket = ownershipProbeTransition.inbox_bucket;
+    patch.automation_lane = ownershipProbeTransition.automation_lane;
+    patch.follow_up_at = ownershipProbeTransition.follow_up_at;
+    patch.operational_status = ownershipProbeTransition.operational_status;
+    patch.is_actioned = true;
+  } else if (is_inbound && classification?.seller_state?.lead_temperature) {
     patch.lead_temperature = classification.seller_state.lead_temperature;
   }
 

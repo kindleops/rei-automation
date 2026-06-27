@@ -69,7 +69,7 @@ import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
-import { PropertyParticipantRail } from './components/PropertyParticipantRail'
+import { ActiveProspectCard } from './components/ActiveProspectCard'
 import type { PropertyParticipant, PropertyParticipantGraph } from './utils/participantLabels'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
@@ -158,6 +158,7 @@ import {
   getSavedPresetConfig,
   isSuppressedThread,
   resolveThreadPrimaryName,
+  resolveThreadOwnerName,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
   type InboxSavedFilterPreset,
@@ -201,10 +202,10 @@ import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings,
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
 const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.default })))
-// DEV-ONLY: Comp Intelligence V4 rebuild, mounted behind a toggle. Enable with
-// localStorage 'nx.comp.v4' = '1'. Never active in production builds.
+// DEV: Comp Intelligence V4 rebuild is the DEFAULT in dev. Opt OUT (old workspace)
+// with localStorage 'nx.comp.v4' = '0'. Production (DEV false) always uses the old one.
 const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
-const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && typeof window !== 'undefined' && window.localStorage.getItem('nx.comp.v4') === '1'
+const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.comp.v4') !== '0')
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
@@ -625,6 +626,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [propertyParticipants, setPropertyParticipants] = useState<PropertyParticipant[]>([])
   const [propertyParticipantsLoading, setPropertyParticipantsLoading] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<PropertyParticipant | null>(null)
+  const [masterOwnerHouseholdLabel, setMasterOwnerHouseholdLabel] = useState<string | null>(null)
+  const [nextEligibleContact, setNextEligibleContact] = useState<PropertyParticipant | null>(null)
   const [threadIntelligence, setThreadIntelligence] = useState<ThreadIntelligenceRecord | null>(null)
   const [dealContext, setDealContext] = useState<DealContext | null>(null)
   const [queueProcessorHealth, setQueueProcessorHealth] = useState<QueueProcessorHealth | null>(null)
@@ -659,10 +662,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
 
   // Tracks whether the live inbox has resolved at least once — gates heavy background queries.
-  const heavyQueriesStartedRef = useRef(false)
-  const autonomyQueriesStartedRef = useRef(false)
+  const backgroundBootstrapStartedRef = useRef(false)
+  const selectedWorkspaceViewsRef = useRef(selectedWorkspaceViews)
   const healthIntervalRef = useRef<number | null>(null)
   const autonomyIntervalRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    selectedWorkspaceViewsRef.current = selectedWorkspaceViews
+  }, [selectedWorkspaceViews])
   // Stable ref to selected thread — lets message effect depend on key (string) not object reference
   const selectedRef = useRef<InboxWorkflowThread | null>(null)
   const selectedThreadFallbackRef = useRef<InboxWorkflowThread | null>(null)
@@ -1846,9 +1853,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       })
 
     // ── Deal intelligence / dossier enrichment (background, non-blocking) ─
-    void getThreadHydrationForThread(thread, controller.signal)
+    void getThreadHydrationForThread(thread, controller.signal, { skipMessages: true, skipDossier: true })
       .then((hydration) => {
         if (!isStillSelected()) return
+        if (hydration.messages.length > 0) {
+          messageCacheRef.current[cacheKey] = hydration.messages
+          setSelectedMessages((current) => (current.length > 0 ? current : hydration.messages))
+          setHasOlderMessages(hydration.pagination.hasMore)
+          setMessagesLoading(false)
+        }
         if (hydration.dealContext) {
           setDealContext(hydration.dealContext)
           dealContextCacheRef.current[cacheKey] = hydration.dealContext
@@ -2354,26 +2367,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [])
 
   useEffect(() => {
-    if (_dataLoading) return
-    let active = true
-    const deferTimer = window.setTimeout(() => {
-      const loadQueueControl = async () => {
-        const diagnostics = await refreshQueueControl()
-        if (!active || !diagnostics) return
-      }
-      if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(() => { void loadQueueControl() }, { timeout: 10_000 })
-      } else {
-        void loadQueueControl()
-      }
-    }, 4_000)
-    return () => {
-      active = false
-      window.clearTimeout(deferTimer)
-    }
-  }, [_dataLoading, refreshQueueControl])
-
-  useEffect(() => {
     try {
       window.localStorage.setItem('nx.queue.mode', queueCommandMode)
       window.localStorage.setItem('nx.queue.caps', JSON.stringify(queueCommandCaps))
@@ -2463,46 +2456,88 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [refreshQueueControl, refreshQueueHealth])
 
-  // Queue health polls send_queue (heavy). Defer until inbox shell is painted so thread
-  // messages and sidebar are not competing with queue/control on cold load.
+  // Serialize heavy background API work so thread messages / dossier are not competing
+  // with queue/control/health/page on a single-worker dev API.
   useEffect(() => {
     if (data.liveFetchStatus !== 'active') return
     if (_dataLoading) return
-    if (heavyQueriesStartedRef.current) return
+    if (backgroundBootstrapStartedRef.current) return
 
     let active = true
     let idleHandle: number | null = null
-    const deferTimer = window.setTimeout(() => {
-      const startHeavyQueries = () => {
-        if (!active || heavyQueriesStartedRef.current) return
-        heavyQueriesStartedRef.current = true
-        const refreshHealth = async () => {
-          const snapshot = await refreshQueueHealth()
-          if (!active) return
-          setQueueProcessorHealth(snapshot)
-        }
-        void refreshHealth()
-        healthIntervalRef.current = window.setInterval(() => { void refreshHealth() }, 30000)
+    const gap = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
+
+    const runStaggeredBootstrap = async () => {
+      if (!active || backgroundBootstrapStartedRef.current) return
+      backgroundBootstrapStartedRef.current = true
+
+      await gap(10_000)
+      if (!active) return
+
+      await refreshQueueControl().catch(() => null)
+      if (!active) return
+      await gap(600)
+
+      await refreshQueueHealth().catch(() => null)
+      if (!active) return
+      await gap(600)
+
+      const activity = await fetchInboxActivity().catch(() => [])
+      if (active) setActivityFeed(activity)
+      if (!active) return
+      await gap(600)
+
+      const templates = await fetchSmsTemplates({ includeInactive: true, limit: 800 }).catch(() => [])
+      if (active) setTemplateInventory(templates)
+      if (!active) return
+      await gap(600)
+
+      if (selectedWorkspaceViewsRef.current.includes('queue')) {
+        const nextQueue = await fetchQueueModel().catch(() => null)
+        if (active && nextQueue) setQueueModel(nextQueue)
       }
-      if (typeof window.requestIdleCallback === 'function') {
-        idleHandle = window.requestIdleCallback(() => startHeavyQueries(), { timeout: 12_000 })
-      } else {
-        startHeavyQueries()
-      }
-    }, 4_000)
+
+      healthIntervalRef.current = window.setInterval(() => { void refreshQueueHealth() }, 30_000)
+      autonomyIntervalRef.current = window.setInterval(async () => {
+        const nextActivity = await fetchInboxActivity().catch(() => [])
+        if (nextActivity.length) setActivityFeed(nextActivity)
+        if (!selectedWorkspaceViewsRef.current.includes('queue')) return
+        const nextQueue = await fetchQueueModel().catch(() => null)
+        if (nextQueue) setQueueModel(nextQueue)
+      }, 45_000)
+    }
+
+    const kickoff = () => { void runStaggeredBootstrap() }
+    if (typeof window.requestIdleCallback === 'function') {
+      idleHandle = window.requestIdleCallback(kickoff, { timeout: 18_000 })
+    } else {
+      kickoff()
+    }
 
     return () => {
       active = false
-      window.clearTimeout(deferTimer)
       if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleHandle)
       }
     }
-  }, [_dataLoading, data.liveFetchStatus, refreshQueueHealth])
+  }, [_dataLoading, data.liveFetchStatus, refreshQueueControl, refreshQueueHealth])
 
   useEffect(() => {
-    return () => { if (healthIntervalRef.current !== null) window.clearInterval(healthIntervalRef.current) }
+    return () => {
+      if (healthIntervalRef.current !== null) window.clearInterval(healthIntervalRef.current)
+      if (autonomyIntervalRef.current !== null) window.clearInterval(autonomyIntervalRef.current)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!selectedWorkspaceViews.includes('queue')) return
+    if (queueModel) return
+    let active = true
+    void fetchQueueModel()
+      .then((model) => { if (active) setQueueModel(model) })
+      .catch(() => null)
+    return () => { active = false }
+  }, [queueModel, selectedWorkspaceViews])
 
   const handleQueueCommandModeChange = useCallback((mode: QueueCommandMode) => {
     if (mode === 'automatic') {
@@ -2658,57 +2693,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       successDetail: (payload) => `${payload?.cancelled ?? 0} stale follow-up rows cancelled.`,
     })
   ), [runQueueCommand])
-
-  // Templates, queue model, and activity are heavy Supabase queries. Defer until inbox is
-  // interactive so cold load prioritizes thread list + selected thread messages.
-  useEffect(() => {
-    if (data.liveFetchStatus !== 'active') return
-    if (_dataLoading) return
-    if (autonomyQueriesStartedRef.current) return
-
-    let active = true
-    let idleHandle: number | null = null
-    const deferTimer = window.setTimeout(() => {
-      const startAutonomyQueries = () => {
-        if (!active || autonomyQueriesStartedRef.current) return
-        autonomyQueriesStartedRef.current = true
-        const refreshAutonomyInputs = async () => {
-          try {
-            const [nextQueue, nextTemplates, nextActivity] = await Promise.all([
-              fetchQueueModel().catch(() => null),
-              fetchSmsTemplates({ includeInactive: true, limit: 800 }).catch(() => []),
-              fetchInboxActivity().catch(() => []),
-            ])
-            if (!active) return
-            setQueueModel(nextQueue)
-            setTemplateInventory(nextTemplates)
-            setActivityFeed(nextActivity)
-          } catch (error) {
-            if (DEV) console.warn('[InboxPage autonomy inputs] refresh failed', error)
-          }
-        }
-        void refreshAutonomyInputs()
-        autonomyIntervalRef.current = window.setInterval(() => { void refreshAutonomyInputs() }, 45000)
-      }
-      if (typeof window.requestIdleCallback === 'function') {
-        idleHandle = window.requestIdleCallback(() => startAutonomyQueries(), { timeout: 15_000 })
-      } else {
-        startAutonomyQueries()
-      }
-    }, 6_000)
-
-    return () => {
-      active = false
-      window.clearTimeout(deferTimer)
-      if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleHandle)
-      }
-    }
-  }, [DEV, _dataLoading, data.liveFetchStatus])
-
-  useEffect(() => {
-    return () => { if (autonomyIntervalRef.current !== null) window.clearInterval(autonomyIntervalRef.current) }
-  }, [])
 
   // ── ALWAYS-ON AUTOPILOT LOOP ──────────────────────────────────────────────
   const autopilotStateRef = useRef({
@@ -3160,17 +3144,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedId(phone)
   }, [activeContext, handleSelect, setActiveContext, threads])
 
+  const handleTryNextEligible = useCallback((participant: PropertyParticipant) => {
+    handleParticipantSelect(participant)
+  }, [handleParticipantSelect])
+
   useEffect(() => {
     const propertyId = selected?.propertyId || effectiveActiveContext.propertyId
     const selectedPhone = selected?.canonicalE164 || selected?.bestPhone || selected?.sellerPhone || selected?.threadKey
     if (!propertyId) {
       setPropertyParticipants([])
       setSelectedParticipant(null)
+      setMasterOwnerHouseholdLabel(null)
+      setNextEligibleContact(null)
       return
     }
 
     let cancelled = false
     const controller = new AbortController()
+    let deferTimer: ReturnType<typeof setTimeout> | null = null
+    let idleHandle: number | null = null
     setPropertyParticipantsLoading(true)
     const fallbackParticipant = selected ? {
       participant_id: `${propertyId}:${selectedPhone || selected.id}`,
@@ -3180,38 +3172,55 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       relationship_to_property: String((selected as unknown as Record<string, unknown>).contact_identity_class || 'respondent'),
     } satisfies PropertyParticipant : null
 
-    void fetchPropertyParticipants(propertyId, selectedPhone || null, controller.signal)
-      .then((res) => {
-        if (cancelled) return
-        if (!res.ok) {
-          setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
-          setSelectedParticipant(fallbackParticipant)
-          return
-        }
-        const payload = (res.data ?? {}) as PropertyParticipantGraph
-        const participants = Array.isArray(payload.participants) && payload.participants.length > 0
-          ? payload.participants
-          : (fallbackParticipant ? [fallbackParticipant] : [])
-        setPropertyParticipants(participants)
-        const current = participants.find((row) => String(row.canonical_e164 ?? '').trim() === String(selectedPhone ?? '').trim())
-          || payload.selected_participant
-          || participants[0]
-          || fallbackParticipant
-        setSelectedParticipant(current)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
-          setSelectedParticipant(fallbackParticipant)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setPropertyParticipantsLoading(false)
-      })
+    const loadParticipants = () => {
+      if (cancelled) return
+      void fetchPropertyParticipants(propertyId, selectedPhone || null, controller.signal)
+        .then((res) => {
+          if (cancelled) return
+          if (!res.ok) {
+            setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+            setSelectedParticipant(fallbackParticipant)
+            return
+          }
+          const payload = (res.data ?? {}) as PropertyParticipantGraph
+          const participants = Array.isArray(payload.participants) && payload.participants.length > 0
+            ? payload.participants
+            : (fallbackParticipant ? [fallbackParticipant] : [])
+          setPropertyParticipants(participants)
+          setMasterOwnerHouseholdLabel(payload.master_owner_household_label || null)
+          setNextEligibleContact(payload.next_eligible_contact || null)
+          const current = participants.find((row) => String(row.canonical_e164 ?? '').trim() === String(selectedPhone ?? '').trim())
+            || payload.selected_participant
+            || participants[0]
+            || fallbackParticipant
+          setSelectedParticipant(current)
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+            setSelectedParticipant(fallbackParticipant)
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setPropertyParticipantsLoading(false)
+        })
+    }
+
+    deferTimer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleHandle = window.requestIdleCallback(loadParticipants, { timeout: 4_000 })
+      } else {
+        loadParticipants()
+      }
+    }, 2_500)
 
     return () => {
       cancelled = true
       controller.abort()
+      if (deferTimer) window.clearTimeout(deferTimer)
+      if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleHandle)
+      }
     }
   }, [effectiveActiveContext.propertyId, selectedKeyForEffect, selected?.propertyId])
 
@@ -4156,13 +4165,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         hasOlderMessages={hasOlderMessages}
         olderMessagesLoading={olderMessagesLoading}
         onLoadOlder={handleLoadOlderMessages}
+        selectedParticipant={selectedParticipant}
+        masterOwnerHouseholdLabel={masterOwnerHouseholdLabel}
       />
 
-      <PropertyParticipantRail
+      <ActiveProspectCard
         participants={propertyParticipants}
-        selectedPhone={selectedParticipant?.canonical_e164 || selected?.canonicalE164 || selected?.bestPhone || selected?.sellerPhone || null}
+        selectedParticipant={selectedParticipant}
+        masterOwnerHousehold={masterOwnerHouseholdLabel || (selected ? `${resolveThreadOwnerName(selected)} household` : null)}
         loading={propertyParticipantsLoading}
         onSelectParticipant={handleParticipantSelect}
+        onTryNextEligible={handleTryNextEligible}
+        nextEligiblePreview={nextEligibleContact}
       />
 
       <Composer
