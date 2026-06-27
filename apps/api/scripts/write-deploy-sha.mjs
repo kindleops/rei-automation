@@ -10,10 +10,12 @@ function resolveSha() {
   if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
   if (process.env.DEPLOY_GIT_SHA) return process.env.DEPLOY_GIT_SHA;
   try {
-    return execSync("git rev-parse HEAD", { cwd: API_ROOT, encoding: "utf8" }).trim();
+    const fromGit = execSync("git rev-parse HEAD", { cwd: API_ROOT, encoding: "utf8" }).trim();
+    if (fromGit) return fromGit;
   } catch {
-    return "unknown";
+    // fall through
   }
+  return "unknown";
 }
 
 const sha = resolveSha();

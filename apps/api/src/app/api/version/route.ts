@@ -6,10 +6,12 @@ function resolveDeploySha() {
   if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
   if (process.env.DEPLOY_GIT_SHA) return process.env.DEPLOY_GIT_SHA;
   try {
-    return readFileSync(join(process.cwd(), '.deploy-sha'), 'utf8').trim();
+    const fromFile = readFileSync(join(process.cwd(), '.deploy-sha'), 'utf8').trim();
+    if (fromFile && fromFile !== 'unknown') return fromFile;
   } catch {
-    return 'local';
+    // fall through
   }
+  return 'local';
 }
 
 export async function GET() {

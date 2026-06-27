@@ -325,7 +325,10 @@ async function main() {
 
   // Step 5: deploy — capture RAW vercel output first (no prepended assertions)
   console.log("[evidence] vercel deploy --prod");
-  const deployOutput = run("vercel deploy --prod --yes 2>&1", { cwd: API_ROOT });
+  const deployOutput = run(
+    `vercel deploy --prod --yes --build-env DEPLOY_GIT_SHA=${head} 2>&1`,
+    { cwd: API_ROOT }
+  );
   writeLog("deploy.log", deployOutput);
 
   let inspectOutput = "";
