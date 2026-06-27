@@ -30,12 +30,32 @@ export function summarizeSellerInboundSideEffects(orchestration = {}, extras = {
   };
 }
 
+function resolveCanonicalShouldQueueReply({
+  intelligence_snapshot = null,
+  decision = null,
+  execution = null,
+} = {}) {
+  if (execution?.automation_decision?.should_queue_reply != null) {
+    return Boolean(execution.automation_decision.should_queue_reply);
+  }
+  if (intelligence_snapshot?.canonical_decision?.should_queue_reply != null) {
+    return Boolean(intelligence_snapshot.canonical_decision.should_queue_reply);
+  }
+  if (decision?.immediate_next_action === "queue_auto_reply") return true;
+  return false;
+}
+
 export function summarizeSellerInboundOrchestration(orchestration = {}, extras = {}) {
   const contract = orchestration.contract || null;
   const intelligence_snapshot = orchestration.intelligence_snapshot || null;
   const decision = orchestration.decision || null;
   const execution = orchestration.execution || null;
   const follow_up = orchestration.follow_up || null;
+  const canonical_should_queue_reply = resolveCanonicalShouldQueueReply({
+    intelligence_snapshot,
+    decision,
+    execution,
+  });
   const side_effects =
     orchestration.side_effects ||
     summarizeSellerInboundSideEffects(orchestration, {
@@ -65,13 +85,25 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
       follow_up?.followup_created || follow_up?.scheduled_for || decision?.follow_up_at
     ),
     duplicate_suppressed: Boolean(orchestration.idempotent?.duplicate_suppressed),
+    canonical_should_queue_reply,
+    planned_queue_action:
+      decision?.immediate_next_action ||
+      intelligence_snapshot?.canonical_decision?.scheduled_next_action ||
+      null,
     queues_s2_reply_preview: Boolean(
-      execution?.automation_decision?.should_queue_reply &&
+      canonical_should_queue_reply &&
         (execution?.selected_template?.use_case === "consider_selling" ||
           execution?.selected_template?.stage_code === "consider_selling" ||
-          decision?.template_key === "consider_selling")
+          execution?.selected_template?.stage_code === "S2" ||
+          decision?.template_key === "consider_selling" ||
+          intelligence_snapshot?.recommended_use_case === "consider_selling")
     ),
-    execution_should_queue_reply: execution?.automation_decision?.should_queue_reply ?? null,
+    execution_should_queue_reply: canonical_should_queue_reply,
+    execution_shadow_only: Boolean(
+      orchestration.writes_suppressed ||
+        execution?.dry_run ||
+        intelligence_snapshot?.decision_layers?.execution?.shadow_only
+    ),
     execution_template_use_case:
       execution?.selected_template?.use_case || decision?.template_key || null,
     execution_preview_message: execution?.rendered_message_text || null,

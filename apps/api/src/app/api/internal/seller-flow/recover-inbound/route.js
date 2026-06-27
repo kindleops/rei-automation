@@ -31,6 +31,9 @@ export async function POST(request) {
       dryRun,
       autoReplyMode,
       proofCases,
+      messageEventId: body.message_event_id || body.messageEventId || null,
+      bodyContains: body.body_contains || body.bodyContains || null,
+      detectedIntent: body.detected_intent || body.detectedIntent || null,
     });
 
     return NextResponse.json(result, { status: result.ok ? 200 : 500 });

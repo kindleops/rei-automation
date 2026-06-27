@@ -58,6 +58,26 @@ function needsRecovery(row = {}) {
  * Recovery worker: finds inbound messages with incomplete seller-flow processing
  * and re-runs the canonical orchestration path.
  */
+function messageMatchesFilters(row = {}, { bodyContains = null, detectedIntent = null } = {}) {
+  const body = clean(row.message_body).toLowerCase();
+  const intent = clean(row.detected_intent || row.metadata?.detected_intent).toLowerCase();
+  const classification_intent = clean(
+    row.metadata?.classification?.primary_intent
+  ).toLowerCase();
+
+  if (bodyContains) {
+    const needle = clean(bodyContains).toLowerCase();
+    if (!body.includes(needle)) return false;
+  }
+
+  if (detectedIntent) {
+    const wanted = clean(detectedIntent).toLowerCase();
+    if (intent !== wanted && classification_intent !== wanted) return false;
+  }
+
+  return true;
+}
+
 export async function recoverUnprocessedInboundMessages({
   supabaseClient = null,
   limit = 25,
@@ -65,6 +85,9 @@ export async function recoverUnprocessedInboundMessages({
   autoReplyMode = null,
   lookbackHours = RECOVERY_LOOKBACK_HOURS,
   proofCases = null,
+  messageEventId = null,
+  bodyContains = null,
+  detectedIntent = null,
   loadContextImpl = null,
   processInboundImpl = null,
 } = {}) {
@@ -98,22 +121,41 @@ export async function recoverUnprocessedInboundMessages({
     return { ok: false, reason: "missing_supabase" };
   }
   const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
+  const select_fields =
+    "id,provider_message_sid,from_phone_number,to_phone_number,message_body,received_at,detected_intent,metadata,master_owner_id,prospect_id,property_id,phone_number_id,stage_before";
 
-  const { data: candidates, error } = await supabase
-    .from("message_events")
-    .select(
-      "id,provider_message_sid,from_phone_number,to_phone_number,message_body,received_at,detected_intent,metadata,master_owner_id,prospect_id,property_id,phone_number_id,stage_before"
-    )
-    .eq("direction", "inbound")
-    .gte("received_at", since)
-    .order("received_at", { ascending: false })
-    .limit(Math.max(Number(limit) * 4, 50));
+  let candidates = [];
+  let error = null;
+
+  if (messageEventId) {
+    const targeted = await supabase
+      .from("message_events")
+      .select(select_fields)
+      .eq("id", messageEventId)
+      .eq("direction", "inbound")
+      .maybeSingle();
+    candidates = targeted.data ? [targeted.data] : [];
+    error = targeted.error;
+  } else {
+    const scanned = await supabase
+      .from("message_events")
+      .select(select_fields)
+      .eq("direction", "inbound")
+      .gte("received_at", since)
+      .order("received_at", { ascending: false })
+      .limit(Math.max(Number(limit) * 8, 100));
+    candidates = scanned.data;
+    error = scanned.error;
+  }
 
   if (error) {
     return { ok: false, reason: "query_failed", error: error.message };
   }
 
-  const rows = (Array.isArray(candidates) ? candidates : []).filter(needsRecovery).slice(0, limit);
+  const filtered = (Array.isArray(candidates) ? candidates : []).filter((row) =>
+    messageMatchesFilters(row, { bodyContains, detectedIntent })
+  );
+  const rows = (messageEventId ? filtered : filtered.filter(needsRecovery)).slice(0, limit);
   const mode_resolution = resolveGuardedAutoReplyMode({ requestedMode: autoReplyMode });
   const results = [];
 
@@ -239,6 +281,11 @@ export async function recoverUnprocessedInboundMessages({
     candidate_count: rows.length,
     recovered_count: results.filter((r) => r.ok).length,
     dry_run: Boolean(dryRun),
+    filters: {
+      message_event_id: messageEventId || null,
+      body_contains: bodyContains || null,
+      detected_intent: detectedIntent || null,
+    },
     results,
   };
 }

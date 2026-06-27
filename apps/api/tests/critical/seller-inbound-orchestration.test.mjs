@@ -305,7 +305,10 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
   assert.equal(yes_case.normalized_intent, "ownership_confirmed");
   assert.equal(yes_case.decision.stage_after, "offer_interest");
   assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
+  assert.equal(yes_case.canonical_should_queue_reply, true);
+  assert.equal(yes_case.planned_queue_action, "queue_auto_reply");
   assert.equal(yes_case.queues_s2_reply_preview, true);
+  assert.equal(yes_case.execution_shadow_only, true);
   assert.ok(yes_case.execution_preview_message);
   assert.equal(yes_case.writes_suppressed, true);
   assert.equal(yes_case.side_effects?.notifications_dispatched, false);
@@ -385,4 +388,78 @@ test("recovery worker reprocesses incomplete inbound rows through canonical orch
   assert.ok(result.results[0].side_effects?.workflow_events_count > 0);
   assert.ok(result.results[0].side_effects?.notification_events_count > 0);
   assert.equal(result.results[0].side_effects?.notifications_dispatched, false);
+});
+
+test("recovery worker can target Yes ownership inbound via body_contains filter", async () => {
+  const orchestrationSupabase = makeSellerOrchestrationSupabase();
+  const proofContext = baseContext();
+  const rows = [
+    {
+      id: "evt-stop-1",
+      provider_message_sid: "sid-stop",
+      from_phone_number: "+19012812981",
+      to_phone_number: "+15559876543",
+      message_body: "STOP",
+      received_at: new Date().toISOString(),
+      detected_intent: "opt_out",
+      metadata: { detected_intent: "opt_out" },
+      master_owner_id: "mo-21",
+      prospect_id: "pros-31",
+      property_id: "prop-227",
+    },
+    {
+      id: "evt-yes-1",
+      provider_message_sid: "sid-yes",
+      from_phone_number: "+15551234567",
+      to_phone_number: "+15559876543",
+      message_body: "Yes",
+      received_at: new Date().toISOString(),
+      detected_intent: null,
+      metadata: {},
+      master_owner_id: "mo-21",
+      prospect_id: "pros-31",
+      property_id: "prop-227",
+    },
+  ];
+  const mockSupabase = {
+    from(table) {
+      if (table === "message_events") {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          gte() {
+            return this;
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return Promise.resolve({ data: rows, error: null });
+          },
+        };
+      }
+      return orchestrationSupabase.from(table);
+    },
+  };
+
+  installIoBoundaryMocks({ supabase: orchestrationSupabase });
+
+  const result = await recoverUnprocessedInboundMessages({
+    supabaseClient: mockSupabase,
+    limit: 1,
+    dryRun: true,
+    autoReplyMode: "live_limited",
+    bodyContains: "Yes",
+    loadContextImpl: async () => proofContext,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.candidate_count, 1);
+  assert.equal(result.results[0].message, "Yes");
+  assert.equal(result.results[0].normalized_intent, "ownership_confirmed");
+  assert.equal(result.results[0].canonical_should_queue_reply, true);
 });

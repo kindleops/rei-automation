@@ -1,5 +1,6 @@
 .DS_Store
 .next/
+.deploy-sha
 .data/
 .vercel/
 coverage/
