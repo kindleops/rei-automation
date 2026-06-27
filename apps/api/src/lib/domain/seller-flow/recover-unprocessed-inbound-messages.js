@@ -21,15 +21,30 @@ function isRecent(timestamp = null, hours = STALE_REPLY_WINDOW_HOURS) {
   return Date.now() - ts <= hours * 60 * 60 * 1000;
 }
 
+function resolveHumanReviewRequired(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  if (Object.prototype.hasOwnProperty.call(row, "human_review_required")) {
+    return row.human_review_required;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "human_review_required")) {
+    return metadata.human_review_required;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "needs_human_review")) {
+    return metadata.needs_human_review;
+  }
+  return null;
+}
+
 function needsRecovery(row = {}) {
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
   const classification = metadata.classification || row.classification || null;
   const detected_intent = clean(row.detected_intent || metadata.detected_intent);
   const automation_decision = metadata.automation_decision || row.automation_decision || null;
+  const human_review_required = resolveHumanReviewRequired(row);
 
   if (!detected_intent && !classification?.primary_intent) return true;
   if (!automation_decision && !metadata.seller_flow_decision) return true;
-  if (row.human_review_required === null && detected_intent === "unclear") return true;
+  if (human_review_required === null && detected_intent === "unclear") return true;
   if (metadata.recovery_status === "incomplete") return true;
   return false;
 }
@@ -55,7 +70,7 @@ export async function recoverUnprocessedInboundMessages({
   const { data: candidates, error } = await supabase
     .from("message_events")
     .select(
-      "id,provider_message_sid,from_phone_number,to_phone_number,message_body,received_at,detected_intent,human_review_required,metadata,master_owner_id,prospect_id,property_id,phone_number_id,stage_before"
+      "id,provider_message_sid,from_phone_number,to_phone_number,message_body,received_at,detected_intent,metadata,master_owner_id,prospect_id,property_id,phone_number_id,stage_before"
     )
     .eq("direction", "inbound")
     .gte("received_at", since)
@@ -131,7 +146,12 @@ export async function recoverUnprocessedInboundMessages({
         inboundTo: inbound_to,
         inboundEventId: row.id,
         providerMessageId: row.provider_message_sid,
-        stageBefore: row.stage_before || context?.summary?.conversation_stage || null,
+        stageBefore:
+          row.stage_before ||
+          row.metadata?.stage_before ||
+          row.metadata?.conversation_stage ||
+          context?.summary?.conversation_stage ||
+          null,
         autoReplyMode: mode_resolution.mode,
         executionAllowed: allow_live_send,
         dryRun: !allow_live_send,
