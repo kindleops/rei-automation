@@ -1795,13 +1795,13 @@ async function queryInitialBootThreadRows(params = {}, {
   if (clean(params.q) || clean(params.keyword_group || params.keywordGroup)) return null;
 
   let query = supabase
-    .from(BOOT_FAST_THREAD_SOURCE)
-    .select(BOOT_FAST_THREAD_FIELDS)
+    .from(PRIMARY_THREAD_SOURCE)
+    .select(INBOX_THREAD_SUMMARY_SELECT_FIELDS)
     .not("thread_key", "is", null)
     .neq("thread_key", "");
 
   if (params.direction && params.direction !== "all") {
-    query = query.eq("latest_direction", normalizeDirection(params.direction));
+    query = query.eq("latest_message_direction", normalizeDirection(params.direction));
   }
 
   if (typeof query.order === "function") {
@@ -1822,7 +1822,7 @@ async function queryInitialBootThreadRows(params = {}, {
 
   const { data, error } = await query;
   if (error) {
-    console.warn("[INBOX_BOOT_FAST_SOURCE_FAILED]", error?.message || error);
+    console.warn("[INBOX_BOOT_SOURCE_FAILED]", error?.message || error);
     return null;
   }
 
@@ -1830,17 +1830,7 @@ async function queryInitialBootThreadRows(params = {}, {
     data: data || [],
     count: null,
     error: null,
-    sourceConfig: {
-      key: "boot_fast",
-      name: BOOT_FAST_THREAD_SOURCE,
-      directionColumn: "latest_direction",
-      countSource: PRIMARY_COUNT_SOURCE,
-      countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
-      getSelectColumns() {
-        return BOOT_FAST_THREAD_FIELDS;
-      },
-      searchColumns: ["thread_key", "seller_phone", "latest_message_body"],
-    },
+    sourceConfig: THREAD_SOURCE_CONFIGS[0],
   };
 }
 
@@ -2334,11 +2324,11 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
-  const skipLinkedContextHydration = initialBootMode || fastBucketMode || options.listOnly === true;
+  const skipHeavyHydration = options.listOnly === true;
   try {
-    if (!skipLinkedContextHydration) {
-      finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
-      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+    finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
+    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+    if (!skipHeavyHydration && !initialBootMode && !fastBucketMode) {
       finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
     }
     finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
@@ -2351,7 +2341,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const deliveryHydrationStartedAt = nowMs();
   let deliveryHydrationMs = 0;
-  if (!skipDelivery && !skipLinkedContextHydration) {
+  if (!skipDelivery && !skipHeavyHydration) {
     finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
     deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
   }
