@@ -354,8 +354,8 @@ async function main() {
   const ready = buildCompletedInOutput && (aliasedInOutput || inspectMeta.ready);
   appendFileSync(
     resolve(SCRATCH, "deploy.log"),
-    [
-      "\n=== DEPLOY METADATA (appended after raw CLI output) ===",
+    `\n${[
+      "=== DEPLOY METADATA (appended after raw CLI output) ===",
       `DEPLOY_SHA=${head}`,
       `DEPLOY_BRANCH=${branch}`,
       `PROD_ALIAS=${PROD_ALIAS}`,
@@ -364,8 +364,7 @@ async function main() {
       `inspect_status=${inspectMeta.status || "unknown"}`,
       `inspect_deployment_url=${inspectMeta.deployment_url || "unknown"}`,
       `build_success_observed=${ready}`,
-    ].join("\n"),
-    "\n"
+    ].join("\n")}\n`
   );
 
   // Post-deploy version on production alias
