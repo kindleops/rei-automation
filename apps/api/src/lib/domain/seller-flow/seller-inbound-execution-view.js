@@ -6,12 +6,22 @@ function resolveWouldQueueReply({
   execution = null,
   canonical_decision = null,
   decision = null,
+  writes_suppressed = false,
 } = {}) {
-  const automation = execution?.automation_decision || canonical_decision || {};
-  if (automation.should_queue_reply != null) {
-    return Boolean(automation.should_queue_reply);
+  const automation = execution?.automation_decision || {};
+  const canonical_queue = canonical_decision?.should_queue_reply;
+  const decision_queue = decision?.immediate_next_action === "queue_auto_reply";
+
+  if (writes_suppressed) {
+    if (canonical_queue != null) return Boolean(canonical_queue);
+    if (decision_queue) return true;
+    if (automation.should_queue_reply != null) return Boolean(automation.should_queue_reply);
+    return false;
   }
-  return decision?.immediate_next_action === "queue_auto_reply";
+
+  if (automation.should_queue_reply != null) return Boolean(automation.should_queue_reply);
+  if (canonical_queue != null) return Boolean(canonical_queue);
+  return decision_queue;
 }
 
 function resolveWouldScheduleFollowup({
@@ -68,6 +78,7 @@ export function normalizeSellerInboundExecutionView({
     execution,
     canonical_decision,
     decision,
+    writes_suppressed,
   });
   const would_followup = resolveWouldScheduleFollowup({
     follow_up,

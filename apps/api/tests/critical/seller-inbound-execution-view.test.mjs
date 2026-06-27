@@ -87,6 +87,34 @@ test("not_interested dry-run exposes planned follow-up without applied followup 
   assert.equal(view.follow_up.followup_created, false);
 });
 
+test("stale recovery shadow run still reports planned queue from decision contract", () => {
+  const view = normalizeSellerInboundExecutionView({
+    writes_suppressed: true,
+    canonical_decision: {
+      should_queue_reply: true,
+    },
+    decision: {
+      immediate_next_action: "queue_auto_reply",
+    },
+    execution: {
+      queued: false,
+      dry_run: true,
+      automation_decision: {
+        should_queue_reply: false,
+      },
+    },
+    follow_up: {
+      ok: true,
+      skipped: true,
+      reason: "not_attempted",
+    },
+  });
+
+  assert.equal(view.queued, true);
+  assert.equal(view.queue_row_created, false);
+  assert.equal(view.effective_action, "queue_planned");
+});
+
 test("live queue path preserves applied queue row semantics", () => {
   const view = normalizeSellerInboundExecutionView({
     writes_suppressed: false,
