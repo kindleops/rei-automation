@@ -33,7 +33,9 @@ const SELLER_FLOW_PATHS = [
   "apps/api/package.json",
 ];
 
-const STASH_KEEP_PATHSPECS = SELLER_FLOW_PATHS.map((path) => `':!${path}'`).join(" ");
+const STASH_KEEP_PATHSPECS = SELLER_FLOW_PATHS.map(
+  (path) => `":(exclude)${path}"`
+).join(" ");
 
 mkdirSync(SCRATCH, { recursive: true });
 
@@ -130,6 +132,11 @@ async function captureSafetyCounts(env, label) {
       "deal_intelligence_view",
       `thread_key=eq.${encodeURIComponent(PROOF_THREAD_KEY)}`,
     ],
+    v_universal_lead_command_proof_thread: [
+      "v_universal_lead_command",
+      `thread_key=eq.${encodeURIComponent(PROOF_THREAD_KEY)}`,
+    ],
+    v_universal_lead_command_recent: ["v_universal_lead_command", recent],
     inbound_intelligence_audit_proof: ["inbound_intelligence_audit", proofEvents],
     inbound_intelligence_audit_recent: [
       "inbound_intelligence_audit",
@@ -152,17 +159,18 @@ async function fetchProdVersion() {
 
 function stashNonSellerWorkspace() {
   try {
-    const status = run("git status --porcelain").trim();
-    if (!status) return false;
+    const before = run("git status --porcelain").trim();
+    if (!before) return { stashed: false, before, after: "" };
     run(`git stash push -u -m harness-seller-only -- . ${STASH_KEEP_PATHSPECS}`);
-    return true;
-  } catch {
-    return false;
+    const after = run("git status --porcelain").trim();
+    return { stashed: true, before, after };
+  } catch (error) {
+    return { stashed: false, before: "", after: "", error: error?.message || String(error) };
   }
 }
 
-function restoreNonSellerWorkspace(stashed) {
-  if (!stashed) return;
+function restoreNonSellerWorkspace(stashResult) {
+  if (!stashResult?.stashed) return;
   try {
     run("git stash pop");
   } catch (error) {
@@ -216,8 +224,9 @@ async function main() {
   const env = loadEnvLocal();
   const head = run("git rev-parse HEAD").trim();
   const branch = run("git branch --show-current").trim();
-  let workspaceStashed = false;
+  let stashResult = { stashed: false };
 
+  writeLog("blocker.log", "");
   try {
   console.log(`[evidence] SCRATCH=${SCRATCH}`);
   console.log(`[evidence] HEAD=${head} branch=${branch}`);
@@ -253,7 +262,7 @@ async function main() {
   );
 
   // Step 3: isolate workspace, then capture seller-flow porcelain only
-  workspaceStashed = stashNonSellerWorkspace();
+  stashResult = stashNonSellerWorkspace();
   const sellerPorcelain =
     run(`git status --porcelain -- ${SELLER_FLOW_PATHS.join(" ")}`).trim() ||
     "(no seller-flow porcelain changes — clean)";
@@ -265,10 +274,16 @@ async function main() {
     [
       "=== VERIFICATION PLAN STEP 3 ===",
       `HEAD=${head}`,
-      `workspace_stashed=${workspaceStashed}`,
+      `workspace_stashed=${stashResult.stashed}`,
+      `total_porcelain_lines_post_stash=${run("git status --porcelain | wc -l").trim()}`,
       "",
       "=== seller-flow porcelain (post-stash, plan scope only) ===",
       sellerPorcelain,
+      "",
+      "=== stash before/after (non-seller isolated) ===",
+      `before_lines=${stashResult.before ? stashResult.before.split("\n").length : 0}`,
+      `after_lines=${stashResult.after ? stashResult.after.split("\n").length : 0}`,
+      stashResult.error ? `stash_error=${stashResult.error}` : "stash_error=none",
       "",
       "=== seller-flow diff stat c45c0dd..HEAD ===",
       sessionDiffStat || "(no diff)",
@@ -283,21 +298,25 @@ async function main() {
 
   // Step 4: push with full stdout + remote ref confirmation
   console.log("[evidence] git push");
-  const pushOutput = run("git push origin seller-autopilot 2>&1");
+  const pushOutput = run("git push -v origin seller-autopilot 2>&1");
   const remoteRef = run("git ls-remote origin refs/heads/seller-autopilot 2>&1").trim();
+  const originHead = run("git rev-parse origin/seller-autopilot 2>&1").trim();
+  const originLog = run("git log origin/seller-autopilot -1 --oneline 2>&1").trim();
   writeLog(
     "push.log",
     [
       "=== VERIFICATION PLAN STEP 4: PUSH ===",
       `LOCAL_HEAD=${head}`,
+      `ORIGIN_HEAD=${originHead}`,
       "",
-      "=== git push stdout/stderr ===",
+      "=== git push -v stdout/stderr ===",
       pushOutput.trim() || "(no output)",
       "",
       "=== origin seller-autopilot ref ===",
       remoteRef,
+      `origin_log=${originLog}`,
       "",
-      `remote_matches_local=${remoteRef.startsWith(head)}`,
+      `remote_matches_local=${remoteRef.startsWith(head) || originHead === head}`,
     ].join("\n")
   );
 
@@ -310,16 +329,22 @@ async function main() {
     `vercel deploy --prod --yes --build-env DEPLOY_GIT_SHA=${head} 2>&1`,
     { cwd: API_ROOT }
   );
-  writeLog("deploy.log", deployOutput);
+  const inspectOutput = run(
+    `vercel inspect ${PROD_ALIAS.replace("https://", "")} 2>&1`,
+    { cwd: API_ROOT }
+  );
+  const deployLogText = `${deployOutput}\n${inspectOutput}`;
+  writeLog("deploy.log", deployLogText);
 
-  const buildCompletedInOutput = /Build Completed/i.test(deployOutput);
+  const buildCompletedInOutput = /Build Completed/i.test(deployLogText);
   const aliasedInOutput = new RegExp(
     `Aliased:\\s*(https://)?${PROD_ALIAS.replace("https://", "").replace(/\./g, "\\.")}`,
     "i"
-  ).test(deployOutput);
+  ).test(deployLogText);
   const deployShaObserved =
-    deployOutput.includes(head) || /\[deploy-sha\]/i.test(deployOutput);
-  const ready = buildCompletedInOutput && aliasedInOutput;
+    deployLogText.includes(head) || /\[deploy-sha\]/i.test(deployLogText);
+  const readyObserved = /Ready/i.test(deployLogText);
+  const ready = buildCompletedInOutput && aliasedInOutput && readyObserved;
 
   // Post-deploy version on production alias
   console.log("[evidence] prod /api/version");
@@ -408,8 +433,22 @@ async function main() {
   };
   writeLog("prod-verify.log", JSON.stringify(prodVerifyPayload, null, 2));
   const prodVerifyText = JSON.stringify(prodVerifyPayload);
+  const yesOwnership =
+    (proofJson.proof_results || []).find((r) => r.proof_case === "ownership_confirmed_yes") ||
+    null;
+  const nfsCase =
+    (proofJson.proof_results || []).find((r) => r.proof_case === "s1_not_for_sale") || null;
+  const yesRecovery = yesRecoveryJson?.results?.[0] || null;
   const queuedObserved = /"queued"\s*:\s*true/.test(prodVerifyText);
   const followupObserved = /"followup_scheduled"\s*:\s*true/.test(prodVerifyText);
+  const executionQueuedObserved = Boolean(yesOwnership?.execution?.queued);
+  const sellerStageQueuedObserved = Boolean(
+    yesOwnership?.execution?.seller_stage_reply?.queued ??
+      yesOwnership?.seller_stage_reply?.queued
+  );
+  const intelligenceQueueObserved = Boolean(
+    yesOwnership?.intelligence_snapshot?.reply_recommendation?.should_queue_reply
+  );
 
   const safetyAfter = await captureSafetyCounts(env, "after_prod_proof");
   writeLog("prod-safety-after.json", JSON.stringify(safetyAfter, null, 2));
@@ -425,27 +464,30 @@ async function main() {
   }
   writeLog("prod-safety-delta.json", JSON.stringify(safetyDelta, null, 2));
 
-  const yesOwnership =
-    (proofJson.proof_results || []).find((r) => r.proof_case === "ownership_confirmed_yes") ||
-    null;
-  const nfsCase =
-    (proofJson.proof_results || []).find((r) => r.proof_case === "s1_not_for_sale") || null;
-  const yesRecovery = yesRecoveryJson?.results?.[0] || null;
-
   const summaryLines = [
     `PROD VERIFY SUMMARY @ ${head}`,
     `prod_alias=${PROD_ALIAS}`,
     `prod_version_commit=${versionBeforeProof?.commit || "unknown"}`,
     `version_matches_head=${versionMatchesHead}`,
     `deploy_build_success=${ready}`,
+    `deploy_ready_observed=${readyObserved}`,
     `deploy_aliased_in_cli_output=${aliasedInOutput}`,
     `deploy_sha_observed_in_cli=${deployShaObserved}`,
     `grep_queued_true=${queuedObserved}`,
     `grep_followup_scheduled_true=${followupObserved}`,
+    `execution_queued_true=${executionQueuedObserved}`,
+    `seller_stage_reply_queued_true=${sellerStageQueuedObserved}`,
+    `intelligence_should_queue_true=${intelligenceQueueObserved}`,
     "",
     "=== RAW ORCHESTRATOR FIELDS (proof ownership_confirmed_yes) ===",
     yesOwnership
-      ? `queued=${yesOwnership.queued} queue_row_created=${yesOwnership.queue_row_created} effective_action=${yesOwnership.effective_action}`
+      ? [
+          `queued=${yesOwnership.queued} execution.queued=${yesOwnership.execution?.queued}`,
+          `queue_row_created=${yesOwnership.queue_row_created} effective_action=${yesOwnership.effective_action}`,
+          `execution.effective_action=${yesOwnership.execution?.effective_action}`,
+          `seller_stage_reply.queued=${yesOwnership.execution?.seller_stage_reply?.queued}`,
+          `intelligence.execution.effective_action=${yesOwnership.intelligence_snapshot?.decision_layers?.execution?.effective_action}`,
+        ].join("\n")
       : "(missing)",
     "",
     "=== RAW ORCHESTRATOR FIELDS (proof s1_not_for_sale) ===",
@@ -474,10 +516,12 @@ async function main() {
       `head_sha=${head}`,
       `new_branches_created_in_session=0`,
       `deploy_build_success=${ready}`,
+      `deploy_ready_observed=${readyObserved}`,
       `deploy_aliased_in_cli_output=${aliasedInOutput}`,
       `deploy_sha_observed_in_cli=${deployShaObserved}`,
       `grep_queued_true=${queuedObserved}`,
       `grep_followup_scheduled_true=${followupObserved}`,
+      `execution_queued_true=${executionQueuedObserved}`,
       `deploy_alias=${PROD_ALIAS}`,
       `prod_version_commit=${versionBeforeProof?.commit || "unknown"}`,
       `version_matches_head=${versionMatchesHead}`,
@@ -493,10 +537,21 @@ async function main() {
     ].join("\n")
   );
 
-  if (!ready) throw new Error("deploy.log missing Build Completed + prod alias markers");
+  if (!ready) throw new Error("deploy.log missing Build Completed + Aliased + Ready markers");
   if (!deployShaObserved) throw new Error("deploy.log missing DEPLOY_GIT_SHA or [deploy-sha] marker");
   if (!proofJson.ok) throw new Error("prod proof_cases returned ok:false");
   if (!queuedObserved) throw new Error('prod-verify.log missing raw "queued":true');
+  if (!executionQueuedObserved) {
+    throw new Error("prod proof ownership_confirmed_yes missing execution.queued=true");
+  }
+  if (!sellerStageQueuedObserved) {
+    throw new Error("prod proof ownership_confirmed_yes missing seller_stage_reply.queued=true");
+  }
+  if (!intelligenceQueueObserved) {
+    throw new Error(
+      "prod proof ownership_confirmed_yes missing intelligence reply_recommendation.should_queue_reply=true"
+    );
+  }
   if (!followupObserved) throw new Error('prod-verify.log missing raw "followup_scheduled":true');
   if (!versionMatchesHead) {
     throw new Error(
@@ -507,7 +562,7 @@ async function main() {
   console.log("[evidence] complete");
   console.log(summaryLines.join("\n"));
   } finally {
-    restoreNonSellerWorkspace(workspaceStashed);
+    restoreNonSellerWorkspace(stashResult);
   }
 }
 

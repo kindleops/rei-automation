@@ -44,6 +44,57 @@ function resolveWouldScheduleFollowup({
   return false;
 }
 
+function alignIntelligenceSnapshotExecutionView(snapshot = null, view = {}) {
+  if (!snapshot) return snapshot;
+  const layers = snapshot.decision_layers || {};
+  const execution_layer = layers.execution || {};
+  const reply = snapshot.reply_recommendation || {};
+
+  return {
+    ...snapshot,
+    decision_layers: {
+      ...layers,
+      execution: {
+        ...execution_layer,
+        execution_allowed: Boolean(view.queued ?? execution_layer.execution_allowed),
+        effective_action: view.effective_action ?? execution_layer.effective_action,
+        queue_row_created: Boolean(view.queue_row_created),
+        follow_up_scheduled: Boolean(view.followup_scheduled),
+        shadow_only: view.effective_action === "shadow_only",
+        audit_only: Boolean(view.writes_suppressed),
+      },
+    },
+    reply_recommendation: {
+      ...reply,
+      should_queue_reply: Boolean(view.queued),
+      reply_mode: view.queued ? "queue_planned" : reply.reply_mode,
+      scheduled_next_action: view.queued
+        ? "queue_auto_reply"
+        : reply.scheduled_next_action,
+    },
+  };
+}
+
+function alignSellerStageReply(stageReply = null, view = {}) {
+  const base = stageReply || { ok: true, handled: true };
+  return {
+    ...base,
+    queued: Boolean(view.queued),
+    queue_row_created: Boolean(view.queue_row_created),
+    effective_action: view.effective_action ?? null,
+    reason:
+      view.queued && view.writes_suppressed
+        ? "queue_planned_writes_suppressed"
+        : base.reason,
+    plan: base.plan
+      ? {
+          ...base.plan,
+          should_queue_reply: Boolean(view.queued),
+        }
+      : base.plan,
+  };
+}
+
 function resolveEffectiveAction({
   writes_suppressed = false,
   would_queue = false,
@@ -111,6 +162,12 @@ export function normalizeSellerInboundExecutionView({
         effective_action,
         writes_suppressed: Boolean(writes_suppressed),
         execution_allowed: execution.execution_allowed ?? null,
+        seller_stage_reply: alignSellerStageReply(execution.seller_stage_reply, {
+          queued,
+          queue_row_created,
+          effective_action,
+          writes_suppressed,
+        }),
       }
     : null;
 
@@ -135,4 +192,5 @@ export function normalizeSellerInboundExecutionView({
   };
 }
 
+export { alignIntelligenceSnapshotExecutionView, alignSellerStageReply };
 export default normalizeSellerInboundExecutionView;

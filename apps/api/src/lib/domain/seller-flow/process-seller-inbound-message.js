@@ -23,7 +23,11 @@ import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
-import { normalizeSellerInboundExecutionView } from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
+import {
+  normalizeSellerInboundExecutionView,
+  alignIntelligenceSnapshotExecutionView,
+  alignSellerStageReply,
+} from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -480,14 +484,6 @@ export async function processSellerInboundMessage({
     });
   }
 
-  const seller_stage_reply = {
-    ...(intelligence?.seller_stage_reply || {}),
-    ...(execution?.seller_stage_reply || {}),
-    intelligence_snapshot,
-    automation_decision: execution?.automation_decision || canonical_decision,
-    seller_flow_decision: decision,
-  };
-
   const execution_view = normalizeSellerInboundExecutionView({
     execution,
     follow_up: follow_up_result,
@@ -496,6 +492,23 @@ export async function processSellerInboundMessage({
     contract,
     writes_suppressed,
   });
+
+  const aligned_intelligence_snapshot = alignIntelligenceSnapshotExecutionView(
+    intelligence_snapshot,
+    execution_view
+  );
+
+  const seller_stage_reply = alignSellerStageReply(
+    {
+      ...(intelligence?.seller_stage_reply || {}),
+      ...(execution_view.execution?.seller_stage_reply || {}),
+      intelligence_snapshot: aligned_intelligence_snapshot,
+      automation_decision:
+        execution_view.execution?.automation_decision || canonical_decision,
+      seller_flow_decision: decision,
+    },
+    execution_view
+  );
 
   runtimeDeps.info("[SELLER_INBOUND_ORCHESTRATED]", {
     thread_key: threadKey || inboundFrom,
@@ -534,7 +547,7 @@ export async function processSellerInboundMessage({
     classification,
     contract,
     intelligence,
-    intelligence_snapshot,
+    intelligence_snapshot: aligned_intelligence_snapshot,
     execution: execution_view.execution,
     follow_up: execution_view.follow_up,
     decision,

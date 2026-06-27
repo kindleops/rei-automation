@@ -156,6 +156,12 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
   assert.equal(result.queue_row_created, false);
   assert.equal(result.execution.queue_row_created, false);
   assert.equal(result.effective_action, "queue_planned");
+  assert.equal(result.execution.seller_stage_reply.queued, true);
+  assert.equal(result.intelligence_snapshot.reply_recommendation.should_queue_reply, true);
+  assert.equal(
+    result.intelligence_snapshot.decision_layers.execution.effective_action,
+    "queue_planned"
+  );
   assert.equal(result.auto_reply_mode, "live_limited");
   assert.equal(result.writes_suppressed, true);
   assert.equal(result.side_effects?.notifications_dispatched, false);

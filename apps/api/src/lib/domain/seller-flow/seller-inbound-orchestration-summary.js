@@ -53,6 +53,7 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
     interest_signal: contract?.interest_signal || null,
     contract,
     intelligence_snapshot,
+    seller_stage_reply: orchestration.seller_stage_reply || null,
     decision,
     execution,
     follow_up,

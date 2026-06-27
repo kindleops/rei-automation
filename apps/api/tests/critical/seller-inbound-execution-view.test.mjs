@@ -43,6 +43,8 @@ test("ownership dry-run exposes planned queue intent without applied queue row",
   assert.equal(view.execution.queued, true);
   assert.equal(view.execution.queue_row_created, false);
   assert.equal(view.execution.writes_suppressed, true);
+  assert.equal(view.execution.seller_stage_reply.queued, true);
+  assert.equal(view.execution.seller_stage_reply.queue_row_created, false);
 });
 
 test("not_interested dry-run exposes planned follow-up without applied followup row", () => {
