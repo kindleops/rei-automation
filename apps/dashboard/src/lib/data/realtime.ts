@@ -49,7 +49,7 @@ export const subscribeToInboxRealtime = (onChange?: () => void): RealtimeSubscri
     return []
   }
   const supabase = getSupabaseClient()
-  const relevantTables = ['message_events', 'inbox_thread_state', 'send_queue']
+  const relevantTables = ['message_events', 'inbox_thread_state', 'send_queue', 'universal_lead_state_events', 'operator_entity_preferences']
   const subs: RealtimeSubscription[] = []
 
   for (const table of relevantTables) {

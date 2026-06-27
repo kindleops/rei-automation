@@ -3,6 +3,7 @@ import {
   isOutboundLastWithoutReply,
   resolveOutboundReplyState,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { isStaleExplicitInboxBucket } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -224,7 +225,7 @@ function shouldRouteToNeedsReview(classification = {}) {
 
 export function deriveInboxBucketFromThreadState(row = {}) {
   const explicit = normalizeLegacyBucket(row.inbox_bucket || row.inbox_category || "");
-  if (explicit) return explicit;
+  if (explicit && !isStaleExplicitInboxBucket(row, explicit)) return explicit;
 
   if (row.is_suppressed === true || lower(row.disposition) === "suppressed") return "suppressed";
   if (lower(row.disposition) === "wrong_number") return "dead";
@@ -249,6 +250,20 @@ export function deriveInboxBucketFromThreadState(row = {}) {
 
   const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row);
   if (bucket) return bucket;
+
+  if (isOutboundLastWithoutReply({
+    lastOutboundAt: row.last_outbound_at,
+    lastInboundAt: row.last_inbound_at,
+  })) {
+    const outboundState = resolveOutboundReplyState({
+      lastOutboundAt: row.last_outbound_at,
+      lastInboundAt: row.last_inbound_at,
+      latestDeliveryStatus: row.latest_delivery_status,
+      workflowRow: row,
+    });
+    if (outboundState.inbox_bucket) return outboundState.inbox_bucket;
+  }
+
   if (hasExplicitColdEvidence(row)) return "cold";
   return null;
 }
@@ -336,12 +351,6 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     return outboundState.inbox_bucket;
   }
 
-  const lastInboundAt =
-    messageEvent.received_at ||
-    existingState.last_inbound_at ||
-    existingState.latest_message_at;
-  const lastOutboundAt = existingState.last_outbound_at || existingState.lastOutboundAt;
-  const hasOutboundAfterInbound = !isOutboundLastWithoutReply({ lastOutboundAt, lastInboundAt });
   const pendingQueue = Number(existingState.pending_queue_count || 0) > 0;
   const blockedQueue = Number(existingState.blocked_queue_count || 0) > 0;
   const autoReplyQueued = pendingQueue || blockedQueue || ["queued", "scheduled", "approval", "processing"].includes(
@@ -353,7 +362,7 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     lower(existingState.disposition) === "suppressed" ||
     lower(existingState.suppression_status) === "suppressed";
 
-  if (hasOutboundAfterInbound || autoReplyQueued || handled || terminallySuppressed) {
+  if (autoReplyQueued || handled || terminallySuppressed) {
     return null;
   }
 

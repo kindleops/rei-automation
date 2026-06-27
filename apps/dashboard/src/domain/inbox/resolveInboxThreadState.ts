@@ -37,8 +37,22 @@ export const ACTIVE_CANONICAL_BUCKETS = new Set<CanonicalBucket>([
 export const isActiveCanonicalBucket = (bucket: unknown): boolean =>
   ACTIVE_CANONICAL_BUCKETS.has(String(bucket ?? '').trim().toLowerCase() as CanonicalBucket)
 
+const WAITING_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000
+
+const parseTimestampMs = (value: unknown): number => {
+  const ms = new Date(String(value ?? '')).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+const isOutboundLastWithoutReply = (lastOutboundAt: unknown, lastInboundAt: unknown): boolean => {
+  const outboundMs = parseTimestampMs(lastOutboundAt)
+  if (!outboundMs) return false
+  const inboundMs = parseTimestampMs(lastInboundAt)
+  return !inboundMs || inboundMs < outboundMs
+}
+
 export const isWaitingInboxState = (state: BucketClassification): boolean =>
-  state.flags.latest_direction === 'outbound' && state.bucket !== 'dead' && state.bucket !== 'suppressed'
+  state.bucket === 'waiting'
 
 const num = (v: unknown, fallback = 0): number => {
   const n = Number(String(v ?? '').replace(/[,$\s]/g, ''))
@@ -64,6 +78,30 @@ const getAny = (thread: Record<string, unknown>, ...keys: string[]): unknown => 
     if (v !== undefined && v !== null && String(v).trim() !== '') return v
   }
   return undefined
+}
+
+export const threadMatchesWaitingBucket = (thread: Record<string, unknown>, nowMs = Date.now()): boolean => {
+  const bucket = lower(getAny(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory'))
+  if (['dead', 'suppressed'].includes(bucket)) return false
+  const lastOut = getAny(thread, 'last_outbound_at', 'lastOutboundAt', 'latest_message_at', 'latestMessageAt')
+  const lastIn = getAny(thread, 'last_inbound_at', 'lastInboundAt')
+  if (!isOutboundLastWithoutReply(lastOut, lastIn)) return false
+  const outMs = parseTimestampMs(lastOut)
+  if (!outMs) return false
+  return (nowMs - outMs) <= WAITING_REPLY_WINDOW_MS
+}
+
+export const threadMatchesColdBucket = (thread: Record<string, unknown>, nowMs = Date.now()): boolean => {
+  const bucket = lower(getAny(thread, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory'))
+  const lane = lower(getAny(thread, 'automation_lane', 'automationLane'))
+  if (['dead', 'suppressed'].includes(bucket)) return false
+  if (bucket === 'cold' || lane === 'cold_reactivation') return true
+  const lastOut = getAny(thread, 'last_outbound_at', 'lastOutboundAt', 'latest_message_at', 'latestMessageAt')
+  const lastIn = getAny(thread, 'last_inbound_at', 'lastInboundAt')
+  if (!isOutboundLastWithoutReply(lastOut, lastIn)) return false
+  const outMs = parseTimestampMs(lastOut)
+  if (!outMs) return false
+  return (nowMs - outMs) > WAITING_REPLY_WINDOW_MS
 }
 
 const getDirection = (thread: Record<string, unknown>): string => {
@@ -163,7 +201,15 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     return null
   })()
 
-  if (bucketFromBackend && !isSuppressed && !isDead) {
+  const backendBucketIsStale = bucketFromBackend === 'new_replies' && (
+    direction !== 'inbound'
+    || isSuppressed
+    || isDead
+    || isRead
+    || hasAny(intent, ['not_interested', 'wrong_number', 'opt_out', 'stop', 'dnc'])
+  )
+
+  if (bucketFromBackend && !isSuppressed && !isDead && !backendBucketIsStale) {
     return {
       bucket: bucketFromBackend,
       reasons: [`backend_status_bucket(${statusBucket})`],

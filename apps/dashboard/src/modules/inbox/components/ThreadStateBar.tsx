@@ -174,9 +174,9 @@ const STAGE_OPTIONS: PillOption<ThreadStage>[] = (Object.keys(threadStageVisuals
   (v) => ({ value: v, visual: threadStageVisuals[v] }),
 )
 
-const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = (['hot', 'warm', 'cold'] as ThreadTemperature[]).map(
-  (v) => ({ value: v, visual: threadTemperatureVisuals[v] }),
-)
+const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = (
+  ['unscored', 'cold', 'warm', 'hot'] as ThreadTemperature[]
+).map((v) => ({ value: v, visual: threadTemperatureVisuals[v] }))
 
 const AUTO_OPTIONS: PillOption<AutopilotMode>[] = (Object.keys(autopilotModeVisuals) as AutopilotMode[]).map(
   (v) => ({
@@ -255,7 +255,7 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
           error={status.error}
           disabled={disabled}
           className="nx-ctrl--status"
-          onChange={(next) => status.commit(next, () => persist({ conversation_status: next }))}
+          onChange={(next) => status.commit(next, () => persist({ operational_status: next, conversation_status: next }))}
         />
         <GlassControl
           label="Acquisition stage"
@@ -265,7 +265,7 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
           error={stage.error}
           disabled={disabled}
           className="nx-ctrl--stage"
-          onChange={(next) => stage.commit(next, () => persist({ seller_stage: next }))}
+          onChange={(next) => stage.commit(next, () => persist({ lifecycle_stage: next, seller_stage: next }))}
         />
         <GlassControl
           label="Lead temperature"
@@ -275,7 +275,7 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
           error={temperature.error}
           disabled={disabled}
           className="nx-ctrl--temperature"
-          onChange={(next) => temperature.commit(next, () => persist({ temperature: next }))}
+          onChange={(next) => temperature.commit(next, () => persist({ lead_temperature: next, temperature: next }))}
         />
       </div>
       <div className="nx-conv-command-strip__spacer" aria-hidden="true" />

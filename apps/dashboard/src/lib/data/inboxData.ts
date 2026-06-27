@@ -3117,7 +3117,12 @@ const getThreadLookupIdentity = (
 ): ThreadLookupIdentity => {
   const threadRecord = thread as unknown as AnyRecord
   const conversationThreadId = getConversationThreadIdForThread(threadRecord)
-  const legacyThreadKey = asString(thread.threadKey || threadRecord.legacyThreadKey || threadRecord.legacy_thread_key, '')
+  const rowThreadKey = asString(threadRecord.thread_key ?? threadRecord.threadKey, '')
+  const phoneLikeRowKey = rowThreadKey && !rowThreadKey.startsWith('ct:') ? rowThreadKey : ''
+  const legacyThreadKey = asString(
+    threadRecord.legacy_thread_key ?? threadRecord.legacyThreadKey ?? thread.threadKey,
+    phoneLikeRowKey,
+  )
   const selectedThreadKey = conversationThreadId || asString(thread.threadKey || thread.id, '')
   const canonicalE164 = normalizePhone(thread.canonicalE164)
   const phone = normalizePhone(thread.phoneNumber)
@@ -3384,6 +3389,9 @@ export const getThreadMessagesPageForThread = async (
   if (!threadKey) return emptyThreadMessagePage(offset, limit, { error_code: 'missing_thread_key' })
 
   try {
+    const threadRecord = thread as unknown as AnyRecord
+    const rowThreadKey = asString(threadRecord.thread_key ?? threadRecord.threadKey, '')
+    const phoneLikeRowKey = rowThreadKey && !rowThreadKey.startsWith('ct:') ? rowThreadKey : ''
     const params = new URLSearchParams()
     if (options.fetchAll) {
       params.set('fetch_all', '1')
@@ -3393,16 +3401,13 @@ export const getThreadMessagesPageForThread = async (
     }
     if (lookup.conversationThreadId) params.set('conversation_thread_id', lookup.conversationThreadId)
     if (lookup.legacyThreadKey) params.set('legacy_thread_key', lookup.legacyThreadKey)
+    else if (phoneLikeRowKey) params.set('legacy_thread_key', phoneLikeRowKey)
     if (lookup.normalizedPhone) params.set('normalized_phone', lookup.normalizedPhone)
     if (lookup.canonicalE164) params.set('canonical_e164', lookup.canonicalE164)
     if (lookup.phone) params.set('phone', lookup.phone)
     if (lookup.bestPhone) params.set('best_phone', lookup.bestPhone)
     if (lookup.sellerPhone) params.set('seller_phone', lookup.sellerPhone)
-    if (lookup.latestMessageId && !options.fetchAll) {
-      params.set('latest_message_id', lookup.latestMessageId)
-      params.set('latestMessageId', lookup.latestMessageId)
-    }
-    const threadRecord = thread as unknown as AnyRecord
+    // Conversation hydration must load the full thread — never scope to latest_message_id only.
     const propertyId = asString(threadRecord.propertyId ?? threadRecord.property_id, '')
     const prospectId = asString(threadRecord.prospectId ?? threadRecord.prospect_id, '')
     const masterOwnerId = asString(threadRecord.ownerId ?? threadRecord.master_owner_id ?? threadRecord.masterOwnerId, '')
@@ -3606,9 +3611,17 @@ const buildIntelligenceFromHydration = (
   }
 }
 
+export type ThreadHydrationOptions = {
+  /** Caller already fetched messages — skip duplicate thread-messages round-trip. */
+  skipMessages?: boolean
+  /** Caller loads full dossier via Deal Intelligence — skip heavy hydration payload. */
+  skipDossier?: boolean
+}
+
 export const getThreadHydrationForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   signal?: AbortSignal,
+  options: ThreadHydrationOptions = {},
 ): Promise<ThreadHydrationResult> => {
   const hydrationStartedAt = dataLayerNow()
   const lookup = getThreadLookupIdentity(thread)
@@ -3618,6 +3631,8 @@ export const getThreadHydrationForThread = async (
   const degradedParts: string[] = []
 
   const hydrationParams = buildThreadHydrationQueryParams(thread, lookup)
+  if (options.skipMessages) hydrationParams.set('include_messages', '0')
+  if (options.skipDossier) hydrationParams.set('include_dossier', '0')
   const hydrationPromise = threadKey
     ? backendClient.fetchInboxThreadHydration(hydrationParams.toString(), signal).catch((err) => {
         if (!isAbortLikeError(err, signal)) {
@@ -3627,8 +3642,10 @@ export const getThreadHydrationForThread = async (
       })
     : Promise.resolve({ ok: false as const, data: null, status: 0, error: 'MISSING_THREAD_KEY', message: 'missing thread key' })
 
-  const messagesPromise = getAllThreadMessagesForThread(thread, { signal })
-  const dealContextPromise = threadKey
+  const messagesPromise = options.skipMessages
+    ? Promise.resolve(emptyThreadMessagePage(0, 50, { skipped_duplicate_fetch: true }))
+    : getAllThreadMessagesForThread(thread, { signal })
+  const dealContextPromise = threadKey && !options.skipDossier
     ? getDealContextByThread(threadKey, signal).catch(() => null)
     : Promise.resolve(null)
 

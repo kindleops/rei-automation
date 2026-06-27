@@ -151,6 +151,20 @@ const rowMatchesThread = (row: Record<string, unknown>, threadKey: string): bool
 const getRowAutomationLane = (row: Record<string, unknown>): string =>
   String(getRowValue(row, 'automation_lane', 'automationLane') ?? '').trim().toLowerCase()
 
+const WAITING_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000
+
+const rowTimestampMs = (value: unknown): number => {
+  const ms = new Date(String(value ?? '')).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+const rowIsOutboundLastWithoutReply = (row: Record<string, unknown>): boolean => {
+  const outboundMs = rowTimestampMs(getRowValue(row, 'last_outbound_at', 'lastOutboundAt', 'latest_message_at', 'latestMessageAt'))
+  if (!outboundMs) return false
+  const inboundMs = rowTimestampMs(getRowValue(row, 'last_inbound_at', 'lastInboundAt'))
+  return !inboundMs || inboundMs < outboundMs
+}
+
 const getRowBucketKey = (row: Record<string, unknown>): string => {
   const bucket = normalizeBucketKey(
     getRowValue(row, 'inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'),
@@ -166,10 +180,40 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
   if (key === 'all_messages') return true
   if (key === 'active') return ACTIVE_BUCKETS.has(rowBucket)
   if (key === 'waiting') {
-    return rowBucket === 'waiting'
+    if (['dead', 'suppressed'].includes(rowBucket)) return false
+    if (!rowIsOutboundLastWithoutReply(row)) return false
+    const outboundMs = rowTimestampMs(getRowValue(row, 'last_outbound_at', 'lastOutboundAt', 'latest_message_at', 'latestMessageAt'))
+    return outboundMs > 0 && (Date.now() - outboundMs) <= WAITING_REPLY_WINDOW_MS
   }
   if (key === 'cold') {
-    return rowBucket === 'cold' || getRowAutomationLane(row) === 'cold_reactivation'
+    if (['dead', 'suppressed'].includes(rowBucket)) return false
+    if (rowBucket === 'cold' || getRowAutomationLane(row) === 'cold_reactivation') return true
+    if (!rowIsOutboundLastWithoutReply(row)) return false
+    const outboundMs = rowTimestampMs(getRowValue(row, 'last_outbound_at', 'lastOutboundAt', 'latest_message_at', 'latestMessageAt'))
+    return outboundMs > 0 && (Date.now() - outboundMs) > WAITING_REPLY_WINDOW_MS
+  }
+  if (key === 'new_replies') {
+    if (['dead', 'suppressed'].includes(rowBucket)) return false
+    const direction = String(getRowValue(row, 'latest_message_direction', 'latestDirection', 'direction') ?? '').trim().toLowerCase()
+    const normalizedDirection = direction === 'in' || direction === 'incoming' ? 'inbound'
+      : direction === 'out' || direction === 'outgoing' ? 'outbound'
+        : direction
+    if (normalizedDirection !== 'inbound') return false
+    if (Number(getRowValue(row, 'pending_queue_count', 'pendingQueueCount') ?? 0) > 0) return false
+    const lastOut = getRowValue(row, 'last_outbound_at', 'lastOutboundAt')
+    const lastIn = getRowValue(row, 'last_inbound_at', 'lastInboundAt', 'latest_message_at', 'latestMessageAt')
+    const inMs = rowTimestampMs(lastIn)
+    const outMs = rowTimestampMs(lastOut)
+    if (!inMs) return false
+    if (outMs > 0 && inMs < outMs) return false
+    const isRead = getRowValue(row, 'is_read', 'isRead') === true
+    const isActioned = getRowValue(row, 'is_actioned', 'isActioned') === true
+    const isTerminal = getRowValue(row, 'opt_out', 'optOut') === true
+      || getRowValue(row, 'wrong_number', 'wrongNumber') === true
+      || getRowValue(row, 'not_interested', 'notInterested') === true
+      || getRowValue(row, 'is_suppressed', 'isSuppressed') === true
+    if (isRead || isActioned || isTerminal) return false
+    return rowBucket === 'new_replies' || normalizedDirection === 'inbound'
   }
   return rowBucket === key
 }

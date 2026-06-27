@@ -189,6 +189,7 @@ const getBodyCount = (body: unknown): { bodyCount: number | null; bodyCountPath:
 }
 
 const GET_CACHE_TTL_MS: Record<string, number> = {
+  '/api/cockpit/health': 15_000,
   '/api/cockpit/ops/metrics': 12_000,
   '/api/cockpit/queue/control': 8_000,
   '/api/cockpit/queue/status': 8_000,
@@ -196,6 +197,10 @@ const GET_CACHE_TTL_MS: Record<string, number> = {
   '/api/cockpit/queue/processor-health': 10_000,
   '/api/cockpit/inbox/counts': 60_000,
   '/api/cockpit/inbox/live': 2_000,
+  '/api/cockpit/inbox/thread-messages': 8_000,
+  '/api/cockpit/inbox/thread-hydration': 5_000,
+  '/api/cockpit/inbox/property-participants': 30_000,
+  '/api/cockpit/deal-intelligence/thread': 45_000,
   '/api/cockpit/notifications': 30_000,
   '/api/cockpit/notifications/preferences': 120_000,
   '/api/cockpit/templates/list': 60_000,
@@ -779,6 +784,15 @@ export function fetchInboxThreadHydration(
   return callBackend(`/api/cockpit/inbox/thread-hydration?${queryString}`, { signal })
 }
 
+export function fetchDealIntelligenceDossier(
+  threadKey: string,
+  queryString: string,
+  signal?: AbortSignal,
+): Promise<BackendResult<{ ok?: boolean; data?: unknown }>> {
+  const path = `/api/cockpit/deal-intelligence/thread/${encodeURIComponent(threadKey)}?${queryString}`
+  return callBackend(path, { signal })
+}
+
 export function fetchPropertyParticipants(
   propertyId: string,
   selectedPhone?: string | null,
@@ -1066,10 +1080,26 @@ export interface ThreadStateResult {
 export function updateThreadState(
   threadKey: string,
   patch: Record<string, unknown>,
+  meta: Record<string, unknown> = {},
 ): Promise<BackendResult<ThreadStateResult>> {
   return callBackend<ThreadStateResult>(`/api/cockpit/inbox/threads/${threadKey}`, {
     method: 'PATCH',
-    body: JSON.stringify(patch),
+    body: JSON.stringify({ ...patch, ...meta, thread_key: threadKey }),
+  })
+}
+
+export function patchUniversalLeadState(
+  threadKey: string,
+  patch: Record<string, unknown>,
+  meta: Record<string, unknown> = {},
+): Promise<BackendResult<ThreadStateResult>> {
+  return callBackend<ThreadStateResult>('/api/cockpit/lead-state/patch', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      thread_key: threadKey,
+      patch,
+      ...meta,
+    }),
   })
 }
 

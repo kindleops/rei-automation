@@ -526,20 +526,6 @@ export async function runInboxAction({
   })
 }
 
-const THREAD_STATE_ALLOWED_FIELDS = new Set([
-  // visibility / workflow flags
-  'is_read',
-  'is_pinned',
-  'is_archived',
-  'assigned_user',
-  'manual_review',
-  // operator-settable state fields
-  'conversation_status',
-  'seller_stage',
-  'temperature',
-  'autopilot_mode',
-])
-
 const THREAD_STATE_FORBIDDEN_FIELDS = new Set([
   'seller_status',
   'seller_state',
@@ -548,14 +534,8 @@ const THREAD_STATE_FORBIDDEN_FIELDS = new Set([
   'classification',
 ])
 
-const SAFE_STATE_VALUES = {
-  conversation_status: new Set(['new_reply','active_communication','waiting','follow_up','offer_sent','contract_sent','under_contract','closed']),
-  seller_stage:        new Set(['s1_ownership','s2_interest','s3_pricing','s4_condition','s5_offer','s6_negotiation','s7_follow_up','s8_closing']),
-  temperature:         new Set(['hot','warm','cold','dead']),
-  autopilot_mode:      new Set(['autopilot_on','autopilot_paused','manual_only']),
-}
-
 export async function patchThreadStateSafe({ payload = {}, supabase = defaultSupabase } = {}) {
+  const { patchUniversalLeadState } = await import('@/lib/domain/lead-state/patch-universal-lead-state.js')
   const dryRun = asBoolean(payload.dry_run, false)
   const threadKey = clean(payload.thread_key)
   if (!isCanonicalThreadKey(threadKey)) {
@@ -570,73 +550,34 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     return blockedResponse('thread-state', `forbidden_patch_field:${forbiddenAttempt}`, { thread_key: threadKey, dry_run: dryRun })
   }
 
-  const allowedPatch = {}
-  for (const k of keys) {
-    if (THREAD_STATE_ALLOWED_FIELDS.has(k)) allowedPatch[k] = patch[k]
-  }
+  const result = await patchUniversalLeadState({
+    threadKey,
+    patch,
+    dryRun,
+    supabase,
+    meta: {
+      source_view: payload.source_view || payload.sourceView || 'inbox_thread_patch',
+      reason: payload.reason || null,
+      change_source: payload.change_source || 'manual',
+      updated_by: payload.updated_by || payload.operator_id || null,
+      operator_id: payload.operator_id || payload.updated_by || null,
+      executed_next_action: payload.execute_next_action === true,
+      resume_automatic_scoring: payload.resume_automatic_scoring === true,
+    },
+  })
 
-  if (Object.keys(allowedPatch).length === 0) {
-    return blockedResponse('thread-state', 'no_allowed_patch_fields', { thread_key: threadKey, dry_run: dryRun })
-  }
-
-  // Validate enum values for state fields — reject unknown values to prevent data corruption
-  for (const [field, allowed] of Object.entries(SAFE_STATE_VALUES)) {
-    if (field in allowedPatch && !allowed.has(clean(allowedPatch[field]))) {
-      return blockedResponse('thread-state', `invalid_value:${field}`, { thread_key: threadKey, value: allowedPatch[field] })
-    }
-  }
-
-  const now = new Date().toISOString()
-  const rowPatch = {
-    thread_key: threadKey,
-    updated_at: now,
-    ...('is_read' in allowedPatch ? { is_read: asBoolean(allowedPatch.is_read, false), last_read_at: asBoolean(allowedPatch.is_read, false) ? now : null } : {}),
-    ...('is_pinned' in allowedPatch ? { is_pinned: asBoolean(allowedPatch.is_pinned, false) } : {}),
-    ...('is_archived' in allowedPatch ? { is_archived: asBoolean(allowedPatch.is_archived, false), archived_at: asBoolean(allowedPatch.is_archived, false) ? now : null } : {}),
-    ...('assigned_user' in allowedPatch ? { assigned_user: clean(allowedPatch.assigned_user) || null } : {}),
-    ...('manual_review' in allowedPatch ? { manual_review: asBoolean(allowedPatch.manual_review, false) } : {}),
-    // Operator-settable state fields
-    ...('conversation_status' in allowedPatch ? { conversation_status: clean(allowedPatch.conversation_status) } : {}),
-    ...('seller_stage' in allowedPatch ? { seller_stage: clean(allowedPatch.seller_stage) } : {}),
-    ...('temperature' in allowedPatch ? { temperature: clean(allowedPatch.temperature) } : {}),
-    ...('autopilot_mode' in allowedPatch ? { autopilot_mode: clean(allowedPatch.autopilot_mode) } : {}),
-  }
-
-  if (dryRun) {
-    return okResponse('thread-state', { dry_run: true, thread_key: threadKey, diagnostics: { patch: rowPatch } })
-  }
-
-  const { data, error } = await supabase
-    .from('inbox_thread_state')
-    .upsert(rowPatch, { onConflict: 'thread_key' })
-    .select('thread_key,is_read,is_pinned,is_archived,last_read_at,archived_at,updated_at')
-    .maybeSingle()
-
-  if (error) {
-    // Column may not exist yet — degrade gracefully and retry without state fields
-    if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('column')) {
-      const coreFields = ['thread_key','updated_at','is_read','last_read_at','is_pinned','is_archived','archived_at','assigned_user','manual_review']
-      const coreRowPatch = Object.fromEntries(Object.entries(rowPatch).filter(([k]) => coreFields.includes(k)))
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from('inbox_thread_state')
-        .upsert(coreRowPatch, { onConflict: 'thread_key' })
-        .select('thread_key,updated_at')
-        .maybeSingle()
-      if (fallbackError) throw fallbackError
-      return okResponse('thread-state', {
-        dry_run: false,
-        thread_key: threadKey,
-        partial: true,
-        note: 'state_columns_pending_migration',
-        diagnostics: { row: fallbackData || null },
-      })
-    }
-    throw error
+  if (!result.ok) {
+    return blockedResponse('thread-state', result.reason || 'patch_failed', { thread_key: threadKey, dry_run: dryRun })
   }
 
   return okResponse('thread-state', {
-    dry_run: false,
+    dry_run: dryRun,
     thread_key: threadKey,
-    diagnostics: { row: data || null },
+    diagnostics: {
+      row: result.row || null,
+      audit_event_ids: result.audit_event_ids || [],
+      realtime_event: result.realtime_event || null,
+      patch: result.patch || null,
+    },
   })
 }

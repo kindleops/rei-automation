@@ -5,7 +5,10 @@
 import {
   deriveInboxBucketFromThreadState,
 } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
-import { resolveWorkflowWaitingState } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import {
+  isStaleExplicitInboxBucket,
+  threadMatchesBucketFilter,
+} from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -91,10 +94,16 @@ export function resolveCanonicalInboxBucket(row = {}) {
   return deriveInboxBucketFromThreadState(normalizeInboxThreadStateRow(row));
 }
 
-export function resolveEffectiveInboxBucket(row = {}) {
-  const explicit = lower(row.inbox_bucket);
-  if (explicit) return explicit;
-  return lower(resolveCanonicalInboxBucket(row) || "");
+export function resolveEffectiveInboxBucket(row = {}, nowMs = Date.now()) {
+  const normalized = normalizeInboxThreadStateRow(row);
+  const explicit = lower(normalized.inbox_bucket);
+  const canonical = lower(resolveCanonicalInboxBucket(normalized) || "");
+
+  if (explicit && !isStaleExplicitInboxBucket(normalized, explicit, nowMs)) {
+    return explicit;
+  }
+  if (canonical) return canonical;
+  return explicit;
 }
 
 function tabToBuckets(tab) {
@@ -115,12 +124,15 @@ export function threadMatchesInboxTab(row = {}, tab = "all") {
   const effectiveBucket = resolveEffectiveInboxBucket(normalized);
 
   if (normalizedTab === "cold") {
-    return lower(normalized.automation_lane) === "cold_reactivation" || effectiveBucket === "cold";
+    return threadMatchesBucketFilter(normalized, "cold", Date.now());
   }
 
   if (normalizedTab === "waiting") {
-    if (effectiveBucket === "waiting") return true;
-    return resolveWorkflowWaitingState(normalized).is_waiting === true;
+    return threadMatchesBucketFilter(normalized, "waiting", Date.now());
+  }
+
+  if (normalizedTab === "new_replies") {
+    return threadMatchesBucketFilter(normalized, "new_replies", Date.now());
   }
 
   const allowed = tabToBuckets(normalizedTab);

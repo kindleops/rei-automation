@@ -3,67 +3,36 @@
  * Do not invent values here — keep aligned with acquisition/classification source of truth.
  */
 
-export const UNIVERSAL_STAGE_ORDER = [
-  'ownership_confirmation',
-  'offer_interest',
-  'asking_price',
-  'property_condition',
-  'offer',
-  'formal_contract',
-  'under_contract',
-  'disposition',
-  'prepared_to_close',
-  'closed',
-] as const
+export {
+  LIFECYCLE_STAGE_ORDER as UNIVERSAL_STAGE_ORDER,
+  LIFECYCLE_STAGE_META,
+  OPERATIONAL_STATUS_ORDER as UNIVERSAL_STATUS_ORDER,
+  OPERATIONAL_STATUS_META as UNIVERSAL_STATUS_LABELS,
+  LEAD_TEMPERATURE_ORDER as UNIVERSAL_TEMPERATURE_ORDER,
+  LEAD_TEMPERATURE_META as UNIVERSAL_TEMPERATURE_LABELS,
+  DISPOSITION_ORDER,
+  DISPOSITION_META,
+  CONTACTABILITY_ORDER,
+  CONTACTABILITY_META,
+  normalizeLifecycleStage,
+  normalizeOperationalStatus,
+  normalizeLeadTemperature,
+} from '../lead-state/universal-lead-state-registry'
 
-export const UNIVERSAL_STAGE_LABELS: Record<string, string> = {
-  ownership_confirmation: 'Ownership Confirmation',
-  offer_interest: 'Offer Interest',
-  asking_price: 'Asking Price',
-  property_condition: 'Property Condition',
-  offer: 'Offer',
-  formal_contract: 'Formal Contract',
-  under_contract: 'Under Contract',
-  disposition: 'Disposition',
-  prepared_to_close: 'Prepared to Close',
-  closed: 'Closed',
-}
-
-export const UNIVERSAL_STATUS_ORDER = [
-  'priority',
-  'waiting',
-  'cold',
-  'follow_up',
-  'needs_review',
-  'unknown',
-] as const
-
-export const UNIVERSAL_STATUS_LABELS: Record<string, string> = {
-  priority: 'Priority',
-  waiting: 'Waiting',
-  cold: 'Cold',
-  follow_up: 'Follow Up',
-  needs_review: 'Needs Review',
-  unknown: 'Unknown',
-}
-
-export const UNIVERSAL_TEMPERATURE_ORDER = [
-  'hot',
-  'warming',
-  'engaged',
-  'cold',
-  'dead',
-  'unknown',
-] as const
-
-export const UNIVERSAL_TEMPERATURE_LABELS: Record<string, string> = {
-  hot: 'Hot',
-  warming: 'Warming',
-  engaged: 'Engaged',
-  cold: 'Cold',
-  dead: 'Dead',
-  unknown: 'Unclassified',
-}
+export const UNIVERSAL_STAGE_LABELS = Object.fromEntries(
+  Object.entries({
+    ownership_confirmation: 'S1 Ownership Check',
+    offer_interest: 'S2 Interest Probe',
+    asking_price: 'S3 Asking Price',
+    property_condition: 'S4 Property Condition',
+    offer: 'S5 Offer',
+    formal_contract: 'S6 Formal Contract',
+    under_contract: 'S7 Under Contract',
+    disposition: 'S8 Disposition',
+    prepared_to_close: 'S9 Prepared to Close',
+    closed: 'S10 Closed',
+  }),
+)
 
 export type PipelineScopePredicate = {
   scope: string
