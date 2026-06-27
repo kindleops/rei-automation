@@ -252,8 +252,23 @@ async function main() {
     append: true,
   });
 
+  let inspectOutput = "";
+  try {
+    inspectOutput = run(`vercel inspect ${PROD_ALIAS.replace("https://", "")} 2>&1`, {
+      cwd: API_ROOT,
+    });
+    appendFileSync(resolve(SCRATCH, "deploy.log"), `\n=== VERCEL INSPECT (production alias) ===\n${inspectOutput}\n`);
+  } catch (error) {
+    appendFileSync(
+      resolve(SCRATCH, "deploy.log"),
+      `\n=== VERCEL INSPECT FAILED ===\n${error?.message || error}\n`
+    );
+  }
+
   const deployText = readFileSync(resolve(SCRATCH, "deploy.log"), "utf8");
-  const ready = /Ready|Build Completed|Deployment completed/i.test(deployText);
+  const ready =
+    /Ready|Build Completed|Deployment completed/i.test(deployText) ||
+    /status● Ready/i.test(inspectOutput);
   const aliased = deployText.includes(PROD_ALIAS.replace("https://", ""));
   appendFileSync(
     resolve(SCRATCH, "deploy.log"),
@@ -263,7 +278,21 @@ async function main() {
   // Post-deploy version on production alias
   console.log("[evidence] prod /api/version");
   const versionBeforeProof = await fetchProdVersion();
-  writeLog("prod-version.json", JSON.stringify(versionBeforeProof, null, 2));
+  writeLog(
+    "prod-version.json",
+    JSON.stringify(
+      {
+        ...versionBeforeProof,
+        evidence_deploy_sha: head,
+        note:
+          versionBeforeProof?.commit === "local"
+            ? "CLI deploy from local workspace; VERCEL_GIT_COMMIT_SHA not injected — use DEPLOY_SHA_CONFIRMED in deploy.log"
+            : null,
+      },
+      null,
+      2
+    )
+  );
 
   const secret = env.INTERNAL_API_SECRET;
   if (!secret) throw new Error("missing INTERNAL_API_SECRET");
