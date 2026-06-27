@@ -1,4 +1,5 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
+import { VirtualizedInboxList } from './VirtualizedInboxList'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { formatInboxThreadTimestamp } from '../../../shared/formatters'
 import { resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
@@ -157,6 +158,37 @@ export const InboxConversationTable = memo(({
   )
 
   const hasLocalFilters = query.trim().length > 0 || statusFilter !== 'all' || replyFilter !== 'all' || marketFilter !== 'all'
+  const shouldVirtualize = rows.length >= 12
+  const virtualRowHeight = density === 'ultra_compact' ? 44 : density === 'compact' ? 52 : 64
+
+  const renderCompactCard = useCallback((row: RowModel) => {
+    const ts = formatInboxThreadTimestamp(row.thread.lastMessageAt || row.thread.lastMessageIso)
+    return (
+      <button
+        type="button"
+        className={cls('nx-thread-card', selectedId === row.thread.id && 'is-selected')}
+        onClick={() => onSelect(row.thread.id)}
+      >
+        <div className="nx-thread-card__row">
+          <div>
+            <strong className="nx-thread-card__title">{row.seller || 'Unknown seller'}</strong>
+            <span className="nx-thread-card__subtitle">{row.address || 'No address available'}</span>
+          </div>
+          <time className="nx-thread-card__time">{ts.fullLabel}</time>
+        </div>
+        {renderStatusBadges(row)}
+        {layoutMode === 'medium' && (
+          <div className="nx-thread-card__meta-grid">
+            <span><label>Market</label><strong>{row.market || '—'}</strong></span>
+            <span><label>Intent</label><strong>{row.lastIntent || '—'}</strong></span>
+            <span><label>Next Action</label><strong>{row.decision.next_action || '—'}</strong></span>
+            <span><label>Automation</label><strong>{row.decision.automation_status}</strong></span>
+          </div>
+        )}
+        <p className="nx-thread-card__preview">{row.lastMessagePreview}</p>
+      </button>
+    )
+  }, [layoutMode, onSelect, selectedId])
 
   const renderStatusBadges = (row: RowModel) => (
     <div className="nx-thread-card__badges">
@@ -248,36 +280,17 @@ export const InboxConversationTable = memo(({
           ))}
         </div>
 
-        <div className={cls('nx-thread-card-list', layoutMode === 'medium' && 'is-medium')}>
-          {rows.map((row) => {
-            const ts = formatInboxThreadTimestamp(row.thread.lastMessageAt || row.thread.lastMessageIso)
-            return (
-              <button
-                key={row.thread.id}
-                type="button"
-                className={cls('nx-thread-card', selectedId === row.thread.id && 'is-selected')}
-                onClick={() => onSelect(row.thread.id)}
-              >
-                <div className="nx-thread-card__row">
-                  <div>
-                    <strong className="nx-thread-card__title">{row.seller || 'Unknown seller'}</strong>
-                    <span className="nx-thread-card__subtitle">{row.address || 'No address available'}</span>
-                  </div>
-                  <time className="nx-thread-card__time">{ts.fullLabel}</time>
-                </div>
-                {renderStatusBadges(row)}
-                {layoutMode === 'medium' && (
-                  <div className="nx-thread-card__meta-grid">
-                    <span><label>Market</label><strong>{row.market || '—'}</strong></span>
-                    <span><label>Intent</label><strong>{row.lastIntent || '—'}</strong></span>
-                    <span><label>Next Action</label><strong>{row.decision.next_action || '—'}</strong></span>
-                    <span><label>Automation</label><strong>{row.decision.automation_status}</strong></span>
-                  </div>
-                )}
-                <p className="nx-thread-card__preview">{row.lastMessagePreview}</p>
-              </button>
-            )
-          })}
+        <div className={cls('nx-thread-card-list', layoutMode === 'medium' && 'is-medium', shouldVirtualize && 'is-virtualized')}>
+          {shouldVirtualize ? (
+            <VirtualizedInboxList
+              items={rows}
+              rowHeight={layoutMode === 'medium' ? virtualRowHeight + 28 : virtualRowHeight}
+              className="nx-inbox-table-virtual-list"
+              renderRow={(row) => renderCompactCard(row)}
+            />
+          ) : rows.map((row) => (
+            <div key={row.thread.id}>{renderCompactCard(row)}</div>
+          ))}
         </div>
       </section>
     )

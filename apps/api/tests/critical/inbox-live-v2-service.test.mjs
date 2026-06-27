@@ -195,18 +195,25 @@ function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
         table === "v_inbox_threads_live_v2" ||
         table === "v_inbox_thread_counts_live_v2"
       ) {
+        const missingTableApi = {
+          not() { return missingTableApi; },
+          neq() { return missingTableApi; },
+          eq() { return missingTableApi; },
+          order() { return missingTableApi; },
+          limit() { return missingTableApi; },
+          range() { return missingTableApi; },
+          or() { return missingTableApi; },
+          then(resolve, reject) {
+            return Promise.resolve({
+              data: null,
+              count: null,
+              error: { message: `relation "${table}" does not exist` },
+            }).then(resolve, reject);
+          },
+        };
         return {
           select() {
-            return {
-              limit() { return this; },
-              then(resolve, reject) {
-                return Promise.resolve({
-                  data: null,
-                  count: null,
-                  error: { message: `relation "${table}" does not exist` },
-                }).then(resolve, reject);
-              },
-            };
+            return missingTableApi;
           },
         };
       }
@@ -713,6 +720,7 @@ test("counts come from the same canonical v2 source and match filter results", a
       inbox_bucket: "priority",
       latest_message_at: "2026-05-29T12:30:00.000Z",
       unread_count: 1,
+      is_read: true,
     }),
     makeThread({
       thread_key: "+15550000032",
@@ -742,6 +750,7 @@ test("counts come from the same canonical v2 source and match filter results", a
       inbox_bucket: "needs_review",
       latest_message_at: "2026-05-29T11:50:00.000Z",
       needs_review: true,
+      is_read: true,
     }),
     makeThread({
       thread_key: "+15550000036",
@@ -890,8 +899,49 @@ test("initial boot fallback returns threads without exact-counting v_inbox_enric
   assert.equal(result.pagination.limit, 25);
   assert.equal(result.source, "v_inbox_enriched");
   assert.equal(result.fallback_used, true);
-  assert.equal(result.countsDegraded, true);
-  assert.equal(result.diagnostics?.countsDegraded, true);
+  assert.equal(result.countsSource, "skipped");
+  assert.equal(result.diagnostics?.count_preserved_reason, "counts_skipped_by_request");
+  assert.ok(Object.keys(result.threads[0]).length <= 35, "initial boot rows should be compact summaries");
   assert.equal(trackers.fallbackExactCountRequested, false);
   assert.equal(trackers.fallbackCountQueryRequested, false);
+});
+
+test("manual bucket switch returns compact summary rows without dossier blobs", async () => {
+  const supabase = makeLiveInboxThreadSupabase([], {
+    stateRows: [
+      {
+        thread_key: "+15551230001",
+        seller_phone: "+15551230001",
+        canonical_e164: "+15551230001",
+        inbox_bucket: "new_replies",
+        latest_message_body: "Yes I still own it",
+        latest_message_at: "2026-06-27T12:00:00.000Z",
+        latest_direction: "inbound",
+        is_read: false,
+        is_suppressed: false,
+        message_count: 2,
+        inbound_count: 1,
+        outbound_count: 1,
+      },
+    ],
+  });
+
+  const result = await getLiveInbox(
+    {
+      filter: "new_replies",
+      timeout_mode: "manual_bucket_switch",
+      limit: 10,
+      skip_counts: "1",
+      skip_delivery: "1",
+    },
+    { listOnly: true, skipCounts: true, skipDelivery: true },
+    { supabase },
+  );
+
+  assert.equal(result.threads.length, 1);
+  const row = result.threads[0];
+  assert.equal(row.prospect_data, undefined);
+  assert.equal(row.master_owner_data, undefined);
+  assert.equal(row.preview, "Yes I still own it");
+  assert.ok(Object.keys(row).length <= 35, `expected compact summary row, got ${Object.keys(row).length} keys`);
 });

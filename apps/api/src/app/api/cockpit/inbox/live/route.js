@@ -53,7 +53,9 @@ export async function GET(request) {
     })
 
     const liveOptions = timeoutMode === 'initial_boot'
-      ? { selectMode: 'initial_boot_safe' }
+      ? { selectMode: 'initial_boot_safe', listOnly: true, skipCounts: true, skipDelivery: true }
+      : timeoutMode === 'manual_bucket_switch' || timeoutMode === 'auto_refresh'
+      ? { listOnly: true, skipCounts: true, skipDelivery: true }
       : {}
 
     let data

@@ -207,6 +207,10 @@ const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligen
 const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
 const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.comp.v4') !== '0')
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
+const BuyerMatchV4Workspace = lazy(() => import('./buyer-match-v4/BuyerMatchV4Workspace').then((m) => ({ default: m.BuyerMatchV4Workspace })))
+/** DEV: Buyer Match V4 is default in dev. Opt out with localStorage `nx.buyer.v4` = '0'. */
+const BUYER_MATCH_V4_ENABLED =
+  Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.buyer.v4') !== '0')
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
@@ -1349,7 +1353,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: nextStage, view: nextView }),
       },
       cursor: null,
-      limit: 100,
+      limit: 30,
       _force: true,
       _timeoutMode: 'manual_bucket_switch',
       _refreshReason: 'manual_bucket_switch',
@@ -3561,6 +3565,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         await handleWorkflowMutation('Lead: HOT', () => markThreadHot(thread), { skipRefresh: true })
         break
       case 'snooze':
+        setOptimisticPatches((prev) => ({
+          ...prev,
+          [thread.id]: {
+            ...prev[thread.id],
+            inboxStatus: 'waiting',
+            followUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          },
+        }))
         await handleWorkflowMutation('Thread: Snoozed', () => snoozeThread(thread), { skipRefresh: true })
         break
       case 'pause_automation':
@@ -4505,31 +4517,40 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'buyer_match') {
       return (
-        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`, BUYER_MATCH_V4_ENABLED && 'is-buyer-match-v4')}>
           <WorkspaceSuspense>
-          <BuyerMatchWorkspace
-            paused={heavyLoadPaused}
-            dealContext={canonicalSelectedContext}
-            propertySnapshot={{
-              property_id: canonicalSelectedContext?.propertyId || '',
-              address: canonicalSelectedContext?.propertyAddress || 'Property Unknown',
-              market: canonicalSelectedContext?.market || '',
-              zip: canonicalSelectedContext?.propertyZip || '',
-              state: canonicalSelectedContext?.propertyState || '',
-              county: canonicalSelectedContext?.propertyCounty || '',
-              property_type: canonicalSelectedContext?.property_type || '',
-              asset_class: canonicalSelectedContext?.property_type || '',
-              beds: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_bedrooms as number | null,
-              baths: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_baths as number | null,
-              sqft: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.building_square_feet as number | null,
-              estimated_value: canonicalSelectedContext?.estimatedValue || null,
-              arv: canonicalSelectedContext?.estimated_arv || canonicalSelectedContext?.estimatedValue || null,
-              purchase_price: canonicalSelectedContext?.cashOffer || null,
-              dispo_strategy: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.dispo_strategy as string || '',
-            }}
-            paneWidth={paneWidth}
-            apiBase="/api/cockpit"
-          />
+          {BUYER_MATCH_V4_ENABLED ? (
+            <BuyerMatchV4Workspace
+              paused={heavyLoadPaused}
+              dealContext={canonicalSelectedContext}
+              paneWidth={paneWidth}
+              onOpenFull={() => handleFocusWorkspaceView('buyer_match')}
+            />
+          ) : (
+            <BuyerMatchWorkspace
+              paused={heavyLoadPaused}
+              dealContext={canonicalSelectedContext}
+              propertySnapshot={{
+                property_id: canonicalSelectedContext?.propertyId || '',
+                address: canonicalSelectedContext?.propertyAddress || 'Property Unknown',
+                market: canonicalSelectedContext?.market || '',
+                zip: canonicalSelectedContext?.propertyZip || '',
+                state: canonicalSelectedContext?.propertyState || '',
+                county: canonicalSelectedContext?.propertyCounty || '',
+                property_type: canonicalSelectedContext?.property_type || '',
+                asset_class: canonicalSelectedContext?.property_type || '',
+                beds: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_bedrooms as number | null,
+                baths: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.total_baths as number | null,
+                sqft: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.building_square_feet as number | null,
+                estimated_value: canonicalSelectedContext?.estimatedValue || null,
+                arv: canonicalSelectedContext?.estimated_arv || canonicalSelectedContext?.estimatedValue || null,
+                purchase_price: canonicalSelectedContext?.cashOffer || null,
+                dispo_strategy: (canonicalSelectedContext?.property as Record<string, unknown> | null)?.dispo_strategy as string || '',
+              }}
+              paneWidth={paneWidth}
+              apiBase="/api/cockpit"
+            />
+          )}
           </WorkspaceSuspense>
         </section>
       )

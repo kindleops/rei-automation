@@ -1450,16 +1450,7 @@ function toSupabaseBoolean(value) {
   return value ? "true" : "false";
 }
 
-async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
-  const normalized = normalizeLiveFilter(filter);
-  if (normalized === "all") return null;
-
-  let query = supabase
-    .from("inbox_thread_state")
-    .select("thread_key")
-    .not("thread_key", "is", null)
-    .neq("thread_key", "");
-
+function applyInboxThreadStateBucketFilter(query, normalized) {
   switch (normalized) {
     case "priority":
       query = query.eq("inbox_bucket", "priority");
@@ -1517,8 +1508,22 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
       if (typeof query.is === "function") query = query.is("property_id", null);
       break;
     default:
-      return null;
+      break;
   }
+  return query;
+}
+
+async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
+  const normalized = normalizeLiveFilter(filter);
+  if (normalized === "all") return null;
+
+  let query = supabase
+    .from("inbox_thread_state")
+    .select("thread_key")
+    .not("thread_key", "is", null)
+    .neq("thread_key", "");
+
+  query = applyInboxThreadStateBucketFilter(query, normalized);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -1794,18 +1799,53 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   const normalizedFilter = normalizeLiveFilter(filter);
   if (normalizedFilter === "all") return null;
 
-  const threadKeys = await fetchAuthoritativeThreadKeysForFilter(supabase, normalizedFilter);
-  if (!threadKeys?.length) {
-    return {
-      data: [],
-      count: 0,
-      error: null,
-      sourceConfig: THREAD_SOURCE_CONFIGS[0],
-    };
+  let query = supabase
+    .from("inbox_thread_state")
+    .select(AUTHORITATIVE_INBOX_THREAD_FIELDS)
+    .not("thread_key", "is", null)
+    .neq("thread_key", "");
+
+  query = applyInboxThreadStateBucketFilter(query, normalizedFilter);
+
+  const q = clean(params.q).toLowerCase();
+  if (q && typeof query.or === "function") {
+    const qStr = `%${q}%`;
+    query = query.or(`thread_key.ilike.${qStr},seller_phone.ilike.${qStr},latest_message_body.ilike.${qStr}`);
   }
 
-  const rawRows = await fetchAuthoritativeInboxRowsByThreadKeys(supabase, threadKeys, params);
-  const { page, hasMore } = paginateAuthoritativeInboxRows(rawRows, { limit, cursorKeyset, offset });
+  if (typeof query.order === "function") {
+    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
+    query = query.order("thread_key", { ascending: false });
+  }
+
+  if (cursorKeyset?.latest_message_at && cursorKeyset?.thread_key && typeof query.or === "function") {
+    query = query.or(
+      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`,
+    );
+    if (typeof query.limit === "function") query = query.limit(limit + 1);
+  } else if (offset > 0 && typeof query.range === "function") {
+    query = query.range(offset, offset + limit);
+  } else if (typeof query.limit === "function") {
+    query = query.limit(limit + 1);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  let rawRows = data || [];
+  if (q) {
+    rawRows = rawRows.filter((row) => {
+      const haystack = [
+        row.thread_key,
+        row.seller_phone,
+        row.latest_message_body,
+      ].map((value) => clean(value).toLowerCase()).join(" ");
+      return haystack.includes(q);
+    });
+  }
+
+  const hasMore = rawRows.length > limit;
+  const page = hasMore ? rawRows.slice(0, limit) : rawRows;
   const rows = page.map(mapAuthoritativeInboxRow);
 
   return {
@@ -2238,8 +2278,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : DEFAULT_LIMIT);
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
-  const skipCounts = bool(params.skip_counts) || fastBucketMode || deps.skipCounts === true || options.skipCounts === true;
+  const skipCounts = bool(params.skip_counts) || fastBucketMode || initialBootMode || deps.skipCounts === true || options.skipCounts === true;
   const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootMode || options.skipDelivery === true;
+  const skipLinkedContextHydration = initialBootMode || fastBucketMode || options.listOnly === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2378,14 +2419,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
   const skipHeavyHydration = options.listOnly === true;
+  const fastListMode = initialBootMode || fastBucketMode;
   try {
-    finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
-    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
-    if (!skipHeavyHydration && !initialBootMode && !fastBucketMode) {
-      finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
+    if (!skipLinkedContextHydration) {
+      finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
+      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
+      if (!skipHeavyHydration) {
+        finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
+      }
     }
-    finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
-    if (initialBootMode) {
+    finalRows = finalRows.map((row) => normalizeThreadRow(row, {
+      ...params,
+      skip_keyword_analysis: fastListMode || bool(params.skip_keyword_analysis),
+    }));
+    if (fastListMode) {
       finalRows = finalRows.map((row) => compactInboxThreadSummaryRow(row));
     }
     linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);

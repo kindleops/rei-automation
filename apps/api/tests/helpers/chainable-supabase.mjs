@@ -270,6 +270,10 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
           return api;
         },
         not(column, operator, value) {
+          if (operator === "is" && value === null) {
+            queryState.filters.push((row) => row?.[column] != null && cleanInboxValue(row?.[column]) !== "");
+            return api;
+          }
           if (operator === "in" && column === "inbox_bucket") {
             const blocked = new Set(
               String(value || "")
@@ -282,7 +286,10 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
           }
           return api;
         },
-        neq() { return api; },
+        neq(column, value) {
+          queryState.filters.push((row) => cleanInboxValue(row?.[column]) !== cleanInboxValue(value));
+          return api;
+        },
         is(column, value) {
           if (value === null) {
             queryState.filters.push((row) => row?.[column] == null);

@@ -422,7 +422,8 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
       })
       const explicitPatchBucketKey = getRowBucketKey(patch)
       const targetBucketKey = normalizeBucketKey(action.targetBucketKey) || explicitPatchBucketKey || getRowBucketKey(patchedRow) || previousBucketKey
-      const shouldMoveBuckets = Boolean(normalizeBucketKey(action.targetBucketKey) || explicitPatchBucketKey || action.upsert === true)
+      const explicitBucketMove = Boolean(normalizeBucketKey(action.targetBucketKey) || explicitPatchBucketKey)
+      const shouldMoveBuckets = explicitBucketMove || (action.upsert === true && !existingRow)
       if (targetBucketKey && !getRowBucketKey(patchedRow)) {
         patchedRow.inbox_bucket = targetBucketKey
         patchedRow.inboxBucket = targetBucketKey

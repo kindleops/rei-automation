@@ -127,6 +127,8 @@ export interface LiveInboxFetchParams {
   advanced?: Record<string, unknown>
   timeoutMode?: 'initial_boot' | 'manual_bucket_switch' | 'auto_refresh'
   refreshReason?: string
+  skipCounts?: boolean
+  skipDelivery?: boolean
   signal?: AbortSignal
 }
 
@@ -347,6 +349,7 @@ export const INBOX_DEBUG_LOOKUPS = INBOX_DEBUG_VERBOSE || (DEV && String(import.
 const MESSAGE_EVENTS_THREAD_PAGE_SIZE = 50
 export const HYDRATED_INBOX_PAGE_SIZE = 100
 const INITIAL_BOOT_LIVE_LIMIT = 25
+const BUCKET_SWITCH_LIVE_LIMIT = 30
 export const HYDRATED_INBOX_THREADS_VIEW = 'v_universal_inbox_threads'
 export const HYDRATED_INBOX_COUNTS_VIEW = 'inbox_category_counts'
 
@@ -1703,6 +1706,8 @@ export const fetchLiveInbox = async ({
   advanced,
   timeoutMode,
   refreshReason,
+  skipCounts,
+  skipDelivery,
   signal,
 }: LiveInboxFetchParams = {}): Promise<LiveInboxResponse> => {
   const params = new URLSearchParams()
@@ -1717,6 +1722,8 @@ export const fetchLiveInbox = async ({
     advanced: advanced && Object.keys(advanced).length > 0 ? JSON.stringify(advanced) : undefined,
     timeout_mode: timeoutMode,
     refresh_reason: refreshReason,
+    skip_counts: skipCounts ? '1' : undefined,
+    skip_delivery: skipDelivery ? '1' : undefined,
   }
   Object.entries(entries).forEach(([key, value]) => {
     const param = toQueryParam(value)
@@ -2082,6 +2089,8 @@ export const getInboxRowsForView = async (
   const requestedPageSize = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
   const page_size = options._timeoutMode === 'initial_boot'
     ? Math.min(requestedPageSize, INITIAL_BOOT_LIVE_LIMIT)
+    : options._timeoutMode === 'manual_bucket_switch'
+    ? Math.min(requestedPageSize, BUCKET_SWITCH_LIVE_LIMIT)
     : requestedPageSize
   const rawCursor = options.cursor ?? null
   const numericOffset = options.offset ?? 0
@@ -2127,6 +2136,8 @@ export const getInboxRowsForView = async (
       advanced: serverAdvancedPayload,
       timeoutMode: options._timeoutMode,
       refreshReason: options._refreshReason,
+      skipCounts: options._timeoutMode === 'initial_boot' || options._timeoutMode === 'manual_bucket_switch',
+      skipDelivery: options._timeoutMode === 'initial_boot' || options._timeoutMode === 'manual_bucket_switch',
       signal: options.signal,
     }).catch((err) => {
       const isAbort = isAbortLikeError(err, options.signal)

@@ -18,6 +18,7 @@ import {
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
 import { isInboxDebugEnabled } from '../inbox.adapter'
 import { InboxStreetViewThumb } from './InboxStreetViewThumb'
+import { VirtualizedInboxList } from './VirtualizedInboxList'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -1546,10 +1547,41 @@ export const InboxSidebar = ({
     )
   )
 
+  const virtualRowHeight = inboxMode === 'full100' ? 96 : inboxMode === 'rail25' ? 56 : 72
+  const shouldVirtualizeList = displayedActiveThreads.length >= 12
+
+  const renderThreadRow = useCallback((thread: InboxWorkflowThread) => {
+    const decision = decisionMap.get(thread.id)
+    if (!decision) return null
+    const onThreadSelect = (id: string) => {
+      console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
+      onSelect(id)
+    }
+    if (inboxMode === 'full100') {
+      return (
+        <CommandCenterRow
+          thread={thread}
+          selected={selectedId === thread.id}
+          decision={decision}
+          onSelect={onThreadSelect}
+        />
+      )
+    }
+    return (
+      <CompactRow25
+        thread={thread}
+        selected={selectedId === thread.id}
+        decision={decision}
+        inboxMode={inboxMode}
+        onSelect={onThreadSelect}
+      />
+    )
+  }, [activeViewFilter, decisionMap, inboxMode, onSelect, selectedId])
+
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
-        <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table')}>
+        <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table', shouldVirtualizeList && 'is-virtualized')}>
           {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
             <div className="nx-cc-table__header" aria-hidden="true">
               <span className="nx-cc-table__th nx-cc-table__th--media" />
@@ -1575,35 +1607,18 @@ export const InboxSidebar = ({
                 </div>
               ))}
             </div>
-          ) : displayedActiveThreads.length > 0 ? displayedActiveThreads.map((thread) => {
-            const decision = decisionMap.get(thread.id)
-            if (!decision) return null
-            const onThreadSelect = (id: string) => {
-              console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
-              onSelect(id)
-            }
-            if (inboxMode === 'full100') {
-              return (
-                <CommandCenterRow
-                  key={thread.threadKey || thread.id}
-                  thread={thread}
-                  selected={selectedId === thread.id}
-                  decision={decision}
-                  onSelect={onThreadSelect}
-                />
-              )
-            }
-            return (
-              <CompactRow25
-                key={thread.threadKey || thread.id}
-                thread={thread}
-                selected={selectedId === thread.id}
-                decision={decision}
-                inboxMode={inboxMode}
-                onSelect={onThreadSelect}
+          ) : displayedActiveThreads.length > 0 ? (
+            shouldVirtualizeList ? (
+              <VirtualizedInboxList
+                items={displayedActiveThreads}
+                rowHeight={virtualRowHeight}
+                className="nx-sidebar-rebuilt__virtual-list"
+                renderRow={(thread) => renderThreadRow(thread)}
               />
-            )
-          }) : (
+            ) : displayedActiveThreads.map((thread) => (
+              <div key={thread.threadKey || thread.id}>{renderThreadRow(thread)}</div>
+            ))
+          ) : (
             <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>
               {inboxLoadFailed ? (
                 <button type="button" className="nx-sidebar-rebuilt__telemetry-indicator" onClick={() => onRetryLoad?.()}>

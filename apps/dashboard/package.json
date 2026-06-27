@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "sync:sounds": "mkdir -p public/sounds && cp ../../sounds/*.mp3 public/sounds/",
+    "sync:sounds": "mkdir -p public/sounds && (test -d ../../sounds && cp ../../sounds/*.mp3 public/sounds/ || true)",
     "predev": "npm run sync:sounds",
     "dev": "vite",
     "prebuild": "npm run sync:sounds",
@@ -15,6 +15,7 @@
     "setup:inbox": "node scripts/setup-inbox.mjs",
     "proof:queue-recovery": "node scripts/proof/queue-recovery.mjs",
     "proof:inbox": "npx tsx scripts/proof/inbox-store-proof.ts && node scripts/proof/inbox-bucket-resolver-proof.mjs",
+    "proof:inbox-perf": "node scripts/proof/inbox-perf-verification.mjs",
     "proof:inbox-integrity": "node scripts/proof/inbox-integrity.mjs",
     "proof:smart-inboxes": "node scripts/proof/smart-inboxes.mjs",
     "proof:inbox-buttons": "node scripts/proof/inbox-buttons.mjs",
