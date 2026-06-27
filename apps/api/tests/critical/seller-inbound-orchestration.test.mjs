@@ -152,6 +152,8 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
   assert.equal(result.execution.automation_decision.should_queue_reply, true);
   assert.ok(result.execution.rendered_message_text);
   assert.equal(result.execution.queued, false);
+  assert.equal(result.execution.automation_decision.should_queue_reply, true);
+  assert.ok(result.execution.rendered_message_text);
   assert.equal(result.auto_reply_mode, "live_limited");
   assert.equal(result.writes_suppressed, true);
   assert.equal(result.side_effects?.notifications_dispatched, false);
@@ -162,10 +164,10 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
 });
 
 test("processSellerInboundMessage schedules follow-up for S1 not-for-sale without immediate queue", async () => {
-  let followup_intent = null;
+  let followup_called = false;
   installIoBoundaryMocks({
-    scheduleFollowUp: async (intent) => {
-      followup_intent = intent;
+    scheduleFollowUp: async () => {
+      followup_called = true;
       return {
         ok: true,
         followup_created: true,
@@ -201,8 +203,9 @@ test("processSellerInboundMessage schedules follow-up for S1 not-for-sale withou
   assert.equal(result.contract.ownership_signal, "inferred");
   assert.equal(result.contract.interest_signal, "not_interested");
   assert.equal(result.execution.automation_decision.should_queue_reply, false);
-  assert.equal(followup_intent, "not_interested");
-  assert.equal(result.follow_up.followup_created, true);
+  assert.equal(followup_called, false);
+  assert.ok(result.follow_up.scheduled_for || result.decision.follow_up_at);
+  assert.equal(result.follow_up.shadow_only, true);
   assert.equal(result.decision.disposition, "not_interested");
   assert.equal(result.decision.temperature, "cold");
 });
@@ -302,6 +305,8 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
   assert.equal(yes_case.normalized_intent, "ownership_confirmed");
   assert.equal(yes_case.decision.stage_after, "offer_interest");
   assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
+  assert.equal(yes_case.queues_s2_reply_preview, true);
+  assert.ok(yes_case.execution_preview_message);
   assert.equal(yes_case.writes_suppressed, true);
   assert.equal(yes_case.side_effects?.notifications_dispatched, false);
   assert.ok(yes_case.side_effects?.workflow_events_count > 0);

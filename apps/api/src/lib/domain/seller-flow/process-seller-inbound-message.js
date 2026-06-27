@@ -368,7 +368,7 @@ export async function processSellerInboundMessage({
             canonical_decision?.next_action === "do_not_reply"))
     );
 
-    if (should_schedule_followup && execution_allowed) {
+    if (should_schedule_followup && execution_allowed && !writes_suppressed) {
       try {
         follow_up_result = await runtimeDeps.scheduleFollowUp(follow_up_intent, threadKey || inboundFrom, {
           is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
@@ -393,11 +393,20 @@ export async function processSellerInboundMessage({
     } else if (contract.ownership_probe_transition) {
       follow_up_result = {
         ok: true,
-        skipped: !execution_allowed,
-        shadow_only: !execution_allowed,
+        skipped: writes_suppressed || !execution_allowed,
+        shadow_only: writes_suppressed || !execution_allowed,
         followup_created: false,
         scheduled_for: contract.ownership_probe_transition.follow_up_at,
         reason: "s1_ownership_probe_followup_scheduled",
+      };
+    } else if (should_schedule_followup && writes_suppressed) {
+      follow_up_result = {
+        ok: true,
+        skipped: false,
+        shadow_only: true,
+        followup_created: false,
+        scheduled_for: canonical_decision?.follow_up_at || null,
+        reason: "followup_preview_writes_suppressed",
       };
     }
   }
