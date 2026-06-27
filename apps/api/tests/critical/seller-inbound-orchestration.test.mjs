@@ -12,6 +12,8 @@ import {
   __resetSellerInboundOrchestratorDeps,
 } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 import { recoverUnprocessedInboundMessages } from "@/lib/domain/seller-flow/recover-unprocessed-inbound-messages.js";
+import { runSellerInboundProofCases } from "@/lib/domain/seller-flow/run-seller-inbound-proof-cases.js";
+import { makeSellerOrchestrationSupabase } from "../helpers/seller-orchestration-test-supabase.mjs";
 
 afterEach(() => {
   __resetSellerInboundOrchestratorDeps();
@@ -32,20 +34,30 @@ function baseContext(overrides = {}) {
       seller_stage: "ownership_check",
       property_address: "123 Main St",
       seller_first_name: "Jane",
+      language_preference: "English",
     },
     ...overrides,
   };
 }
 
-function ownershipClassification(overrides = {}) {
-  return {
-    primary_intent: "ownership_confirmed",
-    detected_intent: "ownership_confirmed",
-    confidence: 0.94,
-    language: "English",
-    automation_decision: { auto_reply_allowed: true },
+function installIoBoundaryMocks(overrides = {}) {
+  const supabase = overrides.supabase || makeSellerOrchestrationSupabase();
+  __setSellerInboundOrchestratorDeps({
+    getSupabaseClient: () => supabase,
+    patchUniversalLeadState: async ({ patch }) => ({ ok: true, patch, dry_run: true }),
+    emitAutomationEvent: async () => ({ ok: true }),
+    persistInboundIntelligenceSnapshot: async () => ({ ok: true, dry_run: true }),
+    persistSellerContactReferral: async () => ({ ok: true, skipped: true }),
+    executeReferralAutomation: async () => ({ ok: true, skipped: true }),
+    scheduleFollowUp: async (intent) => ({
+      ok: true,
+      followup_created: true,
+      scheduled_for: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      reason: `nurture_followup:${intent}`,
+    }),
     ...overrides,
-  };
+  });
+  return supabase;
 }
 
 test("classify.js connects: Yes → ownership_confirmed", async () => {
@@ -110,42 +122,8 @@ test("S1 not-for-sale applies ownership-probe overlay in automation decision", (
   assert.ok(decision.follow_up_at);
 });
 
-test("processSellerInboundMessage orchestrates ownership confirmation under live_limited", async () => {
-  const queued_rows = [];
-  __setSellerInboundOrchestratorDeps({
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      automation_decision: {
-        should_queue_reply: true,
-        next_action: "queue_auto_reply",
-        route_hint: "consider_selling",
-        audit_reason: "ownership_confirmed",
-      },
-      selected_template: {
-        use_case: "consider_selling",
-        stage_code: "consider_selling",
-        template_id: "tpl-s2",
-        language: "English",
-      },
-      rendered_message_text: "Are you open to selling 123 Main St?",
-      queued: true,
-      queue_row_id: "queue-99",
-      queue_result: { ok: true, raw: { scheduled_for: new Date().toISOString() } },
-      seller_stage_reply: {
-        ok: true,
-        queued: true,
-        handled: true,
-        reason: "auto_reply_queued",
-        brain_stage: "consider_selling",
-        rendered_text: "Are you open to selling 123 Main St?",
-      },
-    }),
-    patchUniversalLeadState: async () => ({ ok: true, thread_key: "+15551234567" }),
-    emitAutomationEvent: async () => ({ ok: true }),
-    scheduleFollowUp: async () => ({ ok: true, skipped: true, reason: "active_workflow_no_nurture" }),
-    persistInboundIntelligenceSnapshot: async () => ({ ok: true }),
-    getSupabaseClient: () => null,
-  });
+test("processSellerInboundMessage runs real intelligence + execution for ownership confirmation", async () => {
+  installIoBoundaryMocks();
 
   const classification = await classify("Yes", null, { heuristicOnly: true });
   const result = await processSellerInboundMessage({
@@ -163,36 +141,25 @@ test("processSellerInboundMessage orchestrates ownership confirmation under live
     inboundEventId: "evt-yes-1",
     autoReplyMode: "live_limited",
     executionAllowed: true,
+    dryRun: true,
     skipNotifications: true,
+    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.contract.normalized_intent, "ownership_confirmed");
   assert.equal(result.contract.ownership_signal, "confirmed");
+  assert.equal(result.intelligence_snapshot?.canonical_intent, "ownership_confirmed");
   assert.equal(result.decision.stage_after, "offer_interest");
-  assert.equal(result.execution.queued, true);
-  assert.equal(result.execution.rendered_message_text, "Are you open to selling 123 Main St?");
+  assert.equal(result.execution.automation_decision.should_queue_reply, true);
+  assert.ok(result.execution.rendered_message_text);
+  assert.equal(result.execution.queued, false);
   assert.equal(result.auto_reply_mode, "live_limited");
-  assert.equal(result.execution_allowed, true);
 });
 
 test("processSellerInboundMessage schedules follow-up for S1 not-for-sale without immediate queue", async () => {
   let followup_intent = null;
-  __setSellerInboundOrchestratorDeps({
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      automation_decision: {
-        should_queue_reply: false,
-        next_action: "schedule_later_followup",
-        route_hint: "consider_selling",
-        audit_reason: "s1_not_for_sale_advance_with_followup",
-        ownership_status: "inferred",
-        disposition: "not_interested",
-        lead_temperature: "cold",
-      },
-      queued: false,
-      seller_stage_reply: { ok: true, queued: false, handled: true },
-    }),
+  installIoBoundaryMocks({
     scheduleFollowUp: async (intent) => {
       followup_intent = intent;
       return {
@@ -202,10 +169,6 @@ test("processSellerInboundMessage schedules follow-up for S1 not-for-sale withou
         reason: "nurture_followup:not_interested",
       };
     },
-    patchUniversalLeadState: async () => ({ ok: true }),
-    emitAutomationEvent: async () => ({ ok: true }),
-    persistInboundIntelligenceSnapshot: async () => ({ ok: true }),
-    getSupabaseClient: () => null,
   });
 
   const classification = await classify("Not for sale!!!!", null, { heuristicOnly: true });
@@ -224,13 +187,15 @@ test("processSellerInboundMessage schedules follow-up for S1 not-for-sale withou
     inboundEventId: "evt-nfs-1",
     autoReplyMode: "live_limited",
     executionAllowed: true,
+    dryRun: true,
     skipNotifications: true,
+    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.contract.ownership_signal, "inferred");
   assert.equal(result.contract.interest_signal, "not_interested");
-  assert.equal(result.execution.queued, false);
+  assert.equal(result.execution.automation_decision.should_queue_reply, false);
   assert.equal(followup_intent, "not_interested");
   assert.equal(result.follow_up.followup_created, true);
   assert.equal(result.decision.disposition, "not_interested");
@@ -238,20 +203,19 @@ test("processSellerInboundMessage schedules follow-up for S1 not-for-sale withou
 });
 
 test("processSellerInboundMessage is idempotent on duplicate queue suppression", async () => {
-  __setSellerInboundOrchestratorDeps({
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      automation_decision: { should_queue_reply: false, audit_reason: "duplicate_source_event" },
-      duplicate_suppressed: true,
-      queue_row_id: "queue-existing",
-      queued: false,
-      seller_stage_reply: { ok: true, queued: false, handled: true, reason: "duplicate_source_event" },
+  installIoBoundaryMocks({
+    supabase: makeSellerOrchestrationSupabase({
+      sendQueueRows: [
+        {
+          id: "queue-existing",
+          source_event_id: "evt-dup-1",
+          queue_status: "queued",
+          type: "auto_reply",
+          thread_key: "+15551234567",
+          created_at: new Date().toISOString(),
+        },
+      ],
     }),
-    patchUniversalLeadState: async () => ({ ok: true }),
-    emitAutomationEvent: async () => ({ ok: true }),
-    persistInboundIntelligenceSnapshot: async () => ({ ok: true }),
-    scheduleFollowUp: async () => ({ ok: true, skipped: true }),
-    getSupabaseClient: () => null,
   });
 
   const result = await processSellerInboundMessage({
@@ -261,13 +225,22 @@ test("processSellerInboundMessage is idempotent on duplicate queue suppression",
     prospectId: "pros-31",
     ownerId: "mo-21",
     phoneId: "phone-51",
-    classification: ownershipClassification(),
+    classification: {
+      primary_intent: "ownership_confirmed",
+      detected_intent: "ownership_confirmed",
+      confidence: 0.94,
+      language: "English",
+      automation_decision: { auto_reply_allowed: true },
+    },
     context: baseContext(),
+    route: { stage: "ownership_check", use_case: "ownership_check" },
     inboundFrom: "+15551234567",
     inboundEventId: "evt-dup-1",
     autoReplyMode: "live_limited",
     executionAllowed: true,
+    dryRun: true,
     skipNotifications: true,
+    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.idempotent.duplicate_suppressed, true);
@@ -306,7 +279,34 @@ test("buildSellerFlowDecision returns standardized shape", () => {
   assert.ok(Array.isArray(decision.notification_events));
 });
 
-test("recovery worker identifies incomplete inbound rows", async () => {
+test("runSellerInboundProofCases exercises representative Yes and Not-for-sale flows", async () => {
+  installIoBoundaryMocks();
+
+  const proof = await runSellerInboundProofCases({
+    dryRun: true,
+    autoReplyMode: "live_limited",
+  });
+
+  assert.equal(proof.ok, true);
+  assert.equal(proof.proof_count, 2);
+
+  const yes_case = proof.proof_results.find((row) => row.proof_case === "ownership_confirmed_yes");
+  const nfs_case = proof.proof_results.find((row) => row.proof_case === "s1_not_for_sale");
+
+  assert.ok(yes_case);
+  assert.equal(yes_case.normalized_intent, "ownership_confirmed");
+  assert.equal(yes_case.decision.stage_after, "offer_interest");
+  assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
+
+  assert.ok(nfs_case);
+  assert.equal(nfs_case.normalized_intent, "not_interested");
+  assert.equal(nfs_case.execution.automation_decision.should_queue_reply, false);
+  assert.equal(nfs_case.follow_up.followup_created, true);
+});
+
+test("recovery worker reprocesses incomplete inbound rows through canonical orchestration", async () => {
+  const orchestrationSupabase = makeSellerOrchestrationSupabase();
+  const proofContext = baseContext();
   const mockSupabase = {
     from(table) {
       if (table === "message_events") {
@@ -345,27 +345,7 @@ test("recovery worker identifies incomplete inbound rows", async () => {
           },
         };
       }
-      if (table === "inbox_thread_state") {
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({ data: null, error: null });
-          },
-        };
-      }
-      return {
-        update() {
-          return this;
-        },
-        eq() {
-          return Promise.resolve({ error: null });
-        },
-      };
+      return orchestrationSupabase.from(table);
     },
   };
 
@@ -373,9 +353,22 @@ test("recovery worker identifies incomplete inbound rows", async () => {
     supabaseClient: mockSupabase,
     limit: 5,
     dryRun: true,
-    autoReplyMode: "dry_run",
+    autoReplyMode: "live_limited",
+    loadContextImpl: async () => proofContext,
+    processInboundImpl: async (args) => {
+      installIoBoundaryMocks({ supabase: orchestrationSupabase });
+      return processSellerInboundMessage({
+        ...args,
+        skipNotifications: true,
+        skipUniversalStatePatch: true,
+      });
+    },
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.candidate_count, 1);
+  assert.equal(result.recovered_count, 1);
+  assert.equal(result.results[0].ok, true);
+  assert.equal(result.results[0].normalized_intent, "ownership_confirmed");
+  assert.equal(result.results[0].decision.stage_after, "offer_interest");
 });

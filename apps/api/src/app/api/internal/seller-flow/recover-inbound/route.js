@@ -23,12 +23,14 @@ export async function POST(request) {
     const limit = Number(body.limit) || 25;
     const dryRun = body.dry_run !== false;
     const autoReplyMode = body.auto_reply_mode || null;
+    const proofCases = Array.isArray(body.proof_cases) ? body.proof_cases : null;
 
     const result = await recoverUnprocessedInboundMessages({
       supabaseClient: getDefaultSupabaseClient(),
       limit,
       dryRun,
       autoReplyMode,
+      proofCases,
     });
 
     return NextResponse.json(result, { status: result.ok ? 200 : 500 });

@@ -5,6 +5,11 @@ import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-
 import { loadContext } from "@/lib/domain/context/load-context.js";
 import { resolveRoute } from "@/lib/domain/routing/resolve-route.js";
 import { resolveGuardedAutoReplyMode } from "@/lib/domain/seller-flow/auto-reply-mode.js";
+import { summarizeSellerInboundOrchestration } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
+import {
+  runSellerInboundProofCases,
+  DEFAULT_SELLER_INBOUND_PROOF_CASES,
+} from "@/lib/domain/seller-flow/run-seller-inbound-proof-cases.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const RECOVERY_LOOKBACK_HOURS = 72;
@@ -59,12 +64,38 @@ export async function recoverUnprocessedInboundMessages({
   dryRun = true,
   autoReplyMode = null,
   lookbackHours = RECOVERY_LOOKBACK_HOURS,
+  proofCases = null,
+  loadContextImpl = null,
+  processInboundImpl = null,
 } = {}) {
-  if (!hasSupabaseConfig() && !supabaseClient) {
-    return { ok: false, reason: "missing_supabase" };
+  const supabase = supabaseClient || (hasSupabaseConfig() ? getDefaultSupabaseClient() : null);
+  const processInbound = processInboundImpl || processSellerInboundMessage;
+  const resolveContext =
+    loadContextImpl ||
+    (async (args) =>
+      loadContextWithFallback({
+        ...args,
+        loadContextImpl: loadContext,
+      }));
+
+  if (Array.isArray(proofCases) && proofCases.length > 0) {
+    const proof = await runSellerInboundProofCases({
+      cases: proofCases,
+      autoReplyMode,
+      dryRun: true,
+      supabaseClient: supabase,
+    });
+    return {
+      ok: true,
+      dry_run: true,
+      proof_only: true,
+      ...proof,
+    };
   }
 
-  const supabase = supabaseClient || getDefaultSupabaseClient();
+  if (!supabase) {
+    return { ok: false, reason: "missing_supabase" };
+  }
   const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
 
   const { data: candidates, error } = await supabase
@@ -93,11 +124,10 @@ export async function recoverUnprocessedInboundMessages({
 
     let context = null;
     try {
-      context = await loadContextWithFallback({
+      context = await resolveContext({
         inbound_from,
         inbound_to,
         create_brain_if_missing: false,
-        loadContextImpl: loadContext,
       });
     } catch (context_error) {
       results.push({
@@ -132,7 +162,7 @@ export async function recoverUnprocessedInboundMessages({
     const allow_live_send = recent && !dryRun;
 
     try {
-      const orchestration = await processSellerInboundMessage({
+      const orchestration = await processInbound({
         message: message_body,
         threadKey: inbound_from,
         propertyId: row.property_id || context?.ids?.property_id || null,
@@ -159,17 +189,14 @@ export async function recoverUnprocessedInboundMessages({
         supabaseClient: supabase,
       });
 
-      results.push({
-        message_event_id: row.id,
-        ok: orchestration.ok,
-        recent,
-        live_send_allowed: allow_live_send,
-        normalized_intent: orchestration.contract?.normalized_intent || null,
-        stage_after: orchestration.decision?.stage_after || null,
-        queued: Boolean(orchestration.execution?.queued),
-        followup_scheduled: Boolean(orchestration.follow_up?.followup_created),
-        recovery_action: allow_live_send ? "reprocessed_live" : "reprocessed_shadow",
-      });
+      results.push(
+        summarizeSellerInboundOrchestration(orchestration, {
+          message: message_body,
+          message_event_id: row.id,
+          live_send_allowed: allow_live_send,
+          recovery_action: allow_live_send ? "reprocessed_live" : "reprocessed_shadow",
+        })
+      );
 
       if (!dryRun) {
         await supabase
@@ -215,4 +242,5 @@ export async function recoverUnprocessedInboundMessages({
   };
 }
 
+export { DEFAULT_SELLER_INBOUND_PROOF_CASES };
 export default recoverUnprocessedInboundMessages;
